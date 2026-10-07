@@ -285,5 +285,84 @@ GUARD STATE. `RouteAuthorizationGuardTests.cs` — `ExplicitlyCreditedFilterType
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review and adr-check are mandatory (FULL). Run /conflict-check before the PR.</protocol>
+    <outcome date="2026-10-03" branch="task/uac-r2-161" base="6b243f092" result="completed (code); manual live gate pending">
+      Full record: notes/task-161-communications-route-authorization.md (live-verified names §2, 146/167 status §3,
+      behaviour changes §4, deletions §5, escalation triggers §6, seeding §8, ledger input §9, live gate §13).
+      DONE: new endpoint filter Api/Filters/CommunicationRecordAuthorizationFilter.cs (one CommunicationRecordRoute value per
+      route fixes the id source, the right and the deny answer; composes CommunicationThreadReadService visibility +
+      ICommunicationAccessFilter, CallerRecordAccessProbe rights and table privileges, AuthorizationService "read" for
+      attachments, an impersonated template read; id-independent preconditions first: bearer token + resolvable caller;
+      every fault denies). Attached after the identity filter on send, send-bulk, archive, suggest-associations,
+      confirm-affinity, threads POST, ad-hoc create-task, proposals apply / dismiss / undo / create-task-apply, tasks undo,
+      accounts verify, thread rename / pin / delete, message delete; and on template/render. Template merge read now AS
+      THE CALLER (IImpersonatedCommunicationQuery) with text parity kept (characterization test written first, passed
+      before and after). ResolveCandidateNamesAsync MOVED to Services/Communication/SuggestionCandidateAccess.cs; an
+      unreadable candidate is removed before the ladder decides (one optional admission callback on
+      IncomingAssociationResolver.EvaluateAsync; same rungs, same ladder); Office suggestions and suggest-associations share
+      it (task 127's criterion now met). CommunicationThreadReadService.ReadVisibleCommunicationAsync added
+      (CanCallerSeeMessageAsync unchanged). RegardingNameFields: + sprk_reportcard; live fixes sprk_analysis set
+      sprk_analysises and sprk_organization name sprk_organizationname; RegardingNameFieldsTests (lock-step by source scan
+      + live pins). CommunicationAuthorizationFilter documented as an identity precondition; RouteAuthorizationGuardTests
+      ClaimOnlyFilters reason corrected (167 not landed: no waiver, no GovernedFiles entry). No OperationAccessPolicy key,
+      no ExternalAccess edit, no DI registration, no package, no option, no column.
+      DELETED (owner round 10 item 1): GET /api/communications/{id:guid}/status + handler + CommunicationStatusResponse +
+      its two mirror tests (no caller in the repo; not in src/solutions/CopilotAgent/spaarke-bff-openapi.yaml). Kept and
+      fixed: suggest-associations (scripts/uat-rung-preview-harness.ps1), send-bulk (communication-user-guide.md:226),
+      accounts verify (COMMUNICATION-ADMIN-GUIDE.md runbook).
+      TASK 146 not landed: TaskActionCore still writes ownerid from AssignedTo, so the Assign check applies. TASK 167 not
+      landed: ledger input in the note §9.
+      BEHAVIOUR CHANGES (note §4): Write now required for thread rename / pin / delete and message delete (amendment) —
+      Direct-thread non-owners (ReadAccess share) and, in dev, everyone without Write reaching app-owned rows lose them;
+      send-bulk over the cap answers one 400 instead of a 207; unresolved caller / no token answer the route's own deny;
+      record-thread name comes from the record read as the caller.
+      PLACEMENT (CLAUDE.md §10): in the BFF — existing routes; one filter composing existing seams; one moved helper.
+      JUSTIFICATION (§11): CommunicationRecordAuthorizationFilter — existing: CommunicationAuthorizationFilter (identity
+      only), RecordRouteAccessAuthorizationFilter (route keys only, 403, no body), FinanceAuthorizationFilter (finance;
+      reused as is per amendment, cannot express the route-specific 404 bodies / 200 no-op / impersonated visibility);
+      extension: making CommunicationAuthorizationFilter decide would make RouteAuthorizationGuardTests Rule B credit its
+      ~20 identity-only uses as record gates; cost of doing nothing: any signed-in user emails any document's bytes,
+      renders any record's columns, files tasks/threads against secure records, verifies any mailbox.
+      SuggestionCandidateAccess — a MOVE of the private ResolveCandidateNamesAsync so two endpoint files share it;
+      cost of doing nothing: suggest-associations and the Office route return candidates the caller cannot read.
+      IncomingAssociationResolver.EvaluateAsync admission overload — existing: the evaluate-only overload; extension: the
+      same private evaluate core with an optional filter (not a fork); cost of doing nothing: an Ambiguous status reveals
+      a hidden candidate. ReadVisibleCommunicationAsync — existing CanCallerSeeMessageAsync lacks the access filter and
+      DELETE /{id} depends on it unchanged; cost: internal-only communications pass the gate for external callers.
+      QUALITY GATES: code-review and adr-check run (note §12); no Critical; build -warnaserror 0 warnings.
+      TESTS: build -warnaserror clean; affected classes green (CommunicationRecordAuthorizationContractTests 159/159); full BFF unit suite 14244 passed / 54 skipped / 143 failed, all 143 HttpClient timeouts under heavy machine contention (268 dotnet processes), and the 55 classes they belong to re-run in isolation 560 passed / 0 failed; ArchTests 346/346; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped; no vulnerable package; 36 seeded removals each fail a named test.
+      LIVE GATE (pending, manual, main session): note §13 items (a)-(g).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-161-r1" base="7f9159027" result="verifier findings closed (code); manual live gate still pending">
+      Adversarial verifier round on 7f9159027. Full record: note §15 (item-by-item), §4.10-§4.11 (behaviour), §7 (tests),
+      §8 S37-S40 (seeding), §12 (r1 verification, the verifier's publish-size numbers).
+      ITEMS 8/14/15 FIXED: POST /threads and POST /template/render answer a regarding type outside RegardingNameFields
+      (and, on /threads, a missing regarding) with their 400 VALIDATION_ERROR BEFORE the caller precondition, so no
+      Dataverse call at all runs, not even the app-only systemuser lookup (Gate.CheckRequestShape before
+      CheckCallerPreconditionsAsync). The two ...Is400BeforeAnyDataverseCall tests assert the ICallerSystemUserResolver
+      and every other Dataverse seam untouched (seed S37 bites both).
+      ITEM 9 FIXED: the template handler's not-found branch returns TemplateNotFound(templateId), the body the filter
+      denies an unreadable template with; the summary now matches; new unit test (seed S38 bites).
+      ITEM 10 FIXED: route descriptions of create-task, the four proposal routes and tasks undo state the 404 for an
+      unknown / invisible id, a missing token and an unresolved caller; rename / pin / thread delete / message delete
+      state the Write requirement; route comments corrected; Produces 404 on create-task and tasks undo.
+      ITEM 11 FIXED: weak positive tests replaced by full authorized-path tests (apply / undo / tasks undo run to 200 and
+      write AS THE CALLER, one audit row); the contract host substitutes IFieldMappingDataverseService (module boundary,
+      ADR-038); deny tests also assert no impersonated write (seeds S39, S40 bite).
+      CONFIRMED, NO CHANGE: items 1, 2 (endpoints-smoke.json observation recorded in note §5), 3, 6, 7, 13.
+      ITEM 12 (owner, deployment sequencing): Write stays required (amendment); recommended to deploy 161 with or after
+      task 146 so app-owned messages / threads are re-owned first.
+      ITEMS 5/16: the verifier measured publish size per CLAUDE.md §10 hazards 3-4: base 45.657 MB, branch 45.683 MB,
+      +0.026 MB, 212 files each, Compress-Archive Optimal, fresh short paths C:\wq161m / C:\wq161b; the PR cites these
+      (r1 not re-measured, on instruction; no package change).
+      PLACEMENT (CLAUDE.md §10): unchanged; r1 adds no service, registration, endpoint, option, job, column or package
+      (two private helpers inside the existing filter; one test-host substitution). No §11 justification needed (no new
+      surface). /conflict-check: 21 open PRs, no overlap; master and the email-communication-intelligence branches
+      unchanged on these files since the base.
+      TESTS (r1): build -warnaserror 0 warnings; affected 170/170; Communication-filtered 1303 passed / 8 skipped / 0
+      failed; full BFF unit suite 14385 passed / 54 skipped / 3 failed of 14442 (all 3 TaskCanceledException under
+      contention, 271 dotnet processes, CPU 100 %), those 3 classes re-run isolated 19/19 passed; ArchTests 346/346;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed.
+      NOT CLOSED: item 17, the MANUAL LIVE GATE (note §13 (a)-(g)), main session.
+    </outcome>
   </execution>
 </task>

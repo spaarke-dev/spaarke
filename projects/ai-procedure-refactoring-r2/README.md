@@ -1,5 +1,7 @@
 # AI Procedure Refactoring R2 — Substantive Documentation Library
 
+> **Portfolio**: [Project #1136](https://github.com/spaarke-dev/spaarke/issues/1136) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/ai-procedure-refactoring-r2`
 > **Started**: April 5, 2026

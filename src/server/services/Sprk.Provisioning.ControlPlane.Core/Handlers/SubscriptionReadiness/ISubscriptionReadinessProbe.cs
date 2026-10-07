@@ -96,6 +96,35 @@ public interface ISubscriptionReadinessProbe
         string subscriptionId,
         string tenantId,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim
+    /// absorption. Registers each provider in <paramref name="requiredProviders"/>
+    /// on the target subscription (POST providers/{ns}/register) and polls
+    /// GET providers/{ns} until <c>registrationState == "Registered"</c> —
+    /// aggregating results across providers with a shared total-deadline
+    /// budget of <paramref name="totalTimeout"/>. Returns
+    /// <c>Passed=true</c> iff EVERY provider reached Registered within the
+    /// budget; else <c>Passed=false</c> with a diagnostic listing the
+    /// providers that did not (and their observed states).
+    ///
+    /// Domain outcomes (provider still Registering / Unregistered at deadline)
+    /// return <c>Passed=false</c>; only unanticipated infrastructure faults
+    /// throw.
+    /// </summary>
+    /// <param name="subscriptionId">Target Azure subscription id.</param>
+    /// <param name="tenantId">Target Entra tenant id (parity with sibling calls; not currently used SDK-side).</param>
+    /// <param name="requiredProviders">Canonical provider namespaces to register (e.g. "Microsoft.KeyVault"). Empty list is a no-op Success.</param>
+    /// <param name="pollInterval">Interval between successive poll requests.</param>
+    /// <param name="totalTimeout">Aggregate time budget across all providers (shared, not per-provider).</param>
+    /// <param name="cancellationToken">Cancellation token (respected during both register + poll).</param>
+    Task<SubscriptionReadinessCheckResult> RegisterAndPollRequiredProvidersAsync(
+        string subscriptionId,
+        string tenantId,
+        IReadOnlyList<string> requiredProviders,
+        TimeSpan pollInterval,
+        TimeSpan totalTimeout,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>

@@ -60,7 +60,7 @@
   <escalation>
     <trigger>The editable/immutable distinction cannot be derived from `SaveContentType` alone — e.g. an attachment turns out to need per-case mutability, or `Document` covers immutable cases too. That is a schema/contract question, not an implementation detail: STOP and escalate rather than inventing a classification. Consider escalating the model tier to `fable`.</trigger>
     <trigger>Mirroring the Compose pattern would require changing `ContentDedupDetector`'s contract or a Compose-owned file. STOP — that is a cross-project coordination decision.</trigger>
-    <trigger>A test proving the two-distinct-drafts case cannot be written without a live Dataverse. Report the seam gap rather than deleting the test or asserting on a mock that models nothing (see the `Unmodelled<>` stubs in `DocumentVersionAuthorizationTests` — those are NOT coverage).</trigger>
+    <trigger>A test proving the two-distinct-drafts case cannot be written without a live Dataverse. Report the seam gap rather than deleting the test or asserting on a mock that models nothing (see the `Unmodelled&lt;&gt;` stubs in `DocumentVersionAuthorizationTests` — those are NOT coverage).</trigger>
   </escalation>
 
   <acceptance-criteria>
@@ -72,6 +72,13 @@
     <criterion testable="true">New tests live at a KEEP path per ADR-038 and exercise the persistence decision, not a mock that models nothing.</criterion>
     <criterion testable="false">The PR description states the placement decision, the publish-size delta measured against a fresh master build with the zip tool named, and the CVE check result.</criterion>
   </acceptance-criteria>
+
+  <steps mode="directional">
+    <!-- Added 2026-10-02 by task 079 (record integrity) so this file validates. The task was authored WITHOUT a
+         steps element and was executed against its goal, constraints and acceptance criteria, which remain the
+         record of what was asked. This element is not a claim about how the work was done; see notes. -->
+    <step>Work to the goal, constraints and acceptance criteria above. (Authored without steps; see the notes for what was done.)</step>
+  </steps>
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>

@@ -103,34 +103,10 @@ export type {
   WorkspaceTabMatterContext,
 } from './types/WorkspaceTab';
 
-// ---------------------------------------------------------------------------
-// Types — Pillar 9 Widget Visibility Contract (R6 task 071; FR-55)
-//
-// Discriminated union (5 variants — Summary, DocumentViewer, Dashboard, Table,
-// Email) describing the agent-visible state each widget MAY opt into exposing to
-// Pillar 9's prompt builder. Consumed by:
-//   - task 072 (WorkspaceWidgetRegistry getVisibleState extension)
-//   - task 073 (per-widget implementations)
-//   - task 074 (Pillar 9 prompt builder — per-turn system-prompt snippet)
-//
-// Privacy default per ADR-015: widgets that don't implement
-// `getAgentVisibleState()` contribute nothing to the prompt. Opt-in is
-// explicit. See `./types/SerializedWidgetState.ts` for full per-variant
-// rationale.
-// ---------------------------------------------------------------------------
-
-export type {
-  SerializedWidgetState,
-  SerializedSummaryState,
-  SerializedDocumentViewerState,
-  SerializedDashboardState,
-  SerializedTableState,
-  SerializedEmailState,
-  GetAgentVisibleState,
-  _DiscriminatorAlignment,
-} from './types/SerializedWidgetState';
-
-export { assertNeverSerializedState } from './types/SerializedWidgetState';
+// Pillar 9 (agent-visible tab state): the client-side SerializedWidgetState union
+// + getAgentVisibleState derivations were DELETED 2026-10-03 (C-21, #1112) — never
+// called in production. The BFF derives it server-side from WorkspaceTab.widgetData
+// (SprkChatAgentFactory.TryDeriveVisibleState); that is the only enforcement point.
 
 export * from './types/event-types';
 
@@ -144,7 +120,6 @@ export {
   replaceWorkspaceWidget,
   resolveWorkspaceWidget,
   getWorkspaceWidgetMetadata,
-  getWorkspaceWidgetVisibleStateFn,
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
@@ -159,7 +134,7 @@ export {
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.
-export type { WorkspaceWidgetRegistration, RegistryGetAgentVisibleState } from './registry/WorkspaceWidgetRegistry';
+export type { WorkspaceWidgetRegistration } from './registry/WorkspaceWidgetRegistry';
 
 // ContextWidgetRegistry — lazy-load with null-return for unknown types
 export {

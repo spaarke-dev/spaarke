@@ -8,11 +8,11 @@
  * etc.).
  *
  * Note on `TrendDirection`: `MetricCard` exports a local `TrendDirection`
- * (`'up' | 'down' | 'neutral'`) while `TrendCard` re-exports the canonical
- * `TrendDirection` (`'up' | 'down' | 'flat'`) from the `types` barrel. The two
- * collide under `export *`, so neither is surfaced through this components
- * barrel (not an error) — the canonical `TrendDirection` is available from
- * `@spaarke/visuals/types`.
+ * (`'up' | 'down' | 'neutral'`) that would collide with the canonical
+ * `TrendDirection` (`'up' | 'down' | 'flat'`) surfaced at the package root via
+ * the `types` barrel, so it is not surfaced through this components barrel.
+ * (`TrendCard`, which re-exported the canonical one, had zero consumers and was
+ * deleted 2026-10-03 — reuse audit C-14.)
  */
 
 export * from './BarChart';
@@ -29,13 +29,10 @@ export * from './MetricCardMatrix';
 export * from './MiniTable';
 export * from './StatusDistributionBar';
 
-// MetricCard and TrendCard are re-exported explicitly (NOT `export *`) to avoid
-// the `TrendDirection` name clash: MetricCard has a local `TrendDirection`
-// (`'up' | 'down' | 'neutral'`) and TrendCard re-exports the canonical
-// `TrendDirection` (`'up' | 'down' | 'flat'`) from `types`. The canonical one
-// is surfaced at the package root via the `types` barrel; MetricCard's local
+// MetricCard is re-exported explicitly (NOT `export *`) to avoid the
+// `TrendDirection` name clash: MetricCard has a local `TrendDirection`
+// (`'up' | 'down' | 'neutral'`); the canonical one (`'up' | 'down' | 'flat'`) is
+// surfaced at the package root via the `types` barrel. MetricCard's local
 // variant stays internal to `./MetricCard`.
 export { MetricCard } from './MetricCard';
 export type { IMetricCardProps } from './MetricCard';
-export { TrendCard } from './TrendCard';
-export type { ITrendCardProps } from './TrendCard';

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
@@ -15,8 +16,10 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 ///   POST /api/spe/containertypes?configId={id}                      — create a new container type
 ///   POST /api/spe/containertypes/{typeId}/register?configId={id}    — register container type (grant app permissions)
 ///
-/// The configId query parameter identifies the sprk_specontainertypeconfig Dataverse record whose
-/// app registration credentials are used to authenticate with Graph API and SharePoint REST API.
+/// The configId query parameter identifies the sprk_specontainertypeconfig Dataverse record the request is
+/// about. No credential is taken from it: every operation here is DELEGATED, as the signed-in
+/// administrator (container types reject app-only Graph tokens, and grant management is delegated —
+/// see SpeAdminGraphService).
 ///
 /// Authorization: Inherited from SpeAdminEndpoints route group (RequireAuthorization + SpeAdminAuthorizationFilter).
 /// </summary>
@@ -25,7 +28,8 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// ADR-007: No Graph SDK types in public API surface — endpoints return domain records only.
 /// ADR-008: Authorization inherited from parent route group (no global middleware).
 /// ADR-019: All errors return ProblemDetails (RFC 7807).
-/// SPE-053: Registration endpoint calls SharePoint REST API (not Graph API) for applicationPermissions.
+/// SPE-053: Registration endpoint issues a delegated Graph applicationPermissionGrant (it called the
+/// SharePoint REST API with an owning-app secret until 2026-10-04).
 /// </remarks>
 public static class ContainerTypeEndpoints
 {
@@ -103,17 +107,21 @@ public static class ContainerTypeEndpoints
 
         // POST /api/spe/containertypes/{typeId}/register?configId={id}
         group.MapPost("/containertypes/{typeId}/register", RegisterContainerTypeAsync)
+            // App-only as the config's owning app: the type must be the config's own, and a type shared with an unreachable config is not changed (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRegisterContainerType")
             .WithSummary("Register an SPE container type (grant app permissions)")
             .WithDescription(
-                "Registers a SharePoint Embedded container type by granting the consuming application " +
-                "the specified delegated and application permissions via the SharePoint REST API. " +
-                "This is required before containers of the type can be created by the consuming app. " +
+                "Grants the consuming application the specified delegated and application permissions on " +
+                "the container type's registration in this tenant (a Microsoft Graph " +
+                "applicationPermissionGrant, issued as the signed-in administrator). Required before the " +
+                "consuming app can work with containers of the type. sharePointAdminUrl is ignored. " +
                 "Writes an audit log entry on success.")
             .Produces<RegisterContainerTypeResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -135,7 +143,7 @@ public static class ContainerTypeEndpoints
     ///   400 Bad Request — configId is missing or does not exist in Dataverse.
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
     ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> ListContainerTypesAsync(
         [Microsoft.AspNetCore.Mvc.FromQuery] Guid? configId,
@@ -258,7 +266,7 @@ public static class ContainerTypeEndpoints
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
     ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
     ///   404 Not Found   — Container type with the given typeId was not found in Graph API.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> GetContainerTypeAsync(
         string typeId,
@@ -390,7 +398,7 @@ public static class ContainerTypeEndpoints
     ///   400 Bad Request — configId invalid/missing, config not found, or validation failure.
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
     ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> CreateContainerTypeAsync(
         [FromQuery] Guid? configId,
@@ -461,8 +469,7 @@ public static class ContainerTypeEndpoints
         // documented create body carries it alongside name and billingClassification.
         //
         // Resolution order: what the caller explicitly asked for, else the owning app registered on
-        // the config (multi-app mode), else the config's own client id (single-app mode) — the same
-        // precedence ContainerTypeConfig.HasOwningApp encodes.
+        // the config, else the config's own client id (both are sprk_owningappid today).
         var owningAppId = FirstNonBlank(request.OwningAppId, config.OwningAppId, config.ClientId);
         if (string.IsNullOrWhiteSpace(owningAppId))
         {
@@ -579,26 +586,29 @@ public static class ContainerTypeEndpoints
     /// <summary>
     /// POST /api/spe/containertypes/{typeId}/register?configId={id}
     ///
-    /// Registers a container type by granting the consuming application (identified by appId in the request body)
-    /// the specified delegated and application permissions. Uses the SharePoint REST API — not Graph API.
+    /// Grants the consuming application (identified by appId in the request body) the specified delegated
+    /// and application permissions on the container type's registration in this tenant. A Graph
+    /// <c>applicationPermissionGrant</c>, issued DELEGATED as the signed-in administrator (2026-10-04 — it
+    /// previously called the SharePoint REST API with the owning app's client secret).
     ///
-    /// This is the critical step that enables the consuming app to create and manage containers of this type.
-    /// Without registration, the container type exists but cannot be used.
+    /// This is the step that lets the consuming app create and manage containers of this type.
     ///
     /// Validation:
     ///   - configId must be present and a valid non-empty GUID.
     ///   - config must exist in the sprk_specontainertypeconfig Dataverse table.
     ///   - request.appId must not be null or whitespace and must be a valid GUID.
-    ///   - request.sharePointAdminUrl must not be null or whitespace and must be a valid HTTPS URL.
+    ///   - request.sharePointAdminUrl is ignored (kept on the request type for compatibility).
     ///   - At least one permission must be supplied (delegatedPermissions or applicationPermissions).
     ///   - All permission names must be valid values from <see cref="ContainerTypePermissions.ValidPermissions"/>.
     ///
     /// Responses:
-    ///   200 OK          — Registration successful; body contains <see cref="RegisterContainerTypeResponse"/>.
+    ///   200 OK          — Grant applied; body carries the permissions Graph reports as granted.
     ///   400 Bad Request — configId invalid/missing, config not found, or validation failure.
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
-    ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
-    ///   500 Internal    — Unexpected error from SharePoint REST API or Key Vault.
+    ///   403 Forbidden   — User is not an admin (SpeAdminAuthorizationFilter), or Graph refused — the
+    ///                     SharePoint Embedded Administrator Entra role is the prerequisite.
+    ///   404 Not Found   — The container type is not registered in this tenant.
+    ///   500 Internal    — Unexpected Graph error.
     /// </summary>
     private static async Task<IResult> RegisterContainerTypeAsync(
         string typeId,
@@ -649,33 +659,8 @@ public static class ContainerTypeEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.register.app_id_invalid" });
         }
 
-        // Validate required sharePointAdminUrl
-        if (string.IsNullOrWhiteSpace(request.SharePointAdminUrl))
-        {
-            logger.LogWarning(
-                "POST /api/spe/containertypes/{TypeId}/register — missing sharePointAdminUrl. TraceId: {TraceId}",
-                typeId, context.TraceIdentifier);
-            return Results.Problem(
-                detail: "The 'sharePointAdminUrl' field is required and must be a valid HTTPS URL " +
-                        "(e.g., https://contoso-admin.sharepoint.com).",
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.register.sharepoint_url_required" });
-        }
-
-        // Validate sharePointAdminUrl is an absolute HTTPS URI
-        if (!Uri.TryCreate(request.SharePointAdminUrl, UriKind.Absolute, out var spAdminUri) ||
-            !string.Equals(spAdminUri.Scheme, "https", StringComparison.OrdinalIgnoreCase))
-        {
-            logger.LogWarning(
-                "POST /api/spe/containertypes/{TypeId}/register — invalid sharePointAdminUrl '{Url}'. TraceId: {TraceId}",
-                typeId, request.SharePointAdminUrl, context.TraceIdentifier);
-            return Results.Problem(
-                detail: $"The 'sharePointAdminUrl' value '{request.SharePointAdminUrl}' is not a valid HTTPS URL.",
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.register.sharepoint_url_invalid" });
-        }
+        // sharePointAdminUrl is no longer validated or used: registration is a Graph grant now, not a
+        // SharePoint REST call. The field stays on the request type so existing callers keep binding.
 
         // Validate at least one permission is supplied
         var hasAnyPermission =
@@ -730,11 +715,11 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Register the container type via SharePoint REST API
-            var result = await graphService.RegisterContainerTypeAsync(
-                config,
+            // DELEGATED Graph grant on the type's registration in this tenant — the signed-in admin's
+            // identity, no owning-app secret. See SpeAdminGraphService.RegisterContainerTypeForUserAsync.
+            var result = await graphService.RegisterContainerTypeForUserAsync(
+                context,
                 typeId,
-                request.SharePointAdminUrl,
                 request.AppId,
                 request.DelegatedPermissions ?? [],
                 request.ApplicationPermissions ?? [],
@@ -762,24 +747,45 @@ public static class ContainerTypeEndpoints
                 ApplicationPermissions = result.ApplicationPermissions
             });
         }
-        catch (HttpRequestException httpEx)
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied granting app {AppId} on container type {TypeId} — reporting the Entra " +
+                "directory-role prerequisite. TraceId: {TraceId}",
+                request.AppId, typeId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(
+                sse, $"Could not grant app '{request.AppId}' on container type '{typeId}'.", context.TraceIdentifier);
+        }
+        catch (SpaarkeStorageException sse)
         {
             logger.LogError(
-                httpEx,
-                "SharePoint REST API error registering container type {TypeId} for app {AppId}. " +
-                "Status: {StatusCode}. TraceId: {TraceId}",
-                typeId, request.AppId, (int?)httpEx.StatusCode, context.TraceIdentifier);
+                sse,
+                "Graph API error granting app {AppId} on container type {TypeId}. Status: {Status}. TraceId: {TraceId}",
+                request.AppId, typeId, sse.StatusCode, context.TraceIdentifier);
+
+            return sse.ToProblemDetails(
+                summary: $"Could not grant app '{request.AppId}' on container type '{typeId}'.",
+                errorCode: "spe.containertypes.register.graph_error",
+                statusCode: StatusCodes.Status500InternalServerError,
+                traceId: context.TraceIdentifier);
+        }
+        catch (SpeAdminGraphService.ContainerTypeNotRegisteredException notRegistered)
+        {
+            // Graph reported no registration for the type in this tenant — a grant needs one.
+            logger.LogWarning(
+                notRegistered,
+                "Container type {TypeId} is not registered in this tenant; cannot grant app {AppId}. TraceId: {TraceId}",
+                typeId, request.AppId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: ProblemDetailsHelper.Explain(
-                    $"Could not register container type '{typeId}' via the SharePoint REST API"
-                    + (httpEx.StatusCode is { } sc ? $" (HTTP {(int)sc})." : "."),
-                    httpEx),
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "SharePoint REST API Error",
+                detail: notRegistered.Message,
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Container Type Not Registered",
                 extensions: new Dictionary<string, object?>
                 {
-                    ["errorCode"] = "spe.containertypes.register.sharepoint_error",
+                    ["errorCode"] = "spe.containertypes.register.not_registered",
                     ["traceId"] = context.TraceIdentifier
                 });
         }

@@ -17,6 +17,13 @@ module.exports = {
     // mocks under __tests__/__mocks__ so tests run without building dist/.
     '^@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog$':
       '<rootDir>/__tests__/__mocks__/richFilePreviewDialog.tsx',
+    // Task 089 / ADR-044: `resolveCommunicationId()` now deep-imports `cleanGuid` from
+    // `@spaarke/ui-components/dist/services/PolymorphicResolverService`, same as every other
+    // deep-dist specifier here — a compiled ESM `dist/*.js` ts-jest's default
+    // transformIgnorePatterns skips. Map any OTHER deep `dist/*` specifier onto the shared TS
+    // SOURCE (mirrors `RegardingResolver/jest.config.js`); listed after the more specific
+    // RichFilePreviewDialog mapping above so that one still wins for its own path.
+    '^@spaarke/ui-components/dist/(.*)$': '<rootDir>/../../shared/Spaarke.UI.Components/src/$1',
     '^@spaarke/auth$': '<rootDir>/__tests__/__mocks__/spaarkeAuth.ts',
     // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
     // presentational core now live in the shared lib

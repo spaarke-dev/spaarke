@@ -1,6 +1,8 @@
 # Spaarke SPE Container-Type Topology — how to create container types and containers
 
 > **Created**: 2026-08-28 by `sdap-SPE-admin-app-r2` (UAT round 2 follow-up)
+> **Updated**: 2026-10-03 by `customer-provisioning-orchestration-r1` task 248 — owning-app credential is MI-FIC
+> (no certificate); `Spaarke Model 1` recorded (§3, §3A).
 > **Status**: Authoritative for container-type topology decisions.
 > **Audience**: anyone standing up a Spaarke environment, or adding an SPE surface.
 >
@@ -79,14 +81,36 @@ choice means creating a replacement, and (R3) the mistake stays on the books for
 
 ## 3. Spaarke's topology
 
+> ⚠️ **Inventory correction (2026-10-03).** An earlier revision of this document implied
+> `Spaarke PAYGO 1` was effectively the only container type. **It is not.** The SharePoint admin
+> center → **SharePoint Embedded → Apps** list shows **four** SPE apps, and because app↔type is 1:1
+> (R1) that is **four container types already in use**:
+>
+> | App | Billing type | ⇒ classification |
+> |---|---|---|
+> | Spaarke Demo Documents | Owner org | `standard` |
+> | Spaarke PAYGO 1 (`8a6ce34c…`) | Owner org | `standard` |
+> | Spaarke DMS Dev 1 | **User org** | `directToCustomer` |
+> | Spaarke DMS-SPE Trial | **trial** | `trial` |
+>
+> **Two consequences.** (a) **4 of 25 slots are consumed** and standard types cannot be deleted (R3),
+> so the remaining budget is 21, not 24. (b) 🔴 **The one permitted trial slot is ALREADY TAKEN** by
+> `Spaarke DMS-SPE Trial` — a new `trial` type cannot be created until that one is deleted, including
+> every container of it (trial types *are* deletable; standard ones are not).
+>
+> **Always read the live Apps list before planning a new type.** This inventory is a snapshot.
+
 | Purpose | Container type | Owning app | Classification | Containers live in | Serves |
 |---|---|---|---|---|---|
 | Development | `Spaarke PAYGO 1` (existing, `8a6ce34c…`) | `170c98e1…` | as-is | Spaarke | internal |
 | Customer trials | `Spaarke Trial 1` | **new** | `standard` | Spaarke | 1 container per prospect |
-| Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` | **new** | `standard` | Spaarke | 1 container per customer |
+| Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` (**created 2026-10-03**, `fb3817a8…`) | `Spaarke SPE Model 1 Owner` (`bfac7f6e…`) | `standard` | Spaarke | 1 container per customer |
 | Model 2 (customer's Azure subscription inside the **customer's own** tenant) | `Spaarke Model 2` | **new** | `directToCustomer` | **Customer tenants** | **ALL** Model 2 customers |
 
-Four of twenty-five. **Model 2 scales to unlimited customers** through registration (R4).
+**Budget**: the four types in the inventory above already existed; `Spaarke Model 1` was created
+2026-10-03 (**5 of 25**); adding `Spaarke Trial 1` and `Spaarke Model 2` brings it to **7 of 25**.
+**Model 2 scales to unlimited customers** through registration (R4), so customer growth does not move
+this number.
 
 > 🟡 **Deployment-model note (2026-09-28, owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))**
 > — Model 1 is **not** a shared tier. Every customer gets a **dedicated Dataverse environment and a
@@ -152,8 +176,9 @@ Three further reasons, all pointing the same way:
 - **Consent surface.** Model 2 customers consent to the *owning* app. Merged, they are consenting to
   something that also carries the BFF's API scopes, redirect URIs, and Dataverse/Mail permissions.
 - **Auth v4.** The BFF identity is deliberately secret-free ([ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) A4).
-  Owning apps are exception **E-1** and may carry secrets. Merging drags that exception back onto the
-  identity auth-v4 worked to clean.
+  Owning apps are exception **E-1** and may carry secrets (SPE Admin no longer uses any — §6B). Merging drags that
+  exception back onto the identity auth-v4 worked to clean. Since task 248 the L2 control plane needs no owning-app
+  secret or certificate either — see "Owning-app credential" below.
 
 > ⚠️ **The existing app is the merged shape.** `170c98e1…` is named **`SDAP-PCF-CLIENT`** while being
 > the container type's owning app. That is the artifact to unwind, not the pattern to extend — and
@@ -218,7 +243,53 @@ this does **and does not** say: Model 1 customers share a *container-type regist
 settings baseline. They do **not** share a container, a BFF, or any Azure resource — those are dedicated
 per customer in both models (D-12).
 
-Grant the BFF app what it needs on the relevant registration; **do not make it an owner.**
+Grant the BFF app what it needs on the relevant registration; **do not make it an owner.** The per-app
+grant API is v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}`
+(`PATCH` to update, `DELETE` to remove), called as the owning app; per-customer BFF grants are T227 (G9).
+
+### Owning-app credential — managed-identity federated credential (task 248, 2026-10-03)
+
+Owner decision **D16** (2026-10-02): the L2 control plane signs in as an owning app through a
+**managed-identity federated identity credential (MI-FIC)** — ADR-028 A4's default for confidential
+clients — not with a certificate. No ADR amendment was needed. **An owning app set up this way has no
+certificate and no client secret**; nothing is stored in any Key Vault.
+
+- The owning app carries one federated identity credential per L2 Worker UAMI that must act as it
+  (issuer `https://login.microsoftonline.com/{tenantId}/v2.0`, subject = the UAMI's **principal** id,
+  audience `api://AzureADTokenExchange`; at most 20 per app). MI-as-FIC needs a **user-assigned** managed
+  identity in the **same tenant** as the app — which is why this works for Model 1's single-tenant owning
+  app.
+- The Worker UAMI requests a token for `api://AzureADTokenExchange` and presents it as the client assertion
+  in a client-credentials request for the owning app (`ClientAssertionCredential`). The Worker's
+  configuration names only `ContainerTypeId` + `OwnerAppId` per container type.
+- **Evidence (live probe 2026-10-03)**, from a throwaway Azure Container Instance carrying the dev Worker
+  UAMI: the exchange returned an owning-app Graph token with **`appidacr` = `2`** (client-assertion class —
+  the same class a certificate produces), `idtyp` = `app`, roles `FileStorageContainerTypeReg.Selected` +
+  `FileStorageContainer.Selected`. The container-type registration GET and the container list for the type
+  both returned 200 as that token.
+- The 24 h "certificate replication" wait that an earlier design gated on (H0 `SpeCertBootstrap`) is gone;
+  H0 now checks the owner entry, the token and the registration (`SpeOwnerCredential`).
+
+**`Spaarke Model 1` — recorded state (2026-10-03)**
+
+| Item | Value |
+|---|---|
+| Container type | `Spaarke Model 1`, id `fb3817a8-5a55-42ba-8cc9-12cf055168b8`, `standard`; created by the owner in the SharePoint admin center |
+| Owning app | `Spaarke SPE Model 1 Owner`, appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, single-tenant, no secret, no certificate; Graph application permissions `FileStorageContainer.Selected` + `FileStorageContainerTypeReg.Selected`, admin-consented via `appRoleAssignedTo` |
+| Federated credential | `sprk-controlplane-dev-uami-assertion` → dev Worker UAMI `sprk-controlplane-dev-uami` (principal `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044`) |
+| Billing | `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod` — the binding is permanent; never delete that resource group or account |
+| Registration in Spaarke's tenant | registered at creation (2026-10-03T22:54:58Z); `owningAppId` = the owning app; `billingStatus` `valid` |
+| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grant**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep** |
+| Containers | none yet (list returned empty) |
+
+The admin-center creation flow prompts for a client secret on the owning app; none was added, and none
+should be. Setup procedure: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](../guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).
+
+> ⚠️ **Grant the identity the BFF actually authenticates as.** With `Graph:ManagedIdentity:Enabled=true`
+> (every Azure environment), the BFF's app-only Graph client is its **user-assigned managed identity**, not
+> its app registration — on dev, appId `5967251e…` (`mi-bff-api-dev`), not `1e40baad…`. A grant naming the
+> app registration does not give that client access. (Verified 2026-10-04: dev's `Spaarke PAYGO 1`
+> registration carries `full` grants for both.) This is also the identity SPE Admin uses — §6B.
 
 ---
 
@@ -231,11 +302,36 @@ Grant the BFF app what it needs on the relevant registration; **do not make it a
   - `FileStorageContainer.Selected` (application)
   - `FileStorageContainerTypeReg.Selected` (application) — required to register on consuming tenants
   - `signInAudience = AzureADMultipleOrgs` **if it will ever serve a consuming tenant** (Model 2)
+  - **No certificate and no client secret.** Its credential is a federated identity credential trusting
+    the L2 Worker's user-assigned managed identity (§3A "Owning-app credential"). If the SharePoint admin
+    center asks for a client secret during creation, do not add one
 - A **non-guest member account in the owning tenant**. No admin role is required — the Graph create
   API is callable by any non-guest owning-tenant user, who is auto-assigned as an owner
 - For `standard`: an Azure subscription + resource group, with owner/contributor to attach billing
 
-### The call
+### ⭐ Preferred path — SharePoint admin center (verified working 2026-10-03)
+
+**SharePoint admin center → SharePoint Embedded → Apps → + Create app.** This is the SPE Apps
+experience (GA Jul 2026) and it is the **recommended way to create a container type**: it links the
+Entra app, creates the container type, and sets up billing in one flow, with a delegated identity —
+so it sidesteps R5 entirely. Used successfully for `Spaarke SPE Model 1 Owner` on 2026-10-03.
+
+The panel's vocabulary differs from Graph's. The mapping:
+
+| Admin-center "Billing type" | Graph `billingClassification` | Who pays |
+|---|---|---|
+| **Owner org** | `standard` | **Us** — connect an Azure billing subscription |
+| **User org** | `directToCustomer` | **The customer** — their admin activates pay-as-you-go |
+
+Panel fields: **Entra app registration** (choose *Use an existing Entra app* and select the owning app
+you created) · **Owners** (up to 3) · **Billing type** · **Billing subscription setup** (now / later).
+
+> ⚠️ The panel states *"This setting can't be changed later"* about billing type. That is **R3 +
+> §2's no-conversion rule** surfacing in the UI. Get it right the first time.
+
+### Alternative — the Graph call
+
+Use when scripting, or when the admin center is unavailable.
 
 ```http
 POST https://graph.microsoft.com/beta/storage/fileStorage/containerTypes
@@ -277,7 +373,9 @@ Per customer, once:
    Model 2 customer (R4). Do not create a new one.
 2. **Customer admin grants admin consent** to the owning app (this is why it must be multi-tenant).
 3. **Register container-type application permissions** in the consuming tenant —
-   `POST /storage/fileStorage/containerTypeRegistrations`. Spaarke exposes this as
+   v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}`, called as the owning app
+   (`FileStorageContainerTypeReg.Selected`; create-or-replace, so a later PUT must keep the owning-app
+   grant). Spaarke exposes this as
    `POST /api/spe/containertypes/{typeId}/register` and the `/consumers` routes.
 4. **Configure pass-through billing** — the customer activates pay-as-you-go (§4).
 5. **Validate** container creation and access.
@@ -316,6 +414,189 @@ a container type cannot be deleted while any container of it exists anywhere.
 | Storage per container (trial) | 1 GB |
 | Storage per container (standard) | `maxStoragePerContainerInBytes`, set **on the container type** — type-wide, not per container |
 | Containers per **standard** container type | ⚠️ **UNDOCUMENTED** — see §8 |
+
+### Every container is bound to the business unit that owns it
+
+Because one container type serves several customers (Model 1), "a container of this config's type" is **not** "this
+customer's container". Every container therefore carries its owning Dataverse business unit as a `fileStorageContainer`
+custom property, **`spaarkeBusinessUnitId`** (canonical GUID, not searchable) — unified-access-control-r2 task 165, owner
+rounds 20 and 35. The name is ONE C# constant (`src/server/shared/Contracts/SpeContainerBusinessUnitBinding.cs`,
+source-linked into the BFF and the L2 control plane) and ONE PowerShell constant (`scripts/common/SpeContainerBinding.ps1`);
+an ArchTest pins both and fails on any creation site that does not stamp.
+
+- **Stamped at creation by EVERY creation path** (round 35 item 1) — the BFF's SPE admin plane (`POST /api/spe/containers`:
+  the config's unit, or the creating admin's for a unit-less config) and secure-record provisioning (the Secure Record
+  unit); the L2 control plane's **H8** root container (the new environment's root business unit, after verification);
+  `scripts/New-BusinessUnitContainer.ps1` (the business unit it is run for), `scripts/Provision-Customer.ps1` step 10 (the
+  root business unit) and `scripts/Create-NewContainerType.ps1 -CreateTestContainer` (`-TestContainerBusinessUnitId`). A
+  stamp that does not read back removes the container again. **H8's 24h replication wait** (rounds 41 + 49): H8 binds
+  only a container it has verified addressable, so it RECORDS what it created at once, in TYPED run fields
+  (`interStepState.containerTypeId` + `speContainerCreation` — round 41's gate-evidence record was stored by the Cosmos
+  serializer as `{"valueKind":1}` and lost), and every later entry resumes with that container. A recorded root container is
+  never created again; a recorded type gets no second type — its containers are listed and one already there is adopted
+  (every further one bound to the same unit, or removed) before a root container is created; a creation that got no
+  answer is recorded as in doubt (a type in doubt is QuarantineRequired until an operator checks — app-only cannot list
+  container types; a root container in doubt is waited for through the replication window). H8 hands the container to H7
+  (`sprk_SharePointEmbeddedContainerId`) only once bound; H7 waits for H8 in the DAG. The guard follows every route to the
+  containers collection (rounds 41 + 49) — a builder held in a variable, a URI held in a variable or a constant (in any
+  file, or a dot-sourced script), an absolute URL in a C# string, a generic `PostAsJsonAsync<T>`, an abbreviated
+  `-Meth Post`, a splat, raw HTTP, the Graph PowerShell cmdlet — not one spelling. Existing containers:
+  `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1` (dry run / `-Apply` / `-Verify`) derives the owner only from
+  authoritative records, takes an explicit `-Bind <containerId>=<businessUnitId>` for a container no record claims, and
+  its `-Verify` lists — and fails on — every container still unbound.
+- **Authorized per container** on every container, item, column, custom-property, permission, recycle-bin and bulk route:
+  a container bound to the admin's own unit or a descendant; an **unbound** (or malformed) container by **no** admin
+  route — root-unit admins included (round 35 item 2: under Model 1 a root admin of any environment whose config names a
+  shared type would otherwise reach another customer's unbound containers); every refusal is the same 404, logged with
+  its reason (`unbound`, `malformed`, `absent`, `other_type`, `out_of_scope`); an unreadable binding fails closed. Lists
+  and searches are trimmed the same way, and an unbound container is in **no dashboard view** either — not even the
+  platform operator's aggregate (round 41 item 2: under Model 1 the root admin of any environment is that environment's
+  platform operator, so an aggregate over a shared type's unbound containers would count other customers'); its alarm is
+  the backfill's `-Verify`. **Manual gate:** the backfill's `-Apply` + `-Verify` exit 0 in every environment before
+  task 165's BFF is deployed there, and before a further environment is onboarded onto a shared type.
+- **Server-owned**: the custom-property route refuses to set or change it.
+- **Read one container at a time**: on the containers **collection** Graph accepts `$select=customProperties`, echoes it
+  in `@odata.context`, and drops it from every row (measured 2026-10-04, beta and v1.0) — the same silent shape
+  sdap-SPE-admin-app-r2 task 028 measured for `$expand=drive`. A list read would report every container as unbound.
+
+Because sharing a type no longer exposes containers, configs of different customers may name the same container type,
+owning app and its secret; the consuming app stays per customer. The app-only container-type routes (type permissions,
+consuming-app registrations, register) refuse a read or a write of a type that a config the admin cannot reach also
+carries (round 35 item 5 — the reads list every customer's consuming app). **SPE Admin authenticates as the BFF's own
+identity** (§6B), so the BFF resolves NO Key Vault secret from a config and refuses no config for its secret name
+(round 65 item 1 removed round 35 item 3's read guard and 409 with the reads they guarded). `sprk_keyvaultsecretname` is
+retained only as data: a SUPPLIED name must start `spe-owning-app-` (400 on config POST/PUT), because one reader remains —
+`scripts/Backfill-SpeContainerBusinessUnitStamp.ps1`, which lists a config's containers as its owning app.
+
+**Tenant-wide and type-wide routes are for Spaarke's own environments only** (owner round 49 item 1). Under Model 1 every
+customer environment's root admin is a "platform operator" in their own environment, so a root-unit check cannot confine a
+route whose answer spans the whole SharePoint Embedded tenant (security alerts, secure score) or a whole container type (its
+app permissions, consuming apps, registration). Those routes serve only a root-unit admin of a deployment that carries
+the BFF setting `SpeAdmin__PlatformOperatorEnvironment=true` — a DEPLOYMENT setting (Bicep
+`speAdminPlatformOperatorEnvironment`, `config/environments.json` → `scripts/Deploy-BffApi.ps1`), never a Dataverse column
+a customer admin could clear. It is set only for Spaarke-operated environments, and **today only `dev` carries it** (owner
+round 57 item 1): Spaarke's production operator environment does not exist yet (the stopped `spaarke-bff-demo`, `demo` in
+`config/environments.json`, which declares `false`), and the change that stands it up adds the marker — its registry key,
+its name in `SpeAdminOperatorEnvironmentMarkerGuardTests`, and the App Service setting (no Bicep template names it since
+task 249 removed the Model 2 stack). Until then
+every other environment refuses those routes. The registry declaration must be a JSON boolean: `Deploy-BffApi.ps1` fails on
+any other type (PowerShell reads the string `"false"` as true — round 57 item 3). **Customer environments never carry it**
+— customer provisioning does not emit it, a missing setting is `false`, and every other caller gets the same
+`403 spe.admin.deny.platform_operator_required`. The container-type routes that act with the CALLER's own delegated token
+(list / get / create types, settings, owners) are not gated, by decision (round 57 item 2, accepting D38): Graph authorizes
+them by the caller's own SharePoint Embedded administrator role, and the BFF lends no identity, so gating them would only
+remove legitimate screens.
+
+---
+
+## 6A. The Dataverse config record — what is actually read
+
+After creating a container type, register it in Dataverse (`sprk_specontainertypeconfigs`) so the SPE
+Admin app can reach it. **`ResolveConfigAsync` selects exactly five columns** — verified in code,
+2026-10-03:
+
+```
+sprk_specontainertypeconfigid · sprk_containertypeid · sprk_owningappid
+sprk_keyvaultsecretname · _sprk_environment_value   (→ sprk_speenvironment.sprk_tenantid)
+```
+
+Mapping: **`sprk_owningappid` → `ContainerTypeConfig.ClientId`** (and, identically, `OwningAppId`) and
+`sprk_keyvaultsecretname` → `SecretKeyVaultName`. *(Corrected 2026-10-04: an earlier version of this page
+said the `OwningApp*` properties were never populated; `ResolveConfigAsync` sets them to the same values.)*
+
+**Since 2026-10-04 no credential is read from this record** (§6B). What each column now does:
+
+| Column | Used for |
+|---|---|
+| `sprk_containertypeid` | Which container type the config is about |
+| `sprk_owningappid` | Default `owningAppId` when **creating** a container type — nothing else |
+| `_sprk_environment_value` → `sprk_tenantid` | **Load-bearing.** The tenant guard (§6B) refuses a config whose tenant is blank or is not the BFF's |
+| `sprk_keyvaultsecretname` | **Nothing in the BFF** (data only). Optional; a supplied name must start `spe-owning-app-` (400). Read only by the container-binding backfill script, to list the config's containers as its owning app (a blank or non-conforming name: bind its containers with `-Bind`) |
+
+### 🔴 Everything else on the "Edit Container Type Config" form is inert
+
+| Form section | Read by the BFF? |
+|---|---|
+| Container Type ID · Owning App Client ID · Environment | ✅ **yes** |
+| Key Vault Secret Name | ❌ **no** — since 2026-10-04 (§6B) |
+| **Storage & Sharing** (Max Storage Per Container, Sharing Capability, Item Versioning) | ❌ **no** |
+| **Permissions** (delegated + application checkboxes) | ❌ **no** |
+| **Consuming App Registration** (Client ID, KV Secret Name) | ❌ **no** |
+
+These are collected, stored in Dataverse, and never consulted. An operator setting **Max Storage Per
+Container** here would reasonably believe it applied — it does not. The real settings live on the
+**Container Type Settings tab**, which writes to Graph.
+
+**"Consuming App Registration" is Phase-3 scaffolding that was never wired.** Conceptually it would
+hold a *registered-access* app (§3A: ownership is 1:1, access is N-to-many) — a second app granted
+permissions on the container type without owning it. **Today, leave it empty**; populating it changes
+nothing. Grant access apps via `applicationPermissionGrants` on the container-type **registration**
+instead (§3A).
+
+**Recommended fix**: remove the three inert sections from the config editor
+(`src/solutions/SpeAdminApp/src/components/settings/ContainerTypeConfig.tsx` — form state keys
+`maxStoragePerBytes`, `sharingCapability`, `isItemVersioningEnabled`, `delegatedPermissions`,
+`applicationPermissions`, and the consuming-app pair), or render them read-only labelled *"set on the
+container type — shown for reference"*. **Do not wire them** — that would duplicate the Graph settings
+tab and create two surfaces that disagree.
+
+---
+
+## 6B. ✅ SPE Admin identity — secret-free (resolved 2026-10-04)
+
+**SPE Admin never authenticates as a container type's owning app.** It uses two identities, neither of
+which holds a secret:
+
+| Work | Identity | Mechanism |
+|---|---|---|
+| **Container work** — containers, items, recycle bin, search, security, dashboard sync, bulk jobs | **The BFF's own app-only identity** — on Azure, its user-assigned managed identity (dev: `mi-bff-api-dev`, appId `5967251e…`) | `IGraphClientFactory.ForApp()` — the same client every other SPE path in the BFF uses |
+| **Grants and container types** — Consuming Tenants panel, Register, create/settings/owners | **The signed-in SPE administrator**, delegated | The BFF's existing on-behalf-of exchange |
+
+Access for the BFF's identity comes from an **`applicationPermissionGrant` on the container type's
+registration** in its tenant (§3A) — **never from ownership**.
+
+### What it replaced, and why the "obvious" fix was a dead end
+
+It used to authenticate app-only **as each owning app**, with a client secret fetched from Key Vault by
+the config's secret name (ADR-028 exception E-1). A config without a usable secret — the Model 1 config
+held the literal `null` — failed every container operation.
+
+The intuitive secret-free fix was to federate each **owning app** to the BFF's managed identity. Microsoft's
+rules make that unworkable ([Configure an application to trust a managed identity](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-config-app-trust-managed-identity)):
+
+- **The managed identity and the app registration must be in the same tenant**, and
+- **an app registration holds at most 20 federated credentials.**
+
+Under D-12 every customer has its own BFF and managed identity, so: **Model 1** → one federated credential
+per customer on the Model 1 owner ⇒ a hard **20-customer cap**; **Model 2** → each customer's identity lives
+in the *customer's* tenant while the owner lives in Spaarke's ⇒ **not supported at all**. Grants have
+neither limit: each customer's BFF identity is granted on the registration in its own tenant.
+
+### 🔴 Tenant guard — fail closed
+
+The BFF's identity can only act in its own tenant. App-only work is **refused** for a config whose
+environment tenant is blank, or is not the BFF's (`TENANT_ID`) — otherwise the client would list the *BFF's*
+tenant's containers under another tenant's config. Manage a container type from the BFF deployed in its tenant.
+
+### Onboarding a container type for SPE Admin (operator steps)
+
+1. **Grant the BFF's identity on the registration.** SPE Admin → Container Types → the type →
+   **Consuming Tenants → Add**: appId = **the BFF managed identity's appId** (dev `5967251e-171c-46fe-a6c2-ef843c90309d`),
+   application permissions `full`, delegated permissions `full` *(mirrors the dev type's existing grant)*.
+   Requires the **SharePoint Embedded Administrator** (or Global Administrator) Entra role. New grants can
+   take **up to an hour** to propagate.
+2. **App roles on the BFF identity** (one-time per BFF, Entra admin):
+   `FileStorageContainer.Selected` ✅ (dev has it) · `SecurityEvents.Read.All` — **needed by the Security
+   tab**; dev's managed identity does **not** have it yet (the old owning app did).
+3. **Config record**: leave *Key Vault Secret Name* blank; make sure the linked environment's tenant id is set.
+
+Verified state (2026-10-04, read-only probe): on dev type `Spaarke PAYGO 1` (`8a6ce34c…`) the BFF managed
+identity already holds `full` app-only and delegated — broader than the owning app's own grant — so dev
+loses nothing. The Model 1 registration needs step 1.
+
+ADR-028 E-1 no longer covers any SPE Admin path: the census and allowlist rows for `SpeAdminGraphService`
+and the (removed) `SpeAdminTokenProvider` were deleted from `CredentialCensusTests` / `CredentialGuardTests`,
+so a secret-bearing credential reappearing there fails the build.
 
 ---
 
@@ -359,6 +640,10 @@ provisioning flow is treated as correct:
 
 1. **Handler H8 is unproven** — it inherits the `Create-NewContainerType.ps1` defect (§7). Container-type
    creation cannot be automated with an app-only token.
+   *Update 2026-10-03 (tasks 213.2 / 248):* H8 no longer creates container types — the operator creates the
+   type once (runbook). H8 creates, activates and verifies the customer's **container**, app-only as the
+   type's owning app through the Worker UAMI's federated credential (§3A). Owning-app sign-in and the
+   registration were proven live 2026-10-03; H8's container create has not yet run against `Spaarke Model 1`.
 2. **The app registration set (§3A) is a provisioning input**, not an afterthought. **Every** customer —
    Model 1 and Model 2 alike — needs **its own BFF app registration** and a grant on the relevant
    container-type registration (its own under Model 2; Spaarke's single Model 1 registration under Model 1)

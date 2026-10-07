@@ -36,25 +36,18 @@ import type {
   EmailComposeContent,
   ComposeEmailResult,
 } from './types';
+// The FR-02 stamp contract (task 014 writes it server-side; task 051 reads it; task 089 writes it into the open
+// document). One client-side copy, pinned against the server's `OfficeDocumentStamp` constants by
+// `__tests__/documentStampContract.test.ts`.
+import { STAMP_NAMESPACE, STAMP_ROOT_ELEMENT, STAMP_ID_ELEMENT, buildStampXml } from './documentStampContract';
 
 /**
  * Minimum required WordApi version for this adapter.
  */
 const MIN_WORD_API_VERSION = '1.3';
 
-/**
- * The FR-02 stamp contract (spaarkeai-word-add-in-r1 task 051, reading what task 014 writes).
- * Mirrors `OfficeDocumentStamp.StampNamespace` / `.StampRootElement` / `.StampIdElement`
- * (`src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentStamp.cs`). TypeScript cannot
- * reference a C# constant, so this is a byte-for-byte VALUE mirror, not a shared reference — a
- * silent mismatch here means `getByNamespaceAsync` simply never finds the part the server wrote,
- * with no compiler or runtime signal. Re-verify against that file (or
- * `projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md` §13.3) before changing
- * any of the three strings below.
- */
-const STAMP_NAMESPACE = 'urn:spaarke:office:document-identity:1';
-const STAMP_ROOT_ELEMENT = 'documentIdentity';
-const STAMP_ID_ELEMENT = 'documentId';
+/** A canonical bare-lowercase GUID (ADR-044) — the only shape {@link WordAdapter.writeDocumentStamp} writes. */
+const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /**
  * A bare, optionally-braced GUID's shape — what `Guid.ToString("D")` writes server-side, plus the
@@ -120,6 +113,14 @@ function extractStampId(xml: string): string | null {
 export class WordAdapter implements IHostAdapter {
   private _initialized = false;
   private _documentUrl: string | null = null;
+  /**
+   * Task 094: true while {@link writeDocumentStamp} is writing. A registered
+   * {@link registerDocumentChangeHandler} wrapper checks this before invoking its callback, so the
+   * pane's own identity-mark write can never flip "Saved" back into "Save" (AC3). Belt-and-suspenders:
+   * a custom XML part write is not expected to fire a paragraph event at all (it touches no paragraph),
+   * but nothing in the Word JS API documentation guarantees that, so this suppression is defensive.
+   */
+  private _suppressDocumentChangeEvents = false;
 
   /**
    * Get the Office host type.
@@ -353,6 +354,137 @@ export class WordAdapter implements IHostAdapter {
   }
 
   /**
+   * Write the identity stamp into the document open in Word (spaarkeai-word-add-in-r1 task 089, UAT-9).
+   *
+   * Root cause it fixes (`notes/042-uat-round3-2026-10-03.md` §2): the server stamps only the STORED copy, so the
+   * open document never learned its own id, and its next save was a create under the same name → 409 `OFFICE_020`
+   * against its own earlier record.
+   *
+   * Common API only (019 condition 1 — not `Word.Document.customXmlParts`, WordApi 1.4), guarded by
+   * `isSetSupported('CustomXmlParts')` (019 condition 4) before any call. The result is exactly ONE part in the
+   * stamp namespace, carrying `documentId`, so the document never carries two identities (the server's reader and
+   * {@link readDocumentStamp} both answer `null` when two disagree):
+   * - a part already carrying `documentId` is kept and NOTHING is written (no add, no delete) — a document opened
+   *   from Spaarke carries the server's stamp, so it is not marked changed;
+   * - every other part in the namespace (a different id, a duplicate, or an unreadable one) is deleted;
+   * - if no part carried `documentId`, one is added.
+   *
+   * Never trusts the caller's id shape: anything but a canonical bare-lowercase GUID is refused before any call.
+   * Every host failure rejects with a typed {@link HostAdapterError}; the caller logs it and carries on, because
+   * the save it follows has already succeeded.
+   */
+  async writeDocumentStamp(documentId: string): Promise<'written' | 'unchanged'> {
+    this.ensureInitialized();
+
+    if (!this.checkRequirementSet('CustomXmlParts')) {
+      throw this.createError('CAPABILITY_NOT_SUPPORTED', 'This version of Word cannot store custom XML parts.');
+    }
+    if (!CANONICAL_GUID.test(documentId)) {
+      throw this.createError('UNKNOWN_ERROR', 'The document id to stamp is not a canonical GUID.');
+    }
+
+    this._suppressDocumentChangeEvents = true;
+    try {
+      const parts = await this.getCustomXmlPartsByNamespace(STAMP_NAMESPACE);
+
+      let keep: Office.CustomXmlPart | null = null;
+      const remove: Office.CustomXmlPart[] = [];
+      for (const part of parts) {
+        const id = extractStampId(await this.getPartXml(part));
+        if (id === documentId && keep === null) {
+          keep = part;
+        } else {
+          remove.push(part);
+        }
+      }
+
+      if (keep !== null && remove.length === 0) {
+        return 'unchanged';
+      }
+
+      for (const part of remove) {
+        await this.deletePart(part);
+      }
+      if (keep === null) {
+        await this.addCustomXmlPart(buildStampXml(documentId));
+      }
+      return 'written';
+    } catch (error) {
+      const message = (error as { message?: string } | undefined)?.message;
+      throw this.createError(
+        'UNKNOWN_ERROR',
+        `Word did not store the Spaarke identity mark: ${message || 'unknown error'}.`
+      );
+    } finally {
+      this._suppressDocumentChangeEvents = false;
+    }
+  }
+
+  /**
+   * Register a handler for the open document's content-change events (spaarkeai-word-add-in-r1 task
+   * 094). Guarded by `isSetSupported('WordApi', '1.6')` (the requirement set that carries
+   * `onParagraphAdded` / `onParagraphChanged` / `onParagraphDeleted` — verified GA, not preview, on
+   * Microsoft Learn 2026-10-04). Registers all three events (added/changed/deleted each cover a
+   * distinct edit shape; a single paragraph-level edit can fire any of them) behind ONE wrapped
+   * callback, so the caller sees one notification per qualifying change regardless of which event
+   * actually fired.
+   *
+   * The wrapper checks {@link _suppressDocumentChangeEvents} before invoking `onChange`, so the
+   * pane's own {@link writeDocumentStamp} write can never be mistaken for a user edit (AC3).
+   */
+  async registerDocumentChangeHandler(onChange: () => void): Promise<() => void> {
+    this.ensureInitialized();
+
+    if (!this.checkRequirementSet('WordApi', '1.6')) {
+      throw this.createError(
+        'CAPABILITY_NOT_SUPPORTED',
+        'This version of Word cannot report document content changes.'
+      );
+    }
+
+    // `EventHandlers.add` requires a promise-returning handler (Office.js convention) even though
+    // this handler does no async work itself and ignores the event args — `unknown` is a safe
+    // parameter type here (a supertype of every event's actual args type), letting ONE handler be
+    // shared across all three `.add()` calls below.
+    const wrapped = async (_event: unknown): Promise<void> => {
+      if (this._suppressDocumentChangeEvents) {
+        return;
+      }
+      onChange();
+    };
+
+    let handlers: OfficeExtension.EventHandlerResult<unknown>[] = [];
+    await Word.run(async context => {
+      handlers = [
+        context.document.onParagraphAdded.add(wrapped),
+        context.document.onParagraphChanged.add(wrapped),
+        context.document.onParagraphDeleted.add(wrapped),
+      ];
+      await context.sync();
+    });
+
+    return () => {
+      const toRemove = handlers;
+      handlers = [];
+      if (toRemove.length === 0) {
+        return;
+      }
+      // Microsoft Learn's documented removal pattern (`Word.run(eventContext.context, ...)`) is for
+      // Excel/Visio's overload that takes a context directly — Word.run has no such overload. The
+      // SAME effect is `handler.remove()` (queues the removal) followed by `context.sync()` on the
+      // handler's OWN RequestContext (Office Context.sync() the typed removal needs) — exactly the
+      // "same RequestContext the handler was added in" rule, without going back through `Word.run`.
+      const context = toRemove[0]!.context;
+      for (const handler of toRemove) {
+        handler.remove();
+      }
+      void context.sync().catch((error: unknown) => {
+        console.warn('[Spaarke] Could not remove the document change-detection handler', error);
+      });
+    };
+  }
+
+  /**
    * Get the document content as an ArrayBuffer.
    *
    * The default (and `ooxml`) path returns the **real .docx binary** (the compressed OOXML package)
@@ -521,6 +653,32 @@ export class WordAdapter implements IHostAdapter {
     });
   }
 
+  /** Promisify `CustomXmlParts.addAsync` (Common API — see {@link writeDocumentStamp}). */
+  private addCustomXmlPart(xml: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      Office.context.document.customXmlParts.addAsync(xml, result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(result.error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
+  /** Promisify `CustomXmlPart.deleteAsync` (Common API — see {@link writeDocumentStamp}). */
+  private deletePart(part: Office.CustomXmlPart): Promise<void> {
+    return new Promise((resolve, reject) => {
+      part.deleteAsync(result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(result.error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+
   /**
    * Get the capabilities of this adapter.
    *
@@ -534,6 +692,16 @@ export class WordAdapter implements IHostAdapter {
     // task 027 / FR-10 (NFR-10): decided at runtime, never a manifest requirement — see the
     // HostCapabilities.canOpenBrowserWindow doc comment.
     const canOpenBrowserWindow = this.checkRequirementSet('OpenBrowserWindowApi', '1.1');
+    // task 051 / FR-02 (client half): unlike canGetDocumentUrl, genuinely conditional — a host can satisfy this
+    // adapter's WordApi 1.3 floor and still lack the separate Common `CustomXmlParts` requirement set (019
+    // condition 4). Bare one-arg call: the set is unversioned (019 §6 cond. 4). Checked once for read and write.
+    const hasCustomXmlParts = this.checkRequirementSet('CustomXmlParts');
+    // task 094: GA (not preview) requirement set — onParagraphAdded/Changed/Deleted on Word.Document.
+    const canDetectDocumentChanges = this.checkRequirementSet('WordApi', '1.6');
+    // task 094: platform, never hostType (NFR-10) — the ms-word: anchor-click trial only has community
+    // evidence of working on desktop Word (Win/Mac); Office on the web/mobile cannot register it.
+    const platform = this.getPlatform();
+    const canOpenDesktopWord = platform === Office.PlatformType.PC || platform === Office.PlatformType.Mac;
 
     return {
       canGetAttachments: false,
@@ -541,10 +709,9 @@ export class WordAdapter implements IHostAdapter {
       canGetSender: false,
       canGetDocumentContent: isApiSupported,
       canGetDocumentUrl: true,
-      // task 051 / FR-02 (client half): unlike canGetDocumentUrl, genuinely conditional — a host can
-      // satisfy this adapter's WordApi 1.3 floor and still lack the separate Common `CustomXmlParts`
-      // requirement set (019 condition 4). Bare one-arg call: the set is unversioned (019 §6 cond. 4).
-      canReadDocumentStamp: this.checkRequirementSet('CustomXmlParts'),
+      canReadDocumentStamp: hasCustomXmlParts,
+      // task 089 (UAT-9): the write uses the same Common set (addAsync / deleteAsync), so the same runtime gate.
+      canWriteDocumentStamp: hasCustomXmlParts,
       canSaveAsPdf: true, // Server-side conversion
       canSaveAsEml: false,
       canInsertLink: isApiSupported,
@@ -553,6 +720,11 @@ export class WordAdapter implements IHostAdapter {
       // task 036 / FR-15: `Office.context.mailbox` does not exist in Word — always false. Never
       // reachable via a `hostType` conditional in a view; the view reads this flag.
       canComposeEmail: false,
+      // task 096 (UAT round 4): Word's Email tab — an in-pane form (shared compose engine) that attaches the
+      // open document. It needs no Office API beyond what the pane already uses, so the only gate is the build
+      // setting: held OFF until the send route authorizes each attachment and association (owner 2026-10-04,
+      // task 097 note §6). Read per call, so a test can switch it.
+      canEmailFromPane: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true',
       // task 040 / FR-19: linked-todos is spec'd Outlook-only (spec.md Assumptions) — Word has no
       // `sprk_communication` counterpart for the banner's query to key off.
       canShowLinkedTodos: false,
@@ -564,6 +736,8 @@ export class WordAdapter implements IHostAdapter {
       // Title, or "Untitled Document"), so no separate requirement-set check is needed here, matching
       // `canGetDocumentUrl`'s unconditional-true pattern above.
       canProvideDocumentName: true,
+      canDetectDocumentChanges,
+      canOpenDesktopWord,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };
@@ -713,6 +887,18 @@ export class WordAdapter implements IHostAdapter {
         : Office.context.requirements.isSetSupported(set, version);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Read `Office.context.platform` defensively (task 094) — a host that somehow lacks it (or throws
+   * reading it) is simply "not a known desktop platform", never a crash.
+   */
+  private getPlatform(): Office.PlatformType | undefined {
+    try {
+      return Office.context.platform;
+    } catch {
+      return undefined;
     }
   }
 

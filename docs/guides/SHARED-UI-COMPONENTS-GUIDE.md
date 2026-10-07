@@ -168,8 +168,7 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | **SprkButton** | Fluent v9 Button wrapper with optional tooltip | All |
 | **DatasetGrid** | Multi-view dataset container (Grid, Card, List, Virtualized) | PCF, Code Pages |
 | **ViewSelector** | View mode switcher for DatasetGrid | PCF, Code Pages |
-| **Toolbar** | Action bar for grids and pages (command toolbar) | PCF, Code Pages |
-| **PageChrome** | Page header/chrome (OOB parity) | Code Pages |
+| **PageChrome** | `ViewToolbar` (view-selector row, OOB parity). Its `CommandBar` was deleted 2026-10-03 (#1113, zero consumers) | Code Pages |
 | **RichTextEditor** | Lexical-based WYSIWYG editor | Code Pages only* |
 | **ChoiceDialog** | Simple choice dialog | All |
 | **EventDueDateCard** | Event date display card | Code Pages |
@@ -199,7 +198,6 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | `useDatasetMode` | Dataset display mode management |
 | `useHeadlessMode` | Headless/standalone mode detection |
 | `useVirtualization` | Row virtualization for large datasets |
-| `useKeyboardShortcuts` | Keyboard shortcut management |
 | `useEntityTypeConfig` | Entity-specific configuration |
 | `useDirtyFields` | Track field changes for optimistic save |
 | `useOptimisticSave` | Optimistic save with rollback |
@@ -219,12 +217,8 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 
 | Service | Purpose |
 |---------|---------|
-| `CommandRegistry` | Register and discover toolbar commands |
-| `CommandExecutor` | Execute registered commands |
-| `CustomCommandFactory` | Create custom command instances from configuration |
 | `FieldMappingService` | Map entity fields to display columns |
 | `FieldSecurityService` | Field-level security privilege checks |
-| `EntityConfigurationService` | Entity-specific grid/form configuration |
 | `EntityCreationService` | Entity-agnostic: SPE upload, document record creation, AI analysis trigger |
 | `EventTypeService` | Event type configuration |
 | `FetchXmlService` | Build FetchXML queries |
@@ -240,9 +234,8 @@ The external SPA (`src/client/external-spa/`) bundles React 18 via Vite. Barrel 
 | Type Module | Contents |
 |-------------|----------|
 | `DatasetTypes` | Dataset, column, row interfaces |
-| `CommandTypes` | Command definitions, handlers |
+| `CommandTypes` | Privilege + field-security types (`AccessRights`, `IEntityPrivileges`, `IFieldSecurity`) |
 | `ColumnRendererTypes` | Column renderer configs |
-| `EntityConfigurationTypes` | Entity-specific config |
 | `LookupTypes` | `ILookupItem` for search lookups |
 | `WebApiLike` | Dataverse WebAPI abstraction (low-level) |
 | `serviceInterfaces` | `IDataService`, `IUploadService`, `INavigationService` (high-level service abstractions) |

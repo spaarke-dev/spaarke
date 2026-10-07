@@ -34,6 +34,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/reportcard.md
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateReportCardFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
@@ -147,7 +148,9 @@ export class ReportCardService {
    * @param bffBaseUrl BFF API base URL, same convention as the sibling services.
    */
   constructor(dataService: IDataService, authenticatedFetch: AuthenticatedFetchFn, bffBaseUrl: string) {
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): the report card is created through the BFF (G5) — the server decides
+    // the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
   }

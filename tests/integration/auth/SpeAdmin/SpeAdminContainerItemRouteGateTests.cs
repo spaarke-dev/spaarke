@@ -26,8 +26,8 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// SPE admin at all) + <c>AddSpeAdminTenantScopeFilter()</c> (layer 2: whose data may that admin
 /// reach). Eighteen sibling endpoint groups register ON that group and inherit both. This file's
 /// routes were registered on the <b>root app</b> instead — same URL prefix, neither filter. Bare
-/// <c>.RequireAuthorization()</c> means <i>authenticated</i>, and no <c>DefaultPolicy</c> /
-/// <c>FallbackPolicy</c> override exists to raise that bar. So any authenticated caller could
+/// <c>.RequireAuthorization()</c> means <i>authenticated</i>, and neither the <c>DefaultPolicy</c> nor the
+/// <c>FallbackPolicy</c> (an authenticated user since UAC-r2 task 167) raises that bar. So any authenticated caller could
 /// enumerate, download, preview, mint a sharing link for, delete, and upload into any container id
 /// they named, with the client-supplied <c>configId</c> unchecked across tenants.
 /// </para>
@@ -262,7 +262,7 @@ public sealed class SpeAdminContainerItemRouteGateTests
             // Compare by shape: the group prefix, plus the template with its {placeholders} replaced
             // by the concrete values this class uses.
             var concrete = (SpeAdminGroupPrefix + route)
-                .Replace("{id}", ContainerId)
+                .Replace("{containerId}", ContainerId)
                 .Replace("{itemId}", ItemId);
 
             covered.Should().Contain(

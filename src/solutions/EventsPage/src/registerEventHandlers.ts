@@ -18,9 +18,14 @@
  * **Origin**: lifted from legacy App.tsx `executeBulkStatusUpdate` + `executeBulkArchive`
  */
 
-import { registerCommandHandler } from '@spaarke/ui-components';
-import { getXrm } from './xrmHelpers';
+import { registerCommandHandler, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { EVENT_ENTITY_NAME } from './config';
+
+// Best-effort feedback: the nearest frame that has the member (task 081 round 5).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const notificationXrm = (): any => getXrm((x: any) => typeof x.App?.addGlobalNotification === 'function');
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const alertXrm = (): any => getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event status values (match `sprk_event_ribbon_commands.js` global option set)
@@ -61,17 +66,20 @@ async function executeBulkStatusUpdate(
   statusLabel: string,
   additionalFields?: Record<string, unknown>
 ): Promise<boolean> {
-  const xrm = getXrm();
+  // WebApi for the updates (task 081: the shared walker replaces the former
+  // xrmHelpers.getSidePanesXrm copy); the toast / alert below each ask for their own member.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm();
   if (!xrm?.WebApi) return false;
 
   const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
   if (additionalFields) Object.assign(updateData, additionalFields);
 
-  const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
+  const cleanIds = eventIds.map(id => cleanGuid(id));
 
   try {
     await Promise.all(cleanIds.map(id => xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, updateData)));
-    xrm.App?.addGlobalNotification?.({
+    notificationXrm()?.App?.addGlobalNotification?.({
       type: 2,
       level: 1,
       message: `${eventIds.length} event(s) set to ${statusLabel}`,
@@ -79,7 +87,7 @@ async function executeBulkStatusUpdate(
     });
     return true;
   } catch (error) {
-    xrm.Navigation?.openAlertDialog?.({
+    alertXrm()?.Navigation?.openAlertDialog?.({
       title: 'Error',
       text: `Some events failed to update: ${error instanceof Error ? error.message : String(error)}`,
     });
@@ -94,10 +102,11 @@ async function executeBulkStatusUpdate(
  * before deactivation).
  */
 async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<boolean> {
-  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm();
   if (!xrm?.WebApi) return false;
 
-  const cleanIds = eventIds.map(id => id.replace(/[{}]/g, ''));
+  const cleanIds = eventIds.map(id => cleanGuid(id));
 
   try {
     await Promise.all(
@@ -106,7 +115,7 @@ async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<bool
         await xrm.WebApi.updateRecord(EVENT_ENTITY_NAME, id, { statecode: StateCode.INACTIVE, statuscode: 2 });
       })
     );
-    xrm.App?.addGlobalNotification?.({
+    notificationXrm()?.App?.addGlobalNotification?.({
       type: 2,
       level: 1,
       message: `${eventIds.length} event(s) archived`,
@@ -114,7 +123,7 @@ async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<bool
     });
     return true;
   } catch (error) {
-    xrm.Navigation?.openAlertDialog?.({
+    alertXrm()?.Navigation?.openAlertDialog?.({
       title: 'Error',
       text: `Some events failed to archive: ${error instanceof Error ? error.message : String(error)}`,
     });

@@ -47,15 +47,19 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: true,
   canGetDocumentUrl: true,
   canReadDocumentStamp: true,
+  canWriteDocumentStamp: true,
   canSaveAsPdf: true,
   canSaveAsEml: false,
   canInsertLink: true,
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,
+  canDetectDocumentChanges: false,
+  canOpenDesktopWord: false,
   minApiVersion: '1.3',
   supportedRequirementSet: 'WordApi 1.3',
 };
@@ -68,6 +72,7 @@ const OUTLOOK_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: false,
   canGetDocumentUrl: false,
   canReadDocumentStamp: false,
+  canWriteDocumentStamp: false,
   canProvideDocumentName: false,
   canOpenBrowserWindow: true,
   canSuggestRelatedRecords: true,
@@ -87,12 +92,14 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     getDocumentContent: jest.fn().mockResolvedValue(new ArrayBuffer(0)),
     getDocumentUrl: jest.fn().mockResolvedValue('https://contoso.sharepoint.com/Brief.docx'),
     readDocumentStamp: jest.fn().mockResolvedValue(null),
+    writeDocumentStamp: jest.fn().mockResolvedValue('written'),
     getCapabilities: () => WORD_CAPABILITIES,
     initialize: jest.fn().mockResolvedValue(undefined),
     isInitialized: () => true,
     insertLink: jest.fn(),
     attachFile: jest.fn(),
     composeNewEmail: jest.fn(),
+    registerDocumentChangeHandler: jest.fn().mockResolvedValue(() => undefined),
     ...overrides,
   };
 }
@@ -138,7 +145,14 @@ beforeEach(() => {
 describe('SaveView', () => {
   describe('loading and error state', () => {
     it('shows a loading state while the adapter resolves', () => {
-      const adapter = makeWordAdapter({ getSubject: jest.fn(() => new Promise(() => { /* no-op */ })) });
+      const adapter = makeWordAdapter({
+        getSubject: jest.fn(
+          () =>
+            new Promise(() => {
+              /* no-op */
+            })
+        ),
+      });
       renderSaveView(adapter);
 
       expect(screen.getByText('Loading document information...')).toBeInTheDocument();
@@ -306,38 +320,89 @@ describe('SaveView', () => {
       expect(props.canSuggestRelatedRecords).toBe(false);
       expect(props.canProvideDocumentName).toBe(false);
     });
-  });
 
-  describe('onViewDocument', () => {
-    it('forwards to the provided onViewDocument callback', async () => {
-      const handleViewDocument = jest.fn();
-      const adapter = makeWordAdapter();
-      renderSaveView(adapter, { onViewDocument: handleViewDocument });
+    // Task 094.
+    it('reflects canDetectDocumentChanges and canOpenDesktopWord from the adapter', async () => {
+      const capabilities: HostCapabilities = {
+        ...WORD_CAPABILITIES,
+        canDetectDocumentChanges: true,
+        canOpenDesktopWord: true,
+      };
+      const adapter = makeWordAdapter({ getCapabilities: () => capabilities });
+      renderSaveView(adapter);
 
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      (props.onViewDocument as (url: string) => void)('https://example.com/doc');
-      expect(handleViewDocument).toHaveBeenCalledWith('https://example.com/doc');
+      expect(props.canDetectDocumentChanges).toBe(true);
+      expect(props.canOpenDesktopWord).toBe(true);
     });
 
-    it('falls back to window.open when onViewDocument is not provided', async () => {
-      const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+    it('defaults canDetectDocumentChanges/canOpenDesktopWord to false (WORD_CAPABILITIES fixture)', async () => {
       const adapter = makeWordAdapter();
       renderSaveView(adapter);
 
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      (props.onViewDocument as (url: string) => void)('https://example.com/doc');
-      expect(windowOpenSpy).toHaveBeenCalledWith('https://example.com/doc', '_blank');
+      expect(props.canDetectDocumentChanges).toBe(false);
+      expect(props.canOpenDesktopWord).toBe(false);
+    });
+  });
+
+  // Task 094: the lifted saved-state bundle passes through untouched when supplied, and is omitted
+  // entirely (SaveFlow keeps its own uncontrolled copy) when not.
+  describe('savedState / onSavedStateChange passthrough (task 094)', () => {
+    it('forwards both when supplied', async () => {
+      const onSavedStateChange = jest.fn();
+      const savedState = {
+        savedDocument: null,
+        profileRefreshSignal: 0,
+        contentChangedSinceSave: false,
+      };
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter, { savedState, onSavedStateChange });
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect(props.savedState).toBe(savedState);
+      expect(props.onSavedStateChange).toBe(onSavedStateChange);
+    });
+
+    it('omits both entirely when not supplied', async () => {
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter);
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect('savedState' in props).toBe(false);
+      expect('onSavedStateChange' in props).toBe(false);
+    });
+  });
+
+  // Task 088 (UAT-1): the `onViewDocument` seam — a callback taking the stored file's Graph webUrl, with a
+  // `window.open(url, '_blank')` fallback here — was REMOVED: View Document opens the Spaarke document RECORD
+  // inside SaveFlow (pinned by SaveFlow.savedState.test.tsx). The two tests that pinned the old forwarding and
+  // fallback are replaced by this one, which pins that the webUrl path is gone rather than merely unused.
+  describe('View Document (task 088)', () => {
+    it('hands SaveFlow no onViewDocument callback — no path from the Save tab opens the file URL any more', async () => {
+      const windowOpenSpy = jest.spyOn(window, 'open').mockImplementation(() => null);
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter);
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      expect(lastSaveFlowProps()).not.toHaveProperty('onViewDocument');
+      expect(windowOpenSpy).not.toHaveBeenCalled();
 
       windowOpenSpy.mockRestore();
     });
   });
 
   describe('optional prop passthrough', () => {
-    it('forwards onComplete, onSaved, onQuickCreate, onNavigate, allowedEntityTypes, resolvedDocumentId, documentIdentity and onRetryDocumentIdentity when supplied', async () => {
+    it('forwards (onComplete through its stamp-writing wrapper) onSaved, onQuickCreate, onNavigate, allowedEntityTypes, resolvedDocumentId, documentIdentity and onRetryDocumentIdentity when supplied', async () => {
       const onComplete = jest.fn();
       const onSaved = jest.fn();
       const onQuickCreate = jest.fn();
@@ -360,7 +425,9 @@ describe('SaveView', () => {
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      expect(props.onComplete).toBe(onComplete);
+      // Task 089: onComplete is wrapped (it also writes the identity stamp) — it must still reach the caller's.
+      (props.onComplete as (id: string, url: string) => void)('doc-1', 'https://x/doc.docx');
+      expect(onComplete).toHaveBeenCalledWith('doc-1', 'https://x/doc.docx');
       expect(props.onSaved).toBe(onSaved);
       expect(props.onQuickCreate).toBe(onQuickCreate);
       expect(props.onNavigate).toBe(onNavigate);
@@ -377,7 +444,8 @@ describe('SaveView', () => {
       await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
 
       const props = lastSaveFlowProps();
-      expect('onComplete' in props).toBe(false);
+      // Task 089: onComplete is always supplied — SaveView itself acts on a completed save (the identity stamp).
+      expect(typeof props.onComplete).toBe('function');
       expect('onSaved' in props).toBe(false);
       expect('onQuickCreate' in props).toBe(false);
       expect('onNavigate' in props).toBe(false);

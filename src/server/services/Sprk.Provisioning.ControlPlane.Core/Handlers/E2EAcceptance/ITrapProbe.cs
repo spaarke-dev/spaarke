@@ -7,7 +7,7 @@
 // per-item probes without needing to know the concrete type of any single one.
 //
 // COMPOSITE PATTERN:
-//   Each per-trap real probe (T1–T6, tasks 171/177/178/180/172/175) already
+//   Each per-trap real probe (T1–T6, tasks 171/177/178/180/172/175; T7 task 238) already
 //   exposes the same shape — a <see cref="TrapKind"/> Kind property and a
 //   <see cref="ProbeAsync(TrapVerificationRequest, CancellationToken)"/> method
 //   returning a <see cref="TrapVerificationOutcome"/>. This interface merely
@@ -26,7 +26,7 @@
 //   the least-invasive uniform composition surface.
 //
 // PLACEMENT + JUSTIFICATION (CLAUDE.md §11):
-//   Existing — 6 real trap probe classes with uniform Kind + ProbeAsync
+//   Existing — 6 (now 7, T7 task 238) real trap probe classes with uniform Kind + ProbeAsync
 //     signatures already exist (tasks 171/172/175/177/178/180).
 //   Extension — annotating each probe with this interface is a two-token
 //     ADD (`: ITrapProbe`) with zero behavior change; the composite is the

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="087" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>ADR-002 amendment (path B): a platform-native declarative mechanism such as Dataverse autonumber may own a write-path invariant</title>
+    <phase>5 Remediation — governance follow-through</phase>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Governance documents only: ADR-002 (full + concise), the write-path architecture doc, `.claude/constraints/plugins.md`, root `CLAUDE.md` and the changelog. No `.cs`/`.ts` change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>An ADR amendment is repo-wide governance read by every project's adr-check; the wording must widen WP-1 exactly as far as decided and no further.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/adr/` and `.claude/constraints/` (main-session-only, CLAUDE.md §3) and root `CLAUDE.md` (hot path: one editor at a time).</parallel-reason>
+    <deps>076</deps>
+    <tags>adr, governance, documentation, root-claude</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision 2026-10-03 on task 076's ADR conflict: "A now, B as its own task". Task 076 recorded a project-scoped exception (path A) because write-path invariant I-11 — a Matter/Project always has a number, its primary name — is owned by Dataverse's platform autonumber, while ADR-002 WP-1 says every invariant's owner is "a server-side component in the BFF write path". This task is path B: amend ADR-002 so that ownership by a platform-native declarative mechanism is allowed under stated conditions.</prompt>
+
+  <role>Spaarke architecture steward. You amend an ADR that every project's adr-check enforces; precision of the rule matters more than prose.</role>
+
+  <goal>ADR-002 (full and concise), the write-path architecture doc, `.claude/constraints/plugins.md` and root `CLAUDE.md` agree on one rule: an invariant may be owned by a platform-native declarative mechanism that fires on every write path and runs no Spaarke code, and I-11 is owned that way without an exception.</goal>
+
+  <context>
+    <background>
+      - **The conflict (task 076 Step 9.5, both reviewers):** `docs/adr/ADR-002-no-heavy-plugins.md` WP-1 (≈ line 72) — *"exactly one owner: a server-side component in the BFF write path"* — and ≈ line 98, declarative column mechanisms are *"not a substitute for WP-1 owners"*. The "Permitted (not plugins)" list names alternate keys, formula/rollup columns and business rules, but not autonumber.
+      - **Already inconsistent before 076:** `.claude/constraints/plugins.md` ≈ line 63 ("no owner needed if no code") contradicts the full ADR's ≈ line 98. Root `CLAUDE.md` (the "Dataverse write path" pointer row) says *"ONE BFF server-side owner (WP-1)"*.
+      - **Why platform ownership is better where it applies:** it fires inside the create transaction on EVERY write path — Code Pages, PCF, Office add-in, model-driven forms, import, the AI create tool — so WP-4 (inline) holds and WP-5 (a fix-up for writes outside the product) is unnecessary. A BFF owner covers only BFF-routed writes. Autonumber is already used across the schema (e.g. `sprk_backgroundjobrun`, `sprk_notificationoutbox`, `sprk_userentityassociation` primary names).
+      - **What I-11 has on top of the platform:** a per-environment setup and check (`scripts/Set-RecordNumberingSchema.ps1 -Verify`), because the autonumber SEED is not carried by a solution import; and BFF-side handling (`RecordCreationService` never sends the number, retries a key-refused create, warns when none came back). The amendment should make such a verifiable per-environment check a CONDITION of platform ownership.
+      - **Interim framing stays:** the owner called autonumber "an interim solution until we build the numbering function". The amendment is about who may own an invariant, not about numbering's final design.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5">Path B: the ADR change is its own deliverable; record the owner's sign-off on the final wording before it is committed.</constraint>
+    <constraint source="this task">Widen WP-1 ONLY for mechanisms that are (1) native Dataverse metadata — declarative, no Spaarke code executes; (2) applied by the platform synchronously on every create/update path, whoever writes; (3) checkable per environment by a scripted `-Verify` (or equivalent) recorded in the invariant's registry row. Power Automate flows, plugins, webhooks and client-side code stay outside the allowance.</constraint>
+    <constraint source="CLAUDE.md §18">Root `CLAUDE.md` is edited in place (no new section); every edit gets a `.claude/CHANGELOG.md` entry.</constraint>
+    <constraint source="CLAUDE.md §3">`.claude/**` edits are main-session only.</constraint>
+    <constraint source="this task">Do not change any other WP rule's meaning; ADR-002's plugin ban is untouched.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">`docs/adr/ADR-002-no-heavy-plugins.md` and `.claude/adr/ADR-002-thin-plugins.md` both state the WP-1 allowance with the three conditions, list autonumber columns under "Permitted (not plugins)", and record the amendment date and its origin (task 076 / 087).</criterion>
+    <criterion testable="true">`.claude/constraints/plugins.md`'s "no owner needed if no code" line agrees with the ADR (the contradiction is gone).</criterion>
+    <criterion testable="true">Root `CLAUDE.md`'s Dataverse-write-path pointer row no longer says only "BFF server-side owner"; `.claude/CHANGELOG.md` has the entry.</criterion>
+    <criterion testable="true">`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: the §5 intro and the L2 layer description name platform-native owners; the I-11 row's "WP-1 exception (path A)" note becomes "owner per ADR-002 as amended (task 087)".</criterion>
+    <criterion testable="true">`projects/spaarkeai-word-add-in-r1/spec.md` ADR Tensions: the ADR-002 WP-1 row records path B as done.</criterion>
+    <criterion testable="true">The owner's sign-off on the final ADR wording is recorded (quote + date) in `notes/087-adr-002-amendment.md`.</criterion>
+    <criterion testable="true">Doc-drift guards still pass: `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` (includes `WorkloadPlacementDocDriftTests`) green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The amendment would have to admit anything beyond native declarative metadata (a flow, a plugin, a webhook, client code) to cover a case someone raises — STOP; that is a different ADR decision.</trigger>
+    <trigger>Another active project's open work depends on the current WP-1 wording (check `projects/INDEX.md` and open PRs touching ADR-002) — STOP and coordinate before editing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read ADR-002 (full and concise), `plugins.md`, the write-path doc §2–§5, and the root CLAUDE.md pointer row; list every sentence that states or implies "BFF owner only".</step>
+    <step>Check `projects/INDEX.md` and open PRs for concurrent edits to these files (escalation trigger 2).</step>
+    <step>Draft the amendment (the three conditions; autonumber in "Permitted"); get the owner's sign-off on the wording.</step>
+    <step>Apply it to all five documents; update the I-11 row and the spec's ADR Tensions row; add the CHANGELOG entry.</step>
+    <step>Run ArchTests; write `notes/087-adr-002-amendment.md`; TASK-INDEX 087 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>ADR-002 already permits declarative platform mechanisms (alternate keys, formula/rollup columns, business rules) but denies them WP-1 ownership; autonumber is used across the schema without being named.</existing>
+    <extension>Yes — an amendment of the existing ADR and its pointer documents; no new ADR, no new document.</extension>
+    <cost-of-doing-nothing>I-11 stays a standing exception, and the planned numbering function would be pushed to BFF code plus a WP-5 fix-up job to match the coverage the platform gives today; every adr-check of a schema using autonumber keeps tripping WP-1.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">docs/adr/ADR-002-no-heavy-plugins.md</file>
+    <file role="edit">.claude/adr/ADR-002-thin-plugins.md</file>
+    <file role="edit">.claude/constraints/plugins.md</file>
+    <file role="edit">CLAUDE.md</file>
+    <file role="edit">.claude/CHANGELOG.md</file>
+    <file role="edit">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+    <file role="edit">projects/spaarkeai-word-add-in-r1/spec.md</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/087-adr-002-amendment.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>docs/adr/ADR-002-no-heavy-plugins.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/constraints/plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>docs/adr/ADR-002-no-heavy-plugins.md</file>
+    <file>.claude/adr/ADR-002-thin-plugins.md</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/087-adr-002-amendment.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Main session only (touches .claude/).</protocol>
+  </execution>
+
+  <notes>
+    COMPLETED 2026-10-03. Record: notes/087-adr-002-amendment.md. Owner sign-off on the full wording, 2026-10-03:
+    "approved--but let's not add business rules in this revision" - business rules stay Permitted for defaults/UX and
+    are explicitly never an invariant owner. WP-1 now: one owner = BFF code, or a platform-native declarative mechanism
+    meeting (a) Dataverse metadata / no Spaarke code, (b) applied on every create/update whoever writes, (c) a scripted
+    per-environment -Verify named in the registry row. Autonumber columns added to Permitted; formula/rollup vs business
+    rules split (removes the plugins.md contradiction). Applied to: full + concise ADR-002, plugins.md, root CLAUDE.md
+    pointer row, .claude/CHANGELOG.md, the write-path doc (L2, section 5 intro, I-11 row), spec ADR Tensions (path B
+    done), projects/INDEX.md (Skill Directives Y). Escalation trigger 2 did not fire (no other open PR on these files).
+    ArchTests 345/345 (doc-drift guards included).
+  </notes>
+</task>

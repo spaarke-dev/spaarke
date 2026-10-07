@@ -184,6 +184,22 @@ rejects a same-version update — and re-upload.
 - `src/client/office-addins/CLAUDE.md` — "no `FunctionFile`" (task 037 added one) and "4-part version" for JSON.
 - `.claude/skills/office-addins-deploy/SKILL.md` — told operators to download `outlook/manifest.xml` (404).
 
+## 8b. 👤 Rollout outcome (owner, 2026-10-03)
+
+- **What the owner saw before the tidy-up:** three Spaarke groups in Word ("Spaarke (TEST)" and two "Spaarke"). That
+  is the expected result of uploading BOTH zips while the Word XML add-in is still assigned (office-js #6938).
+- **What the owner did:** *"i removed the TEST and the two xml Word and Outlook specific--and now not showing so
+  should be ok"*. So the TEST app (§6 step 5) and **both XML add-ins** are removed. Only the unified package
+  (`spaarke-addin-1.1.0.zip`) remains, and the extra groups are gone.
+- **This differs from §6 step 6** (keep both XML add-ins for clients that cannot run the unified package). The owner
+  decides this. The consequence is that **Outlook on Mac** and **Word older than 2501** now have no Spaarke add-in.
+  If either population appears, re-upload the matching XML (`/outlook/outlook-manifest.xml`, `/word/manifest.xml`
+  from the deployed site); both are still built and hosted.
+- Criterion 2 (§7): the owner's 2026-10-03 UAT round (`042-uat-results.md` §10) exercised Quick Save and Share in
+  Word. It is not recorded which package's ribbon was clicked (it may have been before the tidy-up). The UAT
+  feedback is about behaviour, not about installation, so the observed install of the unified package on desktop
+  and web is still the owner's to confirm.
+
 ## 9. Follow-ups (not done here)
 
 - **Per-customer builds** (Model 1 / Model 2, D-13): `webApplicationInfo.resource` is per-customer BFF, so each

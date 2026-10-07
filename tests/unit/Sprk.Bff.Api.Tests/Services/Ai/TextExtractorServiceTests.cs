@@ -167,9 +167,9 @@ public class TextExtractorServiceTests
     [InlineData(".pdf")]
     [InlineData(".docx")]
     [InlineData(".doc")]
-    public async Task ExtractAsync_DocIntelTypes_WhenKeyMissing_ReturnsConfigurationError(string extension)
+    public async Task ExtractAsync_DocIntelTypes_WhenKeyAndCredentialMissing_ReturnsConfigurationError(string extension)
     {
-        // Only endpoint configured, key missing
+        // Only endpoint configured: no key AND no managed-identity credential (task 243 — either one suffices)
         var options = Options.Create(new DocumentIntelligenceOptions
         {
             DocIntelEndpoint = "https://test.cognitiveservices.azure.com/"
@@ -182,6 +182,108 @@ public class TextExtractorServiceTests
 
         result.Success.Should().BeFalse();
         result.ErrorMessage.Should().Contain("not configured");
+    }
+
+    // ---------- Task 243 (owner D13): "key if configured, else managed identity" ----------
+    // Each managed-identity test sets a 100-byte limit and sends 200 bytes: the file-size check runs AFTER the
+    // configuration guard and BEFORE any client call, so "exceeds maximum" proves the guard accepted the
+    // credential without a network call (ThrowingTokenCredential would fail the test if a token were requested).
+
+    [Fact]
+    public async Task ExtractAsync_DocIntelFile_WithManagedIdentityAndNoKey_PassesTheConfigurationGuard()
+    {
+        var service = new TextExtractorService(
+            ManagedIdentityOnlyOptions(), _loggerMock.Object, CreateNoOpCache(),
+            managedIdentityCredential: new ThrowingTokenCredential());
+
+        using var stream = CreateStream(new string('a', 200));
+        var result = await service.ExtractAsync(stream, "document.pdf");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("exceeds maximum", "the managed identity alone satisfies the guard");
+    }
+
+    [Fact]
+    public async Task ExtractLayoutAsync_WithManagedIdentityAndNoKey_PassesTheConfigurationGuard()
+    {
+        var service = new TextExtractorService(
+            ManagedIdentityOnlyOptions(), _loggerMock.Object, CreateNoOpCache(),
+            managedIdentityCredential: new ThrowingTokenCredential());
+
+        using var stream = CreateStream(new string('a', 200));
+        var result = await service.ExtractLayoutAsync(stream, "document.pdf");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("exceeds maximum", "the managed identity alone satisfies the guard");
+    }
+
+    [Fact]
+    public async Task ExtractLayoutAsync_WhenKeyAndCredentialMissing_ReturnsConfigurationError()
+    {
+        var service = new TextExtractorService(ManagedIdentityOnlyOptions(), _loggerMock.Object, CreateNoOpCache());
+
+        using var stream = CreateStream(new string('a', 200));
+        var result = await service.ExtractLayoutAsync(stream, "document.pdf");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("not configured");
+    }
+
+    [Fact]
+    public async Task ExtractAsync_DocIntelFile_WhenTheManagedIdentityIsRejected_ReportsTheCredential()
+    {
+        var service = new TextExtractorService(
+            ManagedIdentityOnlyOptions(), _loggerMock.Object, CreateNoOpCache(),
+            managedIdentityCredential: new RejectingTokenCredential());
+
+        using var stream = CreateStream("small");   // under the size limit, so the client is called
+        var result = await service.ExtractAsync(stream, "document.pdf");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("rejected the service's credential",
+            "a credential fault is configuration, not 'temporarily unavailable'");
+    }
+
+    [Fact]
+    public async Task ExtractLayoutAsync_WhenTheManagedIdentityIsRejected_ReportsTheCredential()
+    {
+        var service = new TextExtractorService(
+            ManagedIdentityOnlyOptions(), _loggerMock.Object, CreateNoOpCache(),
+            managedIdentityCredential: new RejectingTokenCredential());
+
+        using var stream = CreateStream("small");
+        var result = await service.ExtractLayoutAsync(stream, "document.pdf");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("rejected the service's credential");
+    }
+
+    private static IOptions<DocumentIntelligenceOptions> ManagedIdentityOnlyOptions() =>
+        Options.Create(new DocumentIntelligenceOptions
+        {
+            DocIntelEndpoint = "https://test.cognitiveservices.azure.com/",
+            // DocIntelKey not set — the stamp shape since task 243
+            MaxFileSizeBytes = 100,
+        });
+
+    /// <summary>A managed identity whose token request fails the way Azure.Identity reports it (no network).</summary>
+    private sealed class RejectingTokenCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new Azure.Identity.AuthenticationFailedException("ManagedIdentityCredential authentication failed.");
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new Azure.Identity.AuthenticationFailedException("ManagedIdentityCredential authentication failed.");
+    }
+
+    /// <summary>A credential that fails the test if a token is ever requested (no network in unit tests).</summary>
+    private sealed class ThrowingTokenCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("No token may be requested in this unit test.");
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("No token may be requested in this unit test.");
     }
 
     [Fact]

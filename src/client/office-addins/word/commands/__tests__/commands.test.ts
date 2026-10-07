@@ -1,32 +1,26 @@
 /**
- * Unit tests for word/commands/index.ts (spaarkeai-word-add-in-r1 task 037 / FR-17).
+ * Unit tests for word/commands/index.ts (spaarkeai-word-add-in-r1 task 037 / FR-17; reworked by task 089 for UAT
+ * round 3 — UAT-9 Quick Save, UAT-10 Share → Open Spaarke).
  *
- * Covers the task's hard acceptance criteria:
- *   - `event.completed()` fires on EVERY path for both commands — success, extraction/auth/network
- *     failure — asserted here, not by inspection (the task's own binding requirement).
- *   - `quickSave` bootstraps auth + apiClient + a WordAdapter (via the factory, explicit 'word' host),
- *     extracts bytes through `WordAdapter.getDocumentContent()`, computes the idempotency key via
- *     `computeQuickSaveIdempotencyKey`, and posts an unfiled CREATE request — never opening the pane.
- *   - `shareDocument` resolves the open document's identity, mints a share link, and reports outcome —
- *     with the ONE deliberate exception (no resolved identity -> open the pane, stated explicitly).
+ * Covers:
+ *   - `event.completed()` fires on EVERY path of every command — success, extraction/auth/network failure — asserted
+ *     here, not by inspection (omitting it on any path leaves the Word ribbon spinner stuck forever).
+ *   - Quick Save resolves the open document's identity FIRST: a resolved document is a VERSION save
+ *     (`existingDocumentId` + `isNewVersion`); a new one is a CREATE with the pane's name rule and `allowRename`; any
+ *     other outcome saves nothing and says why. After a success the open document is marked with the saved id.
+ *   - Every notification says what happened in words; a refusal shows the SERVER's message, never the old fixed
+ *     "Failed to save" text.
+ *   - Open Spaarke opens the Console URL built from the build settings, through the capability-chosen opener.
  *
- * All collaborators are module-mocked so this suite exercises ONLY this file's own orchestration
- * (NFR-10: commands are thin entry points over shared services, which have their own test suites).
+ * Collaborators with side effects (auth, the API client, the adapter factory, identity resolution and the stamp
+ * write) are module-mocked; the PURE request/message builders in `quickSaveHelpers` run for real so the tests pin
+ * the actual request body and notification text.
  *
- * `word/commands/index.ts` caches its bootstrap state (`bootstrapped`, `wordAdapter`) in module-level
- * closures, matching `outlook/commands/index.ts`'s own convention — so each test re-`require`s a FRESH
- * module instance (`jest.resetModules()`) rather than relying on the ES import cached at file load;
- * otherwise a later test's "auth bootstrap fails" scenario would silently no-op against an
- * already-bootstrapped module and prove nothing.
+ * `word/commands/index.ts` caches its bootstrap state in module-level closures, so each test re-`require`s a FRESH
+ * module instance (`jest.resetModules()`).
  */
 
 import type { IHostAdapter } from '@shared/adapters';
-
-// ---------------------------------------------------------------------------------------------
-// Module mocks — declared before importing the module under test. jest hoists `jest.mock()`
-// calls above imports, but the mock FACTORIES below close over these `const` bindings, which is
-// safe because the closures are only invoked when the mocked module is actually required.
-// ---------------------------------------------------------------------------------------------
 
 const mockRegisterAdapter = jest.fn();
 const mockCreateAndInitialize = jest.fn();
@@ -38,42 +32,43 @@ jest.mock('@shared/adapters', () => ({
 }));
 
 jest.mock('@shared/adapters/WordAdapter', () => ({
-  // Never actually constructed in these tests — HostAdapterFactory itself is mocked, so this only
-  // needs to exist as SOME value `registerAdapter('word', WordAdapter)` can be called with.
+  // Never constructed — HostAdapterFactory itself is mocked.
   WordAdapter: class MockWordAdapter {},
 }));
 
 const mockAuthInitialize = jest.fn();
 const mockApiConfigure = jest.fn();
 const mockApiPost = jest.fn();
+const mockApiGet = jest.fn();
 jest.mock('@shared/services', () => ({
   authService: { initialize: (...args: unknown[]) => mockAuthInitialize(...args) },
   apiClient: {
     configure: (...args: unknown[]) => mockApiConfigure(...args),
     post: (...args: unknown[]) => mockApiPost(...args),
+    get: (...args: unknown[]) => mockApiGet(...args),
   },
 }));
 
 const mockResolveDocumentIdentity = jest.fn();
-const mockApplyStampPrecedence = jest.fn();
-jest.mock('@shared/taskpane/services/documentIdentityService', () => ({
-  resolveDocumentIdentity: (...args: unknown[]) => mockResolveDocumentIdentity(...args),
-  applyStampPrecedence: (...args: unknown[]) => mockApplyStampPrecedence(...args),
-}));
+const mockWriteIdentityStampAfterSave = jest.fn();
+jest.mock('@shared/taskpane/services/documentIdentityService', () => {
+  const actual = jest.requireActual('@shared/taskpane/services/documentIdentityService');
+  return {
+    // The precedence rule is pure — run it for real.
+    applyStampPrecedence: actual.applyStampPrecedence,
+    resolveDocumentIdentity: (...args: unknown[]) => mockResolveDocumentIdentity(...args),
+    writeIdentityStampAfterSave: (...args: unknown[]) => mockWriteIdentityStampAfterSave(...args),
+  };
+});
 
-const mockBuildDocumentSaveRequest = jest.fn();
 const mockComputeQuickSaveIdempotencyKey = jest.fn();
-const mockArrayBufferToBase64 = jest.fn();
 jest.mock('@shared/taskpane/services/quickSaveHelpers', () => ({
-  buildDocumentSaveRequest: (...args: unknown[]) => mockBuildDocumentSaveRequest(...args),
+  ...jest.requireActual('@shared/taskpane/services/quickSaveHelpers'),
   computeQuickSaveIdempotencyKey: (...args: unknown[]) => mockComputeQuickSaveIdempotencyKey(...args),
-  arrayBufferToBase64: (...args: unknown[]) => mockArrayBufferToBase64(...args),
 }));
 
-const mockMintDocumentShareLink = jest.fn();
-jest.mock('@shared/taskpane/services/shareLinkService', () => ({
-  mintDocumentShareLink: (...args: unknown[]) => mockMintDocumentShareLink(...args),
-}));
+const RESOLVED_ID = '2bcfc5d2-0000-4000-8000-000000000001';
+const CREATED_ID = '1eea00c5-0000-4000-8000-000000000002';
 
 function createMockEvent(): Office.AddinCommands.Event {
   return { completed: jest.fn() } as unknown as Office.AddinCommands.Event;
@@ -90,10 +85,11 @@ function createMockAdapter(overrides: Partial<Record<keyof IHostAdapter, unknown
     getAttachmentContent: jest.fn(),
     getSenderEmail: jest.fn().mockResolvedValue(''),
     getRecipients: jest.fn().mockResolvedValue([]),
-    getDocumentContent: jest.fn().mockResolvedValue(new ArrayBuffer(4)),
+    getDocumentContent: jest.fn().mockResolvedValue(new Uint8Array([0x50, 0x4b, 0x03, 0x04]).buffer),
     getDocumentUrl: jest.fn().mockResolvedValue(null),
     readDocumentStamp: jest.fn().mockResolvedValue(null),
-    getCapabilities: jest.fn().mockReturnValue({ canReadDocumentStamp: true }),
+    writeDocumentStamp: jest.fn().mockResolvedValue('written'),
+    getCapabilities: jest.fn().mockReturnValue({ canReadDocumentStamp: true, canWriteDocumentStamp: true }),
     initialize: jest.fn().mockResolvedValue(undefined),
     isInitialized: jest.fn().mockReturnValue(true),
     insertLink: jest.fn(),
@@ -103,20 +99,38 @@ function createMockAdapter(overrides: Partial<Record<keyof IHostAdapter, unknown
   } as unknown as IHostAdapter;
 }
 
+function lastNotifyCall(displayDialogAsync: jest.Mock): unknown[] | undefined {
+  return displayDialogAsync.mock.calls[displayDialogAsync.mock.calls.length - 1];
+}
+
 /** Reads the `message` query param off the URL `displayDialogAsync` was called with. */
 function lastNotifyMessage(displayDialogAsync: jest.Mock): string | null {
-  const call = displayDialogAsync.mock.calls[displayDialogAsync.mock.calls.length - 1];
-  if (!call) return null;
-  const url = new URL(call[0] as string);
-  return url.searchParams.get('message');
+  const call = lastNotifyCall(displayDialogAsync);
+  return call ? new URL(call[0] as string).searchParams.get('message') : null;
 }
 
 /** Reads the `status` query param off the URL `displayDialogAsync` was called with. */
 function lastNotifyStatus(displayDialogAsync: jest.Mock): string | null {
-  const call = displayDialogAsync.mock.calls[displayDialogAsync.mock.calls.length - 1];
-  if (!call) return null;
-  const url = new URL(call[0] as string);
-  return url.searchParams.get('status');
+  const call = lastNotifyCall(displayDialogAsync);
+  return call ? new URL(call[0] as string).searchParams.get('status') : null;
+}
+
+/** The job read after a save: Completed, naming the document it landed on and where it is stored. */
+function completedJob(documentId: string, fileName: string) {
+  return {
+    status: 'Completed',
+    result: {
+      artifact: {
+        id: documentId,
+        webUrl: `https://contoso.sharepoint.com/:w:r/contentstorage/CSP_1/_layouts/15/doc2.aspx?sourcedoc=%7Bx%7D&file=${encodeURIComponent(fileName)}&action=default`,
+      },
+    },
+  };
+}
+
+/** A thrown ApiClientError's shape: the server's ProblemDetails on `.error`. */
+function serverRefusal(problem: Record<string, unknown>): Error {
+  return Object.assign(new Error(String(problem.detail ?? problem.title)), { name: 'ApiClientError', error: problem });
 }
 
 describe('word/commands/index.ts', () => {
@@ -128,17 +142,22 @@ describe('word/commands/index.ts', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    jest.clearAllMocks();
 
     mockAdapter = createMockAdapter();
     mockAuthInitialize.mockResolvedValue(undefined);
     mockApiConfigure.mockReturnValue(undefined);
     mockCreateAndInitialize.mockResolvedValue(mockAdapter);
-    mockArrayBufferToBase64.mockReturnValue('BASE64BYTES');
     mockComputeQuickSaveIdempotencyKey.mockResolvedValue('idem-key-1');
-    mockBuildDocumentSaveRequest.mockReturnValue({ contentType: 'Document', document: { fileName: 'x.docx' } });
     mockResolveDocumentIdentity.mockResolvedValue({ kind: 'new', reason: 'not_cloud_document' });
-    mockApplyStampPrecedence.mockImplementation((urlOutcome: unknown) => urlOutcome);
-    mockMintDocumentShareLink.mockResolvedValue({ ok: true, url: 'https://spaarke.app/doc/abc' });
+    mockWriteIdentityStampAfterSave.mockResolvedValue('written');
+    mockApiPost.mockResolvedValue({
+      success: true,
+      duplicate: false,
+      jobId: 'job-1',
+      statusUrl: '/api/office/jobs/job-1',
+    });
+    mockApiGet.mockResolvedValue(completedJob(CREATED_ID, 'My Document.docx'));
 
     displayDialogAsync = jest.fn((_url: string, _options: unknown, callback?: (result: unknown) => void) => {
       callback?.({ status: 'succeeded', value: {} });
@@ -149,18 +168,10 @@ describe('word/commands/index.ts', () => {
     showAsTaskpane = jest.fn().mockResolvedValue(undefined);
     (global as unknown as { Office: Record<string, unknown> }).Office.addin = { showAsTaskpane };
 
-    Object.defineProperty(global.navigator, 'clipboard', {
-      value: { writeText: jest.fn().mockResolvedValue(undefined) },
-      configurable: true,
-    });
-
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     commands = require('../index');
   });
 
-  // -----------------------------------------------------------------------------------------
-  // showTaskPane — unchanged behavior, sanity-checked alongside the two rewritten commands.
-  // -----------------------------------------------------------------------------------------
   describe('showTaskPane', () => {
     it('completes immediately', () => {
       const event = createMockEvent();
@@ -172,9 +183,8 @@ describe('word/commands/index.ts', () => {
   // -----------------------------------------------------------------------------------------
   // quickSave
   // -----------------------------------------------------------------------------------------
-  describe('quickSave', () => {
-    it('bootstraps auth + apiClient + WordAdapter (explicit "word" host), saves an unfiled document, notifies success, and completes', async () => {
-      mockApiPost.mockResolvedValue({ jobId: 'job-1' });
+  describe('quickSave — an UNRESOLVED document is a keep-both CREATE', () => {
+    it("bootstraps (explicit 'word' host), creates with the pane's file-name rule + allowRename, stamps the created id, names the file, and completes", async () => {
       const event = createMockEvent();
 
       await commands.quickSave(event);
@@ -182,166 +192,330 @@ describe('word/commands/index.ts', () => {
       expect(mockAuthInitialize).toHaveBeenCalledTimes(1);
       expect(mockApiConfigure).toHaveBeenCalledTimes(1);
       expect(mockRegisterAdapter).toHaveBeenCalledWith('word', expect.anything());
-      // Explicit 'word' literal, NOT the no-arg form (see the file's own bootstrap doc comment).
       expect(mockCreateAndInitialize).toHaveBeenCalledWith('word');
 
-      expect(mockAdapter.getSubject).toHaveBeenCalledTimes(1);
-      expect(mockAdapter.getDocumentContent).toHaveBeenCalledWith({ format: 'ooxml' });
-      expect(mockArrayBufferToBase64).toHaveBeenCalled();
-      expect(mockComputeQuickSaveIdempotencyKey).toHaveBeenCalledWith({
-        kind: 'document',
-        title: 'My Document',
-        contentBase64: 'BASE64BYTES',
-      });
-      expect(mockBuildDocumentSaveRequest).toHaveBeenCalledWith({ title: 'My Document' }, 'BASE64BYTES', 'idem-key-1');
-      expect(mockApiPost).toHaveBeenCalledWith('/api/office/save', {
-        contentType: 'Document',
-        document: { fileName: 'x.docx' },
-      });
+      // Identity was resolved (URL, then the stamp) before anything was sent.
+      expect(mockAdapter.getDocumentUrl).toHaveBeenCalledTimes(1);
+      expect(mockAdapter.readDocumentStamp).toHaveBeenCalledTimes(1);
 
-      expect(displayDialogAsync).toHaveBeenCalledTimes(1);
+      expect(mockApiPost).toHaveBeenCalledTimes(1);
+      const [route, body] = mockApiPost.mock.calls[0]!;
+      expect(route).toBe('/api/office/save');
+      expect(body.contentType).toBe('Document');
+      expect(body.idempotencyKey).toBe('idem-key-1');
+      expect(body.document).toMatchObject({ fileName: 'My Document.docx', title: 'My Document', allowRename: true });
+      expect(body.document).not.toHaveProperty('existingDocumentId');
+      expect(body.document).not.toHaveProperty('isNewVersion');
+      expect(body).not.toHaveProperty('targetEntity');
+
+      // The job names the created document; the open document is marked with it.
+      expect(mockApiGet).toHaveBeenCalledWith('/api/office/jobs/job-1');
+      expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, CREATED_ID);
+
       expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
-      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/saved/i);
-
+      expect(lastNotifyMessage(displayDialogAsync)).toBe("Saved to Spaarke as 'My Document.docx'.");
+      expect(showAsTaskpane).not.toHaveBeenCalled();
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
 
-    it('completes even when document content extraction fails, without posting, and notifies failure', async () => {
-      (mockAdapter.getDocumentContent as jest.Mock).mockRejectedValue(new Error('getFileAsync failed'));
+    it('when the server KEPT BOTH under another name, the notification names the file actually created', async () => {
+      (mockAdapter.getSubject as jest.Mock).mockResolvedValue('Untitled Document');
+      mockApiGet.mockResolvedValue(completedJob(CREATED_ID, 'Untitled Document 1.docx'));
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(mockApiPost.mock.calls[0]![1].document.fileName).toBe('Untitled Document.docx');
+      const message = lastNotifyMessage(displayDialogAsync)!;
+      expect(message).toContain("'Untitled Document 1.docx'");
+      expect(message).toMatch(/both were kept/);
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it('a name collision on an unresolved document is never turned into a version save (#1005: a name is not identity)', async () => {
+      // Even when the file name matches an existing Spaarke document, an unresolved identity creates.
+      (mockAdapter.getSubject as jest.Mock).mockResolvedValue('The Newfound Importance of Knowledge Management');
+      await commands.quickSave(createMockEvent());
+
+      expect(mockApiPost.mock.calls[0]![1].document).not.toHaveProperty('existingDocumentId');
+      expect(mockApiPost.mock.calls[0]![1].document.allowRename).toBe(true);
+    });
+  });
+
+  describe('quickSave — a RESOLVED document is a VERSION save', () => {
+    it('resolved by its identity stamp (a local file): sends existingDocumentId + isNewVersion and says "Saved a new version"', async () => {
+      (mockAdapter.readDocumentStamp as jest.Mock).mockResolvedValue(RESOLVED_ID);
+      mockApiGet.mockResolvedValue(completedJob(RESOLVED_ID, 'My Document.docx'));
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      const body = mockApiPost.mock.calls[0]![1];
+      expect(body.document).toMatchObject({ existingDocumentId: RESOLVED_ID, isNewVersion: true });
+      expect(body.document).not.toHaveProperty('allowRename');
+      // The version key names the document, so a version and a create of the same bytes never share a key.
+      expect(mockComputeQuickSaveIdempotencyKey).toHaveBeenCalledWith(
+        expect.objectContaining({ kind: 'document', existingDocumentId: RESOLVED_ID })
+      );
+
+      expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, RESOLVED_ID);
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
+      expect(lastNotifyMessage(displayDialogAsync)).toBe("Saved a new version of 'My Document.docx'.");
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolved by its cloud URL: versions that document and names it by the resolver's document name", async () => {
+      (mockAdapter.getDocumentUrl as jest.Mock).mockResolvedValue('https://contoso.sharepoint.com/Brief.docx');
+      mockResolveDocumentIdentity.mockResolvedValue({
+        kind: 'resolved',
+        documentId: RESOLVED_ID,
+        documentName: 'Engagement Brief',
+        fileName: 'Brief.docx',
+        relatedRecord: null,
+      });
+      mockApiGet.mockResolvedValue(completedJob(RESOLVED_ID, 'Brief.docx'));
+
+      await commands.quickSave(createMockEvent());
+
+      expect(mockResolveDocumentIdentity).toHaveBeenCalledWith('https://contoso.sharepoint.com/Brief.docx');
+      expect(mockApiPost.mock.calls[0]![1].document.existingDocumentId).toBe(RESOLVED_ID);
+      expect(lastNotifyMessage(displayDialogAsync)).toBe("Saved a new version of 'Engagement Brief'.");
+    });
+
+    it('a version save whose job cannot be read still stamps the known document and reports the version', async () => {
+      (mockAdapter.readDocumentStamp as jest.Mock).mockResolvedValue(RESOLVED_ID);
+      mockApiGet.mockRejectedValue(new Error('job read failed'));
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, RESOLVED_ID);
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Saved a new version of/);
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('quickSave — identity it must not guess about saves NOTHING and says why', () => {
+    it.each([
+      [{ kind: 'conflict' }, /conflicting records/],
+      [{ kind: 'indeterminate', reason: 'unavailable' }, /could not check/],
+      [{ kind: 'denied' }, /can't add a version/],
+      [{ kind: 'error', message: 'boom' }, /boom/],
+    ])('%o → no POST, an error notification with the reason', async (outcome, reason) => {
+      mockResolveDocumentIdentity.mockResolvedValue(outcome);
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(mockApiPost).not.toHaveBeenCalled();
+      expect(mockWriteIdentityStampAfterSave).not.toHaveBeenCalled();
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(reason);
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it('identity resolution that THROWS is reported, not turned into a create', async () => {
+      (mockAdapter.getDocumentUrl as jest.Mock).mockRejectedValue(new Error('url read failed'));
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(mockApiPost).not.toHaveBeenCalled();
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/url read failed/);
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('quickSave — failures say what failed, in words', () => {
+    it("NEGATIVE: a refusal shows the SERVER's message (403), never the fixed 'Failed to save' text, and stamps nothing", async () => {
+      mockApiPost.mockRejectedValue(
+        serverRefusal({ status: 403, title: 'Forbidden', detail: 'You do not have write access to this document.' })
+      );
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      const message = lastNotifyMessage(displayDialogAsync)!;
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
+      expect(message).toContain('You do not have write access to this document.');
+      expect(message).not.toMatch(/Failed to save/);
+      expect(mockWriteIdentityStampAfterSave).not.toHaveBeenCalled();
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it('a rate-limited save (429) shows the server reason too', async () => {
+      mockApiPost.mockRejectedValue(serverRefusal({ status: 429, title: 'Too Many Requests' }));
+      await commands.quickSave(createMockEvent());
+      expect(lastNotifyMessage(displayDialogAsync)).toBe('Spaarke did not save this document: Too Many Requests (429)');
+    });
+
+    it('a document that cannot be read from Word says so, and posts nothing', async () => {
+      (mockAdapter.getDocumentContent as jest.Mock).mockRejectedValue({
+        code: 'CONTENT_RETRIEVAL_FAILED',
+        message: 'getFileAsync failed',
+      });
       const event = createMockEvent();
 
       await commands.quickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
+      expect(lastNotifyMessage(displayDialogAsync)).toBe(
+        "Couldn't read this document from Word, so nothing was saved (getFileAsync failed)."
+      );
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
 
-    it('completes even when auth bootstrap fails, without posting', async () => {
+    it('a network failure (no server reason) says Spaarke could not be reached', async () => {
+      mockApiPost.mockRejectedValue(new TypeError('Failed to fetch'));
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Couldn't reach Spaarke.*Failed to fetch/);
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it('an auth bootstrap failure posts nothing, says it could not connect, and completes', async () => {
       mockAuthInitialize.mockRejectedValue(new Error('auth failed'));
       const event = createMockEvent();
 
       await commands.quickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Couldn't connect to Spaarke.*auth failed/);
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
 
-    it('completes even when the network POST fails', async () => {
-      mockApiPost.mockRejectedValue(new Error('network down'));
-      const event = createMockEvent();
-
-      await commands.quickSave(event);
+    it("a job that ended Failed after the save was accepted reports the job's reason, not a success", async () => {
+      mockApiGet.mockResolvedValue({ status: 'Failed', error: { message: 'Upload finalization failed' } });
+      await commands.quickSave(createMockEvent());
 
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
-      expect(event.completed).toHaveBeenCalledTimes(1);
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/Upload finalization failed/);
+      expect(mockWriteIdentityStampAfterSave).not.toHaveBeenCalled();
     });
 
-    it('never opens the task pane on any path (success or failure)', async () => {
+    it('a stamp-write failure never turns a successful save into an error (the helper is non-fatal)', async () => {
+      mockWriteIdentityStampAfterSave.mockResolvedValue('failed');
+      await commands.quickSave(createMockEvent());
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
+    });
+
+    it('a very long server reason is bounded before it goes into the dialog URL', async () => {
+      mockApiPost.mockRejectedValue(serverRefusal({ status: 400, title: 'Bad', detail: 'x'.repeat(5000) }));
+      await commands.quickSave(createMockEvent());
+      const message = lastNotifyMessage(displayDialogAsync)!;
+      expect(message.length).toBeLessThanOrEqual(400);
+      expect(message.endsWith('…')).toBe(true);
+    });
+
+    it('error notifications get a larger window than a success', async () => {
+      mockApiPost.mockRejectedValue(serverRefusal({ status: 403, title: 'Forbidden', detail: 'No.' }));
+      await commands.quickSave(createMockEvent());
+      expect(lastNotifyCall(displayDialogAsync)![1]).toMatchObject({ height: 30, width: 35 });
+    });
+
+    it('never opens the task pane on any path', async () => {
       mockApiPost.mockRejectedValue(new Error('network down'));
-      const event = createMockEvent();
-
-      await commands.quickSave(event);
-
+      await commands.quickSave(createMockEvent());
       expect(showAsTaskpane).not.toHaveBeenCalled();
     });
   });
 
   // -----------------------------------------------------------------------------------------
-  // shareDocument
+  // openSpaarke (replaces shareDocument — UAT-10)
   // -----------------------------------------------------------------------------------------
-  describe('shareDocument', () => {
-    it('mints a share link for a resolved document, copies it to the clipboard, notifies success, and completes without opening the pane', async () => {
-      mockResolveDocumentIdentity.mockResolvedValue({
-        kind: 'resolved',
-        documentId: '11111111-1111-1111-1111-111111111111',
-        documentName: 'Contract',
-        fileName: 'Contract.docx',
-        relatedRecord: null,
-      });
+  describe('openSpaarke', () => {
+    const originalEnv = { ORG_URL: process.env.ORG_URL, SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME };
+    let openBrowserWindow: jest.Mock;
+    let isSetSupported: jest.Mock;
+
+    beforeEach(() => {
+      process.env.ORG_URL = 'https://spaarkedev1.crm.dynamics.com';
+      process.env.SPAARKE_APP_NAME = 'sprk_MatterManagement';
+      openBrowserWindow = jest.fn();
+      isSetSupported = jest.fn().mockReturnValue(true);
+      global.Office.context.ui.openBrowserWindow =
+        openBrowserWindow as unknown as typeof Office.context.ui.openBrowserWindow;
+      (global.Office.context as unknown as { requirements: unknown }).requirements = { isSetSupported };
+    });
+
+    afterEach(() => {
+      process.env.ORG_URL = originalEnv.ORG_URL;
+      process.env.SPAARKE_APP_NAME = originalEnv.SPAARKE_APP_NAME;
+    });
+
+    it('opens Matter Management on the Workspace (the Console) via openBrowserWindow, with no sign-in or API call, and completes', () => {
       const event = createMockEvent();
 
-      await commands.shareDocument(event);
+      commands.openSpaarke(event);
 
-      expect(mockMintDocumentShareLink).toHaveBeenCalledWith('11111111-1111-1111-1111-111111111111');
-      const clipboard = (global.navigator as unknown as { clipboard: { writeText: jest.Mock } }).clipboard;
-      expect(clipboard.writeText).toHaveBeenCalledWith('https://spaarke.app/doc/abc');
-
-      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
-      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/copied/i);
-
-      expect(showAsTaskpane).not.toHaveBeenCalled();
+      expect(openBrowserWindow).toHaveBeenCalledWith(
+        'https://spaarkedev1.crm.dynamics.com/main.aspx?appname=sprk_MatterManagement&pagetype=webresource&webresourceName=sprk_spaarkeai'
+      );
+      expect(isSetSupported).toHaveBeenCalledWith('OpenBrowserWindowApi', '1.1');
+      expect(mockAuthInitialize).not.toHaveBeenCalled();
+      expect(mockApiPost).not.toHaveBeenCalled();
+      expect(mockApiGet).not.toHaveBeenCalled();
+      expect(displayDialogAsync).not.toHaveBeenCalled();
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
 
-    it('DELIBERATE EXCEPTION: opens the pane when the document has no resolved Spaarke identity yet, and does not attempt to mint', async () => {
-      mockResolveDocumentIdentity.mockResolvedValue({ kind: 'new', reason: 'not_cloud_document' });
+    it('falls back to window.open where openBrowserWindow is not supported (Office on the web)', () => {
+      isSetSupported.mockReturnValue(false);
+      const fakeWindow = { opener: 'pane' } as unknown as Window;
+      const windowOpen = jest.spyOn(window, 'open').mockReturnValue(fakeWindow);
       const event = createMockEvent();
 
-      await commands.shareDocument(event);
-
-      expect(mockMintDocumentShareLink).not.toHaveBeenCalled();
-      expect(showAsTaskpane).toHaveBeenCalledTimes(1);
-      expect(event.completed).toHaveBeenCalledTimes(1);
+      try {
+        commands.openSpaarke(event);
+        expect(openBrowserWindow).not.toHaveBeenCalled();
+        expect(windowOpen).toHaveBeenCalledWith(expect.stringContaining('webresourceName=sprk_spaarkeai'), '_blank');
+        expect((fakeWindow as unknown as { opener: unknown }).opener).toBeNull();
+        expect(event.completed).toHaveBeenCalledTimes(1);
+      } finally {
+        windowOpen.mockRestore();
+      }
     });
 
-    it('a link-mint failure notifies failure, completes, and does not open the pane or touch the clipboard', async () => {
-      mockResolveDocumentIdentity.mockResolvedValue({
-        kind: 'resolved',
-        documentId: '11111111-1111-1111-1111-111111111111',
-        documentName: 'Contract',
-        fileName: 'Contract.docx',
-        relatedRecord: null,
-      });
-      mockMintDocumentShareLink.mockResolvedValue({ ok: false, message: 'nope' });
+    it('a blocked window is reported, not swallowed', () => {
+      isSetSupported.mockReturnValue(false);
+      const windowOpen = jest.spyOn(window, 'open').mockReturnValue(null);
+      try {
+        commands.openSpaarke(createMockEvent());
+        expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
+        expect(lastNotifyMessage(displayDialogAsync)).toMatch(/blocked/);
+      } finally {
+        windowOpen.mockRestore();
+      }
+    });
+
+    it.each([
+      ['ORG_URL', { ORG_URL: '' }],
+      ['the app name', { SPAARKE_APP_NAME: '' }],
+    ])('without %s it opens nothing, says it is not set up, and completes', (_label, env) => {
+      Object.assign(process.env, env);
       const event = createMockEvent();
 
-      await commands.shareDocument(event);
+      commands.openSpaarke(event);
 
-      const clipboard = (global.navigator as unknown as { clipboard: { writeText: jest.Mock } }).clipboard;
-      expect(clipboard.writeText).not.toHaveBeenCalled();
+      expect(openBrowserWindow).not.toHaveBeenCalled();
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
-      expect(lastNotifyMessage(displayDialogAsync)).toBe('nope');
-      expect(showAsTaskpane).not.toHaveBeenCalled();
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/isn't set up/);
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
 
-    it('completes even when identity resolution throws unexpectedly', async () => {
-      mockResolveDocumentIdentity.mockRejectedValue(new Error('boom'));
-      const event = createMockEvent();
-
-      await commands.shareDocument(event);
-
-      expect(mockMintDocumentShareLink).not.toHaveBeenCalled();
-      expect(event.completed).toHaveBeenCalledTimes(1);
-    });
-
-    it('completes even when auth bootstrap fails', async () => {
-      mockAuthInitialize.mockRejectedValue(new Error('auth failed'));
-      const event = createMockEvent();
-
-      await commands.shareDocument(event);
-
-      expect(mockResolveDocumentIdentity).not.toHaveBeenCalled();
-      expect(event.completed).toHaveBeenCalledTimes(1);
-    });
-
-    it('a clipboard write failure never blocks completion (best effort only)', async () => {
-      mockResolveDocumentIdentity.mockResolvedValue({
-        kind: 'resolved',
-        documentId: '11111111-1111-1111-1111-111111111111',
-        documentName: 'Contract',
-        fileName: 'Contract.docx',
-        relatedRecord: null,
-      });
-      Object.defineProperty(global.navigator, 'clipboard', {
-        value: { writeText: jest.fn().mockRejectedValue(new Error('denied')) },
-        configurable: true,
+    it('completes even when the opener throws', () => {
+      openBrowserWindow.mockImplementation(() => {
+        throw new Error('host refused');
       });
       const event = createMockEvent();
 
-      await commands.shareDocument(event);
+      commands.openSpaarke(event);
 
+      expect(lastNotifyMessage(displayDialogAsync)).toMatch(/host refused/);
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
   });
@@ -351,13 +525,9 @@ describe('word/commands/index.ts', () => {
   // -----------------------------------------------------------------------------------------
   describe('notify() resilience', () => {
     it('quickSave still completes when Office.context.ui is unavailable', async () => {
-      // Simulate a host without the Dialog API / Office.context.ui at all. Deletes only
-      // `displayDialogAsync` (not the whole shared `Office.context.ui` object that jest.setup.js
-      // creates once for the file) so this test cannot corrupt state for tests that run after it.
       const original = global.Office.context.ui.displayDialogAsync;
       // @ts-expect-error — simulating the function being entirely absent on this host.
       delete global.Office.context.ui.displayDialogAsync;
-      mockApiPost.mockResolvedValue({ jobId: 'job-1' });
       const event = createMockEvent();
 
       try {
@@ -372,7 +542,6 @@ describe('word/commands/index.ts', () => {
       global.Office.context.ui.displayDialogAsync = jest.fn(() => {
         throw new Error('displayDialogAsync failed');
       }) as unknown as typeof Office.context.ui.displayDialogAsync;
-      mockApiPost.mockResolvedValue({ jobId: 'job-1' });
       const event = createMockEvent();
 
       await commands.quickSave(event);

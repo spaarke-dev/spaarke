@@ -182,9 +182,30 @@ describe('todoScoring.ts remains untouched (locked composite formula)', () => {
       repoRoot,
       'src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts'
     );
-    const contents = fs.readFileSync(lockedFilePath, 'utf8');
+    // Line endings normalised to LF (task 081 round 3): the pinned hash used to
+    // be of the CRLF bytes a Windows `core.autocrlf=true` checkout produces, so
+    // the guard failed on any LF checkout (e.g. Linux CI) with no code change.
+    const contents = fs.readFileSync(lockedFilePath, 'utf8').replace(/\r\n/g, '\n');
     const hash = crypto.createHash('sha256').update(contents).digest('hex');
     // Captured via `sha256sum` immediately before task 011 made any edits.
-    expect(hash).toBe('e919bf8f471b35716e071e6fc07f6d899598637a95326eaff5c4b108ee525a72');
+    //
+    // Re-pinned 2026-10-03 (spaarke-ontology-platform-r1 task 080 / C-10) — this guard's INTENT is
+    // "the composite-score FORMULA/WEIGHTS below don't drift", not "this file's bytes never change
+    // for any reason". Task 080 converged the three independently-drifted copies of `parseDueDate`
+    // (a LIVE BUG: Kanban bucketing disagreed with the composite score by a day in negative-UTC-
+    // offset zones) onto a single implementation in `@spaarke/ui-components`, so this file no longer
+    // defines its own `parseDueDate` — it imports + re-exports the canonical one. The weights
+    // (priority 0.50 / effort 0.20 inverted / urgency 0.30) and every scoring/label function below
+    // are byte-for-byte unchanged; only the date-parsing primitive's SOURCE moved. New hash computed
+    // via `sha256sum` immediately after that edit, reviewed in the same change.
+    //
+    // Re-pinned 2026-10-05 (spaarke-ontology-platform-r1 task 081 / C-17, same intent as above):
+    // `computeDueLabel`'s TIER now comes from the shared `dueUrgencyForDays`
+    // (`@spaarke/ui-components` `utils/dateLocal.ts`, the one 3/7/10 tier function every due-date
+    // surface calls) over the shared `daysBetweenLocalMidnight`, and `DueUrgency` is re-exported
+    // from there. The tier boundaries are identical (pinned by `todoScoring.dueTiers.test.ts` and
+    // `dueUrgency.crossSurface.test.ts`); the composite-score weights and `computeTodoScore` /
+    // `computeDueDateUrgencyRaw` are byte-for-byte unchanged. Hash of the LF-normalised file.
+    expect(hash).toBe('47f94fe286179fe3945294555a927453e40332459f7d68448e4555bd646e4c00');
   });
 });

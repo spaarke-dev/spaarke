@@ -4,7 +4,8 @@
     <title>FR-17: wire quickSave and shareDocument ribbon commands</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>011 complete (Word unified JSON manifest), 010 complete (adapter consolidation)</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by 6f29ef236 (docs: close 052, 054 and 037). -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.ts` command entry points and the Word manifest, which changes what the installed add-in exposes; a manifest defect breaks the add-in for every user. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>sonnet</model-tier>

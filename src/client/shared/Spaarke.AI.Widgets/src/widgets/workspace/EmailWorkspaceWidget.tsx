@@ -98,8 +98,8 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, on
   // seam (`WorkspaceWidgetProps.onDataChange` → `widget_update` PaneEventBus
   // event → `WorkspaceTabManager.updateTab` → `PATCH /tabs` write-through, the
   // task-025 AnalysisEditor persistence path) — NO new persistence mechanism.
-  // Both the server `TryDeriveVisibleState` and the client registry
-  // `getVisibleState('email')` then read the Email shape from `widgetData`.
+  // The server `TryDeriveVisibleState` then reads the Email shape from `widgetData`
+  // (the client-side registry derivation was deleted 2026-10-03, C-21).
   // `emlDocumentId` is persisted as an on-demand `eml-render` fetch handle
   // (FR-C4); it is deliberately excluded from the agent-visible derivation.
   //
@@ -173,7 +173,10 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, on
     () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
     [authenticatedFetch, bffBaseUrl]
   );
-  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
+  const dataverseUrl = React.useMemo(
+    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
+    []
+  );
 
   // Signed-in user's mailbox address for the compose "From:" row (item 3). Resolved once
   // via Xrm; the email surface defaults From to send-as this user (switchable to shared).

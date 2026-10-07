@@ -12,13 +12,16 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 public sealed class DocumentStorageResolver : IDocumentStorageResolver
 {
     private readonly IDocumentDataverseService _documentService;
+    private readonly RecordContainerResolver _containerResolver;
     private readonly ILogger<DocumentStorageResolver> _logger;
 
     public DocumentStorageResolver(
         IDocumentDataverseService documentService,
+        RecordContainerResolver containerResolver,
         ILogger<DocumentStorageResolver> logger)
     {
         _documentService = documentService;
+        _containerResolver = containerResolver;
         _logger = logger;
     }
 
@@ -97,6 +100,11 @@ public sealed class DocumentStorageResolver : IDocumentStorageResolver
                 detail: "Document is marked as having a file (sprk_hasfile=true) but the Graph Item ID is empty. The upload may still be in progress or did not complete successfully.",
                 statusCode: 409);
         }
+
+        // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): every caller of this resolver downloads AS THE
+        // APPLICATION, so the pointer must name a container this document may use before it is handed out. Throws the
+        // 409 document_storage_unverified SdapProblemException otherwise (see RecordContainerResolver).
+        await _containerResolver.EnsureDocumentPointerContainerAsync(documentId, driveId, itemId, cancellationToken);
 
         _logger.LogInformation(
             "Resolved document {DocumentId} to storage pointers (DriveId length: {DriveIdLength}, ItemId length: {ItemIdLength})",

@@ -143,7 +143,11 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Grepping `src/client/office-addins/shared/taskpane/**` for host-name comparisons and `Office.context.host` reads returns zero hits; any remaining hits are confined to `shared/adapters/*Adapter.ts`.</criterion>
+    <!-- Reworded 2026-10-02 by task 079 (its AC explicitly allows this). ORIGINAL: "Grepping
+         `src/client/office-addins/shared/taskpane/**` for host-name comparisons and `Office.context.host` reads returns
+         zero hits; any remaining hits are confined to `shared/adapters/*Adapter.ts`." That literal grep returns 9 code
+         hits, all host-shaped DATA selection, classified in notes/parity-checklist.md §3/§6 and confirmed by task 079. -->
+    <criterion testable="true">Grepping `src/client/office-addins/shared/taskpane/**` for host-name comparisons and `Office.context.host` reads finds no `Office.context.host` read and no host-type comparison that decides whether a FEATURE is available (those are capability gates, e.g. `canShowLinkedTodos`, `canSuggestRelatedRecords`). Every remaining host-type comparison selects host-shaped DATA — which request shape to build or which already-capability-populated field to label — and is listed and classified in `notes/parity-checklist.md` §3/§6.</criterion>
     <criterion testable="true">`notes/parity-checklist.md` exists and enumerates every shared capability with, per host, one of supported / gated-absent / broken plus the evidence that established it. No capability appears without an evidence row.</criterion>
     <criterion testable="true">The checklist explicitly lists the spec's Word-only capabilities (document identity, `.docx` save, version-save) and Outlook-only capabilities (email/attachment save, triage, linked-todos) as gated-absent in the other host — not as gaps.</criterion>
     <criterion testable="true">Given a capability declared absent in a host, when that host's pane renders, then the affordance is not rendered at all — not rendered-and-disabled and not rendered-then-failing.</criterion>

@@ -3,8 +3,10 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -77,11 +79,13 @@ namespace Sprk.Bff.Api.Api;
 /// key — see the task-003 and task-072 rationale on those entries.) No new operation key was added,
 /// because a new key carrying the same required right changes no decision (CLAUDE.md §11).
 ///
-/// Auth model: the per-document Dataverse decision is the boundary and runs BEFORE any Graph call.
-/// The SPE read itself remains OBO (<c>IGraphClientFactory.ForUserAsync</c> beneath the
-/// <see cref="ISpeFileOperations"/> facade) — never app-only elevation — so SPE's own answer stays in
-/// place behind the gate as defence in depth. This is deliberately NOT the admin version surface
-/// (<c>ContainerItemEndpoints.cs</c> — app-only, config-scoped); do not fold these routes into it.
+/// Auth model: the per-document Dataverse decision is the boundary and runs BEFORE any Graph call. The SPE
+/// read is APP-ONLY (unified-access-control-r2 task 171, owner round 69 — broker-only), after the document-pointer
+/// check (<c>RecordContainerResolver.EnsureDocumentPointerContainerAsync</c>). Until 2026-10-06 it ran as the user
+/// (OBO), which SharePoint Embedded answers only for a caller holding a container ROLE: version history was
+/// unreadable on every per-record secure container (no members by design) and for any user not hand-added to a
+/// business-unit container. This is still NOT the admin version surface (<c>ContainerItemEndpoints.cs</c> —
+/// config-scoped); do not fold these routes into it.
 ///
 /// SCOPE (binding, per task 050): open/read-only ONLY. No restore, no branch-from, no version-state
 /// mutation of any kind is mapped here.
@@ -99,30 +103,39 @@ public static class DocumentVersionEndpoints
     {
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
 
-        // GET: list a document's version history (per-document gate, then OBO read)
+        // GET: list a document's version history (per-document gate, pointer check, then app-only read)
         docs.MapGet("/{documentId}/versions", async (
             string documentId,
             HttpContext ctx,
             [FromServices] IDocumentDataverseService dataverseService,
+            [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ISpeFileOperations speFileStore,
+            [FromServices] IGenericEntityService entityService,
+            [FromServices] ILogger<RelocatedVersionHistory> historyLogger,
             CancellationToken ct) =>
         {
-            var (driveId, itemId) = await ResolveSpePointerAsync(documentId, dataverseService, ct);
+            var (driveId, itemId) = await ResolveSpePointerAsync(documentId, dataverseService, containerResolver, ct);
 
             try
             {
                 var versions = await GraphCallScope.Run(
-                    () => speFileStore.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct),
-                    "obo.versions.list");
+                    () => speFileStore.ListFileVersionsAsync(driveId, itemId, ct),
+                    "versions.list");
 
-                return versions == null
-                    ? TypedResults.NotFound()
-                    : TypedResults.Ok(versions);
+                if (versions == null)
+                {
+                    return TypedResults.NotFound();
+                }
+
+                // unified-access-control-r2 task 166, owner round 45 item 1: a version a relocation REPLAYED into a moved
+                // file reports its ORIGINAL author and date (Graph cannot set them), so the history a user sees is
+                // unchanged. Presentation only — the caller was authorized for the document above.
+                return TypedResults.Ok(await RelocatedVersionHistory.WithOriginalAuthorshipAsync(
+                    entityService, Guid.Parse(documentId), itemId, versions, historyLogger, ct));
             }
             catch (UnauthorizedAccessException)
             {
-                // SPE also refused under the caller's delegated permission. Defence in depth behind
-                // the per-document gate above — no longer the boundary, but still honoured.
+                // SPE refused the BFF identity itself (a registration problem, not the caller's rights).
                 return TypedResults.Problem(statusCode: StatusCodes.Status403Forbidden, title: "Access denied");
             }
             catch (SpaarkeStorageException ex)
@@ -135,7 +148,7 @@ public static class DocumentVersionEndpoints
         .WithTags("Documents")
         .WithName("ListDocumentVersionsAsUser")
         .WithSummary("List a document's SPE version history. Requires Read on the document; the SPE "
-                   + "read then runs under the calling user's own (OBO) permission.")
+                   + "read then runs app-only after the document's storage pointer is verified.")
         .Produces<IReadOnlyList<VersionInfoDto>>(StatusCodes.Status200OK)
         .Produces(StatusCodes.Status400BadRequest)
         .Produces(StatusCodes.Status401Unauthorized)
@@ -149,6 +162,7 @@ public static class DocumentVersionEndpoints
             string versionId,
             HttpContext ctx,
             [FromServices] IDocumentDataverseService dataverseService,
+            [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ISpeFileOperations speFileStore,
             CancellationToken ct) =>
         {
@@ -157,13 +171,13 @@ public static class DocumentVersionEndpoints
                 return ProblemDetailsHelper.ValidationError("versionId is required");
             }
 
-            var (driveId, itemId) = await ResolveSpePointerAsync(documentId, dataverseService, ct);
+            var (driveId, itemId) = await ResolveSpePointerAsync(documentId, dataverseService, containerResolver, ct);
 
             try
             {
                 var stream = await GraphCallScope.Run(
-                    () => speFileStore.DownloadFileVersionAsUserAsync(ctx, driveId, itemId, versionId, ct),
-                    "obo.versions.download");
+                    () => speFileStore.DownloadFileVersionAsync(driveId, itemId, versionId, ct),
+                    "versions.download");
 
                 return stream == null
                     ? TypedResults.NotFound()
@@ -217,9 +231,10 @@ public static class DocumentVersionEndpoints
     private static async Task<(string DriveId, string ItemId)> ResolveSpePointerAsync(
         string documentId,
         IDocumentDataverseService dataverseService,
+        RecordContainerResolver containerResolver,
         CancellationToken ct)
     {
-        if (!Guid.TryParse(documentId, out _))
+        if (!Guid.TryParse(documentId, out var documentGuid))
         {
             throw new SdapProblemException(
                 "invalid_id",
@@ -260,6 +275,11 @@ public static class DocumentVersionEndpoints
                 $"Drive ID '{document.GraphDriveId}' does not start with 'b!' (expected SharePoint Embedded container format)",
                 400);
         }
+
+        // Task 171: the read that follows runs AS THE APPLICATION, so the pointer must name a container this document may
+        // use — 409 document_storage_unverified otherwise, before any Graph call (the check SPE's own ACL made under OBO).
+        await containerResolver.EnsureDocumentPointerContainerAsync(
+            documentGuid, document.GraphDriveId, document.GraphItemId, ct);
 
         return (document.GraphDriveId, document.GraphItemId);
     }

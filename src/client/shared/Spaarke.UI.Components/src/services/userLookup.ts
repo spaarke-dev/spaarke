@@ -25,6 +25,7 @@
 import type { IDataService } from '../types/serviceInterfaces';
 import type { ILookupItem } from '../types/LookupTypes';
 import { getCurrentUserId, getCurrentUserName } from '../utils/xrmContext';
+import { cleanGuid } from '../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -253,7 +254,7 @@ export async function resolveCurrentUserAsContactAssignee(
   try {
     const user = await dataService.retrieveRecord(
       'systemuser',
-      userId.replace(/[{}]/g, ''),
+      cleanGuid(userId),
       '?$select=internalemailaddress,fullname'
     );
     const email = user['internalemailaddress'] as string | undefined;

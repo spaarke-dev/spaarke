@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 6 (5-6) — no main scroll bar on the pane (wheel/touch/keyboard scrolling kept), and an expand/collapse button in the toolbar that widens the pane as far as Office allows, up to 3x</title>
+    <phase>6 UAT round 6 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx`/`.ts` (`TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `taskPaneWidthService.ts`) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only; the platform limits are already documented (task 095 note) and the behaviour is decided.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT6-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 101 and 102. Disjoint: 103 owns `TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `TaskPaneNavigation.tsx`, `taskPaneWidthService.ts`, `word/taskpane/index.tsx` and their tests; it MUST NOT edit `CreateRecordForm.tsx`, `RelatedToPicker.tsx`, `FindView.tsx`, `FindResultsList.tsx`, `webpack.config.js` or `ci-gated-suites.txt` (report new suites to the main session). If `App.tsx` must change, keep it to wiring and report it. Client-only.</parallel-reason>
+    <deps>095</deps>
+    <tags>frontend, office-addins, typescript, task-pane, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 6 (2026-10-06), items 5 and 6, with the constraints the main session stated to the owner (note §2).</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9, Office.js).</role>
+
+  <goal>The pane shows no main scroll bar, and the user can widen it for reading and narrow it back with one toolbar button.</goal>
+
+  <context>
+    <background>
+      - **Owner (round 6)**: (5) remove the add-in's main scroll bar (scroll with the wheel); (6) a **&lt;&gt;**
+        expand/collapse button at the top, next to the menu down arrow, that widens the add-in to 3x.
+      - **Constraints stated to the owner** (note §2): the down arrow and X are Office's title bar — the button goes in
+        the add-in toolbar beside the "⋮" menu. Width is set with `Office.extensionLifeCycle.taskpane.setWidth`
+        (TaskPaneApi 1.1). Limits (task 095 note, `notes/095-related-to-and-save-as.md`, and
+        `.claude/agent-memory/researcher/office-addin-taskpane-width-2026-10-04.md`): web 330-500 px; Windows 86 px to
+        50% of the Word window; Mac 270 px to 50%. A value outside the limits is **silently ignored** and the call
+        returns void. So "3x" means: request 3x the platform default; if the pane did not change width (observe
+        `window.innerWidth` / a `resize` event within a short timeout), step down (e.g. half the screen's available
+        width, then the platform max you know — 500 on web) until a request takes; collapse returns to the round-4
+        width (`preferredTaskPaneWidth`, default + 75).
+      - **Where the API is unsupported** (no TaskPaneApi 1.1), the button is not rendered (NFR-10, capability-gated).
+      - **Item 5**: today a vertical scroll bar shows inside the pane's border (screenshot). Hide it (e.g.
+        `scrollbar-width: none` + `::-webkit-scrollbar { display: none }`) on the main scroll container only, keeping
+        wheel, touch and keyboard scrolling; inner lists (Find, task 102) keep their own scrolling.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 5">No visible scroll bar on the pane's main scroll container; the content still scrolls by wheel, touch, and keyboard (PageUp/PageDown/arrow keys when focus is in the pane). Inner scrollable lists are not affected by this rule.</constraint>
+    <constraint source="owner item 6 + note §2">An icon button in the toolbar next to "⋮" (accessible name "Expand pane" / "Collapse pane", `aria-pressed` reflecting state; an expand/collapse chevrons icon from `@fluentui/react-icons`). Expand requests the widest width the host accepts up to 3x the platform default; collapse returns to the round-4 width. Never throws; failures leave the width unchanged.</constraint>
+    <constraint source="NFR-10">The button is gated on a capability derived from the TaskPaneApi 1.1 requirement set (not `hostType`); add it to `HostCapabilities` if that is the pattern, with tests for both adapters.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens; the toolbar still fits at 320 px; visible focus on the new button.</constraint>
+    <constraint source="ADR-038">Tests: the hidden scroll bar style on the main container; the button's gating; expand steps down when a request does not take; collapse; state persistence is optional (per viewer, try/catch).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The main pane container has no visible scroll bar and still scrolls (wheel/keyboard); Find's inner lists still scroll.</criterion>
+    <criterion testable="true">With TaskPaneApi 1.1: the toolbar shows the expand button beside "⋮"; pressing it requests 3x the default, stepping down until the width changes; pressing again returns to the round-4 width; `aria-pressed` and the accessible name follow the state.</criterion>
+    <criterion testable="true">Without TaskPaneApi 1.1, no button is rendered.</criterion>
+    <criterion testable="true">Gates: jest (all suites) green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): Word desktop and Word on the web — the pane widens (web caps at 500 px) and narrows back. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-6 note, the 095 note and the researcher memory on task-pane width, `TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `taskPaneWidthService.ts`.</step>
+    <step>Item 5 (hidden scroll bar); tests.</step>
+    <step>Item 6 (capability, button, expand/step-down/collapse); tests.</step>
+    <step>Gates; `notes/103-pane-scroll-and-expand.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>`taskPaneWidthService.ts` (task 095) already wraps `setWidth`; the toolbar and shell exist.</existing>
+    <extension>Yes — extends the width service with expand/collapse and adds one toolbar button; no new service.</extension>
+    <cost-of-doing-nothing>Owner UAT round 6 items 5-6: the scroll bar takes width in a narrow pane, and there is no way to widen the pane for reading results.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Pane scroll and expand">
+      <steps>
+        <step>No scroll bar on the pane; the wheel scrolls it.</step>
+        <step>Press expand → the pane widens (web: to 500 px); press again → back to the default width.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/taskPaneWidthService.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/103-pane-scroll-and-expand.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round6-2026-10-06.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/095-related-to-and-save-as.md</file>
+      <file>.claude/agent-memory/researcher/office-addin-taskpane-width-2026-10-04.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/103-pane-scroll-and-expand.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

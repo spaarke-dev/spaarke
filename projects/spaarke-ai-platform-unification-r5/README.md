@@ -1,5 +1,7 @@
 # Spaarke AI Platform Unification R5
 
+> **Portfolio**: [Project #1209](https://github.com/spaarke-dev/spaarke/issues/1209) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: ✅ **CLOSED with known limitations (2026-06-06)** — wire-layer foundation shipped; renderer + duplicate-fire defects deferred to R6 architecture phase. See [`notes/lessons-learned.md`](notes/lessons-learned.md).
 > **Created**: 2026-06-03
 > **Closed**: 2026-06-06

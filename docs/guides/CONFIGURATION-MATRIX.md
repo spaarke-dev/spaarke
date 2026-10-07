@@ -130,8 +130,9 @@ Options class: `RedisOptions` (`Configuration/RedisOptions.cs`)
 | Setting | Default | Location | Description |
 |---------|---------|----------|-------------|
 | `Redis:Enabled` | `false` | Env Var / appsettings | Enable Redis (false = in-memory fallback) |
-| `Redis:ConnectionString` | -- | Key Vault | Redis connection string |
-| `Redis:InstanceName` | `sdap:` | appsettings | Cache key prefix |
+| `Redis:Endpoint` | -- | App Setting (plain) | Azure Managed Redis `host:10000`. When set, the BFF authenticates with its managed identity (`ManagedIdentity:ClientId`) over RESP3; required with `Redis:Enabled=true` outside Development/Testing (task 242) |
+| `Redis:ConnectionString` | -- | user-secrets / local config | Development/Testing only, and only without `Redis:Endpoint` (e.g. `localhost:6379`); refused elsewhere |
+| `Redis:InstanceName` | `spaarke:` | appsettings | Cache key prefix |
 | `Redis:DefaultExpirationMinutes` | `60` | appsettings | Sliding expiration |
 | `Redis:AbsoluteExpirationMinutes` | `1440` | appsettings | Absolute expiration (24h) |
 
@@ -166,7 +167,7 @@ Options class: `DocumentIntelligenceOptions` (`Configuration/DocumentIntelligenc
 
 | Setting | Default | Range | Location | Description |
 |---------|---------|-------|----------|-------------|
-| `DocumentIntelligence:Enabled` | `true` | bool | Env Var | Master switch for AI summarization |
+| `DocumentIntelligence:Enabled` | `false` when unset (the DI gates read `GetValue<bool>`; the options class's own `true` default does not apply to them) | bool | Env Var | Master switch for the AI platform (text extraction, analysis, playbooks, search). Customer stamps get `true` from H4b (catalog per-env literal, task 243) |
 | `DocumentIntelligence:StreamingEnabled` | `true` | bool | appsettings | Enable SSE streaming responses |
 | `DocumentIntelligence:OpenAiEndpoint` | -- | URL | Key Vault | Azure OpenAI endpoint |
 | `DocumentIntelligence:OpenAiKey` | -- | -- | Key Vault | Azure OpenAI API key |
@@ -176,7 +177,7 @@ Options class: `DocumentIntelligenceOptions` (`Configuration/DocumentIntelligenc
 | `DocumentIntelligence:MaxOutputTokens` | `500` | 100-4000 | appsettings | Max summary tokens |
 | `DocumentIntelligence:Temperature` | `0.3` | 0.0-1.0 | appsettings | Generation temperature |
 | `DocumentIntelligence:DocIntelEndpoint` | -- | URL | Key Vault | Document Intelligence endpoint |
-| `DocumentIntelligence:DocIntelKey` | -- | -- | Key Vault | Document Intelligence API key |
+| `DocumentIntelligence:DocIntelKey` | -- | -- | Key Vault | Document Intelligence API key — optional: when unset the BFF uses its managed identity (customer stamps carry no key since task 243; the account needs a custom subdomain) |
 | `DocumentIntelligence:DocIntelTimeoutSeconds` | `30` | 5-300 | appsettings | Doc Intel request timeout |
 | `DocumentIntelligence:DocIntelCircuitBreakerThreshold` | `3` | 1-20 | appsettings | CB failure threshold |
 | `DocumentIntelligence:DocIntelCircuitBreakerBreakSeconds` | `60` | 10-600 | appsettings | CB open duration |
@@ -211,10 +212,6 @@ Options class: `AnalysisOptions` (`Configuration/AnalysisOptions.cs`)
 | `Analysis:MaxChatHistoryMessages` | `20` | 1-50 | appsettings | Chat history depth |
 | `Analysis:MaxChatInputTokens` | `50000` | int | appsettings | Max input tokens for chat |
 | `Analysis:MaxDocumentContextLength` | `100000` | 1000-200000 | appsettings | Max doc text in prompt |
-| `Analysis:EnableDocxExport` | `true` | bool | appsettings | DOCX export enabled |
-| `Analysis:EnablePdfExport` | `true` | bool | appsettings | PDF export enabled |
-| `Analysis:EnableEmailExport` | `true` | bool | appsettings | Email export enabled |
-| `Analysis:EnableTeamsExport` | `false` | bool | appsettings | Teams export enabled |
 | `Analysis:MaxConcurrentStreams` | `3` | 1-10 | appsettings | Max concurrent streams |
 | `Analysis:StreamChunkDelayMs` | `10` | 0-100 | appsettings | SSE chunk delay |
 | `Analysis:DeploymentEnvironment` | `Development` | string | Env Var / Dataverse | Environment name |
@@ -341,7 +338,7 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 | Secret Name | Used By | Description |
 |-------------|---------|-------------|
 | `ServiceBus-ConnectionString` | `ConnectionStrings:ServiceBus`, `ServiceBus:ConnectionString` | Azure Service Bus |
-| `Redis-ConnectionString` | `ConnectionStrings:Redis` | Redis cache |
+| ~~`Redis-ConnectionString`~~ | ~~`ConnectionStrings:Redis`~~ | Retired by task 242 — Redis is Entra-only; use the plain `Redis:Endpoint` setting |
 | ~~`BFF-API-ClientSecret`~~ | ~~`Dataverse:ClientSecret`, `AgentToken:ClientSecret`~~ | 🔴 **All DELETED 2026-08-24** (task 033). BFF identity is secret-free; use `Graph:Credentials:Order=[ManagedIdentityFederated]` |
 | `Dataverse-ServiceUrl` | `Dataverse:ServiceUrl` | Dataverse environment URL |
 | `ai-openai-endpoint` | `DocumentIntelligence:OpenAiEndpoint` | Azure OpenAI endpoint |
@@ -359,7 +356,7 @@ Secrets stored in Azure Key Vault and referenced via `@Microsoft.KeyVault(Secret
 | `Email-WebhookSigningKey` | `EmailProcessing:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Dataverse webhook signature |
 | `communication-webhook-secret` | `Communication:WebhookClientState` | Graph webhook validation secret (challenge-response) |
 | `communication-webhook-signing-key` | `Communication:WebhookSigningKey` | **Canonical (Auth v2 Phase C)** — HMAC-SHA256 for Graph webhook signature |
-| `BingSearch-ApiKey` | `BingSearch:ApiKey` | Bing Search key |
+| `BingSearch-ApiKey` | `BingSearch:ApiKey` | Bing Search v7 key — **not provisioned on customer stamps** (owner D18, 2026-10-02: the v7 API was retired 2025-08-11) |
 
 ---
 
@@ -382,7 +379,7 @@ After changing configuration:
 | CORS errors in browser console | Missing allowed origin | Add origin to `Cors:AllowedOrigins:N` App Setting |
 | Key Vault reference shows literal `@Microsoft.KeyVault(...)` | App Service Key Vault integration not configured | Enable managed identity and Key Vault reference resolution on the App Service |
 | Graph calls fail with 401 | `Graph:ClientSecret` expired or `ManagedIdentity:Enabled` mismatch | Rotate secret in Key Vault or verify MI config |
-| Redis timeout errors | `Redis:ConnectionString` invalid or Redis unreachable | Verify connection string; set `Redis:Enabled=false` to fall back to in-memory |
+| Redis startup or timeout errors | `Redis:Endpoint` wrong, the managed identity lacks the cache's access policy, or Redis unreachable | Check `Redis:Endpoint` is host:10000 and `ManagedIdentity:ClientId` names the identity with the access-policy assignment; in Development only, `Redis:Enabled=false` + `AllowInMemoryFallback=true` falls back to in-memory |
 
 ---
 

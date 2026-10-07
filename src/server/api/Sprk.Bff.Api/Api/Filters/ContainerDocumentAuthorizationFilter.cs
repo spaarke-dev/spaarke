@@ -32,11 +32,26 @@ public static class ContainerDocumentAuthorizationFilterExtensions
 {
     /// <summary>
     /// Requires the caller to hold Read on the record that OWNS the container named by the
-    /// <c>{containerId}</c> route parameter. Refuses when no owner can be established.
+    /// <c>{containerId}</c> route parameter — or, when <paramref name="queryParameter"/> is given, by that QUERY
+    /// parameter. Refuses when no owner can be established.
     /// </summary>
+    /// <param name="builder">The endpoint convention builder.</param>
+    /// <param name="queryParameter">
+    /// <see langword="null"/> (the default) keeps the original behaviour: the id is the <c>{containerId}</c> route
+    /// value, and a route that lost it is refused with the uniform 403. A name makes the id come from the QUERY
+    /// string instead (unified-access-control-r2 task 166, for <c>GET /api/v1/documents?containerId=</c>): there an
+    /// absent or blank value is the CALLER's omission, not a template defect, so the filter answers
+    /// <c>400 "ContainerId is required for listing documents"</c> itself — no resolver call, no Dataverse call, and
+    /// never <c>next()</c>.
+    /// </param>
     public static TBuilder AddContainerDocumentAuthorizationFilter<TBuilder>(
-        this TBuilder builder) where TBuilder : IEndpointConventionBuilder
+        this TBuilder builder, string? queryParameter = null) where TBuilder : IEndpointConventionBuilder
     {
+        if (queryParameter is not null)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(queryParameter);
+        }
+
         return builder.AddEndpointFilter(async (context, next) =>
         {
             var services = context.HttpContext.RequestServices;
@@ -44,7 +59,8 @@ public static class ContainerDocumentAuthorizationFilterExtensions
             var filter = new ContainerDocumentAuthorizationFilter(
                 services.GetRequiredService<RecordContainerResolver>(),
                 services.GetRequiredService<AuthorizationService>(),
-                services.GetService<ILogger<ContainerDocumentAuthorizationFilter>>());
+                services.GetService<ILogger<ContainerDocumentAuthorizationFilter>>(),
+                queryParameter);
 
             return await filter.InvokeAsync(context, next);
         });
@@ -53,7 +69,8 @@ public static class ContainerDocumentAuthorizationFilterExtensions
 
 /// <summary>
 /// unified-access-control-r2 task 078 — the per-resource gate for
-/// <c>GET /api/v1/containers/{containerId}/documents</c>.
+/// <c>GET /api/v1/containers/{containerId}/documents</c>; since task 166 also for its query-keyed twin
+/// <c>GET /api/v1/documents?containerId=</c> (same data path, id read from the query).
 /// </summary>
 /// <remarks>
 /// <para><b>The hole.</b> That route took a container id straight off the URL and returned that
@@ -106,9 +123,10 @@ public static class ContainerDocumentAuthorizationFilterExtensions
 ///   <item><description>A shared container legitimately holds documents belonging to MANY records with
 ///   different access. A per-container gate is structurally incapable of answering "may you see these";
 ///   the correct control for that case is RESULT TRIMMING against the caller's accessible-record set
-///   (Wave 3, <c>AccessibleRecordSetService</c> — the same reasoning the Permanent waiver on
-///   <c>GET /api/v1/documents</c> records). Until trimming exists, refusing is the only honest
-///   answer.</description></item>
+///   (Wave 3, <c>AccessibleRecordSetService</c>). Until trimming exists, refusing is the only honest
+///   answer. (The Permanent waiver that once cited this reasoning for <c>GET /api/v1/documents</c> was DELETED by
+///   task 166: that route names one container too, and is now gated by THIS filter reading the query
+///   parameter.)</description></item>
 /// </list>
 ///
 /// <para>⚠️ <b>Recorded tension with task 075, deliberately not resolved silently.</b>
@@ -170,18 +188,30 @@ public class ContainerDocumentAuthorizationFilter : IEndpointFilter
     /// <summary>The one caller-facing denial message. Says nothing about why.</summary>
     private const string DeniedDetail = "You do not have access to this container.";
 
+    /// <summary>The 400 detail a query-sourced route answers when its container id is absent (task 166). It is the
+    /// SAME sentence the list handler always returned, so the route's contract for a missing id is unchanged.</summary>
+    internal const string MissingQueryContainerIdDetail = "ContainerId is required for listing documents";
+
     private readonly RecordContainerResolver _containerResolver;
     private readonly AuthorizationService _authorizationService;
     private readonly ILogger<ContainerDocumentAuthorizationFilter>? _logger;
 
+    /// <summary>
+    /// <see langword="null"/>: the container id is the <see cref="ContainerRouteParameter"/> route value (task 078).
+    /// Otherwise the name of the QUERY parameter carrying it (task 166).
+    /// </summary>
+    private readonly string? _queryParameter;
+
     public ContainerDocumentAuthorizationFilter(
         RecordContainerResolver containerResolver,
         AuthorizationService authorizationService,
-        ILogger<ContainerDocumentAuthorizationFilter>? logger = null)
+        ILogger<ContainerDocumentAuthorizationFilter>? logger = null,
+        string? queryParameter = null)
     {
         _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _authorizationService = authorizationService ?? throw new ArgumentNullException(nameof(authorizationService));
         _logger = logger;
+        _queryParameter = queryParameter;
     }
 
     public async ValueTask<object?> InvokeAsync(
@@ -224,9 +254,27 @@ public class ContainerDocumentAuthorizationFilter : IEndpointFilter
                 "container_documents_no_caller_token", correlationId);
         }
 
-        var containerId = httpContext.Request.RouteValues.TryGetValue(ContainerRouteParameter, out var raw)
-            ? raw?.ToString()
-            : null;
+        // Task 166: a query-sourced route (GET /api/v1/documents?containerId=) reads the id from the QUERY. There a
+        // missing value is the CALLER's omission, so it is the route's own 400 — answered here, with no resolver
+        // and no Dataverse call, and never by calling next(): a gate that passed an id-less request through would
+        // be decorative on exactly the request it cannot evaluate.
+        if (_queryParameter is not null)
+        {
+            var fromQuery = httpContext.Request.Query.TryGetValue(_queryParameter, out var values)
+                ? values.ToString()
+                : null;
+
+            if (string.IsNullOrWhiteSpace(fromQuery))
+            {
+                return Infrastructure.Errors.ProblemDetailsHelper.ValidationError(MissingQueryContainerIdDetail);
+            }
+        }
+
+        var containerId = _queryParameter is not null
+            ? httpContext.Request.Query[_queryParameter].ToString()
+            : httpContext.Request.RouteValues.TryGetValue(ContainerRouteParameter, out var raw)
+                ? raw?.ToString()
+                : null;
 
         if (string.IsNullOrWhiteSpace(containerId))
         {

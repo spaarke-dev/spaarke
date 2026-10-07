@@ -141,8 +141,8 @@ export interface ChatMessage {
 
 /**
  * Chat session data shape (BFF thread + messages).
- * Renamed from ChatSession to ChatSessionData (Wave 3, task 032) to avoid
- * conflict with the richer ChatSession UI type in chat-history/ChatHistoryPanel.types.ts.
+ * Renamed from ChatSession to ChatSessionData (Wave 3, task 032) to avoid a
+ * conflict with the former chat-history ChatSession UI type (deleted 2026-10-03, C-14).
  */
 export interface ChatSessionData {
   /** Unique session identifier (maps to AI thread ID). */

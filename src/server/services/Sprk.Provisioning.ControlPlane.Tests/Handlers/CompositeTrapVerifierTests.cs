@@ -24,12 +24,12 @@
 //   via H13 handler tests).
 //
 // COVERAGE:
-//   AC-1  Composed with all 6 real ITrapProbe impls -> all-Passed aggregate.
+//   AC-1  Composed with a probe for every TrapKind -> all-Passed aggregate.
 //   AC-2  Empty probe set -> every kind returns InfraFault (not Passed).
-//   AC-3  Single probe wired -> that kind's outcome forwarded; the other 5
+//   AC-3  Single probe wired -> that kind's outcome forwarded; the others
 //         return InfraFault with deferral diagnostic.
 //   AC-4  One probe Failed, rest Passed -> aggregate FirstFailure identifies
-//         the failing kind + FullCatalog reflects all 6 verdicts.
+//         the failing kind + FullCatalog reflects every kind's verdict.
 //   AC-5  Duplicate probe registration -> constructor throws InvalidOperationException.
 //   AC-6  Probe returns an outcome with a mismatched Kind -> composite emits
 //         InfraFault (protects H13's rejection-code mapping from naming the
@@ -39,10 +39,10 @@
 //         the OTHER kinds still runs (fault isolation).
 //   AC-9  OperationCanceledException propagates verbatim (does NOT become
 //         InfraFault).
-//   AC-10 Enum-declaration order preservation -- outcomes list ordered T1..T6.
+//   AC-10 Enum-declaration order preservation -- outcomes list ordered T1..T7.
 //   AC-11 Multiple Failed probes -> every Failure is in the catalog (aggregate
 //         does not short-circuit on first failure).
-//   AC-12 All 6 real ITrapProbe registrations wired by E2EAcceptanceModule.
+//   AC-12 All 7 real ITrapProbe registrations wired by E2EAcceptanceModule.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -71,7 +71,7 @@ public sealed class CompositeTrapVerifierTests
 
     // ---------- AC-1 ----------
     [Fact]
-    public async Task AC1_AllSixProbesPassed_ProducesAllPassedCatalog()
+    public async Task AC1_EveryProbePassed_ProducesAllPassedCatalog()
     {
         var probes = new ITrapProbe[]
         {
@@ -81,12 +81,13 @@ public sealed class CompositeTrapVerifierTests
             FakeTrapProbe.Passed(TrapKind.T4ExchangePolicyCount),
             FakeTrapProbe.Passed(TrapKind.T5SlotMiKvRbac),
             FakeTrapProbe.Passed(TrapKind.T6SpeConfidentialClient),
+            FakeTrapProbe.Passed(TrapKind.T7CustomerIdentityExplicit),
         };
         var verifier = new CompositeTrapVerifier(probes, NullLogger<CompositeTrapVerifier>.Instance);
 
         var result = await verifier.VerifyAllAsync(BuildRequest(), CancellationToken.None);
 
-        result.Outcomes.Should().HaveCount(6);
+        result.Outcomes.Should().HaveCount(Enum.GetValues<TrapKind>().Length);
         result.AllTrapsClear.Should().BeTrue();
         result.AnyInfraFault.Should().BeFalse();
         result.FirstFailure.Should().BeNull();
@@ -108,7 +109,7 @@ public sealed class CompositeTrapVerifierTests
 
         var result = await verifier.VerifyAllAsync(BuildRequest(), CancellationToken.None);
 
-        result.Outcomes.Should().HaveCount(6);
+        result.Outcomes.Should().HaveCount(Enum.GetValues<TrapKind>().Length);
         result.AllTrapsClear.Should().BeTrue("no Failed outcome yet — only InfraFaults");
         result.FirstFailure.Should().BeNull();
         result.FirstInfraFault.Should().NotBeNull("empty probe set MUST NOT vacuously pass");
@@ -132,7 +133,7 @@ public sealed class CompositeTrapVerifierTests
 
         var result = await verifier.VerifyAllAsync(BuildRequest(), CancellationToken.None);
 
-        result.Outcomes.Should().HaveCount(6);
+        result.Outcomes.Should().HaveCount(Enum.GetValues<TrapKind>().Length);
         foreach (var kind in Enum.GetValues<TrapKind>())
         {
             var outcome = result.Outcomes.Single(o => o switch
@@ -163,6 +164,7 @@ public sealed class CompositeTrapVerifierTests
     [InlineData(TrapKind.T4ExchangePolicyCount)]
     [InlineData(TrapKind.T5SlotMiKvRbac)]
     [InlineData(TrapKind.T6SpeConfidentialClient)]
+    [InlineData(TrapKind.T7CustomerIdentityExplicit)]
     public async Task AC4_OneProbeFails_RestPass_FirstFailureIdentifiesFailingKind(TrapKind failing)
     {
         var probes = Enum.GetValues<TrapKind>()
@@ -174,7 +176,7 @@ public sealed class CompositeTrapVerifierTests
 
         var result = await verifier.VerifyAllAsync(BuildRequest(), CancellationToken.None);
 
-        result.Outcomes.Should().HaveCount(6);
+        result.Outcomes.Should().HaveCount(Enum.GetValues<TrapKind>().Length);
         result.AllTrapsClear.Should().BeFalse();
         result.FirstFailure.Should().NotBeNull();
         result.FirstFailure!.Kind.Should().Be(failing);
@@ -318,7 +320,8 @@ public sealed class CompositeTrapVerifierTests
             TrapKind.T3GraphAppRoleParity,
             TrapKind.T4ExchangePolicyCount,
             TrapKind.T5SlotMiKvRbac,
-            TrapKind.T6SpeConfidentialClient);
+            TrapKind.T6SpeConfidentialClient,
+            TrapKind.T7CustomerIdentityExplicit);
     }
 
     // ---------- AC-11 ----------

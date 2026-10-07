@@ -11,6 +11,14 @@
 import * as React from 'react';
 import { Card, makeStyles, mergeClasses, tokens, Text, Badge, Spinner } from '@fluentui/react-components';
 
+/**
+ * Due-date urgency tier. Structurally identical to `DueUrgency` in
+ * `@spaarke/ui-components` (`utils/dateLocal.ts`); declared here because this
+ * package has no `@spaarke/*` dependency. The CALLER computes it with the
+ * shared `dueUrgencyForDays` — this package holds no tier boundaries.
+ */
+export type EventDueUrgency = 'overdue' | '3d' | '7d' | '10d' | 'none';
+
 export interface IEventDueDateCardProps {
   eventId: string;
   eventName: string;
@@ -18,6 +26,12 @@ export interface IEventDueDateCardProps {
   dueDate: Date;
   daysUntilDue: number;
   isOverdue: boolean;
+  /**
+   * Due-date tier from the shared `dueUrgencyForDays` (task 081 / C-17). Drives
+   * the badge and date-column colours; `daysUntilDue`/`isOverdue` drive only
+   * the badge text.
+   */
+  urgency: EventDueUrgency;
   eventTypeColor?: string;
   description?: string;
   assignedTo?: string;
@@ -128,28 +142,36 @@ const useStyles = makeStyles({
 
 const MONTH_ABBREVS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-function getDueBadgeAppearance(daysUntilDue: number, isOverdue: boolean): 'danger' | 'warning' | 'success' {
-  if (isOverdue || daysUntilDue < 3) return 'danger'; // red: overdue or <3 days
-  if (daysUntilDue <= 5) return 'warning'; // yellow: 3-5 days
-  return 'success'; // green: 6+ days
-}
+type DueBadgeColor = 'danger' | 'severe' | 'warning' | 'informative';
 
 /**
- * Get urgency-based background color for the date column.
- * v1.4.7 — switched from `colorStatusXxxBackground2` (pastel tints) to
- * `colorPaletteXxxBackground2` so the date column tints align with the
- * donut/HSBar palette (same `colorPalette*` family the rest of Matter UI
- * uses). Reads cleanly in both light and dark mode.
+ * Tier → colour, following SmartTodo's due badge palette (owner decision
+ * 2026-10-05, task 081 / H1): overdue red · 3d dark orange · 7d yellow ·
+ * 10d and none neutral. The tier itself arrives as the `urgency` prop, computed
+ * by the caller with the shared `dueUrgencyForDays` (3/7/10 calendar days), so
+ * this package keeps NO boundary copy. Before task 081 this card computed its
+ * own tiers (red < 3 days, yellow ≤ 5, green otherwise).
  */
-function getUrgencyDateStyle(daysUntilDue: number, isOverdue: boolean): React.CSSProperties {
-  if (isOverdue || daysUntilDue < 3) {
-    return { backgroundColor: tokens.colorPaletteRedBackground2 };
-  }
-  if (daysUntilDue <= 5) {
-    return { backgroundColor: tokens.colorPaletteYellowBackground2 };
-  }
-  return { backgroundColor: tokens.colorPaletteGreenBackground2 };
-}
+export const EVENT_DUE_BADGE_COLOR: Record<EventDueUrgency, DueBadgeColor> = {
+  overdue: 'danger',
+  '3d': 'severe',
+  '7d': 'warning',
+  '10d': 'informative',
+  none: 'informative',
+};
+
+/**
+ * Date-column tint per tier (same palette as the badge). `Background2` for the
+ * palette tiers so the column aligns with the donut/HSBar palette; neutral
+ * `Background3` (as SmartTodo's 10d badge) for 10d and none.
+ */
+export const EVENT_DUE_DATE_COLUMN_BACKGROUND: Record<EventDueUrgency, string> = {
+  overdue: tokens.colorPaletteRedBackground2,
+  '3d': tokens.colorPaletteDarkOrangeBackground2,
+  '7d': tokens.colorPaletteYellowBackground2,
+  '10d': tokens.colorNeutralBackground3,
+  none: tokens.colorNeutralBackground3,
+};
 
 function getDueBadgeText(daysUntilDue: number, isOverdue: boolean): string {
   if (isOverdue) return String(Math.abs(daysUntilDue));
@@ -176,8 +198,8 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
     [handleClick]
   );
 
-  // Urgency-based date column coloring: <3d red, 3-5d yellow, 6+d green
-  const dateColumnStyle = getUrgencyDateStyle(props.daysUntilDue, props.isOverdue);
+  // Tier-based date column colouring (see EVENT_DUE_DATE_COLUMN_BACKGROUND).
+  const dateColumnStyle: React.CSSProperties = { backgroundColor: EVENT_DUE_DATE_COLUMN_BACKGROUND[props.urgency] };
 
   // v1.4.8 — single-line "DD-MMM-YYYY" format (e.g., "01-JUL-2026") replaces
   // the prior 2-line "DD" + "MMM" stacked layout. Day is zero-padded; month
@@ -215,7 +237,7 @@ export const EventDueDateCard: React.FC<IEventDueDateCardProps> = props => {
       ) : (
         <div className={styles.badgeColumn}>
           <Text className={styles.badgeLabel}>{props.isOverdue ? 'Overdue' : 'Days left'}</Text>
-          <Badge appearance="filled" color={getDueBadgeAppearance(props.daysUntilDue, props.isOverdue)} size="large">
+          <Badge appearance="filled" color={EVENT_DUE_BADGE_COLOR[props.urgency]} size="large">
             {getDueBadgeText(props.daysUntilDue, props.isOverdue)}
           </Badge>
         </div>

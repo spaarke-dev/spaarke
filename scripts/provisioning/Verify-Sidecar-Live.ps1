@@ -1,594 +1,394 @@
 <#
 .SYNOPSIS
-    Live verification harness for the Exchange ApplicationAccessPolicy sidecar
-    (task 114) running as a sitecontainer under the L2 control-plane Worker
-    App Service (task 101). Runs 6 non-destructive checks per task 162's POML
-    acceptance criteria; produces a structured pass/fail report the operator
-    hands off to the completed-live-verification note.
+    Live verification of the H14a Exchange sidecar (task 114; RBAC for Applications + token sign-in
+    since task 251) running as a sitecontainer under the L2 control-plane Worker App Service. Six
+    checks; a structured pass/fail report the operator hands off.
 
 .DESCRIPTION
-    customer-provisioning-orchestration-r1 task 162 (Wave G-6 Batch G-6C) —
-    the OPERATOR-run diagnostic tool that finishes the loop task 161's client
-    started. Executed AFTER the live ceremony (Wave G-1 backlog step 5) has
-    deployed the Worker App Service + published the sidecar image to ACR.
-    Non-destructive by design: every check is READ-ONLY against Azure (`az`
-    show/list commands, GET HTTP) EXCEPT the two POST /apply-policy checks
-    which fire against DEFAULT SAFE placeholder GUIDs that Listener.ps1's
-    Set-ExchangeApplicationAccessPolicy.ps1 fails at Connect-ExchangeOnline
-    before touching any real Exchange tenant. Operators wanting to exercise a
-    real Exchange mutation must override the -TenantId / -PolicyScopeGroupId /
-    -ExpectedAppIds parameters explicitly.
+    customer-provisioning-orchestration-r1 task 162, reworked in task 251 after the first live run.
 
-    Each check maps to one of the POML acceptance criteria + one of the DS-1b
-    §3 security properties:
+    HOW THE SIDECAR CAN BE REACHED (found live, 2026-10-04): on Linux App Service, Kudu runs in its
+    OWN container, so Kudu /api/command cannot reach the Worker's 127.0.0.1:8091 (connection
+    refused), and /api/command runs no shell (`a && b` arrives as arguments of `a`). The earlier
+    version of this script curled the sidecar through Kudu and could never pass. Now:
 
-      1. CONTAINER_HEALTH  — sitecontainer is running under the Worker.
-                             Azure REST: GET /api/webapps/{worker}/sitecontainers/{name}
-      2. LOCALHOST_BIND    — sidecar's port is bound + healthy from inside the
-                             Worker's network namespace (Kudu SSH exec).
-                             Kudu REST: POST /api/command with `curl -sf http://localhost:8091/healthz`
-      3. PUBLIC_ISOLATION  — sidecar's port is NOT reachable from the public
-                             Worker hostname (network-namespace isolation).
-                             Direct HTTP: GET https://{worker}.azurewebsites.net:8091/healthz  MUST fail/timeout
-      4. ROUND_TRIP_AUTH   — a POST /apply-policy with the CORRECT
-                             X-Sidecar-Auth header is accepted (not 401).
-                             Kudu REST: POST /api/command with a curl POST
-      5. ROUND_TRIP_IDEMP  — the SAME POST returns AlreadyCompliant on 2nd run
-                             (script's get-before-set idempotency survives the
-                             container+HTTP wrapping — proven from OUTSIDE the
-                             script, at the wire).
-      6. AUTH_REJECTION    — a POST /apply-policy WITHOUT (or with a WRONG)
-                             X-Sidecar-Auth header is rejected (HTTP 401).
-                             Kudu REST: POST /api/command with a bad-secret curl
+      1. CONTAINER_HEALTH  — the sitecontainer is configured on the Worker with the expected port.
+                             ARM: GET /sites/{worker}/sitecontainers/{name}
+      2. LOCALHOST_BIND    — the sidecar's own log says it bound its port with every setting present:
+                             the latest "Sidecar listening" line in the Worker's container log
+                             (Kudu /api/logs/docker) has degraded = false.
+      3. PUBLIC_ISOLATION  — the sidecar port is NOT reachable at the Worker's public hostname.
+      4. ROUND_TRIP_AUTH   — (-InTenant) POST /read-mailbox-access with the right shared secret and a
+                             real Exchange token returns HTTP 200, outcome Success.
+      5. ROUND_TRIP_IDEMP  — (-InTenant + a TEST app and group) POST /apply-mailbox-access twice; the
+                             second returns AlreadyCompliant. CREATES a group-scoped role assignment
+                             for the test app -- remove it afterwards.
+      6. AUTH_REJECTION    — (-InTenant) a wrong X-Sidecar-Auth is rejected with HTTP 401, and the
+                             tenant id as organization is rejected with HTTP 400.
 
-    Checks 4/5 require a REAL Exchange tenant to move past Failure — with the
-    default safe placeholders they will return wire Failure (Connect-Exchange
-    Online rejects the all-zero-GUID tenantId), which is still a PASS for
-    check 4 (proves the auth path did NOT reject the request) BUT is not a
-    pass for check 5's idempotency assertion (the sidecar cannot demonstrate
-    AlreadyCompliant if it never got past Connect). Operators wanting the
-    full check 5 pass must supply real tenant/group/app-id parameters. This
-    script REPORTS THE DISTINCTION EXPLICITLY rather than silently marking
-    check 5 as "N/A" — see the report section for the discriminator.
+    -InTenant runs checks 4-6 the way the Worker would, inside Azure: a temporary container instance
+    from the Worker's sidecar image, carrying the Worker's managed identity, starts the image's own
+    Listener.ps1, signs in as 'Spaarke Exchange Admin' through the federated credential, reads the
+    tenant's initial domain from Graph GET /organization, and calls the routes on localhost. The
+    Exchange token never leaves that container and is never printed. The container is deleted at the
+    end. Without -InTenant, checks 4-6 are WARN (nothing is created).
 
 .PARAMETER Environment
-    Target environment name (dev, staging, production). Drives default
-    resource names. Default: dev.
+    dev, staging or production. Drives the default resource names. Default: dev.
 
 .PARAMETER WorkerAppServiceName
-    L2 control-plane Worker App Service name. Defaults to
-    spaarke-provisioning-controlplane-worker-{Environment}.
+    L2 Worker App Service. Default: spaarke-provisioning-controlplane-worker-{Environment}.
 
 .PARAMETER WorkerResourceGroup
-    Resource group hosting the Worker. Defaults to rg-spaarke-platform-{Environment}.
+    Resource group of the Worker. Default: rg-spaarke-platform-{Environment}.
 
 .PARAMETER SidecarName
-    Name of the sitecontainer resource attached to the Worker.
-    Defaults to `exchange-policy-sidecar` (per infrastructure/bicep/modules/
-    controlplane-worker-app-service.bicep line 299).
+    Sitecontainer name. Default: exchange-policy-sidecar.
 
 .PARAMETER SidecarPort
-    Port the sidecar Listener.ps1 binds inside the network namespace.
-    Defaults to 8091 (per task 114 Dockerfile EXPOSE + Listener.ps1
-    SIDECAR_LISTEN_PREFIX default).
+    Sidecar port. Default: 8091.
 
-.PARAMETER PlatformKeyVaultName
-    Platform Key Vault name holding the Sidecar-Shared-Secret. Defaults to
-    sprk-controlplane-{Environment}-kv (per Bicep convention).
-
-.PARAMETER SharedSecretName
-    KV secret name for the sidecar's per-boot shared secret. Defaults to
-    Sidecar-Shared-Secret (per Bicep module default).
-
-.PARAMETER TenantId
-    Exchange tenantId to send in the /apply-policy body. Default: all-zero
-    GUID (SAFE — Connect-ExchangeOnline rejects it before mutation). Override
-    with a REAL test tenant to exercise idempotency check 5 end-to-end.
+.PARAMETER InTenant
+    Run checks 4-6 in a temporary container instance (see DESCRIPTION). Creates and deletes one
+    container instance in the Worker's resource group; read-only against Exchange unless check 5's
+    test-app parameters are supplied.
 
 .PARAMETER PolicyScopeGroupId
-    Mail-enabled group ObjectId to send. Default: all-zero GUID (SAFE).
+    Entra object id of a TEST mail-enabled security group (checks 4-6). Default: all-zero GUID --
+    the read then reports "group not found", which still proves routing, auth and the Exchange connect.
 
-.PARAMETER ExpectedAppIds
-    2 app-registration client IDs to send. Default: two safe placeholder GUIDs.
+.PARAMETER AppId
+    Client id of a TEST app. Check 4 reads its assignments; check 5 grants it Application Mail.Read in
+    the test group. Default: the Worker's IntegrationWiring__ExchangeAdminAppId (read only; check 5
+    never runs against the admin app).
+
+.PARAMETER ServicePrincipalObjectId
+    The TEST app's Entra service-principal object id. Check 5 runs only when this and a non-default
+    -AppId and -PolicyScopeGroupId are given.
 
 .PARAMETER SkipChecks
-    Comma-separated list of check names to skip. Valid names:
-    CONTAINER_HEALTH, LOCALHOST_BIND, PUBLIC_ISOLATION, ROUND_TRIP_AUTH,
-    ROUND_TRIP_IDEMP, AUTH_REJECTION.
+    Comma-separated check names to skip: CONTAINER_HEALTH, LOCALHOST_BIND, PUBLIC_ISOLATION,
+    ROUND_TRIP_AUTH, ROUND_TRIP_IDEMP, AUTH_REJECTION.
 
 .PARAMETER ReportPath
-    Optional path to write a JSON summary of all check outcomes. Default: not
-    written (the console table is the primary report).
+    Optional path for a JSON summary.
 
 .EXAMPLE
-    # Dev — default safe run against the deployed dev L2 Worker.
+    # Configuration checks only (creates nothing).
     .\Verify-Sidecar-Live.ps1
 
 .EXAMPLE
-    # Dev — real Exchange test tenant, all checks including full check 5.
-    .\Verify-Sidecar-Live.ps1 `
-        -TenantId 12345678-1234-1234-1234-123456789012 `
-        -PolicyScopeGroupId aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee `
-        -ExpectedAppIds @("bff-app-reg-guid", "uami-client-id-guid")
+    # Full in-tenant run, read-only against Exchange.
+    .\Verify-Sidecar-Live.ps1 -InTenant -PolicyScopeGroupId <test group object id>
 
 .EXAMPLE
-    # Dev — skip public-isolation check (some corp networks time out at
-    # different rates than the platform's own front-end route)
-    .\Verify-Sidecar-Live.ps1 -SkipChecks PUBLIC_ISOLATION
+    # Including check 5 (creates assignment 'Spaarke-liveverify-MailRead' for the test app).
+    .\Verify-Sidecar-Live.ps1 -InTenant -PolicyScopeGroupId <test group> -AppId <test app> -ServicePrincipalObjectId <its SP object id>
 
 .NOTES
-    Project:      customer-provisioning-orchestration-r1
-    Task:         162 - Sidecar live verification against dev L2 Worker
-    Depends on:   101 (Worker Bicep + sitecontainer resource),
-                  113 (Deploy-ControlPlane.ps1),
-                  114 (sidecar Dockerfile + Listener.ps1),
-                  161 (ExchangePolicySidecarClient),
-                  Live ceremony backlog step 5 (Deploy-ControlPlane.ps1 executed).
+    Project: customer-provisioning-orchestration-r1 -- task 162, reworked by task 251.
 
-    Justification (CLAUDE.md §11):
-      Existing:   scripts/provisioning/Deploy-ControlPlane.ps1 is the sibling
-                  pattern for L2 operator scripts (parameter conventions,
-                  $script: helper style, structured console output). This
-                  script does NOT reuse that script — it is a distinct
-                  READ-ONLY verification tool, executed AFTER deploy, not a
-                  deploy itself. No extension viable.
-      Extension:  N/A — verification is a separate concern from deploy.
-      Cost-of-doing-nothing: without this harness, the operator would run
-                  6 ad-hoc az/curl commands from memory per verification run,
-                  making the "did the sidecar work?" answer non-repeatable and
-                  hard to hand off across ceremony sessions. The whole point
-                  of shipping the sidecar (task 114) is unrealized without a
-                  repeatable verification story (task 162's own <notes> field).
+    Justification (CLAUDE.md §11): Existing -- Deploy-ControlPlane.ps1 deploys; this verifies after
+    deploy (separate concern). Cost of doing nothing -- no repeatable answer to "does the sidecar work
+    with the real identity and tenant?" after a deploy.
 
-    PREREQUISITES (operator runs FIRST; this script assumes done):
-      1. `az login` with reader access on rg-spaarke-platform-{env}.
-      2. Live ceremony backlog step 5 executed (Deploy-ControlPlane.ps1 has
-         landed the Worker + sitecontainer image).
-      3. The sidecar's SIDECAR_SHARED_SECRET env-var-KeyVault-reference is
-         resolvable (H4 has PATCHed keyVaultReferenceIdentity — task 125+126
-         landed pre-Wave-G-6).
-      4. Platform KV secret `Sidecar-Shared-Secret` is populated (task 126).
-
-    NON-DESTRUCTIVE / SAFE-BY-DEFAULT:
-      Every default parameter value produces a run that does not mutate any
-      real Exchange tenant. Check 5's full pass requires operator to opt in
-      with real tenant/group/app-id GUIDs.
+    PREREQUISITES: `az login` as the operator (NFR-11) with read on the Worker and its resource group,
+    Kudu (SCM) access on the Worker, and -- for -InTenant -- rights to create a container instance in
+    that resource group and to assign the Worker's user-assigned identity to it.
 #>
 
-[CmdletBinding(SupportsShouldProcess = $false)]  # this script is read-only; no ShouldProcess needed
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSReviewUnusedParameter', 'PolicyScopeGroupId',
-    Justification = 'Referenced via $script:PolicyScopeGroupId inside Invoke-SidecarApplyPolicyViaKudu — PSScriptAnalyzer does not trace cross-function script-scope usage.')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSReviewUnusedParameter', 'ExpectedAppIds',
-    Justification = 'Referenced via $script:ExpectedAppIds inside Invoke-SidecarApplyPolicyViaKudu — PSScriptAnalyzer does not trace cross-function script-scope usage.')]
+[CmdletBinding()]
 param(
-    [Parameter(Mandatory = $false)]
     [ValidateSet('dev', 'staging', 'production')]
     [string]$Environment = 'dev',
-
-    [Parameter(Mandatory = $false)]
     [string]$WorkerAppServiceName,
-
-    [Parameter(Mandatory = $false)]
     [string]$WorkerResourceGroup,
-
-    [Parameter(Mandatory = $false)]
     [string]$SidecarName = 'exchange-policy-sidecar',
-
-    [Parameter(Mandatory = $false)]
     [int]$SidecarPort = 8091,
-
-    [Parameter(Mandatory = $false)]
-    [string]$PlatformKeyVaultName,
-
-    [Parameter(Mandatory = $false)]
-    [string]$SharedSecretName = 'Sidecar-Shared-Secret',
-
-    [Parameter(Mandatory = $false)]
-    [string]$TenantId = '00000000-0000-0000-0000-000000000000',
-
-    [Parameter(Mandatory = $false)]
+    [switch]$InTenant,
+    # GUIDs only: these values are written into the generated in-container script.
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
     [string]$PolicyScopeGroupId = '00000000-0000-0000-0000-000000000000',
-
-    [Parameter(Mandatory = $false)]
-    [string[]]$ExpectedAppIds = @('00000000-0000-0000-0000-000000000000', 'ffffffff-ffff-ffff-ffff-ffffffffffff'),
-
-    [Parameter(Mandatory = $false)]
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
+    [string]$AppId = '',
+    [ValidatePattern('^([0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12})?$')]
+    [string]$ServicePrincipalObjectId = '',
     [string]$SkipChecks = '',
-
-    [Parameter(Mandatory = $false)]
     [string]$ReportPath = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# ---- Defaults derived from -Environment ------------------------------------
-
-if (-not $WorkerAppServiceName) {
-    $WorkerAppServiceName = "spaarke-provisioning-controlplane-worker-$Environment"
-}
-if (-not $WorkerResourceGroup) {
-    $WorkerResourceGroup = "rg-spaarke-platform-$Environment"
-}
-if (-not $PlatformKeyVaultName) {
-    $PlatformKeyVaultName = "sprk-controlplane-$Environment-kv"
-}
+if (-not $WorkerAppServiceName) { $WorkerAppServiceName = "spaarke-provisioning-controlplane-worker-$Environment" }
+if (-not $WorkerResourceGroup) { $WorkerResourceGroup = "rg-spaarke-platform-$Environment" }
+$ZeroGuid = '00000000-0000-0000-0000-000000000000'
 
 $script:CheckResults = [ordered]@{}
+$script:ValidCheckNames = @('CONTAINER_HEALTH', 'LOCALHOST_BIND', 'PUBLIC_ISOLATION', 'ROUND_TRIP_AUTH', 'ROUND_TRIP_IDEMP', 'AUTH_REJECTION')
 $script:SkipSet = @{}
-foreach ($check in ($SkipChecks -split ',' | ForEach-Object { $_.Trim().ToUpperInvariant() })) {
-    if ($check) { $script:SkipSet[$check] = $true }
-}
-
-$script:ValidCheckNames = @(
-    'CONTAINER_HEALTH',
-    'LOCALHOST_BIND',
-    'PUBLIC_ISOLATION',
-    'ROUND_TRIP_AUTH',
-    'ROUND_TRIP_IDEMP',
-    'AUTH_REJECTION'
-)
-foreach ($skip in $script:SkipSet.Keys) {
-    if ($script:ValidCheckNames -notcontains $skip) {
-        throw "Unknown check name in -SkipChecks: '$skip'. Valid names: $($script:ValidCheckNames -join ', ')."
-    }
+foreach ($check in ($SkipChecks -split ',' | ForEach-Object { $_.Trim().ToUpperInvariant() } | Where-Object { $_ })) {
+    if ($script:ValidCheckNames -notcontains $check) { throw "Unknown check name in -SkipChecks: '$check'. Valid names: $($script:ValidCheckNames -join ', ')." }
+    $script:SkipSet[$check] = $true
 }
 
 # ---- Helpers ----------------------------------------------------------------
 
 function Write-CheckResult {
-    param(
-        [string]$Name,
-        [ValidateSet('PASS', 'FAIL', 'WARN', 'SKIP')]
-        [string]$Status,
-        [string]$Message,
-        [hashtable]$Details = @{}
-    )
-    $script:CheckResults[$Name] = [ordered]@{
-        status  = $Status
-        message = $Message
-        details = $Details
-    }
-    $color = switch ($Status) {
-        'PASS' { 'Green' }
-        'FAIL' { 'Red' }
-        'WARN' { 'Yellow' }
-        'SKIP' { 'DarkGray' }
-    }
-    Write-Host ("  [{0}] {1,-20} {2}" -f $Status, $Name, $Message) -ForegroundColor $color
+    param([string]$Name, [ValidateSet('PASS', 'FAIL', 'WARN', 'SKIP')][string]$Status, [string]$Message, [hashtable]$Details = @{})
+    $script:CheckResults[$Name] = [ordered]@{ status = $Status; message = $Message; details = $Details }
+    $color = @{ PASS = 'Green'; FAIL = 'Red'; WARN = 'Yellow'; SKIP = 'DarkGray' }[$Status]
+    Write-Host ("  [{0}] {1,-18} {2}" -f $Status, $Name, $Message) -ForegroundColor $color
 }
 
-function Test-CheckSkipped {
-    param([string]$Name)
-    return $script:SkipSet.ContainsKey($Name)
+function Test-CheckSkipped([string]$Name) {
+    if ($script:SkipSet.ContainsKey($Name)) { Write-CheckResult -Name $Name -Status 'SKIP' -Message 'Skipped via -SkipChecks'; return $true }
+    return $false
 }
 
-function Get-AccessToken {
-    param([string]$Resource)
-    # Explicit variable assignment + $LASTEXITCODE guard — same pattern
-    # scripts/provisioning/Deploy-ControlPlane.ps1 uses; `az ... | Select-Object`
-    # elsewhere in this codebase left $LASTEXITCODE stale (task 113 finding).
+function Invoke-Az {
+    # No param block on purpose: az's own -o/-g/-n must reach az, not bind as PowerShell parameters.
+    # Explicit $LASTEXITCODE guard (task 113 finding: piping az output leaves it stale).
     $script:LASTEXITCODE = 0
-    $tokenJson = az account get-access-token --resource $Resource -o json 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "az account get-access-token failed for resource '$Resource'. Ensure `az login` was completed and the current subscription is set. Output: $tokenJson"
-    }
-    return ($tokenJson | ConvertFrom-Json).accessToken
+    $out = & az @args 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "az $($args[0..1] -join ' ') failed: $out" }
+    return ($out | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] }) -join "`n"
 }
 
-function Get-ManagementToken { return Get-AccessToken -Resource 'https://management.azure.com/' }
+function Get-ManagementToken { return (Invoke-Az account get-access-token --resource 'https://management.azure.com/' --query accessToken -o tsv).Trim() }
 
-function Invoke-KuduCommand {
-    param(
-        [Parameter(Mandatory = $true)][string]$Command,
-        [Parameter(Mandatory = $false)][string]$Dir = '/home'
-    )
-    # Kudu REST /api/command runs an arbitrary command inside the main app
-    # container (which shares the network namespace with sitecontainers per
-    # the App Service sitecontainer topology — DS-1b §3). Response envelope:
-    #   { Output: <string>, Error: <string>, ExitCode: <int> }
-    $token = Get-ManagementToken
-    $kuduBase = "https://$WorkerAppServiceName.scm.azurewebsites.net"
-    $body = @{ command = $Command; dir = $Dir } | ConvertTo-Json -Compress
-    $headers = @{ Authorization = "Bearer $token"; 'Content-Type' = 'application/json' }
-    try {
-        $response = Invoke-RestMethod -Method POST -Uri "$kuduBase/api/command" -Headers $headers -Body $body -ErrorAction Stop
-        return @{ ExitCode = $response.ExitCode; Output = $response.Output; Error = $response.Error }
-    } catch {
-        return @{ ExitCode = -1; Output = ''; Error = "Kudu REST call failed: $($_.Exception.Message)" }
-    }
-}
-
-function Get-SidecarSharedSecret {
-    $script:LASTEXITCODE = 0
-    $secretJson = az keyvault secret show --vault-name $PlatformKeyVaultName --name $SharedSecretName --query value -o tsv 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "az keyvault secret show failed for '$SharedSecretName' on vault '$PlatformKeyVaultName'. Ensure the operator has 'Key Vault Secrets User' RBAC on this vault + the secret has been populated. Output: $secretJson"
-    }
-    return $secretJson.Trim()
+function Invoke-Arm {
+    # ARM REST with a JSON body: nothing passes through az.cmd / cmd.exe quoting.
+    param([string]$Method, [string]$Path, $Body = $null)
+    $p = @{ Method = $Method; Uri = "https://management.azure.com$Path"; Headers = @{ Authorization = "Bearer $(Get-ManagementToken)" } }
+    if ($null -ne $Body) { $p.Body = ($Body | ConvertTo-Json -Depth 20 -Compress); $p.ContentType = 'application/json' }
+    return Invoke-RestMethod @p
 }
 
 # ---- Check 1: CONTAINER_HEALTH --------------------------------------------
 
 function Test-ContainerHealth {
-    if (Test-CheckSkipped 'CONTAINER_HEALTH') {
-        Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
-        return
-    }
+    if (Test-CheckSkipped 'CONTAINER_HEALTH') { return }
     try {
-        $token = Get-ManagementToken
-        # Fetch the sitecontainer resource metadata via ARM. Requires reader
-        # on the Worker; verifies the container ARM-level config exists.
-        $script:LASTEXITCODE = 0
-        $subscription = az account show --query id -o tsv 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "az account show failed: $subscription"
-        }
+        $subscription = (Invoke-Az account show --query id -o tsv).Trim()
         $uri = "https://management.azure.com/subscriptions/$subscription/resourceGroups/$WorkerResourceGroup/providers/Microsoft.Web/sites/$WorkerAppServiceName/sitecontainers/$SidecarName" + '?api-version=2024-04-01'
-        $siteContainer = Invoke-RestMethod -Method GET -Uri $uri -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
-        $image = $siteContainer.properties.image
-        $port = $siteContainer.properties.targetPort
-        $details = @{
-            image      = $image
-            targetPort = $port
-            authType   = $siteContainer.properties.authType
-        }
-        if ($port -ne "$SidecarPort") {
-            Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'FAIL' -Message "sitecontainer targetPort mismatch: expected $SidecarPort, got $port" -Details $details
+        $sc = Invoke-RestMethod -Uri $uri -Headers @{ Authorization = "Bearer $(Get-ManagementToken)" }
+        $script:SidecarImage = [string]$sc.properties.image
+        $details = @{ image = $script:SidecarImage; targetPort = $sc.properties.targetPort; authType = $sc.properties.authType }
+        if ("$($sc.properties.targetPort)" -ne "$SidecarPort") {
+            Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'FAIL' -Message "targetPort is $($sc.properties.targetPort), expected $SidecarPort" -Details $details
             return
         }
-        Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'PASS' -Message "sitecontainer '$SidecarName' configured on port $port with image '$image'" -Details $details
+        Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'PASS' -Message "sitecontainer '$SidecarName' on port $SidecarPort, image '$script:SidecarImage'" -Details $details
     } catch {
-        Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'FAIL' -Message "Failed to fetch sitecontainer metadata: $($_.Exception.Message)"
+        Write-CheckResult -Name 'CONTAINER_HEALTH' -Status 'FAIL' -Message "Could not read the sitecontainer: $($_.Exception.Message)"
     }
 }
 
-# ---- Check 2: LOCALHOST_BIND (via Kudu SSH exec) ---------------------------
+# ---- Check 2: LOCALHOST_BIND (the sidecar's own log) -----------------------
 
 function Test-LocalhostBind {
-    if (Test-CheckSkipped 'LOCALHOST_BIND') {
-        Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
-        return
-    }
-    # curl the sidecar's /healthz from inside the Worker's own network
-    # namespace via Kudu's /api/command exec. Listener.ps1 line 326-334
-    # documents GET /healthz -> 200 "ok" unauthenticated.
-    $result = Invoke-KuduCommand -Command "curl -sf -m 10 http://127.0.0.1:$SidecarPort/healthz && echo :EXITOK"
-    if ($result.ExitCode -eq 0 -and $result.Output -match ':EXITOK') {
-        Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'PASS' -Message "GET http://127.0.0.1:$SidecarPort/healthz returned 200 'ok' from inside the Worker's network namespace"
-    } else {
-        Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'FAIL' `
-            -Message "curl http://127.0.0.1:$SidecarPort/healthz failed inside Worker (ExitCode=$($result.ExitCode))" `
-            -Details @{ output = $result.Output; error = $result.Error }
+    if (Test-CheckSkipped 'LOCALHOST_BIND') { return }
+    try {
+        $headers = @{ Authorization = "Bearer $(Get-ManagementToken)" }
+        $kudu = "https://$WorkerAppServiceName.scm.azurewebsites.net"
+        # The app's container log (*_default_docker.log) carries the sidecar's stdout too.
+        # Assign first: Invoke-RestMethod emits the JSON array as ONE pipeline object.
+        $listing = Invoke-RestMethod -Uri "$kudu/api/logs/docker" -Headers $headers
+        $logs = @($listing | Where-Object { $_.href -match '_default_docker\.log$' } | Sort-Object { [DateTime]$_.lastUpdated } -Descending)
+        if ($logs.Count -eq 0) { Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'FAIL' -Message 'No *_default_docker.log on the Worker'; return }
+        $line = $null
+        foreach ($log in $logs | Select-Object -First 3) {
+            $text = Invoke-RestMethod -Uri $log.href -Headers $headers
+            $line = ($text -split "`n") | Where-Object { $_ -match '"component":"exchange-policy-sidecar"' -and $_ -match '"message":"Sidecar listening"' } | Select-Object -Last 1
+            if ($line) { break }
+        }
+        if (-not $line) { Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'FAIL' -Message "No 'Sidecar listening' line in the Worker's recent container logs -- the sidecar never bound its port"; return }
+        $entry = $line.Substring($line.IndexOf('{')) | ConvertFrom-Json
+        # ConvertFrom-Json turns the ISO timestamp into a local DateTime; report it in UTC.
+        $at = if ($entry.timestamp -is [DateTime]) { $entry.timestamp.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss') + 'Z' } else { [string]$entry.timestamp }
+        $details = @{ timestamp = $at; prefix = $entry.prefix; degraded = $entry.degraded }
+        if ($entry.degraded) {
+            Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'FAIL' -Message "Sidecar bound $($entry.prefix) at $at but DEGRADED -- a setting is missing (see its 'missing settings' log line)" -Details $details
+            return
+        }
+        Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'PASS' -Message "Sidecar bound $($entry.prefix) at $at, all settings present" -Details $details
+    } catch {
+        Write-CheckResult -Name 'LOCALHOST_BIND' -Status 'FAIL' -Message "Could not read the Worker's container logs via Kudu: $($_.Exception.Message)"
     }
 }
 
 # ---- Check 3: PUBLIC_ISOLATION (security-critical) ------------------------
 
 function Test-PublicIsolation {
-    if (Test-CheckSkipped 'PUBLIC_ISOLATION') {
-        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
-        return
-    }
-    # A request to the Worker's PUBLIC hostname on the sidecar port MUST
-    # fail/timeout. App Service's public front-end only exposes port 443
-    # (HTTPS) via its ingress; sitecontainer ports live in the private
-    # network namespace and are NOT publicly routed unless the operator
-    # explicitly configures it (they shouldn't). Any 200 here is a
-    # HIGH-SEVERITY security finding per POML <escalation> trigger #1.
-    $publicHost = "$WorkerAppServiceName.azurewebsites.net"
-    $probe = "https://${publicHost}:$SidecarPort/healthz"
+    if (Test-CheckSkipped 'PUBLIC_ISOLATION') { return }
+    $probe = "https://${WorkerAppServiceName}.azurewebsites.net:$SidecarPort/healthz"
     try {
-        $response = Invoke-WebRequest -Method GET -Uri $probe -TimeoutSec 10 -UseBasicParsing -ErrorAction Stop
-        # ANY 2xx here is a HIGH-severity finding.
-        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'FAIL' `
-            -Message "SECURITY-CRITICAL: sidecar port $SidecarPort is REACHABLE at public hostname '$publicHost' (HTTP $($response.StatusCode)). ESCALATE per POML <escalation> trigger #1 — this exposes Exchange-admin capability to the public internet." `
-            -Details @{ probe = $probe; statusCode = $response.StatusCode; body = ($response.Content | Out-String).Substring(0, [Math]::Min(200, $response.Content.Length)) }
-    } catch [System.Net.WebException], [System.Net.Http.HttpRequestException] {
-        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'PASS' -Message "sidecar port $SidecarPort correctly UNREACHABLE at public hostname '$publicHost' (probe timed out / connection refused as expected)" -Details @{ probe = $probe; expectedFailure = $_.Exception.Message }
+        $response = Invoke-WebRequest -Uri $probe -TimeoutSec 10 -UseBasicParsing
+        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'FAIL' -Message "SECURITY-CRITICAL: sidecar port $SidecarPort is REACHABLE publicly (HTTP $($response.StatusCode)). Escalate." -Details @{ probe = $probe }
     } catch {
-        # Any other exception (DNS, TLS handshake) is a PASS for isolation
-        # (still not-reachable) but WARN so the operator sees the shape.
-        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'PASS' -Message "sidecar port $SidecarPort not-reachable at public hostname '$publicHost' (unexpected exception shape — investigate but not a security finding)" -Details @{ probe = $probe; exception = $_.Exception.GetType().Name; message = $_.Exception.Message }
+        Write-CheckResult -Name 'PUBLIC_ISOLATION' -Status 'PASS' -Message "port $SidecarPort not reachable at the public hostname ($($_.Exception.GetType().Name))" -Details @{ probe = $probe }
     }
 }
 
-# ---- Check 4: ROUND_TRIP_AUTH (valid X-Sidecar-Auth) ----------------------
+# ---- Checks 4-6: in-tenant replay -----------------------------------------
 
-function Invoke-SidecarApplyPolicyViaKudu {
-    param(
-        [string]$SharedSecret,
-        [string]$CorrelationId
-    )
-    # Reference script-scope params explicitly so PSScriptAnalyzer's
-    # cross-function usage tracking can see them (avoids false-positive
-    # PSReviewUnusedParameter warnings on script-param level).
-    $bodyObj = @{
-        tenantId           = $script:TenantId
-        expectedAppIds     = $script:ExpectedAppIds
-        policyScopeGroupId = $script:PolicyScopeGroupId
-        descriptionPrefix  = "Spaarke-Provisioning-AppAccessPolicy-LiveVerify"
-        correlationId      = $CorrelationId
-        timeoutSeconds     = 300
-    }
-    $bodyJson = ($bodyObj | ConvertTo-Json -Compress -Depth 6).Replace('"', '\"')
-    # curl inside the Worker container.
-    $curl = "curl -sS -m 360 -o /tmp/apply-policy-response.json -w 'HTTP_%{http_code}' -X POST -H 'Content-Type: application/json' -H 'X-Sidecar-Auth: $SharedSecret' -d `"$bodyJson`" http://127.0.0.1:$SidecarPort/apply-policy; echo; cat /tmp/apply-policy-response.json; rm -f /tmp/apply-policy-response.json"
-    return Invoke-KuduCommand -Command $curl
+function Get-InTenantScript {
+    param([string]$TenantId, [string]$UamiClientId, [string]$AdminAppId, [string]$ReadAppId, [bool]$RunApply)
+    # Runs inside the container instance. Prints RESULT lines only -- never a token or the secret.
+    return @"
+`$ErrorActionPreference = 'Stop'
+function Result(`$name, `$obj) { Write-Host ("RESULT {0} {1}" -f `$name, (`$obj | ConvertTo-Json -Compress -Depth 6)) }
+`$secret = [guid]::NewGuid().ToString('N'); `$env:SIDECAR_SHARED_SECRET = `$secret
+`$p = Start-Process pwsh -ArgumentList '-NoProfile','-NonInteractive','-File','/app/Listener.ps1' -PassThru -RedirectStandardOutput /tmp/l.out -RedirectStandardError /tmp/l.err
+`$up = `$false; for (`$i = 0; `$i -lt 60 -and -not `$up; `$i++) { try { Invoke-RestMethod http://127.0.0.1:$SidecarPort/healthz -TimeoutSec 5 | Out-Null; `$up = `$true } catch { Start-Sleep 2 } }
+if (-not `$up) { Result 'listener' @{ ok = `$false }; exit 10 }
+`$imds = 'http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&client_id=$UamiClientId&resource='
+`$assertion = (Invoke-RestMethod -Headers @{ Metadata = 'true' } -Uri (`$imds + 'api://AzureADTokenExchange')).access_token
+`$exo = (Invoke-RestMethod -Method Post -Uri 'https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token' -Body @{ client_id = '$AdminAppId'; scope = 'https://outlook.office365.com/.default'; grant_type = 'client_credentials'; client_assertion_type = 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer'; client_assertion = `$assertion }).access_token
+`$graph = (Invoke-RestMethod -Headers @{ Metadata = 'true' } -Uri (`$imds + 'https://graph.microsoft.com')).access_token
+`$org = Invoke-RestMethod -Uri 'https://graph.microsoft.com/v1.0/organization?`$select=verifiedDomains' -Headers @{ Authorization = "Bearer `$graph" }
+`$domain = @(`$org.value[0].verifiedDomains | Where-Object { `$_.isInitial })[0].name
+function Call(`$path, `$body, `$secretValue) {
+    `$r = Invoke-WebRequest -Method Post -Uri "http://127.0.0.1:$SidecarPort`$path" -Body (`$body | ConvertTo-Json -Compress -Depth 6) -ContentType 'application/json' -Headers @{ 'X-Sidecar-Auth' = `$secretValue; 'X-Exchange-Access-Token' = `$exo } -SkipHttpErrorCheck -TimeoutSec 360
+    `$j = try { `$r.Content | ConvertFrom-Json } catch { `$null }
+    return @{ status = [int]`$r.StatusCode; outcome = `$j.outcome; diagnostic = `$j.diagnostic; assignments = @(`$j.assignments).Count }
+}
+`$read = @{ tenantId = '$TenantId'; organization = `$domain; appId = '$ReadAppId'; scopeGroupId = '$PolicyScopeGroupId'; roles = @('Application Mail.Read'); correlationId = 'live-verify-read' }
+Result 'domain' @{ organization = `$domain }
+Result 'read' (Call '/read-mailbox-access' `$read `$secret)
+Result 'wrongsecret' (Call '/read-mailbox-access' `$read 'definitely-not-the-secret')
+`$guidOrg = `$read.Clone(); `$guidOrg.organization = '$TenantId'
+Result 'guidorg' (Call '/read-mailbox-access' `$guidOrg `$secret)
+if (`$$RunApply) {
+    `$apply = @{ tenantId = '$TenantId'; organization = `$domain; appId = '$ReadAppId'; servicePrincipalObjectId = '$ServicePrincipalObjectId'; displayName = 'Spaarke-liveverify-test-app'; scopeGroupId = '$PolicyScopeGroupId'; assignments = @(@{ name = 'Spaarke-liveverify-MailRead'; role = 'Application Mail.Read' }); correlationId = 'live-verify-apply'; timeoutSeconds = 300 }
+    Result 'apply1' (Call '/apply-mailbox-access' `$apply `$secret)
+    Result 'apply2' (Call '/apply-mailbox-access' `$apply `$secret)
+}
+Stop-Process -Id `$p.Id -Force -ErrorAction SilentlyContinue
+Write-Host 'INTENANT DONE'
+"@
 }
 
-function Test-RoundTripAuth {
-    if (Test-CheckSkipped 'ROUND_TRIP_AUTH') {
-        Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
+function Invoke-InTenantChecks {
+    $names = 'ROUND_TRIP_AUTH', 'ROUND_TRIP_IDEMP', 'AUTH_REJECTION'
+    if (-not $InTenant) {
+        foreach ($n in $names) { if (-not (Test-CheckSkipped $n)) { Write-CheckResult -Name $n -Status 'WARN' -Message 'Not run: needs -InTenant (runs the request inside Azure as the Worker identity; see -InTenant help)' } }
         return
     }
+    $aci = "sprk-sidecar-verify-$Environment"
+    $groupPath = $null
     try {
-        $secret = Get-SidecarSharedSecret
-    } catch {
-        Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' -Message "Cannot read shared secret from KV: $($_.Exception.Message)"
-        return
-    }
-    $corr = "live-verify-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr
-    $out = $result.Output
-    if ($result.ExitCode -ne 0) {
-        Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' `
-            -Message "Kudu exec failed (ExitCode=$($result.ExitCode))" `
-            -Details @{ output = $out; error = $result.Error; correlationId = $corr }
-        return
-    }
-    if ($out -match 'HTTP_(\d{3})') {
-        $httpCode = [int]$Matches[1]
-        if ($httpCode -eq 401) {
-            Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' `
-                -Message "sidecar returned HTTP 401 with the CORRECT shared secret from KV — the KV secret value does not match the sidecar's SIDECAR_SHARED_SECRET env var. Verify the sitecontainer's KV reference resolved (H4 keyVaultReferenceIdentity PATCH). Restart the Worker to reload the sitecontainer env if a secret was rotated." `
-                -Details @{ httpCode = 401; correlationId = $corr; output = $out }
-            return
+        $account = Invoke-Az account show -o json | ConvertFrom-Json
+        $tenantId = $account.tenantId
+        $groupPath = "/subscriptions/$($account.id)/resourceGroups/$WorkerResourceGroup/providers/Microsoft.ContainerInstance/containerGroups/$aci"
+        $identity = Invoke-Az webapp identity show -g $WorkerResourceGroup -n $WorkerAppServiceName -o json | ConvertFrom-Json
+        $uamiId = @($identity.userAssignedIdentities.PSObject.Properties)[0].Name
+        $uamiClientId = @($identity.userAssignedIdentities.PSObject.Properties)[0].Value.clientId
+        $settings = Invoke-Az webapp config appsettings list -g $WorkerResourceGroup -n $WorkerAppServiceName -o json | ConvertFrom-Json
+        $adminAppId = [string](@($settings | Where-Object name -eq 'IntegrationWiring__ExchangeAdminAppId')[0].value)
+        if (-not $adminAppId) { throw "Worker setting IntegrationWiring__ExchangeAdminAppId is empty" }
+        if (-not $script:SidecarImage) { throw 'Sidecar image unknown (CONTAINER_HEALTH did not run or failed)' }
+        $readAppId = if ($AppId) { $AppId } else { $adminAppId }
+        $runApply = [bool]($AppId -and $ServicePrincipalObjectId -and $PolicyScopeGroupId -ne $ZeroGuid -and $AppId -ne $adminAppId)
+        $script = Get-InTenantScript -TenantId $tenantId -UamiClientId $uamiClientId -AdminAppId $adminAppId -ReadAppId $readAppId -RunApply $runApply
+        $location = (Invoke-Az group show -n $WorkerResourceGroup --query location -o tsv).Trim()
+        Write-Host "  [--] creating container instance '$aci' from $script:SidecarImage (Worker identity) ..." -ForegroundColor DarkGray
+        $definition = @{
+            location   = $location
+            identity   = @{ type = 'UserAssigned'; userAssignedIdentities = @{ $uamiId = @{} } }
+            properties = @{
+                osType                   = 'Linux'
+                restartPolicy            = 'Never'
+                imageRegistryCredentials = @(@{ server = $script:SidecarImage.Split('/')[0]; identity = $uamiId })
+                containers               = @(@{
+                    name       = 'verify'
+                    properties = @{
+                        image        = $script:SidecarImage
+                        command      = @('pwsh', '-NoProfile', '-NonInteractive', '-File', '/verify/verify.ps1')
+                        resources    = @{ requests = @{ cpu = 1; memoryInGB = 1.5 } }
+                        volumeMounts = @(@{ name = 'verify'; mountPath = '/verify'; readOnly = $true })
+                    }
+                })
+                volumes                  = @(@{ name = 'verify'; secret = @{ 'verify.ps1' = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($script)) } })
+            }
         }
-        if ($httpCode -eq 200 -or ($httpCode -ge 200 -and $httpCode -lt 500)) {
-            # Any 2xx (with structured envelope) or 4xx (validation error) proves
-            # the auth header was accepted — the request got past the 401 guard.
-            Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'PASS' `
-                -Message "sidecar accepted X-Sidecar-Auth (HTTP $httpCode; the request got past the shared-secret guard)" `
-                -Details @{ httpCode = $httpCode; correlationId = $corr; response = ($out -replace '.*HTTP_\d{3}\s*', '') }
-            return
+        Invoke-Arm PUT "$groupPath`?api-version=2023-05-01" $definition | Out-Null
+        $log = ''
+        for ($i = 0; $i -lt 120; $i++) {
+            Start-Sleep -Seconds 5
+            try { $log = [string](Invoke-Arm GET "$groupPath/containers/verify/logs?api-version=2023-05-01").content } catch { $log = '' }
+            if ($log -match 'INTENANT DONE' -or $log -match 'RESULT listener') { break }
         }
-        Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'WARN' `
-            -Message "sidecar returned HTTP $httpCode — unexpected. Auth was accepted (not a 401) but the shape is unusual." `
-            -Details @{ httpCode = $httpCode; correlationId = $corr; output = $out }
-        return
-    }
-    Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' `
-        -Message 'Could not parse HTTP status code from Kudu curl output' `
-        -Details @{ correlationId = $corr; output = $out }
-}
+        $results = @{}
+        foreach ($l in ($log -split "`n") | Where-Object { $_ -match '^RESULT (\S+) (.*)$' }) {
+            $null = $l -match '^RESULT (\S+) (.*)$'; $results[$Matches[1]] = $Matches[2] | ConvertFrom-Json
+        }
+        if (-not $results.ContainsKey('read')) { throw "The in-tenant run produced no read result. Container log: $log" }
+        $org = $results['domain'].organization
 
-# ---- Check 5: ROUND_TRIP_IDEMP (2nd run) ----------------------------------
-
-function Test-RoundTripIdempotency {
-    if (Test-CheckSkipped 'ROUND_TRIP_IDEMP') {
-        Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
-        return
-    }
-    try {
-        $secret = Get-SidecarSharedSecret
+        if (-not (Test-CheckSkipped 'ROUND_TRIP_AUTH')) {
+            $r = $results['read']
+            $groupMissing = $PolicyScopeGroupId -eq $ZeroGuid -and $r.outcome -eq 'Failure' -and "$($r.diagnostic)" -match 'not found'
+            if ($r.status -eq 200 -and ($r.outcome -eq 'Success' -or $groupMissing)) {
+                Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'PASS' -Message "read as $readAppId via $org : HTTP 200, $($r.outcome) ($($r.diagnostic))" -Details @{ organization = $org; outcome = $r.outcome; assignments = $r.assignments }
+            } else {
+                Write-CheckResult -Name 'ROUND_TRIP_AUTH' -Status 'FAIL' -Message "read returned HTTP $($r.status), outcome '$($r.outcome)': $($r.diagnostic)" -Details @{ organization = $org }
+            }
+        }
+        if (-not (Test-CheckSkipped 'ROUND_TRIP_IDEMP')) {
+            if (-not $runApply) {
+                Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'WARN' -Message 'Not run: needs -AppId, -ServicePrincipalObjectId and -PolicyScopeGroupId for a TEST app and group (it creates a role assignment)'
+            } elseif ($results['apply2'].outcome -eq 'AlreadyCompliant') {
+                Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'PASS' -Message "apply #1 $($results['apply1'].outcome), apply #2 AlreadyCompliant. Remove assignment 'Spaarke-liveverify-MailRead' and the test app's Exchange service principal when done."
+            } else {
+                Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'FAIL' -Message "apply #2 returned '$($results['apply2'].outcome)': $($results['apply2'].diagnostic)" -Details @{ apply1 = $results['apply1']; apply2 = $results['apply2'] }
+            }
+        }
+        if (-not (Test-CheckSkipped 'AUTH_REJECTION')) {
+            $w = $results['wrongsecret']; $g = $results['guidorg']
+            if ($w.status -eq 401 -and $g.status -eq 400) {
+                Write-CheckResult -Name 'AUTH_REJECTION' -Status 'PASS' -Message 'wrong shared secret -> 401; tenant id as organization -> 400'
+            } else {
+                Write-CheckResult -Name 'AUTH_REJECTION' -Status 'FAIL' -Message "SECURITY-CRITICAL: wrong secret -> HTTP $($w.status) (expected 401); tenant id as organization -> HTTP $($g.status) (expected 400). Escalate." -Details @{ wrongSecret = $w; guidOrganization = $g }
+            }
+        }
     } catch {
-        Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'FAIL' -Message "Cannot read shared secret from KV: $($_.Exception.Message)"
-        return
+        foreach ($n in $names) { if (-not $script:SkipSet.ContainsKey($n)) { Write-CheckResult -Name $n -Status 'FAIL' -Message "In-tenant run failed: $($_.Exception.Message)" } }
+    } finally {
+        if ($groupPath) {
+            try { Invoke-Arm DELETE "$groupPath`?api-version=2023-05-01" | Out-Null }
+            catch { Write-Host "  [!!] could not delete container instance '$aci' in $WorkerResourceGroup -- delete it by hand" -ForegroundColor Yellow }
+        }
     }
-    if ($TenantId -eq '00000000-0000-0000-0000-000000000000') {
-        Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'WARN' `
-            -Message "SAFE-DEFAULT MODE: check 5's idempotency cannot be verified with an all-zero tenantId (Connect-ExchangeOnline rejects it before get-before-set can run). Re-run with -TenantId, -PolicyScopeGroupId, -ExpectedAppIds pointing at a real safely-scoped test tenant to verify AlreadyCompliant-on-2nd-run." `
-            -Details @{ reason = 'safe-default-mode'; hint = 'operator override required for full check' }
-        return
-    }
-    # Same request twice; expect AlreadyCompliant (wire outcome) on 2nd run.
-    $corr1 = "live-verify-idemp-1-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $corr2 = "live-verify-idemp-2-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result1 = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr1
-    $result2 = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $secret -CorrelationId $corr2
-    $out1 = $result1.Output
-    $out2 = $result2.Output
-    if ($out2 -match '"outcome"\s*:\s*"AlreadyCompliant"') {
-        Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'PASS' `
-            -Message "2nd run returned wire outcome AlreadyCompliant — get-before-set idempotency survives container+HTTP wrapping." `
-            -Details @{ run1CorrelationId = $corr1; run2CorrelationId = $corr2 }
-        return
-    }
-    Write-CheckResult -Name 'ROUND_TRIP_IDEMP' -Status 'FAIL' `
-        -Message '2nd run did NOT return AlreadyCompliant — idempotency may not be surviving the wrapping.' `
-        -Details @{ run1CorrelationId = $corr1; run2CorrelationId = $corr2; run1Output = $out1; run2Output = $out2 }
-}
-
-# ---- Check 6: AUTH_REJECTION (security-critical) --------------------------
-
-function Test-AuthRejection {
-    if (Test-CheckSkipped 'AUTH_REJECTION') {
-        Write-CheckResult -Name 'AUTH_REJECTION' -Status 'SKIP' -Message 'Skipped via -SkipChecks'
-        return
-    }
-    $wrongSecret = 'definitely-not-the-real-secret-' + [guid]::NewGuid().ToString('N')
-    $corr = "live-verify-auth-reject-{0}" -f ([guid]::NewGuid().ToString('N'))
-    $result = Invoke-SidecarApplyPolicyViaKudu -SharedSecret $wrongSecret -CorrelationId $corr
-    $out = $result.Output
-    if ($out -match 'HTTP_401') {
-        Write-CheckResult -Name 'AUTH_REJECTION' -Status 'PASS' `
-            -Message "sidecar correctly REJECTED (HTTP 401) a request with a wrong X-Sidecar-Auth header" `
-            -Details @{ correlationId = $corr }
-        return
-    }
-    if ($out -match 'HTTP_(\d{3})') {
-        $httpCode = [int]$Matches[1]
-        Write-CheckResult -Name 'AUTH_REJECTION' -Status 'FAIL' `
-            -Message "SECURITY-CRITICAL: sidecar returned HTTP $httpCode (expected 401) for a request with a WRONG X-Sidecar-Auth header. ESCALATE per POML <escalation> trigger #2 — the shared-secret rejection path is broken." `
-            -Details @{ httpCode = $httpCode; correlationId = $corr; output = $out }
-        return
-    }
-    Write-CheckResult -Name 'AUTH_REJECTION' -Status 'FAIL' `
-        -Message 'Could not parse HTTP status code from Kudu curl output (wrong-secret probe)' `
-        -Details @{ correlationId = $corr; output = $out }
 }
 
 # ---- Run + report ----------------------------------------------------------
 
-Write-Host ""
-Write-Host "===============================================================" -ForegroundColor Cyan
-Write-Host " Sidecar Live Verification — task 162" -ForegroundColor Cyan
-Write-Host "===============================================================" -ForegroundColor Cyan
-Write-Host " Environment:            $Environment"
-Write-Host " Worker App Service:     $WorkerAppServiceName"
-Write-Host " Worker Resource Group:  $WorkerResourceGroup"
-Write-Host " Sidecar:                $SidecarName (port $SidecarPort)"
-Write-Host " Platform KV:            $PlatformKeyVaultName"
-Write-Host " Shared secret name:     $SharedSecretName"
-Write-Host " TenantId payload:       $TenantId $(if ($TenantId -eq '00000000-0000-0000-0000-000000000000') { '(SAFE default)' } else { '(operator override)' })"
-Write-Host ""
-
-Write-Host "Running checks:" -ForegroundColor Cyan
+Write-Host ''
+Write-Host '===============================================================' -ForegroundColor Cyan
+Write-Host ' Sidecar live verification' -ForegroundColor Cyan
+Write-Host '===============================================================' -ForegroundColor Cyan
+Write-Host " Worker:   $WorkerAppServiceName ($WorkerResourceGroup)"
+Write-Host " Sidecar:  $SidecarName (port $SidecarPort)"
+Write-Host " Mode:     $(if ($InTenant) { 'in-tenant (checks 4-6 run inside Azure as the Worker identity)' } else { 'configuration only (checks 4-6 WARN)' })"
+Write-Host ''
 Test-ContainerHealth
 Test-LocalhostBind
 Test-PublicIsolation
-Test-RoundTripAuth
-Test-RoundTripIdempotency
-Test-AuthRejection
+Invoke-InTenantChecks
 
-Write-Host ""
-Write-Host "===============================================================" -ForegroundColor Cyan
-Write-Host " Summary" -ForegroundColor Cyan
-Write-Host "===============================================================" -ForegroundColor Cyan
-$passCount = ($script:CheckResults.Values | Where-Object { $_.status -eq 'PASS' } | Measure-Object).Count
-$failCount = ($script:CheckResults.Values | Where-Object { $_.status -eq 'FAIL' } | Measure-Object).Count
-$warnCount = ($script:CheckResults.Values | Where-Object { $_.status -eq 'WARN' } | Measure-Object).Count
-$skipCount = ($script:CheckResults.Values | Where-Object { $_.status -eq 'SKIP' } | Measure-Object).Count
-$totalCount = $script:CheckResults.Count
-Write-Host " PASS: $passCount / $totalCount" -ForegroundColor Green
-if ($warnCount -gt 0) { Write-Host " WARN: $warnCount / $totalCount" -ForegroundColor Yellow }
-if ($skipCount -gt 0) { Write-Host " SKIP: $skipCount / $totalCount" -ForegroundColor DarkGray }
-if ($failCount -gt 0) { Write-Host " FAIL: $failCount / $totalCount" -ForegroundColor Red }
-Write-Host ""
-
+$counts = @{}
+foreach ($s in 'PASS', 'FAIL', 'WARN', 'SKIP') { $counts[$s] = @($script:CheckResults.Values | Where-Object { $_.status -eq $s }).Count }
+Write-Host ''
+Write-Host (" PASS {0} · WARN {1} · FAIL {2} · SKIP {3}" -f $counts.PASS, $counts.WARN, $counts.FAIL, $counts.SKIP)
 if ($ReportPath) {
-    $report = [ordered]@{
-        timestamp         = [DateTimeOffset]::UtcNow.ToString('o')
-        environment       = $Environment
-        workerAppService  = $WorkerAppServiceName
-        sidecar           = $SidecarName
-        sidecarPort       = $SidecarPort
-        platformKeyVault  = $PlatformKeyVaultName
-        sharedSecretName  = $SharedSecretName
-        tenantIdWasSafe   = ($TenantId -eq '00000000-0000-0000-0000-000000000000')
-        counts            = @{ pass = $passCount; fail = $failCount; warn = $warnCount; skip = $skipCount; total = $totalCount }
-        checks            = $script:CheckResults
-    }
-    $report | ConvertTo-Json -Depth 10 | Out-File -FilePath $ReportPath -Encoding utf8
-    Write-Host " Report written: $ReportPath" -ForegroundColor Cyan
+    [ordered]@{
+        timestamp = [DateTimeOffset]::UtcNow.ToString('o'); environment = $Environment; worker = $WorkerAppServiceName
+        sidecar = $SidecarName; inTenant = [bool]$InTenant; counts = $counts; checks = $script:CheckResults
+    } | ConvertTo-Json -Depth 10 | Out-File -FilePath $ReportPath -Encoding utf8
+    Write-Host " Report: $ReportPath"
 }
-
-if ($failCount -gt 0) {
-    Write-Host " OVERALL: FAIL" -ForegroundColor Red
-    exit 1
-}
-Write-Host " OVERALL: PASS$(if ($warnCount -gt 0) { ' (with warnings)' })" -ForegroundColor Green
+if ($counts.FAIL -gt 0) { Write-Host ' OVERALL: FAIL' -ForegroundColor Red; exit 1 }
+Write-Host " OVERALL: PASS$(if ($counts.WARN -gt 0) { ' (with warnings)' })" -ForegroundColor Green
 exit 0

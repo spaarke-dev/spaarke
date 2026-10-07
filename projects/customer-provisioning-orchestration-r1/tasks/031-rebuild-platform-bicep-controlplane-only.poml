@@ -4,7 +4,7 @@
     <title>Rebuild platform.bicep — shrink to control-plane-only (per D12)</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching structural rebuild of the platform stack; blast radius spans every environment. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope; structural refactor).</rigor-reason>
     <model-tier>opus</model-tier>

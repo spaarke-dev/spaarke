@@ -389,7 +389,7 @@ Maker portal → Power Platform Admin → Environments → {env} → Settings �
 
 ### Verification
 
-Run an authenticated request through the BFF that exercises Dataverse (e.g., `/api/ai/playbooks/by-name/Document%20Profile`). If you get 200 (or 401 with valid token), App User is registered correctly. If 500 with `Failed to resolve playbook`, check BFF logs for `0x80072560` Dataverse 403 — the Application User is missing.
+Run an authenticated request through the BFF that exercises Dataverse (e.g., `/api/ai/playbooks/by-id/{playbookId}` with the id of the public Document Profile playbook — the `DOCUMENT_PROFILE_PLAYBOOK_ID` constant in `src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts`; the old `/by-name/` route was retired by unified-access-control-r2 task 164). If you get 200 (or 401 with valid token), App User is registered correctly. If you get the uniform `Playbook Not Found` 404 for a playbook that exists, check BFF logs for `0x80072560` Dataverse 403 — the Application User is missing.
 
 ---
 

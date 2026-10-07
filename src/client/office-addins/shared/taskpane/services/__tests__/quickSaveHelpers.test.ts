@@ -3,6 +3,10 @@ import {
   buildDocumentSaveRequest,
   computeQuickSaveIdempotencyKey,
   arrayBufferToBase64,
+  fileNameFromWebUrl,
+  describeQuickSaveSuccess,
+  describeQuickSaveFailure,
+  describeUnsavableIdentity,
   type QuickSaveEmailContext,
 } from '../quickSaveHelpers';
 import type { EntitySearchResult } from '../../hooks/useEntitySearch';
@@ -147,8 +151,8 @@ describe('computeQuickSaveIdempotencyKey', () => {
   });
 });
 
-describe('buildDocumentSaveRequest (task 037 / FR-17 — Word ribbon quickSave)', () => {
-  it('builds an unfiled CREATE request — no targetEntity, no existingDocumentId/isNewVersion', () => {
+describe('buildDocumentSaveRequest (task 037 / FR-17; task 089 — version vs keep-both create)', () => {
+  it('a CREATE is unfiled and asks the server to keep both on a name collision — never existingDocumentId/isNewVersion', () => {
     const req = buildDocumentSaveRequest({ title: 'Contract' }, 'BASE64BYTES', 'idem-key-1');
 
     expect(req.contentType).toBe('Document');
@@ -158,6 +162,7 @@ describe('buildDocumentSaveRequest (task 037 / FR-17 — Word ribbon quickSave)'
       title: 'Contract',
       contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       contentBase64: 'BASE64BYTES',
+      allowRename: true,
     });
     expect(req.idempotencyKey).toBe('idem-key-1');
     // Association is optional for a Document save (mirrors useSaveFlow's "Association is optional"
@@ -167,15 +172,182 @@ describe('buildDocumentSaveRequest (task 037 / FR-17 — Word ribbon quickSave)'
     expect(req.document).not.toHaveProperty('isNewVersion');
   });
 
-  it('does not double an existing .docx extension', () => {
-    const req = buildDocumentSaveRequest({ title: 'Contract.docx' }, 'x', 'k');
-    expect(req.document.fileName).toBe('Contract.docx');
+  it('a VERSION names the resolved document with isNewVersion, and never asks to rename (a version cannot collide by name)', () => {
+    const req = buildDocumentSaveRequest({ title: 'Contract' }, 'B64', 'k', {
+      mode: 'version',
+      existingDocumentId: '2bcfc5d2-0000-4000-8000-000000000001',
+    });
+
+    expect(req.document.existingDocumentId).toBe('2bcfc5d2-0000-4000-8000-000000000001');
+    expect(req.document.isNewVersion).toBe(true);
+    expect(req.document).not.toHaveProperty('allowRename');
+    expect(req).not.toHaveProperty('targetEntity');
   });
 
-  it('falls back to a placeholder title when blank', () => {
-    const req = buildDocumentSaveRequest({ title: '' }, 'x', 'k');
-    expect(req.document.title).toBe('Document');
-    expect(req.document.fileName).toBe('Document.docx');
+  it("names the file by the PANE's rule — the Document Name default minus its extension, then .docx (never doubled)", () => {
+    expect(buildDocumentSaveRequest({ title: 'Contract.docx' }, 'x', 'k').document).toMatchObject({
+      fileName: 'Contract.docx',
+      title: 'Contract',
+    });
+    // The pane strips .doc too (SaveFlow's default name), then uploads as .docx (useSaveFlow).
+    expect(buildDocumentSaveRequest({ title: 'Memo.doc' }, 'x', 'k').document.fileName).toBe('Memo.docx');
+    expect(buildDocumentSaveRequest({ title: 'Untitled Document' }, 'x', 'k').document.fileName).toBe(
+      'Untitled Document.docx'
+    );
+  });
+
+  it("falls back to the pane's placeholder name when the title is blank", () => {
+    const req = buildDocumentSaveRequest({ title: '   ' }, 'x', 'k');
+    expect(req.document.title).toBe('document');
+    expect(req.document.fileName).toBe('document.docx');
+  });
+});
+
+describe('computeQuickSaveIdempotencyKey — version vs create (task 089)', () => {
+  it('a version save of the same bytes is a different operation from a create of them', async () => {
+    const create = await computeQuickSaveIdempotencyKey({ kind: 'document', title: 'C', contentBase64: 'AAAA' });
+    const version = await computeQuickSaveIdempotencyKey({
+      kind: 'document',
+      title: 'C',
+      contentBase64: 'AAAA',
+      existingDocumentId: '11111111-1111-1111-1111-111111111111',
+    });
+    expect(version).not.toBe(create);
+  });
+});
+
+describe('fileNameFromWebUrl (task 089 — the name the server actually stored)', () => {
+  it('reads the file= parameter of the documented SPE Office web URL', () => {
+    expect(
+      fileNameFromWebUrl(
+        'https://contoso.sharepoint.com/:w:r/contentstorage/CSP_x/_layouts/15/doc2.aspx?sourcedoc=%7Babc%7D&file=Brief%201.docx&action=default&mobileredirect=true'
+      )
+    ).toBe('Brief 1.docx');
+  });
+
+  it('reads the last segment of a direct file URL', () => {
+    expect(
+      fileNameFromWebUrl(
+        'https://spaarke.sharepoint.com/contentstorage/CSP_1/Document%20Library/Examiner%20report%20draft.docx'
+      )
+    ).toBe('Examiner report draft.docx');
+  });
+
+  it('names nothing for a viewer page with no file parameter, an empty value, or garbage', () => {
+    expect(fileNameFromWebUrl('https://contoso.sharepoint.com/_layouts/15/Doc.aspx?sourcedoc=%7Babc%7D')).toBeNull();
+    expect(fileNameFromWebUrl(undefined)).toBeNull();
+    expect(fileNameFromWebUrl('not a url')).toBeNull();
+  });
+});
+
+describe('describeQuickSaveSuccess (task 089 — Quick Save always says what it did)', () => {
+  const storedAs = (name: string) => ({
+    documentId: 'd',
+    webUrl: `https://c.sharepoint.com/contentstorage/CSP_1/Document%20Library/${encodeURIComponent(name)}`,
+  });
+
+  it('a version: "Saved a new version of \'{name}\'"', () => {
+    expect(
+      describeQuickSaveSuccess({
+        target: { mode: 'version', existingDocumentId: 'd' },
+        requestedFileName: 'Brief.docx',
+        documentLabel: 'Brief',
+        saved: storedAs('Brief.docx'),
+        duplicate: false,
+      })
+    ).toBe("Saved a new version of 'Brief'.");
+  });
+
+  it('a create stored under the requested name names it', () => {
+    expect(
+      describeQuickSaveSuccess({
+        target: { mode: 'create' },
+        requestedFileName: 'Brief.docx',
+        saved: storedAs('Brief.docx'),
+        duplicate: false,
+      })
+    ).toBe("Saved to Spaarke as 'Brief.docx'.");
+  });
+
+  it('a create the server KEPT BOTH under another name names the file actually created, and says why', () => {
+    const message = describeQuickSaveSuccess({
+      target: { mode: 'create' },
+      requestedFileName: 'Untitled Document.docx',
+      saved: storedAs('Untitled Document 1.docx'),
+      duplicate: false,
+    });
+    expect(message).toContain("'Untitled Document 1.docx'");
+    expect(message).toMatch(/both were kept/);
+  });
+
+  it('never names a guessed file when the stored name is unknown', () => {
+    expect(
+      describeQuickSaveSuccess({
+        target: { mode: 'create' },
+        requestedFileName: 'Brief.docx',
+        saved: null,
+        duplicate: false,
+      })
+    ).toBe('Saved to Spaarke.');
+  });
+});
+
+describe('describeQuickSaveFailure (task 089 — never the fixed "Failed to save" when the server gave a reason)', () => {
+  const refusal = (problem: Record<string, unknown>) => Object.assign(new Error('x'), { error: problem });
+
+  it("shows the server's own message for a refusal (403)", () => {
+    const message = describeQuickSaveFailure(
+      refusal({ status: 403, title: 'Forbidden', detail: 'You do not have write access to this document.' }),
+      'save'
+    );
+    expect(message).toBe('Spaarke did not save this document: You do not have write access to this document. (403)');
+    expect(message).not.toMatch(/Failed to save/);
+  });
+
+  it('falls back to the catalog message for a known errorCode with no detail, then to the title', () => {
+    expect(
+      describeQuickSaveFailure(refusal({ status: 413, errorCode: 'OFFICE_004', title: 'x', detail: '' }), 'save')
+    ).toMatch(/25MB/);
+    expect(describeQuickSaveFailure(refusal({ status: 429, title: 'Too Many Requests' }), 'save')).toBe(
+      'Spaarke did not save this document: Too Many Requests (429)'
+    );
+  });
+
+  it('says what failed in words when there is no server reason', () => {
+    expect(describeQuickSaveFailure({ code: 'CONTENT_RETRIEVAL_FAILED', message: 'getFileAsync failed' }, 'read')).toBe(
+      "Couldn't read this document from Word, so nothing was saved (getFileAsync failed)."
+    );
+    expect(describeQuickSaveFailure(new TypeError('Failed to fetch'), 'save')).toMatch(
+      /^Couldn't reach Spaarke.*Failed to fetch/
+    );
+    expect(describeQuickSaveFailure(new Error('auth failed'), 'connect')).toMatch(/^Couldn't connect to Spaarke/);
+  });
+});
+
+describe('describeUnsavableIdentity (task 089 — Quick Save never creates silently where the pane would not)', () => {
+  it.each(['conflict', 'indeterminate', 'denied'] as const)('%s → a reason, so nothing is saved', kind => {
+    const outcome =
+      kind === 'indeterminate'
+        ? ({ kind, reason: 'unavailable' } as const)
+        : ({ kind } as { kind: 'conflict' | 'denied' });
+    expect(describeUnsavableIdentity(outcome)).toMatch(/did not save/);
+  });
+
+  it('error → a reason naming the cause', () => {
+    expect(describeUnsavableIdentity({ kind: 'error', message: 'boom' })).toMatch(/boom/);
+  });
+
+  it('new and resolved → null (Quick Save handles them)', () => {
+    expect(describeUnsavableIdentity({ kind: 'new', reason: 'not_cloud_document' })).toBeNull();
+    expect(
+      describeUnsavableIdentity({
+        kind: 'resolved',
+        documentId: 'd',
+        documentName: '',
+        fileName: '',
+        relatedRecord: null,
+      })
+    ).toBeNull();
   });
 });
 

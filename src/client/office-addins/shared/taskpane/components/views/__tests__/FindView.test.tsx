@@ -30,6 +30,11 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { FindView, resolveFindState, type FindState } from '../FindView';
 import { apiClient, ApiClientError } from '@shared/services';
 import type { DocumentIdentityState } from '../../../services/documentIdentityService';
+import { openRecord } from '../../../services/openRecordLauncher';
+
+// Task 092 (UAT-3): opening wiring — same pattern as `SaveFlow.openRecord.test.tsx`.
+jest.mock('../../../services/openRecordLauncher');
+const mockOpenRecord = openRecord as jest.MockedFunction<typeof openRecord>;
 
 // ResizeObserver (Fluent v9 MessageBar reflow detection) is polyfilled globally in jest.setup.js
 // (task 071) — removed the per-file copy that used to live here.
@@ -109,6 +114,9 @@ function profileEnvelope(fields: {
   searchIndexed?: boolean | null;
   searchIndexName?: string | null;
   summaryStatus?: number | null;
+  keywords?: string | null;
+  tldr?: string | null;
+  summary?: string | null;
 }) {
   return { data: fields };
 }
@@ -240,6 +248,8 @@ describe('FindView (component)', () => {
     mockGetAccount.mockReset();
     mockGetAccount.mockReturnValue({ tenantId: TENANT_ID });
     intersectionCallbacks = [];
+    mockOpenRecord.mockReset();
+    mockOpenRecord.mockReturnValue({ opened: true });
   });
 
   describe('state 1 — no sprk_document', () => {
@@ -382,8 +392,9 @@ describe('FindView (component)', () => {
 
       renderWithProvider(<FindView documentIdentity={RESOLVED} />);
 
-      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
-      expect(screen.getByText('MSA Draft')).toBeTruthy();
+      // Task 092: the "Most similar documents" heading is now ALWAYS present (even while loading), so
+      // it's no longer a usable proxy for "the fetch resolved" — wait on the actual row text instead.
+      await waitFor(() => expect(screen.getByText('MSA Draft')).toBeTruthy());
       expect(screen.getByText('Results may be incomplete')).toBeTruthy();
       expect(screen.getByText('Some related documents were not evaluated…')).toBeTruthy();
 
@@ -422,7 +433,11 @@ describe('FindView (component)', () => {
 
       await waitFor(() => expect(screen.getByText('MSA Draft')).toBeTruthy());
       expect(screen.getByText(/Matter: Smith v Smith/)).toBeTruthy();
-      expect(screen.getByTestId('find-results-scroll-area').textContent).not.toContain('Smith v Smith');
+      // Task 092: the hub section now shares the ONE scroll container with the ranked list (by
+      // design — a single scroll container is the whole point), so the scope that matters is the
+      // RANKED LIST itself, not the shared scroller around it.
+      const rankedList = screen.getByRole('list', { name: 'Similar Documents' });
+      expect(rankedList.textContent).not.toContain('Smith v Smith');
     });
 
     it('no pager control of any kind renders, even with many results', async () => {
@@ -432,7 +447,7 @@ describe('FindView (component)', () => {
 
       renderWithProvider(<FindView documentIdentity={RESOLVED} />);
 
-      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('Document 0')).toBeTruthy());
       expect(screen.queryByText(/load more/i)).toBeNull();
       expect(screen.queryByText(/next page/i)).toBeNull();
       expect(screen.queryByRole('navigation')).toBeNull();
@@ -445,7 +460,7 @@ describe('FindView (component)', () => {
 
       renderWithProvider(<FindView documentIdentity={RESOLVED} />);
 
-      await waitFor(() => expect(screen.getByText('Most similar documents')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('Document 0')).toBeTruthy());
 
       const relatedCallsBefore = mockGet.mock.calls.filter(call =>
         String(call[0]).includes('/api/ai/visualization/related/')
@@ -464,6 +479,150 @@ describe('FindView (component)', () => {
         String(call[0]).includes('/api/ai/visualization/related/')
       ).length;
       expect(relatedCallsAfter).toBe(1); // still exactly one — reveal is DOM-only, never a re-fetch
+    });
+  });
+
+  // Task 092 (UAT-3): Matching records must not wait on the documents request.
+  describe('Matching records render independently of the Documents section (task 092, UAT-3)', () => {
+    it('renders while the documents request is still loading', async () => {
+      mockGet.mockResolvedValueOnce(
+        profileEnvelope({ searchIndexed: true, summaryStatus: 100000002, keywords: 'indemnity' })
+      );
+      // The visualization GET stays pending until resolved below — documents stay in `loading` for
+      // the assertions, then settled explicitly so no promise is left dangling for jest's teardown.
+      let resolveDocs!: (value: unknown) => void;
+      const docsPromise = new Promise(resolve => {
+        resolveDocs = resolve;
+      });
+      mockGet.mockImplementationOnce(() => docsPromise);
+      mockPost.mockResolvedValueOnce({
+        results: [{ recordId: 'm-1', recordType: 'sprk_matter', recordName: 'Acme v. Globex', confidenceScore: 0.8 }],
+      });
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('Finding similar documents…')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('Acme v. Globex')).toBeTruthy());
+
+      await act(async () => {
+        resolveDocs(relatedDocumentsEnvelope(0));
+      });
+    });
+
+    it('renders when the documents request fails', async () => {
+      mockGet.mockResolvedValueOnce(
+        profileEnvelope({ searchIndexed: true, summaryStatus: 100000002, keywords: 'indemnity' })
+      );
+      mockGet.mockRejectedValueOnce(
+        new ApiClientError({ type: 'about:blank', title: 'Server Error', status: 500, detail: 'Boom' })
+      );
+      mockPost.mockResolvedValueOnce({
+        results: [{ recordId: 'm-1', recordType: 'sprk_matter', recordName: 'Acme v. Globex', confidenceScore: 0.8 }],
+      });
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('Boom')).toBeTruthy());
+      await waitFor(() => expect(screen.getByText('Acme v. Globex')).toBeTruthy());
+    });
+
+    it('shows a confidence percentage and up to 3 match reasons end-to-end', async () => {
+      mockGet.mockResolvedValueOnce(
+        profileEnvelope({ searchIndexed: true, summaryStatus: 100000002, keywords: 'indemnity' })
+      );
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(0));
+      mockPost.mockResolvedValueOnce({
+        results: [
+          {
+            recordId: 'm-1',
+            recordType: 'sprk_matter',
+            recordName: 'Acme v. Globex',
+            confidenceScore: 0.876,
+            matchReasons: ['Name match: <em>Acme</em>', 'Description match: indemnity clause'],
+          },
+        ],
+      });
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await waitFor(() => expect(screen.getByText('Acme v. Globex')).toBeTruthy());
+      expect(screen.getByText(/88% match/)).toBeTruthy();
+      expect(screen.getByText('Acme').tagName).toBe('STRONG');
+      expect(screen.getByText('Description match: indemnity clause')).toBeTruthy();
+    });
+  });
+
+  // Task 092 (UAT-3, NFR-10): opening a row — gated on `canOpenRecord` + `ORG_URL`, wired to the SAME
+  // `openRecord` launcher `SaveFlow` uses (`SaveFlow.openRecord.test.tsx` is the precedent this mirrors).
+  describe('opening a row (task 092, UAT-3, NFR-10)', () => {
+    const ORG_URL = 'https://contoso.crm.dynamics.com';
+    const originalOrgUrl = process.env.ORG_URL;
+
+    afterAll(() => {
+      if (originalOrgUrl === undefined) {
+        delete process.env.ORG_URL;
+      } else {
+        process.env.ORG_URL = originalOrgUrl;
+      }
+    });
+
+    it('document row: calls openRecord with sprk_document + the cleaned id when canOpenRecord + ORG_URL are both set', async () => {
+      process.env.ORG_URL = ORG_URL;
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(1, undefined, [resultNode('doc-1', 'MSA Draft')]));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} canOpenRecord />);
+
+      const row = await screen.findByRole('button', { name: /MSA Draft/ });
+      await userEvent.click(row);
+
+      expect(mockOpenRecord).toHaveBeenCalledWith({ orgUrl: ORG_URL, entityType: 'sprk_document', recordId: 'doc-1' });
+    });
+
+    it('a parent/hub row: calls openRecord with sprk_matter + its real id', async () => {
+      process.env.ORG_URL = ORG_URL;
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(
+        relatedDocumentsEnvelope(1, undefined, [
+          resultNode('doc-1', 'MSA Draft'),
+          matterHubNode('matter-bbbbbbbb-1111-2222-3333-444444444444', 'Smith v Smith'),
+        ])
+      );
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} canOpenRecord />);
+
+      const row = await screen.findByRole('button', { name: /Matter: Smith v Smith/ });
+      await userEvent.click(row);
+
+      expect(mockOpenRecord).toHaveBeenCalledWith({
+        orgUrl: ORG_URL,
+        entityType: 'sprk_matter',
+        recordId: 'bbbbbbbb-1111-2222-3333-444444444444',
+      });
+    });
+
+    it('renders every row as plain text (no button role) when canOpenRecord is false (default)', async () => {
+      process.env.ORG_URL = ORG_URL;
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(1, undefined, [resultNode('doc-1', 'MSA Draft')]));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} />);
+
+      await screen.findByText('MSA Draft');
+      expect(screen.queryByRole('button', { name: /MSA Draft/ })).toBeNull();
+      expect(mockOpenRecord).not.toHaveBeenCalled();
+    });
+
+    it('renders every row as plain text when ORG_URL is not configured, even with canOpenRecord true', async () => {
+      delete process.env.ORG_URL;
+      mockGet.mockResolvedValueOnce(profileEnvelope({ searchIndexed: true }));
+      mockGet.mockResolvedValueOnce(relatedDocumentsEnvelope(1, undefined, [resultNode('doc-1', 'MSA Draft')]));
+
+      renderWithProvider(<FindView documentIdentity={RESOLVED} canOpenRecord />);
+
+      await screen.findByText('MSA Draft');
+      expect(screen.queryByRole('button', { name: /MSA Draft/ })).toBeNull();
+      expect(mockOpenRecord).not.toHaveBeenCalled();
     });
   });
 

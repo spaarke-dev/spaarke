@@ -53,18 +53,15 @@
  * on the drifted `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` §3.1; corrected in
  * that doc.)
  *
- * ## getVisibleState (the sanctioned agent-visibility contract, Pillar 9)
+ * ## Agent visibility (Pillar 9)
  *
- * `composeWidgetVisibility` exposes WHICH document the Compose tab holds to the
- * Assistant per-turn prompt. The registry `getVisibleState` slot returns the
- * CLOSED `SerializedWidgetState` union (Summary | DocumentViewer | Dashboard |
- * Table) — a compile-time-locked contract aligned 1:1 with
- * `WorkspaceTabWidgetType` (`_DiscriminatorAlignment` guard). A Compose tab
- * HOLDS A DOCUMENT, so we project the active-document identity onto the
- * existing `DocumentViewer` variant (`filename` = the resolved file name). This
- * is fully additive — it needs ZERO change to the union / `WorkspaceTab` / the
- * Pillar 9 prompt builder (no regression). See the LIMITATION note on
- * `composeWidgetVisibility`.
+ * This registration carries NO client-side agent-visibility derivation. The
+ * former `composeWidgetVisibility` / registry `getVisibleState` slot was
+ * deleted 2026-10-03 (C-21, #1112): the client derivation was never called in
+ * production — the BFF derives each tab's agent-visible state from
+ * `widgetData` itself (`SprkChatAgentFactory.TryDeriveVisibleState`). The
+ * active-document ROUTING identity remains owned by the `composeActionBridge`
+ * conduit (`registerActiveDocument` → `POST /api/compose/active-document`).
  *
  * @see ./ComposeDirectWidget.tsx — the WorkspaceWidgetProps → ComposeWorkspace adapter
  * @see ./composeWidgetData.ts — the `widgetData.compose` seed shape
@@ -79,83 +76,9 @@ import {
   // Compose declares an EXPLICIT opt-out (its read/write fidelity is governed
   // separately by ADR-049; outside R3 scope). See COMPOSE_WIDGET_METADATA.
   assistantContractOptOut,
-  type RegistryGetAgentVisibleState,
-  type SerializedDocumentViewerState,
   type WidgetMetadata,
   type WorkspaceWidgetComponent,
 } from "@spaarke/ai-widgets";
-import type { ComposeWidgetSeed } from "./composeWidgetData";
-
-// ---------------------------------------------------------------------------
-// getVisibleState — Pillar 9 agent-visibility derivation for a Compose tab
-// ---------------------------------------------------------------------------
-
-/**
- * Derive the agent-visible state for a Compose tab from `widgetData.compose`.
- *
- * Returns a `SerializedDocumentViewerState` — the Compose tab holds a DOCUMENT,
- * so the existing `DocumentViewer` variant is the natural, additive projection.
- * The `filename` field carries the active-document identity (resolved across the
- * stored / upload / draft door shapes) so the Assistant knows which document the
- * Compose tab is editing. Returns `null` when there is no `compose` payload OR
- * no identifiable document (privacy default per ADR-015 + the registry
- * opt-out contract).
- *
- * **LIMITATION (honest, per plan §Wave 5 acceptance + item 3):** the ROUTING
- * identity fields the Wave-2/3 seed also carries — `source`, `sessionFileId`,
- * `documentSessionId`, `sprkDocumentId` — are NOT surfaced in the serialized
- * PROMPT state. Two reasons:
- *   1. The registry `getVisibleState` slot is locked to the closed
- *      `SerializedWidgetState` union; the `DocumentViewer` variant has no field
- *      for those routing ids, and widening the union would touch
- *      `WorkspaceTab` + the Pillar 9 prompt builder (a cross-cutting change,
- *      NOT zero-regression).
- *   2. Per ADR-015 (data minimization) those internal routing ids should be
- *      WITHHELD from the LLM prompt anyway — the human-facing `filename` is the
- *      correct agent-visible identity.
- * The routing identity remains owned by the `composeActionBridge`
- * active-document conduit (`registerActiveDocument` → `POST /api/compose/active-document`),
- * which is DELIBERATELY NOT retired — `getVisibleState` (a read-only prompt
- * projection) does not and cannot cover it (a client→server routing write for
- * DEF-11/DEF-12 edit routing). Retiring it would regress edit routing.
- */
-export const composeWidgetVisibility: RegistryGetAgentVisibleState = (
-  widgetData: unknown
-): SerializedDocumentViewerState | null => {
-  if (widgetData === null || typeof widgetData !== "object") return null;
-  const compose = (widgetData as { compose?: unknown }).compose;
-  if (compose === null || typeof compose !== "object") return null;
-  const seed = compose as ComposeWidgetSeed;
-
-  // Resolve the human-facing file identity across the three door shapes.
-  const fileName =
-    (typeof seed.fileName === "string" && seed.fileName) ||
-    (typeof seed.upload?.fileName === "string" && seed.upload.fileName) ||
-    (typeof seed.draft?.fileName === "string" && seed.draft.fileName) ||
-    "";
-
-  // Any active-document identity at all (stored / upload / draft)?
-  const hasIdentity =
-    fileName.length > 0 ||
-    (typeof seed.speDriveItemId === "string" && seed.speDriveItemId.length > 0) ||
-    (typeof seed.sprkDocumentId === "string" && seed.sprkDocumentId.length > 0) ||
-    (typeof seed.upload?.sessionFileId === "string" && seed.upload.sessionFileId.length > 0) ||
-    (typeof seed.draft?.ledgerRef === "string" && seed.draft.ledgerRef.length > 0) ||
-    (typeof seed.draft?.html === "string" && seed.draft.html.length > 0);
-  if (!hasIdentity) return null;
-
-  return {
-    widgetType: "DocumentViewer",
-    // The active-document identity the Assistant needs: which file is open.
-    filename: fileName.length > 0 ? fileName : "Compose document",
-    // The Compose seed carries no MIME / size; leave them at their neutral
-    // "unknown" sentinels rather than asserting a type. hasSelection is false —
-    // editor selection is not surfaced through widgetData.
-    mimeType: "",
-    sizeBytes: 0,
-    hasSelection: false,
-  };
-};
 
 // ---------------------------------------------------------------------------
 // Metadata + registration
@@ -206,8 +129,7 @@ export function registerComposeWidget(): void {
     () =>
       import("./ComposeDirectWidget").then((m) => ({
         default: m.ComposeDirectWidget as WorkspaceWidgetComponent,
-      })),
-    composeWidgetVisibility
+      }))
   );
 }
 

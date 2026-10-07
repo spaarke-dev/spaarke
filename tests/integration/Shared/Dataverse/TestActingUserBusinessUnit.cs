@@ -118,7 +118,11 @@ internal static class TestActingUserBusinessUnit
             {
                 var user = new Entity("systemuser", SystemUserId)
                 {
-                    ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId)
+                    ["businessunitid"] = new EntityReference("businessunit", BusinessUnitId),
+                    // Task 171 (finding 2): record-less content is written only for an enabled internal person.
+                    ["domainname"] = "acting.user@contoso.example",
+                    ["isdisabled"] = false,
+                    ["accessmode"] = new OptionSetValue(0),
                 };
                 var collection = new EntityCollection();
                 collection.Entities.Add(user);

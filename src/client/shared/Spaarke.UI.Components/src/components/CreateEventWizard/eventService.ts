@@ -8,6 +8,7 @@
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateEventFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -16,6 +17,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { applyResolverFields, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -101,7 +103,7 @@ function _resolveLookupHint(entityLogicalName: string): string {
  * Best-effort resolution of the current Dataverse user GUID from the host Xrm global.
  *
  * Matches the established `CreateWorkAssignmentWizard/workAssignmentService._getCurrentUserId`
- * pattern: walks `window`, `window.parent`, `window.top` (cross-origin safe) looking first for
+ * pattern: walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) looking first for
  * `Xrm.Utility.getGlobalContext().userSettings.userId` (Code Page hosted in a Power App iframe),
  * then falling back to `Xrm.Utility.getUserId()` (PCF / direct host).
  *
@@ -111,40 +113,9 @@ function _resolveLookupHint(entityLogicalName: string): string {
  * @returns Current user GUID (braces stripped, lowercased), or `null` if Xrm is unreachable.
  */
 function _tryGetCurrentUserId(): string | null {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-    } catch {
-      // Cross-origin frame — skip
-    }
-  }
-  return null;
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? null;
 }
 
 /**
@@ -408,7 +379,12 @@ export class EventService {
     }
 
     try {
-      const id = await this._dataService.createRecord('sprk_event', entity);
+      // UAC-r2 task 147 r1 (owner round 28 item 1): the child create goes through the BFF (G5) — the server decides the
+      // owner (the Secure Record Owners team under a secure record); a refusal surfaces the server's message.
+      const id = await withBffChildWrites(this._dataService, this._authenticatedFetch, this._bffBaseUrl).createRecord(
+        'sprk_event',
+        entity
+      );
       return {
         eventId: id,
         eventName: formValues.eventName.trim(),

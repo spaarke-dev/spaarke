@@ -160,6 +160,49 @@ describe('the dead-button guard — an executeFunction id and its registration m
   });
 });
 
+describe('Open Spaarke replaces Share on the Word ribbon (task 089, UAT-10)', () => {
+  const readText = (relative: string) => fs.readFileSync(path.join(ROOT, relative), 'utf8');
+
+  it('the package, the Word JSON and the Word XML all carry "Open Spaarke" (with a tooltip) and nothing references shareDocument', () => {
+    const merged = buildFromSources();
+    const wordControls = merged.extensions[0].ribbons
+      .filter((r: Json) => r.requirements.scopes[0] === 'document')
+      .flatMap((r: Json) => r.tabs.flatMap((t: Json) => t.groups.flatMap((g: Json) => g.controls)));
+
+    const openSpaarke = wordControls.find((c: Json) => c.actionId === 'openSpaarke');
+    expect(openSpaarke).toMatchObject({ id: 'WordOpenSpaarkeButton', label: 'Open Spaarke' });
+    expect(openSpaarke.supertip.title).toBe('Open Spaarke');
+    expect(openSpaarke.supertip.description).toEqual(expect.any(String));
+    // Where Share was: the last Word button, after Save and Quick Save.
+    expect(wordControls.map((c: Json) => c.id)).toEqual([
+      'WordSaveButton',
+      'WordQuickSaveButton',
+      'WordOpenSpaarkeButton',
+    ]);
+
+    const xml = readText('word/word-manifest.xml');
+    expect(xml).toMatch(/<FunctionName>openSpaarke<\/FunctionName>/);
+    expect(xml).toMatch(/id="OpenSpaarkeButton\.Label" DefaultValue="Open Spaarke"/);
+    expect(xml).toMatch(/id="OpenSpaarkeButton\.SupertipText" DefaultValue="[^"]+"/);
+
+    for (const source of [
+      JSON.stringify(merged),
+      readText('word/manifest.json'),
+      xml,
+      readText('word/commands/index.ts'),
+    ]) {
+      expect(source).not.toMatch(/shareDocument|ShareButton/);
+    }
+  });
+
+  it('the Word JSON and the Word XML versions move together (XML is the 3-part version plus ".0")', () => {
+    const jsonVersion: string = readJson('word/manifest.json').version;
+    const xmlVersion = /<Version>\s*([\d.]+)\s*<\/Version>/.exec(readText('word/word-manifest.xml'))![1];
+    expect(jsonVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(xmlVersion).toBe(`${jsonVersion}.0`);
+  });
+});
+
 describe('icons — every icon URL in the package must resolve', () => {
   it('points an icon that does not exist at the same-size Spaarke icon, and fails when no fallback exists', () => {
     const merged = buildFromSources();

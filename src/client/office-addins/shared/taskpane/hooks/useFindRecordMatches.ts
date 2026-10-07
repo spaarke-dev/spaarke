@@ -111,12 +111,24 @@ function truncateAtWordBoundary(text: string, max: number): string {
   return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim();
 }
 
-/** Minimal mirror of the BFF's `RecordSearchResult` — only the fields the Find list renders. */
+/**
+ * Minimal mirror of the BFF's `RecordSearchResult` (`Models/Ai/RecordSearch/RecordSearchResult.cs`) —
+ * only the fields the Find list renders.
+ *
+ * Task 092 (UAT-3): added `confidenceScore` + `matchReasons` so the Matching records section can show
+ * WHY a record matched. `confidenceScore` mirrors the server's non-nullable `double` (`0.0`–`1.0`,
+ * always present). `matchReasons` mirrors the server's `IReadOnlyList<string>?` (semantic captions and
+ * "Name match: …" / "Description match: …" strings, up to 5, which MAY contain `<em>…</em>` highlight
+ * markup) — rendered only via `renderMatchReason` in `FindResultsList.tsx`, never
+ * `dangerouslySetInnerHTML`.
+ */
 export interface RecordMatch {
   recordId: string;
   recordType: string;
   recordName: string;
   recordDescription?: string | null;
+  confidenceScore: number;
+  matchReasons?: string[] | null;
   referenceNumbers?: string[] | null;
 }
 

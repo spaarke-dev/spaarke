@@ -12,12 +12,13 @@ public interface IPlaybookService
     /// Create a new playbook.
     /// </summary>
     /// <param name="request">Playbook creation request.</param>
-    /// <param name="userId">ID of the user creating the playbook.</param>
+    /// <param name="ownerSystemUserId">The Dataverse <c>systemuserid</c> of the person creating the playbook — the row's
+    /// OWNER (<c>ownerid</c>), so the OwnerOnly routes admit them. Never the Entra object id; never empty (refused).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Created playbook response.</returns>
     Task<PlaybookResponse> CreatePlaybookAsync(
         SavePlaybookRequest request,
-        Guid userId,
+        Guid ownerSystemUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -70,7 +71,12 @@ public interface IPlaybookService
     /// <summary>
     /// List playbooks for a user (owned playbooks).
     /// </summary>
-    /// <param name="userId">User ID to filter by owner.</param>
+    /// <param name="userId">
+    /// The owner to filter by: the caller's Dataverse <c>systemuserid</c>, compared with <c>_ownerid_value</c>.
+    /// NOT the Entra <c>oid</c> — the two are different GUID spaces, and passing the oid matched nothing
+    /// (owner round 12 item 6, unified-access-control-r2 task 164). Callers resolve it with
+    /// <c>PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync</c>.
+    /// </param>
     /// <param name="query">Query parameters for filtering and pagination.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Paginated list of playbook summaries.</returns>
@@ -141,13 +147,14 @@ public interface IPlaybookService
     /// Clone a playbook (typically a template) to create a new playbook owned by the user.
     /// </summary>
     /// <param name="sourcePlaybookId">ID of the playbook to clone.</param>
-    /// <param name="userId">ID of the user who will own the cloned playbook.</param>
+    /// <param name="ownerSystemUserId">The Dataverse <c>systemuserid</c> of the person who will own the clone (see
+    /// <see cref="CreatePlaybookAsync"/>).</param>
     /// <param name="newName">Optional new name for the cloned playbook. If null, uses "[SourceName] (Copy)".</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The newly created cloned playbook.</returns>
     Task<PlaybookResponse> ClonePlaybookAsync(
         Guid sourcePlaybookId,
-        Guid userId,
+        Guid ownerSystemUserId,
         string? newName = null,
         CancellationToken cancellationToken = default);
 

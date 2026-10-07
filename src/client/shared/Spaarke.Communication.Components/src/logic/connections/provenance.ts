@@ -744,6 +744,12 @@ export interface PrimaryReviewModel {
   primary?: PrimaryCandidate;
 }
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate
+// rather than importing the canonical `cleanGuid` from `@spaarke/ui-components`.
+// This module is documented (see the `logic/connections` barrel) as having ZERO
+// imports — a stronger, more explicit guarantee than the sibling modules' general
+// "no React import" (NFR-05), and importing even a pure string helper from the
+// React/Fluent-heavy UI component package would break that documented invariant.
 function primaryKey(entity: string, id: string): string {
   return `${entity}:${id.replace(/[{}]/g, '').toLowerCase()}`;
 }

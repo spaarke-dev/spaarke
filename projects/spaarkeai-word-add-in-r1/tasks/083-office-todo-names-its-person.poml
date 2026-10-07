@@ -4,7 +4,7 @@
     <title>An Office-pane To Do names the person it is for, so the Daily Briefing can find it again after 080 (#1044, writer half)</title>
     <phase>5 Remediation — ownership</phase>
     <gate>BLOCKED on unified-access-control-r2 task 141 (the user↔contact link contract). UAC-r2 will send the field names and the resolution rule when 141 is authored.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `OfficeService.cs` (bff-api) and adds a data-mutation test. It repairs a regression this project introduced (080).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -111,6 +111,10 @@
       <file>.claude/constraints/bff-extensions.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    2026-10-04: gate met (UAC-r2 141 and 152 merged; escalation triggers 1 and 2 did not fire). OfficeService.CreateTodoAsync defaults sprk_assignedto to the caller's linked contact (IIdentityNormalizationService), warning todo_assignee_unset when none; never refuses. 3 tests added (+ factory doubles); seeded negative control red then restored; 18/18 Office/ownership, ArchTests 349/349, full suite 14,226/6/54 where the 6 are load-induced host-startup timeouts that pass 118/118 in isolation; CVE clean. No post-080 Office To Do lacks an assignee (3 exist, all explicitly assigned). OPEN: live check as Test User 1 (needs deploy) and publish-size delta (main session). Details: notes/083-office-todo-person.md.
+  </notes>
 
   <outputs>
     <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>

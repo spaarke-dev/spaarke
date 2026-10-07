@@ -18,13 +18,11 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 public class WorkingDocumentServiceTests
 {
     private readonly Mock<IGenericEntityService> _genericEntityServiceMock;
-    private readonly Mock<IServiceProvider> _serviceProviderMock;
     private readonly Mock<ILogger<WorkingDocumentService>> _loggerMock;
 
     public WorkingDocumentServiceTests()
     {
         _genericEntityServiceMock = new Mock<IGenericEntityService>();
-        _serviceProviderMock = new Mock<IServiceProvider>();
         _loggerMock = new Mock<ILogger<WorkingDocumentService>>();
     }
 
@@ -34,7 +32,7 @@ public class WorkingDocumentServiceTests
         {
             MaxWorkingVersions = maxWorkingVersions
         });
-        return new WorkingDocumentService(_genericEntityServiceMock.Object, _serviceProviderMock.Object, options, _loggerMock.Object);
+        return new WorkingDocumentService(_genericEntityServiceMock.Object, options, _loggerMock.Object);
     }
 
     #region UpdateWorkingDocumentAsync Tests
@@ -131,77 +129,8 @@ public class WorkingDocumentServiceTests
 
     #endregion
 
-    #region SaveToSpeAsync Tests
-
-    [Fact]
-    public async Task SaveToSpeAsync_Phase1_ReturnsStubResult()
-    {
-        // Arrange
-        var service = CreateService();
-        var analysisId = Guid.NewGuid();
-        var fileName = "analysis-output.md";
-        var content = System.Text.Encoding.UTF8.GetBytes("# Analysis Output");
-
-        // Act
-        var result = await service.SaveToSpeAsync(analysisId, fileName, content, "text/markdown", CancellationToken.None);
-
-        // Assert — when the mocked _genericEntityService cannot resolve a parent matter
-        // (the default Moq behavior returns null/empty entities), WorkingDocumentService
-        // falls back to the Dataverse-field write path and returns a result with empty
-        // SPE coordinates. The previous "stub-drive-id" / "stub-item-id" / WebUrl-contains-
-        // filename expectation reflected the Phase 1 stub implementation that was replaced
-        // when the service was wired to real Dataverse + SpeFileStore. The behavioral
-        // guarantee remaining for this test: the call completes without throwing and
-        // returns a non-null result whose DocumentId surfaces the analysisId argument.
-        result.Should().NotBeNull();
-        result.DocumentId.Should().NotBeEmpty();
-        result.DriveId.Should().BeEmpty(
-            "no SPE container is resolved when _genericEntityService is unmocked");
-        result.ItemId.Should().BeEmpty(
-            "fallback path does not perform an SPE upload");
-    }
-
-    [Fact]
-    public async Task SaveToSpeAsync_DifferentContentTypes_ReturnsResult()
-    {
-        // Arrange
-        var service = CreateService();
-        var analysisId = Guid.NewGuid();
-        var content = new byte[] { 0x50, 0x4B, 0x03, 0x04 }; // DOCX magic bytes
-
-        // Act
-        var result = await service.SaveToSpeAsync(
-            analysisId,
-            "output.docx",
-            content,
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            CancellationToken.None);
-
-        // Assert — content-type variation does not change the fallback return shape;
-        // a non-null SavedDocumentResult is returned without throwing. WebUrl is empty
-        // in the no-SPE-container fallback path (see SaveToSpeAsync_Phase1_ReturnsStubResult
-        // for the same rationale; this test additionally validates binary payload handling).
-        result.Should().NotBeNull();
-        result.WebUrl.Should().BeEmpty(
-            "no SPE container is resolved when _genericEntityService is unmocked");
-    }
-
-    [Fact]
-    public async Task SaveToSpeAsync_EmptyContent_StillReturnsResult()
-    {
-        // Arrange
-        var service = CreateService();
-        var analysisId = Guid.NewGuid();
-
-        // Act
-        var result = await service.SaveToSpeAsync(analysisId, "empty.txt", [], "text/plain", CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.DocumentId.Should().NotBeEmpty();
-    }
-
-    #endregion
+    // unified-access-control-r2 task 162 (owner round 10 item 1): the SaveToSpeAsync tests were DELETED with the
+    // method, whose only caller was POST /api/ai/analysis/{analysisId}/save (no caller in the repo, not published).
 
     #region CreateWorkingVersionAsync Tests
 
@@ -292,30 +221,4 @@ public class WorkingDocumentServiceTests
     }
 
     #endregion
-}
-
-/// <summary>
-/// Tests for SavedDocumentResult model.
-/// </summary>
-[Trait("status", "repaired")]
-public class SavedDocumentResultTests
-{
-    [Fact]
-    public void SavedDocumentResult_CanBeCreated()
-    {
-        // Arrange & Act
-        var result = new SavedDocumentResult
-        {
-            DocumentId = Guid.NewGuid(),
-            DriveId = "drive-123",
-            ItemId = "item-456",
-            WebUrl = "https://example.com/doc"
-        };
-
-        // Assert
-        result.DocumentId.Should().NotBeEmpty();
-        result.DriveId.Should().Be("drive-123");
-        result.ItemId.Should().Be("item-456");
-        result.WebUrl.Should().Be("https://example.com/doc");
-    }
 }

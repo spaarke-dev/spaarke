@@ -535,6 +535,8 @@ public static class OfficeEndpoints
     /// <summary>
     /// Task 055 (#1005 / ISS-006): strips a name-collision refusal's <c>ExistingDocumentName</c> and
     /// <c>ExistingDocumentId</c> unless the caller holds <see cref="AccessRights.Read"/> on that document.
+    /// Task 088 (UAT-5): <c>CanSaveAsVersion</c> is forced to <c>false</c> in the same breath, so a caller who
+    /// cannot read the other document receives exactly the payload it received before task 088.
     /// Every other error passes through untouched.
     /// </summary>
     /// <remarks>
@@ -593,7 +595,41 @@ public static class OfficeEndpoints
             + "and id are withheld. The pane offers \"Keep both\" only.",
             error.FileName);
 
-        return error with { ExistingDocumentId = null, ExistingDocumentName = null };
+        return error with { ExistingDocumentId = null, ExistingDocumentName = null, CanSaveAsVersion = false };
+    }
+
+    /// <summary>
+    /// The ProblemDetails extensions of an <c>OFFICE_020</c> name-collision refusal (task 025, extended by tasks
+    /// 055 and 088).
+    /// </summary>
+    /// <remarks>
+    /// <c>existingDocumentId</c> + <c>existingDocumentName</c> identify the document that already holds the
+    /// name — present only when the caller holds Read on it (stripped upstream by
+    /// <see cref="WithholdCollisionIdentityIfUnauthorizedAsync"/>); the pane offers "Open" from them.
+    /// <c>canSaveAsVersion</c> (task 088) is the ONLY signal for "Save as new version", and is written only
+    /// alongside an id: a refusal whose identity was withheld carries exactly the keys it carried before task
+    /// 088, so a caller who cannot read the other document cannot tell from the payload's shape anything it
+    /// could not tell before.
+    /// </remarks>
+    private static Dictionary<string, object?> NameCollisionExtensions(SaveError error, string correlationId)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["errorCode"] = error.Code,
+            ["correlationId"] = correlationId,
+            ["retryable"] = error.Retryable,
+            ["fileName"] = error.FileName,
+            ["existingDocumentId"] = error.ExistingDocumentId,
+            // Task 055 (#1005): names the document. Null whenever the id is also null.
+            ["existingDocumentName"] = error.ExistingDocumentName
+        };
+
+        if (error.ExistingDocumentId is not null)
+        {
+            extensions["canSaveAsVersion"] = error.CanSaveAsVersion;
+        }
+
+        return extensions;
     }
 
     /// <summary>
@@ -652,25 +688,14 @@ public static class OfficeEndpoints
                     ["retryable"] = error.Retryable
                 }),
             // Task 025 (word-add-in-r1) — a same-name collision refused BEFORE any bytes moved. FileName +
-            // ExistingDocumentId (Document saves only, when resolvable) let the pane offer the two-option
-            // choice ("Keep both" / "Save as new version") without re-parsing the message text.
+            // ExistingDocumentId (when resolvable and readable) let the pane offer its choices without
+            // re-parsing the message text.
             OfficeErrorCodes.NameCollision => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),
                 detail: error.Message,
                 statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = error.Code,
-                    ["correlationId"] = correlationId,
-                    ["retryable"] = error.Retryable,
-                    ["fileName"] = error.FileName,
-                    ["existingDocumentId"] = error.ExistingDocumentId,
-                    // Task 055 (#1005): names the document the version retry would write into. Null — and so
-                    // omitted from the body — whenever the id is also null, which is how both the
-                    // filed-elsewhere case and the caller-cannot-read case reach the pane.
-                    ["existingDocumentName"] = error.ExistingDocumentName
-                }),
+                extensions: NameCollisionExtensions(error, correlationId)),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,
@@ -1035,20 +1060,25 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
-        // GET /office/search/matter-types - List active Matter Type reference values (task 038)
-        // A small, load-once reference list (5 rows in dev) — sibling of /entities, not a filter on it:
-        // sprk_mattertype_ref is a reference table (not an association-target entity) and the caller
-        // loads it once, so the 2-character-minimum typeahead contract below does not fit.
+        // GET /office/search/{list} - List the active rows of one create-form reference list:
+        // matter-types (task 038), practice-areas and project-types (task 100).
+        // ONE parameterized route rather than three near-identical ones (CLAUDE.md §11): task 100 generalized the
+        // task-038 /matter-types route, whose URL and wire shape are unchanged. {list} is looked up in the CLOSED
+        // OfficeSearchService.ReferenceLists table — any other value is a 404, so the route cannot read an arbitrary
+        // table. The literal /entities route above takes precedence over this parameter (route precedence).
+        // Small, load-once reference lists — siblings of /entities, not filters on it: they are reference tables (not
+        // association-target entities) and the caller loads each once, so the 2-character typeahead contract does not fit.
         // Authorization: OfficeAuthFilter validates user authentication
         // Rate Limit: 30 requests/minute/user (reuses the Search category — same low-risk read shape)
-        search.MapGet("/matter-types", GetMatterTypesAsync)
-            .WithName("GetOfficeMatterTypes")
-            .WithSummary("List active Matter Type reference values")
-            .WithDescription("Returns the active sprk_mattertype_ref rows for the pane's required Matter Type field (spaarkeai-word-add-in-r1 task 038). A small, load-once reference list, not a typeahead search.")
+        search.MapGet("/{list}", GetReferenceListAsync)
+            .WithName("GetOfficeReferenceList")
+            .WithSummary("List the active rows of a create-form reference list")
+            .WithDescription("Returns the active rows of one reference list for the pane's \"+ New\" form: matter-types (sprk_mattertype_ref, task 038), practice-areas (sprk_practicearea_ref) or project-types (sprk_projecttype_ref) (task 100). A small, load-once list ordered by name, not a typeahead search. Any other list name is 404.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
             .AddOfficeAuthFilter() // Task 073 - baseline Office-caller authentication
-            .Produces<MatterTypeListResponse>(StatusCodes.Status200OK)
+            .Produces<ReferenceListResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
     }
 
@@ -1244,14 +1274,16 @@ public static class OfficeEndpoints
     }
 
     /// <summary>
-    /// Matter-types list endpoint handler (task 038). No query, no pagination — the whole active set is
-    /// returned in one call for a dropdown loaded once.
+    /// Reference-list endpoint handler (task 038 for matter types; generalized by task 100). No query, no pagination —
+    /// the whole active set is returned in one call for a dropdown loaded once.
     /// </summary>
-    /// <param name="officeService">Office service for the matter-type reference read.</param>
+    /// <param name="list">The list name — a key of <see cref="OfficeSearchService.ReferenceLists"/>.</param>
+    /// <param name="officeService">Office service for the reference read.</param>
     /// <param name="logger">Logger instance.</param>
     /// <param name="context">HTTP context for user claims.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    private static async Task<IResult> GetMatterTypesAsync(
+    private static async Task<IResult> GetReferenceListAsync(
+        string list,
         IOfficeService officeService,
         ILogger<Program> logger,
         HttpContext context,
@@ -1263,7 +1295,7 @@ public static class OfficeEndpoints
 
         if (string.IsNullOrEmpty(userId))
         {
-            logger.LogWarning("Matter-types list requested without valid user identity");
+            logger.LogWarning("Reference list requested without valid user identity");
             return Results.Problem(
                 title: "Unauthorized",
                 detail: "User identity could not be determined",
@@ -1275,12 +1307,28 @@ public static class OfficeEndpoints
                 });
         }
 
+        // A CLOSED table: an unknown list name is a 404, never a read of a table the caller named.
+        if (!OfficeSearchService.TryGetReferenceList(list, out var referenceList))
+        {
+            return Results.Problem(
+                title: "Not Found",
+                detail: "There is no reference list with that name.",
+                statusCode: StatusCodes.Status404NotFound,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_VALIDATION",
+                    ["correlationId"] = traceId,
+                    ["parameter"] = "list"
+                });
+        }
+
         try
         {
-            var response = await officeService.GetMatterTypesAsync(cancellationToken);
+            var response = await officeService.GetReferenceListAsync(referenceList, cancellationToken);
 
             logger.LogInformation(
-                "Matter-types list returned {ResultCount} results for user {UserId}",
+                "Reference list {List} returned {ResultCount} results for user {UserId}",
+                list,
                 response.Results.Count,
                 userId);
 
@@ -1288,11 +1336,11 @@ public static class OfficeEndpoints
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Error listing matter types for user {UserId}", userId);
+            logger.LogError(ex, "Error listing reference list {List} for user {UserId}", list, userId);
 
             return Results.Problem(
-                title: "Matter Types Unavailable",
-                detail: "An error occurred while listing matter types",
+                title: "Reference List Unavailable",
+                detail: "An error occurred while listing the reference values",
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?>
                 {
@@ -1320,7 +1368,7 @@ public static class OfficeEndpoints
         group.MapPost("/quickcreate/{entityType}", QuickCreateAsync)
             .WithName("OfficeQuickCreate")
             .WithSummary("Create a new entity with minimal fields")
-            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. This endpoint assigns NEITHER a matter number nor a project number: both will be set by a planned separate server-side numbering component that triggers on create. Because sprk_matternumber and sprk_projectnumber are their entities' primary name attributes, records created here show a blank name in lookups and grids until that component exists. Invoice keeps the minimal name-only path. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
+            .WithDescription("Creates a new Matter, Project, or Invoice with minimal required fields, for inline creation from the Office add-in. Matter and Project are created server-side (spaarkeai-word-add-in-r1 FR-13) with a load-bearing owner — the caller's business-unit default owner team (an unresolved caller or team is refused with 403 and no row is written), business-unit defaults, the Field Mapping Framework applied from the optional record context, and for Matter the matter-type lookup when supplied. The matter and project numbers (sprk_matternumber, sprk_projectnumber — each entity's primary name attribute) are assigned by Dataverse's platform autonumber on create (MAT-###### / PRJ-######; interim until a numbering function, task 076); the request never carries one. A create the number's alternate key refuses is retried with the next number; after 3 refusals it is refused with 409 record_number_unavailable and no row is written. A record that comes back without a number is still returned, with a warning. Task 100 adds the create form's fields: practiceAreaId (Matter) and projectTypeId (Project) are set when they resolve and dropped with a warning when they do not (never a rejection, like matterTypeId); assignedToContactId names the Assigned To contact (sprk_assignedtointernal on a Matter or Project, sprk_assignedto1 on an Invoice) and requires the caller to hold Read on that contact — otherwise 403 OFFICE_009 assignee_inaccessible, with one body for an unreadable and a nonexistent contact, and no row written. Without it a Matter or Project is assigned to the maker's linked contact and an Invoice is left unassigned. Invoice is written on the minimal path: name, description and Assigned To. Every record created here is owned by the caller's business-unit default owner team (task 080); when no team resolves the create is refused with 403 OFFICE_022 and no row is written.")
             .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
             .AddIdempotencyFilter() // Task 030 - Idempotency support per spec.md
             .AddOfficeAuthFilter()  // Task 073 - baseline Office-caller authentication
@@ -1330,7 +1378,24 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
+            .ProducesProblem(StatusCodes.Status409Conflict) // Idempotency conflicts; record_number_unavailable (task 076)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // GET /office/quickcreate/defaults - What the "+ New" form prefills (task 100, owner decision B)
+        // The caller's OWN linked contact for Assigned To — the same contact RecordCreationService assigns a Matter or
+        // Project when the request names none, so the prefill and the server's default are one answer
+        // (RecordCreationService.ResolveDefaultAssigneeAsync). Takes no id: there is no resource to authorize beyond
+        // the caller themself (waived Permanent in RouteAuthorizationGuardTests).
+        // Authorization: OfficeAuthFilter validates user authentication
+        // Rate Limit: Search category (30/minute/user) — a read loaded once per pane, not a create
+        group.MapGet("/quickcreate/defaults", GetQuickCreateDefaultsAsync)
+            .WithName("OfficeQuickCreateDefaults")
+            .WithSummary("Defaults for the quick-create form")
+            .WithDescription("Returns what the pane's \"+ New\" form prefills: assignedTo = the caller's own linked contact (task 141's user-contact link, never an email match), or null when the caller has none, cannot be resolved, or it could not be read. For a Matter or Project it is the contact the create assigns when the request names none (spaarkeai-word-add-in-r1 task 100).")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.Search)
+            .AddOfficeAuthFilter()
+            .Produces<QuickCreateDefaultsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
 
         // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
@@ -1358,6 +1423,29 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+    }
+
+    /// <summary>
+    /// Quick-create defaults handler (task 100): the caller's own linked contact for the form's Assigned To prefill.
+    /// A caller who cannot be resolved to a Dataverse user gets <c>assignedTo: null</c> (200), not a refusal — the
+    /// form simply has no prefill, and the create itself refuses such a caller with its own message.
+    /// </summary>
+    private static async Task<IResult> GetQuickCreateDefaultsAsync(
+        RecordCreationService recordCreation,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var caller = await callerResolver.ResolveAsync(context.User, cancellationToken);
+        if (!caller.IsResolved
+            || !Guid.TryParse(caller.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            return TypedResults.Ok(new QuickCreateDefaultsResponse());
+        }
+
+        var assignedTo = await recordCreation.ResolveDefaultAssigneeAsync(callerSystemUserId, cancellationToken);
+        return TypedResults.Ok(new QuickCreateDefaultsResponse { AssignedTo = assignedTo });
     }
 
     /// <summary>

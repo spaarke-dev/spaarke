@@ -1,5 +1,6 @@
 import { apiClient, ApiClientError } from '@shared/services';
-import { cleanGuid } from '../utils/cleanGuid';
+import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { ACCESS_SYSTEM_FAILURE_REASON_CODE } from '../utils/errorMessages';
 
 /**
@@ -296,6 +297,45 @@ export function applyStampPrecedence(
   // owner's precedence names exactly three 'new' reasons as the stamp's ONLY fallback trigger — none
   // of these outcomes is in that list, so the stamp is not consulted and the outcome is unchanged.
   return urlOutcome;
+}
+
+/**
+ * What {@link writeIdentityStampAfterSave} did: `'written'` / `'unchanged'` come from the adapter; `'skipped'` = the
+ * host cannot write the stamp (or there was no id); `'failed'` = the write was attempted and the host refused it.
+ */
+export type IdentityStampWriteOutcome = 'written' | 'unchanged' | 'skipped' | 'failed';
+
+/**
+ * After a SUCCESSFUL save of the open document, mark it with the saved `sprk_document` id (spaarkeai-word-add-in-r1
+ * task 089, UAT-9) — the one call both the pane (`SaveView`) and the ribbon Quick Save make, so the two cannot
+ * drift.
+ *
+ * - **Capability-gated (NFR-10)**: only when `canWriteDocumentStamp` is true — never a `hostType` check. Outlook
+ *   and a Word without the `CustomXmlParts` set get `'skipped'` and nothing is attempted.
+ * - **Non-fatal (owner, 2026-10-03)**: the save has already succeeded, so a refused write is logged and reported as
+ *   `'failed'`, never thrown — the caller still reports the save as a success.
+ * - **Canonical id (ADR-044)**: the id is run through `cleanGuid` before it reaches the document.
+ * - **A stamp is a hint, never an authorization (014 §3)**: this only records which record the bytes were saved
+ *   as; every later use of it still goes through the server's own authorization (the version save's write check).
+ */
+export async function writeIdentityStampAfterSave(
+  adapter: Pick<IHostAdapter, 'getCapabilities' | 'writeDocumentStamp'>,
+  documentId: string | null | undefined
+): Promise<IdentityStampWriteOutcome> {
+  const id = cleanGuid(documentId);
+  if (!id) {
+    return 'skipped';
+  }
+
+  try {
+    if (!adapter.getCapabilities().canWriteDocumentStamp) {
+      return 'skipped';
+    }
+    return await adapter.writeDocumentStamp(id);
+  } catch (error) {
+    console.warn('[Spaarke] The document was saved, but its Spaarke identity mark could not be written', error);
+    return 'failed';
+  }
 }
 
 /**

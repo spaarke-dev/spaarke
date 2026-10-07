@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 
@@ -98,9 +100,26 @@ internal sealed class ExternalGrantRow
     /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
     /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
     /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// <para><b>⚠️ Its WIRE shape is not <c>yyyy-MM-dd</c></b> (task 140, read live 2026-10-05). The column's
+    /// <i>format</i> is DateOnly but its <i>behaviour</i> is <b>TimeZoneIndependent</b> (task 098 §2.3), and the Web API
+    /// returns a TimeZoneIndependent value as a full timestamp — <c>"2026-12-10T00:00:00Z"</c>. System.Text.Json's own
+    /// <see cref="DateOnly"/> converter accepts only <c>yyyy-MM-dd</c> and THROWS on that, so every read of a row carrying
+    /// an expiry (which, since task 097, is every row the BFF writes) failed with a <see cref="JsonException"/>: the grant
+    /// core's re-grant and every contact-side grant (its expiry-cap read), <c>/revoke</c>, the contact revoke and list,
+    /// and <c>set-record-share-expiry</c>. <see cref="DataverseDateOnlyJsonConverter"/> reads both shapes.</para>
     /// </remarks>
     [JsonPropertyName("sprk_expiresdate")]
+    [JsonConverter(typeof(DataverseDateOnlyJsonConverter))]
     public DateOnly? ExpiresDate { get; set; }
+
+    /// <summary>
+    /// The row's version as it was read — <c>@odata.etag</c>, <c>W/"&lt;versionnumber&gt;"</c>, which the Web API returns on
+    /// every row of a read without being asked (live-verified 2026-10-05). A write that must not land over a change made
+    /// since the read sends it as <c>If-Match</c> (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>): the contact-side
+    /// grant's PATCH and the contact revoke's deactivation (task 140, session 27 round 42 item 1).
+    /// </summary>
+    [JsonPropertyName("@odata.etag")]
+    public string? ETag { get; set; }
 
     [JsonPropertyName("_sprk_contact_value")]
     public Guid? ContactId { get; set; }
@@ -117,8 +136,92 @@ internal sealed class ExternalGrantRow
     [JsonPropertyName("_sprk_workassignment_value")]
     public Guid? WorkAssignmentId { get; set; }
 
+    /// <summary>
+    /// The SYSTEMUSER who issued the grant (<c>sprk_grantedby</c>), when the issuer was an internal user.
+    /// </summary>
+    [JsonPropertyName("_sprk_grantedby_value")]
+    public Guid? GrantedBySystemUserId { get; set; }
+
+    /// <summary>
+    /// The CONTACT who issued the grant (<c>sprk_grantedbycontact</c>, unified-access-control-r2 task 140) — set only
+    /// on a grant a contact made through the external SPA. It is the issuer the contact-side routes scope to: a contact
+    /// may change or revoke only a row whose value is themselves, so a row anyone else issued is never theirs to alter.
+    /// </summary>
+    [JsonPropertyName("_sprk_grantedbycontact_value")]
+    public Guid? GrantedByContactId { get; set; }
+
+    /// <summary>
+    /// The issuing contact's id as TEXT (<c>sprk_grantedbycontactid</c>, session 27 round 50 item 2) — the grant's provenance,
+    /// which survives the contact's deletion. The lookup above cannot: its relationship's Delete cascade is RemoveLink, so
+    /// deleting the contact empties it. Written in the same write as the lookup, every time (set on a contact grant, cleared
+    /// on an internal take-over), so "recorded but the lookup is empty" means exactly "the issuer was deleted".
+    /// </summary>
+    /// <remarks>Read as text, never parsed on the wire: a value that is not a GUID must not fail every grant-row read (the
+    /// lesson of the TimeZoneIndependent expiry shape, task 140 note §12). The column is BFF-written (field-secured).</remarks>
+    [JsonPropertyName("sprk_grantedbycontactid")]
+    public string? GrantedByContactProvenance { get; set; }
+
+    /// <summary>
+    /// The row was issued by a CONTACT: its issuer lookup is set, or — once that contact was deleted — its recorded provenance
+    /// is. What an internal change takes over (both columns cleared in one write).
+    /// </summary>
+    [JsonIgnore]
+    public bool IsContactIssued => GrantedByContactId is not null || !string.IsNullOrWhiteSpace(GrantedByContactProvenance);
+
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
+}
+
+/// <summary>
+/// Reads a Dataverse date-only column in BOTH shapes the Web API returns: <c>yyyy-MM-dd</c> (a column whose behaviour is
+/// DateOnly) and <c>yyyy-MM-ddT00:00:00Z</c> (a DateOnly-FORMAT column whose behaviour is TimeZoneIndependent —
+/// <c>sprk_externalrecordaccess.sprk_expiresdate</c>, live-verified 2026-10-05). Writes <c>yyyy-MM-dd</c>.
+/// </summary>
+/// <remarks>
+/// <para><b>The calendar date is the leading ten characters, as written.</b> A TimeZoneIndependent value is stored and
+/// returned with no time-zone conversion — the <c>Z</c> is how the Web API renders it, not an instant to convert — so the
+/// stored date is exactly the date part. Converting to a local date would move a midnight value to the previous day
+/// anywhere west of UTC. The SDK path reads the same column as a <see cref="DateTime"/> and takes its date the same
+/// way (<c>ExternalAccessReconciliationJob</c>, <c>GrantExpiryReminderJob</c>).</para>
+/// <para>Anything else — a number, a malformed string — is a <see cref="JsonException"/>, never a guessed date.</para>
+/// <para>§11: <i>Existing</i> — System.Text.Json's own <see cref="DateOnly"/> converter, which reads only
+/// <c>yyyy-MM-dd</c> and is the defect. <i>Extension</i> — it cannot be configured to accept the timestamp shape, and
+/// changing the property to <see cref="DateTime"/> would change every consumer of a value that is a date. <i>Cost of doing
+/// nothing</i> — every read of a dated grant row throws (unified-access-control-r2 task 140 note §12).</para>
+/// </remarks>
+internal sealed class DataverseDateOnlyJsonConverter : JsonConverter<DateOnly?>
+{
+    /// <inheritdoc />
+    public override bool HandleNull => true;
+
+    /// <inheritdoc />
+    public override DateOnly? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+            return null;
+
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException($"A Dataverse date must be a JSON string, not {reader.TokenType}.");
+
+        var text = reader.GetString() ?? string.Empty;
+        if (text.Length >= 10
+            && (text.Length == 10 || text[10] == 'T')
+            && DateOnly.TryParseExact(text.AsSpan(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return date;
+        }
+
+        throw new JsonException($"'{text}' is not a Dataverse date (yyyy-MM-dd, or yyyy-MM-ddT… from a TimeZoneIndependent column).");
+    }
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, DateOnly? value, JsonSerializerOptions options)
+    {
+        if (value is { } date)
+            writer.WriteStringValue(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        else
+            writer.WriteNullValue();
+    }
 }
 
 /// <summary>
@@ -258,10 +361,85 @@ internal static class ExternalGrantLifecycle
     // sprk_expiresdate added by task 023 (H1): without it the upsert's match path cannot see the row's
     // current expiry, so it could neither write a new one nor detect that it was "re-granting" a row
     // that had already expired. Verified DATE ONLY in live metadata (task 007).
+    //
+    // The two ISSUER columns (task 140): sprk_grantedby (systemuser, long-standing) and sprk_grantedbycontact (contact,
+    // added by scripts/Deploy-ExternalRecordAccessContactGrantor.ps1). The contact-side routes decide "is this row the
+    // caller's?" from the second, and /grant re-stamps a row a contact issued when a systemuser changes it, so both read
+    // paths need it. Beside them, sprk_grantedbycontactid (session 27 round 50 item 2): the contact issuer's id as text, which
+    // outlives the contact — so an internal change takes over a row whose issuing contact was deleted too. ⚠️ DEPLOY ORDER:
+    // both columns must exist in the environment BEFORE a BFF carrying this select is deployed — Dataverse answers 400 to a
+    // $select naming an unknown attribute (task 140 notes §live gate).
     private const string RowSelect =
         "sprk_externalrecordaccessid,sprk_accesslevel,statecode,sprk_expiresdate," +
         "_sprk_contact_value,_sprk_organization_value," +
-        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value";
+        "_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value," +
+        "_sprk_grantedby_value,_sprk_grantedbycontact_value," + GrantedByContactIdAttribute;
+
+    /// <summary>
+    /// The <c>@odata.bind</c> navigation property of the contact-typed issuer lookup <c>sprk_grantedbycontact</c>
+    /// (task 140). The schema script creates the lookup with SchemaName <c>sprk_GrantedByContact</c>, so — like every
+    /// other lookup on this table (task 070) — its navigation property is the PascalCase schema name.
+    /// </summary>
+    internal const string GrantedByContactNavigationProperty = "sprk_GrantedByContact";
+
+    /// <summary>The <c>@odata.bind</c> navigation property of the systemuser issuer lookup <c>sprk_grantedby</c>.</summary>
+    internal const string GrantedByNavigationProperty = "sprk_GrantedBy";
+
+    /// <summary>The LOGICAL name of the contact-typed issuer lookup — what an SDK write (<c>IGenericEntityService</c>) addresses.</summary>
+    internal const string GrantedByContactAttribute = "sprk_grantedbycontact";
+
+    /// <summary>
+    /// The contact issuer's id as TEXT — <c>sprk_grantedbycontactid</c> (session 27 round 50 item 2), a plain column, so its
+    /// logical name is also its Web API property and its <c>$select</c> name. Set and cleared in the SAME write as
+    /// <see cref="GrantedByContactAttribute"/>, every time; only a deletion of the contact (RemoveLink) empties the lookup
+    /// alone, which is how the reconciliation job knows the issuer was deleted. Created by
+    /// <c>scripts/Deploy-ExternalRecordAccessContactGrantor.ps1</c>.
+    /// </summary>
+    internal const string GrantedByContactIdAttribute = "sprk_grantedbycontactid";
+
+    /// <summary>The LOGICAL name of the systemuser issuer lookup — what an SDK write addresses.</summary>
+    internal const string GrantedByAttribute = "sprk_grantedby";
+
+    /// <summary>The ONE text form of a contact issuer's id in <see cref="GrantedByContactIdAttribute"/>: lower-case, hyphenated (<c>D</c>).</summary>
+    internal static string ContactIssuerProvenance(Guid issuerContactId)
+        => issuerContactId.ToString("D", CultureInfo.InvariantCulture);
+
+    /// <summary>
+    /// The SDK-shaped (logical-name) fields that make an internal user's change of a CONTACT-issued row take it over
+    /// (session 27 round 34 item 3): the contact issuer is CLEARED — the lookup AND its recorded provenance, in the same write
+    /// (round 50 item 2) — and <c>sprk_grantedby</c> is stamped with the changing systemuser, so the contact can no longer
+    /// revoke, or re-lengthen through its own re-grant, a decision an internal user made. The grant core's Web API path does
+    /// the same with <c>@odata.bind</c> (<c>GrantExternalAccessEndpoint.CreateGrantAsync</c>, default mode).
+    /// </summary>
+    /// <remarks>The systemuser is stamped when it resolves; an audit field never blocks the write (the core's rule) —
+    /// the contact stamp is cleared either way, because that is what protects the internal decision. Applies equally to a
+    /// row whose issuing contact was deleted (<see cref="ExternalGrantRow.IsContactIssued"/>): it is the internal user's
+    /// from now on, so its provenance no longer names a contact.</remarks>
+    internal static void AddInternalTakeOverFields(IDictionary<string, object> fields, Guid? changingSystemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(fields);
+        fields[GrantedByContactAttribute] = DBNull.Value; // IGenericEntityService: DBNull.Value CLEARS the column
+        fields[GrantedByContactIdAttribute] = DBNull.Value;
+        if (changingSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+            fields[GrantedByAttribute] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", systemUserId);
+    }
+
+    /// <summary>
+    /// The Web API shape of <see cref="AddInternalTakeOverFields"/> — what the grant core's default mode adds to its PATCH when
+    /// it CHANGES a contact-issued row (<see cref="ExternalGrantRow.IsContactIssued"/>): the contact lookup unbound (only when
+    /// it is still bound — a deleted issuer's is already empty), its provenance cleared in the same write (round 50 item 2),
+    /// and <c>sprk_grantedby</c> bound to the changing systemuser when it resolved.
+    /// </summary>
+    internal static void AddInternalTakeOverBinds(IDictionary<string, object?> update, ExternalGrantRow row, Guid? changingSystemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentNullException.ThrowIfNull(row);
+        if (row.GrantedByContactId is not null)
+            update[$"{GrantedByContactNavigationProperty}@odata.bind"] = null;
+        update[GrantedByContactIdAttribute] = null;
+        if (changingSystemUserId is { } systemUserId && systemUserId != Guid.Empty)
+            update[$"{GrantedByNavigationProperty}@odata.bind"] = $"/systemusers({systemUserId})";
+    }
 
     /// <summary>
     /// Every ACTIVE row for one logical grant, ordered deterministically (ascending id).
@@ -329,6 +507,21 @@ internal static class ExternalGrantLifecycle
             filter: ActiveRowsForRootFilter(rootType, rootId),
             select: RowSelect,
             top: top,
+            cancellationToken: ct);
+
+    /// <summary>
+    /// Every ACTIVE row on one record that a given CONTACT issued (<c>sprk_grantedbycontact</c>, task 140) — what the
+    /// contact-side list shows the caller. Same row shape and root half as <see cref="ActiveRowsForRootFilter"/>; the
+    /// issuer half is the only addition. No expiry predicate: the caller's own lapsed grants are listed so they can see
+    /// and revoke them. Exceptions propagate.
+    /// </summary>
+    internal static Task<List<ExternalGrantRow>> QueryActiveRowsIssuedByContactAsync(
+        DataverseWebApiClient dataverseClient, ExternalGrantRootType rootType, Guid rootId, Guid issuerContactId,
+        CancellationToken ct)
+        => dataverseClient.QueryAsync<ExternalGrantRow>(
+            EntitySet,
+            filter: $"{ActiveRowsForRootFilter(rootType, rootId)} and _sprk_grantedbycontact_value eq {issuerContactId}",
+            select: RowSelect,
             cancellationToken: ct);
 
     /// <summary>
@@ -428,13 +621,31 @@ internal static class ExternalGrantLifecycle
 
     /// <summary>
     /// Stable reason code (422): the grantee — the contact, one of its active organizations, or the organization of an
-    /// organization-wide grant — is on this record's No Access list, or the list could not be read (fail closed).
-    /// Task 140 reuses it verbatim.
+    /// organization-wide grant — is on this record's No Access list (a matching entry). Task 140 reuses it verbatim.
+    /// Since task 142 r4 a list that could not be read is NOT this code: it is
+    /// <see cref="GranteeNoAccessUnverifiableReasonCode"/>.
     /// </summary>
     internal const string GranteeDeniedReasonCode = "sdap.access.grant.grantee_denied";
 
+    /// <summary>
+    /// Stable reason code (503, task 142 r4 · owner round 13 item 4): whether the grantee is on this record's No Access
+    /// list could not be checked — a read fault (Dataverse 5xx, throttling, a timeout, unreadable memberships or
+    /// referenced organizations, a fail-closed deny-list read). Nothing was granted (fail closed); retryable. The grant
+    /// routes' sibling of <c>/share-user</c>'s <c>sdap.access.user_share.no_access_unverifiable</c>. Task 140 reuses it
+    /// verbatim.
+    /// </summary>
+    internal const string GranteeNoAccessUnverifiableReasonCode = "sdap.access.grant.no_access_unverifiable";
+
     /// <summary>Stable reason code (500): the grantor's own rights on the record could not be read (the probe threw).</summary>
     internal const string CallerRightsUnreadableReasonCode = "sdap.access.grant.caller_rights_unreadable";
+
+    /// <summary>
+    /// Stable reason code (409, task 140 · no proxy revocation or extension): a CONTACT grantor asked to grant someone
+    /// who already holds an active row on the record that somebody ELSE issued (a systemuser, the Assigned-To rule, or
+    /// another contact). The row is left exactly as it is — re-stamping it would let the contact later revoke it, and
+    /// extending it would override the issuer's own time bound.
+    /// </summary>
+    internal const string ContactGrantManagedElsewhereReasonCode = "sdap.access.contact_grant.managed_elsewhere";
 
     /// <summary>
     /// The lower of the requested level and the ceiling — levels are ordered by their option-set values
@@ -545,7 +756,184 @@ internal static class ExternalGrantLifecycle
 
         return deactivated;
     }
+
+    /// <summary>
+    /// Deactivates rows ONLY IF each is still at the version it was read with (<see cref="ExternalGrantRow.ETag"/> as
+    /// <c>If-Match</c>, <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>). A row that changed since the read is NOT
+    /// deactivated: it is returned in <see cref="ConditionalDeactivation.ChangedSinceRead"/>, and what that means is the
+    /// caller's decision — there is no retry.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why (session 27 round 42 item 1).</b> A CONTACT may deactivate only rows it issued, and decides "issued by
+    /// me" from a read. An internal user can take such a row over (round 34 item 3) between that read and the write; an
+    /// unconditional write would then end a decision the internal user just made. Every contact-path deactivation — the
+    /// contact revoke and the contact-issuer mode's duplicate collapses — goes through here.</para>
+    /// <para>Every other fault propagates exactly as in <see cref="DeactivateAsync"/> (a partial sweep surfaces as a
+    /// failure, never as success), including a row with no version (nothing is sent for it) and a row that no longer
+    /// exists.</para>
+    /// </remarks>
+    internal static async Task<ConditionalDeactivation> DeactivateIfUnchangedAsync(
+        DataverseWebApiClient dataverseClient,
+        IEnumerable<ExternalGrantRow> rows,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var deactivated = new List<Guid>();
+        var changed = new List<Guid>();
+
+        foreach (var row in rows)
+        {
+            try
+            {
+                await dataverseClient.UpdateIfMatchAsync(EntitySet, row.Id, new { statecode = 1, statuscode = 2 }, row.ETag ?? string.Empty, ct);
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                changed.Add(row.Id);
+                logger.LogWarning(
+                    "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed since it was read ({ETag}); it was NOT " +
+                    "deactivated — it is no longer certainly the reader's to end.", row.Id, row.ETag);
+                continue;
+            }
+
+            deactivated.Add(row.Id);
+            logger.LogInformation("[EXT-GRANT-LIFECYCLE] Deactivated access record {AccessRecordId} (If-Match {ETag})", row.Id, row.ETag);
+        }
+
+        return new ConditionalDeactivation(deactivated, changed);
+    }
+
+    /// <summary>
+    /// Re-reads each row that changed between a contact's "issued by me" read and its conditional write (session 27 round
+    /// 42 item 1: "the row is re-read for the response") and logs what it now is — never writing it again (no blind
+    /// retry). A re-read that fails is logged and yields <c>null</c> for that row; the caller's answer does not depend on it.
+    /// </summary>
+    /// <returns>The rows as they are now, in <paramref name="rowIds"/> order (<c>null</c> where the re-read failed or the row
+    /// is gone).</returns>
+    internal static async Task<IReadOnlyList<ExternalGrantRow?>> ReReadChangedRowsAsync(
+        DataverseWebApiClient dataverseClient,
+        IEnumerable<Guid> rowIds,
+        Guid callerContactId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var current = new List<ExternalGrantRow?>();
+        foreach (var rowId in rowIds)
+        {
+            ExternalGrantRow? row;
+            try
+            {
+                row = await RetrieveRowAsync(dataverseClient, rowId, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed after contact {ContactId} checked it was " +
+                    "theirs, and could not be re-read; nothing was written over it.", rowId, callerContactId);
+                current.Add(null);
+                continue;
+            }
+
+            logger.LogWarning(
+                "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed after contact {ContactId} checked it was theirs; " +
+                "nothing was written over it. Now: active {Active}, level {Level}, expiry {Expiry}, issued by contact " +
+                "{IssuerContactId} / systemuser {IssuerSystemUserId}.",
+                rowId, callerContactId, row?.IsActive, row?.AccessLevel, row?.ExpiresDate,
+                row?.GrantedByContactId, row?.GrantedBySystemUserId);
+            current.Add(row);
+        }
+
+        return current;
+    }
+
+    // ── A contact's own access on one record (task 140 · owner G2 (i); session 27 round 42 item 2) ────────────
+
+    /// <summary>
+    /// The grant rows that can carry a CONTACT's own access to one record at <paramref name="minimumLevel"/> or above — the
+    /// ONE definition of "the contact's own grant" behind task 140's expiry rule. The contact-side grant route caps the
+    /// expiry a contact may issue at the latest of them (owner decision G2 (i): a grantor cannot hand out time they do not
+    /// hold), and the reconciliation job caps — or ends — a contact-issued row that carries no expiry by the same rows
+    /// (session 27 round 42 item 2: a contact-issued grant may never outlive its issuer's own access).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which rows</b> — exactly the rows the read path lets confer (<c>ExternalParticipationService</c>): the
+    /// contact's own active rows on the record; and, unless the record is Secure or Limited (direct grants only, FR-22),
+    /// the active organization-wide rows of its CONFERRING organizations (<paramref name="conferringOrganizationIds"/> —
+    /// task 109's conferring set). Flags that are absent or unreadable read as direct-only: the fail-closed reading, with
+    /// fewer sources and so an earlier date. Only rows at <paramref name="minimumLevel"/> or above count, and only rows
+    /// <paramref name="mayConfer"/> keeps. A direct row naming a firm confers only while that firm is active (ISS-026): a
+    /// firm that is one of the contact's conferring organizations is active by construction; any other is read, and one
+    /// that no longer exists (404) means the row does not count.</para>
+    /// <para><b>Faults propagate</b> — a read that could not be completed is never "no rows".</para>
+    /// </remarks>
+    /// <param name="mayConfer">Rows it rejects are dropped BEFORE any firm is read. The route keeps only rows that confer
+    /// today; the job also keeps undated rows, whose date the same run may be about to stamp.</param>
+    internal static async Task<ContactHeldGrants> ReadContactHeldGrantsAsync(
+        Guid contactId,
+        IReadOnlyCollection<Guid> conferringOrganizationIds,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        ExternalAccessLevel minimumLevel,
+        Func<ExternalGrantRow, bool> mayConfer,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(mayConfer);
+
+        var flags = await participations.GetRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct);
+        var directOnly = !flags.TryGetValue(rootId, out var f) || f.IsUnreadable || f.IsDirectOnly;
+
+        var rows = new List<ExternalGrantRow>(
+            await QueryActiveRowsAsync(dataverseClient, ExternalGrantKey.ForContact(rootType, rootId, contactId), ct));
+
+        if (!directOnly)
+        {
+            foreach (var organizationId in conferringOrganizationIds)
+            {
+                rows.AddRange(await QueryActiveRowsAsync(
+                    dataverseClient, ExternalGrantKey.ForOrganization(rootType, rootId, organizationId), ct));
+            }
+        }
+
+        var held = new List<ExternalGrantRow>();
+        foreach (var row in rows.Where(r => (r.AccessLevel ?? 0) >= (int)minimumLevel && mayConfer(r)))
+        {
+            if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
+                && !conferringOrganizationIds.Contains(firm))
+            {
+                ExternalParticipationService.OrganizationStateRow? organization;
+                try
+                {
+                    organization = await dataverseClient.RetrieveAsync<ExternalParticipationService.OrganizationStateRow>(
+                        "sprk_organizations", firm, "statecode", ct);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    organization = null; // a deleted firm confers nothing — the row does not count
+                }
+
+                if (!ExternalParticipationService.OrganizationIsActive(organization))
+                    continue;
+            }
+
+            held.Add(row);
+        }
+
+        return new ContactHeldGrants(directOnly, held);
+    }
 }
+
+/// <summary>What <see cref="ExternalGrantLifecycle.DeactivateIfUnchangedAsync"/> did.</summary>
+/// <param name="Deactivated">Rows that were still at their read version and are now inactive.</param>
+/// <param name="ChangedSinceRead">Rows that changed since they were read (HTTP 412) and were left exactly as they are.</param>
+internal sealed record ConditionalDeactivation(IReadOnlyList<Guid> Deactivated, IReadOnlyList<Guid> ChangedSinceRead);
+
+/// <summary>What <see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/> found.</summary>
+/// <param name="DirectOnly">The record admits only direct grants for contacts (Secure, Limited, or flags that could not be
+/// read), so organization-wide rows were not read.</param>
+/// <param name="Rows">The rows that can carry the contact's access, as read — each with its own expiry, possibly none.</param>
+internal sealed record ContactHeldGrants(bool DirectOnly, IReadOnlyList<ExternalGrantRow> Rows);
 
 /// <summary>Who a grant would give access to — the input the write-time policy needs (task 138).</summary>
 internal enum GrantGranteeKind
@@ -624,15 +1012,55 @@ internal sealed record GrantPolicyDecision(bool IsAllowed, string? ReasonCode, i
         ". Nothing was changed, so their existing access stays as it is.");
 
     /// <summary>
-    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list, or the list could not be read.
-    /// 422. The detail never names the entry or its reason (task 143's rule for refusal messages).
+    /// Task 139 (FR-23 at write time): the grantee is on this record's No Access list (a matching entry). 422. The detail
+    /// never names the entry or its reason (task 143's rule for refusal messages). A list that could not be checked is
+    /// <see cref="GranteeDenyListUnreadable"/> since task 142 r4, so this answer now means an entry and nothing else.
     /// </summary>
     public static GrantPolicyDecision GranteeDenied { get; } = new(
         false,
         ExternalGrantLifecycle.GranteeDeniedReasonCode,
         StatusCodes.Status422UnprocessableEntity,
-        "This contact or organization cannot be given access to this record: it is on the record's No Access list, " +
-        "or that list could not be checked. Nothing was granted.");
+        "This contact or organization cannot be given access to this record: it is on the record's No Access list. " +
+        "Nothing was granted.");
+
+    /// <summary>
+    /// The No Access check could not be completed (task 142 r3 for a throw; r4 · owner round 13 item 4 for every read
+    /// fault, through <see cref="NoAccessCheckAnswer.Unverifiable"/>): refused, fail closed, and REPORTED as a fault —
+    /// 503 <see cref="ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode"/>, retryable — never absorbed into
+    /// <see cref="GranteeDenied"/>. <see cref="IsDenyListReadFault"/> lets an in-process caller tell it apart without
+    /// comparing codes: the Assigned-To materializer waits on an entry (a policy hold) and must report a fault.
+    /// </summary>
+    /// <remarks>
+    /// Before r4 this carried <see cref="GranteeDenied"/>'s code, 422 and detail, and the faults the deny-veto code
+    /// absorbed itself (an unreadable membership read, a fail-closed deny-list read) reached the grant routes as a plain
+    /// "denied" — an outage told the operator the person was on the list. The tri-state answer removes both.
+    /// </remarks>
+    public static GrantPolicyDecision GranteeDenyListUnreadable { get; } = new(
+        false,
+        ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode,
+        StatusCodes.Status503ServiceUnavailable,
+        "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was " +
+        "granted. Try again in a moment.")
+    {
+        IsDenyListReadFault = true,
+    };
+
+    /// <summary>
+    /// Task 140: a CONTACT grantor's request names a grantee who already holds an active row somebody else issued. 409;
+    /// nothing is changed. The contact-side handler restates the detail with the grantee's name.
+    /// </summary>
+    public static GrantPolicyDecision ManagedElsewhere { get; } = new(
+        false,
+        ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode,
+        StatusCodes.Status409Conflict,
+        "This person already has access to this record that was granted by someone else; ask them or the record's " +
+        "team to change it. Nothing was changed.");
+
+    /// <summary>
+    /// The refusal is the No Access check's read FAULT, not an entry (<see cref="GranteeDenyListUnreadable"/>). In-process
+    /// only: never part of a response (<c>PolicyRefusalProblem</c> maps the code, status and detail explicitly).
+    /// </summary>
+    public bool IsDenyListReadFault { get; init; }
 
     /// <summary>The level's name as the Manage Access dialog shows it.</summary>
     internal static string DisplayName(ExternalAccessLevel level) => level switch
@@ -682,8 +1110,60 @@ internal sealed class GrantCeiling
     public static GrantCeiling FromGrantorRights(AccessRights grantorRights)
         => new(ExternalAccessLevels.GrantCeilingFor(grantorRights), $"grantor rights {grantorRights}");
 
+    /// <summary>
+    /// The ceiling of a CONTACT grantor (unified-access-control-r2 task 140, owner C4 / Q1, settled round 3b): the
+    /// contact's EFFECTIVE post-veto rights on the record — the evaluator's answer carried on <c>CallerPrincipal</c>,
+    /// on either sign-in plane — through the same ceiling table as a human systemuser grantor
+    /// (<see cref="ExternalAccessLevels.GrantCeilingFor"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a contact's rights, not a probe.</b> A contact is not a Dataverse principal, so there is no
+    /// <c>RetrievePrincipalAccess</c> answer to probe (and the CIAM token cannot be exchanged OBO). The evaluator's answer
+    /// is already rights-based (task 033), vetoed (Restricted, the No Access list, inactive roots — tasks 135/137) and
+    /// Read-gated (task 136), and on a Secure or Limited record it counts the contact's DIRECT grants only (FR-22): exactly
+    /// the level the owner's rule is about (decision G3 (a), round 3: the level a contact HOLDS).</para>
+    /// <para>A contact's rights map is always one of R / R|C|W / R|C|W|D (<see cref="ExternalAccessLevels.ToAccessRights"/>)
+    /// or a union of those, so the table maps them back exactly.</para>
+    /// </remarks>
+    public static GrantCeiling FromContactGrantorRights(AccessRights contactGrantorRights)
+        => new(
+            ExternalAccessLevels.GrantCeilingFor(contactGrantorRights),
+            $"contact grantor effective rights {contactGrantorRights}");
+
+    /// <summary>
+    /// The ceiling of an Assigned-To auto-grant (unified-access-control-r2 task 142): exactly Collaborate, with NO
+    /// grantor-level cap. Owner round 3 A1 and round 3b: "Assigned-To auto-grants follow rule 5: always Collaborate,
+    /// uncapped" — the grantor is the owner's rule, not a person, so there is no person's level to cap at (the cap stays
+    /// for MANUAL Grant Access). Used ONLY by <c>AssignedAccessMaterializer</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Never-lower is the materializer's</b> (this type's remarks): a request for exactly Collaborate is not
+    /// narrowed, so the core's never-lower rule would not fire. The materializer therefore reads the key's active rows
+    /// first and writes nothing over a row at Collaborate or above (CoveredByExisting); it calls the core only to create,
+    /// to raise a lower row, to renew its OWN unmodified row, or to put a raised row back to its prior level.</para>
+    /// </remarks>
+    public static GrantCeiling AssignedToRule { get; } =
+        new(ExternalAccessLevel.Collaborate, "owner rule 5 (task 142): Assigned-To auto-grant, uncapped Collaborate");
+
     public override string ToString() => $"{Level?.ToString() ?? "none"} ({Basis})";
 }
+
+/// <summary>
+/// The CONTACT who is issuing a grant through the contact-side routes (unified-access-control-r2 task 140). Passing one
+/// to the grant core switches it into the contact-issuer mode: the row is stamped with <c>sprk_grantedbycontact</c>
+/// (and <c>sprk_grantedby</c> stays empty), a grantee holding a row anybody else issued is refused
+/// (<see cref="GrantPolicyDecision.ManagedElsewhere"/>), the caller's own row is never LOWERED (any lower request,
+/// narrowed or not, is <see cref="GrantPolicyDecision.WouldLowerExisting"/>) and its expiry is never SHORTENED, and the
+/// written expiry is capped at <see cref="ExpiryCap"/>.
+/// </summary>
+/// <param name="ContactId">The grantor contact — the caller.</param>
+/// <param name="ExpiryCap">
+/// The latest date the grantor's own qualifying access lasts (owner decision G2 (i), session 27 round 3: a grantor
+/// cannot hand out time they do not hold), or <c>null</c> when the grantor's level does not rest on a dated grant
+/// (a standing-grant or organization-expansion term, which carries no date). The written expiry is the requested one
+/// (or today + 90) capped at this date.
+/// </param>
+internal sealed record ContactGrantIssuer(Guid ContactId, DateOnly? ExpiryCap);
 
 /// <summary>Who a grant check is about — the shape the write-time checks need (task 139).</summary>
 /// <param name="Kind">The grantee kind the record's access policy judges.</param>

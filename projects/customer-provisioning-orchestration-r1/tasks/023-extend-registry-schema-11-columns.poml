@@ -4,7 +4,7 @@
     <title>Extend sprk_dataverseenvironment with 12 new columns (registry schema v3.3)</title>
     <phase>C Wave C1 — Registry Schema + Cosmos Model</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse schema change on the central customer-registry table; downstream consumers (L2 control plane, upgrade-mode preflight, tenancy-driven Bicep composition, cache-bust token) all read these columns — task-create Step 3.5.5 FULL (dataverse tag + creates new surface + &gt;3 downstream deps).</rigor-reason>
     <model-tier>sonnet</model-tier>

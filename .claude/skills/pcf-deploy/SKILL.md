@@ -113,7 +113,7 @@ useEffect(() => {
 
 **Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization" + `.claude/patterns/auth/spaarke-sso-binding.md` (INV-1..INV-8) + `.claude/adr/ADR-028-spaarke-auth-architecture.md`
 **Canonical implementations**: `SemanticSearchControl.tsx`, `DocumentRelationshipViewer.tsx`, `RelatedDocumentCount.tsx`
-**Pre-v2 holdout (V3 cleanup target)**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` — do NOT copy this pattern for new PCFs.
+**No pre-v2 holdouts remain**: `UniversalQuickCreate`, the last PCF with its own local `MsalAuthProvider.ts`, was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Do NOT recreate a local MSAL provider in a PCF.
 
 ---
 
@@ -156,7 +156,8 @@ stat -c '%y' src/components/YourChangedComponent/YourChangedComponent.tsx
 ### Other MUST/NEVER Rules
 
 - ✅ **MUST** compile shared lib `dist/` before PCF build if shared components were modified
-- ✅ **MUST** rebuild fresh every deployment (`npm run build`)
+- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`, via `scripts/Invoke-PcfBuildProd.ps1`)
+- ✅ **MUST** confirm the build succeeded from its **output**, not its exit code. `pcf-scripts build` **exits 0 when webpack fails** (it logs `[build] Failed:` / `[pcf-1033]` and returns without rethrowing), so a bare `npm run build:prod` followed by "copy `bundle.js` and pack" can ship the PREVIOUS bundle. `scripts/Invoke-PcfBuildProd.ps1` applies the rule and exits 1 on failure (found 2026-10-04: CI reported 17/18 PCFs passing when 9 had failed)
 - ✅ **MUST** copy build output files from `out/` to Solution: `bundle.js`, `ControlManifest.xml`, and `styles.css` (if produced)
 - ✅ **MUST** use `pack.ps1` (not `Compress-Archive` — backslashes break import)
 - ✅ **MUST** use unmanaged solution (ADR-022)
@@ -240,21 +241,24 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 ### Step 2: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}
-rm -rf out/ bin/
-npm run build:prod         # MUST be build:prod — see Bundle Size & Production Mode
+cd src/client/pcf/{ControlName}   # stay here for Steps 2-5
+rm -rf out/ bin/                  # a failed build must leave NO bundle behind to copy
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+# Runs `npm run build:prod` and exits 1 if the build failed. STOP on a non-zero exit:
+# do not copy, pack or import. A bare `npm run build:prod` exits 0 even when webpack fails.
 
-# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured)
-stat -c '%s bytes' out/controls/{ControlName}/bundle.js
+# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured).
+# The output folder is out/controls/control/ for most field PCFs; some use the control name (see the Path Map).
+stat -c '%s bytes' out/controls/control/bundle.js
 ```
 
 ### Step 3: Copy Build Output to Solution
 
 ```bash
-cp ../out/controls/control/bundle.js \
-   ../out/controls/control/ControlManifest.xml \
-   ../out/controls/control/styles.css \
-   ../Solution/Controls/sprk_Spaarke.Controls.{ControlName}/
+cp out/controls/control/bundle.js \
+   out/controls/control/ControlManifest.xml \
+   out/controls/control/styles.css \
+   Solution/Controls/sprk_Spaarke.Controls.{ControlName}/
 ```
 
 **Note**: Some projects use `src/WebResources/` instead of `Controls/` in the Solution folder. Copy to wherever the `pack.ps1` reads from.
@@ -262,7 +266,7 @@ cp ../out/controls/control/bundle.js \
 ### Step 4: Pack Solution ZIP
 
 ```bash
-cd ../Solution
+cd Solution
 powershell -ExecutionPolicy Bypass -File pack.ps1
 ```
 
@@ -375,7 +379,8 @@ When the user wants to deploy manually for fastest iteration:
 
 1. **Build** (from repo root):
    ```bash
-   cd src/client/pcf/SemanticSearchControl && npm run build
+   cd src/client/pcf/SemanticSearchControl && pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+   # build:prod, and STOP on a non-zero exit (a bare npm build exits 0 even when it failed)
    ```
 2. **Copy artifacts**:
    ```bash

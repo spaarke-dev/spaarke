@@ -1,0 +1,199 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="245b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Run context, part 2 (G25) — values L2 owns: artifact versions computed from the artifacts used, SPE owner-certificate vault + secret name as validated options, H9 publishes the BFF URL + build id, H13/H14 read them</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T245 (G25, notes/run-context-dataflow-gap.md)</phase>
+    <gate>none (T245a ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production .cs (H0 probe, H2a, H2b, H4, H4b, H8, H9, H13, H14, T6 probe, options, DAG) and their tests; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting change to idempotency keys of four handlers plus options + DAG; idempotency-key changes affect resume semantics (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shares HandlerRunInputs / RunContextContractTests / InterStepState / DagAdvancer with T245a, T245c, T238 (sequential by design)</parallel-reason>
+    <deps>245a</deps>
+    <tags>provisioning, l2-controlplane, provisioning-handler, config, testing, customer-provisioning</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the T245a known gaps owned by L2 itself: compute `bicepVer`, `indexVer` and `secretsVer` from the artifact each
+    handler actually uses instead of requiring them as run parameters; make the SPE owner-certificate vault and secret
+    name one validated L2 option used by H0, H8 and the T6 probe; have H9 write the BFF URL and deployed build id to
+    `InterStepState` for H13 and H14; move H13's registry URL and scripts directory to options.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in C#/.NET 10
+    options validation (ValidateOnStart), content hashing, and idempotent handler design.
+  </role>
+
+  <goal>
+    After this task: (1) no run parameter named `bicepVer`, `indexVer` or `secretsVer` is read — each handler derives its
+    idempotency version from the content of the artifact it deploys/applies (same artifact ⇒ same version); (2) H0's
+    certificate probe, H8 and the T6 probe read the SPE owner-certificate vault + secret name from one options type
+    validated at Worker startup, and the H0/H8 secret-name mismatch (`spe-owner-cert-pfx` vs `SPE-OwnerCert-Pfx`) is
+    resolved to the name that exists; (3) H9 writes `BffApiUrl` and `BffBuildId` to `InterStepState` and H13/H14 read
+    them, with H14 ← H9 in the DAG; (4) every T245b known gap in `RunContextContractTests` is gone.
+  </goal>
+
+  <context>
+    <background>
+      Evidence: notes/run-context-dataflow-gap.md. The three versions are idempotency-key components documented as
+      content hashes (H2a: git SHA of infrastructure/bicep, `H2a:74-80,270-276`; H2b: hash of the schema JSONs in
+      scripts/ai-search, `H2b:89-90,246-250`; H4/H4b: manifest content hash, `H4:84-85,163`) but computed nowhere. H12a
+      already hashes its own manifest (`FileSeedManifestReader.cs:65`) — the reference implementation. The H0 probe
+      targets the Spaarke platform vault (`KeyVaultCertBootstrapProbe.cs:30-33,55,92`) via run parameter `keyVaultName`;
+      H8 reads `keyVaultName` + optional `speCertSecretName` (`H8:112-115`, default `SpeContainerOptions.DefaultCertSecretName`
+      = `SPE-OwnerCert-Pfx`); the H0 probe checks `spe-owner-cert-pfx` — Key Vault names ignore case but not hyphens, so
+      these are different secrets. H13 requires `buildId` + `bffApiUrl` (`H13:133-136,255-261`); H9 resolves the build
+      from `latest.json` when `buildId` is absent (`H9:191-199`); H14 requires `webhookNotificationBaseUrl` = the BFF base
+      URL (`H14:107`). H13 ← H14 ← H12c and nothing depends on H9 (`DagAdvancer.cs:140-163`), so today H13/H14 can run
+      before the BFF is deployed.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/{H2aBicepInfraDeployHandler,ArmDeploymentRunner}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/KeyVaultCertBootstrapProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/{H8SpeContainerHandler,SpeContainerOptions}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/{T6SpeConfidentialClientTrapProbe,H13E2EAcceptanceGateHandler,H13AcceptanceOptions}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/H9BffDeployHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14IntegrationWiringHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/InterStepState.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/{DagAdvancer,HandlerRunInputs}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (options binding) + Worker App Service config in infrastructure/bicep (controlplane worker module) if the option needs a value there</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/ — tests of the files above + RunContextContractTests</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project — idempotency semantics (BINDING)">
+      Each computed version is a deterministic hash of the exact bytes the handler deploys/applies in this run (template
+      JSON for H2a, the index schema set for H2b, the embedded manifest for H4/H4b). The idempotency-key format strings
+      (`infra-…`, `aisearch-…`, `kv-…`, `appsettings-…`) stay unchanged. A run resumed with the same artifacts produces
+      the same key.
+    </constraint>
+    <constraint source="ADR-028 / KV credential lifecycle (BINDING)">
+      Read-only checks only against live Key Vaults (secret-name existence via the operator's own identity, NFR-11). No
+      secret is created, renamed, copied or deleted. Never touch `BFF-API-ClientSecret` (either casing),
+      `Dataverse-ClientSecret`, the soft-deleted rollback copies, or E-1 secrets.
+    </constraint>
+    <constraint source="ADR-010 / config constraints">
+      The SPE owner-certificate setting extends the existing `SpeContainerOptions` (no new options type unless H0's
+      options cannot reference it); required values validate at startup (ValidateOnStart), not at first use.
+    </constraint>
+    <constraint source="project — scope">
+      No change to `Sprk.Bff.Api`. T245c scope (H11 users, H14 Exchange group + Graph resources) is out of scope.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>.claude/patterns/provisioning/run-context-contract.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/FileSeedManifestReader.cs (hash reference)</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">For H2a, H2b, H4, H4b: locate the artifact each one uses (template source, schema files, embedded manifest) and replace the `bicepVer`/`indexVer`/`secretsVer` parameter read with a hash of those bytes (shared helper if two handlers hash the same artifact). Keep rejection codes for "artifact unreadable".</step>
+    <step order="2">Find which SPE owner-certificate secret name exists in the platform vault(s) the probes target (read-only `az keyvault secret list --query [].name` under the operator identity) and record it; make `SpeContainerOptions` carry the vault name + secret name (validated at startup); H0's probe, H8 and the T6 probe read them; drop the `keyVaultName` / `speCertSecretName` run parameters for this purpose.</step>
+    <step order="3">H9: write `InterStepState.BffApiUrl` (production slot URL of the deployed App Service) and `InterStepState.BffBuildId` (the build it deployed) with `[ProducedBy(H9)]`; H13 reads both from InterStepState; H14 reads `BffApiUrl` for its webhook base URL. DAG: H14 ← {H12c, H9}.</step>
+    <step order="4">H13 `registryDataverseUrl` / `provisioningScriptsDirectory` → `H13AcceptanceOptions` (validated, with the current defaults).</step>
+    <step order="4b">Secrets-channel gaps pinned by T245a (`RunContextContractTests.PinnedManifestGaps`): (a) the Spaarke-shared vendor keys `BingSearch-ApiKey`, `ContentSafety-ApiKey`, `LlamaParse-ApiKey` (owner D5) — their source is a Spaarke platform-vault secret: make it validated L2 configuration (canonical name → platform vault + secret) that H4 copies from, replacing the `run.Parameters.Secrets` reference nothing writes; (b) `Dataverse-ServiceUrl` is H5's `InterStepState.DataverseEnvUrl`, and H5 is not a DAG ancestor of H4 — choose between H4 ← H5 and moving the value to an H4b `per_env_settings` entry (`from-h5-output`, with H4b ← H5), per the escalation trigger. Remove the fixed entries from `PinnedManifestGaps`. Since T245a, `TrapVerificationRequest.SpeOwnerCertKeyVaultName` (T6) is filled from the interim intake `keyVaultName` — point it at the new SPE owner-certificate option.</step>
+    <step order="4c">Gaps added by the T245a quality gates (2026-10-01): (a) H7 `bffApiBaseUrl` — the stamp's own BFF URL is the same H9 output as step 3; today H7 falls back to the PLATFORM BFF `https://api.spaarke.com`, which is wrong for a dedicated stamp — read `InterStepState.BffApiUrl` and remove the default (DAG: H7 needs an H9 ancestor — decide H7 ← H9 vs a later env-var write, per the escalation trigger); (b) H13 registry columns `bffVersion` (H9 output — the deployed build), `solutionVersion` (H6 output — derive from `InterStepState.ImportedSolutions`) and `clientCacheBustToken` (mint per deploy/upgrade — decide which handler owns it); (c) 🔒 H4's KV RBAC bootstrap grants Key Vault Secrets Officer to `InterStepState.MiObjectId` — the customer stamp's BFF UAMI — when the identity that writes the secrets is L2's own (the bootstrapper's intent, `ArmOperatorKvRbacBootstrapper.cs` header). Make L2's principal object id validated L2 configuration (as `cosmos-provisioning.bicep` already takes `controlPlanePrincipalId`), grant THAT principal, and stop granting the stamp UAMI write access (Bicep already gives it Secrets User). Security-sensitive — **owner APPROVED this fix 2026-10-01** ("yes follow recommendation"): grant L2's configured principal, stop granting the stamp UAMI.</step>
+    <step order="5">Remove the T245b entries from the pinned known-gap list; declare the new inputs in HandlerRunInputs; run RunContextContractTests.</step>
+    <step order="6">Tests, build, docs (constraints/pattern pointer if the contract wording changes, design.md §6.2 keys, gap note §5), TASK-INDEX `✅ [done]`, POML status.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither SPE owner-certificate secret name exists in the platform vault, or both exist with different values, STOP and escalate (do not create or copy a secret).</trigger>
+    <trigger>If H2a's template source is not a single deterministic artifact (e.g. chosen per run by an operator), STOP and escalate — the version may be a release-selection decision, not a hash.</trigger>
+    <trigger>Dataverse-ServiceUrl: if neither H4 ← H5 nor an H4b per_env_settings entry is clearly better (H4 ← H5 delays the KV/app-reg chain behind Dataverse environment creation; the per_env route turns a KV reference into a literal app setting), STOP and present both to the owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>H12a's FileSeedManifestReader already hashes its manifest (FileSeedManifestReader.cs:65); SpeContainerOptions exists (SpeContainerOptions.cs:24); H13AcceptanceOptions exists.</existing>
+    <extension>Yes — extend SpeContainerOptions and H13AcceptanceOptions and add two InterStepState properties; the only possible new code is a shared content-hash helper if two handlers hash the same artifact.</extension>
+    <cost-of-doing-nothing>Every run fails at H0 (cert vault), H2a (bicepVer), H2b (indexVer), H4/H4b (secretsVer) and H13 (buildId/bffApiUrl); H13/H14 can run before the BFF exists; H0 checks a different certificate secret than H8 uses.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">modified handler / options / DAG files listed above</output>
+    <output type="test">updated tests for each modified handler + RunContextContractTests known-gap list</output>
+    <output type="docs">notes/run-context-dataflow-gap.md §5, design.md §6.2</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H2a, H2b, H4 and H4b succeed with no bicepVer/indexVer/secretsVer run parameter; the same artifact bytes give the same idempotency key across two runs; changed bytes give a different key.</criterion>
+    <criterion testable="true">The Worker fails startup when the SPE owner-certificate vault or secret name option is blank; H0's probe and H8 use the same configured secret name; the H0/H8 mismatch is gone.</criterion>
+    <criterion testable="true">After H9 succeeds, InterStepState has BffApiUrl and BffBuildId; H13 and H14 read them; H14 is not ready until H9 has completed.</criterion>
+    <criterion testable="true">The pinned known-gap list contains only T245c entries; `PinnedManifestGaps` contains only the T245c (`Communication-DefaultMailbox`) and T225b (`Dataverse-ClientSecret`, `BFF-API-ClientSecret`) entries; RunContextContractTests pass.</criterion>
+    <criterion testable="true">H4 writes the three vendor keys into the customer vault from the configured platform-vault source with no `run.Parameters.Secrets` reference, and `Dataverse-ServiceUrl` reaches the BFF from H5's output; a missing vendor-key configuration fails Worker startup.</criterion>
+    <criterion testable="true">H7 writes `sprk_BffApiBaseUrl` from the stamp's own BFF URL with no `https://api.spaarke.com` fallback; H13 fills `sprk_bffversion`, `sprk_solutionversion` and `sprk_clientcachebusttoken` from handler outputs; H4's KV RBAC bootstrap grants the configured L2 principal (blank → Worker startup fails) and never the stamp UAMI.</criterion>
+    <criterion testable="true">Build 0/0; no new ControlPlane.Tests failures beyond the T221 baseline; ArchTests pass. Test scope: the behaviours above (determinism + change detection per version, startup validation, H9 outputs + H14 readiness). Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-01). Verified: ControlPlane.Tests 2119 pass / 6 fail (the T221
+    CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 337/337; Api, Worker, LoadTests build 0/0;
+    Invoke-CatalogGenerator.ps1 -Verify OK; customer.json + platform-controlplane.json recompiled (bicep 0.46.1);
+    task-status drift check exit 0. Full account: notes/run-context-dataflow-gap.md §6.
+
+    ESCALATION TRIGGER 1 FIRED (surfaced to the owner, nothing created or copied): no SPE owning-app certificate exists
+    under either name in any Spaarke vault the operator identity can read (name-only check, NFR-11). The code does not
+    depend on it existing — the credential is per-container-type configuration — but H0 rejects every run until the
+    topology runbook creates the certificate (plan G28). Triggers 2 and 3 did not fire (H2a's template is the single
+    CI-published artifact per tenancy model; the per_env route for Dataverse-ServiceUrl was better on all three counts).
+
+    DEVIATIONS FROM THE CLOSED ACCEPTANCE SET (each surfaced to the owner):
+    - AC-2: the owner credential is a LIST keyed by container type (SpeContainerOptions.ContainerTypeOwners), not one
+      vault + secret-name option — an owning app is bound to one container type permanently (topology R1) and one L2
+      provisions into several. An incomplete entry fails Worker startup; an EMPTY list boots and H0 rejects every run.
+      Found on the way and fixed: H8 and T6 authenticated as the customer BFF app with the owner certificate, which
+      could never succeed (the certificate is the owning app's; topology §3A).
+    - AC-4 / AC-5: two vendor keys, not three. ContentSafety-ApiKey stays pinned under new task T246 (plan G26):
+      stamps have no Content Safety resource and the BFF falls back to a dev endpoint. A missing vendor-vault NAME
+      fails startup; a missing vendor SECRET fails H4 Resumable before any write (pre-resolution).
+    - Dataverse-ServiceUrl moved to H4b per_env settings (Dataverse__ServiceUrl / Dataverse__EnvironmentUrl from
+      from-h5-output:dataverse_env_url), H4b ← H5. Consequence: H9 (and H10–H14 behind it) now waits on H5.
+    - registryDataverseUrl was DELETED, not moved to options — the registry updater never read it.
+    - H13 registry columns (spec ADR-020 row PROPOSED): sprk_bffversion = H9's build id; sprk_solutionversion = a
+      32-hex fingerprint of the imported solution set (no release-tag producer until T218); sprk_clientcachebusttoken
+      = the run id.
+    - ADR-028 E-1 scope (spec row PROPOSED, Path B recommended): L2 H0/H8/T6 use the owning-app certificate.
+
+    FOUND AND FIXED BEYOND THE STEPS (fix-at-discovery): the H2a structural inspector could never run (it read
+    infrastructure/bicep/ from a publish output that never contains it) and its per-customer-Redis rule contradicted
+    D-12 — rebuilt as ArmTemplateInspector over the resolved ARM JSON, rule retired; H2a duplicate delivery of a
+    completed step is a no-op that does not re-resolve the template; the A44.5 requireSecretFreeIdentity gate lost in
+    master merge 92b480500 restored in the Worker Bicep; /provision-environment Step 6a used unassigned variables;
+    customer.json and platform-controlplane.json were stale; publish-provisioning-arm-artifacts.yml did not trigger on
+    scripts/canonical-secret-catalog/generated/** (customer.bicep composes kv-secrets.generated.bicep); live references
+    to the deleted FileBicepTemplateInspector repointed at ArmDeploymentRunner.ResolveArmTemplateAsync.
+    Considered and rejected: a Bicep user-defined type for speContainerTypeOwners — it switches the whole platform
+    template to languageVersion 2.0 (symbolic resources) for a shape check SpeContainerOptions.Validate() already does.
+
+    Test-scope justification (beyond the closed list): ArmTemplateInspectorTests (the inspector is new code with its
+    own rules R2/R3); SpeContainerOptionsTests (topology-R1 validation rules + id canonicalisation);
+    WorkerL2OwnedOptionsBootTests (the startup-failure ACs need the real composition root);
+    SecretClientKvWriter pre-resolution test (a missing vendor secret must fail before any write).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

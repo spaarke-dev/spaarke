@@ -15,6 +15,8 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import {
   DataGridPageShell,
+  cleanGuid,
+  getHostFormRecordId,
   type DataGridParentContext,
 } from "@spaarke/ui-components";
 
@@ -37,25 +39,14 @@ function parseMatterId(): string {
     }
   }
   if (!id) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const candidateWindows: any[] = [];
-    try { candidateWindows.push(window.parent); } catch { /* same-origin only */ }
-    try { candidateWindows.push(window.top); } catch { /* same-origin only */ }
-    for (const w of candidateWindows) {
-      if (!w) continue;
-      try {
-        const xrm = w.Xrm;
-        const legacyId: string | undefined = xrm?.Page?.data?.entity?.getId?.();
-        if (legacyId) { id = legacyId; break; }
-        const pageCtx = xrm?.Utility?.getPageContext?.();
-        const entityId: string | undefined = pageCtx?.input?.entityId;
-        if (entityId) { id = entityId; break; }
-      } catch { /* cross-origin or unavailable */ }
-    }
+    // The hosting form's record id via the shared Xrm walk (task 081 round 4):
+    // legacy Xrm.Page id first, then getPageContext().input.entityId — the same
+    // order this page's former parent -> top loop used.
+    id = getHostFormRecordId() ?? "";
   }
   // eslint-disable-next-line no-console
   console.info("[sprk_kpiassessmentspage] parseMatterId resolved to:", id);
-  return id.replace(/[{}]/g, "");
+  return cleanGuid(id);
 }
 
 function buildParentContext(): DataGridParentContext | undefined {

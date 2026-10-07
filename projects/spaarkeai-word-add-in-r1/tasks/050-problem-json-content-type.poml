@@ -4,7 +4,8 @@
     <title>Every BFF error response is served as application/json, never application/problem+json (GitHub #975, ADR-019)</title>
     <phase>2 Save flow</phase>
     <gate>none</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by d7ca4e095 (docs: close 050). -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the BFF's global exception middleware, which shapes EVERY error response in the API; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>

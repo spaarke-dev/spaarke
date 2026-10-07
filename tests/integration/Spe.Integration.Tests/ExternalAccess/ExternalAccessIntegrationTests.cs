@@ -94,8 +94,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var validRequest = new RevokeAccessRequest(
             AccessRecordId: Guid.NewGuid(),
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, validRequest);
@@ -131,8 +130,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var validRequest = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, validRequest);
@@ -351,8 +349,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.Empty,
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
@@ -460,8 +457,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var request = new CloseProjectRequest(
-            ProjectId: Guid.Empty,
-            ContainerId: null);
+            ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -480,8 +476,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // Arrange — valid request; validation guard passes.
         // The handler will attempt to query Dataverse (which fails in tests), yielding 500.
         var request = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -526,8 +521,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.Empty,
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
@@ -542,7 +536,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     public async Task CloseProject_ValidationError_ReturnsProblemJsonContentType()
     {
         // Arrange — empty ProjectId triggers 400
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
+        var request = new CloseProjectRequest(ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -590,7 +584,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     public async Task CloseProject_ValidationError_ProblemDetailsHasStatusAndDetail()
     {
         // Arrange
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
+        var request = new CloseProjectRequest(ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -855,7 +849,8 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Documents the expected revoke flow:
         //   Plane 1: Dataverse — deactivate sprk_externalrecordaccess (statecode=1, statuscode=2)
-        //   Plane 2: SPE — remove Contact from container permissions (if ContainerId provided)
+        //   Plane 2: SPE — remove Contact from the grant root's OWN container (secure roots only; derived from the
+        //            root since uac-r2 task 166 — the request carries no container)
         //   Plane 3: Redis — invalidate sdap:external:access:{contactId} cache
         //
         // Additionally checks remaining participations and conditionally removes web role.
@@ -863,8 +858,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.NewGuid(),
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null); // Skip SPE plane — no ContainerId
+            ProjectId: Guid.NewGuid());
 
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
 
@@ -879,12 +873,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // Documents the expected close-project flow:
         //   Step 1: Query all active sprk_externalrecordaccess for the project
         //   Step 2: Deactivate each record (statecode=1, statuscode=2)
-        //   Step 3: Remove all external SPE members (if ContainerId provided)
+        //   Step 3: Remove exactly the revoked grantees from a SECURE project's own container (derived from the
+        //           project since uac-r2 task 166 — the request carries no container)
         //   Step 4: Invalidate Redis cache for all affected Contacts
 
-        var request = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: "container-close-test-abc123");
+        var request = new CloseProjectRequest(ProjectId: Guid.NewGuid());
 
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
 

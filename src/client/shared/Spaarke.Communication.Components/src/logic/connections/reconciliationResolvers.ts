@@ -45,7 +45,12 @@ function num(record: Record<string, unknown>, field: string): number | null {
  */
 export function buildResolveReview(
   webApi: EmailWorkspaceWebApi,
-  onChanged: () => void
+  onChanged: () => void,
+  /**
+   * UAC-r2 task 147 r1 (owner round 28 item 1): the BFF re-file every regarding write goes through (build it with
+   * `bffRefile`). Without it the review's regarding writes are refused (fail closed).
+   */
+  refileThroughBff?: (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void>
 ): (record: Record<string, unknown>) => EmailConnectionsReviewProps {
   return record => {
     const id = str(record, PRIMARY_ID_FIELD) ?? '';
@@ -60,6 +65,7 @@ export function buildResolveReview(
         webApi,
         hostEntity: COMMUNICATION_ENTITY,
         hostRecordId: id,
+        refileThroughBff,
       },
       pickerWebApi: webApi,
       onAssociationsChanged: onChanged,
@@ -67,6 +73,11 @@ export function buildResolveReview(
   };
 }
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate
+// rather than importing the canonical `cleanGuid` from `@spaarke/ui-components`.
+// This module's own barrel comment states its imports are "type-only... to keep
+// this Layer-1 module React-free at runtime" — a value import of `cleanGuid` would
+// be this file's first real runtime dependency on that package.
 /** Bare, lowercased GUID (braces stripped) or null. */
 function normGuid(value: string | null): string | null {
   if (!value) return null;

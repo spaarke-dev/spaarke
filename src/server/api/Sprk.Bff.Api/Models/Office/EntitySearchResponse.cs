@@ -91,6 +91,19 @@ public record EntitySearchResult
     public string? PrimaryField { get; init; }
 
     /// <summary>
+    /// The entity's email address, when one exists and the type's search projection selects it.
+    /// </summary>
+    /// <remarks>
+    /// Task 091 (UAT-2): additive and DISPLAY-only — lets the Assigned-To contact picker tell apart two
+    /// contacts sharing a display name. Populated only for Contact today (<c>emailaddress1</c>, selected in
+    /// the same impersonated query as every other field; never added to the search <c>contains(...)</c>
+    /// predicate). <c>null</c> for every other entity type and for a Contact with no email on file —
+    /// deliberately separate from <see cref="PrimaryField"/>, whose own value is unchanged by this field.
+    /// </remarks>
+    /// <example>jane.cooper@acme.com</example>
+    public string? Email { get; init; }
+
+    /// <summary>
     /// Icon URL for entity type display.
     /// </summary>
     /// <example>/icons/matter.svg</example>

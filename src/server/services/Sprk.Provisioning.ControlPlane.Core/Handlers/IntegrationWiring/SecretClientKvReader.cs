@@ -10,7 +10,7 @@
 // reusing the SAME ground-truthed shapes that writer's file header documents
 // (GetSecretAsync(name, version, ct) throwing RequestFailedException with
 // Status==404 for a missing secret; KeyVaultSecret.Value is the cleartext
-// string) plus task 120's KeyVaultCertBootstrapProbe precedent for
+// string) plus task 120's KeyVaultCertBootstrapProbe precedent (retired by task 248) for
 // constructing a per-vault-per-call SecretClient from a shared TokenCredential.
 //
 // ACCESS-DENIED vs NOT-FOUND vs GENERIC (task 143/144 verification-focused

@@ -1,14 +1,5 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
-import {
-  FluentProvider,
-  Spinner,
-  Button,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import { MailRegular } from '@fluentui/react-icons';
+import React, { Suspense, lazy, useEffect, useRef, useState, useCallback } from 'react';
+import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
@@ -18,6 +9,7 @@ import { TaskPaneShell, type NavigationTab, type HostType } from './components/T
 import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
+import { DEFAULT_SAVED_DOCUMENT_PANE_STATE, type SavedDocumentPaneState } from './components/SaveFlow';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
@@ -38,8 +30,19 @@ import {
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
 } from './services/documentIdentityService';
-import { prepareSendEmail } from './services/sendEmailService';
-import { cleanGuid } from './utils/cleanGuid';
+import {
+  prepareSendEmail,
+  resolveSendEmailAffordance,
+  type SendEmailRelatedRecordInput,
+} from './services/sendEmailService';
+import { fileNameFromWebUrl } from './services/quickSaveHelpers';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { describeFetchFailure } from './utils/errorMessages';
+
+// Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
+// rich-text editor, which Outlook (no Email tab) and Word with the tab held off would otherwise download and parse
+// for nothing.
+const EmailView = lazy(() => import('./components/views/EmailView').then(module => ({ default: module.EmailView })));
 
 /**
  * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
@@ -50,6 +53,28 @@ import { cleanGuid } from './utils/cleanGuid';
 function toFriendlyRegardingType(entity: string): string {
   const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
   return map[entity] ?? entity;
+}
+
+/**
+ * Builds the `relatedRecord` half of an email from `savedContext` — shared by the Outlook-native path
+ * (`handleSendEmail`, task 036) and Word's Email tab (`EmailView`, task 096) so the label-building rule
+ * (`regardingEntity`'s FRIENDLY type, e.g. "Matter", over the Dataverse logical name) has exactly one definition.
+ */
+function buildSendEmailRelatedRecordInput(
+  savedContext: AppSavedContext | undefined
+): SendEmailRelatedRecordInput | null {
+  return savedContext?.relatedRecord
+    ? {
+        entityType: savedContext.relatedRecord.entityType,
+        id: savedContext.relatedRecord.id,
+        // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
+        // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved below) —
+        // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
+        typeLabel: savedContext.regardingEntity ?? null,
+        displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
+        number: savedContext.relatedRecord.number ?? null,
+      }
+    : null;
 }
 
 /**
@@ -213,6 +238,11 @@ export const App: React.FC<AppProps> = ({
   });
   // Monotonic attempt counter: a resolution result is applied only if no newer attempt has started.
   const identityAttemptRef = useRef(0);
+
+  // Task 094 (owner, 2026-10-04: "yes save should survive tab switch"): the Save tab's saved-state
+  // bundle, lifted here so switching to To Do/Find and back does not remount it away. `SaveView`/
+  // `SaveFlow` own reading and updating it; `App` only holds the value across the tab switch.
+  const [saveFlowState, setSaveFlowState] = useState<SavedDocumentPaneState>(DEFAULT_SAVED_DOCUMENT_PANE_STATE);
 
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
@@ -401,9 +431,14 @@ export const App: React.FC<AppProps> = ({
           }),
         });
         if (!res.ok) {
-          return { ok: false, error: `Create failed (${res.status}).` };
+          // Task 091 (UAT-2, negative case): show the server's own reason, not a bare status code.
+          const described = await describeFetchFailure(res);
+          return { ok: false, error: described.message };
         }
-        return { ok: true };
+        // Task 091 (UAT-2): the server's 201 body carries the created sprk_todo id — echo it back so
+        // the confirmation can offer "Open in Spaarke" (OfficeEndpoints.cs `CreateTodoResponse`).
+        const created = (await res.json()) as { todoId?: string };
+        return { ok: true, ...(created.todoId ? { todoId: created.todoId } : {}) };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
       }
@@ -417,10 +452,23 @@ export const App: React.FC<AppProps> = ({
       // Browser test harness (demo filed context) → static demo contacts.
       if (savedContext?.communicationId?.startsWith('demo-')) {
         await new Promise(resolve => setTimeout(resolve, 200));
+        // Task 091 (UAT-2): two contacts sharing a name, each with its own email — the browser harness's
+        // own demonstration of the duplicate-name problem the email field solves.
         const demo: ContactOption[] = [
-          { id: 'demo-contact-1', name: 'Jane Cooper', displayInfo: 'Acme Corp · GC' },
+          { id: 'demo-contact-1', name: 'Jane Cooper', email: 'jane.cooper@acme.test', displayInfo: 'Acme Corp · GC' },
+          {
+            id: 'demo-contact-1b',
+            name: 'Jane Cooper',
+            email: 'jane.cooper@beta.test',
+            displayInfo: 'Beta LLC · Paralegal',
+          },
           { id: 'demo-contact-2', name: 'Robert Fox', displayInfo: 'Acme Corp · Paralegal' },
-          { id: 'demo-contact-3', name: 'Wade Warren', displayInfo: 'Beta LLC · Counsel' },
+          {
+            id: 'demo-contact-3',
+            name: 'Wade Warren',
+            email: 'wade.warren@beta.test',
+            displayInfo: 'Beta LLC · Counsel',
+          },
         ];
         const q = query.toLowerCase();
         return demo.filter(c => c.name.toLowerCase().includes(q));
@@ -435,12 +483,14 @@ export const App: React.FC<AppProps> = ({
           return [];
         }
         const data = (await res.json()) as {
-          results?: { id: string; name: string; displayInfo?: string }[];
+          results?: { id: string; name: string; displayInfo?: string; email?: string }[];
         };
         return (data.results ?? []).map(r => ({
           id: r.id,
           name: r.name,
           ...(r.displayInfo ? { displayInfo: r.displayInfo } : {}),
+          // Task 091 (UAT-2): additive, from the server's new EntitySearchResult.Email.
+          ...(r.email ? { email: r.email } : {}),
         }));
       } catch {
         return [];
@@ -449,10 +499,10 @@ export const App: React.FC<AppProps> = ({
     [savedContext, apiBaseUrl]
   );
 
-  // Send Email via Outlook (task 036 / FR-15). Capability-gated on `hostAdapter.getCapabilities().canComposeEmail`
-  // below (NFR-10) — never a `hostType` conditional. `Office.context.mailbox` does not exist in Word, so
-  // WordAdapter always reports the capability absent and this affordance never renders there; the deferred
-  // Spaarke-modal variant (design.md §4.2) is out of scope — this opens the HOST's own compose window only.
+  // Send Email (task 036 / FR-15). Capability-gated (NFR-10, never a `hostType` conditional) via
+  // `resolveSendEmailAffordance` — see `sendEmailAffordance` below. `Office.context.mailbox` does not exist in
+  // Word, so `canComposeEmail` is always false there: Outlook gets the native-compose button; Word emails a
+  // document from its Email tab instead (task 096 — replaced task 086's two-choice menu).
   const [sendEmailStatus, setSendEmailStatus] = useState<'idle' | 'sending'>('idle');
   const [sendEmailError, setSendEmailError] = useState<string | null>(null);
   const { announce: announceSendEmail, liveRegion: sendEmailLiveRegion } = useAnnounce();
@@ -462,32 +512,23 @@ export const App: React.FC<AppProps> = ({
     setSendEmailError(null);
     try {
       const subject = await hostAdapter.getSubject();
-      const result = await prepareSendEmail({
-        document: savedContext?.documentId ? { documentId: savedContext.documentId } : null,
-        relatedRecord: savedContext?.relatedRecord
-          ? {
-              entityType: savedContext.relatedRecord.entityType,
-              id: savedContext.relatedRecord.id,
-              // `regardingEntity` is the FRIENDLY type ("Matter") set alongside `relatedRecord` by both
-              // producers (documentIdentityService's applyDocumentIdentityOutcome and handleSaved above) —
-              // reused here so the email link label reads "Matter: ..." rather than "sprk_matter: ...".
-              typeLabel: savedContext.regardingEntity ?? null,
-              displayName: savedContext.relatedRecord.displayName ?? savedContext.relatedRecord.name,
-              number: savedContext.relatedRecord.number ?? null,
-            }
+      // Task 096: links to the document's and the record's SPAARKE records — never a Graph sharing link, which
+      // SharePoint Embedded refuses ("This sharing scenario is not supported on CSP Container site").
+      const result = prepareSendEmail({
+        document: savedContext?.documentId
+          ? { documentId: savedContext.documentId, name: savedContext.documentName ?? savedContext.fileName ?? null }
           : null,
+        relatedRecord: buildSendEmailRelatedRecordInput(savedContext),
         subject,
         orgUrl: process.env.ORG_URL,
       });
 
-      if (result.kind === 'error') {
-        setSendEmailError(result.message);
-        announceSendEmail(result.message, 'assertive');
-        return;
-      }
       if (result.kind === 'nothing-to-send') {
-        // Defensive only — the affordance is hidden whenever there is nothing to link (see canSendEmail
-        // below), so this should not be reachable from the UI.
+        // The button shows only when there is a document or record to link, so this means the links could not
+        // be built — since task 096 both are Spaarke record links, which need ORG_URL. Say so; never no-op.
+        const message = 'Spaarke links are not available: ORG_URL is not configured.';
+        setSendEmailError(message);
+        announceSendEmail(message, 'assertive');
         return;
       }
 
@@ -510,6 +551,11 @@ export const App: React.FC<AppProps> = ({
       setSendEmailStatus('idle');
     }
   }, [hostAdapter, savedContext, announceSendEmail]);
+
+  // Task 096: stable token getter / cache-clear for the Email tab's injected fetch (the shared compose engine
+  // receives a fetch function, never a token — ADR-028).
+  const getPaneAccessToken = useCallback(() => authService.getAccessToken(), []);
+  const clearPaneTokenCache = useCallback(() => authService.clearCache(), []);
 
   // Settings handler (placeholder)
   const handleSettings = () => {
@@ -547,12 +593,18 @@ export const App: React.FC<AppProps> = ({
     indicatorTargetId !== undefined &&
     (linkedTodos.isLoading || linkedTodos.error !== null || linkedTodos.count > 0);
 
-  // Send Email (task 036 / FR-15, NFR-10): gated on the CAPABILITY, never on `hostType` — WordAdapter
-  // always reports `canComposeEmail: false` because `Office.context.mailbox` does not exist in Word, so
-  // this naturally never renders there without needing to branch on which host is running. Also requires
-  // at least one of a document or a related record to link — with neither, there is nothing to send.
-  const canSendEmail =
-    hostAdapter.getCapabilities().canComposeEmail && Boolean(savedContext?.documentId || savedContext?.relatedRecord);
+  // Send Email (task 036 / FR-15): gated on CAPABILITIES only, never `hostType` (NFR-10) —
+  // `resolveSendEmailAffordance` is the single tested gating decision (`services/sendEmailService.ts`). Also
+  // requires a document or a related record to link — with neither, the button does not render (never
+  // rendered-and-disabled). Task 096 removed task 086's Word menu: Word has the Email tab instead.
+  const sendEmailAffordance = resolveSendEmailAffordance(
+    { canComposeEmail: hostAdapter.getCapabilities().canComposeEmail },
+    Boolean(savedContext?.documentId || savedContext?.relatedRecord)
+  );
+  const canSendEmail = sendEmailAffordance === 'outlook-native';
+
+  // Task 096: capability-gated tabs (NFR-10). Word reports `canEmailFromPane` → the Email tab; Outlook does not.
+  const tabCapabilities = { canEmailFromPane: hostAdapter.getCapabilities().canEmailFromPane };
 
   // Task 077: what Find calls the pane's item. From the `canGetSender` CAPABILITY (NFR-10), never
   // `hostType` — an item that has a sender IS an email, so this is the exact semantic, not a proxy.
@@ -637,32 +689,28 @@ export const App: React.FC<AppProps> = ({
         // from the shared tab-availability check (getAvailableTabs) rather than a
         // hostType conditional (NFR-10) — Word now gets Save + Find; Outlook keeps
         // Save + Create To Do + Find.
-        showNavigation={getAvailableTabs(hostType).length > 0}
+        showNavigation={getAvailableTabs(hostType, tabCapabilities).length > 0}
+        tabCapabilities={tabCapabilities}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
         themePreference={preference}
         onThemeChange={setPreference}
         showErrorDetails={showErrorDetails}
         onError={handleError}
+        // Send Email — Outlook only by capability (`canComposeEmail`, NFR-10), once there is a document and/or
+        // related record to link: opens Outlook's native compose window (task 036 / FR-15). Task 106 (owner UAT
+        // round 8): rendered in the toolbar after Find as "Send", no longer a full-width button in the body.
+        {...(canSendEmail
+          ? { onSendEmail: () => void handleSendEmail(), isSendingEmail: sendEmailStatus === 'sending' }
+          : {})}
       >
-        {/* Send Email via Outlook (task 036 / FR-15) — capability-gated (NFR-10), visible on any tab once
-            there is a document and/or related record to link. */}
-        {canSendEmail && (
+        {/* Send Email's live region and error stay in the body; the button itself is in the toolbar (task 106). */}
+        {canSendEmail && sendEmailLiveRegion}
+        {canSendEmail && sendEmailError && (
           <div className={styles.sendEmailRow}>
-            {sendEmailLiveRegion}
-            <Button
-              appearance="secondary"
-              icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
-              onClick={handleSendEmail}
-              disabled={sendEmailStatus === 'sending'}
-            >
-              Send Email
-            </Button>
-            {sendEmailError && (
-              <MessageBar intent="error">
-                <MessageBarBody>{sendEmailError}</MessageBarBody>
-              </MessageBar>
-            )}
+            <MessageBar intent="error">
+              <MessageBarBody>{sendEmailError}</MessageBarBody>
+            </MessageBar>
           </div>
         )}
 
@@ -684,6 +732,10 @@ export const App: React.FC<AppProps> = ({
             onSearchContacts={handleSearchContacts}
             onGoToSave={() => setCurrentTab('save')}
             {...(todoRegardingContext ? { savedContext: todoRegardingContext } : {})}
+            // Task 091 (UAT-2, NFR-10): same pattern as FindView.canOpenRecord / SaveView.canOpenRecord —
+            // decided from the live adapter's capabilities, never a hostType check. Gates the created-To-Do
+            // confirmation's "Open in Spaarke" link.
+            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
           />
         )}
 
@@ -699,6 +751,9 @@ export const App: React.FC<AppProps> = ({
             // silently. The retry re-runs task 013's resolution.
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
+            // Task 094: lifts the Save tab's saved-state bundle above its own mount lifecycle.
+            savedState={saveFlowState}
+            onSavedStateChange={setSaveFlowState}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.
@@ -714,10 +769,21 @@ export const App: React.FC<AppProps> = ({
               // it here (rather than only via documentIdentityService) covers both — and for Word it is a
               // same-value overwrite in the common case (the saved document IS the resolved one).
               if (docId) {
-                setSavedContext(prev => ({ ...prev, documentId: cleanGuid(docId) }));
+                // Task 096: also keep the saved file's name (from its stored URL), so the Email tab's subject and
+                // attachment name are the document's even when it was first saved in this session (the identity
+                // resolver supplies names only for documents that were already in Spaarke). `null` for a
+                // non-Word file (e.g. an Outlook .eml) — then any name already known is kept.
+                const savedFileName = fileNameFromWebUrl(docUrl);
+                setSavedContext(prev => ({
+                  ...prev,
+                  documentId: cleanGuid(docId),
+                  ...(savedFileName ? { fileName: savedFileName } : {}),
+                }));
               }
             }}
             onSaved={handleSaved}
+            // Task 100: the "+ New" form's Assigned To uses the pane's ONE contact search (To Do, Email and Save).
+            onSearchContacts={handleSearchContacts}
             onQuickCreate={(entityType, searchQuery) => {
               // Quick Create - opens Dataverse form in new window.
               // Org URL (email-communication-solution-r4 task 072 / FR-25): config-driven,
@@ -760,7 +826,48 @@ export const App: React.FC<AppProps> = ({
             onRetryDocumentIdentity={retryDocumentIdentity}
             onGoToSave={() => setCurrentTab('save')}
             itemNoun={findItemNoun}
+            // task 092 (UAT-3, NFR-10): same pattern as SaveView's canOpenRecord — decided from the
+            // live adapter's capabilities, never a hostType check. Gates whether Find's document,
+            // parent-record and matching-record rows open in Spaarke or render as plain text.
+            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
           />
+        )}
+
+        {/* Email tab (task 096, owner UAT round 4 items 6-8) — Word only, by the `canEmailFromPane` capability
+            that also gates the tab itself (NFR-10). A thin container over the shared compose engine; it sends
+            as the user with the document attached and the email associated to the same record. */}
+        {currentTab === 'email' && tabCapabilities.canEmailFromPane && (
+          <Suspense fallback={<Spinner size="small" label="Loading email…" />}>
+            <EmailView
+              document={
+                savedContext?.documentId
+                  ? {
+                      documentId: savedContext.documentId,
+                      documentName: savedContext.documentName ?? null,
+                      fileName: savedContext.fileName ?? null,
+                    }
+                  : null
+              }
+              // Task 096: distinguishes "still checking" and "could not confirm" from a genuinely new document, so
+              // the tab never tells the user a document is not in Spaarke when the check merely failed.
+              {...(documentIdentity === 'checking'
+                ? { identityStatus: 'checking' as const }
+                : documentIdentity !== undefined &&
+                    documentIdentity.kind !== 'resolved' &&
+                    documentIdentity.kind !== 'new'
+                  ? { identityStatus: 'unconfirmed' as const }
+                  : {})}
+              relatedRecord={buildSendEmailRelatedRecordInput(savedContext)}
+              orgUrl={process.env.ORG_URL}
+              bffBaseUrl={apiBaseUrl}
+              {...(userEmail ? { fromMailbox: userEmail } : {})}
+              getAccessToken={getPaneAccessToken}
+              clearTokenCache={clearPaneTokenCache}
+              onSearchContacts={handleSearchContacts}
+              canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
+              onGoToSave={() => setCurrentTab('save')}
+            />
+          </Suspense>
         )}
 
         {currentTab === 'share' && (

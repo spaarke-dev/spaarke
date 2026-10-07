@@ -69,7 +69,7 @@ Wire into CI to prevent operators from editing `generated/` by hand:
      never_delete: false            # true ONLY for Dataverse-ClientSecret + BFF-API-ClientSecret (BINDING)
      exception_note: ""
      aliases: []                    # any drift spellings to alias-collapse (never emitted as separate secrets)
-     value_source: "generated"      # from-existing-kv | from-bicep-output | from-run-parameter | generated
+     value_source: "generated"      # from-existing-kv | from-bicep-output | from-run-parameter | from-topology-constants | generated
      app_settings:
        - "MyModule__MySetting"
      tags: ["communication"]
@@ -136,4 +136,4 @@ Two invocations of the generator against the same `manifest.yaml` produce **byte
 
 - [`scripts/naming-conformance-check.ps1`](../naming-conformance-check.ps1) — read-only naming conformance gate owned by `code-quality-and-assurance-r3` (task 063).
 - [`scripts/seed-data/`](../seed-data/) — same manifest-driven pattern applied to the AI seed chain (H12a).
-- [`src/server/services/Sprk.Provisioning.ControlPlane/Handlers/KvSecretsPopulation/`](../../src/server/services/Sprk.Provisioning.ControlPlane/Handlers/KvSecretsPopulation/) — H4 handler which will consume the manifest via `IKvSecretManifest` (currently interim `StaticKvSecretManifest`; swap to a file-backed impl reading the manifest at runtime after this task lands).
+- [`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/`](../../src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/) — H4 handler, which reads this manifest at runtime via `IKvSecretManifest` → `FileKvSecretManifest` (the manifest is an embedded resource of the Core project). The reader refuses any `value_source` not listed above.

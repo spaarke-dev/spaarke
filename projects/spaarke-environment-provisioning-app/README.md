@@ -1,5 +1,7 @@
 # Spaarke Environment Provisioning App
 
+> **Portfolio**: [Project #1220](https://github.com/spaarke-dev/spaarke/issues/1220) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete (2026-06-12) — one criterion carried to r2, live-provisioning sign-off pending
 > **Branch**: `work/spaarke-environment-provisioning-app`
 > **Started**: 2026-04-06

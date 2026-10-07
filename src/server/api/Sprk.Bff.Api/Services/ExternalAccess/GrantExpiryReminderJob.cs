@@ -348,8 +348,13 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
         foreach (var root in Roots)
         {
             entity.Add(OuterLink(root.EntityName, root.IdAttribute, root.EntityName, root.Alias,
-                Attributes(root.NameAttribute, "owninguser", "createdby"),
+                Attributes(root.NameAttribute, "owninguser", Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column, "createdby"),
                 PersonLink("owninguser", root.OwnerAlias),
+                // Task 147 r1 (owner round 28 item 1): "every reader of who created it uses RecordCreatorPerson
+                // (createdbyperson, else createdby)". A root the BFF created as the application (Office quick-create,
+                // and the since-deleted POST /api/v1/work-assignments) has the application as createdby; the person is
+                // sprk_createdbyperson.
+                PersonLink(Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column, root.CreatorPersonAlias),
                 PersonLink("createdby", root.CreatorAlias)));
         }
 
@@ -563,6 +568,7 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
     {
         public string OwnerAlias => Alias + "o";
         public string CreatorAlias => Alias + "c";
+        public string CreatorPersonAlias => Alias + "p";
     }
 
     private enum RecipientSource
@@ -628,6 +634,8 @@ public sealed class GrantExpiryReminderJob : IScheduledJob
                     ? new Recipient(granter, RecipientSource.Granter)
                 : Person(AsId(Aliased(row, root.Alias, "owninguser")), row, root.OwnerAlias) is { } owner
                     ? new Recipient(owner, RecipientSource.RecordOwner)
+                : Person(AsId(Aliased(row, root.Alias, Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column)), row, root.CreatorPersonAlias) is { } creatorPerson
+                    ? new Recipient(creatorPerson, RecipientSource.RecordCreator)
                 : Person(AsId(Aliased(row, root.Alias, "createdby")), row, root.CreatorAlias) is { } creator
                     ? new Recipient(creator, RecipientSource.RecordCreator)
                 : null;

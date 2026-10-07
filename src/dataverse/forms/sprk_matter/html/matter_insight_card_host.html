@@ -13,31 +13,9 @@
     }
     #spaarke-matter-insight-card-host {
       width: 100%;
-      min-height: 200px;
-      padding: 8px;
+      min-height: 0;
+      padding: 0;
       box-sizing: border-box;
-    }
-    .placeholder {
-      padding: 12px;
-      border: 1px dashed #c8c6c4;
-      border-radius: 4px;
-      font-size: 12px;
-      color: #605e5c;
-    }
-    .placeholder-title {
-      font-weight: 600;
-      margin-bottom: 8px;
-      color: #323130;
-    }
-    .placeholder-row {
-      line-height: 1.4;
-    }
-    .placeholder-note {
-      margin-top: 10px;
-      padding-top: 8px;
-      border-top: 1px solid #edebe9;
-      font-style: italic;
-      color: #797775;
     }
   </style>
 </head>
@@ -57,52 +35,50 @@
       iframe (Option a from FormXml patch §4 cross-frame note). The parent form's
       `insightCardMount.js` library remains registered as an OnLoad handler for
       telemetry + future fan-out but the actual React mount happens here once the
-      `@spaarke/ai-widgets` IIFE bundle ships (P1 follow-up — Task 044 / r2).
+      `@spaarke/ai-widgets` IIFE bundle ships (tracked follow-up — see
+      notes/defer-issues.md C-22, filed spaarke-ontology-platform-r1 task 080,
+      2026-10-03; no browser-IIFE bundler config exists yet for @spaarke/ai-widgets,
+      so this is a build-pipeline task, not a wiring fix).
 
-      For Phase 4 staging (this deploy), we render a self-contained placeholder
-      that proves the wire contract is correct — Subject + Topic + Mode + Envelope
-      state — so the demo path works end-to-end without the React bundle.
+    NOTE (spaarke-ontology-platform-r1 task 080 / C-22, 2026-10-03): this host used
+    to render a permanently-visible "Matter Health insight (Phase 4 staging)"
+    placeholder card with live Subject/Topic/Mode/Envelope facts — it read as a
+    shipped, working feature to anyone viewing the Matter form, forever, because
+    nothing would ever flip it to the real card without someone separately
+    noticing and building the bundle. The placeholder is REMOVED. The host renders
+    nothing (empty, zero height) until the real `@spaarke/ai-widgets` IIFE bundle
+    is present, at which point step "When the @spaarke/ai-widgets IIFE bundle
+    ships" below applies unchanged. Contract-verification facts (subject
+    resolution, envelope read) still run and still log to the browser console —
+    useful for an engineer with devtools open — but nothing renders into the page.
 
     When the @spaarke/ai-widgets IIFE bundle ships:
       1. Add <script src="../scripts/spaarke_ai_widgets_bundle.js"></script> below.
-      2. Replace renderPlaceholder() with a call to
-         window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props).
+      2. Call window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props) instead
+         of the diagnostic-only console logging the bootstrap script does today.
       3. Source the subject/envelope from window.parent.Xrm via postMessage or
-         direct frame.parent access (same-origin).
+         direct frame.parent access (same-origin) — already done below.
   -->
-  <div id="spaarke-matter-insight-card-host">
-    <div class="placeholder" data-testid="insight-card-placeholder-iframe">
-      <div class="placeholder-title">Matter Health insight (Phase 4 staging)</div>
-      <div class="placeholder-row" id="row-status">Resolving Matter context...</div>
-      <div class="placeholder-row" id="row-subject"></div>
-      <div class="placeholder-row" id="row-topic">Topic: matter-health</div>
-      <div class="placeholder-row" id="row-mode">Mode: single</div>
-      <div class="placeholder-row" id="row-envelope">Envelope: (reading from parent form)</div>
-      <div class="placeholder-note">
-        @spaarke/ai-widgets IIFE bundle not yet deployed (Task 044 / r2 P1 follow-up).
-        Mount glue + FormXml patch verified wired.
-      </div>
-    </div>
-  </div>
+  <div id="spaarke-matter-insight-card-host"></div>
 
   <script>
     /**
      * Iframe-scope bootstrap. Resolves the Matter Guid via the parent form's
-     * Xrm context, parses the stored envelope, and renders contract-verification
-     * facts into the placeholder. No React, no bundle, no cross-frame mount —
-     * pure DOM for staging only.
+     * Xrm context and parses the stored envelope — console-only diagnostics
+     * (spaarke-ontology-platform-r1 task 080 / C-22: no visible placeholder).
+     * No React, no bundle, no cross-frame mount.
      *
-     * Production path (Task 044 / r2): replace this script's body with a call
-     * to `window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props)` once
-     * the bundle is loaded above.
+     * Production path (tracked in notes/defer-issues.md C-22): replace the
+     * console.log calls below with a call to
+     * `window.SpaarkeAiWidgets.mountInsightSummaryCard(host, props)` once the
+     * bundle is loaded above.
      */
     (function () {
       "use strict";
       try {
         var parentWindow = window.parent;
         if (!parentWindow || parentWindow === window) {
-          var statusEl = document.getElementById("row-status");
-          if (statusEl) { statusEl.textContent = "Status: not embedded — opening matter form directly hides this surface."; }
+          console.log("[Matter Insight Card host] not embedded — opening the HTML resource directly hides this surface.");
           return;
         }
         // Resolve Matter Guid via Xrm in parent scope (same-origin).
@@ -122,8 +98,7 @@
           }
         } catch (idErr) { /* swallow */ }
         if (!matterGuid) {
-          var statusEl2 = document.getElementById("row-status");
-          if (statusEl2) { statusEl2.textContent = "Status: Matter Guid unavailable (form may not be saved)."; }
+          console.log("[Matter Insight Card host] Matter Guid unavailable (form may not be saved) — skipping.");
           return;
         }
         // Strip braces if present.
@@ -131,44 +106,34 @@
           matterGuid = matterGuid.substring(1, matterGuid.length - 1);
         }
         var subject = "matter:" + matterGuid;
-        var statusEl3 = document.getElementById("row-status");
-        var subjectEl = document.getElementById("row-subject");
-        if (statusEl3) { statusEl3.textContent = "Status: contract wired — Matter context resolved."; }
-        if (subjectEl) { subjectEl.textContent = "Subject: " + subject; }
+        console.log("[Matter Insight Card host] contract wired — subject=" + subject + " (no @spaarke/ai-widgets bundle yet; nothing rendered).");
 
-        // Read envelope from parent's Xrm.WebApi (read-only).
+        // Read envelope from parent's Xrm.WebApi (read-only, diagnostic only).
         var WebApi = parentWindow.Xrm && parentWindow.Xrm.WebApi;
         if (WebApi && typeof WebApi.retrieveRecord === "function") {
           WebApi.retrieveRecord("sprk_matter", matterGuid, "?$select=sprk_performancesummary").then(
             function (rec) {
               var raw = rec && rec.sprk_performancesummary;
-              var envelopeEl = document.getElementById("row-envelope");
-              if (!envelopeEl) { return; }
               if (!raw) {
-                envelopeEl.textContent = "Envelope: absent (no stored insight yet)";
+                console.log("[Matter Insight Card host] envelope absent (no stored insight yet).");
                 return;
               }
               var parsed = null;
-              try { parsed = JSON.parse(raw); } catch (parseErr) { /* legacy R5 placeholder */ }
+              try { parsed = JSON.parse(raw); } catch (parseErr) { /* legacy R5 text */ }
               if (!parsed || typeof parsed !== "object") {
-                envelopeEl.textContent = "Envelope: unparseable (legacy text — will overwrite on first invocation)";
+                console.log("[Matter Insight Card host] envelope unparseable (legacy text — will overwrite on first invocation).");
                 return;
               }
-              var stamp = parsed.generatedAt || "(no generatedAt)";
-              envelopeEl.textContent = "Envelope: present, generatedAt=" + stamp;
+              console.log("[Matter Insight Card host] envelope present, generatedAt=" + (parsed.generatedAt || "(none)"));
             },
             function (err) {
-              var envelopeEl2 = document.getElementById("row-envelope");
-              if (envelopeEl2) {
-                envelopeEl2.textContent = "Envelope: read failed (" + (err && err.message ? err.message : "unknown") + ")";
-              }
+              console.warn("[Matter Insight Card host] envelope read failed: " + (err && err.message ? err.message : "unknown"));
             }
           );
         }
       } catch (bootErr) {
         // Defensive — form load MUST NOT break.
-        var statusElX = document.getElementById("row-status");
-        if (statusElX) { statusElX.textContent = "Status: bootstrap failed — " + (bootErr && bootErr.message ? bootErr.message : String(bootErr)); }
+        console.warn("[Matter Insight Card host] bootstrap failed: " + (bootErr && bootErr.message ? bootErr.message : String(bootErr)));
       }
     })();
   </script>

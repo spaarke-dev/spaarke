@@ -265,6 +265,104 @@ public class SecurableEntityRegistryTests
     }
 
     // ============================================================================================
+    // Task 150 (owner round 10 item 11): invoices follow their matter — the invoice's own flag is not a security input
+    // ============================================================================================
+
+    private static readonly Guid MatterId = Guid.Parse("15015015-0000-0000-0000-00000000a771");
+    private const string SharedFallback = "b!shared-fallback-000000000000000";
+    private const string SecureMatterContainer = "b!secure-matter-container-0000000";
+
+    /// <summary>Live dev's shape: the invoice table CARRIES sprk_issecure (task 151 live gate).</summary>
+    private static Harness LiveShapedHarness() => new(
+        Meta("sprk_project", secure: true),
+        Meta("sprk_matter", secure: true),
+        Meta("sprk_workassignment", secure: true),
+        Meta("sprk_invoice", secure: true),
+        Meta("businessunit", secure: false));
+
+    [Fact(DisplayName = "Task 150: sprk_invoice carries sprk_issecure, yet it is NOT securable — and it stays a known entity")]
+    public async Task Invoice_CarryingTheFlag_IsNotSecurable_AndStaysKnown()
+    {
+        var harness = LiveShapedHarness();
+
+        (await harness.Registry.ClassifyEntityAsync("sprk_invoice")).Should().Be(EntitySecurability.NotSecurable,
+            "owner round 10 item 11: an invoice follows its matter, so its own flag decides nothing — and it must stay KNOWN, "
+            + "or every invoice upload would be refused as 'not an entity'");
+        (await harness.Registry.GetSecurableEntitiesAsync())
+            .Should().BeEquivalentTo(["sprk_project", "sprk_matter", "sprk_workassignment"]);
+    }
+
+    [Fact(DisplayName = "Task 150: a catalog cached BEFORE the invoice rule (invoice listed securable) is read without the invoice")]
+    public async Task ACatalogCachedBeforeTheInvoiceRule_IsReadWithoutTheInvoice()
+    {
+        var harness = LiveShapedHarness();
+        await harness.Cache.SetAsync(
+            SecurableEntityRegistry.CacheKey,
+            SecurableEntityRegistry.SerializeCacheEntry(
+                ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice", "businessunit"],
+                ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"]));
+
+        (await harness.Registry.ClassifyEntityAsync("sprk_invoice")).Should().Be(EntitySecurability.NotSecurable,
+            "a value an earlier build cached (6h TTL) must not keep the invoice's flag a security input after deploy");
+        (await harness.Registry.ClassifyEntityAsync("sprk_matter")).Should().Be(EntitySecurability.Securable);
+        harness.FetchCount.Should().Be(0, "the cached value was valid and was served — the rule applied to it on read");
+    }
+
+    [Fact(DisplayName = "Task 150: an invoice FLAGGED secure under an ORDINARY matter is not secure — its matter decides, and its flag is never read")]
+    public async Task AnInvoiceFlaggedTrue_UnderAnOrdinaryMatter_IsNotTreatedAsSecure()
+    {
+        var harness = LiveShapedHarness();
+        var records = Substitute.For<IGenericEntityService>();
+        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
+            {
+                ["sprk_issecure"] = true,   // what a user could set before the lock; no container of its own
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId)
+            }));
+        records.RetrieveAsync("sprk_matter", MatterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_matter", MatterId) { ["sprk_issecure"] = false }));
+
+        var resolver = new RecordContainerResolver(harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+
+        var decision = await resolver.ResolveForRecordAsync("sprk_invoice", RecordId, nonSecureFallbackContainerId: SharedFallback);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback,
+            "before task 150 the invoice's own true flag made it a secure record with no container — every upload refused");
+        decision.ContainerId.Should().Be(SharedFallback);
+        await records.Received(1).RetrieveAsync("sprk_invoice", RecordId,
+            Arg.Is<string[]>(columns => !columns.Contains(SecurableEntityRegistry.SecureFlagAttribute)),
+            Arg.Any<CancellationToken>());
+    }
+
+    [Theory(DisplayName = "Task 150: an invoice under a SECURE matter IS secure — whatever its own flag says")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AnInvoiceUnderASecureMatter_IsSecure_WhateverItsOwnFlag(bool invoiceFlag)
+    {
+        var harness = LiveShapedHarness();
+        var records = Substitute.For<IGenericEntityService>();
+        records.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
+            {
+                ["sprk_issecure"] = invoiceFlag,
+                ["sprk_matter"] = new EntityReference("sprk_matter", MatterId)
+            }));
+        records.RetrieveAsync("sprk_matter", MatterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_matter", MatterId)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = SecureMatterContainer
+            }));
+
+        var resolver = new RecordContainerResolver(harness.Registry, records, NullLogger<RecordContainerResolver>.Instance);
+
+        var decision = await resolver.ResolveForRecordAsync("sprk_invoice", RecordId, nonSecureFallbackContainerId: SharedFallback);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(SecureMatterContainer, "the invoice follows its secure matter (owner C10 part 2)");
+    }
+
+    // ============================================================================================
     // Machinery
     // ============================================================================================
 

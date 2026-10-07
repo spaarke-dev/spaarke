@@ -1,5 +1,7 @@
 # sdap-file-duplication-detector-r1
 
+> **Portfolio**: [Project #1185](https://github.com/spaarke-dev/spaarke/issues/1185) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Investigation / analysis capture (pre-spec)
 > **Created**: 2026-07-14
 > **Origin**: Spun out of `spaarkeai-compose-r2` round-7 UAT item #8 ("file already in SharePoint → notify / open latest"). Determined to be outside compose-r2 scope; captured here for its own project lifecycle.

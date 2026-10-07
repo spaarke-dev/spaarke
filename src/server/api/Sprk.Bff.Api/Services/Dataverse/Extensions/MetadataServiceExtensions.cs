@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Dataverse.Extensions;
@@ -32,6 +33,14 @@ public static class MetadataServiceExtensions
         // Task 080: every BFF record create assigns ownerid to the acting user's BU default owner team.
         // Registered here because Program.cs calls this method unconditionally (:81).
         services.AddRecordOwnershipResolver();
+
+        // Task 156 (owner round 4 item 5, option b; round 3 R3/R4 — minutes, not hours): the 5-minute safety net that
+        // re-stamps a child whose core-ancestor copy differs from its intermediate's current root (writes outside the
+        // BFF, failed cascades, regarding lookups cleared on a form). ADR-036 A1 rule 6: AddScheduledJob, once — here,
+        // not in AddCoreAncestorResolver, which AddToolFramework also calls and AddScheduledJob is not idempotent.
+        // UNCONDITIONAL (ADR-032): every dependency is unconditional, so there is no flag and no Null-Object; its dry-run
+        // mode is configuration (CoreAncestorStampReconciliationJob.WritesEnabledConfigKey), not an `if` here.
+        services.AddScheduledJob<CoreAncestorStampReconciliationJob>(CoreAncestorStampReconciliationJob.DefaultCronSchedule);
         return services;
     }
 
@@ -74,6 +83,28 @@ public static class MetadataServiceExtensions
                     .ConfigureAwait(false);
             },
             sp.GetRequiredService<ILogger<CoreAncestorResolver>>()));
+
+        // Task 156: the stamp's refresh side — the cascade every BFF re-file path calls, and the queue the storage
+        // resolver enqueues a stale child on (consumed by CoreAncestorRestampJobHandler, JobProcessingModule). Singletons
+        // over singletons, registered beside the resolver so every composition that has the resolver has these too
+        // (the same §10 F.1 reasoning as above). The queue resolves Service Bus LAZILY, so composing it never needs
+        // Service Bus configuration.
+        services.TryAddSingleton(TimeProvider.System);
+        services.TryAddSingleton<CoreAncestorRestamper>();
+        services.TryAddSingleton<CoreAncestorRestampQueue>();
+
+        // Task 156, owner round 8 item 1 (§6.5 path B): the ONE app-only step the user-OBO AI update tool may take — the
+        // after-write re-stamp, inline (DataverseUpdateRecordHandler). Here, beside the restamper, because AddToolFramework
+        // (which registers that handler by assembly scan) calls this method too: no composition has the handler without it
+        // (§10 F.1). Unconditional (ADR-032).
+        services.TryAddSingleton<CoreAncestorAfterWriteRestamp>();
+
+        // Task 158 (owner round 6): the two calls a BFF writer of a work assignment or project makes around a create or a
+        // re-file, so one filed under a secure matter or project is secured in the same operation. Here for the same §10
+        // F.1 reason: every composition with a writer (the tool framework's scan, the playbook nodes, the Office and
+        // finance modules) calls this method. A singleton over IServiceScopeFactory only — it resolves the scoped
+        // SecureRootInheritance (ExternalAccessModule) per call and REFUSES a filing write where it cannot. Unconditional.
+        services.TryAddSingleton<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
 
         return services;
     }

@@ -107,8 +107,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
 
         _fixture.DataverseMock.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Once, "the same transient key must resolve to ONE record — the second Save-Version replaces in place");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Once, "only the FIRST create-on-save mints a drive-item; the dedup hit takes the replace path");
         _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -135,8 +135,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(forkDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(forkSpeId, forkDriveId, size: 2048, eTag: "\"fork-etag\""));
 
         // A row ALREADY exists for this transient key — if the fork consulted the dedup lookup it would
@@ -183,8 +183,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
                 It.Is<KeyAttributeCollection>(k => k.ContainsKey(TransientKeyAttribute)),
                 It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
             Times.Never, "forkNew (Save New Document) must SKIP the transient-key dedup lookup — a deliberate new document even when a matching row exists");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Once, "the fork mints a fresh SPE drive-item");
         _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -233,8 +233,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
 
         _fixture.DataverseMock.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Once, "eight repeated create-on-save calls with the SAME transient key must produce exactly ONE record — the 8-duplicate defect is fixed");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Once, "only the first save mints a drive-item; the remaining seven dedup to it");
         _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -265,8 +265,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(world.ResolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(world.MintedSpeId, world.ResolvedDriveId, size: 2048, eTag: "\"v1-etag\""));
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(

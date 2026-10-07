@@ -3,6 +3,9 @@
  * seam, the Document-record affordance, capability gating (NFR-10), and the focus/visibility
  * return-path re-read (Spike-2 §d).
  *
+ * Task 088 (UAT-7): the Document-record affordance is now the footer's "Open Document" button (left of
+ * Save) — formerly a subtle "Open document record" link in the Profile section. Same launcher, same gate.
+ *
  * Kept in a SEPARATE file from `SaveFlow.test.tsx` (which pre-dates task 027 and already carries
  * unrelated typecheck errors in its fixtures — the 2026-09-09 "consciously accepted" test-file
  * bucket, project CLAUDE.md Decisions Made) so this task's own tests stay independently clean.
@@ -108,7 +111,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
       );
 
       expect(screen.queryByRole('button', { name: /open.*gamma merger/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /open this document's record/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open Document' })).not.toBeInTheDocument();
     });
   });
 
@@ -128,7 +131,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
       );
 
       expect(screen.queryByRole('button', { name: /open.*gamma merger/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /open this document's record/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open Document' })).not.toBeInTheDocument();
     });
 
     it('renders both open affordances when canOpenRecord is true and a record/document are resolved', () => {
@@ -147,7 +150,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
       );
 
       expect(screen.getByRole('button', { name: /open.*gamma merger/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /open this document's record/i })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open Document' })).toBeInTheDocument();
     });
   });
 
@@ -194,7 +197,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByRole('button', { name: /open this document's record/i }));
+      await user.click(screen.getByRole('button', { name: 'Open Document' }));
 
       expect(mockOpenRecord).toHaveBeenCalledTimes(1);
       expect(mockOpenRecord).toHaveBeenCalledWith({
@@ -248,7 +251,7 @@ describe('SaveFlow — task 027 / FR-10 open-record wiring', () => {
         </TestWrapper>
       );
 
-      await user.click(screen.getByRole('button', { name: /open this document's record/i }));
+      await user.click(screen.getByRole('button', { name: 'Open Document' }));
 
       act(() => {
         window.dispatchEvent(new Event('focus'));

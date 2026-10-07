@@ -17,7 +17,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { readByRegarding, cleanGuid, type IRegardingReadResultDto } from '@spaarke/ui-components';
+import { readByRegarding, cleanGuid, type IRegardingReadResultDto, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveRegardingContext } from './hostContext';
@@ -33,24 +33,14 @@ const useStyles = makeStyles({
   notice: { paddingInline: tokens.spacingHorizontalM, paddingBlock: tokens.spacingVerticalXS },
 });
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). Mirrors the sibling control. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -58,7 +48,10 @@ function getHostRecordId(): string | undefined {
 }
 
 function getHostEntityName(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const name = xrm?.Page?.data?.entity?.getEntityName?.();
     if (typeof name === 'string' && name.length > 0) return name;
@@ -79,7 +72,7 @@ function getHostEntityName(): string | undefined {
  * the record).
  */
 function shouldAutoOpenConversation(): boolean {
-  const searches: Array<() => string | undefined> = [
+  const searches: (() => string | undefined)[] = [
     () => window.top?.location?.search,
     () => window.parent?.location?.search,
     () => window.location.search,
@@ -97,7 +90,8 @@ function shouldAutoOpenConversation(): boolean {
 
 /** OOB record open via the sanctioned Layout 1 (`Xrm.Navigation.navigateTo`, target 2, 85% × 85%). */
 function openRecordViaXrm(entityType: string, id: string): void {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('navigation');
   try {
     void xrm?.Navigation?.navigateTo?.(
       { pageType: 'entityrecord', entityName: entityType, entityId: cleanGuid(id) },

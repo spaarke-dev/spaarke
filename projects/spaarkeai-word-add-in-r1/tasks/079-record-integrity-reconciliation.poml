@@ -4,7 +4,8 @@
     <title>Two success criteria marked PASS on evidence that does not exist, fourteen ✅ tasks with unsupported claims, seven POML statuses contradicting the index, and ten POMLs that do not parse</title>
     <phase>5 Remediation — spec integrity</phase>
     <gate>blocked — requires 076, 077, 078 (their outcomes are what gets reconciled)</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-02. All acceptance criteria met; record in notes/079-record-integrity.md. Owner signed every spec amendment (FR-12, FR-16, FR-15, FR-10, FR-18/SC-12); the FR-15/FR-10 build is task 086; FR-13's interim number format is task 076's.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Post-compaction-class recovery work across the whole project record, and it gates 090's escalation triggers. Modifies spec.md, the task index and 10 POMLs.</rigor-reason>
     <model-tier>opus</model-tier>

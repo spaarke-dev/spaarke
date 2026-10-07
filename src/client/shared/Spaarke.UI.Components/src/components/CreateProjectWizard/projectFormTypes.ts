@@ -37,7 +37,8 @@ export interface ICreateProjectFormState {
   /** Description — free text, multi-line (optional). Maps to sprk_projectdescription. */
   description: string;
   /**
-   * Secure Project flag — maps to sprk_issecure on the sprk_project record.
+   * Secure Project REQUESTED. Drives the wizard's call to secure provisioning, which sets `sprk_issecure` server-side
+   * (task 150: the column is field-secured and the client never writes it).
    *
    * When true the project will have a dedicated SharePoint Embedded container,
    * a Dataverse Business Unit, and an external access portal provisioned.

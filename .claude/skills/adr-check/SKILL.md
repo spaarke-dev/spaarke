@@ -137,6 +137,35 @@ FOR EACH violation:
 
 **Why this matters**: A violation list that only shows fixes implicitly says "comply or fail." That's wrong when path A or B is the better outcome. Surfacing all three paths forces the human to choose intentionally instead of defaulting to whichever is mechanically easiest.
 
+#### ADR Conflict Resolution Protocol — enforcement and limits (moved verbatim from root CLAUDE.md §6.5 on 2026-10-07)
+
+> Root `CLAUDE.md` §6.5 keeps the principle, the three paths, "no fourth path" and the required output format. The rest moved here.
+
+**When this protocol fires.** Trigger conditions:
+- An agent recognizes that strict compliance with an ADR will produce a worse technical outcome than a documented exception or amendment would
+- `adr-check` or `code-review` flags a violation that the implementer believes is justified
+- During spec authoring, the design surfaces a requirement that conflicts with an existing ADR's MUST/MUST NOT rule
+- During task execution, an ADR constraint blocks a legitimate implementation need
+
+**Where this protocol is enforced:**
+- **At design time** — `design-to-spec` and `project-pipeline` surface anticipated ADR tensions in a dedicated **ADR Tensions** section of `spec.md`
+- **At code-review time** — `code-review` Step 6 (ADR Compliance Check) accepts a reasoned exception (path A) cited in the PR description; otherwise flags as Critical
+- **At task-execute Step 9.5** — `adr-check` violations either are fixed (path C), formalized as exceptions (path A), or trigger amendment workflow (path B); silent retry-until-clean is not the loop
+- **At ADR-check** — this skill's output includes a "Challenge Path" section alongside violations (Step 5.5), prompting the human to choose a resolution rather than just accepting the violation list as final
+
+**What this protocol is NOT:**
+- Not a license to ignore ADRs casually — the bar for path A/B is "documented + rationale + reviewer approval"
+- Not an excuse to bypass auth, security, or compliance ADRs without explicit human sign-off
+- Not retroactive — code that violated an ADR silently before this protocol existed is still in violation; this protocol applies to new decisions going forward
+
+**Anti-patterns this catches:**
+- ❌ "ADR says no, so I'll write worse code to comply" — surface as path B candidate
+- ❌ "I violated the ADR but it's fine, the reviewer won't notice" — silent violation, forbidden
+- ❌ "The ADR is wrong but I don't want to amend it" — surface as path B; the cost of amendment is part of the work
+- ❌ "I'll comply now and document the exception later" — exception MUST be documented at the point of decision, not deferred
+
+Binding for ≥ 6 months from 2026-06-29 (added by `spaarkeai-compose-r1`); reviewed by the next major procedure-quality audit.
+
 ---
 
 ## Conventions

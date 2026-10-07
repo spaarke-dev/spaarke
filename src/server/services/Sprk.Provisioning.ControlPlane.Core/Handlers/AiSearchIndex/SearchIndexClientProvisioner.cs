@@ -73,37 +73,8 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 /// <see cref="SearchIndexClient"/> under UAMI RBAC — zero admin-key handling.
 /// See file header for the raw-pipeline-PUT design rationale.
 /// </summary>
-public sealed partial class SearchIndexClientProvisioner : IAiSearchIndexProvisioner
+public sealed class SearchIndexClientProvisioner : IAiSearchIndexProvisioner
 {
-    private const string SchemaResourcePrefix =
-        "Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.";
-
-    /// <summary>
-    /// Canonical index name -&gt; embedded resource file name. MUST stay in
-    /// sync with infrastructure/ai-search/*.json (task 002 audit § 1 catalog
-    /// authority) and with <see cref="CanonicalIndexCatalog.CanonicalIndexNames"/>.
-    /// </summary>
-    private static readonly ImmutableDictionary<string, string> SchemaResourceNames =
-        new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["spaarke-files-index"] = "spaarke-files-index.json",
-            ["spaarke-discovery-index"] = "spaarke-discovery-index.json",
-            ["spaarke-records-index"] = "spaarke-records-index.json",
-            ["spaarke-rag-references"] = "spaarke-rag-references.json",
-            ["spaarke-insights-index"] = "spaarke-insights-index.json",
-            ["spaarke-session-files"] = "spaarke-session-files.json",
-            ["spaarke-invoices-index"] = "spaarke-invoices-index.json",
-        }.ToImmutableDictionary();
-
-    // Ports Deploy-AllIndexes.ps1's Remove-JsonCommentKeys regexes verbatim
-    // (two comment-key conventions: `"// rationale": "..."` on most schemas;
-    // `"_comment_": "..."` on spaarke-insights-index.json).
-    [GeneratedRegex("\"//[^\"]*\"\\s*:\\s*\"[^\"]*\"\\s*,?\\s*")]
-    private static partial Regex SlashCommentKeyPattern();
-
-    [GeneratedRegex("\"_comment_\"\\s*:\\s*\"[^\"]*\"\\s*,?\\s*")]
-    private static partial Regex UnderscoreCommentKeyPattern();
-
     private readonly TokenCredential _credential;
     private readonly AiSearchIndexOptions _options;
     private readonly SearchClientOptions? _clientOptionsOverride;
@@ -154,7 +125,7 @@ public sealed partial class SearchIndexClientProvisioner : IAiSearchIndexProvisi
         // building the request — this is a defensive fallback, not the
         // primary path).
         var indexNames = request.RequestedIndexNames.IsDefaultOrEmpty
-            ? SchemaResourceNames.Keys.ToImmutableArray()
+            ? IndexSchemaSet.SchemaResourceNames.Keys.ToImmutableArray()
             : request.RequestedIndexNames;
 
         var clientOptions = _clientOptionsOverride ?? new SearchClientOptions();
@@ -165,19 +136,17 @@ public sealed partial class SearchIndexClientProvisioner : IAiSearchIndexProvisi
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!SchemaResourceNames.TryGetValue(indexName, out var resourceFileName))
-            {
-                return new AiSearchIndexProvisionOutcome.Failure(
-                    $"No embedded schema resource registered for index '{indexName}'. " +
-                    "SearchIndexClientProvisioner.SchemaResourceNames and infrastructure/ai-search/*.json are " +
-                    "out of sync — this is the two-place-edit forcing function (parity with CanonicalIndexCatalog.cs) " +
-                    "catching a drifted catalog BEFORE a live PUT, not a silent skip.");
-            }
-
             string schemaJson;
             try
             {
-                schemaJson = LoadAndStripSchema(resourceFileName);
+                if (!IndexSchemaSet.TryGetSchemaBody(indexName, out schemaJson))
+                {
+                    return new AiSearchIndexProvisionOutcome.Failure(
+                        $"No embedded schema resource registered for index '{indexName}'. " +
+                        "IndexSchemaSet.SchemaResourceNames and infrastructure/ai-search/*.json are " +
+                        "out of sync — this is the two-place-edit forcing function (parity with CanonicalIndexCatalog.cs) " +
+                        "catching a drifted catalog BEFORE a live PUT, not a silent skip.");
+                }
             }
             catch (InvalidOperationException ex)
             {
@@ -227,25 +196,6 @@ public sealed partial class SearchIndexClientProvisioner : IAiSearchIndexProvisi
             request.CustomerId, provisioned.Count);
 
         return new AiSearchIndexProvisionOutcome.Success(provisioned.ToImmutable());
-    }
-
-    /// <summary>
-    /// Reads the embedded schema resource + strips comment keys. Exposed
-    /// internal so unit tests can assert the stripped-JSON shape directly
-    /// without a full ProvisionAsync round-trip.
-    /// </summary>
-    internal static string LoadAndStripSchema(string resourceFileName)
-    {
-        var resourceName = SchemaResourcePrefix + resourceFileName;
-        var assembly = typeof(SearchIndexClientProvisioner).Assembly;
-        using var stream = assembly.GetManifestResourceStream(resourceName)
-            ?? throw new InvalidOperationException(
-                $"Embedded resource '{resourceName}' not found. Verify Sprk.Provisioning.ControlPlane.Core.csproj's " +
-                "<EmbeddedResource> glob covers Handlers/AiSearchIndex/IndexSchemas/*.json with the matching <LogicalName>.");
-        using var reader = new StreamReader(stream, Encoding.UTF8);
-        var raw = reader.ReadToEnd();
-        var stripped = SlashCommentKeyPattern().Replace(raw, string.Empty);
-        return UnderscoreCommentKeyPattern().Replace(stripped, string.Empty);
     }
 
     private static string Truncate(string s, int max)

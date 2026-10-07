@@ -9,9 +9,12 @@
     Supported secret types:
       - StorageKey      : Regenerates storage account keys
       - ServiceBus      : Regenerates Service Bus access keys
-      - Redis           : Regenerates Redis access keys
       - EntraId         : Rotates Entra ID app registration client secrets
       - All             : Rotates all supported secret types
+
+    Redis is not rotated here (task 242, owner D12/D13): every Spaarke Redis is Azure Managed Redis with
+    access keys disabled, reached with a managed identity — there is no key or connection string to rotate.
+    The separate Redis key-rotation script and workflow were removed in task 242b (2026-10-05).
 
     The script follows a safe rotation pattern:
       1. Regenerate the credential at the source (Azure resource)
@@ -29,7 +32,7 @@
     Customer identifier (e.g., "demo"). Required when Scope is Customer.
 
 .PARAMETER SecretType
-    Which secret type to rotate: StorageKey, ServiceBus, Redis, EntraId, or All.
+    Which secret type to rotate: StorageKey, ServiceBus, EntraId, or All.
 
 .PARAMETER Environment
     Target environment. Default: "prod".
@@ -48,10 +51,6 @@
     .\Rotate-Secrets.ps1 -Scope Platform -SecretType All -DryRun
 
 .EXAMPLE
-    # Rotate all platform Redis keys
-    .\Rotate-Secrets.ps1 -Scope Platform -SecretType Redis
-
-.EXAMPLE
     # Rotate demo customer storage keys
     .\Rotate-Secrets.ps1 -Scope Customer -CustomerId demo -SecretType StorageKey
 
@@ -63,7 +62,7 @@
     Requires:
       - Azure CLI (az) authenticated with sufficient permissions
       - Key Vault Secrets Officer role on target vaults
-      - Contributor role on target resources (storage, service bus, redis)
+      - Contributor role on target resources (storage, service bus)
       - Application Administrator role for Entra ID secret rotation
 
     Naming conventions (per AZURE-RESOURCE-NAMING-CONVENTION.md):
@@ -71,7 +70,6 @@
       Customer vault:  sprk-{customerId}-{env}-kv
       Storage account: sprk{customerId}{env}sa
       Service Bus:     sprk-{customerId}-{env}-sb
-      Redis:           sprk-{customerId}-{env}-redis
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -84,7 +82,7 @@ param(
     [string]$CustomerId,
 
     [Parameter(Mandatory)]
-    [ValidateSet("StorageKey", "ServiceBus", "Redis", "EntraId", "All")]
+    [ValidateSet("StorageKey", "ServiceBus", "EntraId", "All")]
     [string]$SecretType,
 
     [Parameter()]
@@ -104,6 +102,10 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+# A38c secret-free marker pre-check gate (see scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header
+# for full rationale + §11 justification). Gates ServiceBus-ConnectionString rotation ONLY.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
+
 # ─────────────────────────────────────────────
 # Constants & Naming
 # ─────────────────────────────────────────────
@@ -115,7 +117,6 @@ function Get-PlatformVaultName { "sprk-platform-$Environment-kv" }
 function Get-CustomerVaultName([string]$cid) { "sprk-$cid-$Environment-kv" }
 function Get-StorageAccountName([string]$cid) { "sprk$($cid)$($Environment)sa" }
 function Get-ServiceBusName([string]$cid) { "sprk-$cid-$Environment-sb" }
-function Get-RedisName([string]$cid) { "sprk-$cid-$Environment-redis" }
 
 # ─────────────────────────────────────────────
 # Logging & Audit
@@ -403,87 +404,6 @@ function Rotate-ServiceBusKey {
 }
 
 # ─────────────────────────────────────────────
-# Secret Rotation: Redis Access Keys
-# ─────────────────────────────────────────────
-
-function Rotate-RedisKey {
-    param(
-        [string]$RedisName,
-        [string]$VaultName,
-        [string]$SecretName,
-        [string]$ResourceGroup
-    )
-
-    if ($DryRun) {
-        Write-AuditLog -Level "INFO" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-RedisKey" -Result "DryRun" `
-            -Detail "Would regenerate Secondary key for Redis '$RedisName', update vault, then regenerate Primary"
-        return
-    }
-
-    try {
-        # Step 1: Regenerate secondary key
-        Write-AuditLog -Level "INFO" -SecretName $SecretName -VaultName $VaultName `
-            -Action "RegenerateSecondaryKey" -Result "InProgress" -Detail "Redis: $RedisName"
-
-        az redis regenerate-keys `
-            --name $RedisName `
-            --resource-group $ResourceGroup `
-            --key-type Secondary `
-            -o none
-
-        if ($LASTEXITCODE -ne 0) { throw "Failed to regenerate Secondary key for Redis '$RedisName'" }
-
-        # Step 2: Get new keys and build connection string
-        $redisKeys = az redis list-keys `
-            --name $RedisName `
-            --resource-group $ResourceGroup `
-            -o json | ConvertFrom-Json
-
-        $redisHost = "$RedisName.redis.cache.windows.net"
-        $newConnString = "$redisHost`:6380,password=$($redisKeys.secondaryKey),ssl=True,abortConnect=False"
-
-        if (-not $redisKeys.secondaryKey) { throw "Failed to retrieve secondary key for Redis '$RedisName'" }
-
-        # Step 3: Update Key Vault
-        az keyvault secret set `
-            --vault-name $VaultName `
-            --name $SecretName `
-            --value $newConnString `
-            -o none
-
-        if ($LASTEXITCODE -ne 0) { throw "Failed to update Key Vault secret '$SecretName'" }
-
-        # Step 4: Verify — check Redis is accessible
-        $redisInfo = az redis show `
-            --name $RedisName `
-            --resource-group $ResourceGroup `
-            --query "provisioningState" -o tsv 2>$null
-
-        if ($redisInfo -ne "Succeeded") {
-            Write-AuditLog -Level "WARN" -SecretName $SecretName -VaultName $VaultName `
-                -Action "VerifyConnectivity" -Result "Warning" `
-                -Detail "Redis provisioning state: $redisInfo (expected Succeeded)"
-        }
-
-        # Step 5: Regenerate primary key to invalidate old value
-        az redis regenerate-keys `
-            --name $RedisName `
-            --resource-group $ResourceGroup `
-            --key-type Primary `
-            -o none
-
-        Write-AuditLog -Level "SUCCESS" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-RedisKey" -Result "Success" `
-            -Detail "Rotated to Secondary key, invalidated Primary"
-    }
-    catch {
-        Write-AuditLog -Level "ERROR" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-RedisKey" -Result "Failed" -Detail $_.Exception.Message
-    }
-}
-
-# ─────────────────────────────────────────────
 # Secret Rotation: Entra ID Client Secrets
 # ─────────────────────────────────────────────
 
@@ -583,21 +503,20 @@ function Rotate-PlatformSecrets {
 
     # Service Bus (platform-level)
     if ($SecretType -eq "ServiceBus" -or $SecretType -eq "All") {
+        # ── A38c secret-free marker gate (Model 1 — platform vault) ────────────────────────────
+        # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
+        # 2026-08-24). On a secret-free platform vault, rotating it here would resurrect it and
+        # silently reverse the migration while this run reports Success (§10.5 trap class). Refuse
+        # loudly instead — mirrors the A43 Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape. Model 2
+        # per-customer vaults are gated separately below in Rotate-CustomerSecrets (§10.3 fleet
+        # consistency — this check is per-vault, not per-fleet, so it works identically for both).
+        Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName
+
         $sbName = "sprk-platform-$Environment-sb"
         Rotate-ServiceBusKey `
             -NamespaceName $sbName `
             -VaultName $vaultName `
             -SecretName "ServiceBus-ConnectionString" `
-            -ResourceGroup $resourceGroup
-    }
-
-    # Redis (platform-level)
-    if ($SecretType -eq "Redis" -or $SecretType -eq "All") {
-        $redisName = "sprk-platform-$Environment-redis"
-        Rotate-RedisKey `
-            -RedisName $redisName `
-            -VaultName $vaultName `
-            -SecretName "Redis-ConnectionString" `
             -ResourceGroup $resourceGroup
     }
 
@@ -656,21 +575,18 @@ function Rotate-CustomerSecrets([string]$cid) {
 
     # Service Bus
     if ($SecretType -eq "ServiceBus" -or $SecretType -eq "All") {
+        # ── A38c secret-free marker gate (Model 2 — per-customer vault) ────────────────────────
+        # Same rationale as the platform-vault gate above (Rotate-PlatformSecrets). Under Model 2,
+        # N per-customer vaults each carry their own tag (§10.3 fleet consistency) — this call
+        # checks exactly THIS customer's vault ($vaultName is `Get-CustomerVaultName $cid`), so the
+        # gate is evaluated independently per customer as this function is invoked per customer.
+        Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName -CustomerId $cid
+
         $sbName = Get-ServiceBusName $cid
         Rotate-ServiceBusKey `
             -NamespaceName $sbName `
             -VaultName $vaultName `
             -SecretName "ServiceBus-ConnectionString" `
-            -ResourceGroup $resourceGroup
-    }
-
-    # Redis
-    if ($SecretType -eq "Redis" -or $SecretType -eq "All") {
-        $redisName = Get-RedisName $cid
-        Rotate-RedisKey `
-            -RedisName $redisName `
-            -VaultName $vaultName `
-            -SecretName "Redis-ConnectionString" `
             -ResourceGroup $resourceGroup
     }
 

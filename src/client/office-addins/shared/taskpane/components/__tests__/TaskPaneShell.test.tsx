@@ -59,7 +59,14 @@ describe('TaskPaneShell', () => {
 
   it('shows navigation tabs when authenticated', () => {
     renderWithProvider(
-      <TaskPaneShell isAuthenticated={true} showNavigation={true} selectedTab="save" onTabChange={() => { /* no-op */ }}>
+      <TaskPaneShell
+        isAuthenticated={true}
+        showNavigation={true}
+        selectedTab="save"
+        onTabChange={() => {
+          /* no-op */
+        }}
+      >
         <div>Content</div>
       </TaskPaneShell>
     );
@@ -67,9 +74,10 @@ describe('TaskPaneShell', () => {
     expect(screen.getByRole('tablist')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: /save/i })).toBeInTheDocument();
     // Share is a hidden V1 placeholder (TaskPaneNavigation.tsx TAB_CONFIGS — commented out); the r1
-    // shell renders Save, Find and Create To Do instead (task 071 — matches TaskPaneNavigation.test.tsx).
+    // shell renders Save, Find and To Do instead (task 071 — matches TaskPaneNavigation.test.tsx).
+    // Task 091 (UAT-2): the tab's label is "To Do", not "Create To Do".
     expect(screen.getByRole('tab', { name: /find/i })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: /create to do/i })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: /^to do$/i })).toBeInTheDocument();
   });
 
   it('hides navigation when not authenticated', () => {
@@ -139,7 +147,9 @@ describe('TaskPaneShell', () => {
     };
 
     // Suppress console.error for this test
-    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => { /* no-op */ });
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {
+      /* no-op */
+    });
 
     renderWithProvider(
       <TaskPaneShell showErrorDetails={true}>

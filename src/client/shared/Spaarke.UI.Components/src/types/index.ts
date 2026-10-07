@@ -1,7 +1,6 @@
 export * from './DatasetTypes';
 export * from './CommandTypes';
 export * from './ColumnRendererTypes';
-export * from './EntityConfigurationTypes';
 // ChartDefinitionTypes + DrillInteractionTypes removed (VHVU-042): the canonical
 // VisualType / IChartDefinition / IChartData / IAggregatedDataPoint / DrillInteraction
 // now live in @spaarke/visuals. These were a stale, unused fork (0 consumers).
@@ -23,8 +22,11 @@ export * from './sprkAnalysis';
 export { PrivilegeService } from '../services/PrivilegeService';
 export { FieldSecurityService } from '../services/FieldSecurityService';
 export { ColumnRendererService } from '../services/ColumnRendererService';
-export { EntityConfigurationService } from '../services/EntityConfigurationService';
-export { CustomCommandFactory } from '../services/CustomCommandFactory';
+// (EntityConfigurationService + CustomCommandFactory + their EntityConfigurationTypes DELETED here —
+// spaarke-ontology-platform-r1 reuse audit C-19, 2026-10-03 — dead infra from the deleted
+// UniversalDatasetGrid PCF, consumed only by the also-deleted CommandRegistry. CommandExecutor,
+// which the audit believed live, was consumed only by useKeyboardShortcuts + CommandToolbar and is
+// deleted too (#1113). Zero other consumers found across src/.)
 // (FieldMappingService class removed in task 010 — the engine is now the
 // `applyFieldMappings` function exported from the services barrel. Field-mapping
 // TYPES are exported above via `export * from './FieldMappingTypes'`.)

@@ -1,5 +1,7 @@
 # Dataverse Access-Layer Unification — R1
 
+> **Portfolio**: [Project #1154](https://github.com/spaarke-dev/spaarke/issues/1154) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > ## 🟡 PAUSED (open, not archived) — 2026-08-19
 >
 > A code-grounded validation ([`notes/validation-2026-08-19.md`](notes/validation-2026-08-19.md)) found the

@@ -32,7 +32,7 @@
  * @see projects/spaarkeai-assistant-enhancements-r1/notes/052-profile-security-review.md — F5 + input-hygiene hand-off
  */
 
-import { getClientUrl } from '@spaarke/ui-components';
+import { getClientUrl, cleanGuid as _cleanGuid } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Schema constants (EXACT logical names — verified against $metadata 2026-07-16)
@@ -163,10 +163,10 @@ export interface IUserProfilePort {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Strip braces + lowercase a GUID for safe use in OData URLs (never hand-roll brace-stripping). */
-export function cleanGuid(id: string): string {
-  return (id ?? '').replace(/[{}]/g, '').toLowerCase();
-}
+/** Strip braces + lowercase a GUID for safe use in OData URLs. Re-exported under this
+ * module's existing name (C-7, spaarke-ontology-platform-r1 reuse audit) — delegates
+ * to the canonical `cleanGuid`. */
+export const cleanGuid = _cleanGuid;
 
 /**
  * Normalize + cap a free-text PII field before write (052 input hygiene). Returns null for empty so

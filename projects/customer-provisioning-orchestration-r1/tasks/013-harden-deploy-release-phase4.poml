@@ -4,7 +4,7 @@
     <title>Harden scripts/Deploy-Release.ps1 Phase 4 — customerId-driven, remove spaarkedev1 hardcode</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing PowerShell script (not BFF code); hard-coded string removal + parameterization. Per root CLAUDE.md §8, script hardening with explicit constraints = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

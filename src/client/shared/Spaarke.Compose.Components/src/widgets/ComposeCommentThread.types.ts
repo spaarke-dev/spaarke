@@ -9,7 +9,9 @@
  * no parallel/alternate shape is introduced. A thread is a root comment + an ORDERED, FLAT list of
  * replies; there is no parent/child reply TREE. This intentionally matches what a legacy (non-
  * modern-comments) `.docx` round-trip can represent: one or more `<w:comment>` elements anchored to
- * the SAME span, in document order — see {@link composeCommentThreadsToDocxAnnotations}. FR-25 (task
+ * the SAME span, in document order — see {@link composeSessionCommentThreadsToAnchoredComments}, the
+ * live save-side mapping (its retired `DocxAnnotationInput`-shaped predecessor was deleted
+ * spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03). FR-25 (task
  * 051) will read recovered `RecoveredComment`s (BFF `DocxAnnotationReader`) — `{ id, author, date,
  * commentText, anchorText, paragraphHint }` — grouped by shared `anchorText` and project them
  * directly into a {@link ComposeCommentThreadModel} (the first recovered comment on a span becomes
@@ -24,11 +26,16 @@
  * @see ./marks/CommentAnchorMark.ts — the anchoring mark threads render over (reused, not reimplemented)
  * @see ./hooks/useComposeCommentThreads.ts — the state hook building threads over the mark
  * @see ./ComposeCommentThread.tsx — the Fluent v9 thread UI
- * @see ./useComposeWordShuttle.ts — `DocxAnnotationInput` / `DocxTrackChangeKind` (the existing R2
- *      wire vocabulary this model maps onto for persistence — reused, not forked)
  * @see projects/spaarkeai-compose-r3/spec.md FR-23, FR-25, FR-26
+ *
+ * NOTE (spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03): `composeCommentThreadsToDocxAnnotations`
+ * and `composeSessionCommentThreadsToDocxAnnotations` — the `DocxAnnotationInput`/`targetText`-shaped
+ * save mapping this file used to export — were DELETED. That shape rode the retired `annotations` save
+ * field, which the server's `SaveComposeDocumentBody` never deserialized: every comment sent that way
+ * was silently dropped on save. They had zero production callers (only their own unit tests) and were
+ * abandoned for exactly that data-loss reason — see `composeSessionCommentThreadsToAnchoredComments`
+ * below, the live replacement (the `comments` shape `ComposeService.SaveAsync` actually reads).
  */
-import { DocxTrackChangeKind, type DocxAnnotationInput } from './useComposeWordShuttle';
 import { resolveRunAnchor } from './stepOperationInterceptor';
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { ComposeAnchoredComment } from '../types/compose-operations';
@@ -102,9 +109,8 @@ export interface ComposeCommentThreadModel extends ComposeCommentAuthorStamp {
    * clause: …" / "Assessment says: …" / "Standard: …"), so silently dropping them at export made
    * the saved-then-reopened-in-Word comment materially incomplete relative to what the reviewer
    * saw (the root cause tracked in
-   * `projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md`). Both
-   * `composeCommentThreadsToDocxAnnotations` and `composeSessionCommentThreadsToAnchoredComments`
-   * below now compose the root comment's exported text via
+   * `projects/ai-advanced-capabilities-agreements-r1/notes/word-comment-export-gap.md`).
+   * `composeSessionCommentThreadsToAnchoredComments` below composes the root comment's exported text via
    * {@link composeAdvisoryCommentExportText} (`./advisoryNoteFormatting`), which reads these
    * fields. Absent for session (non-advisory) Comments panel threads, which never pass metadata to
    * `createThread` — those threads' `text` exports completely unchanged (see
@@ -140,64 +146,9 @@ export interface ComposeCommentThreadModel extends ComposeCommentAuthorStamp {
   standardText?: string;
 }
 
-/**
- * Maps threads to the {@link DocxAnnotationInput}s the EXISTING R2 `w:comment` writer path
- * (`DocxAnnotationWriter`, reached via the push-annotations shuttle) renders as native comments
- * (FR-23/FR-24). A thread's root comment + every reply each become their own `Comment`-kind
- * annotation, ALL anchored to the SAME `targetText` — the flat, multi-comment-on-one-span
- * representation a legacy `.docx` can hold (SCOPE GUARD: no modern-comments reply-chain authoring).
- * Threads without a captured `anchorText` are skipped (the server's `DocxAnnotation.Validate()`
- * requires a non-empty `targetText` for a Comment-kind annotation — same rule
- * `anchoredAnnotationsToDocxAnnotations` in `useComposeWordShuttle.ts` already applies).
- *
- * Exported so a save-flow caller (a follow-on wiring task) can append this to the annotations list
- * alongside {@link ../ComposeEditor.ComposeEditorHandle.getRedlineAnnotations} — the two paths NEVER
- * duplicate a target: redlines write `w:ins`/`w:del`, this writes `w:comment`.
- */
-export function composeCommentThreadsToDocxAnnotations(
-  threads: readonly ComposeCommentThreadModel[]
-): DocxAnnotationInput[] {
-  const result: DocxAnnotationInput[] = [];
-  for (const thread of threads) {
-    if (!thread.anchorText) continue;
-    result.push({
-      kind: DocxTrackChangeKind.Comment,
-      targetText: thread.anchorText,
-      // task 052 (FR-15): the ROOT comment's exported text mirrors the gutter (structured for an
-      // advisory thread, verbatim for a plain session comment) — see the shared helper's file
-      // header. Replies are never restructured (see composeAdvisoryCommentExportText's own doc).
-      commentText: composeAdvisoryCommentExportText(thread),
-      author: thread.author,
-      date: thread.timestamp,
-    });
-    for (const reply of thread.replies) {
-      result.push({
-        kind: DocxTrackChangeKind.Comment,
-        targetText: thread.anchorText,
-        commentText: reply.text,
-        author: reply.author,
-        date: reply.timestamp,
-      });
-    }
-  }
-  return result;
-}
-
-/**
- * Item 5b (UAT round-4, FR-23): the SAVE-side projection — like
- * {@link composeCommentThreadsToDocxAnnotations} but EXCLUDING threads whose id is in
- * `importedThreadIds` (threads seeded from the retained original's own `w:comment`s). Those already
- * ride the retained baseline on save, so re-emitting them would DUPLICATE the comment in the output.
- * Only session-authored (or otherwise non-imported) threads are persisted as new `w:comment`s. The
- * host (`ComposeEditor.getCommentThreadAnnotations`) supplies the imported id set from the load-time
- * `initialThreads`.
- */
-export function composeSessionCommentThreadsToDocxAnnotations(
-  threads: readonly ComposeCommentThreadModel[],
-  importedThreadIds: ReadonlySet<string>
-): DocxAnnotationInput[] {
-  return composeCommentThreadsToDocxAnnotations(threads.filter(t => !importedThreadIds.has(t.id)));
-}
+// `composeCommentThreadsToDocxAnnotations` and `composeSessionCommentThreadsToDocxAnnotations` were
+// DELETED here (spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03) — see the file-header NOTE
+// above. The live save-side mapping is `composeSessionCommentThreadsToAnchoredComments` below.
 
 // ---------------------------------------------------------------------------
 // ai-advanced-capabilities-nda-r1 task 040 (comment-export wiring fix)
@@ -214,11 +165,11 @@ export { findCommentAnchorRange, COMMENT_ANCHOR_MARK_NAME } from './commentAncho
  * Maps threads to durable `(paraId, run-local range)`-anchored {@link ComposeAnchoredComment}s by
  * resolving each thread's LIVE `commentAnchor` mark span against `doc` via {@link resolveRunAnchor} —
  * the SAME D2 anchor primitive `stepOperationInterceptor.ts`'s op-log capture path uses. No
- * write-path text-search (I-7). REPLACES {@link composeSessionCommentThreadsToDocxAnnotations} for the
- * Save flow: that function's `DocxAnnotationInput`/`targetText` shape rode the now-retired `annotations`
- * save field, which the server's `SaveComposeDocumentBody` never deserialized (every comment sent that
- * way was silently dropped) — `comments` (this shape) is what `ComposeService.SaveAsync` actually reads
- * and `ComposeShadowPatchEngine.ApplyComment` bakes as a native `w:comment` (ADR-049).
+ * write-path text-search (I-7). REPLACES the now-deleted `composeSessionCommentThreadsToDocxAnnotations`
+ * for the Save flow: that function's `DocxAnnotationInput`/`targetText` shape rode the now-retired
+ * `annotations` save field, which the server's `SaveComposeDocumentBody` never deserialized (every
+ * comment sent that way was silently dropped) — `comments` (this shape) is what `ComposeService.SaveAsync`
+ * actually reads and `ComposeShadowPatchEngine.ApplyComment` bakes as a native `w:comment` (ADR-049).
  *
  * A thread contributes NO comment (never guessed/mis-anchored) when:
  *  - its id is in `importedThreadIds` (it already rides the retained-original baseline — re-emitting
@@ -228,8 +179,8 @@ export { findCommentAnchorRange, COMMENT_ANCHOR_MARK_NAME } from './commentAncho
  *    I-4) — mirrors `classifyMarkStep`'s cross-paragraph refusal for the same-shaped op case.
  *
  * A thread's root comment + every reply each become their OWN `ComposeAnchoredComment`, all anchored to
- * the SAME resolved range — the same multi-comment-on-one-span representation
- * {@link composeCommentThreadsToDocxAnnotations} already uses for the legacy shape.
+ * the SAME resolved range — the same multi-comment-on-one-span representation the now-deleted
+ * `composeCommentThreadsToDocxAnnotations` used for the legacy shape.
  */
 export function composeSessionCommentThreadsToAnchoredComments(
   doc: PMNode,

@@ -37,12 +37,38 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
     };
 
     /// <summary>Writes address the plural entity set and reads the logical name; the fake keys both to one record.</summary>
+    /// <remarks>Task 149 added the child tables the secure-child share synchronizer writes, spelled as the live entity
+    /// sets (2026-10-02; note <c>sprk_analysises</c>) — a second copy on purpose, like the rights table.</remarks>
     private static readonly IReadOnlyDictionary<string, string> LogicalNameOfEntitySet = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         ["sprk_projects"] = "sprk_project",
         ["sprk_matters"] = "sprk_matter",
         ["sprk_workassignments"] = "sprk_workassignment",
+        ["sprk_documents"] = "sprk_document",
+        ["sprk_todos"] = "sprk_todo",
+        ["sprk_events"] = "sprk_event",
+        ["sprk_communications"] = "sprk_communication",
+        ["sprk_communicationattachments"] = "sprk_communicationattachment",
+        ["sprk_memos"] = "sprk_memo",
+        ["sprk_analysises"] = "sprk_analysis",
+        ["sprk_fileversions"] = "sprk_fileversion",
+        // Task 147 r1 E2: the ribbon's "New Budget" creates a budget through the child-record route, which mirrors inline.
+        ["sprk_budgets"] = "sprk_budget",
+        // Task 147 r1c: the remaining census tables the child-record routes create and mirror.
+        ["sprk_invoices"] = "sprk_invoice",
+        ["sprk_reportcards"] = "sprk_reportcard",
+        ["sprk_kpiassessments"] = "sprk_kpiassessment",
+        ["sprk_billingevents"] = "sprk_billingevent",
     };
+
+    /// <summary>Makes the batched strict read throw for this table only (task 149: one table's read failing).</summary>
+    public string? FailBatchReadsOf { get; set; }
+
+    /// <summary>Makes the strict single read throw for this one record only (task 149: a root whose shares cannot be read).</summary>
+    public (string LogicalName, Guid RecordId)? FailReadsOfRecord { get; set; }
+
+    /// <summary>Makes every write on this one record throw (task 149: a partial fan-out).</summary>
+    public (string EntitySet, Guid RecordId)? FailWritesOnRecord { get; set; }
 
     private readonly object _gate = new();
     private readonly Dictionary<(string LogicalName, Guid RecordId, DataversePrincipalRef Principal), (int Mask, DateTimeOffset ModifiedOn)> _shares = new();
@@ -90,6 +116,23 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
             WriteFailure = null;
             IgnoreWrites = false;
             StrictReads = 0;
+            FailBatchReadsOf = null;
+            FailReadsOfRecord = null;
+            FailWritesOnRecord = null;
+            WriteLog.Clear();
+        }
+    }
+
+    /// <summary>Every write attempted, with its target — task 149's child writes are asserted per record and principal.</summary>
+    public List<(string Action, string EntitySet, Guid RecordId, DataversePrincipalRef Principal, string? Rights)> WriteLog { get; } = new();
+
+    private void Target(string action, string entitySetName, Guid recordId, DataversePrincipalRef principal, string? rights)
+    {
+        lock (_gate)
+        {
+            WriteLog.Add((action, entitySetName, recordId, principal, rights));
+            if (FailWritesOnRecord is { } fail && fail.EntitySet == entitySetName && fail.RecordId == recordId)
+                throw new InvalidOperationException($"Simulated write failure on {entitySetName}({recordId}).");
         }
     }
 
@@ -97,6 +140,7 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
         CancellationToken ct = default)
     {
+        Target("GrantAccess", entitySetName, recordId, principal, accessRightsCsv);
         Write($"GrantAccess {accessRightsCsv}", () =>
         {
             var key = Key(entitySetName, recordId, principal);
@@ -111,6 +155,7 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
         string entitySetName, Guid recordId, DataversePrincipalRef principal, string accessRightsCsv,
         CancellationToken ct = default)
     {
+        Target("ModifyAccess", entitySetName, recordId, principal, accessRightsCsv);
         Write($"ModifyAccess {accessRightsCsv}", () =>
         {
             var key = Key(entitySetName, recordId, principal);
@@ -127,6 +172,7 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
     public Task RevokeAccessAsync(
         string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct = default)
     {
+        Target("RevokeAccess", entitySetName, recordId, principal, null);
         Write("RevokeAccess", () =>
         {
             if (!_shares.Remove(Key(entitySetName, recordId, principal)))
@@ -149,8 +195,28 @@ public sealed class FakeRecordShareTable : IDataverseRecordShareService
             StrictReads++;
             if (FailReads || (FailReadBackAfterWrite && Writes.Count > 0))
                 throw new InvalidOperationException("Simulated failure reading the shares.");
+            if (FailReadsOfRecord is { } fail && fail.LogicalName == entityLogicalName && fail.RecordId == recordId)
+                throw new InvalidOperationException($"Simulated failure reading the shares on {entityLogicalName}({recordId}).");
 
             return Task.FromResult(Rows(entityLogicalName, recordId));
+        }
+    }
+
+    /// <summary>
+    /// The batched strict read (task 149): every record asked about is in the answer, or it throws — like the real one.
+    /// </summary>
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName, IReadOnlyCollection<Guid> recordIds, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            StrictReads++;
+            if (FailReads || FailBatchReadsOf == entityLogicalName)
+                throw new InvalidOperationException($"Simulated failure reading the shares on {entityLogicalName} rows.");
+
+            IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>> answer =
+                recordIds.Distinct().ToDictionary(id => id, id => Rows(entityLogicalName, id));
+            return Task.FromResult(answer);
         }
     }
 

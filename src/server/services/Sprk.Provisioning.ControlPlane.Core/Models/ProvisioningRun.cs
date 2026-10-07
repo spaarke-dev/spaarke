@@ -64,11 +64,25 @@ public sealed class ProvisioningRun
     public string EnvironmentId { get; set; } = default!;
 
     /// <summary>
-    /// Tenancy model at run time (mirrors <c>sprk_dataverseenvironment.
-    /// sprk_tenancymodel</c>). Values: <c>Model1Shared</c> | <c>Model2Dedicated</c>.
+    /// Tenancy model at run time (mirrors <c>sprk_dataverseenvironment.sprk_tenancymodel</c>).
+    /// Stays a <c>string</c> field for Cosmos on-disk stability (task 223 D-12 preservation
+    /// constraint — the enum <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>
+    /// is a computed helper for handler branching, NOT a serialization type; introducing a
+    /// <c>[JsonConverter]</c> would risk breaking existing rows). Post-T224 (INCOMING §5 Item 3
+    /// rename) values MUST round-trip to <c>"Model1"</c> or <c>"Model2"</c> because H12c's
+    /// idempotency-key format embeds this string verbatim (the pre-T224 labels
+    /// <c>"Model1Shared"</c> / <c>"Model2Dedicated"</c> were retired). Handlers parse at entry
+    /// via <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse"/>.
     /// </summary>
     [JsonPropertyName("tenancyModel")]
     public string TenancyModel { get; set; } = default!;
+
+    // Task 223 (D-12) code-review S1: `TryGetParsedTenancyModel()` helper method was removed —
+    // every handler that needs a parsed enum already calls
+    // Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var m)
+    // directly + emits a handler-specific rejection code on failure. A helper method with
+    // zero callers is YAGNI surface; delete-until-needed. If a future refactor genuinely
+    // benefits from a `run.TryGetParsedTenancyModel()` shorthand, reintroduce it at that time.
 
     /// <summary>
     /// Overall run status. See <see cref="RunStatus"/> for allowed values +
@@ -99,6 +113,7 @@ public sealed class ProvisioningRun
     /// <c>app-user-created</c>). See <see cref="GateEntry"/> + <see cref="GateState"/>.
     /// </summary>
     [JsonPropertyName("gateStates")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<GateEntry>))] // gate ids persist verbatim (task 165)
     public IDictionary<string, GateEntry> GateStates { get; set; }
         = new Dictionary<string, GateEntry>(StringComparer.Ordinal);
 
@@ -117,8 +132,9 @@ public sealed class ProvisioningRun
     public RunParameters Parameters { get; set; } = new RunParameters();
 
     /// <summary>
-    /// Environment profile used for the run (<c>spaarke-hosted-model2</c>,
-    /// <c>customer-owned-model2</c>, <c>spaarke-hosted-model1-trial</c>).
+    /// Environment profile used for the run: <c>spaarke-hosted-model2</c> (pairs with
+    /// tenancyModel <c>Model1</c>) or <c>customer-owned-model2</c> (pairs with <c>Model2</c>) —
+    /// the pairing POST /api/runs enforces (task 225b, D-12).
     /// </summary>
     [JsonPropertyName("profile")]
     public string Profile { get; set; } = default!;
@@ -148,9 +164,15 @@ public sealed class ProvisioningRun
     /// distinct from <see cref="AttemptCount"/> (a whole-run I6
     /// crash-recovery counter, not per-handler).
     /// </summary>
+    /// <remarks>
+    /// Keys persist VERBATIM (unified-access-control-r2 task 165): the Cosmos SDK's camelCase option lowered them ("H9" ->
+    /// "h9"), so the next lookup missed and every retry re-used attempt 1 — the same MessageId, dropped by Service Bus
+    /// duplicate detection. Case-insensitive so a run persisted before the fix ("h9") still counts.
+    /// </remarks>
     [JsonPropertyName("handlerRetryAttempts")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<int>), true)]
     public IDictionary<string, int> HandlerRetryAttempts { get; set; }
-        = new Dictionary<string, int>(StringComparer.Ordinal);
+        = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// UTC timestamp at which this run document was created. Named

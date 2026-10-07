@@ -49,9 +49,9 @@ public class RecordContainerResolverTests
 
     /// <summary>
     /// The three securable roots this project names. NOTE: live dev metadata (task 151 live gate, 2026-09-30)
-    /// reports a FOURTH entity carrying <c>sprk_issecure</c> — <c>sprk_invoice</c>. This double's world keeps
-    /// invoice non-securable deliberately, because the resolver's non-securable branch is what these tests pin,
-    /// not dev's schema.
+    /// reports a FOURTH entity carrying <c>sprk_issecure</c> — <c>sprk_invoice</c> — which the real registry does
+    /// NOT treat as securable since task 150 (owner round 10 item 11: an invoice follows its matter;
+    /// <c>SecurableEntityRegistry.FlagIsNotASecurityInput</c>). This double's world matches that.
     /// </summary>
     private static readonly string[] SecurableRoots = ["sprk_project", "sprk_matter", "sprk_workassignment"];
 
@@ -116,6 +116,40 @@ public class RecordContainerResolverTests
 
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.Code.Should().Be("secure_record_container_missing");
+    }
+
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision (fail closed, after the NULL backfill). <c>sprk_issecure</c> is
+    /// field-secured; a column this identity cannot read comes back ABSENT, not refused. Before task 150 that read as
+    /// "not secure" and resolved the shared fallback supplied right here — the one outcome SPE cannot take back.
+    /// </summary>
+    [Theory(DisplayName = "Task 150: a securable record whose sprk_issecure is ABSENT is refused, never resolved to the fallback")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    public async Task SecurableRecord_WithAbsentFlag_IsRefused(string entity)
+    {
+        var row = new Entity(entity, RecordId) { ["sprk_containerid"] = OwnContainer };
+        var resolver = Build(securable: SecurableRoots, record: row);
+
+        var act = async () => await resolver.ResolveForRecordAsync(
+            entity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+    }
+
+    [Fact(DisplayName = "Task 150: an explicit FALSE still resolves the fallback — only ABSENT refuses")]
+    public async Task SecurableRecord_WithExplicitFalse_StillResolvesTheFallback()
+    {
+        var resolver = Build(securable: SecurableRoots, record: Row(isSecure: false, containerId: null));
+
+        var decision = await resolver.ResolveForRecordAsync(
+            SecureProjectEntity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        decision.ContainerId.Should().Be(SharedBuContainer);
     }
 
     [Fact(DisplayName = "Task 075: a NON-secure record still resolves through the BU cascade, unchanged")]
@@ -453,14 +487,26 @@ public class RecordContainerResolverTests
         // the resolver deliberately lets the ALIAS win, because every Spaarke caller that says "invoice" means
         // sprk_invoice and the route filter AUTHORIZES "invoice" against sprk_invoices — resolving it anywhere
         // else reads a different record from the one authorized. This world therefore KNOWS the OOB "invoice"
-        // and makes sprk_invoice SECURABLE (as live dev has it), so the two readings give different answers:
-        // only the alias reading reaches the secure record's own container.
+        // and files the sprk_invoice under a SECURE matter, so the two readings give different answers: only the
+        // alias reading follows the invoice's matter link to the secure matter's own container. (Until task 150 this
+        // test made sprk_invoice SECURABLE in its own right, as live dev's metadata has it; owner round 10 item 11
+        // ruled an invoice follows its matter, so its own flag is no longer a security input.)
+        var matterId = Guid.Parse("15015015-0000-0000-0000-0000000a11a5");
         var svc = Substitute.For<IGenericEntityService>();
         svc.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(Row(isSecure: true, containerId: OwnContainer)));
+            .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", matterId)
+            }));
+        svc.RetrieveAsync("sprk_matter", matterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_matter", matterId)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = OwnContainer
+            }));
 
         var resolver = Build(
-            securable: [.. SecurableRoots, "sprk_invoice"],
+            securable: SecurableRoots,
             entityService: svc,
             extraKnownEntities: ["invoice"]);
 
@@ -468,8 +514,8 @@ public class RecordContainerResolverTests
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
         decision.ContainerId.Should().Be(OwnContainer,
-            "'invoice' is sprk_invoice here; reading it as the OOB entity would route a secure invoice's content "
-            + "to the shared fallback");
+            "'invoice' is sprk_invoice here; reading it as the OOB entity would route the content of an invoice under a "
+            + "secure matter to the shared fallback");
 
         await svc.Received(1).RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
         await svc.DidNotReceive().RetrieveAsync("invoice", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());

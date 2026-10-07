@@ -1,5 +1,7 @@
 # Spaarke Iframe-Wizard Pattern Enhancement
 
+> **Portfolio**: [Project #1221](https://github.com/spaarke-dev/spaarke/issues/1221) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Design (pre-planning)
 > **Created**: 2026-05-27
 > **Source**: Discovered during R4 task 043 (W-5 Context → Workspace mount source)

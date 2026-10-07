@@ -46,6 +46,7 @@ import {
   resolveRecordDisplayNameFieldName,
   type IPolymorphicWebApi,
   OOB_MODAL_SIZES,
+  getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { AssociationStatus, type ICommunicationRecord } from './types';
@@ -65,6 +66,7 @@ import {
   type IRegardingSelection,
 } from '@spaarke/communication-components/logic/connections';
 import { ConnectionsEditor } from './ConnectionsEditor';
+import { refileThroughBff } from './bffWrites';
 import { resolveTitle } from './title';
 
 const useStyles = makeStyles({
@@ -255,27 +257,16 @@ export interface IFiledAssociation {
   recordName: string;
 }
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  // Cross-origin frame access can throw SecurityError; guard defensively.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 /** Resolve the host communication record GUID from Xrm.Page. */
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) {
-      return id.replace(/[{}]/g, '');
+      return cleanGuid(id);
     }
   } catch {
     /* ignore */
@@ -285,7 +276,10 @@ function getHostRecordId(): string | undefined {
 
 /** Refresh the host form after a write so bound fields update transparently. */
 async function refreshForm(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const data = xrm?.Page?.data;
     const refresh = data?.refresh;
@@ -306,7 +300,10 @@ async function refreshForm(): Promise<void> {
  * (test harness / canvas app). Defensive throughout — never throws to the host form.
  */
 async function handleRefreshInternal(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const data = xrm?.Page?.data;
     const save = data?.entity?.save;
@@ -346,7 +343,7 @@ function resolvePrimaryOpenTarget(
       const etn = parsed.searchParams.get('etn');
       const id = parsed.searchParams.get('id');
       if (etn && id) {
-        const cleanId = id.replace(/[{}]/g, '');
+        const cleanId = cleanGuid(id);
         if (cleanId.length > 0) return { entityName: etn, entityId: cleanId };
       }
     } catch {
@@ -460,6 +457,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
       webApi: context.webAPI as unknown as IResolverWriteContext['webApi'],
       hostEntity,
       hostRecordId,
+      // v1.7.0 (UAC-r2 task 147 r1, owner round 28 item 1): a regarding write moves the communication into or out of a
+      // record, so its owner follows — it is re-filed through the BFF, never written through context.webAPI.
+      refileThroughBff,
     }),
     [context.webAPI, hostEntity, hostRecordId]
   );
@@ -670,7 +670,11 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
 
   const handleLinkAnother = React.useCallback(
     (entityType?: string): void => {
-      const xrm = getXrm();
+      // Shared cross-frame walker (task 081 / C-8). `any` view: the method is
+      // invoked inside the async closure below, where the typeof guard's
+      // narrowing of `xrm.Utility.lookupObjects` does not carry over.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const xrm = getXrm('lookupObjects') as any;
       if (typeof xrm?.Utility?.lookupObjects !== 'function') {
         setError('The record picker is unavailable in this host.');
         return;
@@ -698,7 +702,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
             `sprk_regarding_${picked.entityType}`;
           await fileSelection(field, {
             entityType: picked.entityType,
-            recordId: String(picked.id).replace(/[{}]/g, ''),
+            recordId: cleanGuid(String(picked.id)),
             recordName: typeof picked.name === 'string' ? picked.name : String(picked.id),
           });
         } catch (err) {
@@ -712,7 +716,10 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
   // Launch the create form for an AI-suggested type (e.g. "Create Matter"). R4 launches
   // the quick-create form; full create-and-link is the Notification-Spine project.
   const handleCreateType = React.useCallback((entityType: string): void => {
-    const xrm = getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    // `any` view: typed XrmContext does not declare the members used below.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = (getXrm('openForm') ?? getXrm('navigation')) as any;
     const onLaunchError = (err: unknown) => console.warn('[CommunicationConnections] create-type launch failed:', err);
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {
@@ -824,7 +831,8 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         console.warn('[CommunicationConnections] Cannot open regarding record — no target resolved.');
         return;
       }
-      const xrm = getXrm();
+      // Shared cross-frame walker (task 081 / C-8).
+      const xrm = getXrm('navigation');
       if (typeof xrm?.Navigation?.navigateTo !== 'function') {
         console.warn('[CommunicationConnections] Xrm.Navigation.navigateTo unavailable; cannot open record.');
         return;

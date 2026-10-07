@@ -169,7 +169,7 @@ public sealed class BapRestEnvironmentRateProbeTests
         var probe = new BapRestEnvironmentRateProbe(
             new HttpClient(handler), FakeCredentialFactory, NullLogger<BapRestEnvironmentRateProbe>.Instance, new TestTimeProvider(Now));
         var input = new PreflightProbeInput(
-            "acme-corp", TenantId, new Dictionary<string, string>());
+            "acme", TenantId, new Dictionary<string, string>());
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
 
@@ -185,7 +185,7 @@ public sealed class BapRestEnvironmentRateProbeTests
         var probe = new BapRestEnvironmentRateProbe(
             new HttpClient(handler), FakeCredentialFactory, NullLogger<BapRestEnvironmentRateProbe>.Instance, new TestTimeProvider(Now));
         var input = new PreflightProbeInput(
-            "acme-corp", TenantId,
+            "acme", TenantId,
             new Dictionary<string, string> { ["minSlotsRequired"] = "10", ["rateLimit"] = "4" });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);

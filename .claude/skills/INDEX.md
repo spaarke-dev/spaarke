@@ -94,6 +94,7 @@
 | [devops-project-register](devops-project-register/SKILL.md) | Inverse of project-start — existing worktree → Project Issue + fields. Used for Phase 3 backfill. | No | `/devops-project-register`, "register project", "backfill on portfolio" |
 | [devops-project-sync](devops-project-sync/SKILL.md) | Workhorse — re-read local state + idempotently update Issue fields. Called by 5 hook tasks. | No | `/devops-project-sync`, "sync portfolio", "update project fields" |
 | [devops-portfolio-status](devops-portfolio-status/SKILL.md) | Portfolio dashboard (terminal); `--snapshot` writes stakeholder narrative to docs/portfolio/ | No | `/devops-portfolio-status`, "portfolio dashboard", "what's running" |
+| [project-spend-update](project-spend-update/SKILL.md) | Manually refresh AI Spend (est.) / AI Calls fields on the portfolio board, one project or all. Deliberately NOT tied to task-execute. | No | `/project-spend-update`, "update project spend", "refresh AI cost" |
 | [devops-project-archive](devops-project-archive/SKILL.md) | **DESTRUCTIVE** — set Project Status, close Issue, **DELETE worktree**, retain folder + .archived marker | No | `/devops-project-archive`, "archive project", "close project" |
 
 ## Skill Categories

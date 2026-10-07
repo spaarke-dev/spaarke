@@ -201,5 +201,300 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in knowledge before starting. Coordinate with field-mapping-server-write-path-r1 before any BFF create route is written.</protocol>
+    <run date="2026-10-04" branch="task/uac-r2-147" base="2bd0175ad" outcome="escalated">
+      <summary>ESCALATED with partial delivery. Built and tested: the L4 net and the sprk_memo taxonomy change. Stopped
+        (first-class stops): routing the client writers and switching on the schedule. Escalation triggers 1/2/3 (E1, the
+        identity model of a BFF child create) and 4 (E2, the L4 interval) fired, and owner rounds 1-13 do not answer them.
+        Full record: notes/task-147-client-child-writers.md.</summary>
+      <done>
+        <item>Census: 29 call sites in 21 files (18 creates, 11 re-files), 12 writers new since the POML's list, each with
+          file:line, parents, host, BFF reachability and a proposed decision (note section 2). Every writer is proposed
+          for A; none is final until E1.</item>
+        <item>sprk_memo added to the CHILD taxonomy in C#, TypeScript and the stamp backfill script. The new guard
+          Taxonomy_MatchesTheStampBackfillScript pins the script's copy.</item>
+        <item>scripts/Backfill-CoreAncestorStamps.ps1 had never been able to run: every candidate query returned 400
+          because lookups were named by their logical name, and -Apply bound through the logical name. Both are fixed.
+          The dry run (read-only, dev): memo 0 to write; 4 stamps to write on other tables; the script's escalation gate
+          fired on communication (28.6% unresolvable).</item>
+        <item>The recent-changes pass in SecureChildReconciliationJob. It covers every lineage child table modified
+          since a per-instance watermark and not already Secure-team-owned. The records above those rows come from
+          SecureChildShareSynchronizer.SecureRootsAboveAsync (the existing upward walk) and are reconciled first with the
+          Sweep trigger. Failures and undetermined rows are reported and fail the run. The watermark moves only past a
+          completed listing in a run that wrote.</item>
+        <item>Tests: ClientChildFixUpTests (7); the CoreAncestorResolverTests memo case and script pin; the jest memo case.
+          Nine seeds, every one bites on the final code.</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c table.</item>
+        <item>field-mapping-server-write-path-r1 was messaged (state, options, questions); replies go to the main
+          session.</item>
+      </done>
+      <stopped>
+        <item>E1 (triggers 1, 2 and 3): who creates a client-initiated child through the BFF. A1 is app-only G5 plus
+          sprk_createdbyperson (field-mapping-r1 Q2); createdby becomes the app, and it needs a column policy past FLS.
+          A2 is an impersonated create with the owner set; Core User holds Assign at Deep, but the Secure Record BU is a
+          sibling in production, so it is likely refused (probe G147-1). A3 is an impersonated create plus an inline app
+          Assign, read back, then mirror; delete on failure; a one-request window. Recommended: A3, adopted INTO
+          field-mapping-r1's pipeline, so there is one create endpoint per table. No writer was switched.</item>
+        <item>E2 (trigger 4): the L4 interval for writes outside the product. It is the ownership exposure, not the
+          2-minute share window round 11 item 2 accepted. Recommended: 2 minutes with writes on, plus hardening (c):
+          remove model-driven Create on child tables under secure parents. The job stays disabled and report-only, and
+          the exact diff is in note section 5.</item>
+      </stopped>
+      <justification-new-surface>
+        <item name="SecureChildShareSynchronizer.SecureRootsAboveAsync + Run.LineageOfReadRowAsync + SecureRootsAbove record">
+          <existing>the synchronizer's private LineageOfAsync (the one upward walk, with the resolver's follow rule).
+            Grep SecureRootsAbove: no hits before this task.</existing>
+          <extension>Yes: it exposes the existing walk for rows of any owner. A copy in the job or the reconciler would be
+            a second follow rule.</extension>
+          <cost-of-doing-nothing>a child written outside the product reaches isolation only when the capped sweep window
+            reaches its record, which takes at least ceil(secure records / 50) runs.</cost-of-doing-nothing>
+        </item>
+        <item name="recent-changes pass in SecureChildReconciliationJob (method, watermark field, two constants, additive ResultJson.recentChanges)">
+          <existing>task 148's sweep (capped, ordered); task 149's share job (Secure-owned rows only).</existing>
+          <extension>Yes: it extends the ONE job for this invariant. The POML forbids a second job class. Constants, not
+            options: the lookback and overlap are correctness margins.</extension>
+          <cost-of-doing-nothing>the same delay, and a failed window would be lost silently.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (ADR-052 "BFF, schedule"; ADR-036 IScheduledJob). No new service, DI registration, endpoint,
+          option, job, column, package or plugin. No AI code (ADR-013 not applicable).</placement>
+      </justification-new-surface>
+      <tests>Affected suites green: the ClientChildFixUpTests, SecureChildTransitionTests, SecureChildShare* and
+        CoreAncestorResolverTests classes, 157 tests in the last affected run. Jest PolymorphicResolverService: 56/56. UI
+        components full jest: 3424 passed, 14 failed. The same 8 suites (13 tests) fail on the baseline taxonomy, so the
+        failures are pre-existing and unrelated. UI components tsc build is green, once the sibling packages
+        @spaarke/auth and @spaarke/sdap-client are built locally. Final full suites (run once): BFF unit 14,845 (14,791 passed + 54
+        skipped, 0 failed); ArchTests 373/373; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 428 (403
+        passed + 25 skipped, 0 failed). CVE scan finds none; dotnet format whitespace is clean.</tests>
+      <live>READ-ONLY only (GETs): sprk_memo metadata, role privileges per business unit, the stamp backfill dry run.
+        Pending manual gates G147-1 to G147-4 are in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1" base="1a39f7bdd" outcome="interrupted">
+      <summary>INTERRUPTED by a machine restart before its final checks; the work was saved on wip/uac-r2-147-r1-restart and
+        finished by the r1c run below (which found and fixed a seed left in place and three defects in it). As recorded at the
+        stop: owner round 28 implemented in full (E1 = A1, E2 = BFF-backed commands under a secure parent + the L4 recent pass
+        every 2 minutes with writes on); verifier items 1-23 closed or recorded as manual live gates. Rebased onto the batch-4
+        integration base (merges 70db1efb1 and e96112845). Full record: notes/task-147-client-child-writers.md (r1).</summary>
+      <done>
+        <item>Items 1-2: sprk_memo is an intermediate (IntermediateRootColumns), a stamp source with parties, and known to
+          RecordContainerResolver (KindByEntity, ByEntity links, sprk_timekeeper party) on the integration base.</item>
+        <item>E1 = A1: POST /api/v1/child-records/{table} (G5: as-caller Create + AppendTo + no server-owned or FLS column;
+          app-only create owned by the resolver's team; sprk_createdbyperson = caller; sharees mirrored inline) and the ONE
+          re-file core OwnedChildWrite.RefileAsync behind PATCH /api/v1/child-records/{table}/{id},
+          PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing; Compose re-files through
+          PUT /api/v1/documents/{id}. Uniform 404; ProblemDetails reason codes.</item>
+        <item>Every census client writer switched (wizards via withBffChildWrites, Daily Briefing, Smart To Do widget,
+          SmartTodo page, LegalWorkspace, Notepad, event side pane, document upload, EntityCreationService, Compose, Create
+          Matter invoice re-file, RegardingResolver PCF 1.6.0, CommunicationConnections PCF 1.7.0 and the communication
+          surfaces); unwired hosts refused (fail closed); refusals show the server message; client ownerid binds removed.</item>
+        <item>Task 152 + reminder: "Created By" readers use sprk_createdbyperson, else createdby (people-targeting, grant
+          expiry reminder, Notepad, document tabs).</item>
+        <item>E2: platform subgrid "+ New" under a secure root replaced by BFF-backed "New &lt;thing&gt;" commands
+          (sprk_secure_child_ribbon.js, SecureChildRibbons template + merge script, Deploy-SecureChildNewCommands.ps1 dry run /
+          -Apply / -Verify; read-only live inventory and RetrieveEntityRibbon drift check run against dev); sprk_budget added
+          to the create route and the stamped child tables; MDA Create privilege kept.</item>
+        <item>L4: SecureChildReconciliationJob every 2 minutes, enabled; recent pass writes unless
+          RecentChangesWritesEnabled=false; unfinished records and unplaced rows carried and retried every run; a
+          non-Completed synchronizer answer fails the run (items 4-5).</item>
+        <item>Docs (item 6): DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3, I-2 and I-6; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c. Note corrections (items 7-8), backfill owner (item 9), 169 hand-off (item 10).</item>
+      </done>
+      <justification-new-surface>
+        <item name="POST/PATCH /api/v1/child-records/{table} (ChildRecordEndpoints)">
+          <existing>OwnedChildWrite (chat tools), PUT /api/v1/documents/{id}; /api/dataverse is read-only; no browser create
+            route existed.</existing>
+          <extension>A thin HTTP face over the existing core; event and communication re-files were added to their own
+            families instead of here.</extension>
+          <cost-of-doing-nothing>every browser child under a secure record stays user-owned, readable by the creator's
+            business unit, until a reconcile run.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing">
+          <existing>the families' typed update routes (no lookup payload).</existing>
+          <extension>Added to the families per round 28; both call the shared ChildRecordEndpoints.UpdateAsync.</extension>
+          <cost-of-doing-nothing>a re-filed event or communication keeps its previous owner.</cost-of-doing-nothing>
+        </item>
+        <item name="OwnedChildWrite.RefileAsync, SecureChildShareSynchronizer.SyncChildAsync and IsSecureOwnerTeamAsync, DataverseWriteItemMapper.MapWebApiPayloadAsync">
+          <existing>the AI update handler's inline re-file; SyncRootAsync; the AI item mapper.</existing>
+          <extension>Extracted or extended; the handler calls the shared core.</extension>
+          <cost-of-doing-nothing>two copies of the re-file rule and no inline mirror for one child.</cost-of-doing-nothing>
+        </item>
+        <item name="config SecureChild:Reconciliation:RecentChangesWritesEnabled">
+          <existing>SecureChild:Reconciliation:WritesEnabled (the sweep).</existing>
+          <extension>A separate switch: round 28 turns the recent pass on while the backfill sweep stays report-only.</extension>
+          <cost-of-doing-nothing>either the sweep writes unreviewed or the net stays off.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_budget in CreateTables, StampedChildTables and the schema script">
+          <existing>the codified role set already holds sprk_budget (G146-1).</existing>
+          <extension>One table added to existing lists.</extension>
+          <cost-of-doing-nothing>the ribbon's New Budget would have no BFF create.</cost-of-doing-nothing>
+        </item>
+        <item name="client bffChildWriteAdapter.ts, BffChildRecordDataverseClient.ts and per-host auth bootstrap files">
+          <existing>bffDataServiceAdapter.ts, with no child create route behind it.</existing>
+          <extension>One seam of decorators over IDataService / IDataverseClient; host files only bootstrap auth.</extension>
+          <cost-of-doing-nothing>each writer hand-rolls fetch and error parsing.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_secure_child_ribbon.js, SecureChildRibbons, Deploy-SecureChildNewCommands.ps1, SecureChildNewCommandAgreementTests">
+          <existing>AccessRibbons (tasks 142/150) pattern; no guard spans ribbon script, template and scripts.</existing>
+          <extension>Same pattern (one template, one merge script, one deploy script); placed on CHILD subgrids, not in the
+            root forms' Access flyout.</extension>
+          <cost-of-doing-nothing>the platform "+ New" under a secure record creates user-owned children.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF for the routes (app-identity Dataverse write after an as-caller check; low volume; no package, no
+          background work, no AI capability). No new DI registration or interface (static endpoint class over existing
+          services). Publish size: skipped per the brief.</placement>
+      </justification-new-surface>
+      <tests>Not run to completion: the restart stopped this run before its final suites. See the r1c run.</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, quick-create flags, RetrieveEntityRibbon, the deploy script's dry
+        run. Pending manual gates G147-2 to G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-1 withdrawn.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1c" base="0ab6411e1" outcome="completed">
+      <summary>Finished the round the restart stopped (from wip/uac-r2-147-r1-restart), implemented owner/main-session round 28
+        in full, round 34 item 6 and round 36, and closed verifier items 1-25. Merged integ/uac-r2-batch4 (tasks 159-164) per the
+        main session's binding note: 159's deletion of PUT /api/v1/events/{id} stands; the event's ONE re-file route is
+        PATCH /api/v1/events/{id}/filing in 159's family, filing only, with the child pass. Full record:
+        notes/task-147-client-child-writers.md (r1c).</summary>
+      <done>
+        <item>Item 1: the WIP read file by file; a seed left in place (UpdateAsync's server-owned-column refusal) restored;
+          the filing routes' DI parameters made [FromServices] (11 host tests were red); the CreateTodoWizard broadcast kept
+          in the call path; the RegardingResolver new-host rule tightened; the E2 inventory widened to every main form.</item>
+        <item>Round 28 E1: ten create tables on POST /api/v1/child-records/{table} (+ sprk_kpiassessment, sprk_billingevent);
+          every census writer switched; refusals show the ProblemDetails message; PCFs RegardingResolver 1.6.0 and
+          CommunicationConnections 1.7.0 in all four places, npm run build:prod, bundles copied; task 152 "Created By" via
+          RecordCreatorPerson. E2: secure-record ribbon commands on every ownership-child subgrid (28, live inventory), the
+          "+ Add KPI" guard, dry run / -Apply / -Verify script; the L4 job every 2 minutes with writes on, carry-forward and
+          the r1c catch-up after every start.</item>
+        <item>Round 34 item 6: CreateEventWizard binds sprk_RelatedEvent; the BFF create refuses sprk_Event@odata.bind (400).</item>
+        <item>Round 36: PATCH /api/v1/events/{id}/filing (shape filter, then 159's RecordRouteAccessAuthorizationFilter
+          "write", then the ONE re-file core: AppendTo, 146's F3, owner assigned; 156's re-stamp); communications: the same
+          rule in 161's family (CommunicationRecordRoute.Refile). SecureChildReconciler.AfterRefileAsync is the ONE
+          after-re-file step of every re-file writer: the row's mirror, then 148's pass over everything filed under it when
+          it moved under, out of or between secure records (a release only when the row itself left isolation). Clients
+          send only the filing to those routes (the seam splits a mixed update, filing first; the side pane; Connections).</item>
+        <item>Verifier items 3-25: memo taxonomy and container links on the integration base; the 409; AC1/R1 new host; L4
+          retries; seed survival; docs; note; E1 framing; backfill owner (G147-3, analysis); merge hazard; ACs; publish size
+          and CVE measured (tests element).</item>
+      </done>
+      <justification-new-surface>
+        <item name="SecureChildReconciler.AfterRefileAsync, ReconcileBelowAsync, MirrorIsolatedDescendantsAsync, IsSecureTeamOwnedAsync / IsSecureOwnerTeamAsync pass-throughs">
+          <existing>SecureChildReconciler's Pass (task 148) walks a ROOT's descendants; SecureChildShareSynchronizer.AfterRefileAsync
+            (r1c) mirrors ONE row; grep "child pass" after a re-file: none.</existing>
+          <extension>Yes: the existing Pass anchored on the re-filed child row (one flag skips the root-only cascade step), per
+            row SyncChildAsync for the mirror; the reconciler already composes the synchronizer, so the after-re-file step moved
+            up one level rather than adding a second walker.</extension>
+          <cost-of-doing-nothing>a re-filed event's to-dos stay readable by the business unit under the secure record it moved
+            into until the sweep, and stay isolated for good under the ordinary record it moved out to.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing filing-only (ValidateFilingRequestAsync, RefileEventAsync) + ChildRecordEndpoints.IsFilingColumn / FilingShapeProblem / NotFilingCode">
+          <existing>159 deleted PUT /api/v1/events/{id}; 159's RecordRouteAccessAuthorizationFilter and its shape-filter pattern.</existing>
+          <extension>One route added to 159's family (round 36: "add the route there if the family lacks it; never a second
+            one"); the general PUT is not restored.</extension>
+          <cost-of-doing-nothing>an event has no browser re-file at all, or a general update comes back ungated.</cost-of-doing-nothing>
+        </item>
+        <item name="CommunicationRecordRoute.Refile (+ RefileDenyCode)">
+          <existing>161's MessageDeactivate write check.</existing>
+          <extension>One enum value reusing the message-write check; its own deny code.</extension>
+          <cost-of-doing-nothing>the communication filing route is gated only inside the handler, outside 161's family contract.</cost-of-doing-nothing>
+        </item>
+        <item name="SecureChildShareSynchronizer.AfterRefileAsync + IsSecureTeamOwnedAsync (r1c)">
+          <existing>SyncChildAsync, RemoveMirrorAsync (148).</existing>
+          <extension>Composes the two existing steps; replaces the route-local copy.</extension>
+          <cost-of-doing-nothing>a move out by the documents route or the chat tool left the old record's sharees on the row for good.</cost-of-doing-nothing>
+        </item>
+        <item name="catch-up in SecureChildReconciliationJob (two fields, one enum value)">
+          <existing>the recent pass and the sweep cursor.</existing>
+          <extension>The same reconcile over the same root list, once per instance.</extension>
+          <cost-of-doing-nothing>a restart drops every carried record and row; a refused re-own older than the lookback is never retried.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_kpiassessment, sprk_billingevent in CreateTables / StampedChildTables / the schema script; ribbon guard for + Add KPI">
+          <existing>the codified role set holds both (G146-1); the r1 ribbon set.</existing>
+          <extension>Entries in existing lists; the same ribbon pattern.</extension>
+          <cost-of-doing-nothing>the live inventory's KPI and billing-event subgrids create user-owned children under a secure record.</cost-of-doing-nothing>
+        </item>
+        <item name="client isFilingKey / splitFilingPayload / FILING_ONLY_REFILE_TABLES; OWNERSHIP_CHILD_TABLES; Connections regardingNavPropFor">
+          <existing>withBffChildWrites (r1).</existing>
+          <extension>Exports on the one seam.</extension>
+          <cost-of-doing-nothing>an event or communication update with any other field is refused 400 by the filing route; a host
+            control re-files an ownership child as the user.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (CLAUDE.md §10; bff-extensions.md): the invariant owner's write path, app-identity writes after
+          as-caller checks, request-scoped; no new DI registration, interface, package, job or column; no AI capability
+          consumed (the chat handler calling the reconciler is AI to CRUD, the permitted direction). Publish size and CVE in
+          the tests element.</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on the merged branch: BFF unit 16,461 (16,406 passed, 54 skipped, 1 failed: a 146 test whose
+        "table without the creator column" example, sprk_memo, gained the column in 147 r1; the case now uses sprk_agreement and its
+        class re-ran 101/101); NetArchTest 608/608; Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed,
+        25 skipped, 0 failed). Affected BFF classes during the round 539/539. Client: ui-components 3,559 (21 failed under load:
+        13 pre-existing in 8 suites, identical on the integration base, #1290; 8 contention, re-run alone 114/114); communication
+        components touched suites 75/75; RegardingResolver 122/122 and CommunicationConnections 43/43, both npm run build:prod and
+        bundles copied; EventDetailSidePane vite build and ui-components tsc green. Seeds: 34 r1c seeds plus 15 round-36 server
+        seeds, 5 round-36 client seeds and P3, every one bites (note section 7). Publish size (fresh short-path worktrees,
+        Compress-Archive Optimal, PDBs included): master c2ef1857b 45.66 MB / 212 files; integration tip 63556192c 35.52 MB
+        (37,243,155 B) / 190 files; branch e19a5f4ab 35.55 MB (37,279,975 B) / 190 files: +0.04 MB against the base it merges into
+        (the -10.11 MB against master is task 162's QuestPDF removal). CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, KPI and billing-event metadata, RegardingResolver hosts, the two
+        unresolvable communications of the stamp dry run, the ribbon deploy script's dry run. Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-05" branch="task/uac-r2-147-r1c-v1" base="149fffd9d" outcome="completed">
+      <summary>Closed the r1c verification's items 1-15 (note section 0). The HIGH defect: every browser re-file that cleared a
+        lookup was refused live, because the one mapper wrote a clear as the lookup's LOGICAL name, which the Web API does not
+        declare; it now writes the metadata navigation property's null bind, and the record-ownership fake refuses the broken
+        shape the way Dataverse does. Owner and main-session rounds 1-43 applied; no new decision needed.</summary>
+      <done>
+        <item>Item 1: DataverseWriteItemMapper.MapCoreAsync (behind MapAsync and MapWebApiPayloadAsync) writes a null on a
+          lookup column as {Nav}@odata.bind: null (ClearedColumns keyed by logical name; a polymorphic lookup through its first
+          navigation property by ordinal name - on the eleven browser tables the only polymorphic lookup is ownerid, refused,
+          live GET 2026-10-05); one value per column (400); relationships read once. Covers the RegardingResolver pre-clear and
+          clear, Connections unlink and clear-primary, the side pane's clears, the chat update tool's clears and a create
+          carrying a clear. The fake refuses a body naming an undeclared property on PATCH, POST and the app-only create.
+          Tests pin the body (set + clear, clear-only move out, unlink, chat clear, polymorphic clear, create, named twice x4).</item>
+        <item>Item 2: a row the caller may not read (Dataverse 403) answers exactly as a missing row on the child-records
+          PATCH, the event filing handler and the communication filing core (fake UnreadableRows).</item>
+        <item>Items 3-4: the watermark holding while carried rows overflow is pinned end to end (the row past the 1,000 cap is
+          still corrected); a carried record no longer flagged secure is dropped, no longer listed as retried, and named in the
+          new additive recentChanges.droppedRoots.</item>
+        <item>Item 5: Deploy-SecureChildNewCommands.ps1 -Apply runs pac solution import --environment $EnvironmentUrl; ArchTests
+          guard on every environment-reaching pac call of the script.</item>
+        <item>Item 6: EventDetailSidePane saveEvent writes the filing through the BFF first (a refused re-file writes nothing),
+          then the other fields; the split is the seam's splitFilingPayload. Jest harness added to the package (6 tests).</item>
+        <item>Item 13: ui-components full jest on this branch = 13 failed in the 8 #1290 suites only, none in a 147 file; with PR
+          #1293's fix applied 3,558/3,559 (the integ-only stale todoScoreMappings pin), with master's #1118 todoScoring.ts too
+          3,559/3,559 - green when the integration branch takes master + #1293; not duplicated here (#1293 owns those files).</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 re-file bullet and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c job row. Note: section 0, seeds table, G147-4 clear read-backs, section 10 rows.</item>
+      </done>
+      <justification-new-surface>
+        <item name="ResultJson.recentChanges.droppedRoots (SecureChildReconciliationJob)">
+          <existing>retriedRoots / carriedRoots in the same report.</existing>
+          <extension>One additive field in the existing report; no new job, option or service.</extension>
+          <cost-of-doing-nothing>a carried record unsecured between runs leaves the carried set with no trace, and was listed as
+            retried although it was not looked at again.</cost-of-doing-nothing>
+        </item>
+        <item name="EventDetailSidePane jest harness (jest.config.cjs; devDependencies jest, ts-jest, @types/jest)">
+          <existing>the same harness in DocumentUploadWizard, Notepad and SmartTodo; the ui-components seam suite (covers the seam,
+            not the pane's own saveEvent).</existing>
+          <extension>The existing pattern in one more package; dev-only, nothing reaches the bundle (package-lock: 286 dev
+            packages added, no production version changed).</extension>
+          <cost-of-doing-nothing>the pane's write order stays unpinned - the partial-save defect of verifier item 6 was invisible
+            to every test.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF changes are inside existing members (the mapper, the job); no new service, DI registration, endpoint,
+          option, job, column, PCF or runtime package; no plugin (ADR-002); fail closed unchanged (ADR-003).</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on e7f405e1f: BFF unit 16,476 (16,422 passed, 54 skipped, 0 failed); NetArchTest 609/609;
+        Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed, 25 skipped, 0 failed). Affected BFF classes
+        354/354. EventDetailSidePane jest 6/6, tsc and vite build green. ui-components full jest: 13 failed in the 8 #1290
+        suites only (none a 147 file); 3,558/3,559 with PR #1293's fix applied, 3,559/3,559 with master's #1118 todoScoring.ts
+        as well. Seeds (note section 7): S1 7, S4 4, S5 1, V3 3, V5 1, V9 1, A8 1, C6-1 1/6, C6-2 3/6 - every one bites; S3
+        survived, so the duplicate check it mutated was deleted. Publish size (fresh short-path worktrees, Compress-Archive
+        Optimal, PDBs included): base 149fffd9d 35.55 MB (37,280,009 B) / 190 files; branch e7f405e1f 35.55 MB (37,281,073 B)
+        / 190 files; delta +1,064 B. CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (one GET of the lookup attribute metadata of the eleven browser tables). Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-4 now names the clear / unlink / chat-clear read-backs.</live>
+      <claude-edits>none</claude-edits>
+    </run>
   </execution>
 </task>

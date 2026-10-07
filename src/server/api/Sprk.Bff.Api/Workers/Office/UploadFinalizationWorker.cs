@@ -306,6 +306,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             await CreateArtifactRecordsAsync(
                 payload,
                 documentId,
+                message.UserId,
                 cancellationToken);
 
             await UpdateJobStatusAsync(
@@ -350,6 +351,29 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             if (payload.TriggerAiProcessing)
             {
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
+
+                // Task 093 (spaarkeai-word-add-in-r1, #1084 follow-on, found 2026-10-03): THIS job's work ends here. The
+                // follow-on AI work (profiling, and optionally RAG indexing / Insights ingest) runs on its own
+                // ADR-004 jobs and persists its OWN outcome on the DOCUMENT (sprk_filesummarystatus,
+                // sprk_searchindexed) via AppOnlyDocumentAnalysisJobHandler / RagIndexingJobHandler — never on
+                // this sprk_processingjob row. Before this fix nothing ever closed the row once this branch was
+                // taken (the only code that used to, ProfileSummaryWorker.CompleteJobAsync, is orphaned: it
+                // listens on the legacy "office-profile" queue, and this method has queued to "sdap-jobs" via
+                // JobSubmissionService since 2026-01-28 — see notes/093-job-row-and-telemetry.md §1). The row
+                // therefore read Running/FileUploaded/70 forever for every save with AI processing on, which is
+                // every real save (ribbon Quick Save always sends TriggerAiProcessing:true; the pane's default
+                // processing options also evaluate true). Marking it Completed here, with a stage that names
+                // what was handed on, makes ADR-017's "persist the final outcome" true at the ROW level. This
+                // does NOT touch sprk_result (task 060's save-time view, the pane's own outcome) — the update
+                // below carries the same five columns as the "no AI" branch, nothing more — so the pane's
+                // behaviour is byte-for-byte unchanged (constraint: do not change what the pane reads).
+                await UpdateJobStatusAsync(
+                    message.JobId,
+                    JobStatus.Completed,
+                    "AiAnalysisQueued",
+                    100,
+                    cancellationToken,
+                    documentId);
             }
             else
             {
@@ -618,7 +642,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Description = payload.ContentType == SaveContentType.Email
                 ? payload.EmailMetadata?.Subject
                 : payload.AttachmentMetadata?.OriginalFileName,
-            OwningTeamId = owningTeamId
+            OwningTeamId = owningTeamId,
+            // Task 146 c1-r1 (owner round 13 item 9): the saving user, carried by SaveAsync with the team.
+            CreatedByPersonId = payload.CreatedByPersonId,
         };
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -672,22 +698,40 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateArtifactRecordsAsync(
         UploadFinalizationPayload payload,
         Guid documentId,
+        string userId,
         CancellationToken cancellationToken)
     {
+        if (!(payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
+            && !(payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null))
+        {
+            return;
+        }
+
+        // Task 146: an artifact is content of its document — owned by the same team (the carried team wins, exactly
+        // as for the document itself). Refuse rather than create it app-owned in the root business unit.
+        var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No owner team could be resolved for this save's artifact record; refusing to create it app-owned "
+                + "(task 146). See the preceding RecordOwnershipResolver warning for which link broke.");
+
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
         {
-            await CreateEmailArtifactAsync(payload.EmailMetadata, documentId, cancellationToken);
+            await CreateEmailArtifactAsync(
+                payload.EmailMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
         else if (payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null)
         {
-            await CreateAttachmentArtifactAsync(payload.AttachmentMetadata, documentId, cancellationToken);
+            await CreateAttachmentArtifactAsync(
+                payload.AttachmentMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
     }
 
     private async Task CreateEmailArtifactAsync(
         EmailArtifactPayload metadata,
         Guid documentId,
-        CancellationToken cancellationToken)
+        Guid owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating EmailArtifact for document {DocumentId}, subject: {Subject}",
@@ -722,7 +766,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             BodyPreview = metadata.BodyPreview,
             HasAttachments = metadata.HasAttachments,
             Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var emailArtifactId = await _processingJobService.CreateEmailArtifactAsync(request, cancellationToken);
@@ -736,7 +782,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateAttachmentArtifactAsync(
         AttachmentArtifactPayload metadata,
         Guid documentId,
-        CancellationToken cancellationToken)
+        Guid owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating AttachmentArtifact for document {DocumentId}, filename: {FileName}",
@@ -751,7 +799,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Size = (int)metadata.Size, // Convert long to int for Dataverse
             IsInline = metadata.IsInline,
             EmailArtifactId = metadata.EmailArtifactId,
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var attachmentArtifactId = await _processingJobService.CreateAttachmentArtifactAsync(request, cancellationToken);
@@ -1066,7 +1116,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         payload.AssociationType,
                         payload.AssociationId,
                         owningTeamId.Value,
-                        cancellationToken);
+                        cancellationToken,
+                        payload.CreatedByPersonId); // task 146 c1-r1 — the saving user
 
                     uploadedCount++;
                 }
@@ -1146,7 +1197,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string? associationType,
         Guid? associationId,
         Guid owningTeamId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
         {
@@ -1195,7 +1247,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Name = attachment.FileName,
             ContainerId = containerId,
             Description = $"Email attachment from {parentFileName}",
-            OwningTeamId = owningTeamId // task 080 — the parent email's team
+            OwningTeamId = owningTeamId, // task 080 — the parent email's team
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
         };
 
         var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);

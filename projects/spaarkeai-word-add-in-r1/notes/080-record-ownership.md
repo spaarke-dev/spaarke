@@ -504,6 +504,23 @@ who saved them, and the owner's 065 rule is *"we can't 'guess'"*. They stay in r
 - **Undo:** `-RevertManifest <path printed> -Apply`.
 - **Order:** run `sprk_todo` again after `sprk_document`, so To Dos follow their documents.
 
+**✅ APPLIED 2026-10-02** (owner: *"for 080 backfill - you are able to run this"*), after the deploy of master
+`5e39f2bea` and the #1081 root-team role:
+
+| Run | Entity | Written | Failed | Reversal manifest (copied to `notes/080-backfill-2026-10-02/`) |
+|---|---|---|---|---|
+| Sample (`-MaxWritesPerRun 5`) | `sprk_document` | 5 | 0 | `record-ownership-manifest-20261002-170848.csv` |
+| Full | `sprk_document` | 26 | 0 | `record-ownership-manifest-20261002-170933.csv` |
+| Full | `sprk_todo` | 10 (3 → BU1 team, 7 → root team) | 0 | `record-ownership-manifest-20261002-170949.csv` |
+| Dry run after | both | **0 left to write** | — | 379 unfiled documents untouched by design |
+
+**Verified as a user, not just by owner field**: `RetrievePrincipalAccess` for **Test User 1** (Spaarke Business Unit 1)
+on the 5 sample documents → Read, Write, Append, AppendTo, Create, Delete, Assign; on a control document still
+app-owned in root and filed to a matter → **None**. The 7 root-team To Dos were writable only because of #1081's role.
+Unfiled documents grew 376 → 379 since 09-30: three new app-owned creates by writers outside the resolver (ISS-007).
+**Undo**: `.\scripts\Backfill-RecordOwnership.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com
+-RevertManifest <manifest> -Apply` (restores only rows still owned by the team it set).
+
 ### 6.10 Gates (commit `5d870b898`)
 
 | Gate | Result |

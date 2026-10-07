@@ -126,8 +126,8 @@ export function parseAdvisoryNote(text: string): AdvisoryNoteSegment[] {
  * already relied on ("Only advisory notes carry a sectionRef; a plain session comment has none").
  * A plain session Comments-panel thread carries none of these and is NEVER relabeled/restructured
  * — its text is exported/rendered completely verbatim, so this gate is what keeps the
- * `composeCommentThreadsToDocxAnnotations`/`composeSessionCommentThreadsToAnchoredComments` unit
- * tests (which use plain fixture threads) passing unchanged.
+ * `composeSessionCommentThreadsToAnchoredComments` unit tests (which use plain fixture threads)
+ * passing unchanged.
  */
 export function isAdvisoryCommentThread(thread: AdvisoryNoteThreadFields): boolean {
   return Boolean(

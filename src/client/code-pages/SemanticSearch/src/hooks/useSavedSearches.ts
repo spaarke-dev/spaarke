@@ -12,6 +12,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 import { getOrgUrl } from '../services/DataverseWebApiService';
 import type { SavedSearch } from '../types';
 
@@ -62,8 +63,10 @@ interface ConfigJson {
 /** Get the current Dataverse user ID from Xrm context. */
 function getCurrentUserId(): string | null {
   try {
+    // Shared cross-frame walker (task 081 / C-8). `any` view: typed
+    // GlobalContext does not declare getUserId().
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    const xrm = getXrm('utility') as any;
     if (xrm?.Utility?.getGlobalContext) {
       // getUserId() returns GUID with braces: "{GUID}"
       return xrm.Utility.getGlobalContext().getUserId().replace(/[{}]/g, '');

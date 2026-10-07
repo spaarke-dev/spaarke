@@ -4,7 +4,8 @@
     <title>Interim — the new gates refuse every ordinary user because the records they gate are root-owned; keep the shipped flows working until 080 lands</title>
     <phase>5 Remediation — authorization</phase>
     <gate>startable. Becomes OBSOLETE when 080 lands — this task exists to be removed.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: CLOSED FOR THIS PROJECT, never executed. It was an interim carve-out 'obsolete the moment 080 lands'; the owner chose to wait for 080, which merged and was deployed to dev 2026-10-02. -->
     <rigor>FULL</rigor>
     <rigor-reason>Deliberately narrows two authorization gates this project just shipped. Tags include bff-api + auth + security. Modifies `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>

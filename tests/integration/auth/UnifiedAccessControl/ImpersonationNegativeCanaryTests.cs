@@ -518,7 +518,9 @@ public class ImpersonationNegativeCanaryTests
         return new DataverseWebApiService(
             http,
             new ConfigurationBuilder().AddInMemoryCollection(settings).Build(),
-            NullLogger<DataverseWebApiService>.Instance);
+            NullLogger<DataverseWebApiService>.Instance,
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
     }
 
     /// <summary>The impersonated side — through the PRODUCTION primitive tasks 035/036 will consume.</summary>

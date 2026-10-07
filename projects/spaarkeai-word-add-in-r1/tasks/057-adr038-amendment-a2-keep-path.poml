@@ -4,7 +4,8 @@
     <title>ADR-038 Amendment A2 — `tests/unit/Sprk.Bff.Api.Tests/**` is the ninth KEEP path</title>
     <phase>4 Parity, deploy, close</phase>
     <gate>startable — owner authorised the amendment 2026-09-19 (CLAUDE.md §6.5 Path B)</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: CLOSED FOR THIS PROJECT, not executed here. Handed to unified-access-control-r2 (GitHub #1014) by owner decision 2026-09-28. -->
     <rigor>FULL</rigor>
     <rigor-reason>Edits `.claude/` directive surface (main-session-only per CLAUDE.md §3) and amends a binding ADR. The failure mode is silent: an amendment that updates some copies of the KEEP-path list and not others leaves `/test-diet` recommending deletion of protected tests — which is exactly what A1 did and what this task must repair.</rigor-reason>
     <model-tier>opus</model-tier>

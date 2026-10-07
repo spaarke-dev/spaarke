@@ -92,8 +92,7 @@ public class UploadSessionManager
     /// (Compose save, communication ingest, invoice extraction, …) writes to a path it derived itself
     /// and relies on replace-in-place. Flipping the default under them would turn a working save into a
     /// 409. New callers that must not clobber a same-named file pass
-    /// <see cref="ConflictBehavior.Fail"/> explicitly — mirrors the OBO twin
-    /// <see cref="UploadSmallAsUserAsync(Sprk.Bff.Api.Infrastructure.Graph.UserOperationContext,string,string,Stream,CancellationToken)"/>.
+    /// <see cref="ConflictBehavior.Fail"/> explicitly.
     /// </remarks>
     public Task<FileHandleDto?> UploadSmallAsync(
         string driveId,
@@ -106,11 +105,16 @@ public class UploadSessionManager
     /// App-only small upload with an EXPLICIT name-collision behaviour.
     /// </summary>
     /// <remarks>
-    /// <see cref="ConflictBehavior.Fail"/> makes a collision a Graph 409, translated here to
+    /// <para><see cref="ConflictBehavior.Fail"/> makes a collision a Graph 409, translated to
     /// <see cref="SpaarkeStorageException"/> (409) with the existing item left UNTOUCHED — the caller
-    /// can then tell the user rather than silently overwriting. This is the behaviour the external
-    /// upload route requires: an external participant must never be able to overwrite a document by
-    /// uploading a same-named file.
+    /// can then tell the user rather than silently overwriting. The external upload route requires this:
+    /// an external participant must never be able to overwrite a document by uploading a same-named file.</para>
+    /// <para><b>unified-access-control-r2 task 171 (owner round 69, broker-only).</b> This is now the ONLY small
+    /// upload: the OBO twin (<c>UploadSmallAsUserAsync</c>) is DELETED, because under OBO SharePoint Embedded only
+    /// lets a caller who holds a container ROLE write, and per-record secure containers have none by design (the
+    /// 2026-10-06 upload403 defect). Every caller authorizes against Dataverse first and derives the container
+    /// server-side; this method performs NO authorization. It inherits the OBO twin's typed error translation
+    /// (403/409/412/413/423/429), so a caller that moved here sees the same exceptions it handled before.</para>
     /// </remarks>
     public async Task<FileHandleDto?> UploadSmallAsync(
         string driveId,
@@ -119,84 +123,19 @@ public class UploadSessionManager
         ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
-        using var activity = Activity.Current;
+        // Task 093 (#1084 follow-on): tags go on the CALLER's request Activity, as always — `using` here
+        // disposed it the moment this method returned, ending the request's own trace span early (resultCode
+        // 0, success false, a truncated duration). This method did not start the Activity and must not end it.
+        var activity = Activity.Current;
         activity?.SetTag("operation", "UploadSmall");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("filePath", path);
 
-        _logger.LogInformation("Uploading small file to drive {DriveId} at path {Path}",
+        _logger.LogInformation("Uploading small file to drive {DriveId} at path {Path} (app-only)",
             driveId, path);
 
-        try
-        {
-            var graphClient = _factory.ForApp();
-
-            // Upload the file using PUT to drive item content endpoint.
-            // conflictBehavior is stated EXPLICITLY — never left to Graph's PUT default, which its own
-            // docs contradict each other about. The 4-arg overload supplies Replace to preserve this
-            // method's historical behaviour; callers that must not clobber a same-named file pass Fail.
-            var item = await PutContentWithConflictBehaviorAsync(
-                graphClient, driveId, path, content, conflictBehavior, ct)
-                .ConfigureAwait(false);
-
-            if (item == null)
-            {
-                _logger.LogError("Failed to upload file - Graph API returned null");
-                return null;
-            }
-
-            _logger.LogInformation("Successfully uploaded file {ItemId} to drive {DriveId}",
-                item.Id, driveId);
-
-            return new FileHandleDto(
-                item.Id!,
-                item.Name!,
-                item.ParentReference?.Id,
-                item.Size,
-                item.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
-                item.ETag,
-                item.Folder != null,
-                item.WebUrl,
-                item.ParentReference?.DriveId ?? driveId);
-        }
-        // Reached only when the caller passed ConflictBehavior.Fail — it explicitly asked to be told
-        // about a name collision rather than silently overwriting. The existing item is UNTOUCHED.
-        // Translated HERE, inside Infrastructure.Graph, so only the domain exception crosses the
-        // ISpeFileOperations facade (ADR-007) — the same treatment the OBO twin gives this response.
-        // Caught before the ServiceException clauses below because Kiota raises ODataError, which does
-        // NOT derive from ServiceException and would otherwise propagate raw as an opaque 500.
-        catch (ODataError ex) when (ex.ResponseStatusCode == 409)
-        {
-            _logger.LogInformation(
-                "SPE app-only upload-small: name collision on path {Path} in drive {DriveId}; " +
-                "existing item left intact (conflictBehavior=fail)", path, driveId);
-            throw new SpaarkeStorageException(
-                $"A file named '{path}' already exists in this location.",
-                statusCode: 409,
-                errorCode: ex.Error?.Code ?? "nameAlreadyExists",
-                innerException: ex);
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogWarning("Drive {DriveId} not found", driveId);
-            return null;
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
-        {
-            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (ServiceException ex)
-        {
-            _logger.LogError(ex, "Graph API error uploading file: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to upload file: {ex.Message}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error uploading file: {Error}", ex.Message);
-            throw;
-        }
+        return await UploadSmallCoreAsync(_factory.ForApp(), driveId, path, content, conflictBehavior, ct)
+            .ConfigureAwait(false);
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -209,14 +148,10 @@ public class UploadSessionManager
     // (tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs) is what keeps the
     // routes from coming back and reviving them.
     //
-    // NOT deleted, and do not confuse them with these: the OBO twins CreateUploadSessionAsUserAsync /
-    // UploadChunkAsUserAsync below are LIVE.
-    //
-    // ⚠️ CORRECTED 2026-08-29. This comment used to cite "OBOEndpoints.cs:119/172" as their call sites.
-    // Task 076 DELETED those two routes and replaced them with the record-keyed upload-session route, so
-    // the citation had been stale since. The live caller is the POST
-    // /api/obo/records/{entityLogicalName}/{recordId:guid}/upload-session handler. Line-numbered
-    // cross-file references rot exactly this way; name the ROUTE, not the line.
+    // ⚠️ UPDATED 2026-10-06 (task 171). The OBO upload-session twin that this note used to call LIVE is replaced by the
+    // app-only CreateUploadSessionAsync below (its one caller is the record-keyed upload-session route, which authorizes
+    // the caller on the owning record first). UploadChunkAsUserAsync remains, uncalled: it never used the caller's
+    // identity (the client PUTs chunks straight to Graph's pre-authenticated session URL).
     // ---------------------------------------------------------------------------------------------
 
 
@@ -225,48 +160,48 @@ public class UploadSessionManager
     // =============================================================================
 
     /// <summary>
-    /// Uploads a file as the user (OBO flow) via Graph's SIMPLE upload — a single
-    /// <c>PUT .../content</c>. Named "small" for the R1-era 4 MB boundary that no longer applies:
-    /// Graph raised the simple-upload limit to 250 MB in October 2023 and SharePoint Embedded confirms
-    /// the same figure for containers, so this method now covers every document size Spaarke carries.
-    /// Callers enforce their own product limits (see <c>ComposeSaveLimits</c>); this method enforces none.
+    /// Small upload as the CALLER (OBO), keeping the historical <see cref="ConflictBehavior.Replace"/>. ONLY for the
+    /// STAGING writes (chat persist, chat Word export, workspace pre-fill): their container comes from configuration
+    /// and their filters only check identity, so the user's own SPE write right on the staging container is the only
+    /// population check. Converting them to app-only would let every signed-in user write there — task 171
+    /// escalation trigger 2, reported to the owner, not converted. Every record-backed upload is app-only above.
     /// </summary>
-    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+    public async Task<FileHandleDto?> UploadSmallToStagingAsUserAsync(
         HttpContext ctx,
         string containerId,
         string path,
         Stream content,
         CancellationToken ct = default)
-        // Replace preserves the behaviour every existing caller was already getting from Graph's
-        // implicit PUT default. Kept as a separate 4-arg overload rather than an optional parameter
-        // so the ~15 Moq Setup/Verify expressions pinning this arity keep compiling — the collision
-        // decision belongs to new callers, not to a signature change rippling through old tests.
-        => UploadSmallAsUserAsync(ctx, containerId, path, content, ConflictBehavior.Replace, ct);
+        => await UploadSmallCoreAsync(await _factory.ForUserAsync(ctx, ct), containerId, path, content, ConflictBehavior.Replace, ct)
+            .ConfigureAwait(false);
+
+    // =============================================================================
+    // SHARED CORE (task 171): ONE upload body, so the typed error translation cannot drift between
+    // identities.
+    // =============================================================================
 
     /// <summary>
-    /// Create a NEW drive-item under the user's OBO identity with an EXPLICIT name-collision behaviour.
+    /// Graph's SIMPLE upload — a single <c>PUT .../content</c> — through <paramref name="graphClient"/>. Named
+    /// "small" for the R1-era 4 MB boundary that no longer applies: Graph raised the simple-upload limit to 250 MB in
+    /// October 2023 and SharePoint Embedded confirms the same figure for containers. Callers enforce their own product
+    /// limits (see <c>ComposeSaveLimits</c>); this method enforces none.
     /// </summary>
     /// <remarks>
-    /// <see cref="ConflictBehavior.Fail"/> makes a name collision a Graph 409 with the existing item
-    /// left untouched — the only value that is safe when the caller has not yet asked the user what
-    /// to do. <see cref="ConflictBehavior.Rename"/> stores under a server-generated name;
-    /// <see cref="ConflictBehavior.Replace"/> overwrites in place (SharePoint keeps the prior content
-    /// as a version).
+    /// <see cref="ConflictBehavior.Fail"/> makes a name collision a Graph 409 with the existing item left untouched —
+    /// the only value that is safe when the caller has not yet asked the user what to do.
+    /// <see cref="ConflictBehavior.Rename"/> stores under a server-generated name; <see cref="ConflictBehavior.Replace"/>
+    /// overwrites in place (SharePoint keeps the prior content as a version).
     /// </remarks>
-    public async Task<FileHandleDto?> UploadSmallAsUserAsync(
-        HttpContext ctx,
+    private async Task<FileHandleDto?> UploadSmallCoreAsync(
+        GraphServiceClient graphClient,
         string containerId,
         string path,
         Stream content,
         ConflictBehavior conflictBehavior,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
-            _logger.LogInformation("Uploading file as user to container {ContainerId}, path {Path}", containerId, path);
-
             // FR-S08 (spaarkeai-compose-r8 task 015): the 4 MB guard that stood here is DELETED — it
             // enforced a Graph limit that no longer exists. `PUT .../content` has accepted files up to
             // 250 MB since October 2023 (the 4 MB figure comes from the retired OneDrive REST docs, which
@@ -281,10 +216,8 @@ public class UploadSessionManager
             // future caller genuinely needs >250 MB, that caller routes to a resumable session — which is
             // a decision about that caller, not a guard on this method.
 
-            // For SharePoint Embedded: Container ID = Drive ID (per Microsoft documentation)
-            // Use container ID directly with OBO credentials (user has access, App-Only might not)
+            // For SharePoint Embedded: Container ID = Drive ID (per Microsoft documentation).
             // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/embedded/concepts/app-concepts/containertypes
-            _logger.LogDebug("Using container ID as drive ID for SPE OBO upload");
 
             var uploadedItem = await PutContentWithConflictBehaviorAsync(
                 graphClient, containerId, path, content, conflictBehavior, ct)
@@ -448,10 +381,44 @@ public class UploadSessionManager
         if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
         if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
 
+        return await ReplaceFileContentCoreAsync(await _factory.ForUserAsync(ctx, ct), driveId, itemId, content, ifMatch, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Replace the content of an existing drive-item APP-ONLY (broker), optionally under <c>If-Match</c> — the
+    /// app-only twin of <see cref="ReplaceFileContentAsUserAsync(HttpContext, string, string, Stream, string?, CancellationToken)"/>,
+    /// with the SAME typed translation (404 → null, 403, 412, 423/locked, 429).
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 171 (owner round 69). ⚠️ Performs NO authorization: every caller MUST have
+    /// authorized the caller for WRITE on the <c>sprk_document</c> row whose pointer names this item (and verified that
+    /// pointer) before calling it. Under the app identity a container role no longer stands behind the write.
+    /// </remarks>
+    public async Task<FileHandleDto?> ReplaceFileContentAsync(
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
+
+        return await ReplaceFileContentCoreAsync(_factory.ForApp(), driveId, itemId, content, ifMatch, ct)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<FileHandleDto?> ReplaceFileContentCoreAsync(
+        GraphServiceClient graphClient,
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
+        CancellationToken ct)
+    {
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
             // FR-24 / Spike 7 G-1: send If-Match for optimistic concurrency when the caller
             // supplied the load-time ETag. Absent an ETag this remains the R1 blind PUT.
             var saved = await graphClient.Drives[driveId].Items[itemId].Content
@@ -617,10 +584,17 @@ public class UploadSessionManager
     }
 
     /// <summary>
-    /// Creates an upload session for large files as the user (OBO flow).
+    /// Creates an upload session for large files APP-ONLY (broker).
     /// </summary>
-    public async Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(
-        HttpContext ctx,
+    /// <remarks>
+    /// unified-access-control-r2 task 171 (owner round 69): this was <c>CreateUploadSessionAsUserAsync</c> (OBO), and
+    /// it was the call that 403'd on 2026-10-06 — a creator uploading into its own newly provisioned SECURE project,
+    /// whose container (by design) has no members. The OBO twin is replaced, not kept beside it: its one caller, the
+    /// record-keyed <c>POST /api/obo/records/{entity}/{id}/upload-session</c> route, authorizes the caller on the
+    /// owning record and resolves the container from that record before calling this. ⚠️ Performs NO authorization.
+    /// The returned <c>uploadUrl</c> is Graph's pre-authenticated session URL; the client PUTs chunks to it directly.
+    /// </remarks>
+    public async Task<UploadSessionResponse?> CreateUploadSessionAsync(
         string driveId,
         string path,
         ConflictBehavior conflictBehavior,
@@ -628,7 +602,7 @@ public class UploadSessionManager
     {
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
+            var graphClient = _factory.ForApp();
 
             // Create upload session request
             var uploadSessionRequest = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody
@@ -662,13 +636,11 @@ public class UploadSessionManager
                 session.ExpirationDateTime ?? DateTimeOffset.UtcNow.AddHours(1)
             );
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
-        {
-            _logger.LogWarning("Access denied creating upload session: {Error}", ex.Message);
-            throw new UnauthorizedAccessException("Access denied", ex);
-        }
         catch (Exception ex)
         {
+            // An ODataError propagates unchanged: the route runs this inside GraphCallScope, which translates it to
+            // SpaarkeStorageException with Graph's own status and code (the dead ServiceException-403 filter that
+            // stood here never fired under Kiota, which raises ODataError).
             _logger.LogError(ex, "Failed to create upload session for drive {DriveId}, path {Path}", driveId, path);
             throw;
         }

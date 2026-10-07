@@ -24,14 +24,22 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// (<c>MSCRMCallerID</c> = the caller's <c>systemuserid</c>) via <see cref="IImpersonatedCommunicationQuery"/>,
 /// exactly like <c>CommunicationThreadReadService</c> — Dataverse applies row-level security natively, so a
 /// caller who cannot see the communication (or a given document) simply gets zero rows: no filename / document-id
-/// / count is disclosed cross-user. The SPE download is OBO on top of that (SPE enforces file access to the
-/// bytes). Fail-closed: an unresolvable caller is refused (403), never an app-only fallback that would widen
-/// access. This deliberately does NOT use the app-only <c>IGenericEntityService</c> path (code-review 2026-08-14).
+/// / count is disclosed cross-user. Fail-closed: an unresolvable caller is refused (403), never an app-only Dataverse
+/// fallback that would widen access. This deliberately does NOT use the app-only <c>IGenericEntityService</c> path
+/// (code-review 2026-08-14).
+/// </para>
+///
+/// <para>
+/// <b>The SPE bytes are read APP-ONLY</b> (unified-access-control-r2 task 171, owner round 69 — broker-only), after
+/// the impersonated Dataverse read decided which documents the caller may see AND the document-pointer check
+/// (<c>RecordContainerResolver.IsDocumentPointerContainerAllowedAsync</c>) verified each row's pointer. They used to
+/// be read OBO, which SharePoint Embedded answers only for a caller holding a role on the container: an attachment
+/// filed on a secure record (no members by design) was always "not available as text".
 /// </para>
 ///
 /// <para>
 /// <b>Reuse (§11, ADR-007/ADR-009).</b> The download + extraction + Redis caching are the SAME shared primitives
-/// the analysis pipeline uses — <see cref="ISpeFileOperations.DownloadFileAsUserAsync"/> and the cache-aware
+/// the analysis pipeline uses — <see cref="ISpeFileOperations.DownloadFileAsync"/> and the cache-aware
 /// <see cref="ITextExtractor.ExtractAsync(System.IO.Stream, string, string?, string?, string?, System.Threading.CancellationToken)"/>
 /// overload (its own 24h Redis cache). The impersonated query seam is REUSED from the messaging read path. This
 /// service adds only the attachment→document join + the rich per-attachment result mapping the reader needs (the
@@ -49,6 +57,7 @@ public sealed class CommunicationAttachmentTextService
     private readonly IImpersonatedCommunicationQuery _query;
     private readonly ICallerSystemUserResolver _callerResolver;
     private readonly ISpeFileOperations _speFileStore;
+    private readonly Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver _containerResolver;
     private readonly ITextExtractor _textExtractor;
     private readonly ILogger<CommunicationAttachmentTextService> _logger;
 
@@ -71,12 +80,14 @@ public sealed class CommunicationAttachmentTextService
         IImpersonatedCommunicationQuery query,
         ICallerSystemUserResolver callerResolver,
         ISpeFileOperations speFileStore,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ITextExtractor textExtractor,
         ILogger<CommunicationAttachmentTextService> logger)
     {
         _query = query;
         _callerResolver = callerResolver;
         _speFileStore = speFileStore;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _textExtractor = textExtractor;
         _logger = logger;
     }
@@ -103,7 +114,8 @@ public sealed class CommunicationAttachmentTextService
         //    pointer, so an attachment whose document is invisible to the caller degrades to not-extractable.
         var pointers = await QueryDocumentPointersAsync(attachments, callerSystemUserId, cancellationToken).ConfigureAwait(false);
 
-        // 3) Download + extract per attachment (OBO; the extractor's own Redis cache makes repeats cheap).
+        // 3) Download + extract per attachment (app-only after the pointer check; the extractor's own Redis cache makes
+        //    repeats cheap).
         var items = new List<CommunicationAttachmentTextItem>(attachments.Count);
         foreach (var att in attachments)
         {
@@ -246,12 +258,21 @@ public sealed class CommunicationAttachmentTextService
 
         try
         {
+            // Task 171: the bytes are read AS THE APPLICATION, so the row's pointer must name a container this document
+            // may use (the check SPE's own ACL made under OBO). Unverifiable → not available as text, never the bytes.
+            if (att.DocumentId is not { } pointerDocumentId
+                || !await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    pointerDocumentId, pointer.DriveId, pointer.ItemId, cancellationToken).ConfigureAwait(false))
+            {
+                return unavailable;
+            }
+
             // ETag for the extractor's cache key (best-effort; extraction still runs without it).
             string? etag = null;
             try
             {
                 var metadata = await _speFileStore
-                    .GetFileMetadataAsUserAsync(httpContext, pointer.DriveId!, pointer.ItemId!, cancellationToken)
+                    .GetFileMetadataAsync(pointer.DriveId!, pointer.ItemId!, cancellationToken)
                     .ConfigureAwait(false);
                 etag = metadata?.ETag;
             }
@@ -262,7 +283,7 @@ public sealed class CommunicationAttachmentTextService
             }
 
             using var stream = await _speFileStore
-                .DownloadFileAsUserAsync(httpContext, pointer.DriveId!, pointer.ItemId!, cancellationToken)
+                .DownloadFileAsync(pointer.DriveId!, pointer.ItemId!, cancellationToken)
                 .ConfigureAwait(false);
             if (stream is null)
                 return unavailable;

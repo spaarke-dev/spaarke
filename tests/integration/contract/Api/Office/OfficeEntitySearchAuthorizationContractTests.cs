@@ -258,6 +258,42 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
 
     #endregion
 
+    #region Email is additive display, selected in the same query, never searched on (task 091 / UAT-2)
+
+    [Fact]
+    public async Task SearchEntities_ForContact_ReturnsEmail_ButTheFilterNeverSearchesOnIt()
+    {
+        var dataverse = StubDataverse.WithFullWorld().Permitting(PermittedContactId);
+
+        var body = await SearchAsync(dataverse, "?q=Ac&type=Contact&top=10");
+
+        body.Results.Should().ContainSingle();
+        body.Results[0].Email.Should().Be(
+            "ac.buyer@acme.test", "the contact projection selects emailaddress1 in the same impersonated query");
+
+        var query = dataverse.LastQueryByEntitySet["contacts"];
+        query.Should().NotBeNull();
+        var parts = query!.Split("&$select=", 2);
+        parts.Should().HaveCount(2, "the query must have a $filter segment and a $select segment to split on");
+        parts[0].Should().NotContain(
+            "emailaddress1", "emailaddress1 must never be added to the contains(...) search predicate");
+        parts[1].Should().Contain(
+            "emailaddress1", "emailaddress1 must be selected in the SAME query as every other projected field");
+    }
+
+    [Fact]
+    public async Task SearchEntities_ForNonContactTypes_NeverReturnsEmail()
+    {
+        var dataverse = StubDataverse.WithFullWorld().Permitting(PermittedMatterId);
+
+        var body = await SearchAsync(dataverse, "?q=Ac&type=Matter&top=10");
+
+        body.Results.Should().ContainSingle();
+        body.Results[0].Email.Should().BeNull("every other entity type's response is unchanged by task 091");
+    }
+
+    #endregion
+
     #region Filing access is opt-in (task 084)
 
     [Fact]
@@ -347,6 +383,10 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
         public ConcurrentBag<string> QueriedEntitySets { get; } = new();
         public ConcurrentBag<Guid> ObservedCallers { get; } = new();
 
+        // Task 091: the exact OData query string issued for each entity set's most recent call — lets a
+        // test assert what was selected/filtered without reaching into OfficeSearchService's private members.
+        public ConcurrentDictionary<string, string?> LastQueryByEntitySet { get; } = new(StringComparer.OrdinalIgnoreCase);
+
         private StubDataverse(bool alwaysFails) => _alwaysFails = alwaysFails;
 
         public static StubDataverse ThatAlwaysFails() => new(alwaysFails: true);
@@ -363,7 +403,10 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
             stub.Add("accounts", DeniedAccountId, Account(DeniedAccountId, "Acme Holdings (restricted)", "A-9001", "2026-09-07"));
             stub.Add("accounts", PermittedAccountId, Account(PermittedAccountId, "Acme Supplies", "A-1001", "2026-09-08"));
             stub.Add("contacts", DeniedContactId, Contact(DeniedContactId, "Ac Whistleblower", "2026-09-09"));
-            stub.Add("contacts", PermittedContactId, Contact(PermittedContactId, "Ac Buyer", "2026-09-10"));
+            // Task 091: the permitted contact carries an email so the projection test (below) has
+            // something real to assert on; the denied contact deliberately has none — it must never
+            // surface either way, so its email shape is irrelevant to this task.
+            stub.Add("contacts", PermittedContactId, Contact(PermittedContactId, "Ac Buyer", "2026-09-10", "ac.buyer@acme.test"));
             return stub;
         }
 
@@ -393,6 +436,7 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
 
             QueriedEntitySets.Add(entitySetName);
             ObservedCallers.Add(callerSystemUserId);
+            LastQueryByEntitySet[entitySetName] = odataQuery;
 
             if (_alwaysFails)
                 throw new HttpRequestException("Dataverse rejected the impersonated read (simulated: no prvActOnBehalfOfAnotherUser).");
@@ -416,8 +460,10 @@ public class OfficeEntitySearchAuthorizationContractTests : IClassFixture<Office
         private static Dictionary<string, JsonElement> Account(Guid id, string name, string number, string modified) =>
             Row($$"""{ "accountid": "{{id}}", "name": "{{name}}", "accountnumber": "{{number}}", "modifiedon": "{{modified}}T00:00:00Z" }""");
 
-        private static Dictionary<string, JsonElement> Contact(Guid id, string name, string modified) =>
-            Row($$"""{ "contactid": "{{id}}", "fullname": "{{name}}", "jobtitle": "Buyer", "modifiedon": "{{modified}}T00:00:00Z" }""");
+        private static Dictionary<string, JsonElement> Contact(Guid id, string name, string modified, string? email = null) =>
+            email is null
+                ? Row($$"""{ "contactid": "{{id}}", "fullname": "{{name}}", "jobtitle": "Buyer", "modifiedon": "{{modified}}T00:00:00Z" }""")
+                : Row($$"""{ "contactid": "{{id}}", "fullname": "{{name}}", "jobtitle": "Buyer", "emailaddress1": "{{email}}", "modifiedon": "{{modified}}T00:00:00Z" }""");
 
         private static Dictionary<string, JsonElement> Row(string json) =>
             JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;

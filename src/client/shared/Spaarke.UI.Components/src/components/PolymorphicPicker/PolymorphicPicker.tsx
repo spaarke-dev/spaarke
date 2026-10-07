@@ -55,6 +55,8 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
+import { cleanGuid } from '../../utils/guid';
+import { getXrm, type XrmCapability, type XrmPartialContext } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -180,28 +182,24 @@ const useStyles = makeStyles({
 // in iframes that must reach up to the host to call `Xrm.Utility.*`).
 // ---------------------------------------------------------------------------
 
-interface IXrmUtility {
-  lookupObjects: (opts: {
-    entityTypes: string[];
-    defaultEntityType?: string;
-    allowMultiSelect: boolean;
-  }) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
-}
-
-interface IXrmBridge {
-  Utility?: IXrmUtility;
-}
-
 /**
- * Locate Xrm on the current window or one of its parents. Exported for tests
- * to override via mocking; not part of the public component API surface.
+ * The host Xrm for the OOB lookup dialog: the nearest frame whose Xrm has
+ * `Utility.lookupObjects`, via the shared `getXrm('lookupObjects')` (task 081
+ * / C-8 — one frame walk; this module no longer has its own). A distinct
+ * contract from plain `getXrm()` (which needs only `WebApi`), hence a
+ * distinct name. Callers that use more than the lookup dialog pass the
+ * capability they use (task 081 round 5, R4-3), e.g. `getXrmForPicker('metadata')`.
+ * Imported by `EmailConnectionsReview.tsx`,
+ * `FieldUpdateReconcileTab.tsx` and `TaskReconcileTab.tsx`.
  *
- * @internal
+ * Before task 081 this was a `window ?? parent ?? top` read accepting the
+ * first truthy `Xrm` (and throwing on a cross-origin parent); it now checks
+ * `lookupObjects` per frame and skips cross-origin frames.
  */
-export function getXrmForPicker(): IXrmBridge | undefined {
-  if (typeof window === 'undefined') return undefined;
-  const w = window as unknown as { Xrm?: IXrmBridge; parent?: { Xrm?: IXrmBridge }; top?: { Xrm?: IXrmBridge } };
-  return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+export function getXrmForPicker(
+  required: XrmCapability | readonly XrmCapability[] = 'lookupObjects'
+): XrmPartialContext | undefined {
+  return getXrm(required);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +240,7 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
       setError(null);
       setIsLookingUp(true);
       try {
-        const xrm = getXrmForPicker();
+        const xrm = getXrm('lookupObjects');
         if (!xrm?.Utility?.lookupObjects) {
           const msg = 'Xrm.Utility.lookupObjects is not available.';
           setError(msg);
@@ -259,7 +257,7 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
           return;
         }
         const picked = results[0];
-        const cleanId = picked.id.replace(/[{}]/g, '').toLowerCase();
+        const cleanId = cleanGuid(picked.id);
         onSelect(entityType, cleanId, picked.name);
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'Lookup failed.';

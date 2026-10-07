@@ -127,8 +127,52 @@ jest.mock(
 // post-reset module instance.
 let registry: typeof WorkspaceWidgetRegistryModule;
 
+// Task 092, 2026-10-04 — OOM root cause + narrow fix (superseded an earlier,
+// rejected `--max-old-space-size=8192` package.json change — see below).
+//
+// `register-workspace-widgets.ts` has exactly ONE top-level (non-lazy) import
+// from `@spaarke/ui-components`: `safeRegister`. Because this package's
+// jest.config.ts moduleNameMapper routes `@spaarke/ui-components` to SOURCE
+// (not `dist`), that one static import forces ts-jest to evaluate the ENTIRE
+// barrel — SprkChat, Lexical, pdfjs-adjacent code, every component — on every
+// `require('../register-workspace-widgets')` call. `loadRegistrations()`
+// calls `jest.resetModules()` + re-requires that graph in `beforeEach` across
+// several `describe` blocks below, so the heavy barrel gets fully
+// re-evaluated dozens of times in this one file despite `register-workspace-
+// widgets.ts` needing exactly one small function from it.
+//
+// Verified empirically, in this order:
+//   1. Reproduces 100% running this ONE file completely alone — rules out
+//      jest-worker cross-FILE accumulation.
+//   2. `afterEach(() => global.gc?.())` with `--expose-gc` did NOT prevent the
+//      crash — ruled out "GC just isn't keeping up".
+//   3. `--max-old-space-size=8192` ran the file to completion cleanly — this
+//      was an initial fix, but a reviewer correctly pushed back: it treats
+//      the SYMPTOM (heap ceiling) not the CAUSE (re-requiring the whole real
+//      barrel for one function), could silently exceed a CI runner's RAM,
+//      and masks the next leak in this package. Replaced by #4.
+//   4. `jest.doMock('@spaarke/ui-components', factory)` inside
+//      `loadRegistrations()`, AFTER `jest.resetModules()`, pointing at
+//      `src/__mocks__/spaarke-ui-components-runtime.ts` — a runtime-values-
+//      only stand-in (no real multi-thousand-module barrel) instead of the
+//      real package. First attempt (just `safeRegister`, the only export
+//      `register-workspace-widgets.ts` itself needs) ran clean at the
+//      default heap for 63/65 tests, but 2 of the "communications-list"
+//      tests broke — `resolveWorkspaceWidget('communications-list')`
+//      dynamically imports the REAL `CommunicationsWorkspaceWidget` from
+//      `@spaarke/communication-components` (deliberately NOT mocked — that's
+//      what those tests are proving), and its own import graph needs much
+//      more than `safeRegister`. The full list was already independently
+//      discovered, file-by-file, fixing the same cross-package-mock problem
+//      in `Spaarke.DailyBriefing.Components/test/__mocks__/spaarke-ui-
+//      components.tsx` — this mock is that same list, reused. Runs to
+//      completion at the DEFAULT heap, no package.json change needed. The
+//      2026-07-08 module-instance-split fix this function exists for is
+//      unaffected: `registry` is still re-`require`d fresh from the SAME
+//      post-reset module registry on every call.
 function loadRegistrations(): void {
   jest.resetModules();
+  jest.doMock('@spaarke/ui-components', () => require('../../../__mocks__/spaarke-ui-components-runtime'));
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   registry = require('../../../registry/WorkspaceWidgetRegistry');
   // Re-requiring the registration module after resetModules() runs its
@@ -369,7 +413,14 @@ describe('communications-list — upgrade in place (task 031, FR-14a / NFR-06)',
 
   it('registers communications-list exactly ONCE — no second widget/registry entry was added', () => {
     const types = registry.getAllWorkspaceWidgetTypes();
-    const communicationsEntries = types.filter(t => t === 'communications-list' || /communication/i.test(t));
+    // Exact-match only (task 092, 2026-10-04) — the prior `/communication/i`
+    // substring regex also caught `communications-reconciliation`, a
+    // DIFFERENT, legitimately-registered widget (commit 0e5d0fafd9,
+    // 2026-08-10, "dual host — reconciliation code page + SpaarkeAi widget"),
+    // added after this test (2026-07-21) and never reconciled against it.
+    // This test's own intent (per its title) is "no second entry for THIS
+    // type", not "no other communication-related type exists at all".
+    const communicationsEntries = types.filter(t => t === 'communications-list');
     expect(communicationsEntries).toEqual(['communications-list']);
   });
 

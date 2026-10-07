@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** (reviewed + clarified 2026-09-25) |
+| Status | **Accepted** (reviewed + clarified 2026-09-25; WP-1 amended 2026-10-03) |
 | Date | 2025-09-27 |
-| Updated | 2026-09-25 |
+| Updated | 2026-10-03 |
 | Authors | Spaarke Engineering |
 
 ---
@@ -69,7 +69,7 @@ A **write-path invariant** is a rule that must always be true about a record at 
 
 | ID | Rule |
 |----|------|
-| **WP-1** | Every write-path invariant has **exactly one owner**: a server-side component in the BFF write path. It is listed in the invariant registry in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`. |
+| **WP-1** | Every write-path invariant has **exactly one owner**, listed in the invariant registry in `DATAVERSE-WRITE-PATH-ARCHITECTURE.md`: **a server-side component in the BFF write path**, or — amended 2026-10-03 — **a platform-native declarative mechanism** that meets ALL three conditions: **(a)** it is Dataverse metadata, so no Spaarke code runs (e.g. an autonumber column format, an alternate key); **(b)** the platform applies it on **every** create/update, whoever writes (so it needs no WP-5 fix-up); **(c)** a scripted per-environment check (`-Verify`) proves it is configured, and the registry row names that check. Plugins, low-code plugins, Power Automate flows, webhooks, business rules and client code **never** own an invariant. |
 | **WP-2** | Client code (wizards, code pages, PCF, add-ins) **MAY pre-compute or preview** an invariant for UX, but **MUST NOT be its only enforcement**. The server result is authoritative. |
 | **WP-3** | Creates/updates of a table that carries a **registered invariant** MUST go through a BFF endpoint — from code pages, Office add-ins, sanctioned import, and integrations alike. `Xrm.WebApi` direct writes remain acceptable for tables with **no** registered invariant (per `DATA-ACCESS-DECISION-CRITERIA.md`). |
 | **WP-4** | Invariants that affect **what the user sees on load** or **security** are applied **inline** — synchronously, in the same request that creates the record — not via a queue. Multi-row effects use one Dataverse transaction (`$batch` changeset / `ExecuteTransaction`). |
@@ -94,15 +94,17 @@ A **write-path invariant** is a rule that must always be true about a record at 
 |---|---|---|
 | **Service endpoint / webhook step registrations** (no code) | Change signal for WP-5 async fix-up (Dataverse → Service Bus / BFF) | Async steps only; HMAC/SAS per ADR-028; receiver idempotent |
 | **Plugin-less Custom APIs** | Business-event contracts only | No logic |
-| **Alternate keys** | Uniqueness for any client | Preferred over any code for uniqueness |
-| **Formula / rollup columns, business rules (entity scope)** | Trivial derived values / defaults | Keep simple; not a substitute for WP-1 owners |
+| **Alternate keys** | Uniqueness for any client | Preferred over any code for uniqueness. May own a uniqueness invariant under WP-1 (a)–(c) |
+| **Autonumber columns** (`AutoNumberFormat`) | Generated sequential identifiers | May own an invariant under WP-1 (a)–(c). The seed is per environment and is **not** carried by a solution import, so the `-Verify` check (c) is mandatory (first use: I-11, `MAT-`/`PRJ-` numbers, `scripts/Set-RecordNumberingSchema.ps1`) |
+| **Formula / rollup columns** | Trivial derived values | Computed when read, so not a stored invariant and no registry owner. A value that must be **stored** is an invariant (WP-1) |
+| **Business rules (entity scope)** | Defaults / UX | Logic that makers can edit — **never** an invariant owner |
 | **Native Dataverse security** (BU, teams, ownership, sharing, column security) | Real access control | Query-interception is never a security boundary |
 
 ### Preferred Patterns
 
 | Concern | Required Mechanism |
 |---------|-------------------|
-| Record invariants (stamp / default / isolate / derive) | BFF server-side write path (WP-1…WP-4) |
+| Record invariants (stamp / default / isolate / derive) | BFF server-side write path (WP-1…WP-4); a platform-native declarative mechanism only under WP-1 (a)–(c) |
 | Writes outside the product | Async fix-up worker + reconciliation, fail-closed (WP-5, WP-6) |
 | Business logic | BFF endpoints |
 | Orchestration | API + async workers |
@@ -185,7 +187,7 @@ So a future exception does not repeat the retired `Spaarke.CustomApiProxy` mista
 
 ## Summary
 
-Dataverse plugins are not used in Spaarke. Spaarke's execution model is **API-first, async-by-default, and AI-forward** — and, since 2026-09-25, **invariants live on the server**: one owner per rule in the BFF write path, inline for security and on-load UX, async fix-up + fail-closed for everything written outside the product.
+Dataverse plugins are not used in Spaarke. Spaarke's execution model is **API-first, async-by-default, and AI-forward** — and, since 2026-09-25, **invariants live on the server**: one owner per rule — in the BFF write path, or (since 2026-10-03) a platform-native declarative mechanism meeting WP-1 (a)–(c) — inline for security and on-load UX, async fix-up + fail-closed for everything written outside the product.
 
 ---
 
@@ -196,6 +198,7 @@ Dataverse plugins are not used in Spaarke. Spaarke's execution model is **API-fi
 | 2025-09-27 | Accepted — plugins not an execution runtime; thin validation/projection plugins exception-only | — |
 | 2026-01-05 | Low-code plugins treated same as C# plugins | — |
 | 2026-09-25 | Review vs current Microsoft/MVP guidance. Posture reaffirmed (**no plugins**; exception path replaced by reopen criteria). **Server-Side Write-Path rule WP-1…WP-8 added.** Retired `Spaarke.CustomApiProxy` plugin, dead `EmailProcessingMonitor` PCF, `Register-EmailWebhook.ps1`, and CrmSdk pins removed from source; arch test rewritten as a repo-wide zero-plugin guard and **armed in Tier-1 blocking CI** (verdict-neutral, mid-shadow-window). Dead plugin-size CI jobs deferred to post-cutover (`projects/ci-cd-unit-test-remediation-r1/notes/post-cutover-adr002-ci-cleanup.md`). **Dev (`spaarkedev1`) cleaned 2026-09-25**: proxy assembly, `sprk_GetFilePreviewUrl` and `sprk_proxyauditlog` were already absent; deleted the still-**active** async "Email-to-Document: Email Create" step + "Email-to-Document Webhook" service endpoint (was calling the deleted `/api/v1/emails/webhook-trigger` on every email create), `EmailProcessingMonitorSolution` + its custom control, and the single `sprk_externalserviceconfig` row (a plaintext BFF-app client secret — verified by credential hint to be stale, not a live credential). Remaining: the now-empty `sprk_externalserviceconfig` table — deletion blocked by the `sprk_SpaarkePlatform` app module + 10 Dataverse-search attribute settings. | C (comply) + clarification |
+| 2026-10-03 | **WP-1 amended**: an invariant may also be owned by a **platform-native declarative mechanism** meeting three conditions — (a) Dataverse metadata, no Spaarke code; (b) applied on every create/update, whoever writes; (c) a scripted per-environment `-Verify` named in the registry row. Plugins, low-code plugins, flows, webhooks, business rules and client code never own one. **Autonumber columns** added to Permitted; formula/rollup columns and business rules split (formula = computed on read, no owner; business rules never an owner — resolves the contradiction with `.claude/constraints/plugins.md`). Origin: `spaarkeai-word-add-in-r1` task 076 recorded write-path invariant I-11 (Matter/Project number = primary name, interim `MAT-`/`PRJ-` autonumber) as a path-A exception; owner chose "A now, B as its own task" (task 087) and approved this wording 2026-10-03, excluding business rules | B (amendment) |
 
 ---
 

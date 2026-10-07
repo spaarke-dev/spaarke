@@ -48,10 +48,10 @@ public static class BffDeployRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing — H9 MUST know the target subscription (ADR-027 D4).</summary>
     public const string MissingSubscriptionId = "missing-subscription-id";
 
-    /// <summary>Run parameter <c>resourceGroupName</c> missing — H9 needs the App Service resource group for slot-swap ARM ops.</summary>
+    /// <summary><c>run.InterStepState.ResourceGroupName</c> (H2a's output) missing — H9 needs the App Service resource group for slot-swap ARM ops.</summary>
     public const string MissingResourceGroupName = "missing-resource-group-name";
 
-    /// <summary>Run parameter <c>appServiceName</c> missing — H9 needs the BFF App Service name for deploy + slot-swap targeting.</summary>
+    /// <summary><c>run.InterStepState.AppServiceName</c> (H2a's output) missing — H9 needs the BFF App Service name for deploy + slot-swap targeting.</summary>
     public const string MissingAppServiceName = "missing-app-service-name";
 
     /// <summary>Run parameter <c>buildId</c> missing — idempotency key requires the BFF CI build number (deterministic per §4.1 preamble).</summary>

@@ -14,16 +14,23 @@
 //   H2a (Bicep infra deploy)
 //     ↓
 //     ├── H2b (AI Search indexes)
-//     ├── H4 (KV secrets + T1 patch)
+//     ├── H4 (per-tenant KV secrets + T1 patch)
+//     │     │
+//     │     ├──→ H4b (BulkAppSettings — task 201 / F20/F20a; needs H4)
+//     │     │     │
+//     │     │     └──→ (feeds H9 below)
+//     │     │
 //     │     ↓
 //     │     H3 (Entra app-reg — needs KV for secret storage)
-//     │       ├── H8 (SPE container-type)
-//     │       └── H9 (BFF deploy)
+//     │       ├── H8 (SPE container CREATION — H8-B, task 214; container-type is a pre-existing operator prereq per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md;
+//     │       │        also waits for H5 — it binds the container to the environment's root business unit; H7 waits for H8)
+//     │       └── H9 (BFF deploy — needs H3 AND H4b so KV refs + batched
+//     │                app-settings are landed before BFF boot / F20 chain)
 //     └── H5 (Dataverse env create)
 //           ↓
 //           H6 (solution import)
 //             ↓
-//             H7 (env-var values)
+//             H7 (env-var values — also waits for H8: it writes H8's BOUND root container)
 //               ↓
 //               H10 (Dataverse App User + Graph parity)
 //                 ↓
@@ -80,6 +87,14 @@ public sealed class DagAdvancer : IDagAdvancer
     /// <summary>Handler identifier for H4 KV secrets population + T1 patch.</summary>
     public const string HandlerH4 = HandlerIds.H4;
 
+    /// <summary>
+    /// Handler identifier for H4b (task 201) — BulkAppSettings thin wrapper.
+    /// Runs AFTER H4, BEFORE H9; kills the F20/F20a progressive
+    /// fail-fast chain by landing ALL required BFF app-settings in ONE
+    /// batched call → ONE App Service restart cycle before BFF zip-deploy.
+    /// </summary>
+    public const string HandlerH4b = HandlerIds.H4b;
+
     /// <summary>Handler identifier for H5 Dataverse env creation.</summary>
     public const string HandlerH5 = HandlerIds.H5;
 
@@ -89,7 +104,7 @@ public sealed class DagAdvancer : IDagAdvancer
     /// <summary>Handler identifier for H7 Dataverse env-var values.</summary>
     public const string HandlerH7 = HandlerIds.H7;
 
-    /// <summary>Handler identifier for H8 SPE container-type.</summary>
+    /// <summary>Handler identifier for H8 SPE container CREATION (H8-B semantics; container-type is a pre-existing operator prereq per docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).</summary>
     public const string HandlerH8 = HandlerIds.H8;
 
     /// <summary>Handler identifier for H9 BFF deploy.</summary>
@@ -134,16 +149,20 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH4] = new[] { HandlerH2a },
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
-            [HandlerH6] = new[] { HandlerH5 },
-            [HandlerH7] = new[] { HandlerH6 },
-            [HandlerH8] = new[] { HandlerH3 },
-            [HandlerH9] = new[] { HandlerH3 },                              // Also needs H4 KV transitively via H3.
+            [HandlerH4b] = new[] { HandlerH4, HandlerH3, HandlerH5 },       // Task 201 / F20 — batched app-settings needs the customer KV populated. (T226 2026-09-30: H4-shared retired.) T245a: + H3 — AzureAd__ClientId is H3's InterStepState.BffAppRegId. T245b: + H5 — Dataverse__ServiceUrl/EnvironmentUrl are H5's InterStepState.DataverseEnvUrl.
+            [HandlerH6] = new[] { HandlerH5, HandlerH3 },                   // T245a: + H3 — H6 reads InterStepState.BffAppRegId (H3 output).
+            [HandlerH7] = new[] { HandlerH6, HandlerH8, HandlerH9 },        // T245a: + H8 — H7 writes the SPE container id env var from InterStepState.SpeContainerId (H8 output). H8 hands the container off only once it is BOUND to its business unit (task 165, owner round 41 item 1). T245b: + H9 — sprk_BffApiBaseUrl is InterStepState.BffApiUrl (H9 output).
+            // H5 too (unified-access-control-r2 task 165, owner round 35 item 1): H8 binds the container it creates to the
+            // customer environment's ROOT business unit, which exists only once H5 has created the environment — a container
+            // nobody can bind is never created.
+            [HandlerH8] = new[] { HandlerH3, HandlerH5 },                   // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 dep kept for ordering, not data (T245b): H8 authenticates as the container type's OWNING app (SpeContainerOptions.ContainerTypeOwners), no longer as H3's BffAppRegId; T227's per-customer container-type grant for the BFF app (G9) will make it a data edge again.
+            [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).
             [HandlerH10] = new[] { HandlerH7 },
             [HandlerH11] = new[] { HandlerH10 },
             [HandlerH12a] = new[] { HandlerH11 },
             [HandlerH12b] = new[] { HandlerH11 },                             // Parallel with H12a.
             [HandlerH12c] = new[] { HandlerH12a, HandlerH12b, HandlerH2a },   // Join per task 072 + H14 handler code.
-            [HandlerH14] = new[] { HandlerH12c },
+            [HandlerH14] = new[] { HandlerH12c, HandlerH9 },                  // T245b: + H9 — webhook receivers are InterStepState.BffApiUrl (H9 output); H13 ← H14 so H13 also follows H9.
             [HandlerH13] = new[] { HandlerH14 },
         };
 

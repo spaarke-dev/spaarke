@@ -14,7 +14,13 @@
 // Tier-2 scoping (R2 NFR-08): the data-returning reads (fetch, record) are scoped by the requested
 // module's registered Tier-2 predicate (ExternalModuleRegistry). A non-participant caller receives an
 // empty result (fetch) or 403 (record) — being authenticated does NOT reveal all records. Schema/view
-// reads (metadata, savedquery, savedqueries) return no record data and are app-only passthrough.
+// reads (metadata, savedquery, savedqueries) return no record data and are app-only.
+//
+// View scope (unified-access-control-r2 task 157 · finding F1): the savedquery / savedqueries routes return ONLY the
+// views an external module's grid is registered to use (ExternalModuleDescriptor.SavedQueryIds, the same module
+// registry the column allow-lists live on), and 404 for every other view, the entity's internal MDA views included.
+// An unregistered id, a registered id whose view belongs to another entity, an unknown id and an entity with no module
+// all get the same 404. Owner decisions C6 / C9: a contact gets only what it is granted.
 //
 // No joins on the read seam (unified-access-control-r2 task 011 · spec FR-10 · finding A-17): the fetch
 // guard admits a caller-submitted FetchXML only when it is a SINGLE-ENTITY read of the module's own
@@ -148,22 +154,25 @@ public static class ExternalModuleDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
-        // GET /savedquery/{id} — saved query payload (view definition; no record data). App-only passthrough.
+        // GET /savedquery/{id} — saved query payload (view definition; no record data). App-only. Only a view a module
+        // grid is registered to use (task 157, F1); 404 otherwise.
         data.MapGet("/savedquery/{savedQueryId:guid}", GetSavedQueryAsync)
             .WithName("ExternalModuleSavedQuery")
-            .WithSummary("Saved query payload for a module DataGrid (view definition only)")
+            .WithSummary("Saved query payload for a module DataGrid (a registered view only)")
             .Produces<SavedQueryDto>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /savedqueries/{entity} — saved queries for an entity (view definitions). App-only passthrough.
+        // GET /savedqueries/{entity} — the entity's views that its module grid is registered to use (task 157, F1).
+        // App-only. 404 when the entity has no module or its module registers no view.
         data.MapGet("/savedqueries/{entityLogicalName}", GetSavedQueriesAsync)
             .WithName("ExternalModuleSavedQueries")
-            .WithSummary("Saved queries for a module entity (view definitions only)")
+            .WithSummary("Registered saved queries for a module entity (view definitions only)")
             .Produces<IReadOnlyList<SavedQuerySummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return externalGroup;
@@ -446,7 +455,7 @@ public static class ExternalModuleDataEndpoints
         }
     }
 
-    private static async Task<IResult> GetSavedQueryAsync(
+    private static Task<IResult> GetSavedQueryAsync(
         Guid savedQueryId,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
@@ -454,26 +463,56 @@ public static class ExternalModuleDataEndpoints
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        if (GetCallerPrincipal(httpContext) is null) return MissingContextResult();
+        if (GetCallerPrincipal(httpContext) is null) return Task.FromResult(MissingContextResult());
+
+        return GetSavedQueryCoreAsync(savedQueryId, registry, savedQueryService.GetSavedQueryAsync, logger, ct);
+    }
+
+    /// <summary>Error code for every refused or absent view on the external savedquery routes (one answer for all).</summary>
+    internal const string ErrorSavedQueryNotFound = "DV_SAVEDQUERY_NOT_FOUND";
+
+    /// <summary>
+    /// The by-id view read (task 157, F1): only a view an external module grid is registered to use
+    /// (<see cref="ExternalModuleDescriptor.SavedQueryIds"/>), checked BEFORE any Dataverse read, and only when the loaded
+    /// view belongs to that module's entity. Every other outcome is the same 404. Separated from the route handler only
+    /// so it can be driven with a test double for <paramref name="loadSavedQuery"/> (the shared
+    /// <see cref="SavedQueryService"/> needs a live ServiceClient); the handler passes
+    /// <c>SavedQueryService.GetSavedQueryAsync</c> unchanged.
+    /// </summary>
+    internal static async Task<IResult> GetSavedQueryCoreAsync(
+        Guid savedQueryId,
+        ExternalModuleRegistry registry,
+        Func<Guid, CancellationToken, Task<SavedQueryDto?>> loadSavedQuery,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        // A view no module grid is registered to use is not available here — the entity's internal MDA views
+        // included. Refused before any read, with the same 404 as an absent id (an unknown and a denied id look alike).
+        var module = registry.FindBySavedQueryId(savedQueryId);
+        if (module is null)
+        {
+            logger.LogInformation(
+                "[EXT-MODULE] Saved query {SavedQueryId} refused — no external module grid is registered to use it.",
+                savedQueryId);
+            return SavedQueryNotFound();
+        }
 
         try
         {
-            var dto = await savedQueryService.GetSavedQueryAsync(savedQueryId, ct).ConfigureAwait(false);
+            var dto = await loadSavedQuery(savedQueryId, ct).ConfigureAwait(false);
             if (dto is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound, title: "Not Found", detail: "Saved query not found",
-                    extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_SAVEDQUERY_NOT_FOUND" });
+                return SavedQueryNotFound();
             }
 
-            // Fail-closed: a saved query is only readable when its target entity has a registered module —
-            // an external caller cannot pull view definitions (FetchXML/LayoutXML) for arbitrary entities.
-            if (string.IsNullOrWhiteSpace(dto.EntityName) || registry.FindByEntity(dto.EntityName) is null)
+            // Defence in depth against a mis-registered id: the view must target the registering module's own entity.
+            if (!string.Equals(dto.EntityName, module.RecordEntity, StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogWarning(
-                    "[EXT-MODULE] Saved query {SavedQueryId} denied — entity '{Entity}' has no registered module.",
-                    savedQueryId, dto.EntityName);
-                return ProblemDetailsHelper.Forbidden(DenyModuleNotRegistered);
+                    "[EXT-MODULE] Saved query {SavedQueryId} refused — registered by module {Module} ({ModuleEntity}) but " +
+                    "it targets '{Entity}'. Fix the module's SavedQueryIds.",
+                    savedQueryId, module.Name, module.RecordEntity, dto.EntityName);
+                return SavedQueryNotFound();
             }
 
             return Results.Ok(dto);
@@ -488,7 +527,7 @@ public static class ExternalModuleDataEndpoints
         }
     }
 
-    private static async Task<IResult> GetSavedQueriesAsync(
+    private static Task<IResult> GetSavedQueriesAsync(
         string entityLogicalName,
         HttpContext httpContext,
         ExternalModuleRegistry registry,
@@ -496,24 +535,46 @@ public static class ExternalModuleDataEndpoints
         ILogger<Program> logger,
         CancellationToken ct)
     {
-        if (GetCallerPrincipal(httpContext) is null) return MissingContextResult();
+        if (GetCallerPrincipal(httpContext) is null) return Task.FromResult(MissingContextResult());
+
+        return GetSavedQueriesCoreAsync(
+            entityLogicalName, registry, savedQueryService.GetSavedQueriesForEntityAsync, logger, ct);
+    }
+
+    /// <summary>
+    /// The per-entity view list (task 157, F1): ONLY the entity's views that its module grid is registered to use. An
+    /// entity with no module, or whose module registers no view (every module today: their grids are inline), gets a
+    /// 404 with no Dataverse read. Separated from the route handler for the same reason as
+    /// <see cref="GetSavedQueryCoreAsync"/>; the handler passes <c>SavedQueryService.GetSavedQueriesForEntityAsync</c>.
+    /// </summary>
+    internal static async Task<IResult> GetSavedQueriesCoreAsync(
+        string entityLogicalName,
+        ExternalModuleRegistry registry,
+        Func<string, CancellationToken, Task<IReadOnlyList<SavedQuerySummaryDto>>> listSavedQueries,
+        ILogger logger,
+        CancellationToken ct)
+    {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
         {
             return ProblemDetailsHelper.ValidationError("Entity logical name is required.");
         }
 
-        // Fail-closed: list saved queries only for an entity with a registered module.
-        if (registry.FindByEntity(entityLogicalName) is null)
+        var module = registry.FindByEntity(entityLogicalName);
+        if (module is null || module.SavedQueryIds.Count == 0)
         {
-            return ProblemDetailsHelper.Forbidden(DenyModuleNotRegistered);
+            logger.LogInformation(
+                "[EXT-MODULE] Saved-query list for '{Entity}' refused — no external module grid is registered to use a " +
+                "view of it.", entityLogicalName);
+            return SavedQueryNotFound();
         }
 
         try
         {
-            var summaries = await savedQueryService
-                .GetSavedQueriesForEntityAsync(entityLogicalName, ct)
-                .ConfigureAwait(false);
-            return Results.Ok(summaries);
+            var summaries = await listSavedQueries(entityLogicalName, ct).ConfigureAwait(false);
+            IReadOnlyList<SavedQuerySummaryDto> registered = summaries
+                .Where(summary => module.SavedQueryIds.Contains(summary.Id))
+                .ToList();
+            return Results.Ok(registered);
         }
         catch (Exception ex)
         {
@@ -524,6 +585,12 @@ public static class ExternalModuleDataEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_INTERNAL_ERROR" });
         }
     }
+
+    /// <summary>The one 404 every refused, unregistered or absent view gets on the external savedquery routes.</summary>
+    private static IResult SavedQueryNotFound() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status404NotFound, title: "Not Found", detail: "Saved query not found",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = ErrorSavedQueryNotFound });
 
     // =========================================================================
     // FetchXML guard (spec FR-10 · finding A-17)

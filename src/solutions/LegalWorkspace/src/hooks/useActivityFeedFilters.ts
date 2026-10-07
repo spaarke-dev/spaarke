@@ -21,6 +21,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { IEvent } from '../types/entities';
 import { EventFilterCategory } from '../types/enums';
+import { isFeedEventOverdue } from '../components/ActivityFeed/feedDueAccent';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -44,7 +45,8 @@ export interface IUseActivityFeedFiltersResult {
   setFilter: (filter: EventFilterCategory) => void;
   /**
    * Per-category counts derived from allEvents.
-   * These mirror the server-side OData predicates in queryHelpers.ts.
+   * HighPriority mirrors the server OData predicate in queryHelpers.ts; Overdue
+   * uses the feed's local-day rule (see `isOverdue`), not the server's UTC filter.
    */
   categoryCounts: CategoryCounts;
 }
@@ -62,23 +64,28 @@ function isHighPriority(event: IEvent): boolean {
 }
 
 /**
- * Compute whether a single event matches the Overdue category.
- * Mirrors: buildEventCategoryFilter(Overdue) → duedate lt today
+ * Compute whether a single event matches the Overdue category: the feed's
+ * shared rule (`isFeedEventOverdue` — due before today, calendar days, LOCAL
+ * time), so the badge count, the client filter and the card accent agree
+ * (task 081 round 4; this parsed a DateOnly due date as UTC midnight).
+ *
+ * It does NOT mirror the server OData filter `buildEventCategoryFilter(Overdue)`
+ * in `services/queryHelpers.ts` (`sprk_duedate lt <UTC midnight today> and
+ * statuscode eq 1`): that one compares against UTC midnight and also requires
+ * an open status. This client rule counts every loaded event by due date only.
  */
 function isOverdue(event: IEvent): boolean {
-  if (!event.sprk_duedate) return false;
-  const dueDate = new Date(event.sprk_duedate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return dueDate < today;
+  return isFeedEventOverdue(event.sprk_duedate);
 }
 
 /**
- * Compute per-category counts from the full event list.
- * Predicates intentionally mirror the OData filters in queryHelpers.ts so
- * badge counts match what the server would return for each filter.
+ * Compute per-category counts from the full event list. HighPriority mirrors
+ * the OData filter in queryHelpers.ts; Overdue uses the feed's local-day rule
+ * (see `isOverdue` above for how that differs from the server filter).
+ *
+ * @internal exported for the cross-surface overdue test.
  */
-function computeCategoryCounts(events: IEvent[]): CategoryCounts {
+export function computeCategoryCounts(events: IEvent[]): CategoryCounts {
   const counts: CategoryCounts = {
     [EventFilterCategory.All]: events.length,
     [EventFilterCategory.HighPriority]: 0,

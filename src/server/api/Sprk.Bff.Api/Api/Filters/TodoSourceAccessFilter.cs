@@ -85,6 +85,12 @@ public static class TodoSourceAccessFilterExtensions
 /// the child for. That is the intended FR-26 semantics, not a gap. Probes are sequential and fail fast, so
 /// a caller can time WHICH of their own four ids was refused — they supplied all four, so this discloses
 /// nothing they did not already know.</para>
+///
+/// <para><b>Create privilege (unified-access-control-r2 task 166, sweep amendment (c)).</b> After the source checks,
+/// the caller must also hold <see cref="CreateTodoPrivilege"/> — the To Do row itself is created app-only and
+/// team-owned, so without it a caller who could not create a To Do anywhere else could create one here (the G5
+/// "check as the user, create as the app" pattern, task 130). That refusal has its own reason code; it names a
+/// TABLE privilege and varies with no record, so it cannot become the existence oracle above.</para>
 /// </remarks>
 public sealed class TodoSourceAccessFilter : IEndpointFilter
 {
@@ -115,9 +121,10 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
     /// </summary>
     /// <remarks>
     /// That table does double duty: besides naming an entity's collection it is also
-    /// <see cref="EntityAccessFilter"/>'s ALLOW-LIST of legal <c>/office/save</c> association targets (its
-    /// own remarks refuse <c>sprk_todo</c> on exactly that ground — no <c>sprk_document</c> lookup column
-    /// exists for it). Adding <c>sprk_document</c> / <c>sprk_communication</c> there to serve this route
+    /// <see cref="EntityAccessFilter"/>'s ALLOW-LIST of legal <c>/office/save</c> association targets: each
+    /// entry is a type a document may be filed against, kept in lockstep with <c>DocumentAssociationMap</c>
+    /// (see the note beside its <c>sprk_todo</c> entry, added 2026-09-04 once <c>sprk_relatedtodo</c> was
+    /// found). Adding <c>sprk_document</c> / <c>sprk_communication</c> there to serve this route
     /// would silently widen which types a document may be filed against on a different route. Two entries
     /// consulted only after the shared table misses is the smaller cost; the shared table is still asked
     /// first, so the three regarding types this route shares with <c>/office/save</c> are resolved in
@@ -153,15 +160,10 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
         }
 
         var sources = CollectSourceRecords(request);
-        if (sources.Count == 0)
-        {
-            // A standalone To Do names no record. Same posture as QuickCreateSourceAccessFilter: where
-            // nothing is read, there is nothing to authorize.
-            return await next(context);
-        }
-
         var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
 
+        // A standalone To Do names no record, so the loop below has nothing to authorize — but the Create-privilege
+        // check after it (task 166) still runs: a To Do with no source is still a row the BFF creates.
         foreach (var (logicalName, recordId) in sources)
         {
             // A MISS DENIES: a type whose per-record access this codebase cannot evaluate is a type whose
@@ -210,8 +212,70 @@ public sealed class TodoSourceAccessFilter : IEndpointFilter
             }
         }
 
+        // ── Task 166 (route-authorization sweep amendment (c), owner round 12 item 9; owner G5 pattern) ──
+        //
+        // The To Do is created APP-ONLY and owned by a business-unit default team (task 080's server invariant),
+        // so until this check a caller with no Create privilege on sprk_todo could create one here. AFTER the
+        // source checks (an unreadable source is refused first, unchanged), the CALLER must hold the table's live
+        // Create privilege, asked through CallerRecordAccessProbe.CallerHoldsPrivilegeAsync (OBO, uncached, fail
+        // closed). Not held, a throw and a missing token are ONE 403. Its reason code differs from the source
+        // refusal's on purpose: it names a TABLE privilege, so it varies with nothing about any record and cannot
+        // rebuild the record-existence oracle this filter's single source refusal exists to close.
+        bool holdsCreate;
+        try
+        {
+            holdsCreate = await _probe.CallerHoldsPrivilegeAsync(
+                callerToken, CreateTodoPrivilege, httpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex,
+                "[TODO-SOURCE-AUTH] The {Privilege} check threw; denying. CorrelationId: {CorrelationId}",
+                CreateTodoPrivilege, httpContext.TraceIdentifier);
+            holdsCreate = false;
+        }
+
+        if (!holdsCreate)
+        {
+            _logger?.LogWarning(
+                "[TODO-SOURCE-AUTH] Denied: caller does not hold {Privilege}. CorrelationId: {CorrelationId}",
+                CreateTodoPrivilege, httpContext.TraceIdentifier);
+
+            return DenyPrivilege(httpContext);
+        }
+
         return await next(context);
     }
+
+    /// <summary>
+    /// The Dataverse Create privilege for <c>sprk_todo</c>, by its exact live name — read from spaarkedev1
+    /// <c>privileges</c> metadata 2026-10-03 (read-only; task 166 note §live facts). Pinned by a test.
+    /// </summary>
+    internal const string CreateTodoPrivilege = "prvCreatesprk_Todo";
+
+    /// <summary>The reason code of the Create-privilege refusal (task 166).</summary>
+    private const string InsufficientPrivilegeReasonCode = "insufficient_privilege";
+
+    /// <summary>The ONE detail of the Create-privilege refusal (task 166). Names no record.</summary>
+    private const string InsufficientPrivilegeDetail = "You do not have permission to create a To Do.";
+
+    /// <summary>The Create-privilege refusal, in the same Office ProblemDetails shape as <see cref="Deny"/>.</summary>
+    private static IResult DenyPrivilege(HttpContext httpContext)
+        => Results.Problem(
+            statusCode: StatusCodes.Status403Forbidden,
+            title: "Forbidden",
+            detail: InsufficientPrivilegeDetail,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.3",
+            extensions: new Dictionary<string, object?>
+            {
+                ["errorCode"] = AccessDeniedErrorCode,
+                ["reasonCode"] = InsufficientPrivilegeReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier
+            });
 
     /// <summary>
     /// Every record id this request would cause to be written, paired with its target's logical name.

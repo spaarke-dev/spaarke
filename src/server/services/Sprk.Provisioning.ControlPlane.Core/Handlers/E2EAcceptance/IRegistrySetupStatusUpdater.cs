@@ -9,7 +9,7 @@
 // TRANSITION SEMANTIC (per POML constraint):
 //   The transition to `Ready` is CONDITIONAL on ALL of:
 //     - Extended validate script exit 0 (SC #5)
-//     - ALL 6 T1–T6 traps clear (SC #6)
+//     - ALL 7 T1–T7 traps clear (SC #6)
 //     - ALL 5 I1–I5 invariants clear (§4D)
 //     - naming-conformance exit 0 (SC #17)
 //     - cost envelope conforms (§15 #14 — advisory-warn only unless opted-in fail)
@@ -55,13 +55,16 @@ public interface IRegistrySetupStatusUpdater
 /// <param name="RunId">RunId — for log correlation + audit trail.</param>
 /// <param name="TenantId">Explicit tenantId (§4D I1 no-hardcoded-tenant) — token acquisition MUST use this scope.</param>
 /// <param name="EnvironmentId">The Dataverse row id (as GUID string) — target of the PATCH.</param>
-/// <param name="RegistryDataverseUrl">The Dataverse environment URL hosting the registry table (Spaarke internal, NOT the customer's own env URL).</param>
+/// <remarks>
+/// No registry URL: the registry client already targets the admin Dataverse environment from its own
+/// configuration (<c>DataverseEnvironmentRegistry:AdminEnvironmentUrl</c>). Task 245b removed the
+/// <c>RegistryDataverseUrl</c> field — it was filled from a run parameter nothing wrote and read by nothing.
+/// </remarks>
 public sealed record RegistrySetupStatusUpdateRequest(
     string CustomerId,
     string RunId,
     string TenantId,
-    string EnvironmentId,
-    string RegistryDataverseUrl);
+    string EnvironmentId);
 
 /// <summary>
 /// Typed outcome of a registry-transition PATCH. Discriminated union:

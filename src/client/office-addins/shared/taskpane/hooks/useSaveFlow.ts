@@ -10,7 +10,8 @@ import {
   type ErrorMessage,
 } from '../utils/errorMessages';
 import { createSseConnection, type SseConnection, type SseEvent } from '../services/SseClient';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { toDocxFileName } from '../utils/documentFileName';
 
 /** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */
 const CANONICAL_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -1073,8 +1074,8 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
           // Ensure a real .docx extension — SPE preview, Word open, Compose mount, and AI text
           // extraction all key off it. Without it the file is stored extensionless and treated as
           // an unknown/unsupported type (email-communication-intelligence-r2 UAT 2026-09-03).
-          const rawDocName = (effectiveDocumentName || 'document').trim() || 'document';
-          const docFileName = /\.docx$/i.test(rawDocName) ? rawDocName : `${rawDocName}.docx`;
+          // Task 089: the rule lives in utils/documentFileName so the ribbon's Quick Save uses the same one.
+          const docFileName = toDocxFileName(effectiveDocumentName);
           documentFileName = docFileName;
           serverRequest.document = {
             fileName: docFileName,

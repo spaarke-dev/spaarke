@@ -100,13 +100,19 @@ public class SignalEvaluationService : ISignalEvaluationService
         SnapshotVelocityPct
     ];
 
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     public SignalEvaluationService(
         IFieldMappingDataverseService fieldMappingService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<FinanceOptions> options,
         FinanceTelemetry telemetry,
         ILogger<SignalEvaluationService> logger)
     {
         _fieldMappingService = fieldMappingService;
+        // unified-access-control-r2 task 146: a spend signal is a child of its matter (live metadata: sprk_spendsignal
+        // carries sprk_matter and sprk_project) — owned by the matter's team, the named Secure team for a secure matter.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options.Value;
         _telemetry = telemetry;
         _logger = logger;
@@ -142,6 +148,24 @@ public class SignalEvaluationService : ISignalEvaluationService
 
         _logger.LogDebug("Found {SnapshotCount} snapshots for matter {MatterId}", snapshotIds.Length, matterId);
 
+        // Task 146: every signal this pass upserts is owned by the matter's team. Resolved once, before any write. This
+        // is a background job with no acting user, so a REFUSAL writes no signal for this matter (logged with the reason
+        // and counted as zero signals — never an app-owned row, never a failed job); a Dataverse fault propagates.
+        var owner = await _ownership.ResolveOwnerAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                TargetEntityLogicalName = MatterEntity,
+                TargetRecordId = matterId,
+            },
+            ct);
+        if (!owner.IsOwned)
+        {
+            _logger.LogWarning(
+                "Signal evaluation SKIPPED for matter {MatterId}: no owner for its spend signals — {Reason} ({Code}) (task 146).",
+                matterId, owner.Reason, owner.RefusalCode);
+            return 0;
+        }
+
         // 2. Retrieve snapshot field values and evaluate rules
         var totalSignals = 0;
         var emptySnapshots = 0;
@@ -167,7 +191,7 @@ public class SignalEvaluationService : ISignalEvaluationService
             {
                 if (rule.Evaluate(snapshot, _options, out var signal))
                 {
-                    await UpsertSignalAsync(matterId, snapshotId, signal, ct);
+                    await UpsertSignalAsync(matterId, snapshotId, signal, owner.OwningTeamId!.Value, ct);
                     totalSignals++;
 
                     _telemetry.RecordSignalEmitted(signal.SignalTypeName, matterId.ToString());
@@ -201,6 +225,7 @@ public class SignalEvaluationService : ISignalEvaluationService
         Guid matterId,
         Guid snapshotId,
         SignalData signal,
+        Guid owningTeamId,
         CancellationToken ct)
     {
         // Generate deterministic ID for idempotent upsert:
@@ -220,7 +245,12 @@ public class SignalEvaluationService : ISignalEvaluationService
             // Simple fields
             [SignalMessage] = signal.Message,
             [SignalIsActive] = true,
-            [SignalGeneratedAt] = DateTime.UtcNow
+            [SignalGeneratedAt] = DateTime.UtcNow,
+
+            // Task 146: the matter's team owns the signal. This PATCH is a create-by-upsert, so the owner must ride in
+            // it (a create cannot be assigned after the fact without an app-owned interval); on re-evaluation of an
+            // existing signal the same team is re-asserted, a no-op.
+            ["ownerid@odata.bind"] = $"/teams({owningTeamId})",
         };
 
         await _fieldMappingService.UpdateRecordFieldsAsync(

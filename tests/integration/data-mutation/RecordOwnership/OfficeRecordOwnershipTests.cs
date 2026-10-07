@@ -3,10 +3,12 @@ using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Tests.Api.Office;
 using Sprk.Bff.Api.Tests.Shared.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -46,6 +48,9 @@ public class OfficeRecordOwnershipTests
     private static readonly byte[] Docx = MinimalDocx.Create("owned draft");
     private static readonly EntityReference OwnerTeam = new("team", RecordOwnershipResolverDouble.DefaultTeamId);
 
+    /// <summary>Task 146 c1-r1: the signed-in Office user's object id, for the tests that see them recorded as creator.</summary>
+    private static readonly Guid SavingUserOid = Guid.Parse("c1c1c1c1-0000-4000-8000-00000000000d");
+
     // =====================================================================================
     // sprk_document — POST /api/office/save
     // =====================================================================================
@@ -56,8 +61,10 @@ public class OfficeRecordOwnershipTests
         var world = new OfficeVersionSaveWorld();
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var matterId = Guid.NewGuid();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", SavingUserOid.ToString()); // a real (GUID) object id, as in production
 
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        var response = await client.PostAsJsonAsync("/api/office/save", new SaveRequest
         {
             ContentType = SaveContentType.Document,
             TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = matterId },
@@ -76,6 +83,13 @@ public class OfficeRecordOwnershipTests
         var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;
         Guid.Parse(OfficeVersionSaveWorld.PayloadValue(payload, "OwningTeamId")!)
             .Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
+
+        // c1-r1 (owner round 13 item 9): the saving user (asked by object id) is recorded on the app-created document —
+        // and carried to the worker with the team, so the children it creates record them too.
+        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        world.CreatedDocumentPersons.Should().Equal(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
+        Guid.Parse(OfficeVersionSaveWorld.PayloadValue(payload, "CreatedByPersonId")!)
+            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
     }
 
     [Fact]
@@ -144,8 +158,10 @@ public class OfficeRecordOwnershipTests
     {
         using var factory = new TodoRegardingTestWebAppFactory();
         var matterId = Guid.NewGuid();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", SavingUserOid.ToString()); // a real (GUID) object id, as in production
 
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
         {
             Name = "Review red-lines",
             RegardingEntityType = "Matter",
@@ -156,12 +172,17 @@ public class OfficeRecordOwnershipTests
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        factory.CreatedEntities.Should().ContainSingle()
-            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+        var todo = factory.CreatedEntities.Should().ContainSingle().Subject;
+        todo.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
 
         var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
         asked.TargetEntityLogicalName.Should().Be("sprk_matter");
         asked.TargetRecordId.Should().Be(matterId);
+
+        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do.
+        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        todo.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id
+            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
     }
 
     [Fact]
@@ -208,6 +229,113 @@ public class OfficeRecordOwnershipTests
     }
 
     // =====================================================================================
+    // sprk_todo Assigned To defaults (task 083, #1044 writer half): task 080 made the owner a BU default
+    // team, so nothing on the row named the person it was for, and the Daily Briefing (UAC-r2 task 152's
+    // people-targeting surface, which matches sprk_assignedto through the SAME task-141 link) could not
+    // find it. These pin that an unassigned To Do defaults to the caller's linked contact, that an explicit
+    // assignee is never overridden, and that a caller with no linked contact still gets their To Do.
+    // =====================================================================================
+
+    [Fact]
+    public async Task CreateTodo_NoAssignee_DefaultsSprkAssignedToToTheCallersLinkedContact_OwnerTeamUnchanged()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var callerSystemUserId = Guid.NewGuid();
+        var callerContactId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(callerSystemUserId, ContactId: callerContactId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Review red-lines",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = matterId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = factory.CreatedEntities.Should().ContainSingle().Subject;
+        created.GetAttributeValue<EntityReference>("sprk_assignedto")
+            .Should().BeEquivalentTo(new EntityReference("contact", callerContactId),
+                "no assignee was chosen, so the caller's own linked contact (task 141) names the To Do");
+        // 080's team-ownership invariant is untouched by this default.
+        created.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+    }
+
+    [Fact]
+    public async Task CreateTodo_ExplicitAssignee_IsNeverOverriddenByTheCallersContact()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var callerSystemUserId = Guid.NewGuid();
+        var callerContactId = Guid.NewGuid();
+        var explicitAssigneeContactId = Guid.NewGuid();
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(callerSystemUserId, ContactId: callerContactId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Follow up on the draft",
+            DocumentId = Guid.NewGuid(),
+            AssignedToContactId = explicitAssigneeContactId,
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        factory.CreatedEntities.Should().ContainSingle()
+            .Which.GetAttributeValue<EntityReference>("sprk_assignedto")
+            .Should().BeEquivalentTo(
+                new EntityReference("contact", explicitAssigneeContactId),
+                "an explicitly chosen assignee always wins over the caller's own contact");
+    }
+
+    [Fact]
+    public async Task CreateTodo_NoAssigneeAndNoLinkedContact_StillCreates_WithNoAssignedTo_AndLogsAWarning()
+    {
+        using var factory = new TodoRegardingTestWebAppFactory();
+        var callerSystemUserId = Guid.NewGuid();
+
+        factory.CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Resolved(callerSystemUserId.ToString("D")));
+        // No ContactId set — PersonIdentity's default is null, i.e. "no linked contact" (never a throw).
+        factory.Identity
+            .Setup(i => i.ResolveAsync(callerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(callerSystemUserId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Nobody to name",
+            DocumentId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "a missing contact link must never refuse the create");
+        var created = factory.CreatedEntities.Should().ContainSingle().Subject;
+        created.Contains("sprk_assignedto").Should().BeFalse(
+            "no assignee was chosen and the caller has no linked contact, so the column stays absent");
+
+        factory.Logs.Entries.Should().Contain(e =>
+            e.Level == LogLevel.Warning
+            && e.Message.Contains("todo_assignee_unset")
+            && e.Message.Contains(callerSystemUserId.ToString("D")),
+            "the missing link must be logged, naming the caller");
+    }
+
+    // =====================================================================================
     // sprk_invoice — POST /api/office/quickcreate/invoice (filed against nothing: the caller's unit)
     // =====================================================================================
 
@@ -221,10 +349,12 @@ public class OfficeRecordOwnershipTests
             "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0080" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        created.Should().ContainSingle()
-            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+        var invoice = created.Should().ContainSingle().Subject;
+        invoice.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         factory.Ownership.Requests.Should().ContainSingle()
             .Which.CallerSystemUserId.Should().Be(callerSystemUserId);
+        // c1-r1 (owner round 13 item 9): the Office user is recorded on the app-created invoice.
+        invoice.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(callerSystemUserId);
     }
 
     [Fact]

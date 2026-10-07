@@ -269,6 +269,14 @@ FOR each task identified, assign a model tier:
   Two reasons. First, the closed-set rule above already tells the executor that unlisted criteria are out of scope; without a test-scope clause, "write tests" is an **open** instruction inside an otherwise closed contract, and the predictable result is breadth padding as uncertainty-hedging — three near-identical happy-path variants that each pass every ADR-038 §7 ban individually while adding no unique verification value. Second, it gives `/test-diet` something concrete to check a MAINTAIN classification against at project close.
 
   **Do NOT state a numeric test count.** A number invites satisfying the number, which is the padding behaviour this clause exists to prevent.
+- **Seeding proofs: request them only where a silent test would be dangerous (added 2026-10-06).** A seeding proof (mutation check) deliberately breaks a guard, confirms the named test fails, then restores the code. It proves a test can fail, which matters most for a guard nobody would notice was broken.
+  - **Request one** for a guard whose failure would be a security, tenant-isolation, fail-open or data-loss outcome (authorization filters, isolation checks, fail-closed paths), and for an architecture or guard test whose only purpose is to catch a regression. One seed per guard, not per branch.
+  - **Don't request one** for minor branches, UI behaviour or happy paths. That is known-limit class K3 in task-execute Step 9.5.
+  - **Why:** by 2026-10, 62 of `unified-access-control-r2`'s 167 POMLs asked for seeding proofs. Each seed is a break-run-restore-rerun cycle on a suite 6.5× larger than in March. Applied to every branch, the cost outran the protection.
+- **Task size (added 2026-10-06).** A task is one reviewable change. Target ≤ 15 KB of POML.
+  - Above ~25 KB, split it, or move background prose into a design/notes file and reference it by path. `<context>` should point at files, not restate them.
+  - **Don't write fix-round history back into the POML.** Round results go in the task's notes file. If a round reveals new scope, it becomes a new task.
+  - **Why:** POMLs grew from 2–5 KB (early 2026) to 10–28 KB on average, up to 156 KB. The bulk was restated `<context>` (36 KB in one task) and `<constraints>` (23 KB), all loaded at Step 1 of every execution and every fix round.
 - **Step mode (see Step 3.5.5c) and escalation triggers (see the `<escalation>` element)** are the other two literal-execution levers — set them deliberately per task.
 - **Frontend tasks need concrete visual direction** (see Step 3.65): anchor the look in a `<knowledge>` pattern reference to an existing Fluent v9 component or an explicit spec. "Clean and modern" is not a spec — Sonnet 5 will settle into a fixed default house style.
 - **Knowledge curation (token discipline).** The 1M context window is headroom for genuinely cross-cutting tasks, NOT license to load the full ADR corpus by default. The Sonnet-5 tokenizer produces ~30% more tokens for the same text, so padding is materially more expensive — load what the task needs via the Tag-to-Knowledge mapping, reference the rest by path.
@@ -341,6 +349,13 @@ FOR each new-component task:
 **NOT required for**: tasks that ONLY modify existing files (edit, refactor, fix bug, add tests for existing surface, rename, format). The rule applies to NEW surface, not modification.
 
 **Audit trail**: tasks with hollow or missing `<justification>` are blocked from code review per CLAUDE.md §11. The `code-review` skill Step 6.6 verifies justification concreteness at PR time.
+
+**Anti-patterns this catches** (real examples from chat-routing-redesign-r1; moved verbatim from root CLAUDE.md §11 on 2026-10-07):
+- ❌ "Delete LegalWorkspace `CreateRecordStep.tsx` as dead code per OC-R4-05" — retirement doc actually preserves it as library; cost-of-doing-nothing was assumed wrongly
+- ❌ "Add new `sprk_playbookcode` lookup keys" — `sprk_playbookid` already exists as the immutable opaque ID; existing-question unanswered
+- ❌ "Build 8 retrieval tool handlers" — 7 of 8 fail extension test for the MVP use case; one excellent handler beats five that partially overlap
+
+Cost-of-rule: one paragraph per new component. Cost-of-rule-absence: shipped scope creep.
 
 **Component-complexity check (per [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md))** — for any task that creates a new component OR **materially grows an existing one**, evaluate **complexity/cohesion, not line count**:
 - If the task would add a **second (or Nth) responsibility** to an already-multi-purpose component, design the task to **extract the diverging responsibility into the right seam** up front — don't accrete another concern onto a god-class. (Prefer extending a *cohesive* component; don't manufacture thin components to dodge a size number.)

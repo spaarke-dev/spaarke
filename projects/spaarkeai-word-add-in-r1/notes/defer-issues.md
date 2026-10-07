@@ -4,6 +4,49 @@
 > File via `/project-defer-issue-tracking` (alias `/defer`) — it writes both places in one step.
 > Per CLAUDE.md §11, every entry names a concrete behavior or contract that fails. "Future flexibility" is not a reason.
 
+## Register — reconciled 2026-10-02 by task 079
+
+The surface task 090's escalation trigger 2 runs against (*"deferred entries that describe unfinished spec
+requirements"*). GitHub states read live on 2026-10-02. **"Spec gap?"** answers one question: does this entry leave a
+requirement of THIS project's `spec.md` unfinished?
+
+| ID | Subject | Status | Owner | Spec gap? | GitHub |
+|---|---|---|---|---|---|
+| ISS-001 | `sprk_event` written to `sprk_document`, column absent | Routed out-of-band | `unified-access-control-r2` | No (UAC-r2's filter) | not filed (operator) |
+| ISS-002 | CI shadow window false green | ✅ Resolved 2026-09-10 | — | No | not filed (operator) |
+| ISS-003 | Global handler serves `application/json` | ✅ Closed | — | No | #975 closed |
+| ISS-004 | office-addins typecheck job reports but does not block | **Open** — job built (056), not merge-blocking; FR-18/SC-12 amended 2026-10-02 to "CI reports" (owner) | **Project owner** (#996, promotion to blocking) | **No** — FR-18 now says "reports"; promotion is an improvement, not a spec gap | #996 open |
+| ISS-005 | New Word documents 503 on identity | ✅ Closed 2026-09-18 | — | No | #997 closed |
+| ISS-006 | Collision "Save as new version" wrote into an unrelated document | **Fixed in code (055), deployed; live re-check pending** | **This project — task 042 UAT** | FR-12 behaviour, pending the live re-check | #1005 open |
+| ISS-007 | I-6 not applied by ~20 writers outside the Office surface | Open | The projects that own those writers (Communication, Compose, Finance, Events, Playbook) | No (outside this spec) | #1034 open |
+| ISS-008 | `/api/v1/work-assignments` writes absent columns | Open | Work-assignment surface owner (not this project) | No | #1035 open |
+| ISS-009 | Playbook create/clone set no owner | Open | Playbook surface owner (not this project) | No | #1036 open |
+| ISS-010 | Picker trims by Read, save demands AppendTo | ✅ Done (084) | — | No | #1037 closed |
+| ISS-011 | `/api/v1/documents` lets the caller choose the owner | ✅ Done (080) | — | No | #1043 closed |
+| ISS-012 | Team-owned To Dos drop out of the Daily Briefing | Open | **Task 083** (ours, blocked on UAC-r2 141) + UAC-r2 141/152 | No (cross-project regression from 080) | #1044 open |
+| ISS-013 | Secure Record Owner role privileges | ✅ Done (082) | — | No | #1046 closed |
+| ISS-014 | Outlook ribbon quick-save sends the logical name | ✅ Done (084) | — | No | #1075 closed |
+| ISS-015 | `sprk_invoice` has no `sprk_invoicename` | Our half ✅ (085); 3 other-owner sites open | Other owners named in #1079 | No | #1079 open |
+| ISS-016 | Root BU team had no roles | ✅ Done 2026-10-02 (owner) | — | No | #1081 closed |
+| ISS-017 | Office job-row reads | ✅ Done (060); live-checked 2026-10-02 | — | No | #1084 closed |
+| ISS-018 | Background work lost on restart; SSE numbering | ✅ Done (068); live-checked 2026-10-02 | — | No | #1086 closed |
+| ISS-019 | Flaky Communication seam test | Open | `email-communication-intelligence-r2` | No | #1088 open |
+| ISS-020 | Six `sdap-jobs` handlers drop a crashed job | Open | Owners of those six handlers | No | #1089 open |
+| ISS-021 | The pane reads the profile once after Generate Profile | Open | **This project** (unscheduled) | Partly — FR-08's result appears only on reload | #1090 open |
+
+**Open work that is a TASK, not a deferral** (listed so nothing is invisible to 090):
+
+| Item | Owner | Spec link |
+|---|---|---|
+| ~~**Task 076** — pane-created Matter/Project has a **blank name** (no number written)~~ ✅ **DONE 2026-10-03** — Dataverse platform autonumber `MAT-`/`PRJ-######` (interim until the numbering function); dev applied; `notes/076-record-numbering.md`. **Open: run `scripts/Set-RecordNumberingSchema.ps1` in every other environment** (production after the owner's uniqueness check) | This project — owner answered 2026-10-02 | FR-13 / **SC-8 → PASS** |
+| **Task 083** — Office To Do names its person | Blocked on UAC-r2 task 141's link contract | FR-14 (completeness) |
+| **Task 042 UAT** — the live list: SC-1/3/7/9 manual halves, SC-11 parity rows; the `<ui-tests>` of 010, 013, 021, 026, 027, 033, 034, 036, 037, 040, 077; #1005 live re-check; 037's ribbon Quick Save/Share (only live attempt, 09-30, failed — blamed on the environment, never re-run); the unexplained 09-30 Create To Do failure; 084's latency check | **Project owner** (needs live Word/Outlook) | Several |
+| ~~Task 079 sign-offs~~ ✅ all signed 2026-10-02. **Task 086** builds two of them: Word Send Email choice (Spaarke email / Outlook on the web) and the focused record page (`navbar=off`) | This project (task 086) | FR-15, FR-10 |
+| Owner actions: 080 backfill `-Apply`; 078's observed install (`notes/078-manifest-decision.md` §6) | **Project owner** | FR-05 (078), I-6 data |
+| Drift checker cannot read this index's layout on master | `customer-provisioning-orchestration-r1` — fix `233ff9341` unmerged (verified: reads 86/86, no drift) | None (tooling) |
+| Handed off, tracked there: ADR-038 KEEP-path amendment (057) | `unified-access-control-r2` | #1014 open |
+| Handed off, delivered there as UAC-r2 task 120: Office route census (061) | `unified-access-control-r2` (issue not yet closed) | #1015 open |
+
 ---
 
 ## ISS-001 — `sprk_event` is written to `sprk_document` but does not exist on the entity
@@ -235,7 +278,7 @@ Either is a small, contained change to one file; add a regression test asserting
 |---|---|
 | **Type** | Issue (missing gate — the safety property an accepted decision depends on is absent) |
 | **Found** | 2026-09-17, task 042, while recording spec Success Criterion 12 against the deployed build |
-| **Owner** | Whoever next owns office-addins CI — one workflow step, plus a spec.md amendment |
+| **Owner** | ~~Whoever next owns office-addins CI~~ **The project owner** (reconciled 2026-10-02 by task 079). Task 056 built the job (`office-addins-tests.yml` `typecheck`): it fails ITS OWN run on any production error, but it is in neither required check (`Router`; classic protection's `Build & Test (Debug)`), so it **does not block a merge**. Promoting it is an owner action on #996; FR-18 / SC-12's "CI gates" wording awaits the owner's sign-off on an amendment (task 079). |
 | **Severity** | A NEW **production** typecheck error in `src/client/office-addins` would be caught by no gate at all |
 | **GitHub Issue** | [spaarke-dev/spaarke#996](https://github.com/spaarke-dev/spaarke/issues/996) |
 
@@ -344,7 +387,7 @@ message text; only `RecordContainerResolver` does it typed on `ErrorCode`.
 |---|---|
 | **Type** | Issue (live defect on the deployed dev build; cross-record content exposure) |
 | **Found** | 2026-09-18, task 042 UAT — observed live, then reproduced from logs + rows |
-| **Owner** | **Unassigned — needs an owner decision.** The fix spans the pane (`SaveFlow.tsx`, `useSaveFlow.ts`) and arguably the 409 contract; it is NOT a one-liner and it interacts with task 023's deliberate no-re-associate rule |
+| **Owner** | ~~Unassigned — needs an owner decision.~~ **This project. Fixed in code by task 055** (closed `23fd17991`; deployed to dev 2026-09-19): the collision withholds the colliding document's id — so no "Save as new version" is offered — when it is filed to a different record or the caller cannot read it (`OfficeCreateCollisionTests` `Collision_WhenTheCollidingDocumentIsFiledToADifferentRecord_…`, `…CannotRead…`). **#1005 stays open until a live re-check in task 042's UAT** (reconciled 2026-10-02 by task 079). |
 | **Severity** | 🔴 A user's document is written as a new version of an **unrelated** `sprk_document`, then profiled and RAG-indexed under that row, while the record the user selected receives nothing |
 | **GitHub Issue** | [spaarke-dev/spaarke#1005](https://github.com/spaarke-dev/spaarke/issues/1005) |
 
@@ -537,7 +580,7 @@ three.
 
 | Field | Value |
 |---|---|
-| **Status** | Fixed on this branch; open until it merges |
+| **Status** | **Done** — merged with task 080; #1043 closed (reconciled 2026-10-02 by task 079) |
 | **Urgency** | now |
 | **Filed** | 2026-09-30 |
 | **Source** | task 080 inventory; master exposure confirmed by UAC-r2 |
@@ -664,11 +707,11 @@ because 084 also changes which predicted record the ribbon may auto-file to.
 
 | Field | Value |
 |---|---|
-| **Status** | Open. **🔔 Owner decision** (security configuration, CLAUDE.md §6) |
-| **Urgency** | now: before the next BFF deploy from master (080 is on master via #1045, not deployed) |
+| **Status** | **Done 2026-10-02 (owner).** The owner assigned **Spaarke Basic User** to the dev root team "Spaarke". Verified live: probe rows owned by it on all six tables, and a real unfiled save through the deployed BFF (master `5e39f2bea`) produced a document owned by it. **Owner's ruling:** the root BU holding users is a **dev data artifact**; production users sit in the customer's named child BU, and the BFF's application user is placed in the customer BU. So the role's organization-wide read (Deep at the root) reaches no production user, and no root-team role is codified for production. Residual, stated on #1081: a production root-BU account that creates from the add-in with no target would be refused |
+| **Urgency** | closed |
 | **Filed** | 2026-10-01 |
 | **Source** | Task 085's live real-Dataverse probe (push-to-github Step 1.7) |
-| **GitHub Issue** | [#1081](https://github.com/spaarke-dev/spaarke/issues/1081) |
+| **GitHub Issue** | [#1081](https://github.com/spaarke-dev/spaarke/issues/1081) (closed 2026-10-02) |
 
 **Description**
 
@@ -749,7 +792,7 @@ returned 204, was read back and deleted. Full table: `notes/085-invoice-quickcre
 
 | Field | Value |
 |---|---|
-| **Status** | **Done** 2026-10-01: task 068, PR #1091 merged as `08b70d6cc`. #1086 closed. The live restart check waits on the next deploy |
+| **Status** | **Done** 2026-10-01: task 068, PR #1091 merged as `08b70d6cc`. #1086 closed. **Live checks done 2026-10-02** after the deploy of `5e39f2bea`: a graceful restart (the work finished first) and a hard kill mid-run (redelivered, lock taken back by its owner, completed) — `notes/068-durability-siblings.md` §9 |
 | **Urgency** | now |
 | **Filed** | 2026-10-01 |
 | **Source** | Task 068's investigation (`notes/068-durability-siblings.md` §1); the Redis lock behaviour verified against the .NET 10 `RedisCache` source |

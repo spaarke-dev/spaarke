@@ -43,15 +43,19 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: true,
   canGetDocumentUrl: true,
   canReadDocumentStamp: true,
+  canWriteDocumentStamp: true,
   canSaveAsPdf: true,
   canSaveAsEml: false,
   canInsertLink: true,
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,
+  canDetectDocumentChanges: false,
+  canOpenDesktopWord: false,
   minApiVersion: '1.3',
   supportedRequirementSet: 'WordApi 1.3',
 };
@@ -64,6 +68,7 @@ const OUTLOOK_CAPABILITIES: HostCapabilities = {
   canGetDocumentContent: false,
   canGetDocumentUrl: false,
   canReadDocumentStamp: false,
+  canWriteDocumentStamp: false,
   canProvideDocumentName: false,
 };
 
@@ -81,12 +86,14 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     getDocumentContent: jest.fn().mockResolvedValue(new ArrayBuffer(0)),
     getDocumentUrl: jest.fn().mockResolvedValue('https://contoso.sharepoint.com/Brief.docx'),
     readDocumentStamp: jest.fn().mockResolvedValue(null),
+    writeDocumentStamp: jest.fn().mockResolvedValue('written'),
     getCapabilities: () => WORD_CAPABILITIES,
     initialize: jest.fn().mockResolvedValue(undefined),
     isInitialized: () => true,
     insertLink: jest.fn(),
     attachFile: jest.fn(),
     composeNewEmail: jest.fn(),
+    registerDocumentChangeHandler: jest.fn().mockResolvedValue(() => undefined),
     ...overrides,
   };
 }

@@ -4,9 +4,10 @@
  * The PCF MUST NOT reimplement regarding write logic: `applyRegardingSelection`
  * must delegate the SET path to the shared `applyResolverFields`. We mock the
  * shared service and assert it is called (with the catalog-derived nav args) and
- * that the host record is persisted via `webApi.updateRecord`. The two
- * host-field writers (status advance + override-reason persist) are asserted to
- * write the right columns.
+ * that the host record's regarding is persisted through the BFF re-file
+ * (`refileThroughBff` — UAC-r2 task 147 r1: a regarding write moves the owner, so it is never a
+ * `webApi.updateRecord`; without the re-file it is refused). The two host-field writers (status advance +
+ * override-reason persist) stay on `webApi.updateRecord` and are asserted to write the right columns.
  */
 
 // Mock the shared library BEFORE importing the handler.
@@ -24,6 +25,11 @@ jest.mock('@spaarke/ui-components', () => {
     __esModule: true,
     TODO_REGARDING_CATALOG: CATALOG,
     applyResolverFields: jest.fn().mockResolvedValue({ recordNumber: 'MTR-2025-0001', displayName: 'Acme v. Beta' }),
+    // Real implementation (task 089 / ADR-044): the mock must match it, not just the
+    // signature — `ConnectionsWriteHandler.ts` calls `cleanGuid(...).length === 36` to
+    // validate the host record id, so a stub that doesn't lowercase/brace-strip would
+    // pass tests a real mismatch would catch.
+    cleanGuid: (id: string | null | undefined) => (id ?? '').replace(/[{}]/g, '').trim().toLowerCase(),
   };
 });
 
@@ -61,6 +67,7 @@ function mkCtx(overrides?: Partial<IResolverWriteContext>): IResolverWriteContex
     webApi: { updateRecord: jest.fn().mockResolvedValue({}) } as any,
     hostEntity: 'sprk_communication',
     hostRecordId: '22222222-2222-2222-2222-222222222222',
+    refileThroughBff: jest.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -71,7 +78,7 @@ beforeEach(() => {
 });
 
 describe('applyRegardingSelection', () => {
-  it('delegates the SET path to the shared applyResolverFields and persists via updateRecord', async () => {
+  it('delegates the SET path to the shared applyResolverFields and persists through the BFF re-file', async () => {
     const ctx = mkCtx();
     const fetchMock = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
 
@@ -90,16 +97,17 @@ describe('applyRegardingSelection', () => {
     expect(args[4]).toBe('sprk_matters'); // entitySet
     expect(args[5]).toBe('mtr-1'); // recordId
     expect(args[7]).toBe('matter'); // navPropHint
-    // Host record persisted.
-    expect(ctx.webApi.updateRecord).toHaveBeenCalledWith(
+    // Host record persisted — through the BFF re-file, never webApi.updateRecord (UAC-r2 task 147 r1).
+    expect(ctx.refileThroughBff).toHaveBeenCalledWith(
       'sprk_communication',
       '22222222-2222-2222-2222-222222222222',
       expect.any(Object)
     );
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
     // ADDITIVE (multi-association): sibling typed lookups are NOT nulled — the
     // handler must never emit a `...@odata.bind: null` (that would discard other
     // associations; code-review C1).
-    const payload = (ctx.webApi.updateRecord as jest.Mock).mock.calls[0][2];
+    const payload = (ctx.refileThroughBff as jest.Mock).mock.calls[0][2];
     const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     expect(nulledBinds).toHaveLength(0);
   });
@@ -123,7 +131,7 @@ describe('applyRegardingSelection', () => {
 
     // Both slots delegated to the shared SET path — neither call nulls the other.
     expect(applyResolverFields).toHaveBeenCalledTimes(2);
-    const allPayloads = (ctx.webApi.updateRecord as jest.Mock).mock.calls.map(c => c[2]);
+    const allPayloads = (ctx.refileThroughBff as jest.Mock).mock.calls.map(c => c[2]);
     for (const payload of allPayloads) {
       const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
       expect(nulledBinds).toHaveLength(0);
@@ -131,6 +139,38 @@ describe('applyRegardingSelection', () => {
     // The two writes targeted the two different entity types (matter, contact).
     const targetedTypes = (applyResolverFields as jest.Mock).mock.calls.map(c => c[3]);
     expect(targetedTypes).toEqual(['sprk_matter', 'contact']);
+  });
+
+  it('REFUSES the regarding write when the BFF re-file is not wired — nothing goes through webApi (fail closed)', async () => {
+    const ctx = mkCtx({ refileThroughBff: undefined });
+    const fetchMock = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+
+    const result = await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v. Beta' },
+      undefined,
+      fetchMock as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it("a refused re-file surfaces the server's message and writes nothing else", async () => {
+    const refusal = new Error('The record was not found, or you do not have access to it.');
+    const ctx = mkCtx({ refileThroughBff: jest.fn().mockRejectedValue(refusal) });
+    const fetchMock = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE);
+
+    const result = await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v. Beta' },
+      undefined,
+      fetchMock as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('The record was not found, or you do not have access to it.');
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
   });
 
   it('rejects an unknown entity type without calling the shared service', async () => {
@@ -172,8 +212,9 @@ describe('unlinkRegarding', () => {
     const res = await unlinkRegarding(ctx, 'sprk_matter', fetchMock as unknown as typeof fetch);
 
     expect(res.success).toBe(true);
-    // Single updateRecord that nulls ONLY the matter nav-prop — additive-safe removal.
-    const payload = (ctx.webApi.updateRecord as jest.Mock).mock.calls[0][2];
+    // Single re-file that nulls ONLY the matter nav-prop — additive-safe removal, through the BFF.
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+    const payload = (ctx.refileThroughBff as jest.Mock).mock.calls[0][2];
     expect(payload).toEqual({ 'sprk_RegardingMatter@odata.bind': null });
     // Exactly one nulled bind — never a bulk clear-and-set.
     const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
@@ -186,6 +227,7 @@ describe('unlinkRegarding', () => {
     const res = await unlinkRegarding(ctx, 'sprk_project', fetchMock as unknown as typeof fetch);
     expect(res.success).toBe(false);
     expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
+    expect(ctx.refileThroughBff).not.toHaveBeenCalled();
   });
 
   it('is a no-op (success) without a persisted host record', async () => {

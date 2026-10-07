@@ -45,8 +45,11 @@ public static class DelegationRuleFilterExtensions
 
 /// <summary>
 /// The record a delegation check is about: a Dataverse entity SET name plus a record id.
+/// <paramref name="TableWritePrivilege"/> is set only for an ORGANIZATION-owned table: Dataverse refuses
+/// <c>RetrievePrincipalAccess</c> on such a table (400 0x80040800), and Write on any of its rows is the table's Write
+/// privilege, so the filter asks that privilege instead of the record's rights.
 /// </summary>
-internal readonly record struct DelegationTarget(string EntitySet, Guid RecordId)
+internal readonly record struct DelegationTarget(string EntitySet, Guid RecordId, string? TableWritePrivilege = null)
 {
     public override string ToString() => $"{EntitySet}({RecordId})";
 }
@@ -150,6 +153,28 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
 
             return Deny(httpContext, DenyTargetUnresolved,
                 "The target record for this operation could not be resolved from the request.");
+        }
+
+        if (target.Value.TableWritePrivilege is { } privilege)
+        {
+            // Organization-owned table: the caller's table Write privilege IS Write on the row. The probe answers
+            // false on any failure (fail closed). A caller without it gets the same 403 whether or not the row
+            // exists, so the id stays unenumerable; a caller with it may already read the table, so the handler's
+            // own 404 for an absent row discloses nothing new.
+            if (!await _probe.CallerHoldsPrivilegeAsync(callerToken, privilege, ct))
+            {
+                _logger.LogWarning(
+                    "[DELEGATION] DENIED on {Route} for {Target}: caller does not hold {Privilege} (organization-owned " +
+                    "table, so the table privilege is Write on the row).", route, target.Value, privilege);
+
+                return Deny(httpContext, DenyWriteRequired,
+                    "You must have Write access to this record to change who else can access it.");
+            }
+
+            _logger.LogInformation(
+                "[DELEGATION] ALLOWED on {Route} for {Target}: caller holds {Privilege}.", route, target.Value, privilege);
+
+            return await next(context);
         }
 
         AccessRights rights;
@@ -284,6 +309,34 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // code-before-config ordering exists to prevent.
                 case RecordAccessGateQuery gate:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
+
+                // ── /no-access/enforce (task 143) ────────────────────────────────
+                // The target is the No Access ENTRY itself, so the caller must hold Write on the entry (owner O2: the
+                // access-administrator role). sprk_noaccessentry is ORGANIZATION-owned, which RetrievePrincipalAccess
+                // refuses (400 0x80040800 on dev, so every caller was denied); Write on any row of such a table is
+                // the table Write privilege, so that is what is asked. A caller without it gets this filter's 403
+                // whether or not the entry exists. The removals the handler then makes on each covered record are
+                // bounded by the entry AUTHOR's Write on that record (owner N5), decided inside the enforcer.
+                // Without this case every caller would be denied.
+                case NoAccessEnforceRequest enforce:
+                    return enforce.EntryId is { } entryId && entryId != Guid.Empty
+                        ? new DelegationTarget(NoAccessEnforceEndpoint.EntrySet, entryId, NoAccessEnforceEndpoint.EntryWritePrivilege)
+                        : null;
+
+                // ── /assigned-access/sync, /assigned-access, /assigned-access/dismiss (task 142) ──
+                // The Assigned-To routes change (or, for the list, disclose) who can reach a record, so they take the same
+                // Write-on-the-record check as /share-user — the post-save script, a wizard and the "Update Access" ribbon
+                // command all call them as the user. Each target comes from the SAME explicit-root resolver its handler
+                // uses, so the record authorized is the record materialized. Without these cases the default branch below
+                // would deny every caller — the filter "attached" but never reaching the request type.
+                case AssignedAccessSyncRequest sync:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(sync.RecordType, sync.RecordId));
+
+                case AssignedAccessListQuery assignedList:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(assignedList.RecordType, assignedList.RecordId));
+
+                case AssignedAccessDismissRequest dismiss:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(dismiss.RecordType, dismiss.RecordId));
             }
         }
 

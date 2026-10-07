@@ -14,6 +14,8 @@ import { getEffectiveDarkMode } from './ThemeService';
 // React-free, so this is safe under React 16/17. spaarke-modal-system P7
 // task 090 (FR-11/FR-18): single source of truth for OOB dialog dimensions.
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 
 /**
  * Envelope literal type for `searchMode`. MUST stay aligned with the
@@ -116,7 +118,7 @@ export function buildSemanticSearchEnvelope(
 
   // entityId — strip braces, omit when empty
   if (typeof f.entityId === 'string' && f.entityId.length > 0) {
-    const stripped = f.entityId.replace(/[{}]/g, '');
+    const stripped = cleanGuid(f.entityId);
     if (stripped.length > 0) {
       push('entityId', stripped);
     }
@@ -334,7 +336,8 @@ export class NavigationService {
    * @param onDialogClosed - Optional callback after dialog closes (e.g. refresh results)
    */
   async openAddDocument(scopeId: string | null, entityType: string | null, onDialogClosed?: () => void): Promise<void> {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8): navigateTo + the parent-name WebApi read.
+    const xrm = getXrm(['webApi', 'navigation']) as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService.openAddDocument: Xrm.Navigation not available');
       return;
@@ -348,7 +351,7 @@ export class NavigationService {
       contact: 'contact',
     };
     const parentEntityType = entityType ? (entityLogicalNameMap[entityType] ?? entityType) : 'sprk_matter';
-    const cleanId = scopeId ? scopeId.replace(/[{}]/g, '').toLowerCase() : '';
+    const cleanId = cleanGuid(scopeId);
 
     // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
     // business-unit container lookup, and the `if (!containerId) return;` guard behind it.
@@ -466,7 +469,8 @@ export class NavigationService {
       searchIndexName
     );
 
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn(
         'NavigationService.openSemanticSearchPage: Xrm.Navigation not available — falling back to window.open'
@@ -514,7 +518,8 @@ export class NavigationService {
     filters: SearchFilters,
     customPageName: string = 'sprk_semanticsearchpage'
   ): Promise<void> {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService.viewAllResults: Xrm.Navigation not available');
       return;
@@ -547,7 +552,8 @@ export class NavigationService {
     target: NavigationTarget,
     modalOptions?: ModalOptions
   ): Promise<void> {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService: Xrm.Navigation not available, falling back to URL navigation');
       this.fallbackNavigate(entityName, recordId, target);
@@ -655,42 +661,14 @@ export class NavigationService {
    * Get the Dataverse client URL
    */
   private getClientUrl(): string {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl') as unknown as Xrm.XrmStatic | undefined;
     if (xrm?.Utility?.getGlobalContext) {
       return xrm.Utility.getGlobalContext().getClientUrl();
     }
 
     // Fallback to current origin
     return window.location.origin;
-  }
-
-  /**
-   * Resolve the Xrm global in a PCF virtual control context.
-   *
-   * PCF virtual controls run inside an iframe (or sandboxed context), so the
-   * top-level `Xrm` declaration from @types/xrm may not be available as a
-   * bare global. We check window.Xrm and window.parent.Xrm as fallbacks.
-   */
-  private getXrm(): typeof Xrm | undefined {
-    // Direct global (works in classic web resource context)
-    if (typeof Xrm !== 'undefined') {
-      return Xrm;
-    }
-    // window.Xrm (PCF virtual controls in the same origin frame)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    if (w.Xrm) {
-      return w.Xrm as typeof Xrm;
-    }
-    // window.parent.Xrm (PCF controls inside cross-origin iframes fall back to parent)
-    try {
-      if (w.parent?.Xrm) {
-        return w.parent.Xrm as typeof Xrm;
-      }
-    } catch {
-      // Cross-origin parent access blocked — swallow silently
-    }
-    return undefined;
   }
 }
 

@@ -48,6 +48,10 @@ So, when producing findings (Steps 3–7):
 
 This does NOT change severity as an *output annotation* (the report still ranks Critical → Warning → Suggestion) — it changes only that nothing is dropped *before* it reaches the report.
 
+**Two additions (2026-10-06), so the downstream filter can work:**
+- **Suggest a triage class for each finding** (F1–F4 fix-now / K1–K4 known-limit), as defined in task-execute Step 9.5 "Finding triage and review scope". For any F1 finding, state the concrete failure scenario. A finding with no stateable scenario is K4. This is a label, not a filter: still report everything. **That includes defects in code this change did not write** (pre-existing, adjacent, another project's). Mark them "found in passing" so the orchestrator fixes them in scope, or files and reports them.
+- **A re-review after fixes reviews the fix scope only.** When invoked to verify fixes, scope Step 1 to the lines changed by the fix round plus the code that directly calls or is called by them, not the whole task surface. Re-reviewing the whole surface every round is what kept producing new findings without end.
+
 ### Step 1: Determine Scope
 ```
 IF files explicitly specified:

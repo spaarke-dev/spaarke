@@ -37,6 +37,8 @@ import {
   searchUsersAndContacts,
   ANALYSIS_REGARDING_TARGETS,
   resolveAnalysisFilePreview,
+  cleanGuid,
+  getXrm,
 } from "@spaarke/ui-components";
 import type { AssociationResult } from "@spaarke/ui-components";
 import {
@@ -452,12 +454,11 @@ export function WorkspacePane(): React.JSX.Element {
   // wizard uses (useWizardPageBootstrap.ts / the Create* code pages). Pure Dataverse
   // Web API via the Xrm host global (no BFF/OBO); the GUID-strip on userId is required.
   const resolveAnalysisSpeContainerId = React.useCallback(async (): Promise<string> => {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm: any =
-      (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-    /* eslint-enable @typescript-eslint/no-explicit-any */
+    // Shared cross-frame walker (task 081 / C-8).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = getXrm(['webApi', 'utility']);
     if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
-    const userId: string = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
+    const userId: string = cleanGuid(xrm.Utility.getGlobalContext().userSettings.userId);
     const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");
     const buId = user["_businessunitid_value"] as string;
     if (!buId) throw new Error("Could not resolve business unit");

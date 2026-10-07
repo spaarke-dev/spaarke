@@ -1,5 +1,14 @@
 # Hand-off: server-side record numbering (`sprk_matternumber`) — for the future numbering project
 
+> ⚠️ **INTERIM ANSWER IN PLACE (task 076, owner decisions 2026-10-02).** The owner chose `MAT-######` / `PRJ-######`,
+> sequential, via Dataverse's **platform autonumber** — *"just an interim solution until we build the numbering function"*.
+> §4's mechanism question is answered by its third candidate: the owner's new format carries no type code, which removes
+> the one objection recorded there. `scripts/Set-RecordNumberingSchema.ps1` sets it up per environment (the seed is not
+> carried by a solution import); alternate keys `sprk_MatterNumber` / `sprk_ProjectNumber` make a typed-ahead collision a
+> refused write (§5's recommendation). Still open for the numbering function: §4's overwrite-or-fill question (the Create
+> Matter wizard keeps its own `{typeCode}-{random6}`, so matter numbers carry two formats) and §6. Record:
+> `notes/076-record-numbering.md`.
+
 > **From**: `spaarkeai-word-add-in-r1`, task 030 (FR-13), 2026-09-11
 > **To**: the separate record-numbering project the owner is setting up
 > **Status**: numbering was **removed from task 030** by owner decision (2026-09-11). Nothing in the codebase assigns a matter number server-side today.

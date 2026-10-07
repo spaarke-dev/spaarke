@@ -43,14 +43,17 @@ public interface ICostEnvelopeChecker
 /// <param name="CustomerId">Customer id — flows into log lines.</param>
 /// <param name="RunId">RunId — for log correlation.</param>
 /// <param name="SubscriptionId">Customer subscription id (ADR-027 D4) — cost query scopes to this subscription.</param>
-/// <param name="TenancyModel">Tenancy model (<c>Model1Shared</c> / <c>Model2Dedicated</c>) — drives the expected-envelope selection.</param>
+/// <param name="TenancyModel">Tenancy model as the shared enum — drives the expected-envelope selection.
+/// Task 223 (D-12): changed from <c>string</c> to
+/// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/> so callers (H13 handler) parse
+/// once at entry and the checker gets a typed value — exhaustive switch inside, no silent fallback.</param>
 /// <param name="ResourceGroupName">Customer resource group name — optional scoping for finer-grained cost queries.</param>
 /// <param name="DriftAdvisoryThreshold">Fraction above which drift is advisory-warn (§15 #14 default 0.20).</param>
 public sealed record CostEnvelopeRequest(
     string CustomerId,
     string RunId,
     string SubscriptionId,
-    string TenancyModel,
+    Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel TenancyModel,
     string ResourceGroupName,
     decimal DriftAdvisoryThreshold);
 

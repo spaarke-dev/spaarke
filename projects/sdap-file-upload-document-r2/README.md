@@ -1,5 +1,7 @@
 # SDAP File Upload & Document Creation Dialog (R2)
 
+> **Portfolio**: [Project #1186](https://github.com/spaarke-dev/spaarke/issues/1186) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Implementation Complete — Awaiting Deployment
 > **Branch**: `feature/sdap-file-upload-document-r2`
 > **Created**: 2026-03-09

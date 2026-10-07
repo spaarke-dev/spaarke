@@ -1,5 +1,7 @@
 # spaarke-ai-execution-trace-r1 — AI Execution Trace / Observability (Seed)
 
+> **Portfolio**: [Project #1204](https://github.com/spaarke-dev/spaarke/issues/1204) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Project seed (pre-spec) — created 2026-07-14
 > **Origin**: compose-r2 UAT — owner directive: the Context pane should DEFAULT to the Execution Trace tool, Quick Start is being removed, and the trace must **log anything AI-related and the resources it uses, following industry best practices for user visibility into how the AI is running**.
 > **Relationship**: shares the **Context pane** with the planned Assistant/Workspace **pane-UI** project — this project owns the trace *data + behavior*; the pane-UI project owns the pane's *visual redesign*. Coordinate; do not double-own the Context pane.

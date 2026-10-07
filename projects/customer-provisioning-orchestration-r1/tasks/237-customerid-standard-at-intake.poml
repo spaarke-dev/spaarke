@@ -1,0 +1,239 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="237" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>customerId standard at intake (D10 / INCOMING-CUSTOMERID-STANDARD) — validate ^[a-z][a-z0-9]{2,7}$ at POST /api/runs + intake schema + /provision-environment; registry column MaxLength 8; display name recorded once; fixtures, scripts and docs aligned</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T237 (INCOMING-CUSTOMERID-STANDARD §3.1–§3.4; owner D10)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <completed-on>2026-09-30</completed-on>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production .cs (RunsEndpoints + a new Core standard type), ~45 test files, the L3 skill (.claude), PowerShell scripts, and LIVE Dataverse metadata in the admin environment; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting (API edge + schema + skill + scripts + fixture sweep across two test projects) with a live, hard-to-reverse Dataverse metadata change on an alternate-key column.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary); live admin-environment metadata change needs the operator's own identity (NFR-11)</parallel-reason>
+    <deps>none (T226 ✅; master merge ✅ brought INCOMING-CUSTOMERID-STANDARD.md)</deps>
+    <tags>provisioning, l2-controlplane, api, endpoints, dataverse, testing, config, skill-directive, customer-provisioning, d-14</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the customerId standard (`^[a-z][a-z0-9]{2,7}$`, docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
+    § "The customerId standard") the rule everywhere a provisioning customerId is ASSIGNED: the L2 API, the intake
+    schema, the /provision-environment skill, the operator scripts and the registry column. Record the customer's
+    full name once on the registry row so an abbreviated id (northwind → nwind) is never re-derived. Bring every test
+    fixture and doc that encodes the old kebab-case shape into line.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in ASP.NET Core
+    Minimal APIs, Dataverse metadata (Web API EntityDefinitions/Attributes), PowerShell, JSON Schema.
+  </role>
+
+  <goal>
+    After this task: (1) `POST /api/runs` returns 400 for any customerId that does not match the standard, before any
+    registry lookup, Cosmos write or enqueue; (2) `intake.schema.json`, the skill's interactive and batch intake, and
+    every operator script `-CustomerId` parameter enforce the same pattern; (3) `sprk_dataverseenvironment.sprk_customerid`
+    has MaxLength 8 in the live admin environment and in `scripts/Add-CustomerIdColumn.ps1`; (4) intake captures the
+    customer's display name and the placeholder row stores it in `sprk_name` next to the id, so the id↔name decision is
+    recorded once; (5) no test fixture, example or template carries a non-compliant customerId except deliberate
+    negative cases.
+  </goal>
+
+  <context>
+    <background>
+      Owner D10 (2026-09-30) adopted unified-access-control-r2's D-14 standard. `customer.bicep` composes
+      `take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24)`; a 10-char id with env `staging` yields a name
+      ending in a hyphen, which Azure rejects. The storage name strips hyphens, so `acme-x` and `acmex` collide silently.
+      ARM cannot enforce the character rule (no @pattern), and a Dataverse text column cannot either — intake code is the
+      only enforcement point (INCOMING §2a). Today the L2 API only checks non-blank (`RunsEndpoints.cs:382-385`); the
+      schema and skill still say kebab-case 3–32 (`intake.schema.json:12-13`, SKILL.md Step 1a ~line 677); the column is
+      MaxLength 64 (`scripts/Add-CustomerIdColumn.ps1:99-105`, live spaarkedev1 = NVARCHAR(64)). Live registry check
+      2026-09-30 (spaarkedev1): NO row has a sprk_customerid value; one stale placeholder row named `trial-2026-08-18`
+      (created 2026-08-18, no URL/type/customerId). The BFF already enforces the pattern at runtime
+      (`src/server/api/Sprk.Bff.Api/Configuration/CustomerIdResolver.cs:86`, `CustomerIdPattern`), but the control plane
+      does not reference the BFF and must not.
+      Adjacent drift found while scoping (plan G22): T224 renamed the `sprk_tenancymodel` option labels to Model1/Model2
+      in `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1` but never applied them — live spaarkedev1 still shows
+      Model1Shared/Model2Dedicated. Same table, same operator session, so it is folded into this task's live step.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/CustomerIdStandard.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/CustomerIdStandardTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Api/RunsEndpointsTests.cs</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json</file>
+      <file>scripts/provisioning-prereqs/context-defaults.dev.json</file>
+      <file>scripts/provisioning-prereqs/context-defaults.prod.json</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>scripts/Add-CustomerIdColumn.ps1</file>
+      <file>scripts/Provision-Customer.ps1</file>
+      <file>scripts/Decommission-Customer.ps1</file>
+      <file>scripts/Deploy-Release.ps1</file>
+      <file>scripts/Initialize-ReportingCustomer.ps1</file>
+      <file>tests/bicep-e2e-dry-run.ps1</file>
+      <file>provisioning-runs/_templates/intake.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/ (DataverseEnvironmentRecord.cs:70 doc comment only)</file>
+      <file>Fixture files — see notes "Fixture inventory"</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="INCOMING-CUSTOMERID-STANDARD §2a + naming doc (BINDING)">
+      Every validation point added or changed in this task uses exactly `^[a-z][a-z0-9]{2,7}$` — no trimming, no
+      lower-casing, no auto-abbreviation of the submitted value (reject, never repair). Cite the naming doc rather than
+      restating the derivation. Min-3 stays (it is in the pattern) but no new code treats it as more than the pattern.
+    </constraint>
+    <constraint source="ADR-001 / ADR-008 / .claude/constraints/api.md">
+      The CreateRun rejection uses the endpoint's existing `BadRequest(httpContext, ...)` ProblemDetails helper (400,
+      correlationId extension) and runs before the registry lookup (REG-07), the CustomerRunGuard, any Cosmos write and
+      any enqueue. No new middleware or filter.
+    </constraint>
+    <constraint source="CLAUDE.md §10 + plan boundary">
+      The control plane MUST NOT reference `Sprk.Bff.Api`. The only BFF change allowed is the doc comment at
+      `DataverseEnvironmentRecord.cs:70` (comment-only; publish size N/A) and BFF test fixtures listed in the inventory.
+    </constraint>
+    <constraint source="ADR-038 §7 + tests/CLAUDE.md">
+      Fixture edits preserve each test's intent: a deliberate mismatch test keeps a DIFFERENT compliant id; deliberate
+      blank / malformed inputs stay malformed. No test is deleted, skipped or narrowed.
+    </constraint>
+    <constraint source="NFR-11 + owner directive (live envs)">
+      Live Dataverse changes use the operator's OWN identity, only against spaarkedev1 (the registry/admin environment),
+      and only the three changes named in step 6. Never delete a registry row; deactivate. Never drop or recreate the
+      `sprk_customerid_key` alternate key or the column.
+    </constraint>
+    <constraint source="manifest/prereqs CI">
+      `scripts/provisioning-prereqs/validate.ps1` and `npx ajv-cli@5 compile --spec=draft2020 -s scripts/provisioning-prereqs/intake.schema.json` pass.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-CUSTOMERID-STANDARD.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/CustomerIdResolver.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Configuration/CustomerIdResolverTests.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Runtime pattern reference" location="src/server/api/Sprk.Bff.Api/Configuration/CustomerIdResolver.cs:86">
+        Mirror its `CustomerIdPattern` constant + `[GeneratedRegex]` usage in the control-plane type; cross-reference
+        it in a comment (the two must not drift — the shared case list in the tests is the parity check).
+      </pattern>
+      <pattern name="Endpoint 400 shape" location="RunsEndpoints.cs:382-385, 1148-1154">
+        Existing `BadRequest(httpContext, message)` helper.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add `CustomerIdStandard` (static, Core/Models): `public const string Pattern = "^[a-z][a-z0-9]{2,7}$";`, a `[GeneratedRegex]`, and `IsValid(string? value)`; XML doc cites the naming doc and `CustomerIdResolver.CustomerIdPattern`. Unit-test it with the case list in acceptance criterion 2.</step>
+    <step order="2">CreateRun: after the existing blank check, reject a non-matching customerId with 400 — message: "customerId '{value}' does not match the customerId standard ^[a-z][a-z0-9]{2,7}$ (3-8 lowercase letters/digits, starting with a letter; see AZURE-RESOURCE-NAMING-CONVENTION.md). Abbreviate longer names at intake (northwind → nwind)." Add RunsEndpointsTests cases.</step>
+    <step order="3">Schema + defaults: `intake.schema.json` customerId pattern/description/examples; add optional `displayName` (string, 1-200 chars; the customer's full name; defaults to customerId); `context-defaults.dev.json` / `.prod.json` shape text.</step>
+    <step order="4">Skill (main session): Step 1a states the rule + abbreviation guidance and validates the entered value with the regex (re-prompt on failure); Step 1 captures `displayName`; the placeholder create writes `sprk_name = displayName` (default customerId) and `sprk_customerid = customerId`; fix the stale examples (`trial-acme-2026-08-18`, "kebab-case" text near the batch-mode and Step 4.0 sections). Leave the `__role-probe__` query value (it is not an intake value).</step>
+    <step order="5">Scripts: `[ValidatePattern('^[a-z][a-z0-9]{2,7}$')]` on `-CustomerId` in Provision-Customer.ps1, Decommission-Customer.ps1 (and its `rg-spaarke-[a-z0-9]{3,10}-…` match), Deploy-Release.ps1, Initialize-ReportingCustomer.ps1 (examples → compliant), tests/bicep-e2e-dry-run.ps1. `Add-CustomerIdColumn.ps1`: MaxLength 8 + description citing the standard. Leave `stacks/model1-*.bicep` (retired by T225a).</step>
+    <step order="6">LIVE spaarkedev1 (prescriptive order; operator identity; read back after each): (a) re-confirm no row has a non-empty sprk_customerid (if one does → escalation trigger 2); (b) set `sprk_customerid` MaxLength 64 → 8; (c) deactivate (statecode=1, statuscode=2) the stale `trial-2026-08-18` placeholder row — do not delete; (d) G22: set `sprk_tenancymodel` option labels 0 → "Model1", 1 → "Model2" with the descriptions already in `Extend-DataverseEnvironmentSchema-v3.3.ps1` (labels only; values unchanged). Record before/after in notes.</step>
+    <step order="7">Fixture sweep per the inventory in notes; update docs: `provisioning-runs/_templates/intake.md` (rule + pointer + displayName meaning), DEPLOYMENT-GUIDE line ~147 ("3-10 alphanumeric" → the standard), `DataverseEnvironmentRecord.cs:70` comment.</step>
+    <step order="8">Verify: builds 0/0 (ControlPlane Api/Worker/Tests, Sprk.Bff.Api, BFF unit tests project); ControlPlane.Tests only the 6 CustomerRunGuard baseline failures; BFF tests for touched files pass; ArchTests 337/337; validate.ps1 + ajv compile OK; grep shows no non-compliant customerId literal outside the deliberate-negative list.</step>
+    <step order="9">Step 9.5 gates; POML completed + notes; TASK-INDEX `✅ [done]`; plan §3 (INCOMING-CUSTOMERID-STANDARD row) + §4 G22 + §7 T237; current-task.md; one commit; push.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Dataverse refuses the MaxLength decrease on `sprk_customerid` (e.g. because the column backs the `sprk_customerid_key` alternate key) — STOP and report the exact error; do not drop/recreate the key or column, do not widen the code rule.</trigger>
+    <trigger>Any live registry row has a non-empty `sprk_customerid` (none did on 2026-09-30) — STOP: re-issuing a real id touches the alternate key and possibly Azure resource names; owner decides.</trigger>
+    <trigger>Any code reads the `sprk_tenancymodel` formatted LABEL text (rather than the 0/1 value) and expects the old names — STOP before relabelling and report the consumer.</trigger>
+    <trigger>A script's `-CustomerId` turns out to be a different identifier than the Spaarke customerId (e.g. a reporting-only name) — leave it, note why, continue.</trigger>
+    <trigger>Changing a fixture value would change what the test proves (e.g. a length- or hyphen-dependent assertion) — keep it, list it in notes as a deliberate case.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Configuration/CustomerIdResolver.cs:86` (`CustomerIdPattern`) — the only regex for the standard; it lives in the BFF. `grep -rn "a-z0-9" src/server/services` finds no control-plane equivalent.</existing>
+    <extension>No — the control plane does not and must not reference `Sprk.Bff.Api` (BFF/provisioning boundary, CLAUDE.md §10), so the BFF type cannot be reused; a small Core type is the one shared point for the API and any later handler check.</extension>
+    <cost-of-doing-nothing>`POST /api/runs` accepts `acme-x` (silent storage-account collision with `acmex`) and 9-10-char ids (`customer.bicep` Key Vault name truncated or ending in a hyphen → H2a deployment fails late with an opaque Azure error).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="pwsh">Scripts, validate.ps1</tool>
+    <tool name="npx">ajv-cli schema compile</tool>
+    <tool name="Dataverse Web API / MCP">Live metadata + row changes in spaarkedev1 (operator identity)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/CustomerIdStandard.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/CustomerIdStandardTests.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Api/RunsEndpointsTests.cs + fixture files</output>
+    <output type="config">scripts/provisioning-prereqs/intake.schema.json, context-defaults.*.json</output>
+    <output type="skill">.claude/skills/provision-environment/SKILL.md (+ .claude/CHANGELOG.md entry)</output>
+    <output type="scripts">scripts/Add-CustomerIdColumn.ps1, Provision-Customer.ps1, Decommission-Customer.ps1, Deploy-Release.ps1, Initialize-ReportingCustomer.ps1, tests/bicep-e2e-dry-run.ps1</output>
+    <output type="docs">provisioning-runs/_templates/intake.md, docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+    <output type="live">spaarkedev1: sprk_customerid MaxLength 8; stale placeholder deactivated; sprk_tenancymodel labels Model1/Model2</output>
+    <output type="notes">projects/customer-provisioning-orchestration-r1/notes/t237-customerid-standard.md (live before/after, fixture decisions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. `POST /api/runs` with a customerId that fails the pattern returns 400 ProblemDetails whose detail names the value and the standard, and creates no Cosmos run, registry call or Service Bus message; a compliant id proceeds exactly as before. Tests cover: accepted `abc` (3) and `abcdefgh` (8); rejected `ab` (2), `abcdefghi` (9), `Acme` (uppercase), `acme-x` (hyphen), `1acme` (leading digit), `acme_x` (underscore), ` acme` (leading space — not trimmed). The existing blank → 400 test still passes.</criterion>
+    <criterion testable="true">2. `CustomerIdStandard.IsValid` returns true for `abc`, `acme`, `nwind`, `abcdefgh`, `a1b2c3` and false for null, empty, `ab`, `abcdefghi`, `Acme`, `acme-x`, `1acme`, `acme_x`, ` acme`, `acme `. `CustomerIdStandard.Pattern` equals the BFF's `CustomerIdResolver.CustomerIdPattern` string (checked by reading both into the task notes; the case list matches the BFF resolver's negative cases).</criterion>
+    <criterion testable="true">3. `intake.schema.json`: customerId `pattern` = `^[a-z][a-z0-9]{2,7}$`, description cites the naming doc, every example body uses a compliant id; optional `displayName` (string, 1-200) documented as the customer's full name recorded on the registry row. `npx ajv-cli@5 compile --spec=draft2020` succeeds; `validate.ps1` passes; `IntakeSchemaProfileParityTests` pass.</criterion>
+    <criterion testable="true">4. SKILL.md: Step 1a validates the entered id against the regex and re-prompts with abbreviation guidance; batch mode relies on the updated schema; Step 1 collects `displayName`; the placeholder create writes `sprk_name = displayName` (default customerId) and `sprk_customerid = customerId`; no example or prose in the skill describes customerId as kebab-case or 3-32 chars. `.claude/CHANGELOG.md` has an entry.</criterion>
+    <criterion testable="true">5. Each script listed in step 5 rejects a non-compliant `-CustomerId` at parameter binding (or the escalation-trigger-4 note explains why one was left); `Add-CustomerIdColumn.ps1` creates MaxLength 8.</criterion>
+    <criterion testable="true">6. Live spaarkedev1, read back after the change: `sprk_customerid` MaxLength = 8; the `trial-2026-08-18` row is Inactive (still present); `sprk_tenancymodel` labels are Model1 (0) / Model2 (1). Before/after recorded in notes. (If an escalation trigger fires, the criterion is met by the recorded escalation instead.)</criterion>
+    <criterion testable="true">7. No customerId literal in the inventoried test files, script examples, schema examples, the skill or `intake.md` violates the pattern, except the deliberate negative inputs listed in notes; tests that compared two different customers still compare two different compliant ids; generated smoke/seam ids are compliant (e.g. a letter prefix + 7 lowercase hex chars).</criterion>
+    <criterion testable="true">8. Builds 0 warnings / 0 errors (ControlPlane Api, Worker, Tests; Sprk.Bff.Api; BFF unit test project); ControlPlane.Tests failures = exactly the 6 `CustomerRunGuardModulePostConfigureTests`; touched BFF tests pass; ArchTests 337/337.</criterion>
+    <criterion testable="true">9. Test scope: cover the stated contract (criteria 1-2) plus the edge cases named there. Fixture edits are value replacements, not new tests. Anything beyond that needs a one-line justification in task notes.</criterion>
+    <criterion testable="true">10. Step 9.5 code-review + adr-check run; findings dispositioned in completion notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Fixture inventory (2026-09-30 sweep; re-grep before editing — values like `"acme"`, `"trial1"`, `"cust"`, `"other"`, `"beta"` are already compliant):
+    - ControlPlane.Tests: `trial-2026-08-18` (Registry/DataverseEnvironmentRegistryClientTests.cs 232,242,260,280,298,314,330,347,371) + `smoke-canary` (:564); `trial-2026-08-20` (DataverseRegistrySetupStatusUpdaterTests 160,166,233); `test-customer` (RunsEndpointsTests:89, QuarantineClearServiceTests:38, StateReconcilerServiceTests:61, HandlerOutcomeApplierTests:64, DagAdvancerTests:56, CrashRecoveryStartupServiceTests:59, ReconcilerEnqueuePayloadAttemptTests:61, DispatchCoreDecisionTests:93); `acme-corp` (ProvisioningRunSerializerContractTests:72, HandlerEnvelopeRoundTripTests:154, CustomerRunGuardTests:54, H0PreflightHandlerTests:87, H05ConsentCaptureHandlerTests:36, H1SubscriptionReadinessHandlerTests:45, H12bAppConfigSeedHandlerTests:49, H12cRuntimeReferencesHandlerTests:48, ArmCognitiveServicesTpmProbeTests:133,149, ArmComputeVCpuProbeTests:102,118, BapRestEnvironmentRateProbeTests:172,188, KeyVaultCertBootstrapProbeTests:117,139,156); `beta-industries` (CustomerRunGuardTests:55); `customer-a`/`customer-b` (CrashRecoveryStartupServiceTests:342,348); `size-guard-test` (ServiceBusEnvelopeSizeGuardTests:49); `acme-prod` (H4bBulkAppSettingsHandlerTests:76); `cust-1` (H13BuildPromotedColumnsTests 36,56,75,116,139,160); `cust-x` (H12b:168, H12c:171); `other-customer` (H10:448, H11:375, H14a:162); `customer-01` (NamingConformanceCheckerTests 220,239,259); generated `smoke-…`/`seam-…` ids (ServiceBusSmokeTests:171, CosmosSmokeTests:107, CosmosActiveRunScannerSeamTests:117, ProvisioningDispatchSpineSeamTests:205,330).
+    - Deliberate cases — KEEP malformed: RunsEndpointsTests:1032 `OTHER-CUSTOMER` may become a different compliant id ONLY if the test is a mismatch test (read it); `?customerId=x` (RunsEndpointsTests:135-141) is a GET query, keep; H05ConsentCaptureHandlerTests:108 `different-customer` → a different compliant id; H05:77 `""` and CosmosSmokeTests:251 `"  "` stay blank.
+    - tests/**: LoadTests ReconcilerConcurrencyScenario.cs:91, LongHandlerScenario.cs:108; tests/integration/Sprk.Bff.Api.IntegrationTests/Onboarding/ConsentCallbackE2ETestFixture.cs:62 `acme-corp-e2e`; tests/unit/Sprk.Bff.Api.Tests/Onboarding/ConsentCallbackEndpointTests.cs:31 + HmacSignatureVerifierTests.cs:22 `acme-corp`; tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1:141-143 `acme-1..3`. Leave `CustomerIdResolverTests.cs:141-150` (deliberate negatives).
+    - Not customerIds (leave): ArmDeploymentRunnerTests:105,167 `customer-acme-1` (ARM deployment name).
+    Live metadata notes: decreasing a Dataverse string MaxLength is done via PUT on the attribute metadata (MSCRM.MergeLabels); verify whether the alternate key blocks it — that is escalation trigger 1, not a reason to drop the key.
+    Out of scope: BFF `TenancyModel` names (T224 follow-up); `stacks/model1-*.bicep` (T225a); `ai-foundry-stack.bicep` @maxLength(10) — note in completion notes whether it composes a 24-char-limited name (follow-up only).
+  </notes>
+
+  <completion-notes>
+    COMPLETED 2026-09-30 (SESSION 27). Full record: notes/t237-customerid-standard.md.
+    - Standard ^[a-z][a-z0-9]{2,7}$ enforced at POST /api/runs (new Core CustomerIdStandard → 400 before registry
+      lookup / guard / Cosmos / enqueue), intake.schema.json (pattern + parity test), skill Step 1a (-cnotmatch, \z),
+      and the operator scripts (ValidatePattern with Options='None' — case-sensitive). Reserved ids platform/shared/byok
+      refused at the API, schema and skill (code-review W3; mirrors the BFF's CustomerIdResolver).
+    - displayName (schema + skill Step 1a-bis) written to sprk_name next to sprk_customerid — the abbreviation is
+      recorded once. Deploy-Release now resolves sprk_customerid first; its sprk_name/envaccountdomain fallback is
+      limited to platform rows (sprk_customerid eq null, statecode eq 0).
+    - Skill Step 1f $tenancyModelMap fixed (pre-T224 keys returned null for every value).
+    - LIVE spaarkedev1 (owner-approved, operator identity): sprk_customerid MaxLength 64→8 (Add-CustomerIdColumn.ps1,
+      now able to correct an existing column); stale trial-2026-08-18 placeholder deactivated (not deleted);
+      sprk_tenancymodel labels → Model1/Model2 (G22). spaarke-demo lacks the registry columns (flagged, not changed).
+    - ~45 fixture files moved to compliant ids; LoadTests compile break (since 2026-08-28) fixed.
+    Acceptance: criteria 1-10 met. Criterion 3's `ajv compile` failed on format:uuid (pre-existing, also on HEAD);
+    fixed in a follow-up commit on the owner's instruction — the CI workflow and the skill's batch path now load
+    ajv-formats (notes/prereqs-validate-ajv-formats-coord-pr.md).
+    Verification: builds 0/0 (ControlPlane Api/Worker/Tests, Sprk.Bff.Api, BFF unit + integration tests, LoadTests);
+    ControlPlane.Tests 1972 pass / 6 fail (CustomerRunGuard baseline) / 1 skip; ArchTests 337/337; BFF Onboarding +
+    CustomerIdResolver 51/51; Pester 26/26; validate.ps1 OK. BFF change = one doc comment (publish size N/A).
+    Gates: adr-check 0 violations / 8 warnings; code-review 0 critical / 5 warnings / 11 suggestions — dispositions in
+    the notes §5.
+  </completion-notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

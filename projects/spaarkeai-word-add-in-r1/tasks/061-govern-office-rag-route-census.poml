@@ -4,7 +4,8 @@
     <title>The authorization census has never looked at the Office surface — govern it, and fix the filter regex that would false-flag it</title>
     <phase>5 Remediation — authorization</phase>
     <gate>startable — no dependencies. MUST land before 062-067.</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: CLOSED FOR THIS PROJECT, not executed here. Handed to unified-access-control-r2 (GitHub #1015) by owner decision 2026-09-28; delivered there as their task 120. -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the repository's authorization governance test. Tags include security + testing. A defect here silently disables the guard for every route it claims to cover.</rigor-reason>
     <model-tier>opus</model-tier>

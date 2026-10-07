@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../services/documentProfileChoices';
 
 /**
@@ -80,8 +80,11 @@ export interface UseDocumentProfileResult {
    * Dispatches the FR-08 Generate Profile trigger. No-op (resolves immediately, issues no network
    * request) when `documentId` is absent — the caller (DocumentProfileSection) also disables the
    * button in that state, so this is defense-in-depth, not the only guard.
+   *
+   * Resolves `true` when the server ACCEPTED the request (202 — the profile job is queued), `false` when it
+   * was refused or never sent (task 088: the Save tab's saved state re-enables "Save" only on `true`).
    */
-  generateProfile: () => Promise<void>;
+  generateProfile: () => Promise<boolean>;
   /** True while the POST is in flight (button busy state). */
   isGenerating: boolean;
   /** Set when the trigger POST itself fails (network/auth/validation) — distinct from a profile
@@ -186,11 +189,11 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
     };
   }, [documentId, refreshToken]);
 
-  const generateProfile = useCallback(async (): Promise<void> => {
+  const generateProfile = useCallback(async (): Promise<boolean> => {
     if (!documentId) {
       // Defense-in-depth — the caller disables the control in this state so this path should be
       // unreachable in practice, but generateProfile() must never issue a network call without an id.
-      return;
+      return false;
     }
 
     setIsGenerating(true);
@@ -205,6 +208,7 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
       // whatever status the background profile actually lands on.
       setOutcome({ kind: 'status', status: 'Pending' });
       setRefreshToken(token => token + 1);
+      return true;
     } catch (err) {
       const message =
         err instanceof ApiClientError
@@ -213,6 +217,7 @@ export function useDocumentProfile(documentId: string | undefined): UseDocumentP
             ? err.message
             : 'Failed to start profiling.';
       setGenerateError(message);
+      return false;
     } finally {
       setIsGenerating(false);
     }

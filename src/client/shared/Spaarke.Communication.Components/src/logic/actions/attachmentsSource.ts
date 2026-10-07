@@ -17,6 +17,18 @@
 
 import type { IAttachmentItem } from '@spaarke/ui-components';
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate,
+// deliberately, rather than importing the canonical `cleanGuid` from
+// `@spaarke/ui-components`. This module is documented (file header + the
+// `logic/actions` barrel) as Layer-1, React-agnostic, dependency-light logic
+// reused across hosts (NFR-05) — pulling in the React/Fluent-heavy UI component
+// package for a 2-line string helper would add a real runtime dependency edge for
+// every future consumer, not a free convergence.
+/** Strip Dataverse braces from a GUID. */
+function cleanGuid(id: string | null | undefined): string {
+  return (id ?? '').replace(/[{}]/g, '').trim();
+}
+
 /** `sprk_attachmenttype` option-set value for a body-embedded image (excluded from the file list). */
 const ATTACHMENT_TYPE_INLINE_IMAGE = 100000001;
 
@@ -36,11 +48,6 @@ export interface ISourceAttachmentRecord {
   sprk_name?: string | null;
   sprk_attachmenttype?: number | null;
   _sprk_document_value?: string | null;
-}
-
-/** Strip Dataverse braces from a GUID. */
-function cleanGuid(id: string | null | undefined): string {
-  return (id ?? '').replace(/[{}]/g, '').trim();
 }
 
 /**

@@ -94,8 +94,9 @@ export function createXrmNavigationService(): INavigationService {
    * Resolves the Xrm.Navigation reference, throwing a descriptive error
    * when the host environment does not expose navigation capabilities.
    */
-  function getNavigation() {
-    const xrm = getXrm();
+  function getNavigation(capability: 'navigation' | 'openForm') {
+    // The nearest frame whose Navigation has the method this caller uses (task 081 round 5).
+    const xrm = getXrm(capability);
     if (!xrm?.Navigation) {
       throw new Error(
         'Xrm.Navigation is not available. Ensure this adapter is used within a Dataverse-hosted context (PCF control or Code Page).'
@@ -106,7 +107,7 @@ export function createXrmNavigationService(): INavigationService {
 
   return {
     async openRecord(entityName: string, entityId: string): Promise<void> {
-      const navigation = getNavigation();
+      const navigation = getNavigation('openForm');
       await navigation.openForm({ entityName, entityId });
     },
 
@@ -116,7 +117,7 @@ export function createXrmNavigationService(): INavigationService {
     // Assistant pane) is NOT navigated away. See
     // docs/standards/MODAL-DECISION-CRITERIA.md.
     async openRecordModal(entityName: string, entityId: string): Promise<void> {
-      const navigation = getNavigation();
+      const navigation = getNavigation('navigation');
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const nav = navigation as any;
       await nav.navigateTo(
@@ -131,7 +132,7 @@ export function createXrmNavigationService(): INavigationService {
     },
 
     async openDialog(webresourceName: string, data?: string, options?: DialogOptions): Promise<DialogResult> {
-      const _navigation = getNavigation();
+      const _navigation = getNavigation('navigation');
 
       // Build the navigateTo page input
       const pageInput: Record<string, unknown> = {
@@ -162,7 +163,7 @@ export function createXrmNavigationService(): INavigationService {
         // the dialog is closed. The actual Xrm API accepts (pageInput, navOptions)
         // but our typed interface only has one parameter. We use the underlying
         // runtime call directly via the Xrm object.
-        const xrm = getXrm();
+        const xrm = getXrm('navigation');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrmNav = xrm?.Navigation as any;
         const result = await xrmNav.navigateTo(pageInput, navOptions);
@@ -219,7 +220,7 @@ export function createXrmNavigationService(): INavigationService {
     },
 
     async openLookup(options: LookupOptions): Promise<LookupResult[]> {
-      const xrm = getXrm();
+      const xrm = getXrm('lookupObjects');
       if (!xrm?.Utility) {
         throw new Error(
           'Xrm.Utility is not available. Ensure this adapter is used within a Dataverse-hosted context (PCF control or Code Page).'

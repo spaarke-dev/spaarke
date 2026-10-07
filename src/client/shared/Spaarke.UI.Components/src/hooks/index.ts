@@ -1,5 +1,4 @@
 export * from './types';
-export * from './useKeyboardShortcuts';
 export { useSseStream, parseSseEvent, parsePaneEvent, readSseStream } from './useSseStream';
 export type { ReadSseStreamOptions } from './useSseStream';
 export * from './useAiSummary';
@@ -15,7 +14,6 @@ export * from './useSlashCommands';
 export * from './useTwoPanelLayout';
 export * from './useTheme';
 export * from './useUiScale';
-export * from './useDocumentMultiSelect';
 
 // DataGrid framework (task 003)
 export { DataGridContextProvider, useDataGridContext, useDataGridContextOptional } from './useDataGridContext';

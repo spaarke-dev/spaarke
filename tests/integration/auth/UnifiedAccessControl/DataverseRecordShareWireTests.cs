@@ -241,6 +241,97 @@ public class DataverseRecordShareWireTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Task 149 — the batched strict read (the secure-child share synchronizer)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid OtherDocumentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+    /// <summary>
+    /// The wire shape verified live on spaarkedev1 (2026-10-02): the logical-name <c>objecttypecode</c>, the records OR-ed,
+    /// <c>objectid</c> selected; rows grouped by record; a record with no share answered EMPTY, never missing.
+    /// </summary>
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_GroupsTheRowsByRecord_AndAnswersEveryRecordAskedAbout()
+    {
+        var handler = SharesHandler($$"""
+            {"value":[
+              {"objectid":"{{MatterId}}","principalid":"{{UserId}}","principaltypecode":"systemuser","accessrightsmask":23,"changedon":"2026-10-02T03:51:06Z"},
+              {"objectid":"{{MatterId}}","principalid":"{{TeamId}}","principaltypecode":"team","accessrightsmask":1,"changedon":"2026-10-02T04:00:00Z"}
+            ]}
+            """);
+
+        var shares = await new OfflineService(handler)
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId, OtherDocumentId });
+
+        shares[MatterId].Should().HaveCount(2);
+        shares[OtherDocumentId].Should().BeEmpty("a record with no share is answered, not left out");
+        var url = handler.Requests.Single().Url;
+        url.Should().Contain($"objecttypecode eq 'sprk_document' and (objectid eq {MatterId} or objectid eq {OtherDocumentId})");
+        url.Should().Contain("$select=objectid,principalid,principaltypecode,accessrightsmask,changedon");
+    }
+
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_ARowForARecordNotAskedAbout_Throws()
+    {
+        var body = $$"""{"value":[{"objectid":"{{Guid.NewGuid()}}","principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":1,"changedon":"2026-10-02T04:00:00Z"}]}""";
+
+        var read = () => new OfflineService(SharesHandler(body))
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId });
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*no record that was asked about*");
+    }
+
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_ASecondPage_Throws()
+    {
+        var body = $$"""
+            {"value":[{"objectid":"{{MatterId}}","principalid":"{{UserId}}","principaltypecode":8,"accessrightsmask":1,"changedon":"2026-10-02T04:00:00Z"}],
+             "@odata.nextLink":"https://test.crm.dynamics.com/api/data/v9.2/principalobjectaccessset?$skiptoken=abc"}
+            """;
+
+        var read = () => new OfflineService(SharesHandler(body))
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId });
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*another page*");
+    }
+
+    /// <summary>
+    /// Task 149 r1 (F6): the batched read is STRICT per row, like the single one. An unreadable mask read softly is 0 —
+    /// which the synchronizer treats as "no direct share" — so a principal holding a real share would never be revoked.
+    /// </summary>
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_WhenARowHasNoReadableMask_Throws()
+    {
+        var body = $$"""{"value":[{"objectid":"{{MatterId}}","principalid":"{{UserId}}","principaltypecode":8,"changedon":"2026-10-02T04:00:00Z"}]}""";
+
+        var read = () => new OfflineService(SharesHandler(body))
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId });
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*rights mask*");
+    }
+
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_ReadsInBatches()
+    {
+        var handler = SharesHandler();
+        var ids = Enumerable.Range(0, DataverseWebApiService.PrincipalAccessBatchSize + 1).Select(_ => Guid.NewGuid()).ToArray();
+
+        var shares = await new OfflineService(handler).GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", ids);
+
+        shares.Should().HaveCount(ids.Length);
+        handler.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task GetPrincipalAccessForRecordsOrThrowAsync_WhenDataverseRefuses_Throws()
+    {
+        var read = () => new OfflineService(SharesHandler(status: HttpStatusCode.ServiceUnavailable))
+            .GetPrincipalAccessForRecordsOrThrowAsync("sprk_document", new[] { MatterId });
+
+        await read.Should().ThrowAsync<InvalidOperationException>().WithMessage("*503*");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -279,6 +370,61 @@ public class DataverseRecordShareWireTests
             throw new InvalidOperationException($"Unexpected request: {request.Method} {url}");
         });
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 171 (adversarial finding 3): the effective-rights read a REVOKING caller uses
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static HttpResponseMessage Status(HttpStatusCode status, string? errorCode) =>
+        new(status)
+        {
+            Content = errorCode is null
+                ? new StringContent(string.Empty)
+                : new StringContent("{\"error\":{\"code\":\"" + errorCode + "\",\"message\":\"scripted\"}}", Encoding.UTF8, "application/json"),
+        };
+
+    [Theory(DisplayName = "Task 171 (finding 3): the strict rights read answers only what is an ACCESS answer — a request-level 403 is UNKNOWN")]
+    [InlineData(HttpStatusCode.Forbidden, "0x80040220", "None")]      // access-check denial — an answer about the user
+    [InlineData(HttpStatusCode.NotFound, null, "None")]               // Dataverse's "cannot read this record"
+    [InlineData(HttpStatusCode.Forbidden, "0x8004A110", "unknown")]   // CannotActOnBehalfOfAnotherUser — the app's fault
+    [InlineData(HttpStatusCode.Forbidden, "0x80040216", "unknown")]   // any other 403 code
+    [InlineData(HttpStatusCode.Forbidden, null, "unknown")]           // an unreadable 403
+    public async Task RetrievePrincipalRightsOrUnknownAsync_MapsOnlyAccessAnswers(
+        HttpStatusCode status, string? errorCode, string expected)
+    {
+        var handler = new ScriptedHandler(_ => Status(status, errorCode));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        if (expected == "unknown")
+            rights.Should().BeNull("revoking on a fault of the REQUEST would remove every grant on every pass");
+        else
+            rights.Should().Be(AccessRights.None);
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Url.Should().Contain($"systemusers({UserId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess");
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 3): a 200 answer is the rights Dataverse states")]
+    public async Task RetrievePrincipalRightsOrUnknownAsync_Success_ReturnsTheStatedRights()
+    {
+        var handler = new ScriptedHandler(_ => Json("""{"AccessRights":"ReadAccess, WriteAccess"}"""));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        rights.Should().NotBeNull();
+        rights!.Value.HasFlag(AccessRights.Write).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 3): the LENIENT read still maps the impersonation fault to None — which is why a revoking caller must not use it")]
+    public async Task RetrievePrincipalRightsAsync_ImpersonationFault_IsNone()
+    {
+        var handler = new ScriptedHandler(_ => Status(HttpStatusCode.Forbidden, "0x8004A110"));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsAsync(UserId, "sprk_matters", MatterId);
+
+        rights.Should().Be(AccessRights.None, "deny-side callers read every 403 as 'no rights' — safe for them, by design");
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
@@ -290,6 +436,8 @@ public class DataverseRecordShareWireTests
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
         }).Build(),
         NullLogger<DataverseWebApiService>.Instance,
+        new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+            NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance),
         confidentialClients: null,
         credential: new StaticTokenCredential());
 

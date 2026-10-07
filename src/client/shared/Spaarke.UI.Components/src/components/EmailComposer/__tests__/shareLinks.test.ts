@@ -1,12 +1,13 @@
 /**
- * shareLinks.test.ts — owner UAT 2026-07-30 R2 item 12.
+ * shareLinks.test.ts — owner UAT 2026-07-30 R2 item 12, amended by task 098 (owner decision 2026-10-05).
  *
- * At SEND, `resolveAttachmentShareLinks` swaps the internal URL of every attachment the author toggled
- * **Link** on (that has a `documentId`) for a recipient-openable SPE sharing link resolved by the host.
- * Best-effort + non-blocking: no handler / null / throw all keep the prior `linkUrl` so a share-link
- * hiccup never fails the send. Non-linked attachments are untouched.
+ * At SEND, `resolveAttachmentShareLinks` swaps the URL of every attachment the author toggled **Link** on
+ * (that has a `documentId`) for the link the host resolves — now the Spaarke RECORD link, never a file
+ * sharing link. No handler → unchanged. A host that cannot produce a link (null / throw) gets the link
+ * OMITTED, never left at the prior internal SPE URL; `findUnresolvedLinks` lets the engine tell the author
+ * why. Non-linked attachments are untouched.
  */
-import { resolveAttachmentShareLinks } from '../EmailComposer';
+import { findUnresolvedLinks, resolveAttachmentShareLinks } from '../EmailComposer';
 import type { IAttachmentItem } from '../EmailComposer.types';
 
 function att(overrides: Partial<IAttachmentItem>): IAttachmentItem {
@@ -42,18 +43,29 @@ describe('resolveAttachmentShareLinks (R2 item 12)', () => {
     expect(out[0].linkUrl).toBe('internal://d1');
   });
 
-  it('keeps the prior linkUrl when the resolver returns null (share link unavailable)', async () => {
+  it('OMITS the link when the resolver returns null (never keeps the internal SPE URL)', async () => {
     const resolver = jest.fn().mockResolvedValue(null);
     const items = [att({ documentId: 'd1', linkSelected: true, linkUrl: 'internal://d1' })];
     const out = await resolveAttachmentShareLinks(items, resolver);
-    expect(out[0].linkUrl).toBe('internal://d1');
+    expect(out[0].linkUrl).toBeUndefined();
+    expect(findUnresolvedLinks(out).map(a => a.id)).toEqual(['a1']);
   });
 
-  it('keeps the prior linkUrl when the resolver throws (best-effort, never blocks send)', async () => {
-    const resolver = jest.fn().mockRejectedValue(new Error('policy blocks anonymous links'));
+  it('OMITS the link when the resolver throws', async () => {
+    const resolver = jest.fn().mockRejectedValue(new Error('no org url'));
     const items = [att({ documentId: 'd1', linkSelected: true, linkUrl: 'internal://d1' })];
     const out = await resolveAttachmentShareLinks(items, resolver);
-    expect(out[0].linkUrl).toBe('internal://d1');
+    expect(out[0].linkUrl).toBeUndefined();
+    expect(findUnresolvedLinks(out)).toHaveLength(1);
+  });
+
+  it('findUnresolvedLinks is empty when every requested link resolved, and ignores unlinked rows', async () => {
+    const resolver = jest.fn(async (id: string) => `https://org/main.aspx?id=${id}`);
+    const items = [
+      att({ id: 'a1', documentId: 'd1', linkSelected: true, linkUrl: 'internal://d1' }),
+      att({ id: 'a2', documentId: 'd2', linkSelected: false, linkUrl: undefined }),
+    ];
+    expect(findUnresolvedLinks(await resolveAttachmentShareLinks(items, resolver))).toEqual([]);
   });
 
   it('resolves only the linked-with-documentId subset in a mixed list', async () => {

@@ -1,19 +1,22 @@
 /**
- * Unit tests for sendEmailService (spaarkeai-word-add-in-r1 task 036 / FR-15).
+ * Unit tests for sendEmailService (spaarkeai-word-add-in-r1 task 036 / FR-15; rewritten by task 096).
  *
- * Covers the task's acceptance criteria:
- *   - both a document and a related record → both links in the composed body
- *   - a document with no related record → document link only, no error
- *   - a related record but no resolved document → record link only
- *   - the document link is minted via POST /api/documents/{documentId}/share-link with NO body
- *     (no expiry override, no alternative route)
- *   - a share-link minting failure → an 'error' outcome; the caller must not open a compose window
- *   - neither a document nor a related record → 'nothing-to-send' (defensive; the UI hides the
- *     affordance in this state, but the service itself must not throw)
+ * Outlook's native-compose Send Email:
+ *   - a document and a related record → both SPAARKE record links in the composed body
+ *   - task 096: the document link is the document's Spaarke record (`etn=sprk_document`) — never a Graph
+ *     sharing link (SharePoint Embedded refuses those: "This sharing scenario is not supported on CSP
+ *     Container site"), and composing makes NO network call at all, so it cannot fail that way again
+ *   - one source only → that link only; neither, or ORG_URL unset → 'nothing-to-send' (never a broken link)
+ *   - `resolveSendEmailAffordance`: Outlook (canComposeEmail) → the button; Word → none (Word has the Email tab)
  */
 
-import { prepareSendEmail } from '../sendEmailService';
-import { apiClient, ApiClientError } from '@shared/services';
+import {
+  prepareSendEmail,
+  resolveSendEmailAffordance,
+  buildRecordLink,
+  buildDocumentRecordLink,
+} from '../sendEmailService';
+import { apiClient } from '@shared/services';
 
 jest.mock('@shared/services', () => {
   const actual = jest.requireActual('@shared/services');
@@ -31,175 +34,187 @@ jest.mock('@shared/services', () => {
 });
 
 const mockPost = apiClient.post as jest.Mock;
+const fetchSpy = jest.fn();
 
 const DOCUMENT_ID = '11111111-1111-1111-1111-111111111111';
 const RECORD_ID = '22222222-2222-2222-2222-222222222222';
 const ORG_URL = 'https://contoso.crm.dynamics.com';
 
-describe('prepareSendEmail', () => {
-  beforeEach(() => {
-    mockPost.mockReset();
-  });
+const MATTER = { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' };
 
-  it('composes both links when both a document and a related record are given', async () => {
-    mockPost.mockResolvedValue({
-      url: 'https://contoso.sharepoint.com/share/abc',
-      expiresAt: '2026-10-01T00:00:00Z',
-      scope: 'organization',
-    });
+beforeEach(() => {
+  mockPost.mockReset();
+  fetchSpy.mockReset();
+  (global as unknown as { fetch: unknown }).fetch = fetchSpy;
+});
 
-    const result = await prepareSendEmail({
-      document: { documentId: DOCUMENT_ID },
-      relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' },
+describe('prepareSendEmail (Outlook native compose)', () => {
+  it('composes the document record link and the related record link', () => {
+    const result = prepareSendEmail({
+      document: { documentId: DOCUMENT_ID, name: 'Agreement' },
+      relatedRecord: MATTER,
       subject: 'Contract Review',
       orgUrl: ORG_URL,
     });
 
-    expect(result.kind).toBe('ready');
     if (result.kind !== 'ready') throw new Error('expected ready');
     expect(result.content.subject).toBe('Contract Review');
-    expect(result.content.htmlBody).toContain('https://contoso.sharepoint.com/share/abc');
-    // href attribute values are HTML-escaped (`&` -> `&amp;`) by buildComposeBody — correct output, not a bug.
+    // href values are HTML-escaped (`&` -> `&amp;`).
     expect(result.content.htmlBody).toContain(
-      `${ORG_URL}/main.aspx?etn=sprk_matter&amp;id=${RECORD_ID}&amp;pagetype=entityrecord`
+      `${ORG_URL}/main.aspx?etn=sprk_document&amp;id=${DOCUMENT_ID}&amp;pagetype=entityrecord&amp;navbar=off`
     );
-    expect(result.content.htmlBody).toContain('Smith v. Jones');
+    expect(result.content.htmlBody).toContain('Document: Agreement');
+    expect(result.content.htmlBody).toContain(
+      `${ORG_URL}/main.aspx?etn=sprk_matter&amp;id=${RECORD_ID}&amp;pagetype=entityrecord&amp;navbar=off`
+    );
+    expect(result.content.htmlBody).toContain('Matter: Smith v. Jones');
   });
 
-  it('mints the share link via POST /api/documents/{documentId}/share-link with no body (no expiry override)', async () => {
-    mockPost.mockResolvedValue({
-      url: 'https://contoso.sharepoint.com/share/abc',
-      expiresAt: '2026-10-01T00:00:00Z',
-      scope: 'organization',
-    });
-
-    await prepareSendEmail({
+  it('task 096: never mints a sharing link — no share-link route call and no network call at all', () => {
+    prepareSendEmail({
       document: { documentId: DOCUMENT_ID },
-      relatedRecord: null,
-      subject: 'x',
-      orgUrl: ORG_URL,
-    });
-
-    expect(mockPost).toHaveBeenCalledTimes(1);
-    expect(mockPost).toHaveBeenCalledWith(`/api/documents/${DOCUMENT_ID}/share-link`);
-  });
-
-  it('document with no related record → document link only, no error', async () => {
-    mockPost.mockResolvedValue({
-      url: 'https://contoso.sharepoint.com/share/abc',
-      expiresAt: '2026-10-01T00:00:00Z',
-      scope: 'organization',
-    });
-
-    const result = await prepareSendEmail({
-      document: { documentId: DOCUMENT_ID },
-      relatedRecord: null,
-      subject: 'x',
-      orgUrl: ORG_URL,
-    });
-
-    expect(result.kind).toBe('ready');
-    if (result.kind !== 'ready') throw new Error('expected ready');
-    expect(result.content.htmlBody).toContain('https://contoso.sharepoint.com/share/abc');
-    expect(result.content.htmlBody).not.toContain('main.aspx');
-  });
-
-  it('related record but no resolved document → record link only, no network call', async () => {
-    const result = await prepareSendEmail({
-      document: null,
-      relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' },
+      relatedRecord: MATTER,
       subject: 'x',
       orgUrl: ORG_URL,
     });
 
     expect(mockPost).not.toHaveBeenCalled();
-    expect(result.kind).toBe('ready');
-    if (result.kind !== 'ready') throw new Error('expected ready');
-    expect(result.content.htmlBody).toContain(
-      `${ORG_URL}/main.aspx?etn=sprk_matter&amp;id=${RECORD_ID}&amp;pagetype=entityrecord`
-    );
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it('a share-link minting failure returns an error outcome (caller must not open compose)', async () => {
-    mockPost.mockRejectedValue(new ApiClientError({ type: 'about:blank', title: 'Forbidden', status: 403 }));
-
-    const result = await prepareSendEmail({
+  it('task 096: the body carries no SharePoint / sharing URL', () => {
+    const result = prepareSendEmail({
       document: { documentId: DOCUMENT_ID },
-      relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' },
-      subject: 'x',
-      orgUrl: ORG_URL,
-    });
-
-    expect(result.kind).toBe('error');
-  });
-
-  it('a minting failure blocks composition even when a related record link is also available', async () => {
-    mockPost.mockRejectedValue(new ApiClientError({ type: 'about:blank', title: 'Forbidden', status: 403 }));
-
-    const result = await prepareSendEmail({
-      document: { documentId: DOCUMENT_ID },
-      relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' },
-      subject: 'x',
-      orgUrl: ORG_URL,
-    });
-
-    // Never a 'ready' result containing only the record link when the document was requested but failed.
-    expect(result.kind).not.toBe('ready');
-  });
-
-  it('neither a document nor a related record → nothing-to-send, no network call', async () => {
-    const result = await prepareSendEmail({
-      document: null,
       relatedRecord: null,
       subject: 'x',
       orgUrl: ORG_URL,
     });
 
-    expect(result.kind).toBe('nothing-to-send');
-    expect(mockPost).not.toHaveBeenCalled();
+    if (result.kind !== 'ready') throw new Error('expected ready');
+    expect(result.content.htmlBody).not.toMatch(/sharepoint|share-link|\/share\//i);
   });
 
-  it('a related record with no ORG_URL configured and no document → nothing-to-send (no broken link)', async () => {
-    const result = await prepareSendEmail({
-      document: null,
-      relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, displayName: 'Smith v. Jones' },
+  it('the record links name the Spaarke app when SPAARKE_APP_NAME is set (task 088)', () => {
+    const original = process.env.SPAARKE_APP_NAME;
+    process.env.SPAARKE_APP_NAME = 'sprk_MatterManagement';
+    try {
+      const result = prepareSendEmail({
+        document: { documentId: DOCUMENT_ID },
+        relatedRecord: MATTER,
+        subject: 'x',
+        orgUrl: ORG_URL,
+      });
+      if (result.kind !== 'ready') throw new Error('expected ready');
+      expect(result.content.htmlBody).toContain(
+        `${ORG_URL}/main.aspx?appname=sprk_MatterManagement&amp;etn=sprk_document&amp;id=${DOCUMENT_ID}`
+      );
+      expect(result.content.htmlBody).toContain(
+        `${ORG_URL}/main.aspx?appname=sprk_MatterManagement&amp;etn=sprk_matter&amp;id=${RECORD_ID}`
+      );
+    } finally {
+      if (original === undefined) delete process.env.SPAARKE_APP_NAME;
+      else process.env.SPAARKE_APP_NAME = original;
+    }
+  });
+
+  it('a document with no related record → the document link only', () => {
+    const result = prepareSendEmail({
+      document: { documentId: DOCUMENT_ID },
+      relatedRecord: null,
       subject: 'x',
-      orgUrl: undefined,
+      orgUrl: ORG_URL,
     });
 
-    expect(result.kind).toBe('nothing-to-send');
+    if (result.kind !== 'ready') throw new Error('expected ready');
+    expect(result.content.htmlBody).toContain('etn=sprk_document');
+    expect(result.content.htmlBody).not.toContain('etn=sprk_matter');
   });
 
-  it('falls back to a generic subject when the given subject is blank', async () => {
-    mockPost.mockResolvedValue({
-      url: 'https://contoso.sharepoint.com/share/abc',
-      expiresAt: '2026-10-01T00:00:00Z',
-      scope: 'organization',
-    });
+  it('a related record but no document → the record link only', () => {
+    const result = prepareSendEmail({ document: null, relatedRecord: MATTER, subject: 'x', orgUrl: ORG_URL });
 
-    const result = await prepareSendEmail({
+    if (result.kind !== 'ready') throw new Error('expected ready');
+    expect(result.content.htmlBody).toContain('etn=sprk_matter');
+    expect(result.content.htmlBody).not.toContain('etn=sprk_document');
+  });
+
+  it('neither a document nor a related record → nothing-to-send', () => {
+    expect(prepareSendEmail({ document: null, relatedRecord: null, subject: 'x', orgUrl: ORG_URL }).kind).toBe(
+      'nothing-to-send'
+    );
+  });
+
+  it('ORG_URL unset → nothing-to-send (no broken link), even with both a document and a record', () => {
+    expect(
+      prepareSendEmail({
+        document: { documentId: DOCUMENT_ID },
+        relatedRecord: MATTER,
+        subject: 'x',
+        orgUrl: undefined,
+      }).kind
+    ).toBe('nothing-to-send');
+  });
+
+  it('falls back to a generic subject when the given subject is blank', () => {
+    const result = prepareSendEmail({
       document: { documentId: DOCUMENT_ID },
       relatedRecord: null,
       subject: '   ',
       orgUrl: ORG_URL,
     });
-
-    expect(result.kind).toBe('ready');
     if (result.kind !== 'ready') throw new Error('expected ready');
     expect(result.content.subject).toBe('Document from Spaarke');
   });
 
-  it('HTML-escapes an unsafe display name in the record link label', async () => {
-    const result = await prepareSendEmail({
+  it('HTML-escapes an unsafe display name in a link label', () => {
+    const result = prepareSendEmail({
       document: null,
       relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, displayName: '<script>alert(1)</script>' },
       subject: 'x',
       orgUrl: ORG_URL,
     });
-
-    expect(result.kind).toBe('ready');
     if (result.kind !== 'ready') throw new Error('expected ready');
     expect(result.content.htmlBody).not.toContain('<script>');
     expect(result.content.htmlBody).toContain('&lt;script&gt;');
+  });
+
+  it('canonicalizes a braced, upper-case document id (ADR-044)', () => {
+    const result = prepareSendEmail({
+      document: { documentId: `{${DOCUMENT_ID.toUpperCase()}}` },
+      relatedRecord: null,
+      subject: 'x',
+      orgUrl: ORG_URL,
+    });
+    if (result.kind !== 'ready') throw new Error('expected ready');
+    expect(result.content.htmlBody).toContain(`id=${DOCUMENT_ID}&amp;`);
+  });
+});
+
+describe('buildRecordLink / buildDocumentRecordLink', () => {
+  it('labels a record "Type: Name (Number)" when the number is known', () => {
+    expect(buildRecordLink(ORG_URL, { ...MATTER, number: 'M-0042' })?.label).toBe('Matter: Smith v. Jones (M-0042)');
+  });
+
+  it('labels a document without a name "Document record"', () => {
+    expect(buildDocumentRecordLink(ORG_URL, { documentId: DOCUMENT_ID })?.label).toBe('Document record');
+  });
+
+  it('returns null for an empty id or an unset ORG_URL', () => {
+    expect(buildRecordLink(ORG_URL, { entityType: 'sprk_matter', id: '' })).toBeNull();
+    expect(buildDocumentRecordLink(undefined, { documentId: DOCUMENT_ID })).toBeNull();
+  });
+});
+
+describe('resolveSendEmailAffordance (NFR-10 — capability only)', () => {
+  it('Outlook (canComposeEmail true) with something to link → outlook-native', () => {
+    expect(resolveSendEmailAffordance({ canComposeEmail: true }, true)).toBe('outlook-native');
+  });
+
+  it('task 096: Word (canComposeEmail false) → none — Word emails from its Email tab, not this button', () => {
+    expect(resolveSendEmailAffordance({ canComposeEmail: false }, true)).toBe('none');
+  });
+
+  it('nothing to link → none, even on Outlook (never rendered-and-disabled)', () => {
+    expect(resolveSendEmailAffordance({ canComposeEmail: true }, false)).toBe('none');
   });
 });

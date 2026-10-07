@@ -4,7 +4,8 @@
     <title>FR-13: Project creation completeness and QuickCreate routing</title>
     <phase>3 Surfacing Spaarke</phase>
     <gate>030 complete — the creation service exists and is proven for Matter</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by 8c2b50213 (docs: close 031). -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the BFF creation service and `QuickCreateAsync`; tags include bff-api and dataverse; writes production Dataverse rows. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -106,7 +106,10 @@ const withFluentProvider = (theme: 'light' | 'dark', content: React.ReactNode): 
       theme={themeObject}
       style={{
         padding: '24px',
-        backgroundColor: theme === 'dark' ? '#1f1f1f' : '#ffffff',
+        // C-18 color sweep (2026-10-04): was a hand-duplicated hex pair
+        // ('#1f1f1f' / '#ffffff') that happened to match the theme's own
+        // background — use the theme object's token directly instead.
+        backgroundColor: themeObject.colorNeutralBackground1,
         minHeight: '320px',
       }}
     >

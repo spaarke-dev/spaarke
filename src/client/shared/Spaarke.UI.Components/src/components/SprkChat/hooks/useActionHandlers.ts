@@ -28,6 +28,7 @@ import type {
   INavigatePayload,
 } from '../types';
 import type { IOutcomeCard } from '../OutcomeCard';
+import { getXrm } from '../../../utils/xrmContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -215,8 +216,10 @@ const handleSearch: ActionHandler = async (_action, context) => {
  * @see dialog-patterns.md — Pattern 1: Opening a React Code Page Dialog
  */
 export function openCodePageDialog(payload: IDialogOpenPayload): void {
+  // Shared cross-frame walker (task 081 / C-8) — was a window-only read,
+  // which missed Xrm when the chat is hosted in an iframe.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = (window as any).Xrm;
+  const xrm: any = getXrm('navigation');
 
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
@@ -264,8 +267,11 @@ export function openCodePageDialog(payload: IDialogOpenPayload): void {
  * @see ADR-006 — MUST use Xrm.Navigation.navigateTo with pageType="webresource"
  */
 export function navigateToTarget(payload: INavigatePayload): void {
+  // Shared cross-frame walker (task 081 / C-8) — was a window-only read,
+  // which missed Xrm when the chat is hosted in an iframe.
+  // Ask for the method this payload calls: openUrl (url) or navigateTo (Code Page).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = (window as any).Xrm;
+  const xrm: any = getXrm(payload.url ? 'openUrl' : 'navigation');
 
   if (!xrm?.Navigation) {
     console.warn(

@@ -75,7 +75,7 @@ Absent all three, the root [CLAUDE.md §11](../../CLAUDE.md) three-question reus
 
 ## Service Architecture: What Belongs in Shared Library
 
-The original constraint ("zero service dependencies, callback-based only") was too rigid. The shared library already contains services (`CommandRegistry`, `FetchXmlService`, `EntityCreationService`, etc.) and this is correct — services with **abstracted dependencies** are portable and testable.
+The original constraint ("zero service dependencies, callback-based only") was too rigid. The shared library already contains services (`FetchXmlService`, `EntityCreationService`, etc.) and this is correct — services with **abstracted dependencies** are portable and testable.
 
 ### Service Portability Tiers
 
@@ -160,15 +160,14 @@ Consumers call the factory in their `main.tsx` and pass the result as props — 
 | `persistThemeToDataverse(webApi, userId, theme)` | Async theme persistence to Dataverse |
 | `parseDataParams()` | Parse Xrm.Navigation.navigateTo data envelope + raw URL params |
 
-### UI Components (16 groups)
+### UI Components (15 groups)
 
 | Component | Description | PCF Safe? |
 |-----------|-------------|-----------|
 | SprkButton | Button with tooltip | Yes |
 | DatasetGrid (Grid/Card/List/Virtualized) | Multi-view dataset | Yes |
 | ViewSelector | View mode switcher | Yes |
-| CommandToolbar | Action bar | Yes |
-| PageChrome | Page header (OOB parity) | Yes |
+| PageChrome | ViewToolbar (OOB parity) | Yes |
 | ChoiceDialog | Simple choice dialog | Yes |
 | SidePaneShell | Slide-in side panel | Yes |
 | DiffCompareView | AI diff viewer | Yes |

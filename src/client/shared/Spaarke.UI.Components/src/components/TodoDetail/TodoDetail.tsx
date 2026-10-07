@@ -60,6 +60,7 @@ import {
   AddCircleRegular,
 } from '@fluentui/react-icons';
 import type { ITodoRecord, ITodoFieldUpdates, IContactOption } from './types';
+import { parseDueDate } from '../../utils/dateLocal';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants (mirror task 009 customization)
@@ -73,16 +74,33 @@ const STATUSCODE_COMPLETED = 2;
 /** statuscode = Dismissed (Inactive). */
 const STATUSCODE_DISMISSED = 659490002;
 
+/**
+ * Entity set the `sprk_todo.sprk_assignedto` lookup targets (`contact`, live metadata,
+ * nav prop `sprk_AssignedTo`). Exported so the schema-parity test can pin it to
+ * `src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md` (task 097).
+ */
+export const TODO_ASSIGNED_TO_ENTITY_SET = 'contacts';
+
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
 // ---------------------------------------------------------------------------
 
 /**
- * Compute To Do Score — mirrors LegalWorkspace computeTodoScore() exactly.
+ * Compute To Do Score — mirrors the hoisted `computeTodoScore()`
+ * (`Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`) exactly.
  *
  * Formula: priority*0.50 + invertedEffort*0.20 + urgencyRaw*0.30
  * Uses Math.ceil for diffDays and Math.round for the final score
  * to match the Kanban card computation.
+ *
+ * Due-date parsing (spaarke-ontology-platform-r1 task 080 / C-10,
+ * 2026-10-03): this used to parse `duedate` with a bare `new Date(duedate)`,
+ * which — for a date-only `sprk_duedate` value — reads as the PREVIOUS
+ * calendar day in every negative-UTC-offset zone, disagreeing with the
+ * Kanban bucket the same To Do landed in. Now uses the canonical
+ * `parseDueDate` ("mirrors exactly" is an assertion that drifts unless both
+ * sides literally import the same function — see that function's doc
+ * comment).
  */
 function computeScore(
   priority: number,
@@ -98,17 +116,15 @@ function computeScore(
   const invertedEffort = 100 - effort;
 
   let urgencyRaw = 0;
-  if (duedate) {
-    const due = new Date(duedate);
-    if (!isNaN(due.getTime())) {
-      const now = new Date();
-      const diffMs = due.getTime() - now.getTime();
-      const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-      if (diffDays < 0) urgencyRaw = 100;
-      else if (diffDays <= 3) urgencyRaw = 80;
-      else if (diffDays <= 7) urgencyRaw = 50;
-      else if (diffDays <= 10) urgencyRaw = 25;
-    }
+  const due = parseDueDate(duedate);
+  if (due) {
+    const now = new Date();
+    const diffMs = due.getTime() - now.getTime();
+    const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) urgencyRaw = 100;
+    else if (diffDays <= 3) urgencyRaw = 80;
+    else if (diffDays <= 7) urgencyRaw = 50;
+    else if (diffDays <= 10) urgencyRaw = 25;
   }
 
   const priorityComponent = priority * 0.5;
@@ -362,9 +378,10 @@ export interface ITodoDetailProps {
    * Search the picker source (users or contacts) by name for the Assigned To picker.
    * Decoupled from Xrm — host provides the implementation (ADR-012).
    *
-   * Note: `sprk_todo.sprk_assignedto` is a `systemuser` lookup. Hosts should resolve
-   * the picker against `systemuser` (or whichever picker source matches the host's
-   * binding). The IContactOption shape is generic (id + name).
+   * Note: `sprk_todo.sprk_assignedto` is a **contact** lookup (live metadata, task 097).
+   * Hosts MUST resolve the picker against `contact` and return contact ids — the save
+   * binds `sprk_AssignedTo@odata.bind` to `/contacts(id)`; a systemuser id is rejected.
+   * The IContactOption shape is generic (id + name).
    */
   onSearchContacts: (query: string) => Promise<IContactOption[]>;
   /**
@@ -633,7 +650,13 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         updates.sprk_effortscore = effort;
       }
       if (assignedToId !== origRef.current.assignedToId) {
-        updates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/systemusers(${assignedToId})` : null;
+        // Task 097: `sprk_todo.sprk_assignedto` targets CONTACT (live metadata, nav prop
+        // `sprk_AssignedTo`). The former `/systemusers(...)` only worked because Dataverse
+        // resolves a single-target bind by id; a real systemuser id — what this component's
+        // own docs told hosts to supply — failed with "Entity 'Contact' ... Does Not Exist".
+        updates['sprk_AssignedTo@odata.bind'] = assignedToId
+          ? `/${TODO_ASSIGNED_TO_ENTITY_SET}(${assignedToId})`
+          : null;
       }
       return updates;
     }, [description, notes, dueDate, priority, effort, assignedToId]);

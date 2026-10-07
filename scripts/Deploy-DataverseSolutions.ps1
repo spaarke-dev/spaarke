@@ -4,7 +4,7 @@
     tier-by-tier, with Package Deployer upgrade semantics (H6 handler entrypoint).
 
 .DESCRIPTION
-    Deploys the 8 authoritative Spaarke managed solutions (per $SolutionImportOrder
+    Deploys the 9 authoritative Spaarke managed solutions (per $SolutionImportOrder
     and spec.md §11.1a / FR-09) to a target Dataverse environment. Solutions are
     imported in dependency-tier order:
 
@@ -181,6 +181,13 @@ $SolutionImportOrder = [ordered]@{
     "EventDetailSidePane"  = @{ DisplayName = "Event Detail Side Pane";   SolutionName = "EventDetailSidePane";  Tier = 3 }
     "EventsPage"           = @{ DisplayName = "Events Page";              SolutionName = "EventsPage";           Tier = 3 }
     "LegalWorkspace"       = @{ DisplayName = "Legal Workspace";          SolutionName = "LegalWorkspace";       Tier = 3 }
+
+    # Tier 4: MDA app + sitemap + app-module components (SESSION 19 MDA-GAP FIX,
+    # customer-provisioning-orchestration-r1 2026-08-28). Depends on Tier 1
+    # entities + Tier 3 feature forms/ribbons. Ships the sprk_MatterManagement
+    # MDA — without this, customer envs receive all entities but no MDA to sign
+    # into. Lockstep with CanonicalSolutionCatalog.cs (unit test enforces).
+    "SpaarkeCorporateCounselApp" = @{ DisplayName = "Spaarke Corporate Counsel App (Matter Management MDA)"; SolutionName = "SpaarkeCorporateCounselApp"; Tier = 4 }
 }
 
 # ============================================================================

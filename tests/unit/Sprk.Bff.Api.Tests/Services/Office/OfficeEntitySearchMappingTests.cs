@@ -19,6 +19,11 @@ public class OfficeEntitySearchMappingTests
     private static readonly OfficeSearchService.EntitySearchMeta ContactMeta =
         new("contacts", "contactid", "fullname", null, "jobtitle");
 
+    // Task 091 (UAT-2): the real production metadata for Contact includes EmailField; ContactMeta above
+    // (no EmailField) stays as-is to keep the two pre-existing tests below byte-identical.
+    private static readonly OfficeSearchService.EntitySearchMeta ContactMetaWithEmail =
+        new("contacts", "contactid", "fullname", null, "jobtitle", "emailaddress1");
+
     private static Dictionary<string, JsonElement> Row(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
 
@@ -46,6 +51,7 @@ public class OfficeEntitySearchMappingTests
         result.DisplayInfo.Should().Be("MAT-2026-001");   // reference number preferred for disambiguation
         result.PrimaryField.Should().Be("MAT-2026-001");
         result.ModifiedOn!.Value.UtcDateTime.Should().Be(new DateTime(2026, 8, 20, 10, 0, 0, DateTimeKind.Utc));
+        result.Email.Should().BeNull("Matter has no EmailField — task 091's additive field is Contact-only");
     }
 
     [Fact]
@@ -65,6 +71,45 @@ public class OfficeEntitySearchMappingTests
         result!.LogicalName.Should().Be("contact");
         result.DisplayInfo.Should().Be("General Counsel"); // no ref field → description (jobtitle)
         result.PrimaryField.Should().Be("Jane Doe");       // no ref field → name
+        result.Email.Should().BeNull("this meta has no EmailField configured — never a fallback onto PrimaryField/Name");
+    }
+
+    [Fact]
+    public void MapSearchRow_Contact_WithEmailField_PopulatesEmail_SoDuplicateNamesCanBeToldApart()
+    {
+        var row = Row($$"""
+        {
+          "contactid": "{{Guid.NewGuid()}}",
+          "fullname": "Jane Cooper",
+          "jobtitle": "General Counsel",
+          "emailaddress1": "jane.cooper@acme.com"
+        }
+        """);
+
+        var result = OfficeSearchService.MapSearchRow(AssociationEntityType.Contact, ContactMetaWithEmail, row);
+
+        result.Should().NotBeNull();
+        result!.Email.Should().Be("jane.cooper@acme.com");
+        // Email is additive — it does not change what PrimaryField/DisplayInfo already carried.
+        result.PrimaryField.Should().Be("Jane Cooper");
+        result.DisplayInfo.Should().Be("General Counsel");
+    }
+
+    [Fact]
+    public void MapSearchRow_Contact_WithEmailField_ButNoEmailOnFile_EmailIsNull()
+    {
+        var row = Row($$"""
+        {
+          "contactid": "{{Guid.NewGuid()}}",
+          "fullname": "Robert Fox",
+          "jobtitle": "Paralegal"
+        }
+        """);
+
+        var result = OfficeSearchService.MapSearchRow(AssociationEntityType.Contact, ContactMetaWithEmail, row);
+
+        result.Should().NotBeNull();
+        result!.Email.Should().BeNull("a contact with no email on file must render as name-only, never the literal 'contact'");
     }
 
     [Fact]

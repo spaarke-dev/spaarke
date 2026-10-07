@@ -70,6 +70,16 @@ jobs:
           # Dataverse org the pane's "Open" buttons (task 027) and the Quick Create deep link
           # point at. Unset, the pane hides the Open buttons rather than showing ones that do nothing.
           ORG_URL: https://spaarkedev1.crm.dynamics.com
+          # The Spaarke model-driven app (unique name) every record link opens in (task 088). Without it a
+          # record opens in the user's default app. Same in every environment; empty → links name no app.
+          SPAARKE_APP_NAME: sprk_MatterManagement
+          # Word's Email tab (task 096). ON since spaarkeai-word-add-in-r1 task 097 (2026-10-06). It was held off
+          # (owner decision 2026-10-04) until /api/communications/send authorized every attachment (Read) and every
+          # association (AppendTo) as the caller. That is unified-access-control-r2 task 161
+          # (CommunicationRecordAuthorizationFilter), on master via #1312 (d254d7166); owner go 2026-10-06: "uac-r2
+          # task 161 is working so you can proceed". The code default stays OFF (webpack.config.js); only this
+          # deploy setting turns it on. Set back to "false" to hide the tab again; no code change either way.
+          ADDIN_EMAIL_TAB_ENABLED: "true"
 
       # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
       # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->

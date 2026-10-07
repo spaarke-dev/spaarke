@@ -57,7 +57,7 @@ When modifying a component, check this table for potential downstream effects:
 | AI playbook schema / names | PlaybookService, ScopeResolverService, AnalysisOrchestrationService, Chat system |
 | RAG index schema | FileIndexingService, RagService, SemanticSearch endpoints, AI Search index definition |
 | `IFileIndexingService` interface | Sync path (OBO), async path (RagIndexingJobHandler), Office IndexingWorker |
-| Export service interface | ExportServiceRegistry, DocxExportService, PdfExportService, EmailExportService |
+| Export service interface (`IExportService`) | DocxExportService and its one consumer, ChatWordExportEndpoints (the registry, PDF and email export were deleted with the analysis export route, task 162) |
 
 ---
 
@@ -125,7 +125,7 @@ Sequence: User → PCF (AnalysisWorkspace) or Chat → BFF (AnalysisEndpoints/Ch
 | Analysis orchestration | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | Core orchestration |
 | Context builder | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs` | Prompt construction |
 | Scope resolver | `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeResolverService.cs` | Playbook/skill resolution |
-| Export services | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/` | DOCX, PDF, Email export |
+| DOCX export | `src/server/api/Sprk.Bff.Api/Services/Ai/Export/DocxExportService.cs` | Chat-to-Word export (ChatWordExportEndpoints) |
 
 **Change impact:**
 
@@ -133,7 +133,7 @@ Sequence: User → PCF (AnalysisWorkspace) or Chat → BFF (AnalysisEndpoints/Ch
 |--------|--------|
 | Modify analysis endpoint signature | Update AnalysisWorkspace API client and Chat system |
 | Change prompt structure | Update AnalysisContextBuilder methods |
-| Add new export format | Create new IExportService, register in ExportServiceRegistry |
+| Add new export format | Implement IExportService and give it a caller-authorized route (no registry exists since task 162) |
 | Modify playbook resolution | Update ScopeResolverService and Dataverse playbook entities |
 | Change chat session schema | Update ChatSessionManager, ChatEndpoints, PCF chat component |
 

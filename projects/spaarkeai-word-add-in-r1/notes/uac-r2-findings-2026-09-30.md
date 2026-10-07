@@ -207,3 +207,22 @@ coordinates its edits to both.
 | The hotmail `#EXT#` guest reaching the Secure BU (their F11) | *"this is in dev and we'll change this"* | The owner changes the account. UAC-r2 grants **no census exception**: clause 1 must pass on its own afterwards |
 | The trusted-tenant list (their I1) | *"yes proceed"* | Their owner had already accepted option (b) directly (a new explicit per-deployment list; empty = deny). 141 proceeds on it. **141 is not in their current batch** (130/131/134/151); they will send its link contract when it is authored as code, so **083 stays blocked** |
 | #1037, disabled with the reason | *"yes write the task"* | Authored as **task 084** |
+
+## 11. Owner decision 2026-10-02 on #1081 — ✅ DELIVERED by the owner to UAC-r2 (2026-10-02)
+
+> Two cross-session sends expired unapproved; the owner posted it to the UAC-r2 project conversation directly.
+
+A cross-session message to the UAC-r2 session (2026-10-02) was **held for its user's approval and expired
+unapproved**, so UAC-r2 has not received it. The content is public on
+[#1081](https://github.com/spaarke-dev/spaarke/issues/1081#issuecomment-5953351766). Summary to relay:
+
+- The owner assigned **Spaarke Basic User** to the dev root team "Spaarke"; verified live (probe rows on six tables,
+  and a real unfiled save through the deployed BFF owned by it). #1081 closed.
+- Owner's ruling: users in the root BU are a **dev data artifact**. In production, users sit in the customer's child
+  BU and the BFF's application user is placed in the customer BU. Nothing is codified for the root team.
+- For their census: Basic User reads at Deep depth, which at the root is the whole org (Secure Record included) for
+  every root-team member (171 in dev, mostly application users). Per the ruling, no production user is affected.
+- Observed: the "Spaarke Demo" BU's default team holds **System Administrator**.
+- Master `5e39f2bea` (incl. task 080's team ownership) is deployed to dev.
+
+**Next**: relay when the UAC-r2 session can accept it, or the owner relays it.

@@ -4,7 +4,7 @@
     <title>Apply Class-A punch list — Sub-phase 203c skill wiring (5 rows: Step 0.5 prereqs reader + --batch flag + Step 7 postmortem + Grant-ControlPlaneIdentity.ps1 + 11 GraphAppRoles null GUIDs)</title>
     <phase>Phase Pre-Live-Fire — Class-A punch list skill wiring</phase>
     <gate>ready</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Per project CLAUDE.md rigor table: A16 (GraphAppRoles.cs completion) touches `src/server/shared/Spaarke.*/**` (BFF-consumed shared code) → tag `bff-api` → FULL. Also skill-directive edits to `.claude/skills/provision-environment/SKILL.md` (A02, A03, A04) fire against live L3 operator surface. Explicit escalation trigger per project CLAUDE.md §Human Escalation Triggers: "Any GraphAppRoles.cs az enumeration returning unexpected role IDs (11 of 14 null must be verified before completing)".</rigor-reason>
     <model-tier>sonnet</model-tier>

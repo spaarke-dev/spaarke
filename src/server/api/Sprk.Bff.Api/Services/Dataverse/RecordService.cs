@@ -9,21 +9,25 @@ using Spaarke.Dataverse;
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
-/// Service for fetching a single Dataverse record with caller-supplied field projection.
-/// Backs <c>GET /api/dataverse/record/{entityLogicalName}/{id}</c> (FR-BFF-05).
+/// Service for fetching a single Dataverse record APP-ONLY with caller-supplied field projection
+/// (FR-BFF-05). Its only caller is the external module seam (<c>ExternalModuleDataEndpoints</c>,
+/// <c>GET /api/v1/external/api/dataverse/record/{entityLogicalName}/{id}</c>).
 /// </summary>
 /// <remarks>
 /// <para>
 /// Per FR-BFF-05 (Spaarke DataGrid Framework R1): record reads are real-time — NO caching.
-/// Each request hits Dataverse directly. The endpoint exists for chip "current value" lookups
-/// and host extension code that needs to fetch one record's projected fields on demand.
+/// Each request hits Dataverse directly.
 /// </para>
 /// <para>
-/// Authorization is handled by <c>DataverseAuthorizationFilter</c> (ADR-008) before the handler
-/// is invoked; this service does NOT enforce privilege checks. Row-level access is enforced
-/// server-side by Dataverse via the impersonated <c>CallerId</c> path on the underlying
-/// <see cref="IDataverseService"/> ServiceClient — a row the caller cannot see surfaces as
-/// <see cref="FaultException"/> which we translate to <see cref="RecordNotFoundException"/>.
+/// 🔴 NO AUTHORIZATION HAPPENS HERE, and Dataverse applies none either: <see cref="IDataverseService"/>
+/// reads as the BFF application user, with no impersonation, so any existing record is returned with
+/// every requested column. A <see cref="RecordNotFoundException"/> means the record does not exist (or
+/// the entity is unknown), never that a caller lacks access. Scoping is the CALLER's job; the external
+/// seam does it with <c>IsRecordAccessible</c> and the per-module column allow-list, because a CIAM
+/// contact cannot be impersonated. The internal <c>GET /api/dataverse/record/{entityLogicalName}/{id}</c>,
+/// which called this behind only an entity-level privilege check while its documentation claimed an
+/// impersonated <c>CallerId</c> path that never existed, read any record by id (route sweep finding #10)
+/// and was DELETED by unified-access-control-r2 task 160.
 /// </para>
 /// </remarks>
 internal sealed class RecordService
@@ -51,8 +55,8 @@ internal sealed class RecordService
     /// <param name="ct">Cancellation token.</param>
     /// <returns>A read-only attribute-keyed dictionary of the record's projected fields.</returns>
     /// <exception cref="RecordNotFoundException">
-    /// Thrown when the record does not exist OR the caller cannot read the row.
-    /// Caller maps to 404 ProblemDetails.
+    /// Thrown when the record (or the entity) does not exist. The read is app-only, so this never
+    /// reflects the end user's access. Caller maps to 404 ProblemDetails.
     /// </exception>
     public async Task<IReadOnlyDictionary<string, object?>> GetRecordAsync(
         string entityLogicalName,
@@ -219,8 +223,9 @@ internal sealed class RecordService
 }
 
 /// <summary>
-/// Thrown by <see cref="RecordService"/> when the requested record does not exist OR the caller
-/// cannot read it. Endpoint maps to 404 ProblemDetails per ADR-019.
+/// Thrown by <see cref="RecordService"/> when the requested record (or entity) does not exist; the
+/// read is app-only, so it never reflects the end user's access. Endpoint maps to 404 ProblemDetails
+/// per ADR-019.
 /// </summary>
 /// <remarks>
 /// Carrying the entity logical name + id lets the endpoint construct a stable ProblemDetails payload

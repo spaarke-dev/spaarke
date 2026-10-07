@@ -266,5 +266,33 @@ Results go in notes/task-160-dataverse-proxy-as-caller.md, with ids redacted to 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL).</protocol>
+    <outcome date="2026-10-03" branch="task/uac-r2-160" base="6b243f092">
+      COMPLETED BY DELETION (amendments 4 and 5, owner round 10 item 1). Neither route had a caller in the repo
+      (the only BffDataverseClient instance, external-spa gridDataverseClient.ts, targets /api/v1/external; createBffDataService
+      builds /api/dataverse/{entity}/{id}, which matches no route) and neither is in any published API description (the
+      CopilotAgent OpenAPI / plugin / agent manifests and the add-in manifests contain no "dataverse"; the BFF publishes no
+      runtime OpenAPI). Read-only Log Analytics, 90 days: 0 internal fetch calls, 1 internal record call (a hand probe on
+      account/Guid.Empty, 2026-08-17). DELETED: Api/Dataverse/FetchEndpoints.cs, Api/Dataverse/RecordEndpoints.cs, their
+      Program.cs mappings, DataverseAuthorizationFilter's FromFetchXmlBody and FromRouteValueWithRecord modes (plus the
+      optional extractor dependency, the FetchXML-argument reflection and the multi-entity branch only those modes reached),
+      FetchEndpointTests.cs, RecordEndpointTests.cs and the fixture/helper members only they used. KEPT unchanged in body:
+      FetchService, RecordService, FetchXmlEntityExtractor, the DTOs and their registrations (the external module seam is
+      their only consumer); ExternalModuleDataEndpoints.cs and RecordContainerResolver.cs untouched. The false
+      row-security claims in RecordService / FetchService / the filter are replaced by an explicit app-only warning.
+      NOT BUILT (amendment 5): the SDK impersonation entry point, its arch rule, the fault classifier and the as-caller
+      service methods; tasks 159 and 161-166 all impersonate through the Web API path (impersonateSystemUserId /
+      MSCRMCallerID). NEW: tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/DataverseProxyRoutesRemovedTests.cs
+      (deny proof: an authenticated caller with Read on every entity gets 404 and nothing reaches Dataverse); bite proven
+      by seeding both routes back in Program.cs (both facts failed with 200, restored). RouteAuthorizationGuardTests:
+      census 120 to 118 only (task 167 not landed: no waiver, ledger or GovernedFiles edit). Docs: DataGrid architecture
+      section 4 (BFF adapter security model), FIELD-MAPPING correction, BffDataverseClient.ts header note.
+      Tests (all green, run once at the end): BFF unit 14212 passed / 54 skipped / 0 failed; Spaarke.ArchTests 346/346;
+      Sprk.Bff.Api.IntegrationTests 90/90; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed; BffDataverseClient.test.ts
+      22/22. BFF build 0 warnings; no package change; dotnet list package --vulnerable: none. Step 9.5 code-review and
+      adr-check: no Critical, no violation. Placement: in BFF, net removal (no new service, registration, endpoint, option,
+      job, column or package); the one new file is a test (three-question justification in the note, section 6).
+      Escalations: none fired (trigger 1 checked: no consumer). Live gate: none for the deletion; an optional post-deploy
+      404 check is in the note. Details: notes/task-160-dataverse-proxy-as-caller.md.
+    </outcome>
   </execution>
 </task>

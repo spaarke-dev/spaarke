@@ -1,5 +1,10 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Xunit;
@@ -149,5 +154,116 @@ public class AnalysisRegardingWriteTests
 
         act.Should().Throw<ArgumentException>()
             .WithMessage("*Unsupported regarding entity type 'account'*");
+    }
+
+    // =========================================================================
+    // Task 097 round 10: the I/O half — PopulateAnalysisRegardingAsync with its two Dataverse reads passed in.
+    // =========================================================================
+
+    [Theory]
+    [InlineData("sprk_matter", "sprk_regardingmatter", "sprk_mattername", "sprk_matternumber")]
+    [InlineData("sprk_project", "sprk_regardingproject", "sprk_projectname", "sprk_projectnumber")]
+    public async Task PopulateAnalysisRegarding_ReadsTheNameAndTheNumberColumnTheCatalogNames(
+        string entity, string lookupField, string nameField, string numberField)
+    {
+        var id = Guid.NewGuid();
+        var reads = new List<string[]>();
+        var analysis = new Entity("sprk_analysis");
+
+        await DataverseServiceClientImpl.PopulateAnalysisRegardingAsync(
+            analysis,
+            new AnalysisRegardingTarget(entity, id, "picker label"),
+            (_, _) => Task.FromResult<Entity?>(CatalogRow(numberField)),
+            (_, _, columns, _) =>
+            {
+                reads.Add(columns);
+                return Task.FromResult(new Entity(entity, id) { [nameField] = "zz-097 name", [numberField] = "NUM-7" });
+            },
+            NullLogger.Instance,
+            CancellationToken.None);
+
+        reads.Should().ContainSingle().Which.Should().BeEquivalentTo(new[] { nameField, numberField });
+        analysis[lookupField].Should().BeOfType<EntityReference>().Which.Id.Should().Be(id);
+        analysis["sprk_regardingrecordname"].Should().Be("zz-097 name");
+        analysis["sprk_regardingrecordnumber"].Should().Be("NUM-7");
+        analysis["sprk_regardingrecordtype"].Should().BeOfType<EntityReference>().Which.Id.Should().Be(RecordTypeRefId);
+    }
+
+    [Fact]
+    public async Task PopulateAnalysisRegarding_ACatalogRowThatNamesNoNumberColumn_ReadsTheNameOnly()
+    {
+        var id = Guid.NewGuid();
+        var reads = new List<string[]>();
+        var analysis = new Entity("sprk_analysis");
+
+        await DataverseServiceClientImpl.PopulateAnalysisRegardingAsync(
+            analysis,
+            new AnalysisRegardingTarget("sprk_matter", id, "picker label"),
+            (_, _) => Task.FromResult<Entity?>(CatalogRow(numberField: null)),
+            (_, _, columns, _) =>
+            {
+                reads.Add(columns);
+                return Task.FromResult(new Entity("sprk_matter", id) { ["sprk_mattername"] = "zz-097 matter" });
+            },
+            NullLogger.Instance,
+            CancellationToken.None);
+
+        reads.Should().ContainSingle().Which.Should().BeEquivalentTo(new[] { "sprk_mattername" });
+        analysis["sprk_regardingrecordname"].Should().Be("zz-097 matter");
+        analysis.Contains("sprk_regardingrecordnumber").Should().BeFalse();
+        analysis.Contains("sprk_regardingrecordtype").Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task PopulateAnalysisRegarding_ACatalogReadThatThrows_StillWritesTheRecordsName()
+    {
+        // Round 10 item 3: on dcdc83995 the catalog read sat ahead of the name read inside ONE try, so a
+        // TimeoutException lost the resolved name (the stager then fell back to the picker label).
+        var id = Guid.NewGuid();
+        var analysis = new Entity("sprk_analysis");
+
+        await DataverseServiceClientImpl.PopulateAnalysisRegardingAsync(
+            analysis,
+            new AnalysisRegardingTarget("sprk_matter", id, "MAT-100"), // a matter picker's label is its NUMBER (SRFR-052)
+            (_, _) => Task.FromException<Entity?>(new TimeoutException("catalog timed out")),
+            (_, _, _, _) => Task.FromResult(new Entity("sprk_matter", id) { ["sprk_mattername"] = "Acme Holdings" }),
+            NullLogger.Instance,
+            CancellationToken.None);
+
+        analysis["sprk_regardingrecordname"].Should().Be("Acme Holdings");
+        analysis.Contains("sprk_regardingrecordnumber").Should().BeFalse();
+        analysis.Contains("sprk_regardingrecordtype").Should().BeFalse();
+        analysis["sprk_regardingmatter"].Should().BeOfType<EntityReference>();
+    }
+
+    [Fact]
+    public async Task PopulateAnalysisRegarding_ACatalogNamingAColumnTheRecordLacks_StillWritesTheRecordsName()
+    {
+        // Round 10 item 6: the combined read faults on the bad column; the name is read again on its own.
+        var id = Guid.NewGuid();
+        var analysis = new Entity("sprk_analysis");
+
+        await DataverseServiceClientImpl.PopulateAnalysisRegardingAsync(
+            analysis,
+            new AnalysisRegardingTarget("sprk_matter", id, "MAT-100"),
+            (_, _) => Task.FromResult<Entity?>(CatalogRow("sprk_nosuchnumber")),
+            (_, _, columns, _) => columns.Contains("sprk_nosuchnumber")
+                ? Task.FromException<Entity>(new InvalidOperationException(
+                    "'sprk_matter' entity doesn't contain attribute with Name = 'sprk_nosuchnumber'"))
+                : Task.FromResult(new Entity("sprk_matter", id) { ["sprk_mattername"] = "Acme Holdings" }),
+            NullLogger.Instance,
+            CancellationToken.None);
+
+        analysis["sprk_regardingrecordname"].Should().Be("Acme Holdings");
+        analysis.Contains("sprk_regardingrecordnumber").Should().BeFalse();
+        analysis.Contains("sprk_regardingrecordtype").Should().BeTrue();
+    }
+
+    private static Entity CatalogRow(string? numberField)
+    {
+        var row = new Entity("sprk_recordtype_ref", RecordTypeRefId) { ["sprk_recorddisplayname"] = "Matter" };
+        if (numberField is not null)
+            row["sprk_regardingrecordnumberfield"] = numberField;
+        return row;
     }
 }

@@ -194,6 +194,46 @@ export interface IHostAdapter {
   readDocumentStamp(): Promise<string | null>;
 
   /**
+   * Write the identity stamp into the document OPEN in the host, so the next save of the same document — from the
+   * pane or the ribbon, in this session or after the file is reopened — resolves it instead of colliding with its
+   * own record (spaarkeai-word-add-in-r1 task 089, UAT-9). The server stamps only the STORED copy (task 014).
+   *
+   * Only supported when {@link HostCapabilities.canWriteDocumentStamp} is `true`. Callers MUST check it first.
+   *
+   * Leaves the document with exactly ONE stamp part, carrying `documentId`:
+   * - a part already carrying `documentId` → nothing is written at all (no add, no delete) → `'unchanged'`;
+   * - otherwise every other part in the stamp namespace is deleted and, if none carried `documentId`, one is
+   *   added → `'written'`.
+   *
+   * Writing marks the document changed, so Word asks to save the local copy on close (accepted by the owner,
+   * 2026-10-03). A document opened from Spaarke already carries the server's stamp with the same id → no write.
+   *
+   * @param documentId The saved `sprk_document` id, canonical bare lowercase (ADR-044).
+   * @throws {HostAdapterError} `CAPABILITY_NOT_SUPPORTED` when the host cannot write the stamp; `UNKNOWN_ERROR`
+   * when `documentId` is not a canonical GUID or the host refuses the write. Callers treat every throw as
+   * non-fatal: the save itself has already succeeded.
+   */
+  writeDocumentStamp(documentId: string): Promise<'written' | 'unchanged'>;
+
+  /**
+   * Register a handler that fires when the open document's CONTENT changes (spaarkeai-word-add-in-r1
+   * task 094 — the owner's "Re-enable on document edits" rule). Only supported when
+   * {@link HostCapabilities.canDetectDocumentChanges} is `true`. Callers MUST check the capability
+   * flag before calling — matching the {@link getDocumentUrl} / {@link readDocumentStamp} convention.
+   *
+   * Resolves to an UNSUBSCRIBE function once registration completes; callers MUST call it on
+   * unmount (or when no longer interested) to remove the handler. The handler does not fire for a
+   * change THIS adapter itself made while writing the identity stamp ({@link writeDocumentStamp}) —
+   * that write touches a custom XML part, not the document body, so it is not expected to fire a
+   * paragraph event at all; the adapter additionally suppresses its own write window defensively.
+   *
+   * @param onChange Invoked (no arguments) on every qualifying content-change event.
+   * @returns A promise resolving to the unsubscribe function.
+   * @throws {HostAdapterError} with code `CAPABILITY_NOT_SUPPORTED` when the host does not support this capability.
+   */
+  registerDocumentChangeHandler(onChange: () => void): Promise<() => void>;
+
+  /**
    * Get the capabilities of this host adapter.
    *
    * Use this to determine what features are available before calling

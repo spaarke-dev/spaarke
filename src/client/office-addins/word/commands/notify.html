@@ -26,6 +26,20 @@
       .message.error {
         color: #a4262c;
       }
+      body.error {
+        flex-direction: column;
+      }
+      #dismiss {
+        display: none;
+        margin-top: 4px;
+        padding: 4px 16px;
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      body.error #dismiss {
+        display: inline-block;
+      }
     </style>
   </head>
   <body>
@@ -46,28 +60,47 @@
       projects/spaarkeai-word-add-in-r1/notes/037-manifest-change.md. Deferred to task 042's UAT,
       matching this project's established convention for anything only a live host can confirm.
     -->
+    <!--
+      Task 089 (UAT-9): an ERROR now says why — often the server's own reason — so it must stay readable. A success
+      still closes after 2.2 s; an error stays 8 s and has a Close button. The message is rendered with
+      textContent only (never parsed as HTML), so a server-supplied reason cannot inject markup.
+    -->
     <div id="message" class="message"></div>
+    <button id="dismiss" type="button">Close</button>
     <script>
       (function () {
+        var SUCCESS_CLOSE_MS = 2200;
+        var ERROR_CLOSE_MS = 8000;
+
         var params = new URLSearchParams(window.location.search);
         var message = params.get('message') || '';
         var status = params.get('status') || 'info';
+        var isError = status === 'error';
 
         var el = document.getElementById('message');
         el.textContent = message;
-        if (status === 'error') {
+        if (isError) {
           el.classList.add('error');
+          el.setAttribute('role', 'alert');
+          document.body.classList.add('error');
         }
 
-        // Best-effort auto-dismiss. `window.close()` on a window this add-in itself opened via
+        // Best-effort close. `window.close()` on a window this add-in itself opened via
         // displayDialogAsync is the standard self-closing pattern for a transient Office dialog.
-        setTimeout(function () {
+        function closeSelf() {
           try {
             window.close();
           } catch (e) {
             // Some hosts refuse a script-initiated close — the message stays visible; harmless.
           }
-        }, 2200);
+        }
+
+        var dismiss = document.getElementById('dismiss');
+        if (dismiss) {
+          dismiss.addEventListener('click', closeSelf);
+        }
+
+        setTimeout(closeSelf, isError ? ERROR_CLOSE_MS : SUCCESS_CLOSE_MS);
       })();
     </script>
   </body>

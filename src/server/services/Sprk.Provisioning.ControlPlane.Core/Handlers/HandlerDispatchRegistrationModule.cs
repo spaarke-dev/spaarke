@@ -63,7 +63,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 
@@ -107,13 +107,9 @@ public static class HandlerDispatchRegistrationModule
             HandlerIds.H3, (sp, _) => sp.GetRequiredService<H3EntraAppRegHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4, (sp, _) => sp.GetRequiredService<H4KvSecretsPopulationHandler>());
-        // Task 200: H4-shared (F19 automation) — sibling of H4; targets the
-        // SHARED KV via source-service SDK extraction.
-        services.AddKeyedScoped<IProvisioningHandler>(
-            HandlerIds.H4Shared, (sp, _) => sp.GetRequiredService<H4SharedKvSecretsPopulationHandler>());
         // Task 201: H4b (F20/F20a automation) — BulkAppSettings handler.
         // Thin wrapper around task 084's Configure-AppServiceSettings.generated.ps1
-        // (extended with per_env_settings). Runs AFTER H4 + H4-shared, BEFORE H9.
+        // (extended with per_env_settings). Runs AFTER H4, BEFORE H9. (H4-shared retired T226, 2026-09-30.)
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H4b, (sp, _) => sp.GetRequiredService<H4bBulkAppSettingsHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
@@ -123,7 +119,7 @@ public static class HandlerDispatchRegistrationModule
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H7, (sp, _) => sp.GetRequiredService<H7DataverseEnvVarValuesHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
-            HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerTypeHandler>());
+            HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H9, (sp, _) => sp.GetRequiredService<H9BffDeployHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

@@ -4,7 +4,8 @@
     <title>FR-02 client half: read the custom XML stamp in the pane and apply the identity precedence</title>
     <phase>1 Foundation</phase>
     <gate>014 complete — the server must be writing the stamp before the client can read one</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'not-started' while the index read done. Synced to completed: closed by 12a0b4258 (docs: close 051). -->
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.ts`/`.tsx` in the add-in's identity path, which decides whether a save becomes a new version or a new record. Tags include office-addins and save-flow.</rigor-reason>
     <model-tier>sonnet</model-tier>

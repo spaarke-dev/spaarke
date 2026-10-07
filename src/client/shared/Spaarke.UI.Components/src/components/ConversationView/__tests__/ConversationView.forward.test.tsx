@@ -274,7 +274,13 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     const dialog = await screen.findByRole('alertdialog', {}, { timeout: 4000 });
 
     // Forward mode header (EmailComposer renders "Forward" for mode === 'forward').
-    expect(within(dialog).getByRole('heading', { name: 'Forward' })).toBeInTheDocument();
+    // SprkModal (ADR-050) renders a custom header — a plain `<span>` wired via
+    // `aria-labelledby`, not a semantic heading (task 092, 2026-10-04; the
+    // `#713 shell re-base` migration to SprkModal on 2026-08-03 changed this
+    // dialog's header DOM without updating this pre-existing assertion).
+    // Assert the dialog's actual accessible-name contract instead of a
+    // `role="heading"` this shell deliberately does not render.
+    expect(dialog).toHaveAccessibleName('Forward');
 
     // Subject prefilled via deriveForwardState → dedupSubjectPrefix(..,'Fwd:').
     expect(within(dialog).getByRole('textbox', { name: 'Subject' })).toHaveValue('Fwd: Contract draft');
@@ -287,6 +293,12 @@ describe('ConversationView forward → SendEmailDialog forward mode (FR-08, ADR-
     // Attachment prefilled — the source attachment rides the forward (FR-08),
     // defaulted to included (deriveForwardState → selected:true). It renders in
     // the composer's attachment list, and its per-item "Attach" toggle is on.
+    //
+    // AttachmentList (task 092, 2026-10-04: "composer UAT round 9",
+    // 2026-07-24, added collapsible attachments defaulting to COLLAPSED —
+    // this test predates that change and never expanded the section before
+    // asserting. Expand it the way a real user would: click the header.
+    await userEvent.click(within(dialog).getByRole('button', { name: /^Attachments/ }));
     expect(within(dialog).getByText('contract.pdf')).toBeInTheDocument();
     expect(within(dialog).getByRole('checkbox', { name: 'Attach contract.pdf as a file' })).toBeChecked();
 

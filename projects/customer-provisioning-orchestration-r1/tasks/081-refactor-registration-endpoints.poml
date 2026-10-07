@@ -4,7 +4,7 @@
     <title>Refactor RegistrationEndpoints.cs lines 466/468/469 to use DataverseEnvironmentService (remove 4 [Obsolete] warnings)</title>
     <phase>E DemoExpirationService Migration</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api'; modifies BFF endpoint .cs file; R5 carry-over. Test-modifying if new tests added.</rigor-reason>
     <model-tier>sonnet</model-tier>

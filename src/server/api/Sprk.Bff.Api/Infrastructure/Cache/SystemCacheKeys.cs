@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
 /// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
-/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068, its justification in its own remarks; see
+/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068 and approved by the owner on review 2026-10-02, its
+/// justification in its own remarks; see
 /// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
 /// three-question justification).
 /// </para>
@@ -78,6 +79,12 @@ public static class SystemCacheKeys
     /// <c>{InstanceName}scheduler:lease:{jobId}</c>.
     /// Justification: a scheduled job runs for the whole BFF, not for a tenant; like <see cref="IdempotencyLock"/>
     /// the lock must be tenant-agnostic so any instance can take and release it.
+    /// <para>Second site, same key family (unified-access-control-r2 task 143, catalogued in r2): the No Access
+    /// enforcer's per-record removal lock, <c>Infrastructure/ExternalAccess/NoAccessShareEnforcer.cs</c>. Raw key:
+    /// <c>{InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}</c>. A keyed mutex over the same store, never
+    /// a job's dispatch key (no job id starts with <c>no-access-enforce:</c>); it serializes owner S5's "someone else keeps
+    /// access" check across instances, so it must be tenant-agnostic for the same reason. The reuse is a recorded §6.5
+    /// path-A exception to ADR-036 A1-7 (<c>projects/unified-access-control-r2/design.md</c> §9).</para>
     /// </summary>
     public const string SchedulerLease = "scheduler-lease";
 
@@ -97,6 +104,7 @@ public static class SystemCacheKeys
     /// independently on each instance and after every restart; (2) a tenant key would not help — the job's GUID is the
     /// unit, and every instance publishing for that job must share one counter; (3) without it a <c>Last-Event-ID</c>
     /// reconnect skips or repeats events.
+    /// Architecture review: approved by the owner, 2026-10-02.
     /// </summary>
     public const string JobStatusSequence = "job-status-sequence";
 

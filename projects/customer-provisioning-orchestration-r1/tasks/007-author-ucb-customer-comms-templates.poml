@@ -4,7 +4,7 @@
     <title>Author 6 U-CB customer-comms templates in docs/deployment/customer-comms/ (U-CB-1..U-CB-6)</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation-only template authoring. New markdown files; no code changes; no tests. Per root CLAUDE.md §8 rigor table, docs-only = MINIMAL. Owner Assumption: text-only markdown, no HTML/branded email.</rigor-reason>
     <model-tier>sonnet</model-tier>

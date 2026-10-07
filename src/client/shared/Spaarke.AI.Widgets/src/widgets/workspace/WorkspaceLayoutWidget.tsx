@@ -17,8 +17,9 @@
  *   This widget no longer imports `LegalWorkspaceApp` directly. It accepts an
  *   optional injected `renderer?: WorkspaceRenderer` prop OR consults the
  *   default-renderer slot exposed by `@spaarke/ui-components`. The host
- *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`
- *   at bootstrap, so default behaviour is unchanged from pre-C-4. Future
+ *   (SpaarkeAi `main.tsx`) calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`
+ *   at bootstrap — a wrapper around `LegalWorkspaceApp` that injects SpaarkeAi's
+ *   section registry + a tab-scoped ComposeLaunchContext. Future
  *   hosts can register an alternate renderer without modifying this widget.
  *
  * Embedded mode:
@@ -46,7 +47,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { getDefaultWorkspaceRenderer, type WorkspaceRenderer } from '@spaarke/ui-components';
+import { getDefaultWorkspaceRenderer, cleanGuid, getXrm, type WorkspaceRenderer } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -171,54 +172,33 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Xrm provider (frame-walk) — mirrors LegalWorkspace's xrmProvider so the
-// embedded app has access to the same Xrm.WebApi reference it would use
-// standalone. Kept inline to avoid pulling LegalWorkspace's xrmProvider
-// (which lives outside the shared barrel) into the widget bundle directly.
+// Xrm provider — resolves `Xrm.WebApi` / the current user id via the shared
+// cross-frame `getXrm()` walker (task 081 / C-8 — this previously hand-rolled
+// its own window/parent/top frame walk plus a cache-write side effect onto
+// `window.Xrm`; one of six duplicates converged onto `xrmContext.ts:306`,
+// which has no such side effect and is not relied on here either).
 // ---------------------------------------------------------------------------
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-function locateXrm(): any | null {
-  // 1. Current window
-  if (typeof window !== 'undefined' && (window as any).Xrm?.WebApi) {
-    return (window as any).Xrm;
-  }
-  // 2. Parent window (iframe inside Custom Page)
-  try {
-    const p = (window.parent as any)?.Xrm;
-    if (p?.WebApi) {
-      (window as any).Xrm = p;
-      return p;
-    }
-  } catch {
-    /* cross-origin */
-  }
-  // 3. Top window
-  try {
-    const t = (window.top as any)?.Xrm;
-    if (t?.WebApi) {
-      (window as any).Xrm = t;
-      return t;
-    }
-  } catch {
-    /* cross-origin */
-  }
-  return null;
-}
-
 function getWebApiSafe(): any | null {
-  return locateXrm()?.WebApi ?? null;
+  return getXrm()?.WebApi ?? null;
 }
 
 function getUserIdSafe(): string {
-  const xrm = locateXrm();
+  // getGlobalContext, else the legacy Xrm.userSettings shape (both per frame).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('utility') ?? getXrm((x: any) => !!x.userSettings?.userId);
   if (xrm?.Utility?.getGlobalContext) {
-    const ctx = xrm.Utility.getGlobalContext();
+    const ctx = xrm.Utility.getGlobalContext() as any;
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';
-    return String(raw).replace(/[{}]/g, '');
+    return cleanGuid(String(raw));
   }
-  if (xrm?.userSettings?.userId) {
-    return String(xrm.userSettings.userId).replace(/[{}]/g, '');
+  // Defensive fallback for a non-standard Xrm shape (userSettings directly on
+  // Xrm rather than under Utility.getGlobalContext()) — not part of the typed
+  // `XrmContext` contract, kept verbatim from the pre-081 implementation.
+  const legacyUserSettings = (xrm as any)?.userSettings?.userId;
+  if (legacyUserSettings) {
+    return cleanGuid(String(legacyUserSettings));
   }
   return '';
 }
@@ -254,7 +234,7 @@ export const WorkspaceLayoutWidget: React.FC<
 
   // Resolve the renderer: injected prop wins; otherwise consult the default slot.
   // The slot is populated by the host at bootstrap (e.g. SpaarkeAi `main.tsx`
-  // calls `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`).
+  // calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)`, a LegalWorkspaceApp wrapper).
   const Renderer: WorkspaceRenderer | null = React.useMemo(() => renderer ?? getDefaultWorkspaceRenderer(), [renderer]);
 
   // Dev fallback: when Xrm isn't available (e.g. `npm run dev` in Vite),

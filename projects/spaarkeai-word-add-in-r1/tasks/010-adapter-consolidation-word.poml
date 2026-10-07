@@ -169,7 +169,7 @@
 
     BYTE-IDENTICALITY PROVEN BY EXECUTION (not asserted): a throwaway differential harness ran BOTH
     implementations in one process over the same byte source while the reference still existed. 36/36 pass.
-    26 real .docx from the corpus (all < 64 KB, so all single-slice) PLUS 7 synthetic PK-prefixed multi-slice
+    26 real .docx from the corpus (all &lt; 64 KB, so all single-slice) PLUS 7 synthetic PK-prefixed multi-slice
     payloads (2, 5, 64, 65 slices; boundary +/-1) — the corpus alone would have left multi-slice assembly,
     the actual risk, untested. Every case: Buffer.equals(reference)=true, equal to source bytes, SHA-256
     equal, head 50 4b 03 04, identical ascending slice order, identical getFileAsync args, handle closed once.

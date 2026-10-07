@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -13,6 +13,7 @@ import {
 import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import { DOCUMENT_SUMMARY_STATUS_MESSAGES } from '../services/documentProfileChoices';
 import { useDocumentProfile } from '../hooks/useDocumentProfile';
+import { ResizeHandle, type ResizeKeyAction } from './ResizeHandle';
 
 /**
  * DocumentProfileSection.tsx — spaarkeai-word-add-in-r1 task 021 (FR-07) + task 022 (FR-08).
@@ -38,6 +39,36 @@ import { useDocumentProfile } from '../hooks/useDocumentProfile';
  * Generate Profile button's default/busy/disabled states resolve colors from Fluent's Button
  * appearance + `tokens.*` (the empty-value hint text) the same way.
  */
+
+/** Task 105 (UAT round 7 item 4): the Summary viewport's height, adjustable with the shared ResizeHandle. */
+export const SUMMARY_DEFAULT_HEIGHT_PX = 220;
+export const SUMMARY_MIN_HEIGHT_PX = 80;
+export const SUMMARY_MAX_HEIGHT_PX = 640;
+export const SUMMARY_KEY_STEP_PX = 24;
+export const SUMMARY_STORAGE_KEY = 'sprk.office-addin.profile.summaryHeight';
+
+function clampHeight(value: number): number {
+  return Math.min(SUMMARY_MAX_HEIGHT_PX, Math.max(SUMMARY_MIN_HEIGHT_PX, value));
+}
+
+/** The remembered height, or undefined when never adjusted / storage unavailable (the default max-height then applies). */
+function readStoredHeight(): number | undefined {
+  try {
+    const raw = window.localStorage.getItem(SUMMARY_STORAGE_KEY);
+    const parsed = raw === null ? NaN : Number(raw);
+    return Number.isFinite(parsed) ? clampHeight(parsed) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function storeHeight(height: number): void {
+  try {
+    window.localStorage.setItem(SUMMARY_STORAGE_KEY, String(height));
+  } catch {
+    /* storage unavailable — the height simply is not remembered */
+  }
+}
 
 const useStyles = makeStyles({
   section: {
@@ -77,7 +108,7 @@ const useStyles = makeStyles({
   },
   fieldValue: {
     whiteSpace: 'pre-wrap',
-    maxHeight: '220px',
+    maxHeight: `${SUMMARY_DEFAULT_HEIGHT_PX}px`,
     overflowY: 'auto',
   },
   keywordList: {
@@ -116,6 +147,21 @@ export interface DocumentProfileSectionProps {
    * is a no-op — this section behaves exactly as before task 027 when no signal is threaded in.
    */
   refreshSignal?: number;
+  /**
+   * Task 088 (UAT-6): called once each time a Generate Profile request is ACCEPTED by the server (202 — the
+   * profile job is queued; the hook does not poll for the job's end, #1090). `SaveFlow` uses it to turn its
+   * gray "Saved" button back into an enabled "Save" (task 094). Not called when the request is refused or fails.
+   */
+  onProfileGenerated?: () => void;
+  /**
+   * Task 099 (owner UAT round 5, item 6): `'refresh'` is the post-save view — the section's one action is a
+   * **Refresh** button (accessible name "Refresh") that re-reads the saved document's profile (and calls
+   * {@link onRefresh} so the host can re-read the document's name and the record it is filed to). There is no
+   * Generate Profile there. Default `'generate'` is the pre-save behaviour, unchanged.
+   */
+  mode?: 'generate' | 'refresh';
+  /** Task 099: called when Refresh is pressed, after this section starts its own profile re-read. */
+  onRefresh?: () => void;
 }
 
 /** Splits the comma-separated `sprk_filekeywords` value into individual chip labels. */
@@ -126,9 +172,51 @@ function splitKeywords(keywords: string): string[] {
     .filter(k => k.length > 0);
 }
 
-export function DocumentProfileSection({ documentId, refreshSignal }: DocumentProfileSectionProps): React.ReactElement {
+export function DocumentProfileSection({
+  documentId,
+  refreshSignal,
+  onProfileGenerated,
+  mode = 'generate',
+  onRefresh,
+}: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
   const { outcome, generateProfile, isGenerating, generateError, refetch } = useDocumentProfile(documentId);
+
+  // Summary viewport height. `undefined` = never adjusted: the viewport keeps its content-sized default
+  // (max-height). Once adjusted it is a fixed height, remembered per viewer.
+  const [summaryHeight, setSummaryHeight] = useState<number | undefined>(readStoredHeight);
+  const dragOrigin = useRef<{ y: number; height: number } | null>(null);
+  const summaryRef = useRef<HTMLDivElement>(null);
+  const commitHeight = useCallback((next: number) => {
+    const bounded = clampHeight(next);
+    setSummaryHeight(bounded);
+    storeHeight(bounded);
+  }, []);
+  const currentSummaryHeight = (): number =>
+    summaryHeight ?? (Math.round(summaryRef.current?.getBoundingClientRect().height ?? 0) || SUMMARY_DEFAULT_HEIGHT_PX);
+  const onSummaryDragStart = (clientY: number) => {
+    dragOrigin.current = { y: clientY, height: currentSummaryHeight() };
+  };
+  const onSummaryDrag = (clientY: number) => {
+    const origin = dragOrigin.current;
+    if (origin) commitHeight(origin.height + (clientY - origin.y));
+  };
+  const onSummaryKey = (action: ResizeKeyAction) => {
+    switch (action) {
+      case 'decrease':
+        commitHeight(currentSummaryHeight() - SUMMARY_KEY_STEP_PX);
+        break;
+      case 'increase':
+        commitHeight(currentSummaryHeight() + SUMMARY_KEY_STEP_PX);
+        break;
+      case 'min':
+        commitHeight(SUMMARY_MIN_HEIGHT_PX);
+        break;
+      case 'max':
+        commitHeight(SUMMARY_MAX_HEIGHT_PX);
+        break;
+    }
+  };
 
   // task 027 / FR-10 return path: re-read on every CHANGE of refreshSignal past the initial mount
   // (`useDocumentProfile`'s own documentId-keyed effect already covers first load — calling
@@ -170,17 +258,35 @@ export function DocumentProfileSection({ documentId, refreshSignal }: DocumentPr
       </div>
       <div className={styles.card}>{renderBody()}</div>
       <div className={styles.actions}>
-        <Button
-          appearance="secondary"
-          size="small"
-          icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
-          disabled={isDisabled}
-          onClick={() => {
-            void generateProfile();
-          }}
-        >
-          {isGenerating ? 'Generating…' : 'Generate Profile'}
-        </Button>
+        {mode === 'refresh' ? (
+          <Button
+            appearance="secondary"
+            size="small"
+            icon={outcome.kind === 'loading' ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+            // disabledFocusable: the button keeps focus while the re-read runs (ADR-021 focus management).
+            disabledFocusable={!documentId || outcome.kind === 'loading'}
+            onClick={() => {
+              refetch();
+              onRefresh?.();
+            }}
+          >
+            Refresh
+          </Button>
+        ) : (
+          <Button
+            appearance="secondary"
+            size="small"
+            icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+            disabled={isDisabled}
+            onClick={() => {
+              void generateProfile().then(accepted => {
+                if (accepted) onProfileGenerated?.();
+              });
+            }}
+          >
+            {isGenerating ? 'Generating…' : 'Generate Profile'}
+          </Button>
+        )}
         {!documentId && (
           <Text size={200} className={styles.disabledReason}>
             This document is not yet in Spaarke. Save it first to generate a profile.
@@ -251,7 +357,28 @@ export function DocumentProfileSection({ documentId, refreshSignal }: DocumentPr
             <div className={styles.fieldContainer}>
               <Text className={styles.fieldLabel}>Summary</Text>
               {outcome.summary ? (
-                <Body1 className={styles.fieldValue}>{outcome.summary}</Body1>
+                <>
+                  <div
+                    ref={summaryRef}
+                    className={styles.fieldValue}
+                    style={
+                      summaryHeight !== undefined ? { maxHeight: 'none', height: `${summaryHeight}px` } : undefined
+                    }
+                    data-testid="profile-summary"
+                  >
+                    <Body1>{outcome.summary}</Body1>
+                  </div>
+                  <ResizeHandle
+                    label="Resize summary"
+                    valueNow={currentSummaryHeight()}
+                    valueMin={SUMMARY_MIN_HEIGHT_PX}
+                    valueMax={SUMMARY_MAX_HEIGHT_PX}
+                    onDragStart={onSummaryDragStart}
+                    onDrag={onSummaryDrag}
+                    onKeyAction={onSummaryKey}
+                    testId="profile-summary-handle"
+                  />
+                </>
               ) : (
                 <Text size={200} className={styles.emptyValue}>
                   No summary generated.

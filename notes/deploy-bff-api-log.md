@@ -127,9 +127,10 @@ curl -s -o /dev/null -w "%{http_code}" -H "$AUTH" -X POST "$BASE_URL/api/ai/anal
   -H "Content-Type: application/json" -d '{}'
 # Expected: 200 or 400 (validates input)
 
-# Capability refresh webhook (shared-secret auth, not bearer)
-curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/api/ai/capabilities/refresh"
-# Expected: 401 (no secret provided — confirms endpoint is registered and protected)
+# Capability refresh webhook — REMOVED from the BFF after this runbook was written (no route matches
+# /api/ai/capabilities/refresh in src/ as of 2026-10-04). Do not use an anonymous 401 as proof of a route either:
+# since unified-access-control-r2 task 167 the BFF's authorization FallbackPolicy answers 401 for a request that
+# matches NO route. Prove registration with a bearer ("$AUTH" above): anything but 404 means registered.
 ```
 
 ### 3. Safety Service Connectivity Check

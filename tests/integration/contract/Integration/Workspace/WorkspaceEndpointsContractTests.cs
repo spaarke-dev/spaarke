@@ -3,6 +3,10 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Integration.Workspace;
@@ -684,11 +688,31 @@ public class WorkspaceEndpointsContractTests : IClassFixture<WorkspaceTestFixtur
     // POST /api/workspace/ai/summary
     // =========================================================================
 
+    /// <summary>
+    /// Task 163: the summary route now asks Dataverse, AS THE CALLER, for Read on the named record before
+    /// the service reads it. These cases cover the authorized caller, so this client's host answers "Read"
+    /// for every record (the deny paths live in WorkspaceAiSummaryAuthorizationContractTests). Cases that
+    /// are refused before any rights query (empty type / id, unsupported type) keep the shared client.
+    /// </summary>
+    private HttpClient CreateSummaryReaderClient()
+    {
+        var reader = _fixture.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
+            services.AddSingleton<Spaarke.Dataverse.IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+        }));
+
+        var client = reader.CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", WorkspaceTestConstants.TestBearerToken);
+        return client;
+    }
+
     [Fact]
     public async Task AiSummary_ValidRequest_Returns200WithAiSummaryShape()
     {
         // Arrange
-        using var client = _fixture.CreateAuthenticatedClient();
+        using var client = CreateSummaryReaderClient();
         var entityId = Guid.NewGuid();
 
         var request = new
@@ -783,7 +807,7 @@ public class WorkspaceEndpointsContractTests : IClassFixture<WorkspaceTestFixtur
     public async Task AiSummary_ContextTooLong_Returns400()
     {
         // Arrange
-        using var client = _fixture.CreateAuthenticatedClient();
+        using var client = CreateSummaryReaderClient();
 
         var request = new
         {
@@ -835,7 +859,7 @@ public class WorkspaceEndpointsContractTests : IClassFixture<WorkspaceTestFixtur
     public async Task AiSummary_SupportedEntityTypes_AllReturn200()
     {
         // Arrange — verify all four supported entity types are accepted
-        using var client = _fixture.CreateAuthenticatedClient();
+        using var client = CreateSummaryReaderClient();
 
         var supportedTypes = new[] { "sprk_event", "sprk_matter", "sprk_project", "sprk_document" };
 

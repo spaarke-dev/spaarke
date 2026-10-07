@@ -39,7 +39,9 @@ public sealed class EmailDraftToolHandlerPerItemToolsTests : TypedToolHandlerTes
     private EmailDraftToolHandler CreateHandler() =>
         new(_dataverse.Object, _emailDraftAi.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            CreateLogger<EmailDraftToolHandler>());
+            CreateLogger<EmailDraftToolHandler>(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Moq.Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(Moq.MockBehavior.Strict).Object);
 
     private static AnalysisTool BuildTool(string method, string name) =>
         BuildAnalysisTool(

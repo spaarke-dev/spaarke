@@ -63,7 +63,7 @@ import {
   SearchRegular,
   ArrowUndo16Regular,
 } from '@fluentui/react-icons';
-import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
+import { FormModal, getXrmForPicker, cleanGuid } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
@@ -114,9 +114,12 @@ interface ReconcileXrm {
     navigateTo?: (pageInput: Record<string, unknown>, navOptions?: Record<string, unknown>) => Promise<unknown>;
   };
 }
-/** Cast the shared picker bridge to the broader (metadata + navigation) surface. Undefined on non-MDA. */
-function getReconcileXrm(): ReconcileXrm | undefined {
-  return getXrmForPicker() as ReconcileXrm | undefined;
+/**
+ * The shared picker bridge, asking for the capability the caller uses (task 081
+ * round 5, R4-3): 'lookupObjects' / 'metadata' / 'navigation'. Undefined on non-MDA.
+ */
+function getReconcileXrm(capability: 'lookupObjects' | 'metadata' | 'navigation'): ReconcileXrm | undefined {
+  return getXrmForPicker(capability) as ReconcileXrm | undefined;
 }
 
 /** Resolved attribute metadata for a proposal's target field (best-effort; all fields optional). */
@@ -153,11 +156,6 @@ function parseFieldMeta(md: XrmEntityMetadata | undefined, field: string): Field
     attr?.displayName?.userLocalizedLabel?.label ??
     undefined;
   return { type, options, targets, displayName };
-}
-
-/** Normalize a Dataverse lookup id (strip braces, lowercase) — mirrors EmailConnectionsReview. */
-function normalizeLookupId(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
 }
 
 /** Map a resolved metadata AttributeType (or the queue-feed fieldType hint) to a control kind. */
@@ -405,7 +403,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   // still honored from the fieldType hint).
   React.useEffect(() => {
     let cancelled = false;
-    const xrmUtil = getReconcileXrm()?.Utility;
+    const xrmUtil = getReconcileXrm('metadata')?.Utility;
     if (!xrmUtil?.getEntityMetadata || proposals.length === 0) {
       setFieldMeta({});
       return;
@@ -433,7 +431,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
     async (p: FieldUpdateProposal): Promise<void> => {
       const targets = fieldMeta[p.reviewLogId]?.targets;
       try {
-        const xrm = getReconcileXrm();
+        const xrm = getReconcileXrm('lookupObjects');
         if (!xrm?.Utility?.lookupObjects || !targets?.length) return; // non-MDA or unknown target — no-op
         const results = await xrm.Utility.lookupObjects({
           entityTypes: targets,
@@ -442,7 +440,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
         });
         if (!results || results.length === 0) return; // cancelled
         const picked = results[0];
-        setEdited(prev => ({ ...prev, [p.reviewLogId]: normalizeLookupId(picked.id) }));
+        setEdited(prev => ({ ...prev, [p.reviewLogId]: cleanGuid(picked.id) }));
         setPickedNames(prev => ({ ...prev, [p.reviewLogId]: picked.name }));
       } catch (err) {
         setRowError(prev => ({
@@ -458,7 +456,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   // may have changed). Guarded no-op on non-MDA/dev.
   const openRecordForm = React.useCallback(async (): Promise<void> => {
     if (!regarding?.entityType || !regarding?.recordId) return;
-    const nav = getReconcileXrm()?.Navigation;
+    const nav = getReconcileXrm('navigation')?.Navigation;
     if (!nav?.navigateTo) return; // non-MDA/dev — no-op
     try {
       await nav.navigateTo(

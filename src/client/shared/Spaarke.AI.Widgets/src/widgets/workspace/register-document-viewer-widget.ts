@@ -18,7 +18,6 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
-import { documentViewerWidgetVisibility } from './pillar9-visibility';
 // Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022).
 import type { WidgetAssistantContract, AssistantContractCard } from '../../types/shared';
 
@@ -130,12 +129,7 @@ registerWorkspaceWidget(
   () =>
     import('./DocumentViewerWidget') as Promise<{
       default: import('../../types/widget-types').WorkspaceWidgetComponent;
-    }>,
-  // Pillar 9 visibility opt-in (task 073, D-C-28). DocumentViewer category:
-  // exposes file metadata + selection state. selectionText capped at 200
-  // chars per FR-57 acceptance. See `pillar9-visibility.ts` for the
-  // derivation + ADR-015 privacy rationale.
-  documentViewerWidgetVisibility
+    }>
 );
 
 /**

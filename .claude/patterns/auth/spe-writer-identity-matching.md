@@ -1,5 +1,7 @@
 # Pattern — SPE Writer-Identity Matching (post-upload indexing dispatch)
 
+> **SUPERSEDED 2026-10-06 (unified-access-control-r2 task 171, owner rounds 69/70).** The BFF managed identity now holds `full` on container type 8a6ce34c and can read files that users uploaded (the task-166 migration proved this). Every record-backed SPE byte path runs app-only, after a Dataverse decision and the document-pointer check (`RecordContainerResolver.IsDocumentPointerContainerAllowedAsync`). Choose the identity by whether a `sprk_document` (or record) stands behind the bytes, not by who wrote the file. If one exists, the app-only route or a Service Bus job is correct. If not (staging, Compose items with no row), stay as the user. `SpeBrokerOnlyByteIdentityGuardTests` pins the allowed user-identity callers. The rest of this file is historical.
+
 > **Last Reviewed**: 2026-06-08
 > **Status**: Verified (post Phase-3a UAT incident)
 > **Loads**: when adding any background processing that reads SPE files, OR when wiring post-upload pipelines (indexing, analysis, classification, embedding), OR diagnosing "Access denied" on SPE file download from a Service Bus job handler.
@@ -22,7 +24,7 @@ The Spaarke MI is intentionally NOT registered as a guest app on the SPE contain
 |---|---|
 | **User (OBO)** — wizard upload, PCF/Code Page upload, SprkChat persist | **Sync OBO inline** via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)`. The user is on the file's ACL; the same request scope is the only window where the user's OBO token is alive. |
 | **MI (app-only)** — Office Add-in finalize, Email-to-Document, post-analysis re-index | **Async Service Bus** via `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` → `RagIndexingJobHandler` (runs under MI). MI wrote the file, MI can read it. |
-| **User (OBO), read later under MI** | ❌ **NOT ALLOWED — will 403.** The 2026-06-08 Phase 3a UAT incident proved this empirically. |
+| **User (OBO), read later under MI** | *(historical — superseded by task 171: the MI now reads user-uploaded files)* ❌ **NOT ALLOWED — will 403.** The 2026-06-08 Phase 3a UAT incident proved this empirically. |
 
 ## Failure-mode quick lookup
 

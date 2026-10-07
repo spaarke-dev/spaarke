@@ -4,9 +4,14 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -15,11 +20,6 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
-using Sprk.Bff.Api.Infrastructure.Errors;
-using Spaarke.Dataverse;
-using Spaarke.Core.Auth;
-using Sprk.Bff.Api.Infrastructure.Auth;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -911,6 +911,8 @@ public static class ChatDocumentEndpoints
         ChatSessionManager sessionManager,
         IAuthorizationService authorizationService,
         SessionFileBlobStore durableFileStore,
+        // uac-r2 task 166 r1 (round 21 item 1b): the pointer's container is verified before the app-only download.
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -1009,6 +1011,21 @@ public static class ChatDocumentEndpoints
                 "Archive ingest denied: caller {UserId} lacks read access to document {DocumentId} (session {SessionId}).",
                 callerUserId, document.Id, sessionId);
             return ProblemDetailsHelper.Forbidden(authz.ReasonCode);
+        }
+
+        // 3b. uac-r2 task 166 r1 (owner round 21 item 1b): the download below follows the row's pointer AS THE
+        //     APPLICATION, so the pointer must name a container this document may use — refused before any read.
+        if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(
+                document.Id, document.GraphDriveId, document.GraphItemId, ct))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Document storage could not be verified",
+                detail: "This email archive's file is not in a storage container its record may use, so it is not read.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver.DocumentStorageUnverifiedCode,
+                });
         }
 
         // 4. Download the raw .eml via the facade (app-only, ADR-007 — no GraphServiceClient injection).
@@ -1141,7 +1158,7 @@ public static class ChatDocumentEndpoints
     ///    ChatHostContext or configuration fallback". <see cref="ResolveContainerId"/> takes a ChatSession
     ///    and never reads it — there is no per-entity container decision on this path, which is why the
     ///    sink is classified ServerDerivedConfig in SpeWriteSinkContainerProvenanceGuardTests.)
-    /// 5. Upload to SPE via SpeFileStore.UploadSmallAsUserAsync (ADR-007)
+    /// 5. Upload to SPE via SpeFileStore.UploadSmallToStagingAsUserAsync (ADR-007)
     /// 6. Store idempotency marker with SPE metadata
     /// 7. Return 201 Created with SPE file metadata
     ///
@@ -1287,7 +1304,7 @@ public static class ChatDocumentEndpoints
             // is correct — those are not paths, and the response should echo what the caller asked for.
             var uploadPath = SpeUploadPath.SanitizeFileName(filename);
 
-            var uploadResult = await speFileStore.UploadSmallAsUserAsync(
+            var uploadResult = await speFileStore.UploadSmallToStagingAsUserAsync(
                 httpContext,
                 driveId,
                 uploadPath,

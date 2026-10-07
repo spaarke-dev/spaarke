@@ -24,7 +24,7 @@ import {
   DismissRegular,
   SearchRegular,
 } from "@fluentui/react-icons";
-import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, cleanGuid, getXrm } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -244,8 +244,9 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
   // Xrm Lookup dialog for selecting a Document record
   const handleOpenLookup = React.useCallback(async () => {
     try {
+      // Shared cross-frame walker (task 081 / C-8), nearest frame with lookupObjects.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+      const xrm: any = getXrm("lookupObjects");
       if (!xrm?.Utility?.lookupObjects) {
         setError("Xrm lookup is not available in this context");
         return;
@@ -257,7 +258,7 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
       if (results && results.length > 0) {
         const record = results[0];
         handleRecordSelected(
-          record.id.replace(/[{}]/g, ""),
+          cleanGuid(record.id),
           record.name || "Selected Document"
         );
       }
@@ -364,8 +365,9 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
       }
 
       // Open DocumentRelationshipViewer with the documentId
+      // Shared cross-frame walker (task 081 / C-8), nearest frame that can navigateTo.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+      const xrm: any = getXrm("navigation");
       if (xrm?.Navigation?.navigateTo) {
         // Resolve theme for viewer
         const themeParam =

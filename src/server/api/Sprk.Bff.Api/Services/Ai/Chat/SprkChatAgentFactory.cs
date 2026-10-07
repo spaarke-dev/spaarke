@@ -1502,10 +1502,11 @@ public class SprkChatAgentFactory
     /// <see cref="TryDeriveVisibleState"/> returns non-null for its widget data. Tabs
     /// whose <c>VisibleToAssistant</c> is false OR whose widget data lacks renderable
     /// visible state (e.g., Summary with no Tldr and empty Body) are filtered OUT.
-    /// This is the BFF-side enforcement of Pillar 9's per-widget
-    /// <c>getAgentVisibleState()</c> contract — server derives FR-57 shapes directly
-    /// from the typed <see cref="WorkspaceTabWidgetData"/> polymorphic union so the
-    /// closed 4-variant contract is structurally guaranteed.
+    /// This is the SINGLE enforcement point of Pillar 9's agent-visibility contract — the
+    /// server derives FR-57 shapes directly from the typed <see cref="WorkspaceTabWidgetData"/>
+    /// polymorphic union (via <see cref="TryDeriveVisibleState"/>) so the closed-union
+    /// contract is structurally guaranteed. There is no client-side derivation (the former
+    /// client copy was deleted 2026-10-03, reuse audit C-21).
     /// </para>
     /// <para>
     /// <b>FR-57 shapes per widget category</b>:
@@ -1524,8 +1525,8 @@ public class SprkChatAgentFactory
     /// <b>ADR-015 governance</b>: block carries the FR-57 deterministic fields ONLY.
     /// NEVER full widget bodies, NEVER raw user message text from prior turns. The
     /// Summary body is explicitly omitted; only the TL;DR + edit flag participate.
-    /// DocumentViewer.selectionText is content-bearing but capped at 200 chars per the
-    /// frontend contract (task 073) and the spec's payload-minimization principle.
+    /// DocumentViewer.selectionText is content-bearing but capped at 200 chars
+    /// (<see cref="SelectionTextMaxChars"/>) per the spec's payload-minimization principle.
     /// </para>
     /// <para>
     /// <b>NFR-10 budget</b>: each per-tab block is incrementally reserved against the
@@ -1708,9 +1709,9 @@ public class SprkChatAgentFactory
 
     /// <summary>
     /// R6 Task 074 (Pillar 9 / FR-57) — server-side derivation of the agent-visible state
-    /// shape from a tab's typed <see cref="WorkspaceTabWidgetData"/>. Mirrors the frontend
-    /// per-widget <c>getAgentVisibleState()</c> impls (task 073) so the BFF enforces the
-    /// FR-57 contract structurally, not by trusting client serialization.
+    /// shape from a tab's typed <see cref="WorkspaceTabWidgetData"/>. This is the single
+    /// source of the agent-visible shape — the BFF enforces the FR-57 contract structurally,
+    /// never by trusting a client serialization (no client-side derivation exists).
     /// </summary>
     /// <returns>
     /// A typed <see cref="WorkspaceTabVisibleState"/> instance when the widget has
@@ -1750,8 +1751,7 @@ public class SprkChatAgentFactory
     /// workspace layout). MUST match the client's <c>WorkspacePane.tsx</c> dispatch calls
     /// (<c>widgetType: 'workspace'</c>, <c>widgetData: {{ layoutId, layoutName }}</c> — see
     /// e.g. the auto-install and pinned-workspace-reopen effects). Layout tabs are
-    /// conceptually Dashboard-category (LegalWorkspaceApp embedded mode; mirrors the
-    /// client's <c>dashboardWidgetVisibility</c> derivation), so they project onto the
+    /// conceptually Dashboard-category (LegalWorkspaceApp embedded mode), so they project onto the
     /// existing <see cref="WorkspaceTabVisibleState.Dashboard"/> variant — see the contract
     /// note on <see cref="DeriveWorkspaceLayoutVisibleState"/>.
     /// </summary>
@@ -2277,7 +2277,8 @@ public class SprkChatAgentFactory
                 speFileStore,
                 textExtractor,
                 openAiClient,
-                loggerFactory.CreateLogger<DocumentContextService>());
+                loggerFactory.CreateLogger<DocumentContextService>(),
+                serviceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>());
 
             // Multi-document mode: primary + additional documents share the 30K budget
             if (additionalDocumentIds is { Count: > 0 })

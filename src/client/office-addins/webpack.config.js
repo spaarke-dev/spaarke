@@ -43,6 +43,18 @@ const ENV_CONFIG = {
   // (email-communication-solution-r4 task 072 / FR-25). Config-driven, no
   // hardcoded org — when unset, Quick Create degrades to a no-op.
   ORG_URL: process.env.ORG_URL || '',
+  // Optional: the unique name of the Spaarke model-driven app every record link opens in
+  // (spaarkeai-word-add-in-r1 task 088 / UAT-1 — `main.aspx?appname=…`). A link with no app opens in the
+  // user's DEFAULT app, which may not be Spaarke's. The unique name travels with the solution, so it is the
+  // same in every environment; a customer whose app has another name changes this one setting. UNSET →
+  // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
+  SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
+  // Optional: switches Word's Email tab (task 096) on. Default OFF in code; only the exact string "true" turns
+  // it on. The deploy workflow (`.github/workflows/deploy-office-addins.yml`) sets it to "true" since task 097
+  // (2026-10-06): `/api/communications/send` now authorizes every attachment and association as the caller
+  // (unified-access-control-r2 task 161, on master via #1312). A local or other build without the setting
+  // keeps the tab off.
+  ADDIN_EMAIL_TAB_ENABLED: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true' ? 'true' : 'false',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -68,11 +80,15 @@ const ENV_CONFIG = {
  * ids are read from the XML files below so the `alternates.hide` entries can never drift from what is registered.
  *
  * Bump UNIFIED_PACKAGE_VERSION (3-part) on every package change — the admin center rejects a same-version update.
+ * It is also the version the Word pane's footer shows (`process.env.ADDIN_PACKAGE_VERSION`, task 089), so what the
+ * user sees is what the admin uploaded.
+ *
+ * 1.1.1 (task 089, UAT-10): the Word ribbon's Share is replaced by "Open Spaarke".
  */
 const UNIFIED_PACKAGE = {
   APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
   TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
-  VERSION: '1.1.0',
+  VERSION: '1.1.1',
 };
 
 /** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
@@ -204,10 +220,48 @@ module.exports = async (env, options) => {
           __dirname,
           '../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
         ),
+        // Task 096 (owner 2026-10-04: "use our shared UI components so it looks consistent"): the
+        // Word pane's Email tab mounts the SAME compose engine the Spaarke email page mounts
+        // (`EmailComposer`), through its pane wrapper `SendEmailPane` (ADR-045: every send UX goes
+        // through a thin wrapper over the one engine). Exact ($) match to the WRAPPER FILE only —
+        // never the `@spaarke/ui-components` barrel, which would pull in the library's Xrm-bound
+        // components (the ADR-012 Path A reason this package does not consume the barrel). The
+        // wrapper's import closure (22 files) has no Xrm/host dependency; its third-party imports
+        // (react, Fluent v9, lexical) resolve from THIS package's node_modules — see the first rule
+        // under `module.rules`.
+        // Task 099 (ADR-012 amended 2026-10-05 / ADR-044): the ONE shared `cleanGuid` (`utils/guid.ts` — a pure
+        // module, zero imports), by exact alias — replaces this package's former local copy.
+        '@spaarke/ui-components/guid$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/utils/guid.ts'
+        ),
+        '@spaarke/ui-components/send-email-pane$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
+        ),
+        // Task 100 (owner decision C, ADR-012 amended 2026-10-05): the "+ New" form's Assigned To picker is the
+        // shared host-agnostic `LookupField` (`onSearch` injected; imports Fluent, react-icons, LookupTypes and the
+        // shared thin scrollbar — no Xrm). Exact ($) match to the component FILE, never the barrel.
+        '@spaarke/ui-components/lookup-field$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx'
+        ),
       },
     },
     module: {
       rules: [
+        {
+          // Task 096: the aliased shared compose sources live outside this package, where no node_modules is
+          // installed in CI. Their bare imports resolve from THIS package's node_modules FIRST, so the shared
+          // engine binds to the add-in's own single copy of react / react-dom / Fluent / lexical (two React
+          // copies break hooks) even on a machine that has the shared library installed. Scoped to requests
+          // ISSUED by the shared source (Rule.resolve), so the add-in's own dependency resolution — including
+          // any nested package versions — is untouched.
+          include: path.resolve(__dirname, '../shared/Spaarke.UI.Components/src'),
+          resolve: {
+            modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
+          },
+        },
         {
           test: /\.tsx?$/,
           use: {
@@ -359,8 +413,12 @@ module.exports = async (env, options) => {
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
+        'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
+        'process.env.ADDIN_EMAIL_TAB_ENABLED': JSON.stringify(ENV_CONFIG.ADDIN_EMAIL_TAB_ENABLED),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
+        // Task 089: the pane footer shows the app-package version, not a hand-maintained literal.
+        'process.env.ADDIN_PACKAGE_VERSION': JSON.stringify(UNIFIED_PACKAGE.VERSION),
       }),
       // Task 078: the combined Outlook + Word app package → dist/spaarke/.
       new SpaarkeUnifiedPackagePlugin(),
@@ -391,7 +449,10 @@ module.exports = async (env, options) => {
           vendor: {
             test: /[\\/]node_modules[\\/]/,
             name: 'vendors',
-            chunks: 'all',
+            // 'initial', not 'all': packages reached only through a lazy import (the Email tab's compose engine
+            // and its rich-text editor) stay in that lazy chunk instead of the startup `vendors` bundle every pane
+            // loads (task 096 review).
+            chunks: 'initial',
           },
         },
       },

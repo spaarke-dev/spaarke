@@ -10,8 +10,10 @@
  * @see approach-a-dynamic-form-renderer.md
  */
 
+import { createChildThroughBff } from "../services/childRecordWrites";
 import * as React from "react";
-import { getXrm } from "../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../utils/xrmAccess";
+import { cleanGuid } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -78,7 +80,7 @@ export function useRelatedRecord(
       setIsLoading(true);
       setError(null);
 
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         setIsLoading(false);
@@ -86,7 +88,7 @@ export function useRelatedRecord(
       }
 
       try {
-        const normalizedParentId = parentId!.replace(/[{}]/g, "").toLowerCase();
+        const normalizedParentId = cleanGuid(parentId);
         const filter = `_${parentLookupField}_value eq ${normalizedParentId}`;
         const order = orderBy ?? "createdon desc";
         const query = `?$select=${selectFields}&$filter=${filter}&$orderby=${order}&$top=1`;
@@ -131,14 +133,8 @@ export function useRelatedRecord(
     async (data: Record<string, unknown>): Promise<string | null> => {
       if (!parentId) return null;
 
-      const xrm = getXrm();
-      if (!xrm?.WebApi) {
-        setError("Xrm.WebApi not available");
-        return null;
-      }
-
       try {
-        const normalizedParentId = parentId.replace(/[{}]/g, "").toLowerCase();
+        const normalizedParentId = cleanGuid(parentId);
 
         // Set the parent lookup using @odata.bind
         const createData = {
@@ -146,13 +142,14 @@ export function useRelatedRecord(
           [`${parentLookupField}@odata.bind`]: `/sprk_events(${normalizedParentId})`,
         };
 
-        const result = await xrm.WebApi.createRecord(entityName, createData);
-        const newId = (result as Record<string, unknown>).id as string;
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the to-do / memo is created through the BFF (G5) — the server
+        // decides its owner; a refusal is this section's error.
+        const newId = await createChildThroughBff(entityName, createData);
 
         if (newId) {
           // Refresh to get the full record
           setRefreshCounter((c) => c + 1);
-          return newId.replace(/[{}]/g, "").toLowerCase();
+          return cleanGuid(newId);
         }
         return null;
       } catch (err) {
@@ -170,7 +167,7 @@ export function useRelatedRecord(
     async (data: Record<string, unknown>): Promise<boolean> => {
       if (!recordId) return false;
 
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         return false;

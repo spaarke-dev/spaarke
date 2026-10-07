@@ -1,0 +1,72 @@
+// T242b step 4 live probe — the BFF's exact Redis connection path (CacheModule.BuildManagedIdentityOptions) plus the
+// two library behaviours step 4 must confirm on Azure Managed Redis (OSS cluster):
+//   1. RESP3 survives ConfigureForAzureWithTokenCredentialAsync, and the connection negotiates RESP3;
+//   2. a pub/sub round-trip works;
+//   3. SCAN over GetEndPoints() (primaries only) finds and deletes keys spread across slots — the
+//      MembershipCacheInvalidationSubscriber.EvictAsync loop, copied.
+using Azure.Identity;
+using StackExchange.Redis;
+
+string Env(string n) => Environment.GetEnvironmentVariable(n) ?? throw new Exception($"missing {n}");
+var failures = 0;
+void Check(bool ok, string what) { Console.WriteLine($"PROBE {(ok ? "OK  " : "FAIL")} {what}"); if (!ok) failures++; }
+
+var options = ConfigurationOptions.Parse(Env("REDIS_ENDPOINT"));
+options.Ssl = true;
+options.Protocol = RedisProtocol.Resp3;
+var credential = new DefaultAzureCredential(new DefaultAzureCredentialOptions
+{
+    ManagedIdentityClientId = Env("UAMI_CLIENT_ID"),
+    TenantId = Env("AZURE_TENANT_ID"),
+});
+await StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithTokenCredentialAsync(options, credential);
+Check(options.Protocol == RedisProtocol.Resp3, $"options.Protocol after ConfigureForAzureWithTokenCredentialAsync = {options.Protocol}");
+Check(string.IsNullOrEmpty(options.Password) == false || options.User != null, "token-based credentials set by the library");
+
+await using var mux = await ConnectionMultiplexer.ConnectAsync(options);
+var endpoints = mux.GetEndPoints();
+var primaries = endpoints.Select(e => mux.GetServer(e)).Where(s => s.IsConnected && !s.IsReplica).ToList();
+Console.WriteLine($"PROBE endpoints={endpoints.Length} primaries={primaries.Count} serverType={primaries.FirstOrDefault()?.ServerType}");
+Check(primaries.Count > 0, "at least one connected primary");
+Check(primaries.All(s => s.Protocol == RedisProtocol.Resp3), $"negotiated protocol = {string.Join(",", primaries.Select(s => s.Protocol))}");
+
+// 2. pub/sub round-trip (RESP3: subscriptions share the interactive connection)
+var channel = RedisChannel.Literal("t242b:probe:channel");
+var received = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+var sub = mux.GetSubscriber();
+await sub.SubscribeAsync(channel, (_, v) => received.TrySetResult(v.ToString()));
+var receivers = await sub.PublishAsync(channel, "ping");
+var got = await Task.WhenAny(received.Task, Task.Delay(TimeSpan.FromSeconds(10))) == received.Task ? received.Task.Result : null;
+Check(got == "ping", $"pub/sub round-trip (publish reached {receivers} subscriber(s), received '{got}')");
+await sub.UnsubscribeAsync(channel);
+
+// 3. SCAN/DEL across primaries — keys shaped like the membership cache, spread over many slots
+var db = mux.GetDatabase();
+var person = Guid.NewGuid().ToString("D");
+const int keyCount = 40;
+for (var i = 0; i < keyCount; i++)
+{
+    await db.StringSetAsync($"spaarke:tenant:t{i}:membership-resolved:{person}:sprk_matter:h{i}:v1", "x", TimeSpan.FromMinutes(5));
+}
+var slots = Enumerable.Range(0, keyCount).Select(i => mux.HashSlot($"spaarke:tenant:t{i}:membership-resolved:{person}:sprk_matter:h{i}:v1")).Distinct().Count();
+var pattern = $"spaarke:tenant:*:membership-resolved:{person}:sprk_matter:*";
+var deleted = 0;
+foreach (var endpoint in mux.GetEndPoints())
+{
+    var server = mux.GetServer(endpoint);
+    if (!server.IsConnected || server.IsReplica) continue;
+    await foreach (var key in server.KeysAsync(pattern: pattern))
+    {
+        if (await db.KeyDeleteAsync(key)) deleted++;
+    }
+}
+Check(deleted == keyCount, $"SCAN/DEL over GetEndPoints deleted {deleted}/{keyCount} keys spanning {slots} hash slots");
+var left = 0;
+for (var i = 0; i < keyCount; i++)
+{
+    if (await db.KeyExistsAsync($"spaarke:tenant:t{i}:membership-resolved:{person}:sprk_matter:h{i}:v1")) left++;
+}
+Check(left == 0, $"no probe keys left ({left})");
+
+Console.WriteLine(failures == 0 ? "PROBE RESULT PASS" : $"PROBE RESULT FAIL ({failures})");
+return failures == 0 ? 0 : 1;

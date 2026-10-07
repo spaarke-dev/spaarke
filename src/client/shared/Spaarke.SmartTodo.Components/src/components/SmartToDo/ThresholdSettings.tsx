@@ -235,8 +235,7 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
 
 ThresholdSettings.displayName = 'ThresholdSettings';
 
-export default React.memo(ThresholdSettings);
-
-// Also export as named export for barrel file convenience
+// The single public export (the former byte-identical `default` alias was
+// deleted 2026-10-03, reuse audit C-14).
 export const ThresholdSettingsPopover = React.memo(ThresholdSettings);
 ThresholdSettingsPopover.displayName = 'ThresholdSettings';

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Extends the sprk_dataverseenvironment entity with 12 new columns for
-    customer-provisioning-orchestration-r1 (registry schema v3.3).
+    Extends the sprk_dataverseenvironment entity with 13 new columns for
+    customer-provisioning-orchestration-r1 (registry schema v3.3 + T225b).
 
 .DESCRIPTION
     Additive-only extension of the v2 baseline entity (16 columns) created by
@@ -36,6 +36,11 @@
      10. sprk_bffversion            String(50),  Optional  (§14A upgrade-mode preflight version compat)
      11. sprk_solutionversion       String(50),  Optional  (§14A upgrade-mode preflight version compat)
      12. sprk_ClientCacheBustToken  String(100), Optional  (§7.9 upgrade cache-bust token; PascalCase per existing FR-35 grandfather)
+
+    1 T225b addition (2026-10-02, plan G21):
+     13. sprk_credentialmode        String(50),  Optional  (A38a secret-free marker — H4 writes "secret-free"; every new
+                                                            stamp is secret-free by default since T225b, so H4 fails
+                                                            Resumable after writing the vault if this column is missing)
 
     ADR-044 note: GUID-shaped columns (sprk_currentrunid, sprk_tenantid,
     sprk_azuresubscriptionid) are stored as String attributes; canonicalization
@@ -87,6 +92,10 @@ function Invoke-DV([string]$Ep, [string]$Method = "GET", [object]$Body = $null) 
 }
 
 function Test-AttributeExists([string]$LogicalName) {
+    # Dataverse LOGICAL names are lowercase even when the schema name is mixed case (sprk_ClientCacheBustToken ->
+    # sprk_clientcachebusttoken). Looking up the mixed-case name 404s, the create then 400s on the existing column
+    # (seen 2026-10-03 on spaarkedev1) — so always look up the lowercase form.
+    $LogicalName = $LogicalName.ToLowerInvariant()
     try {
         Invoke-RestMethod -Uri "$BaseUrl/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='$LogicalName')?`$select=LogicalName" `
             -Headers $headers -Method GET -UseBasicParsing -ErrorAction Stop | Out-Null
@@ -105,7 +114,7 @@ try {
 }
 
 # ============================================================================
-# Step 1: String columns (10 of 12 — 5 v2 + 5 v3/v3.3)
+# Step 1: String columns (11 of 13 — 5 v2 + 5 v3/v3.3 + 1 T225b)
 # ============================================================================
 Write-Host "`nStep 1: String columns (v2 + v3 + v3.3)" -ForegroundColor Cyan
 
@@ -143,17 +152,22 @@ $stringCols = @(
     # ---- v3.3 additions (3 String) ----
     @{
         N    = "sprk_bffversion"; D = "BFF Version"; L = 50; R = "None"
-        Desc = "BFF version pinned to this customer environment (semantic version, e.g. 1.4.2). H0 upgrade-mode preflight reads this + sprk_solutionversion, queries version-compatibility matrix, blocks red-cell pairs. FR-26 v3.3 addition (design.md §14A upgrade model)."
+        Desc = "CI build id of the BFF artifact H9 deployed to this customer environment (e.g. 2026.09.30-123; owner D17, version-compatibility-matrix.md v2). H0 upgrade-mode preflight reads this + sprk_solutionversion against the version-compatibility matrix. FR-26 v3.3 addition (design.md §14A upgrade model)."
     },
     @{
         N    = "sprk_solutionversion"; D = "Dataverse Solution Version"; L = 50; R = "None"
-        Desc = "Dataverse solution version pinned to this customer environment (semantic version, e.g. 2.1.0). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
+        Desc = "32-hex fingerprint of the Dataverse solution set H6 imported (owner D17, version-compatibility-matrix.md v2). H0 upgrade-mode preflight companion to sprk_bffversion. FR-26 v3.3 addition (design.md §14A upgrade model)."
     },
     @{
         # PascalCase schema name is intentional per project convention — see design.md §7.9
         # canonical-naming grandfather clause; the display name is human-friendly.
         N    = "sprk_ClientCacheBustToken"; D = "Client Cache-Bust Token"; L = 100; R = "None"
-        Desc = "Cache-bust token distributed to clients after upgrade so they invalidate cached bundles (localStorage 60-min TTL). H7 sets a new value on upgrade. FR-26 v3.3 addition (design.md §7.9 / §14A upgrade cache-bust)."
+        Desc = "Cache-bust token for clients — the id of the last provisioning or upgrade run (owner D17). FR-26 v3.3 addition (design.md §7.9 / §14A upgrade cache-bust)."
+    },
+    # ---- T225b addition (1 String) ----
+    @{
+        N    = "sprk_credentialmode"; D = "Credential Mode"; L = 50; R = "None"
+        Desc = "A38a positive secret-free migration marker: H4 writes 'secret-free' when the stamp's BFF runs MI-FIC with no client secret (KvSecretsPopulationOptions.RequireSecretFreeIdentity, the default since task 225b). Added 2026-10-02 (plan G21)."
     }
 )
 
@@ -208,18 +222,18 @@ if (Test-AttributeExists "sprk_tenancymodel") {
         "SchemaName"    = "sprk_tenancymodel"
         "RequiredLevel" = @{ "Value" = "None" }
         "DisplayName"   = New-Label "Tenancy Model"
-        "Description"   = New-Label "Deployment tenancy tier. Model1Shared (trial/SMB — shared platform floors per §3A A1). Model2Dedicated (regulated/enterprise — dedicated stamp per D3). Drives Bicep stack composition (model1-shared.bicep vs model2-full.bicep) + handler behavior differences (§4.1a). FR-26 v3 addition (design.md §3A A1 / §6.1)."
+        "Description"   = New-Label "Deployment tenancy tier per D-12. Model1 (Spaarke-hosted dedicated stamp — customer environment lives in Spaarke's Azure tenant + subscription; Profile 'spaarke-hosted-model2'). Model2 (customer-hosted dedicated stamp — customer environment lives in the customer's Azure tenant + subscription; Profile 'customer-owned-model2'). Drives handler behavior differences (§4.1a). Renamed 2026-09-29 by Task 224 (INCOMING §5 Item 3) from pre-D-12 labels 'Model1Shared'/'Model2Dedicated'; integer values 0/1 preserved for schema stability. FR-26 v3 addition (design.md §3A A1 / §6.1)."
         "OptionSet"     = @{
             "@odata.type"   = "Microsoft.Dynamics.CRM.OptionSetMetadata"
             "IsGlobal"      = $false
             "OptionSetType" = "Picklist"
             "Options"       = @(
-                @{ "Value" = 0; "Label" = New-Label "Model1Shared";    "Description" = New-Label "Model 1: trial/SMB shared-platform tier (§3A A1)." },
-                @{ "Value" = 1; "Label" = New-Label "Model2Dedicated"; "Description" = New-Label "Model 2: regulated/enterprise dedicated stamp (D3)." }
+                @{ "Value" = 0; "Label" = New-Label "Model1"; "Description" = New-Label "Model 1 (D-12): Spaarke-hosted dedicated stamp — customer environment lives in Spaarke's Azure tenant + subscription. Fan-target for Profile 'spaarke-hosted-model2'. Renamed from 'Model1Shared' by Task 224." },
+                @{ "Value" = 1; "Label" = New-Label "Model2"; "Description" = New-Label "Model 2 (D-12): customer-hosted dedicated stamp — customer environment lives in the customer's Azure tenant + subscription. Fan-target for Profile 'customer-owned-model2'. Renamed from 'Model2Dedicated' by Task 224." }
             )
         }
     }
-    if ($r.Success) { Write-Host "  + sprk_tenancymodel (Model1Shared=0, Model2Dedicated=1)" -ForegroundColor Green }
+    if ($r.Success) { Write-Host "  + sprk_tenancymodel (Model1=0, Model2=1)" -ForegroundColor Green }
     else            { Write-Host "  x sprk_tenancymodel: $($r.Error)" -ForegroundColor Red }
 }
 
@@ -233,5 +247,4 @@ $r = Invoke-DV -Ep "PublishXml" -Method "POST" -Body @{
 if ($r.Success) { Write-Host "  Published" -ForegroundColor Green }
 else            { Write-Host "  Publish failed: $($r.Error)" -ForegroundColor Red }
 
-Write-Host "`nDONE - sprk_dataverseenvironment extended with 12 new columns (v3.3) in $EnvironmentDomain" -ForegroundColor Green
-Write-Host "Total columns now: 16 (v2 baseline) + 12 (v3.3 extension) = 28" -ForegroundColor Cyan
+Write-Host "`nDONE - sprk_dataverseenvironment carries the 13 extension columns (v3.3 + T225b) in $EnvironmentDomain (existing columns skipped, never modified)" -ForegroundColor Green

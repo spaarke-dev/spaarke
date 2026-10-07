@@ -50,6 +50,8 @@ import {
   type ICommunicationAssociation,
   searchUsersAndContacts,
   createXrmDataService,
+  cleanGuid,
+  getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
@@ -200,24 +202,14 @@ const useStyles = makeStyles({
   },
 });
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -225,7 +217,10 @@ function getHostRecordId(): string | undefined {
 }
 
 async function refreshHostForm(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const refresh = xrm?.Page?.data?.refresh;
     if (typeof refresh === 'function') {
@@ -350,7 +345,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
         for (const m of COMMUNICATION_REGARDING_FIELDS) {
           const val = recAny[`_${m.field}_value`];
           if (typeof val !== 'string' || val.length === 0) continue;
-          const entityId = val.replace(/[{}]/g, '').toLowerCase();
+          const entityId = cleanGuid(val);
           const entityType =
             (recAny[`_${m.field}_value@Microsoft.Dynamics.CRM.lookuplogicalname`] as string) ?? m.entityType;
           const entityName = recAny[`_${m.field}_value@OData.Community.Display.V1.FormattedValue`] as
@@ -404,11 +399,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // entity types (RegardingResolver pattern). A Document pick attaches; any other record is
   // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
   const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
-    interface XrmLike {
-      Utility?: { lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string }>> };
-    }
-    const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
-    const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({
       entityTypes: [entityType],
@@ -417,7 +409,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
     });
     if (!results || results.length === 0) return null;
     const picked = results[0];
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(String(picked.id));
     const base = resolveDataverseUrl();
     return {
       entityType,
@@ -432,13 +424,8 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // (contact → emailaddress1, user → internalemailaddress) into a chip. Multi-select supported.
   const handleLookupRecipients = React.useCallback(
     async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
-      interface XrmLike {
-        Utility?: {
-          lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
-        };
-      }
-      const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
-      const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+      // Shared cross-frame walker (task 081 / C-8).
+      const xrm = getXrm('lookupObjects');
       if (!xrm?.Utility?.lookupObjects) return null;
       const results = await xrm.Utility.lookupObjects({
         entityTypes: ['contact', 'systemuser'],
@@ -450,7 +437,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
       for (const p of results) {
         const field = EMAIL_FIELD[p.entityType];
         if (!field) continue;
-        const id = String(p.id).replace(/[{}]/g, '');
+        const id = cleanGuid(String(p.id));
         try {
           const rec = await context.webAPI.retrieveRecord(p.entityType, id, `?$select=${field}`);
           const email = rec?.[field];
@@ -477,18 +464,13 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // and returns the picked record; the composer shows it in "Related to" and it is written onto
   // the communication when the email is SENT (the send payload carries `associations`).
   const handleAddRelationship = React.useCallback(async (): Promise<IPickedRecord | null> => {
-    interface XrmLike {
-      Utility?: {
-        lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
-      };
-    }
-    const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
-    const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];
     if (!picked?.id || !picked?.entityType) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(String(picked.id));
     const base = resolveDataverseUrl();
     return {
       entityType: picked.entityType,

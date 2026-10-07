@@ -198,10 +198,12 @@ describe('DocumentComposeLaunch.openInCompose', () => {
       makeFormContext('{F1A2B3C4-0000-1111-2222-333344445555}') as unknown as Xrm.FormContext,
     );
 
-    // First arg is entity name, second is the GUID (no braces).
+    // First arg is entity name, second is the GUID — no braces, and lowercase via the canonical
+    // `cleanGuid` (task 089 / ADR-044). `retrieveRecord` is a Dataverse Web API call, which
+    // matches GUID path segments case-insensitively, so this is safe.
     expect(retrieveRecord).toHaveBeenCalledWith(
       'sprk_document',
-      'F1A2B3C4-0000-1111-2222-333344445555',
+      'f1a2b3c4-0000-1111-2222-333344445555',
       expect.any(String),
     );
   });

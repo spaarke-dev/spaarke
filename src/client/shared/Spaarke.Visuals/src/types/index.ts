@@ -132,17 +132,18 @@ export interface IChartDefinition {
    *  populates a definitive `boolean`, defaulting to `false` when
    *  `sprk_createwizardenabled` is null/absent (NFR-05 backward compat). */
   createWizardEnabled?: boolean;
-  /** Registry key selecting which wizard to open (see `wizardRegistry.ts`).
+  /** Key selecting which wizard to open (resolved by VisualHost's local
+   *  `WIZARD_KEY_TO_PAGE` / `resolveWizardPage` in `VisualHostRoot.tsx`).
    *  `null`/absent when unset — the "+" handler falls back to
    *  `sprk_entitylogicalname`. */
   createWizardKey?: string | null;
 }
 
 /**
- * Trend direction for TrendCard / trendAnalysis (Report Card).
- * Moved here in VHVU-041 to invert the util→component dependency:
- * `trendAnalysis.ts` (util) and `TrendCard.tsx` (component) both import it
- * from the package `types` barrel instead of the util importing the component.
+ * Trend direction for trendAnalysis (Report Card).
+ * Moved here in VHVU-041 to invert the util→component dependency. (Its other
+ * importer, the `TrendCard` component, had zero consumers and was deleted
+ * 2026-10-03 — reuse audit C-14.)
  */
 export type TrendDirection = 'up' | 'down' | 'flat';
 

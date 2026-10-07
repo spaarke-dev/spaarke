@@ -65,8 +65,8 @@ public static class InviteAndGrantExternalUserEndpoint
         CiamUserProvisioningService ciamProvisioner,
         RegistrationEmailService emailService,
         ContactIdentityBinder binder,
-        ITenantCache cache,
         IConfiguration configuration,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         HttpContext httpContext,
         ILogger<Program> logger,
         TimeProvider timeProvider,
@@ -281,7 +281,7 @@ public static class InviteAndGrantExternalUserEndpoint
             // that changed while the account was being provisioned is still judged at write time.
             grantOutcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
                 grantRequest, grantRoot.Type, grantRoot.Id, today, ceiling, callerSystemUserId,
-                dataverseClient, participations, accessibleRecords, cache, httpContext, logger, ct);
+                dataverseClient, participations, accessibleRecords, logger, ct);
 
             // Task 138: the core's own policy check refused (the record changed after the pre-check above) — or, since
             // task 139, its ceiling, never-lower or No Access check did. The Contact was onboarded; the refusal is
@@ -330,6 +330,10 @@ public static class InviteAndGrantExternalUserEndpoint
         logger.LogInformation(
             "[EXT-INVITE-GRANT] Onboarded ({Status}) + granted Contact {ContactId} to {RootType} {RootId} — access record {AccessRecordId}",
             onboardStatus, contactId, grantRoot.Type, grantRoot.Id, accessRecordId);
+
+        // Task 142: a manual grant onto a contact the Assigned-To ledger holds becomes ADOPTED (as /grant). Never thrown.
+        await assignedAccess.MarkGrantAdoptedAsync(
+            grantRoot.Type, grantRoot.Id, contactId, null, accessRecordId, CancellationToken.None);
 
         return TypedResults.Ok(new InviteAndGrantResponse(
             contactId, onboardStatus, accessRecordId, portalUrl,

@@ -9,8 +9,6 @@
   "exports": {
     ".": "./src/index.ts",
     "./components": "./src/components/index.ts",
-    "./hooks": "./src/hooks/index.ts",
-    "./services": "./src/services/index.ts",
     "./context": "./src/context/index.ts",
     "./types": "./src/types/index.ts",
     "./utils": "./src/utils/index.ts",

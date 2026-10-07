@@ -290,3 +290,42 @@ now narrower: it is no longer "the operator has not run the command". Re-probe s
 FR-C07 asked for `agent.chatEmbedAllowedHosts`, which task 025 proved exists in **neither** Graph API
 version. So the *concept* is real but lives in SPO PowerShell only — it is not a Graph settings
 property, and FR-C07's omission of `sharingCapability` in its favour was still an error.
+
+---
+
+## 9. Re-probe 2026-10-07 — the refusal is GONE; Graph now answers 503
+
+Re-run five weeks after the opt-in (`notes/probe050_archival.py` — re-created and **committed** this
+time; the `scratchpad/probe050_optedin.py` referenced above was lost in the 2026-08-31 worktree wipe).
+Same identity (dev owning app, app-only), same container type, fresh throwaway container each run.
+**Two runs, identical:**
+
+```
+POST /beta/storage/fileStorage/containers            → 201  (status: inactive)
+POST …/containers/{id}/activate                      → 204
+POST …/containers/{id}/archive                       → 503  serviceNotAvailable: "Service unavailable"
+GET  …/containers/{id}?$select=status,archivalDetails → 200  status=active, archivalDetails=null
+DELETE …/containers/{id}                             → 204
+DELETE …/deletedContainers/{id}                      → 204
+GET  …/deletedContainers/{id}                        → 404   (teardown verified, both runs)
+```
+
+### What this does and does not establish
+
+- ✅ **Hypothesis 1 (replication lag) is supported.** The `403 notAllowed` *"this application does not
+  currently support archiving"* — byte-identical before and right after the opt-in — **no longer
+  occurs.** The capability gate now passes. Hypothesis 2 (a separate app-level capability) is not needed
+  to explain anything and is dropped.
+- ❌ **AC-1 / AC-2 are still unmet.** Archive does not succeed; the container stays `active`.
+- ⚠️ **The 503 is NOT diagnosed, and is not guessed at here.** Candidates, none tested: the archive
+  service is not yet available to this tenant/region for a beta action; archival refuses a brand-new,
+  empty container; a genuine service outage (unlikely — identical across two runs minutes apart).
+  Distinguishing them needs either a container with content and age, or Microsoft.
+- **Product behaviour on this response is honest**: a Graph 503 surfaces as a Graph error carrying
+  Graph's own code and message — it is not mapped to "archived" or to the not-opted-in 409.
+
+### Status
+
+Task 050 stays 🔄 — **platform-blocked, not code-blocked.** Next evidence: retry on a container that has
+held content for some days, or raise it with Microsoft (SPE archival is beta). No code change follows
+from this probe.

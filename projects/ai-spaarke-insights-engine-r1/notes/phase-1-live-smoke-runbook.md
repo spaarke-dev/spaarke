@@ -17,6 +17,25 @@ Artifact A proves the wire contract holds in isolation; Artifact B proves the wi
 
 ---
 
+## `/api/insights/ask` subject contract (updated 2026-10-04 — unified-access-control-r2 task 163, GitHub #1102)
+
+The route authorization sweep changed what `/api/insights/ask` accepts. Steps 7-9 below are written to this contract;
+an older copy of this runbook (display-number subjects, a raw playbook GUID, `matterType` / `lookBackYears`
+parameters) now gets 400 or 404 at every step.
+
+| Field | Contract | What happens otherwise |
+|---|---|---|
+| `subject` | `matter:{sprk_matterid}` — the GUID of a REAL `sprk_matter` row. Display numbers (`matter:M-2024-0341`) are not ids. | 400 (not a GUID) |
+| `question` | The `sprk_consumercode` of an **enabled `insights-ask` Binding row** (`sprk_playbookconsumer`, ADR-039) — e.g. `predict-matter-cost`, `matter-health-single`. A raw playbook GUID is accepted only when the Binding that targets that playbook is an `insights-ask` one. | 400 "must be either a valid playbook Guid id OR a canonical name registered as an enabled sprk_playbookconsumer row" |
+| `parameters` | Task 164's SHARED playbook-parameter policy — the same one `/api/ai/playbooks/{id}/execute` applies (a declared allow-list). Refused: server-owned keys (`userId`, `tenantId`, `userName`, `run.*`, `start.*`, `userPreferences.*`), a record key (`matterId` / `projectId` / `invoiceId`) that is not a GUID, a typed key of the wrong type (`timeWindowHours`, `dueWithinDays`, `todayUtc`, `dueSoonWindowUtc`), a GUID on a text key, and **every undeclared key — including `matterType`, `lookBackYears`, `currency`** (no Insights playbook node consumes them). Send `{}` unless you need a declared text key (e.g. `matterDescription`). | 400, `errorCode = playbook.parameter-rejected` |
+| The caller's rights | Asked of Dataverse AS THE CALLER, before anything runs: **Read** on the subject matter for a playbook that cannot write to it (**predict-matter-cost**), **Write** for one that can (**matter-health-single** persists its envelope to `sprk_matter.sprk_performancesummary`), plus the same rule on any record parameter. | the uniform 404 (`reasonCode = sdap.access.deny.record_unavailable`) — identical for an absent matter, one you cannot read, and one you can read but not write when the playbook writes |
+
+The same subject rule applies to `/api/insights/assistant/query`: a playbook the Assistant picks for a caller without
+Write on the subject runs only if it cannot write to it (otherwise 404 before the stream opens, or an `error` frame
+with `errorCode = insights.subject.write_required` after it opened).
+
+---
+
 ## Prerequisites (run once)
 
 1. **Spaarke Dev environment provisioned**:
@@ -25,14 +44,42 @@ Artifact A proves the wire contract holds in isolation; Artifact B proves the wi
    - `sprk_analysis` extended with disposition fields (D-P11 via task 052)
    - BFF API deployed to App Service (task 080 prerequisite)
    - `text-embedding-3-large` deployed in `spaarke-openai-dev` (verified per EXT-2 dependency)
-   - `predict-matter-cost` playbook row created in Dataverse via `scripts/Deploy-Playbook.ps1` (task 060 prerequisite)
+   - `predict-matter-cost` playbook row created in Dataverse via `scripts/Deploy-Playbook.ps1` (task 060 prerequisite).
+     As of 2026-10-04 it is **NOT deployed on spaarkedev1** (read-only check: `sprk_analysisplaybook` has
+     `matter-health-single` only) — deploy it first.
+   - **An enabled `insights-ask` Binding row for `predict-matter-cost`** (the subject contract above). The repo seed
+     (`infra/dataverse/sprk_playbookconsumer-rows.json`) binds only `matter-health-single`; the mirror is a projection
+     of the live table, so the row is created LIVE and then exported. This is a live write — dry run, apply, verify:
+     ```pwsh
+     $org = 'https://spaarkedev1.crm.dynamics.com'; $api = "$org/api/data/v9.2"
+     $h = @{ Authorization = "Bearer $(az account get-access-token --resource $org --query accessToken -o tsv)";
+             'OData-Version' = '4.0'; Accept = 'application/json'; 'Content-Type' = 'application/json' }
+     $pb = (Invoke-RestMethod "$api/sprk_analysisplaybooks?`$select=sprk_analysisplaybookid,sprk_name&`$filter=sprk_name eq 'predict-matter-cost@v1' and statecode eq 0" -Headers $h).value
+     if ($pb.Count -ne 1) { throw "expected exactly one active predict-matter-cost@v1 playbook, found $($pb.Count) — deploy it first" }
+     $key = "sprk_consumertype='insights-ask',sprk_consumercode='predict-matter-cost',sprk_environment='*'"
+     $row = [ordered]@{ sprk_name = 'Insights Ask - predict-matter-cost'; sprk_consumertype = 'insights-ask'
+                        sprk_consumercode = 'predict-matter-cost'; sprk_environment = '*'; sprk_priority = 400; sprk_enabled = $true
+                        sprk_ucid = 'UC-C-2'; sprk_disposition = 100000000; sprk_risk = 100000000; sprk_capturemode = 100000000
+                        'sprk_Playbook@odata.bind' = "/sprk_analysisplaybooks($($pb[0].sprk_analysisplaybookid))" }
+     # 1. DRY RUN — print what would be written; nothing is sent.
+     $row | ConvertTo-Json; "PATCH $api/sprk_playbookconsumers($key)"
+     # 2. APPLY (only after reviewing the dry run) — idempotent upsert on the alternate key.
+     Invoke-WebRequest "$api/sprk_playbookconsumers($key)" -Method Patch -Headers $h -Body ($row | ConvertTo-Json) -UseBasicParsing | Out-Null
+     # 3. VERIFY — the row reads back enabled, targeting the playbook; then refresh and commit the mirror.
+     Invoke-RestMethod "$api/sprk_playbookconsumers($key)?`$select=sprk_enabled,_sprk_playbook_value" -Headers $h
+     .\scripts\dataverse\Seed-PlaybookConsumers.ps1 -Export; .\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DiffOnly   # exit 0
+     ```
+   - **Fixture matters are real `sprk_matter` rows.** Note the `sprk_matterid` GUID of the matter each fixture
+     (M-2024-0341, M-2024-0188, M-2024-0512) is filed under, plus one TEST matter with no comparable cohort (Step 9).
 2. **Operator authenticated**:
    - `az login` against the Spaarke Dev tenant
    - `pac auth create --environment <env-url>` for Dataverse MCP
 3. **Local repo on the deployment branch**:
    - `git fetch origin && git checkout work/ai-spaarke-insights-engine-r1`
 4. **Authentication for `/api/insights/ask`**:
-   - Bearer token for a test tenant user (any user in the Spaarke Dev tenant). Acquire via:
+   - Bearer token for a test tenant user who can **Read** each fixture matter (enough for `predict-matter-cost`, which
+     writes nothing; `matter-health-single` needs **Write** on the matter). A user without that right gets the uniform
+     404 — use that for the negative check in Step 7. Acquire via:
      ```pwsh
      az account get-access-token --resource api://<API_APP_ID> --query accessToken -o tsv
      ```
@@ -161,18 +208,24 @@ for ($i = 0; $i -lt $maxTries; $i++) {
 ### Step 7: POST `/api/insights/ask` — sufficient-evidence path
 
 ```pwsh
-# Resolve the predict-matter-cost playbook Guid from Dataverse first:
-$playbookGuid = (az pac data list --table sprk_analysisplaybook --filter "sprk_name eq 'predict-matter-cost'" --query '[0].sprk_analysisplaybookid' -o tsv)
+# Subject contract (see the section above): a real sprk_matterid, the Binding's canonical name, parameters through the
+# shared policy. predict-matter-cost writes nothing, so the caller needs Read on the matter.
+$fixtureMatterId = '<sprk_matterid of the matter M-2024-0341 is filed under>'
 
 $body = @{
-    question = $playbookGuid
-    subject = 'matter:M-2024-0341'
-    parameters = @{ matterType = 'ip-licensing'; lookBackYears = '3' }
+    question = 'predict-matter-cost'      # the insights-ask Binding's sprk_consumercode (prerequisite above)
+    subject = "matter:$fixtureMatterId"
+    parameters = @{}                      # matterType / lookBackYears are refused (400 playbook.parameter-rejected)
 } | ConvertTo-Json
 
 $resp = Invoke-WebRequest -Uri "$baseUrl/api/insights/ask" `
     -Method Post -Headers @{ Authorization = "Bearer $bearerToken" } `
     -Body $body -ContentType 'application/json'
+
+# Negative checks (the route authorization contract) — each must hold:
+#   a user WITHOUT Read on the matter        -> 404, reasonCode sdap.access.deny.record_unavailable
+#   parameters = @{ lookBackYears = '3' }    -> 400, errorCode playbook.parameter-rejected
+#   question = '<a GUID with no insights-ask Binding>' -> 400 "not registered"
 
 $cacheHit = $resp.Headers['X-Insights-Cache']
 $elapsed = $resp.Headers['X-Insights-Elapsed-Ms']
@@ -200,13 +253,15 @@ Re-run Step 7 with identical body. Acceptance: `X-Insights-Cache: true` on the s
 
 ### Step 9: POST `/api/insights/ask` — insufficient-evidence path
 
-Use a fictional matter with no comparable cohort:
+Use a REAL test matter with no comparable cohort (a fictional id is not a record: it gets the uniform 404, not a
+decline):
 
 ```pwsh
+$unicornMatterId = '<sprk_matterid of a TEST matter of a novel type, e.g. "novel-quantum-licensing">'
 $body = @{
-    question = $playbookGuid
-    subject = 'matter:M-UNICORN-001'  # no cohort exists
-    parameters = @{ matterType = 'novel-quantum-licensing'; lookBackYears = '10' }
+    question = 'predict-matter-cost'
+    subject = "matter:$unicornMatterId"   # no cohort exists for its matter type
+    parameters = @{}
 } | ConvertTo-Json
 # ... POST as Step 7
 ```
@@ -286,6 +341,9 @@ The in-process artifact A verifies the wire contract; this runbook verifies the 
 | Step 6 timeout (no Precedent projection) | Confirm endpoint succeeded but projection sync failed silently | Check App Service logs for `PrecedentProjectionSync` errors; verify `IInsightsAi.EmbedTextAsync` returns vector |
 | Step 7 returns 500 | Playbook resolution failed OR LLM error OR cache stampede | Check ProblemDetails body for `INSIGHTS_FACADE_EMPTY_RESULT` vs `INSIGHTS_INTERNAL_ERROR`; check synthesis prompt versioning |
 | Step 7 returns 401 | Bearer token missing `tid` claim | Re-acquire token; verify Azure AD app config |
+| Step 7 returns 404 (`sdap.access.deny.record_unavailable`) | The subject is not a real `sprk_matterid`, the token's user cannot Read it, or (matter-health-single) cannot Write it | Use the matter's GUID; use a user with the right on it (the same answer is given for all three on purpose) |
+| Step 7 returns 400 `playbook.parameter-rejected` | A parameter outside the shared policy (`matterType`, `lookBackYears`, `tenantId`, …) | Send `parameters = @{}` |
+| Step 7 returns 400 "not registered" | No enabled `insights-ask` Binding row for `predict-matter-cost` (or a raw GUID it does not target) | Run the Binding prerequisite (dry run, apply, verify) |
 | Step 7 returns 429 | Rate limit (60/min/oid per ai-context policy from task 061) | Wait 60s; reduce smoke iteration cadence |
 | Step 8 doesn't return cache hit | D-P13 cache invalidation triggered by token rotation OR `AccessibleScopeHash` differs | Re-call within 5 min with same token + body |
 

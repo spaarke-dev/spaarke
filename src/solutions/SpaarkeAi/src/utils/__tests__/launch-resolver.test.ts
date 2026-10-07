@@ -64,6 +64,8 @@ interface MockNavigation {
 }
 
 interface MockXrm {
+  // The shared getXrm() walker (task 081 / C-8) accepts a frame only when Xrm.WebApi is present.
+  WebApi: Record<string, unknown>;
   Navigation: MockNavigation;
 }
 
@@ -71,7 +73,7 @@ function installXrmMock(): MockNavigation {
   const nav: MockNavigation = {
     navigateTo: jest.fn().mockResolvedValue(undefined),
   };
-  (globalThis as unknown as { Xrm: MockXrm }).Xrm = { Navigation: nav };
+  (globalThis as unknown as { Xrm: MockXrm }).Xrm = { WebApi: {}, Navigation: nav };
   return nav;
 }
 
@@ -187,12 +189,16 @@ describe('buildLaunchUrl — Analysis params (task 052)', () => {
     expect(url).not.toContain('analysisId');
   });
 
-  test('emits analysisId (entry case 2d: open existing) with braces stripped', () => {
+  test('emits analysisId (entry case 2d: open existing) normalized via the canonical cleanGuid (task 089 / ADR-044)', () => {
     const url = buildLaunchUrl({
       analysisId: '{D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF}',
     });
 
-    expect(url).toContain('analysisId=D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF');
+    // Braces stripped AND lowercased — matches the canonical `cleanGuid` convention (ADR-044),
+    // which this call site converged onto (task 089). Downstream, `analysisId` is only used for
+    // presence-checking (`analysisMode = analysisId ? 'existing' : 'new'`) and feeds a Dataverse/
+    // BFF record fetch, both case-insensitive, so lowercasing here is safe.
+    expect(url).toContain('analysisId=d1a2b3c4-aaaa-bbbb-cccc-ddddeeeeffff');
     expect(url).not.toContain('worktype');
     expect(url).not.toContain('regarding');
   });
@@ -432,8 +438,12 @@ describe('openSpaarkeAiCompose — Path A entry (task 046 §ui-tests)', () => {
     const data = (pageInput as { data: string }).data;
     const params = new URLSearchParams(data);
 
-    // Braces stripped on the GUID (matches existing entityId handling).
-    expect(params.get('sprkDocumentId')).toBe('D1A2B3C4-AAAA-BBBB-CCCC-DDDDEEEEFFFF');
+    // Braces stripped AND lowercased via the canonical `cleanGuid` (task 089 / ADR-044). The other
+    // producer of a compose seed's `sprkDocumentId` (`WorkspacePane.tsx`'s `_sprk_documentid_value`
+    // read) is sourced straight from a Dataverse Web API response, which is canonically lowercase
+    // already — so `deriveComposeInstanceKey`'s `stored:<id>` reuse key stays consistent between
+    // both producers regardless of entry path.
+    expect(params.get('sprkDocumentId')).toBe('d1a2b3c4-aaaa-bbbb-cccc-ddddeeeeffff');
     expect(params.get('speDriveItemId')).toBe('01ITEM');
     expect(params.get('composeMode')).toBe('editor');
   });

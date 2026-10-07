@@ -767,8 +767,21 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // ComposeServiceCollaborators.Probe() is CallerRecordAccessProbe's own designated test seam
             // (its type doc: "public virtual precisely so tests can substitute the authorization answer
             // without mocking its HttpClient transport" — ADR-038 §4), already built for exactly this.
+            //
+            // uac-r2 task 166 (owner G5 / amendment (c) + S-69): the To Do and quick-create routes now ALSO ask the
+            // caller's table Create privilege through the same probe (CallerHoldsPrivilegeAsync — its virtual
+            // seam). This shared host models a caller who holds it, so every pre-existing Office test keeps its
+            // meaning; the "not held" cases live in OfficeTodoSourceAuthorizationContractTests and
+            // OfficeQuickCreateContractTests.
             services.RemoveAll<CallerRecordAccessProbe>();
-            services.AddScoped(_ => ComposeServiceCollaborators.Probe().Object);
+            services.AddScoped(_ =>
+            {
+                var probe = ComposeServiceCollaborators.Probe();
+                probe.Setup(p => p.CallerHoldsPrivilegeAsync(
+                        It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+                return probe.Object;
+            });
         });
     }
 }
@@ -796,9 +809,14 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
             return Task.FromResult(AuthenticateResult.Fail("Test: unauthenticated caller"));
         }
 
+        // Task 146 c1-r1: a test may sign in with a real (GUID) object id — the shape production oids have — to see the
+        // caller recorded as a row's creator person. Requests without the header keep the fixed text oid, as before.
+        var oid = Request.Headers.TryGetValue("X-Test-Oid", out var suppliedOid) && !string.IsNullOrEmpty(suppliedOid)
+            ? suppliedOid.ToString()
+            : "test-user-oid";
         var claims = new[]
         {
-            new Claim("oid", "test-user-oid"),
+            new Claim("oid", oid),
             new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
             new Claim(ClaimTypes.Email, "test@example.com"),
             new Claim("tid", "test-tenant-id")
@@ -1263,6 +1281,9 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public List<Guid?> CreatedDocumentOwningTeams { get; } = new();
 
+    /// <summary>The creator person each <c>CreateDocumentAsync</c> was given, in order (task 146 c1-r1).</summary>
+    public List<Guid?> CreatedDocumentPersons { get; } = new();
+
     /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
@@ -1272,10 +1293,87 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public Dictionary<(string Entity, Guid Id), string> SecureRecords { get; } = new();
 
-    internal Microsoft.Xrm.Sdk.Entity? RetrieveRecord(string entity, Guid id) =>
-        SecureRecords.TryGetValue((entity, id), out var container)
-            ? new Microsoft.Xrm.Sdk.Entity(entity, id) { ["sprk_issecure"] = true, ["sprk_containerid"] = container }
-            : null;
+    // ── The document-pointer facts (unified-access-control-r2 task 171) ─────────────────────────────────────────────
+    // A version save now writes APP-ONLY, so OfficeService verifies the target row's SPE pointer first
+    // (RecordContainerResolver.IsDocumentPointerContainerAllowedAsync, task 166 r2's interim rule). This world models the
+    // facts that rule reads, uniformly: ONE person created every row and uploaded every item, every row is owned by the
+    // ROOT business unit, and the root unit stamps every drive this world holds. The rule's own refusals have their own
+    // suite; here the point is that a legitimate version save still lands.
+
+    /// <summary>The one person who created every row and uploaded every item in this world.</summary>
+    public static readonly Guid PointerCreator = Guid.Parse("17140000-0000-4000-8000-0000000000c1");
+
+    /// <summary><see cref="PointerCreator"/>'s Entra object id.</summary>
+    public static readonly Guid PointerCreatorObjectId = Guid.Parse("17140000-0000-4000-8000-0000000000c2");
+
+    /// <summary>The root business unit: it owns every row and stamps every drive in this world.</summary>
+    public static readonly Guid PointerRootBusinessUnit = Guid.Parse("17140000-0000-4000-8000-0000000000b0");
+
+    /// <summary>Who created an item (Graph <c>createdBy</c>) — the pointer check's ITEM half.</summary>
+    internal SpeItemCreator? ItemCreator(string driveId, string itemId)
+    {
+        lock (_gate)
+        {
+            return SpeItems.TryGetValue(itemId, out var item) && string.Equals(item.DriveId, driveId, StringComparison.Ordinal)
+                ? new SpeItemCreator(item.Name, PointerCreatorObjectId.ToString(), ApplicationId: null)
+                : null;
+        }
+    }
+
+    private Microsoft.Xrm.Sdk.EntityCollection BusinessUnits(Microsoft.Xrm.Sdk.Query.QueryExpression query)
+    {
+        var result = new Microsoft.Xrm.Sdk.EntityCollection();
+        var like = query.Criteria.Conditions.FirstOrDefault(c =>
+            c.AttributeName == "sprk_containerid" && c.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Like);
+        if (like is null)
+        {
+            // The hierarchy read: the root alone (no parent).
+            result.Entities.Add(new Microsoft.Xrm.Sdk.Entity("businessunit", PointerRootBusinessUnit));
+            return result;
+        }
+
+        lock (_gate)
+        {
+            foreach (var drive in SpeItems.Values.Select(i => i.DriveId).Distinct(StringComparer.Ordinal))
+            {
+                if (like.Values.Count == 1 && like.Values[0] is string pattern && pattern.Contains(drive, StringComparison.Ordinal))
+                {
+                    result.Entities.Add(new Microsoft.Xrm.Sdk.Entity("businessunit", PointerRootBusinessUnit)
+                    {
+                        ["sprk_containerid"] = drive,
+                    });
+                }
+            }
+        }
+
+        return result;
+    }
+
+    internal Microsoft.Xrm.Sdk.Entity? RetrieveRecord(string entity, Guid id)
+    {
+        if (SecureRecords.TryGetValue((entity, id), out var container))
+            return new Microsoft.Xrm.Sdk.Entity(entity, id) { ["sprk_issecure"] = true, ["sprk_containerid"] = container };
+
+        if (entity == "systemuser" && id == PointerCreator)
+            return new Microsoft.Xrm.Sdk.Entity("systemuser", id) { ["azureactivedirectoryobjectid"] = PointerCreatorObjectId };
+
+        if (entity == DocumentEntityName)
+        {
+            lock (_gate)
+            {
+                if (Documents.ContainsKey(id))
+                {
+                    return new Microsoft.Xrm.Sdk.Entity(DocumentEntityName, id)
+                    {
+                        ["createdby"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", PointerCreator),
+                        ["owningbusinessunit"] = new Microsoft.Xrm.Sdk.EntityReference("businessunit", PointerRootBusinessUnit),
+                    };
+                }
+            }
+        }
+
+        return null;
+    }
 
     internal string CreateDocument(CreateDocumentRequest request)
     {
@@ -1291,6 +1389,7 @@ public sealed class OfficeVersionSaveWorld
             CreatedDocumentNames.Add(request.Name);
             CreatedDocumentDescriptions.Add(request.Description);
             CreatedDocumentOwningTeams.Add(request.OwningTeamId);
+            CreatedDocumentPersons.Add(request.CreatedByPersonId);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare
@@ -1588,6 +1687,8 @@ public sealed class OfficeVersionSaveWorld
     internal Microsoft.Xrm.Sdk.EntityCollection RetrieveMultiple(Microsoft.Xrm.Sdk.Query.QueryExpression query)
     {
         var result = new Microsoft.Xrm.Sdk.EntityCollection();
+        if (string.Equals(query.EntityName, "businessunit", StringComparison.Ordinal))
+            return BusinessUnits(query);
         if (!string.Equals(query.EntityName, DocumentEntityName, StringComparison.Ordinal))
             return result;
 
@@ -2037,11 +2138,13 @@ public sealed class OfficeVersionSaveTestWebAppFactory : OfficeTestWebAppFactory
                     It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string driveId, string path, Stream content, ConflictBehavior conflictBehavior, CancellationToken _) =>
                     (FileHandleDto?)world.PutByPathWithConflictBehavior(driveId, path, OfficeVersionSaveWorld.ReadAll(content), conflictBehavior));
-            spe.Setup(s => s.ReplaceFileContentAsUserAsync(
-                    It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                    It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((Microsoft.AspNetCore.Http.HttpContext _, string driveId, string itemId, Stream content, CancellationToken _) =>
+            // Task 171: the version is written APP-ONLY (the route's write gate decided; the pointer is verified first).
+            spe.Setup(s => s.ReplaceFileContentAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string driveId, string itemId, Stream content, string? _, CancellationToken _) =>
                     world.PutByItemId(driveId, itemId, OfficeVersionSaveWorld.ReadAll(content)));
+            spe.Setup(s => s.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string driveId, string itemId, CancellationToken _) => world.ItemCreator(driveId, itemId));
             spe.Setup(s => s.GetQuickXorHashAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string _, string itemId, CancellationToken _) => world.LiveHash(itemId));
             // Task 047: a version save's duplicate check reads the item's CURRENT content to confirm the document still

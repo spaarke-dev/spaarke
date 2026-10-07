@@ -37,6 +37,7 @@ import {
   mergeClasses,
 } from '@fluentui/react-components';
 import { AppsRegular, BookOpenRegular } from '@fluentui/react-icons';
+import { EmptyState } from '@spaarke/ui-components';
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { useDispatchPaneEvent } from '../../events/useDispatchPaneEvent';
 
@@ -243,33 +244,26 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
   },
 
-  // Empty state
-  emptyState: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingHorizontalXL,
-    flex: 1,
-    textAlign: 'center',
-  },
-
+  // Empty state icon color — the shared `EmptyState` (task 081 / C-11) owns
+  // the container/heading/description layout; only the icon's own color is
+  // still local (each `EmptyState` caller owns its icon's color per that
+  // component's contract).
   emptyStateIcon: {
     color: tokens.colorNeutralForeground4,
     fontSize: '48px',
   },
-
-  emptyStateTitle: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase400,
-    color: tokens.colorNeutralForeground2,
+  // Pre-081 spacing / widths kept on top of the shared compact size.
+  emptyStateContainer: {
+    flex: 1,
+    gap: tokens.spacingVerticalM,
   },
-
-  emptyStateBody: {
-    fontSize: tokens.fontSizeBase200,
-    color: tokens.colorNeutralForeground3,
+  emptyStateHeading: {
+    lineHeight: tokens.lineHeightBase300,
+  },
+  emptyStateDescription: {
     maxWidth: '240px',
+    // pre-081 body was a default (size 300) Text with only the font-size reduced
+    lineHeight: tokens.lineHeightBase300,
   },
 
   // Error state
@@ -304,15 +298,23 @@ const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> 
   </div>
 );
 
-/** Empty state shown when the playbook list is empty (never a blank pane). */
+/**
+ * Empty state shown when the playbook list is empty (never a blank pane).
+ * Hoisted to the shared `EmptyState` in `@spaarke/ui-components` (task 081 /
+ * C-11) — this was one of three hand-rolled copies of the same icon+heading+
+ * description shape.
+ */
 const PlaybookGalleryEmptyState: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({ styles }) => (
-  <div className={styles.emptyState} role="status" aria-label="No playbooks available">
-    <AppsRegular className={styles.emptyStateIcon} />
-    <Text className={styles.emptyStateTitle}>No playbooks available</Text>
-    <Text className={styles.emptyStateBody}>
-      No AI playbooks have been configured for your workspace. Contact your administrator to enable playbooks.
-    </Text>
-  </div>
+  <EmptyState
+    size="compact"
+    className={styles.emptyStateContainer}
+    headingClassName={styles.emptyStateHeading}
+    descriptionClassName={styles.emptyStateDescription}
+    icon={<AppsRegular className={styles.emptyStateIcon} />}
+    heading="No playbooks available"
+    description="No AI playbooks have been configured for your workspace. Contact your administrator to enable playbooks."
+    ariaLabel="No playbooks available"
+  />
 );
 
 // ---------------------------------------------------------------------------

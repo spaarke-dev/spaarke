@@ -13,12 +13,13 @@ import {
 } from '@fluentui/react-components';
 import { DocumentSearchRegular } from '@fluentui/react-icons';
 import { apiClient, ApiClientError, authService } from '@shared/services';
-import { cleanGuid } from '../../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { useAnnounce } from '../../hooks/useAnnounce';
 import { useDocumentProfile } from '../../hooks/useDocumentProfile';
 import { deriveRecordSearchSeed, useFindRecordMatches } from '../../hooks/useFindRecordMatches';
 import type { DocumentIdentityState } from '../../services/documentIdentityService';
-import { FindResultsList, type FindResultNode } from '../FindResultsList';
+import { openRecord } from '../../services/openRecordLauncher';
+import { FindResultsList, type DocumentsResultState, type FindResultNode } from '../FindResultsList';
 
 /**
  * FindView — the Find tab's real three-state gate (spaarkeai-word-add-in-r1 task 033, FR-16b).
@@ -241,18 +242,41 @@ type RelatedDocumentsState =
   | { kind: 'loaded'; totalResults: number; partialResultsWarning: string | null; nodes: FindResultNode[] }
   | { kind: 'error'; message: string };
 
+/**
+ * Task 092 (UAT-3/8): maps this view's own fetch state to `FindResultsList`'s `DocumentsResultState`.
+ * `idle` (the transient before the fetch effect's first run) folds into `loading` — `FindResultsList`
+ * only needs loading/error/loaded, and there is nothing honest to show for `idle` that differs from
+ * "finding similar documents…".
+ */
+function toDocumentsResultState(state: RelatedDocumentsState): DocumentsResultState {
+  switch (state.kind) {
+    case 'idle':
+    case 'loading':
+      return { kind: 'loading' };
+    case 'error':
+      return { kind: 'error', message: state.message };
+    case 'loaded':
+      return { kind: 'loaded', nodes: state.nodes, partialResultsWarning: state.partialResultsWarning };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 // Styles
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
+  // Task 092 (UAT-3): NO `overflow: 'auto'` here anymore. `FindResultsList` owns the ONE scroll
+  // container for the Find tab (its own `scrollArea`, flex:1/minHeight:0, no maxHeight cap) — this
+  // view must not add a second overflow:auto layer above it (that was the "two scroll bars" defect).
+  // `minHeight: 0` lets the flex:1 child below (FindResultsList, in the `indexed` case) actually
+  // shrink to fit this container's height instead of forcing it to grow past it.
   container: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     padding: tokens.spacingVerticalM,
     height: '100%',
-    overflow: 'auto',
+    minHeight: 0,
   },
   emptyState: {
     display: 'flex',
@@ -311,6 +335,14 @@ export interface FindViewProps {
    * `hostType`, per NFR-10. Defaults to `document`.
    */
   itemNoun?: FindItemNoun;
+  /**
+   * Task 092 (UAT-3, NFR-10): whether this host can open a browser tab
+   * (`hostAdapter.getCapabilities().canOpenBrowserWindow`, decided by `App` from the live adapter —
+   * never a `hostType` check here, same pattern as `SaveView`'s `canOpenRecord`). `false`/absent
+   * renders every document, parent-record and matching-record row as plain, non-interactive text —
+   * the fallback surface, not an error. Defaults to `false`.
+   */
+  canOpenRecord?: boolean;
 }
 
 export const FindView: React.FC<FindViewProps> = ({
@@ -319,9 +351,21 @@ export const FindView: React.FC<FindViewProps> = ({
   onRetryDocumentIdentity,
   onGoToSave,
   itemNoun = 'document',
+  canOpenRecord = false,
 }) => {
   const styles = useStyles();
   const { announce, liveRegion } = useAnnounce();
+
+  // Task 092 (UAT-3, NFR-10): the Open buttons also need ORG_URL — unset, `openRecord` can only
+  // no-op, so a visible row would do nothing when clicked; render it as plain text instead. Same
+  // pattern as `SaveFlow.openRecordAvailable`. `handleOpenRecord` is the SAME callback for every row
+  // kind (document / hub / matching record) — each caller in `FindResultsList` has already resolved
+  // its own `(entityType, recordId)` before calling it, so there is nothing host-specific left here
+  // beyond the capability + config gate.
+  const openRecordAvailable = canOpenRecord && Boolean(process.env.ORG_URL);
+  const handleOpenRecord = useCallback((entityType: string, recordId: string) => {
+    openRecord({ orgUrl: process.env.ORG_URL, entityType, recordId });
+  }, []);
 
   // Identity resolution wins when it produced a record; a completed save is the fallback. Both feed
   // the SAME `useDocumentProfile` read, so the index-status states work identically however the id
@@ -622,36 +666,19 @@ export const FindView: React.FC<FindViewProps> = ({
       );
 
     case 'indexed':
+      // Task 092 (UAT-3/8): FindResultsList is ALWAYS rendered here — it owns both the "Most similar
+      // documents" and "Matching records" sections independently (documents loading/erroring never
+      // hides or delays the records section, and vice versa). This view only supplies each section's
+      // own data/state; it no longer gates FindResultsList's mount on `relatedState.kind === 'loaded'`.
       return (
         <div className={styles.container}>
           {liveRegion}
-          {relatedState.kind === 'loading' && (
-            <div className={styles.loadingContainer}>
-              <Spinner size="medium" />
-              <Text>Finding similar documents…</Text>
-            </div>
-          )}
-          {relatedState.kind === 'error' && (
-            <MessageBar intent="error" layout="multiline">
-              <MessageBarBody>
-                <MessageBarTitle>Couldn&rsquo;t load similar documents</MessageBarTitle>
-                {relatedState.message}
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {relatedState.kind === 'loaded' && (
-            <div className={styles.section}>
-              {relatedState.partialResultsWarning && (
-                <MessageBar intent="warning" layout="multiline">
-                  <MessageBarBody>
-                    <MessageBarTitle>Results may be incomplete</MessageBarTitle>
-                    {relatedState.partialResultsWarning}
-                  </MessageBarBody>
-                </MessageBar>
-              )}
-              <FindResultsList nodes={relatedState.nodes} announce={announce} records={recordMatches} />
-            </div>
-          )}
+          <FindResultsList
+            documents={toDocumentsResultState(relatedState)}
+            announce={announce}
+            records={recordMatches}
+            {...(openRecordAvailable ? { onOpenRecord: handleOpenRecord } : {})}
+          />
         </div>
       );
   }

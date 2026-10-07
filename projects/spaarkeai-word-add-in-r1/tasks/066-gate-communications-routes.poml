@@ -4,7 +4,8 @@
     <title>F9 — the three `/api/office/communications/*` routes carry only group RequireAuthorization and look up communications app-only by caller-supplied id</title>
     <phase>5 Remediation — authorization</phase>
     <gate>blocked — requires 061</gate>
-    <status>escalated — awaiting owner decision (see notes/066-communications-gate.md §6)</status>
+    <status>completed</status>
+    <!-- Task 079, 2026-10-02: status was 'escalated — awaiting owner decision (see notes/066-communications-gate.md §6)' while the index read done. Synced to completed: CLOSED FOR THIS PROJECT, not executed separately. Owner decision 2026-09-30 (1ce8261a4) chose option A, which task 080 delivered (5d870b898). -->
     <status-note>
       Executed 2026-09-21. The disclosure is CONFIRMED on all three routes and is LARGER than the review
       stated (route 2 also performs a second, app-only retrieve of every candidate record's DISPLAY NAME —

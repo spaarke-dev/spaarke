@@ -11,6 +11,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="NetArchTest.Rules" Version="1.3.2" />
+    <!-- unified-access-control-r2 task 167 f2-v2 (main-session round 52): the route guard proves sign-in, the
+         development-only mappings and retired-route absence against the REAL BFF booted in-process
+         (BootedBff.cs), in Development and in Production. Same package and version the three BFF test
+         projects already use; test-only, so nothing reaches the BFF publish. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.11" />
     <PackageReference Include="xunit" Version="2.6.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4">
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
@@ -30,6 +35,12 @@
     <ProjectReference Include="..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Core\Spaarke.Core.csproj" />
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
+  </ItemGroup>
+
+  <!-- The one shared test-host helper the booted BFF needs (task 167 f2-v2): every WebApplicationFactory<Program>
+       stubs its TokenCredential (TestHostCredentialGuardTests). Linked, not copied, so there is ONE definition. -->
+  <ItemGroup>
+    <Compile Include="..\integration\Shared\TestTokenCredential.cs" Link="SharedTestHelpers\TestTokenCredential.cs" />
   </ItemGroup>
 
   <!--
@@ -67,14 +78,19 @@
     <ItemGroup>
       <_L2Project Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
       <_L2Project Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
+      <_L2Project Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Worker\Sprk.Provisioning.ControlPlane.Worker.csproj" />
     </ItemGroup>
     <!--
       Core carries the POCOs the FR-27 shape invariant is about; Api is included because the
       loader scans every Sprk.Provisioning.ControlPlane* assembly and a partially-built set
-      would silently shrink the guard's coverage. Sidecar and Worker are deliberately omitted:
-      neither declares provisioning POCOs, and each adds build time to a job with a <60s budget.
-      If a secret-shaped POCO is ever added to one of them, add it here — the loader will not
-      tell you it is missing, it will simply scan less.
+      would silently shrink the guard's coverage. Sidecar (a folder with no .csproj) is not built:
+      it declares no provisioning POCOs. If a secret-shaped POCO is ever added to it, add it here —
+      the loader will not tell you it is missing, it will simply scan less.
+
+      WORKER IS BUILT TOO (unified-access-control-r2 task 167 f2-v2, main-session round 52 item 2):
+      RouteAuthorizationGuardTests.NoServerCodeWritesTheHostEnvironmentName (RouteAuthorizationGuardTests.Compiled.cs)
+      reads the COMPILED code of every production project under src/server — the Worker is one — for a
+      write to the host environment's EnvironmentName, and fails closed when one is not built. It references only Core, which is built anyway, so it adds one project's compile.
     -->
     <!--
       RESTORE THEN BUILD. `Targets="Build"` alone fails with NETSDK1004 ("Assets file
@@ -86,6 +102,26 @@
       full-solution path pays nothing.
     -->
     <MSBuild Projects="@(_L2Project)"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration)"
+             ContinueOnError="false" />
+  </Target>
+
+  <!--
+    unified-access-control-r2 task 132, main-session round 55 item 3: PoaShareClientSingletonGuardTests C8
+    (NoCompiledSrcServerAssemblyCarriesAnUnsafeAccessor) reads the compiled custom-attribute table of EVERY project under
+    src/server, so each must be built. The ProjectReferences above build the BFF and its shared libraries; the target
+    above builds the L2 Core and Api; this one builds the rest of src/server — the L2 Worker and the L2 test project —
+    the same way (separate graph, outputs in each project's own bin/, no ProjectReference, so no `Program` collision).
+    It also lets CosmosProvisioningSecretGuardTests load the Worker, which its loader already scans when built.
+    A NEW src/server project not built by any of these fails C8 loudly, naming the project: add it here.
+  -->
+  <Target Name="BuildServerProjectsForCompiledScans" AfterTargets="BuildL2ForCosmosGuard">
+    <ItemGroup>
+      <_ServerProjectForScan Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Worker\Sprk.Provisioning.ControlPlane.Worker.csproj" />
+      <_ServerProjectForScan Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Tests\Sprk.Provisioning.ControlPlane.Tests.csproj" />
+    </ItemGroup>
+    <MSBuild Projects="@(_ServerProjectForScan)"
              Targets="Restore;Build"
              Properties="Configuration=$(Configuration)"
              ContinueOnError="false" />

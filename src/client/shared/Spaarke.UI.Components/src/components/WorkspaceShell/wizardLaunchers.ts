@@ -52,6 +52,8 @@
 // ---------------------------------------------------------------------------
 
 import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
@@ -60,39 +62,18 @@ import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModa
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Walks `window`, `window.parent`, `window.top` looking for an Xrm.Navigation
- * with `navigateTo`. Returns `null` in non-host environments (Vite dev, jsdom).
+ * Resolve the host `Xrm.Navigation` (with `navigateTo`) via the shared
+ * cross-frame `getXrm()` walker. Returns `null` in non-host environments
+ * (Vite dev, jsdom).
  *
- * This is the same resolver used by the widget-mount path that already worked
- * (CreateProjectWizardWidget, FindSimilarWizardWidget) — hoisted here so the
- * direct-click path uses the same resolver.
+ * Kept as an exported thin wrapper (NOT a second frame walk — task 081 / C-8
+ * converged this module's former window/parent/top loop onto
+ * `utils/xrmContext.ts` `getXrm()`) because AI.Widgets widgets import this
+ * name from `@spaarke/ui-components`.
  */
 export function resolveXrmNavigation(): any | null {
-  if (typeof window === 'undefined') return null;
-
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin — skip */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin — skip */
-  }
-
-  for (const frame of frames) {
-    try {
-      const nav = (frame as any).Xrm?.Navigation;
-      if (nav?.navigateTo) {
-        return nav;
-      }
-    } catch {
-      /* cross-origin — skip */
-    }
-  }
-  return null;
+  const nav: any = getXrm('navigation')?.Navigation;
+  return nav?.navigateTo ? nav : null;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -517,7 +498,7 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (isOpenExisting) {
     // Strip braces per the pre-031 SmartTodoApp.tsx convention — registry
     // format `{...}` GUIDs are accepted by callers, `entityId` wants bare.
-    pageInput.entityId = (params.entityId as string).replace(/[{}]/g, '');
+    pageInput.entityId = cleanGuid(params.entityId as string);
   }
   // OOB pre-seed: `data` on an entityrecord pageInput is a FLAT
   // attribute-name → default-value dictionary (same rules as `openForm`'s
@@ -541,7 +522,7 @@ export async function navigateToEntityRecordSurfaceAsync(
   ) {
     pageInput.createFromEntity = {
       entityType: params.createFromEntity.entityType,
-      id: params.createFromEntity.id.replace(/[{}]/g, ''),
+      id: cleanGuid(params.createFromEntity.id),
       name: params.createFromEntity.name ?? '',
     };
   }
@@ -583,6 +564,11 @@ export async function navigateToEntityRecordSurfaceAsync(
     if (ref?.id) {
       return {
         launched: true,
+        // C-7 escalation (spaarke-ontology-platform-r1 reuse audit): deliberately
+        // brace-strip ONLY, not the canonical `cleanGuid` — `launchSurface.test.ts`
+        // pins case preservation here (`{TODO-42}` → `TODO-42`), because this id
+        // comes from `Xrm.Navigation.navigateTo`'s `savedEntityReference` and is
+        // not guaranteed to be a canonical lowercase Dataverse GUID in every path.
         savedEntityReference: { id: String(ref.id).replace(/[{}]/g, ''), entityType: ref.entityType, name: ref.name },
       };
     }

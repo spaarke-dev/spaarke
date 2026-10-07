@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.ServiceModel;
@@ -16,6 +17,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Office;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using EntityReference = Microsoft.Xrm.Sdk.EntityReference;
@@ -26,8 +28,9 @@ namespace Sprk.Bff.Api.Tests.Api.Office;
 /// HTTP contract for <c>POST /api/office/quickcreate/matter</c> after spaarkeai-word-add-in-r1 task 030 (FR-13):
 /// the Matter path runs through <c>RecordCreationService</c> — a load-bearing owner, business-unit defaults, the
 /// matter-type lookup and the Field Mapping Framework — behind <c>QuickCreateSourceAccessFilter</c>. It never writes
-/// <c>sprk_matternumber</c> (numbering is left to a planned separate component — owner decision 2026-09-11) and never
-/// rejects a missing, empty or unknown matter type.
+/// <c>sprk_matternumber</c>: the platform's autonumber assigns it (<c>MAT-{SEQNUM:6}</c>, task 076, interim until the
+/// numbering function), so the service leaves it out, retries a create the number's alternate key refuses, and warns when
+/// the created matter came back without a number. It never rejects a missing, empty or unknown matter type.
 /// </summary>
 /// <remarks>
 /// The REAL pipeline runs end to end (routing, OfficeAuthFilter, the source-access filter, the handler,
@@ -54,10 +57,13 @@ public class OfficeQuickCreateContractTests
     private static readonly Guid AccountId = Guid.Parse("9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e01");
     private static readonly Guid CreatedMatterId = Guid.Parse("00000000-0000-0000-0000-00000000c0de");
 
+    /// <summary>The number the platform's autonumber gives the created matter (task 076).</summary>
+    private const string PlatformNumber = "MAT-000042";
+
     // ── Happy path ──────────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndNoNumber()
+    public async Task Post_Matter_WithMatterType_Returns201_SetsTypeOwnerAndBusinessUnitDefaults_AndLeavesTheNumberToThePlatform()
     {
         using var factory = new OfficeQuickCreateTestWebAppFactory();
         ArrangeResolvedCaller(factory);
@@ -80,7 +86,7 @@ public class OfficeQuickCreateContractTests
         json.GetProperty("entityType").GetString().Should().Be("Matter");
         json.GetProperty("logicalName").GetString().Should().Be("sprk_matter");
         json.GetProperty("name").GetString().Should().Be("Acme v. Globex");
-        json.TryGetProperty("number", out _).Should().BeFalse("nothing on this path assigns a number");
+        json.TryGetProperty("number", out _).Should().BeFalse("the response does not carry the number; the platform assigns it on create");
         json.TryGetProperty("warnings", out _).Should().BeFalse("a fully specified create has nothing to warn about");
 
         var matter = created.Entity!;
@@ -90,7 +96,7 @@ public class OfficeQuickCreateContractTests
         matter.GetAttributeValue<string>("sprk_matterdescription").Should().Be("From Word");
         matter.GetAttributeValue<string>("sprk_searchindexname").Should().Be("spaarke-files-index");
         matter.GetAttributeValue<EntityReference>("sprk_ai_search_index").Id.Should().Be(SearchIndexId);
-        AssertNoMatterNumberSent(matter);
+        AssertNumberLeftToThePlatform(matter);
         matter.Contains("sprk_containerid").Should().BeFalse("the container is derived server-side, never stamped on create (task 076 W1)");
     }
 
@@ -110,7 +116,7 @@ public class OfficeQuickCreateContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().ContainSingle(w => w.Contains("No matter type was supplied"));
         created.Entity!.Contains("sprk_mattertype").Should().BeFalse();
-        AssertNoMatterNumberSent(created.Entity);
+        AssertNumberLeftToThePlatform(created.Entity);
         created.Entity.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
     }
 
@@ -235,7 +241,7 @@ public class OfficeQuickCreateContractTests
 
         // The protected attributes: never sent on create, whatever the profile says — Default, Copy, Template,
         // Concat, and a mis-cased, padded target alike.
-        AssertNoMatterNumberSent(matter);
+        AssertNumberLeftToThePlatform(matter);
         matter.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         matter.Contains("sprk_containerid").Should().BeFalse();
 
@@ -271,7 +277,7 @@ public class OfficeQuickCreateContractTests
         var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
         body!.Warnings.Should().BeNull("the type arrived through mapping, so nothing is missing");
         created.Entity!.GetAttributeValue<EntityReference>("sprk_mattertype").Id.Should().Be(MatterTypeId);
-        AssertNoMatterNumberSent(created.Entity);
+        AssertNumberLeftToThePlatform(created.Entity);
     }
 
     [Fact]
@@ -489,6 +495,174 @@ public class OfficeQuickCreateContractTests
             .Which.CallerSystemUserId.Should().Be(OwnerId, "a new matter is filed against nothing, so the caller's unit decides");
     }
 
+    // ── uac-r2 task 166 (S-69, owner G5): the TARGET table's Create privilege ─────────────────────────────
+
+    /// <summary>
+    /// The live privilege names (spaarkedev1 <c>privileges</c>, read-only 2026-10-03). A typo would make the probe ask
+    /// about a privilege nobody holds and every quick-create of that type would 403.
+    /// </summary>
+    [Theory]
+    [InlineData("matter", "prvCreatesprk_Matter")]
+    [InlineData("project", "prvCreatesprk_Project")]
+    [InlineData("invoice", "prvCreatesprk_Invoice")]
+    public void CreatePrivilegeFor_IsTheLiveDataversePrivilegeName(string entityType, string privilege)
+    {
+        QuickCreateFieldRequirements.TryParse(entityType, out var parsed).Should().BeTrue();
+        Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.CreatePrivilegeFor(parsed).Should().Be(privilege);
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("contact")]
+    public void CreatePrivilegeFor_TypesThisRouteNeverCreates_AskNoPrivilege(string entityType)
+    {
+        QuickCreateFieldRequirements.TryParse(entityType, out var parsed).Should().BeTrue();
+        Sprk.Bff.Api.Api.Filters.QuickCreateSourceAccessFilter.CreatePrivilegeFor(parsed).Should().BeNull();
+    }
+
+    [Theory]
+    [InlineData("matter", "prvCreatesprk_Matter")]
+    [InlineData("project", "prvCreatesprk_Project")]
+    [InlineData("invoice", "prvCreatesprk_Invoice")]
+    public async Task Post_QuickCreate_WhenTheCallerLacksTheTablesCreatePrivilege_Returns403_AndCreatesNothing(
+        string entityType, string privilege)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Remove(privilege);
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "No create privilege" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_009");
+        problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        factory.PrivilegeQuestions.Should().Equal(new[] { privilege }, "asked AS THE CALLER, by its exact live name");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_WhenThePrivilegeCheckThrows_FailsClosed_AndCreatesNothing()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable"));
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Fault" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReadProblemAsync(response)).Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_Matter_AnUnreadableSourceIsRefusedFirst_AndNoPrivilegeIsAsked()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeSourceRights(factory, AccessRights.AppendTo); // not Read
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, SourceContextRequest("Source first", "sprk_project"));
+
+        await AssertSourceDeniedAsync(factory, response, "insufficient_rights");
+        factory.PrivilegeQuestions.Should().BeEmpty("the source half (task 030) runs first and is unchanged");
+    }
+
+    /// <summary>
+    /// uac-r2 task 166 r1 (verifier item 22): a caller with NO bearer token is refused at the route. The factory's
+    /// default seam ignores the token, so here the privilege question is answered by the REAL probe (CallBase), whose
+    /// rule is "no token, no privilege" — proving the filter hands the probe the caller's own (absent) token rather
+    /// than anything that could stand in for it, and that the absence denies.
+    /// </summary>
+    [Theory]
+    [InlineData("matter")]
+    [InlineData("project")]
+    [InlineData("invoice")]
+    public async Task Post_QuickCreate_WithNoBearerToken_Returns403_AndCreatesNothing(string entityType)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        var tokensSeen = new List<string?>();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string? token, string _, CancellationToken _) => tokensSeen.Add(token))
+            .CallBase();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+
+        var client = factory.CreateClient(); // TestAuthHandler authenticates WITHOUT a bearer token
+        var response = await client.PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "No token" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await ReadProblemAsync(response);
+        problem.Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_009");
+        problem.Should().ContainKey("reasonCode").WhoseValue.Should().Be("insufficient_privilege");
+        tokensSeen.Should().ContainSingle().Which.Should().BeNull("the filter forwards the CALLER's token, and there is none");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_ForwardsTheCallersOwnBearerTokenToThePrivilegeQuestion()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        var tokensSeen = new List<string?>();
+        factory.AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback((string? token, string _, CancellationToken _) => tokensSeen.Add(token))
+            .ReturnsAsync(false);
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "caller-token-166");
+        var response = await client.PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Token forwarded" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        tokensSeen.Should().Equal(new[] { "caller-token-166" }, "the question is asked AS THE CALLER");
+        AssertNothingCreated(factory);
+    }
+
+    [Fact]
+    public async Task Post_QuickCreate_OfAnInvalidEntityType_AsksNoPrivilege_AndKeepsTheHandlers400()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Clear();
+        ArrangeResolvedCaller(factory);
+        CaptureCreate(factory);
+
+        var response = await factory.CreateClient().PostAsJsonAsync(
+            "/api/office/quickcreate/notatype", new QuickCreateRequest { Name = "Not a type" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, "the handler's existing answer is unchanged");
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be("OFFICE_002");
+        factory.PrivilegeQuestions.Should().BeEmpty("an unparseable type names no table, so no privilege is asked");
+        AssertNothingCreated(factory);
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("contact")]
+    public async Task Post_QuickCreate_OfATypeThisRouteNeverCreates_AsksNoPrivilege(string entityType)
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        factory.HeldPrivileges.Clear();
+        ArrangeResolvedCaller(factory);
+
+        await factory.CreateClient().PostAsJsonAsync(
+            $"/api/office/quickcreate/{entityType}", new QuickCreateRequest { Name = "Not created here" });
+
+        factory.PrivilegeQuestions.Should().BeEmpty();
+        AssertNothingCreated(factory);
+    }
+
     // ── Negative: validation ────────────────────────────────────────────────────────────────────────────
 
     [Theory]
@@ -522,6 +696,104 @@ public class OfficeQuickCreateContractTests
         AssertNothingCreated(factory);
     }
 
+    // ── Numbering: the platform's autonumber (task 076, interim until the numbering function) ─────────────
+
+    [Fact]
+    public async Task Post_Matter_WhenTheNumberKeyRefusesTheFirstCreate_RetriesOnce_AndStillSendsNoNumber_Returns201()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        ArrangeNumberReadBack(factory, PlatformNumber);
+        var attempts = new List<Entity>();
+        factory.Entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((entity, _) => attempts.Add(entity))
+            .Returns(() => attempts.Count == 1
+                ? Task.FromException<Guid>(NumberKeyViolation())
+                : Task.FromResult(CreatedMatterId));
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Collides Once", MatterTypeId = Guid.Empty });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "a number typed in ahead of the sequence costs one retry, not the create");
+        attempts.Should().HaveCount(2);
+        attempts.ForEach(AssertNumberLeftToThePlatform); // the retry leaves the number to the platform too
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Id.Should().Be(CreatedMatterId);
+        body.Warnings.Should().NotContain(w => w.Contains("number"), "the retry got a number; nothing is missing");
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenEveryNumberIsAlreadyHeld_Returns409_RecordNumberUnavailable_AfterThreeAttempts()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(NumberKeyViolation());
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Always Collides" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        (await ReadProblemAsync(response)).Should().ContainKey("errorCode").WhoseValue.Should().Be(RecordCreationService.NumberUnavailableCode);
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Exactly(3),
+            "the attempts are bounded; a run of typed-ahead numbers is the operator's re-seed, not an endless loop");
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenTheCreateFaultsForAnotherReason_IsNotRetried()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeBusinessUnit(factory);
+        factory.Entities
+            .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse slow"));
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Timed Out" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError, "unchanged: any other create fault propagates");
+        factory.Entities.Verify(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once,
+            "a timeout may have created the row; retrying it could create a second");
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenTheCreatedMatterHasNoNumber_Returns201_AndWarnsThatItHasNoName()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeMatterTypeExists(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+        ArrangeNumberReadBack(factory, null); // this environment has no autonumber on the column
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Unnumbered", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, "the record exists; the missing number is reported, not undone");
+        var body = await response.Content.ReadFromJsonAsync<QuickCreateResponse>();
+        body!.Warnings.Should().ContainSingle(w => w.Contains("created without a number"));
+    }
+
+    [Fact]
+    public async Task Post_Matter_WhenTheNumberCannotBeReadBack_Returns201_WithoutAWarning()
+    {
+        using var factory = new OfficeQuickCreateTestWebAppFactory();
+        ArrangeResolvedCaller(factory);
+        ArrangeMatterTypeExists(factory);
+        ArrangeBusinessUnit(factory);
+        CaptureCreate(factory);
+        factory.Entities
+            .Setup(e => e.RetrieveAsync("sprk_matter", CreatedMatterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("dataverse slow"));
+
+        var response = await factory.CreateClient().PostAsJsonAsync(Route, new QuickCreateRequest { Name = "Read Fails", MatterTypeId = MatterTypeId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var json = await ReadJsonAsync(response);
+        json.TryGetProperty("warnings", out _).Should().BeFalse("a failed read-back says nothing about the number, so it never alarms the user");
+    }
+
     // ── Arrangement + assertion helpers ─────────────────────────────────────────────────────────────────
 
     private static QuickCreateRequest SourceContextRequest(string name, string sourceEntityType) => new()
@@ -532,11 +804,15 @@ public class OfficeQuickCreateContractTests
         SourceRecordId = SourceProjectId,
     };
 
-    /// <summary>No key on the create payload names the matter number, in any casing or padding.</summary>
-    private static void AssertNoMatterNumberSent(Entity matter)
+    /// <summary>
+    /// No key on the create payload names the matter number, in any casing or padding: the platform's autonumber
+    /// assigns it, and fills it ONLY when the create leaves it empty (measured live 2026-10-02), so a value sent here
+    /// would pre-empt the sequence (task 076).
+    /// </summary>
+    private static void AssertNumberLeftToThePlatform(Entity matter)
         => matter.Attributes.Keys
             .Should().NotContain(key => string.Equals(key.Trim(), "sprk_matternumber", StringComparison.OrdinalIgnoreCase),
-                "numbering is left to a planned separate component; this path must never send sprk_matternumber");
+                "the platform's autonumber fills sprk_matternumber only when the create leaves it empty (task 076)");
 
     private static async Task AssertSourceDeniedAsync(
         OfficeQuickCreateTestWebAppFactory factory, HttpResponseMessage response, string reasonCode)
@@ -614,6 +890,10 @@ public class OfficeQuickCreateContractTests
         return requests;
     }
 
+    /// <summary>
+    /// Captures the create payload, and arranges the read-back of the created matter's number as the platform's
+    /// autonumber would answer it (task 076), so every happy path exercises the "number assigned" branch.
+    /// </summary>
     private static CreatedHolder CaptureCreate(OfficeQuickCreateTestWebAppFactory factory)
     {
         var holder = new CreatedHolder();
@@ -621,8 +901,33 @@ public class OfficeQuickCreateContractTests
             .Setup(e => e.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((entity, _) => holder.Entity = entity)
             .ReturnsAsync(CreatedMatterId);
+        ArrangeNumberReadBack(factory, PlatformNumber);
         return holder;
     }
+
+    /// <summary>The created matter's number as the read-back sees it; <see langword="null"/> = the column came back blank.</summary>
+    private static void ArrangeNumberReadBack(OfficeQuickCreateTestWebAppFactory factory, string? number)
+        => factory.Entities
+            .Setup(e => e.RetrieveAsync(
+                "sprk_matter", CreatedMatterId,
+                It.Is<string[]>(columns => columns.Length == 1 && columns[0] == "sprk_matternumber"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", CreatedMatterId) { ["sprk_matternumber"] = number });
+
+    /// <summary>
+    /// The alternate-key duplicate Dataverse raises when the platform's number is already held (live, 2026-10-02), in the
+    /// shape production delivers it: <c>DataverseServiceClientImpl.CreateAsync</c> wraps every fault in an
+    /// <see cref="InvalidOperationException"/>, and the classifier walks to the inner fault.
+    /// </summary>
+    private static InvalidOperationException NumberKeyViolation() => new(
+        "Failed to create sprk_matter record: Entity Key Matter Number (unique) violated.",
+        new FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault
+            {
+                ErrorCode = unchecked((int)0x80060892),
+                Message = "Entity Key Matter Number (unique) violated. A record with the same value for Matter Number already exists.",
+            },
+            new FaultReason("Entity Key Matter Number (unique) violated")));
 
     private static FieldMappingRuleEntity Rule(
         string name, string sourceField, int sourceType, string targetField, int targetType,
@@ -685,6 +990,37 @@ public sealed class OfficeQuickCreateTestWebAppFactory : OfficeTestWebAppFactory
         new ConfigurationBuilder().Build(),
         NullLogger<CallerRecordAccessProbe>.Instance,
         null!);
+
+    /// <summary>Every Create-privilege question the quick-create filter asked, in order (uac-r2 task 166, S-69).</summary>
+    public List<string> PrivilegeQuestions { get; } = new();
+
+    /// <summary>
+    /// The table Create privileges the caller holds. Defaults to the three quick-create creates (matter, project,
+    /// invoice) so every pre-existing test keeps its meaning; a test removes one to model a caller without it.
+    /// </summary>
+    public HashSet<string> HeldPrivileges { get; } = new(StringComparer.Ordinal)
+    {
+        "prvCreatesprk_Matter", "prvCreatesprk_Project", "prvCreatesprk_Invoice",
+    };
+
+    public OfficeQuickCreateTestWebAppFactory()
+    {
+        // uac-r2 task 166 (S-69): the filter's second half asks the CALLER's table Create privilege through the
+        // probe's virtual privilege seam. Answered from HeldPrivileges. (The Office test clients send no bearer
+        // token — TestAuthHandler authenticates without one — so the seam does not model the real probe's
+        // "no token = not held"; that rule is the real probe's own and is covered at the probe.)
+        AccessProbe
+            .Setup(p => p.CallerHoldsPrivilegeAsync(It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string? _, string privilege, CancellationToken __) =>
+            {
+                lock (PrivilegeQuestions)
+                {
+                    PrivilegeQuestions.Add(privilege);
+                }
+
+                return HeldPrivileges.Contains(privilege);
+            });
+    }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {

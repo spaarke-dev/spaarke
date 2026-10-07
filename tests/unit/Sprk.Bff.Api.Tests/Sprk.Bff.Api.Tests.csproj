@@ -31,8 +31,6 @@
     <PackageReference Include="Moq" Version="4.20.72" />
     <PackageReference Include="WireMock.Net" Version="1.5.45" />
 
-    <!-- PDF generation for export tests -->
-    <PackageReference Include="QuestPDF" Version="2025.12.1" />
 
     <!-- Security: Override vulnerable transitive dependencies -->
     <!-- System.Text.RegularExpressions pin removed (task 005): net10 framework-superseded (NU1510). -->
@@ -69,7 +67,7 @@
     HTTP-contract tests physically relocated to tests/integration/contract/** but kept compiled
     into THIS assembly so fixtures (CustomWebAppFactory, WorkspaceTestFixture, AdminJobsTestFixture,
     etc.) and project-specific package refs (NSubstitute, WireMock.Net, Cosmos SDK, MimeKit,
-    QuestPDF, Newtonsoft.Json) remain accessible without duplication in a second test project.
+    Newtonsoft.Json) remain accessible without duplication in a second test project.
     Namespaces preserved (Sprk.Bff.Api.Tests.*) for the same reason. Full assembly migration to
     Spe.Integration.Tests is deferred to a future task once fixture coupling is untangled.
   -->

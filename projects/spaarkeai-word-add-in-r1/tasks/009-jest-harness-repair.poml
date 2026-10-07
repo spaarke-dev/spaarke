@@ -66,6 +66,13 @@
     <criterion testable="false">Any test failing on a genuine product defect after the repair is reported as a finding, not edited away.</criterion>
   </acceptance-criteria>
 
+  <steps mode="directional">
+    <!-- Added 2026-10-02 by task 079 (record integrity) so this file validates. The task was authored WITHOUT a
+         steps element and was executed against its goal, constraints and acceptance criteria, which remain the
+         record of what was asked. This element is not a claim about how the work was done; see notes. -->
+    <step>Work to the goal, constraints and acceptance criteria above. (Authored without steps; see the notes for what was done.)</step>
+  </steps>
+
   <outputs>
     <output type="config">src/client/office-addins/jest.config.js</output>
     <output type="doc">projects/spaarkeai-word-add-in-r1/notes/009-jest-harness-repair.md</output>

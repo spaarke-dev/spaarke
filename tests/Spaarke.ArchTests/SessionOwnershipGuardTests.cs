@@ -44,10 +44,16 @@ public class SessionOwnershipGuardTests
                 + "the principal and drops a candidate session it does not own, falling through to a "
                 + "fresh session so the user still gets a working document.",
 
+            // unified-access-control-r2 task 162: POST /api/ai/analysis/fork (the route this row used to
+            // describe, which silently exempted /promote too) was DELETED — no caller, not published.
             ["Api/Ai/AnalysisEndpoints.cs"] =
-                "POST /api/ai/analysis/fork takes priorSessionId in the body and COPIES its messages. "
-                + "The handler answers 404 for a prior session the caller does not own — deliberately "
-                + "the same answer as a missing one, so the route is not an existence oracle.",
+                "POST /api/ai/analysis/promote takes sessionId in the body and BINDS that session to a "
+                + "new analysis (rewriting its HostContext and its sprk_aichatsummary FK). The handler "
+                + "compares the session's OwnerOid with the caller's oid IMMEDIATELY after reading it — "
+                + "before the already-bound 400 — and answers a session the caller does not own (or "
+                + "one with no owner) with the same 404 as a missing one, so the route is not an "
+                + "existence oracle; it then checks analysis.attach on the session's own document "
+                + "when the body names none. (/fork, which this row covered until task 162, is gone.)",
 
             ["Api/ComposeActiveDocumentEndpoints.cs"] =
                 "POST /api/compose/active-document takes sessionId in the body and MUTATES that "
@@ -60,6 +66,23 @@ public class SessionOwnershipGuardTests
                 + "reference the caller does not own is treated exactly like a stale one: mint a new "
                 + "session rather than resume. Note ExtractUserId() there returns the literal "
                 + "\"unknown\" when the oid is absent — correct for a log line, never for ownership.",
+
+            // unified-access-control-r2 task 166 (route-authorization sweep finding S-64).
+            ["Api/ComposeMountEndpoints.cs"] =
+                "POST /api/compose/upload takes sessionId (and the uploaded documentId) in the BODY and returns "
+                + "that session's retained upload bytes, filename and projection. The handler resolves the "
+                + "session under the CLAIM tenant (ComposeActiveDocumentEndpoints.ResolveOwnedSessionAsync, as-sent "
+                + "then N then D spellings) and requires a non-empty OwnerOid equal to the caller BEFORE any "
+                + "ITenantCache read; not-owned, unknown, unowned and a store fault are the same 404 as expired bytes.",
+
+            // unified-access-control-r2 task 166 (route-authorization sweep, amendment d).
+            ["Api/ComposeSaveEndpoints.cs"] =
+                "POST /api/compose/documents/{documentSpeId}/save and /documents/create-on-save take sessionId in "
+                + "the BODY; the first-save promotion REBINDS that session's document id, create-on-save picks the "
+                + "container from its bound matter, and memory capture reads its defined terms. The handlers "
+                + "forward the session ONLY when the caller owns it (ResolveOwnedSessionAsync under the CLAIM "
+                + "tenant); otherwise the save runs UNBOUND — the Compose Load #863 rule: not-yours is treated "
+                + "exactly as not-found.",
         };
 
     /// <summary>

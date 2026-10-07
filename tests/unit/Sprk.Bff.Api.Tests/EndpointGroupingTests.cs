@@ -17,9 +17,11 @@ namespace Sprk.Bff.Api.Tests;
 public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
 
     public EndpointGroupingTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -120,6 +122,7 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
 
         // Should return a valid HTTP status (not 404) — the endpoint exists...
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", endpoint);  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
 
         // ...and now requires authorization (task 023): an unauthenticated request is a
         // bare 401 auth challenge (no body), consistent with the app's other secured endpoints.

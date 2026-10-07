@@ -74,7 +74,8 @@ public class MessageAttachmentMaterializerTests
     private static MessageAttachmentMaterializer CreateSut(
         Mock<ISpeFileOperations> spe,
         Mock<IGenericEntityService> generic,
-        string? archiveContainerId = DriveId) =>
+        string? archiveContainerId = DriveId,
+        Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble? ownership = null) =>
         new(
             spe.Object,
             generic.Object,
@@ -86,6 +87,7 @@ public class MessageAttachmentMaterializerTests
                 WebhookSigningKey = "key",
                 ArchiveContainerId = archiveContainerId,
             }),
+            ownership ?? new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
             NonSecureContainerResolver());
 
@@ -179,6 +181,8 @@ public class MessageAttachmentMaterializerTests
         // the dotnet-10-upgrade-r1 master re-sync (Part A). The intersection below keeps sprk_communication (unchanged).
         ((EntityReference)document["sprk_relatedcommunication"]).Id.Should().Be(CommunicationId);
         document["sprk_graphitemid"].Should().Be("spe-item-abc");
+        document[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn].Should().Be("spe-item-abc",
+            "round 72 F4: the field-secured copy is written on the same create, with the same value");
         document["sprk_graphdriveid"].Should().Be(DriveId);
 
         var intersection = created[1];

@@ -11,8 +11,10 @@
 //   - a faulted read denies ALL queried candidates, fail-closed, never an empty result
 //   - a subject with no entries yields zero denials (no false walls)
 // Plus the structurally-necessary edges the reader's own contract implies: no-subject/no-candidate
-// short-circuits (never query), the defensive subject-size ceiling, ambiguous-object-shape rows
-// (never silently expand a deny), and multi-entry provenance accumulation.
+// short-circuits (never query), ambiguous-object-shape rows (never silently expand a deny), and
+// multi-entry provenance accumulation. Task 142 round 18 replaced the defensive subject-size ceiling
+// (more than 25 organizations / 5 contacts failed closed without querying) with subject-side chunking:
+// any set is evaluated, the per-chunk matches unioned, and a fault in any chunk fails the whole answer.
 //
 // Module-boundary substitute only: a subclass overriding NoAccessListReader's internal-virtual
 // QueryChunkAsync seam (InternalsVisibleTo, matching the ExternalParticipationService /
@@ -210,21 +212,215 @@ public class NoAccessListReaderTests
         result.Should().BeSameAs(NoAccessListResult.Empty);
     }
 
-    [Fact]
-    public async Task GetDeniedRecordsAsync_ExcessiveOrganizationIds_ReturnsDenyAllQueriedFailClosedWithoutQuerying()
+    // ── Task 142 round 18: a subject set of ANY size is evaluated (chunked), never refused ─────────
+    //
+    // Before round 18 more than 25 organizations / 5 contacts failed closed WITHOUT querying — a deterministic "could
+    // not be checked" that every consumer reported as a transient fault (a grant that "tries again" forever, an
+    // Assigned-To job red for as long as the subject stayed assigned). Now the subject side is split into chunks within
+    // one query's bound and the matches are unioned; only a genuine read fault (in any chunk) fails closed. These run
+    // over TableNoAccessListReader, which answers each query the way Dataverse would — only the entries whose subject
+    // AND object the query's filters name — so an entry is found only if its subject actually reached a query.
+
+    private static Guid[] Ids(int count) => Enumerable.Range(0, count).Select(_ => Guid.NewGuid()).ToArray();
+
+    [Theory]
+    [InlineData(26)] // one over a single query's bound: two subject chunks
+    [InlineData(51)] // three chunks, the last holding one organization
+    public async Task GetDeniedRecordsAsync_MoreOrganizationsThanOneQueryHolds_AreEvaluated_AnEntryOnTheLastIsFound(int count)
     {
-        var sut = FakeNoAccessListReader.Throwing(new InvalidOperationException("must not be called"));
-        var tooManyOrgs = Enumerable.Range(0, NoAccessListReader.MaxSubjectOrganizationIds + 1)
-            .Select(_ => Guid.NewGuid())
-            .ToArray();
+        var organizations = Ids(count);
+        var sut = new TableNoAccessListReader();
+        sut.Add(RecordObjectRow(EntryId, subjectOrg: organizations[^1], objectRecordId: RecordB));
 
-        var candidates = new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, Array.Empty<Guid>()) };
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, Array.Empty<Guid>()),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, Array.Empty<Guid>()),
+        };
 
-        var result = await sut.GetDeniedRecordsAsync(contactId: null, tooManyOrgs, candidates, CancellationToken.None);
+        var result = await sut.GetDeniedRecordsAsync(contactId: null, organizations, candidates, CancellationToken.None);
+
+        result.FailedClosed.Should().BeFalse("a large subject set is evaluated, not refused (round 18)");
+        result.DeniedRecordIds.Should().Equal(new[] { RecordB },
+            "the entry names the LAST organization, which only the last subject chunk carries");
+        result.DenyingEntryIds[RecordB].Should().Equal(EntryId);
+        result.DenyingSubjectKinds[RecordB].Should().Be(NoAccessSubjectKinds.Organization);
+        sut.SubjectFilters.Distinct().Should().HaveCount((count + NoAccessListReader.MaxSubjectOrganizationIds - 1)
+            / NoAccessListReader.MaxSubjectOrganizationIds);
+    }
+
+    /// <summary>The twin: the same large set with no entry naming it is a considered zero, never a fail-closed answer.</summary>
+    [Fact]
+    public async Task GetDeniedRecordsAsync_MoreOrganizationsThanOneQueryHolds_WithNoEntry_IsAConsideredZero()
+    {
+        var sut = new TableNoAccessListReader();
+        sut.Add(RecordObjectRow(EntryId, subjectOrg: Guid.NewGuid(), objectRecordId: RecordA)); // someone else's entry
+
+        var result = await sut.GetDeniedRecordsAsync(contactId: null, Ids(30),
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, Array.Empty<Guid>()) }, CancellationToken.None);
+
+        result.FailedClosed.Should().BeFalse();
+        result.DeniedRecordIds.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_MoreContactsThanOneQueryHolds_AreEvaluated_AnEntryOnTheLastIsFound()
+    {
+        var contacts = Ids(NoAccessListReader.MaxSubjectContactIds + 2); // 7: two subject chunks
+        var sut = new TableNoAccessListReader();
+        sut.Add(OrganizationObjectRow(EntryId, subjectContact: contacts[^1], objectOrg: DeniedOrg)); // an ethical wall
+
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, new[] { OtherOrg }),
+        };
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(contacts, Array.Empty<Guid>(), SystemUserId: null), candidates, CancellationToken.None);
+
+        result.FailedClosed.Should().BeFalse("six or more contacts are evaluated, not refused (round 18)");
+        result.DeniedRecordIds.Should().Equal(new[] { RecordA });
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.Contact);
+    }
+
+    /// <summary>
+    /// The union: entries found by DIFFERENT subject chunks on one record all count — both entry ids, every subject kind
+    /// (the systemuser rides in the first chunk; the 30th organization only in the second).
+    /// </summary>
+    [Fact]
+    public async Task GetDeniedRecordsAsync_EntriesFoundByDifferentSubjectChunks_AreUnioned()
+    {
+        var organizations = Ids(30);
+        var sut = new TableNoAccessListReader();
+        var bySystemUser = RecordObjectRow(EntryId, objectRecordId: RecordA);
+        bySystemUser._sprk_subjectsystemuser_value = SystemUser;
+        sut.Add(bySystemUser);
+        sut.Add(RecordObjectRow(EntryId2, subjectOrg: organizations[^1], objectRecordId: RecordA));
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(new[] { Contact }, organizations, SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.FailedClosed.Should().BeFalse();
+        result.DenyingEntryIds[RecordA].Should().BeEquivalentTo(new[] { EntryId, EntryId2 });
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.SystemUser | NoAccessSubjectKinds.Organization);
+    }
+
+    /// <summary>
+    /// A genuine read fault in ANY chunk still fails the WHOLE answer closed — even when an earlier chunk already found a
+    /// real entry, the union so far is not all the denials. Both fault shapes: a non-success status (the seam's null) and
+    /// a throw.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GetDeniedRecordsAsync_AFaultInOneSubjectChunk_FailsTheWholeAnswerClosed(bool throws)
+    {
+        var organizations = Ids(30);
+        var sut = new TableNoAccessListReader
+        {
+            // Only the SECOND subject chunk (the one carrying the 26th organization) faults.
+            FaultWhenSubjectFilterNames = organizations[NoAccessListReader.MaxSubjectOrganizationIds],
+            FaultThrows = throws,
+        };
+        sut.Add(RecordObjectRow(EntryId, subjectOrg: organizations[0], objectRecordId: RecordA)); // found by chunk 1
+
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, Array.Empty<Guid>()),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, Array.Empty<Guid>()),
+        };
+
+        var result = await sut.GetDeniedRecordsAsync(contactId: null, organizations, candidates, CancellationToken.None);
+
+        result.FailedClosed.Should().BeTrue("one unreadable chunk means the answer cannot prove 'not denied' (NFR-01)");
+        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA, RecordB });
+        result.DenyingEntryIds[RecordA].Should().BeEmpty("a fail-closed answer carries no provenance, even for a real match");
+        sut.SubjectFilters.Should().Contain(f => f.Contains(organizations[0].ToString(), StringComparison.Ordinal),
+            "the first chunk was evaluated before the second faulted");
+    }
+
+
+    /// <summary>
+    /// Task 142 verifier, criterion 19 (batch 4 integration): the ETHICAL-WALL loop (Loop A — the referenced-organization
+    /// object chunks) fails the WHOLE answer closed when one of its chunks answers no rows (<c>null</c>, a non-success
+    /// status), exactly as the record loop does — even when the record loop answers cleanly and an EARLIER organization
+    /// chunk already found a real entry. The record-object queries here succeed, so the only thing that can fail the answer
+    /// is the faulted organization chunk: if that chunk were skipped (<c>continue</c>) instead of failing closed, the
+    /// answer would read as complete and a wall on an organization in the unread chunk would never bind.
+    /// </summary>
+    [Fact]
+    public async Task GetDeniedRecordsAsync_AnEthicalWallOrganizationChunkThatAnswersNothing_FailsTheWholeAnswerClosed()
+    {
+        // Two organization-object chunks: the first carries DeniedOrg (a real entry), the second faults.
+        var referenced = new[] { DeniedOrg }.Concat(Ids(NoAccessListReader.ObjectIdChunkSize)).ToArray();
+        var faultingOrg = referenced[NoAccessListReader.ObjectIdChunkSize]; // the first id of the SECOND chunk
+        var sut = new TableNoAccessListReader { NullWhenObjectOrganizationNamed = faultingOrg };
+        sut.Add(OrganizationObjectRow(EntryId, subjectContact: Contact, objectOrg: DeniedOrg));   // found by chunk 1
+        sut.Add(OrganizationObjectRow(EntryId2, subjectContact: Contact, objectOrg: faultingOrg)); // in the unread chunk
+
+        var candidates = new[]
+        {
+            new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }),
+            new NoAccessCandidateRecord("sprk_matter", RecordB, referenced.Skip(1).ToArray()),
+        };
+
+        var result = await sut.GetDeniedRecordsAsync(Contact, Array.Empty<Guid>(), candidates, CancellationToken.None);
 
         result.FailedClosed.Should().BeTrue(
-            "an implausibly large subject org set cannot be safely bounded-queried -- fail closed rather than truncate (which would silently under-deny)");
-        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA });
+            "an unread ethical-wall chunk means the answer cannot prove 'not denied' (NFR-01)");
+        result.DeniedRecordIds.Should().BeEquivalentTo(new[] { RecordA, RecordB },
+            "every queried candidate is denied — RecordB's wall sits in the chunk that was never read");
+        result.DenyingEntryIds[RecordA].Should().BeEmpty("a fail-closed answer carries no provenance, even for a real match");
+    }
+
+    /// <summary>
+    /// The bound itself: every query embeds at most <see cref="NoAccessListReader.MaxSubjectContactIds"/> contacts and
+    /// <see cref="NoAccessListReader.MaxSubjectOrganizationIds"/> organizations, and across the queries every subject is
+    /// asked about — each contact and organization in exactly one chunk, the systemuser once.
+    /// </summary>
+    [Fact]
+    public async Task GetDeniedRecordsAsync_EveryQueryStaysWithinTheBound_AndEverySubjectIsAskedAbout()
+    {
+        var contacts = Ids(12);
+        var organizations = Ids(60);
+        var sut = new TableNoAccessListReader();
+
+        await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(contacts, organizations, SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }) },
+            CancellationToken.None);
+
+        var distinctFilters = sut.SubjectFilters.Distinct().ToList();
+        distinctFilters.Should().HaveCount(3, "12 contacts need three chunks of 5; 60 organizations need three of 25");
+        foreach (var filter in distinctFilters)
+        {
+            TableNoAccessListReader.IdsNamed(filter, "_sprk_subjectcontact_value").Should()
+                .HaveCountLessThanOrEqualTo(NoAccessListReader.MaxSubjectContactIds);
+            TableNoAccessListReader.IdsNamed(filter, "_sprk_subjectorganization_value").Should()
+                .HaveCountLessThanOrEqualTo(NoAccessListReader.MaxSubjectOrganizationIds);
+        }
+
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectcontact_value"))
+            .Should().BeEquivalentTo(contacts, o => o.WithoutStrictOrdering(), "each contact in exactly one chunk");
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectorganization_value"))
+            .Should().BeEquivalentTo(organizations, o => o.WithoutStrictOrdering(), "each organization in exactly one chunk");
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectsystemuser_value"))
+            .Should().Equal(new[] { SystemUser }, "the systemuser is asked about once");
+    }
+
+    [Fact]
+    public void ChunkSubjects_WithinTheBound_IsOneChunk_TheSingleQueryShapeUnchanged()
+    {
+        var subjects = new NoAccessSubjects(Ids(NoAccessListReader.MaxSubjectContactIds),
+            Ids(NoAccessListReader.MaxSubjectOrganizationIds), SystemUser);
+
+        var chunks = NoAccessListReader.ChunkSubjects(subjects);
+
+        chunks.Should().ContainSingle();
+        NoAccessListReader.BuildSubjectFilter(chunks[0]).Should().Be(NoAccessListReader.BuildSubjectFilter(subjects));
     }
 
     // ── Malformed rows: ambiguous object shape never silently expands a deny ────────────────────
@@ -286,7 +482,93 @@ public class NoAccessListReaderTests
     {
         var filter = NoAccessListReader.BuildSubjectFilter(Contact, new[] { SubjectOrg });
 
-        filter.Should().Be($"(sprk_subjectcontact eq {Contact} or (sprk_subjectorganization eq {SubjectOrg}))");
+        filter.Should().Be($"(_sprk_subjectcontact_value eq {Contact} or (_sprk_subjectorganization_value eq {SubjectOrg}))");
+    }
+
+    // ── Task 143: the systemuser subject, exactly-one-of-THREE, and subject-kind provenance ──────
+
+    private static readonly Guid SystemUser = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+
+    [Fact]
+    public void RowSelect_NamesTheSystemUserSubjectColumn()
+    {
+        // The deploy-order hazard: this column must exist live before this select ships (schema doc + PR order).
+        NoAccessListReader.RowSelect.Split(',').Should().Contain("_sprk_subjectsystemuser_value");
+    }
+
+    [Fact]
+    public void BuildSubjectFilter_AllThreeSubjects_OrJoinsEveryDimension()
+    {
+        var filter = NoAccessListReader.BuildSubjectFilter(
+            new NoAccessSubjects(new[] { Contact }, new[] { SubjectOrg }, SystemUser));
+
+        filter.Should().Be(
+            $"(_sprk_subjectcontact_value eq {Contact} or (_sprk_subjectorganization_value eq {SubjectOrg}) or _sprk_subjectsystemuser_value eq {SystemUser})");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_ASystemUserSubjectRow_DeniesTheRecord_AndSaysASystemUserDeniedIt()
+    {
+        var row = RecordObjectRow(EntryId, objectRecordId: RecordA);
+        row._sprk_subjectsystemuser_value = SystemUser;
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new(), recordLoop: new() { row });
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(Array.Empty<Guid>(), Array.Empty<Guid>(), SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().Equal(RecordA);
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.SystemUser);
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_AContactAndAnOrganizationEntryOnOneRecord_ReportBothSubjectKinds()
+    {
+        var direct = OrganizationObjectRow(EntryId, subjectContact: Contact, objectOrg: DeniedOrg);
+        var viaFirm = OrganizationObjectRow(EntryId2, subjectOrg: SubjectOrg, objectOrg: DeniedOrg);
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new() { direct, viaFirm }, recordLoop: new());
+
+        var result = await sut.GetDeniedRecordsAsync(Contact, new[] { SubjectOrg },
+            new[] { new NoAccessCandidateRecord("sprk_matter", RecordA, new[] { DeniedOrg }) }, CancellationToken.None);
+
+        result.DenyingSubjectKinds[RecordA].Should().Be(NoAccessSubjectKinds.Contact | NoAccessSubjectKinds.Organization);
+    }
+
+    [Theory]
+    [InlineData(true, false, true)]   // contact + systemuser
+    [InlineData(false, true, true)]   // organization + systemuser
+    [InlineData(true, true, false)]   // contact + organization
+    [InlineData(false, false, false)] // no subject at all
+    public async Task GetDeniedRecordsAsync_ARowWithNoneOrMoreThanOneSubject_IsMalformed_AndDeniesNothing(
+        bool contact, bool organization, bool systemUser)
+    {
+        var row = RecordObjectRow(EntryId, objectRecordId: RecordA);
+        row._sprk_subjectcontact_value = contact ? Contact : null;
+        row._sprk_subjectorganization_value = organization ? SubjectOrg : null;
+        row._sprk_subjectsystemuser_value = systemUser ? SystemUser : null;
+        var sut = FakeNoAccessListReader.ReturningRows(orgLoop: new(), recordLoop: new() { row });
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(new[] { Contact }, new[] { SubjectOrg }, SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.DeniedRecordIds.Should().BeEmpty("exactly one of the three subjects is required (schema Business Rule 1)");
+        result.FailedClosed.Should().BeFalse("a malformed row is a data-quality guard, not a read fault");
+    }
+
+    [Fact]
+    public async Task GetDeniedRecordsAsync_ASystemUserSubjectAlone_IsSomethingToCheck_NotAnEmptyAnswer()
+    {
+        var sut = FakeNoAccessListReader.Throwing(new InvalidOperationException("the query ran"));
+
+        var result = await sut.GetDeniedRecordsAsync(
+            new NoAccessSubjects(Array.Empty<Guid>(), Array.Empty<Guid>(), SystemUser),
+            new[] { new NoAccessCandidateRecord("sprk_project", RecordA, Array.Empty<Guid>()) },
+            CancellationToken.None);
+
+        result.FailedClosed.Should().BeTrue("a systemuser subject must reach the query — and a fault there denies");
     }
 
     // ── Test double ──────────────────────────────────────────────────────────────────────────────
@@ -344,8 +626,86 @@ public class NoAccessListReaderTests
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
             }
 
-            var isOrgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var isOrgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             return Task.FromResult<List<NoAccessEntryRow>?>(isOrgLoop ? _orgLoopRows ?? new() : _recordLoopRows ?? new());
+        }
+    }
+
+    /// <summary>
+    /// Task 142 round 18: a deny-list TABLE behind the same <see cref="NoAccessListReader.QueryChunkAsync"/> seam. Each
+    /// query is answered the way Dataverse answers the combined <c>$filter</c>: the stored entries whose subject id is
+    /// named by the query's SUBJECT fragment (for its own kind) and whose object is named by its OBJECT fragment. So,
+    /// unlike <see cref="FakeNoAccessListReader"/>, an entry comes back only when its subject actually reached a query —
+    /// a subject dropped by the chunking is never found. Records every subject fragment it was asked, and can fault the
+    /// one query whose subject fragment names a given id (a non-success status, or a throw).
+    /// </summary>
+    private sealed class TableNoAccessListReader : NoAccessListReader
+    {
+        private const string GuidPattern =
+            "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
+
+        private readonly List<NoAccessEntryRow> _rows = new();
+
+        public TableNoAccessListReader()
+            : base(new HttpClient(), configuration: null!, credential: null!, logger: NullLogger<NoAccessListReader>.Instance)
+        {
+        }
+
+        /// <summary>The subject fragment of every query, in order (a fragment repeats once per object chunk).</summary>
+        public List<string> SubjectFilters { get; } = new();
+
+        /// <summary>When set, the query whose subject fragment names this id faults.</summary>
+        public Guid? FaultWhenSubjectFilterNames { get; init; }
+
+        /// <summary>The fault shape: <c>true</c> throws, <c>false</c> answers the seam's fail-closed <c>null</c>.</summary>
+        public bool FaultThrows { get; init; }
+
+        /// <summary>
+        /// When set, the ethical-wall (Loop A) query whose OBJECT fragment names this referenced organization answers the
+        /// seam's fail-closed <c>null</c> — a non-success status on one organization-object chunk. Every other query
+        /// (other organization chunks, every record-object chunk) answers from the table.
+        /// </summary>
+        public Guid? NullWhenObjectOrganizationNamed { get; init; }
+
+        public void Add(NoAccessEntryRow row) => _rows.Add(row);
+
+        /// <summary>Every id the fragment names in a <c>{column} eq {id}</c> (or <c>eq '{id}'</c>) clause.</summary>
+        public static List<Guid> IdsNamed(string filter, string column)
+            => System.Text.RegularExpressions.Regex.Matches(filter, column + " eq '?(" + GuidPattern + ")'?")
+                .Select(m => Guid.Parse(m.Groups[1].Value))
+                .ToList();
+
+        internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(string subjectFilter, string objectFilter, CancellationToken ct)
+        {
+            SubjectFilters.Add(subjectFilter);
+            if (FaultWhenSubjectFilterNames is { } faulting
+                && subjectFilter.Contains(faulting.ToString(), StringComparison.Ordinal))
+            {
+                return FaultThrows
+                    ? throw new HttpRequestException("simulated HTTP 503 on one subject chunk")
+                    : Task.FromResult<List<NoAccessEntryRow>?>(null);
+            }
+
+            if (NullWhenObjectOrganizationNamed is { } nullOrg
+                && IdsNamed(objectFilter, "_sprk_objectorganization_value").Contains(nullOrg))
+            {
+                return Task.FromResult<List<NoAccessEntryRow>?>(null);
+            }
+
+            var contacts = IdsNamed(subjectFilter, "_sprk_subjectcontact_value");
+            var organizations = IdsNamed(subjectFilter, "_sprk_subjectorganization_value");
+            var users = IdsNamed(subjectFilter, "_sprk_subjectsystemuser_value");
+            var objectOrganizations = IdsNamed(objectFilter, "_sprk_objectorganization_value");
+            var objectRecords = IdsNamed(objectFilter, "sprk_objectrecordid");
+
+            var rows = _rows.Where(r =>
+                    ((r._sprk_subjectcontact_value is { } c && contacts.Contains(c))
+                     || (r._sprk_subjectorganization_value is { } o && organizations.Contains(o))
+                     || (r._sprk_subjectsystemuser_value is { } u && users.Contains(u)))
+                    && ((r._sprk_objectorganization_value is { } oo && objectOrganizations.Contains(oo))
+                        || (Guid.TryParse(r.sprk_objectrecordid, out var rid) && objectRecords.Contains(rid))))
+                .ToList();
+            return Task.FromResult<List<NoAccessEntryRow>?>(rows);
         }
     }
 

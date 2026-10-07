@@ -47,8 +47,11 @@
 // PROBE CONTRACT:
 //   T3 has ONE valid Passed shape -- the UAMI service principal in the
 //   customer's tenant holds EVERY (Value, AppRoleId) pair in
-//   IGraphAppRolesRegistry.GetAll() as an appRoleAssignment scoped to the
-//   Microsoft Graph resource SP (00000003-...). Missing ANY role is Failed.
+//   IGraphAppRolesRegistry.GetEntraGranted() as an appRoleAssignment scoped to
+//   the Microsoft Graph resource SP (00000003-...), and NONE of
+//   GetExchangeScoped() (the mailbox roles H14a grants through Exchange,
+//   scoped to the customer's group -- task 251). Missing ANY Entra role, or
+//   holding ANY mailbox role in Entra, is Failed.
 //
 //   FAILED shapes -- the silent-fail traps this probe catches (per POML +
 //   spec.md FR-33 T3 + design.md s4B T3 + parent-dispatch "task 143 lesson:
@@ -271,8 +274,10 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
         //     "granted" (comparison is by AppRoleId). Belt-and-braces for
         //     task 067's nightly parity ArchTest between BFF-side GraphAppRoles.cs
         //     and L2GraphAppRolesRegistry.cs.
-        var expectedRoles = _rolesRegistry.GetAll();
-        var nullGuidRoles = expectedRoles
+        var allRoles = _rolesRegistry.GetAll();
+        var expectedRoles = _rolesRegistry.GetEntraGranted();
+        var exchangeScopedRoles = _rolesRegistry.GetExchangeScoped();
+        var nullGuidRoles = allRoles
             .Where(r => string.IsNullOrWhiteSpace(r.AppRoleId))
             .Select(r => r.Value)
             .ToList();
@@ -280,7 +285,7 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
         {
             var diagnostic =
                 $"T3 probe cannot verdict -- IGraphAppRolesRegistry has {nullGuidRoles.Count} of " +
-                $"{expectedRoles.Count} entries with null/whitespace AppRoleId " +
+                $"{allRoles.Count} entries with null/whitespace AppRoleId " +
                 $"({string.Join(", ", nullGuidRoles)}). Post-tasks-005/144, the catalog is fully " +
                 "populated (15/15 GUIDs live-verified against tenant a221a95e-...) -- a null here " +
                 "means the catalog was silently regressed. Cannot verdict: an entry without an " +
@@ -424,6 +429,46 @@ public sealed class GraphAppRoleParityT3Probe : ITrapProbe
                 $"{ex.GetType().Name}: {ex.Message}. The verifier's contract is to return Partial on " +
                 "internal failures rather than throw -- a throw here means the verifier itself is " +
                 "failing (network / auth / other) rather than a T3 trigger. Handler classifies Resumable.");
+        }
+
+        // (7) Task 251 (owner D26): the mailbox roles must be ABSENT in Entra. H14a grants them through
+        //     Exchange, scoped to the customer's group; Exchange adds the two sources together, so an
+        //     Entra grant gives the stamp every mailbox in the tenant (Spaarke's own, on Model 1).
+        //     Same verifier: the roles it does NOT report missing are the ones granted.
+        if (parityResult is GraphAppRoleParityResult.Verified && exchangeScopedRoles.Count > 0)
+        {
+            GraphAppRoleParityResult mailboxResult;
+            try
+            {
+                mailboxResult = await _parityVerifier
+                    .VerifyAsync(uamiSpObjectId, request.TenantId, exchangeScopedRoles, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return new TrapVerificationOutcome.InfraFault(Kind,
+                    $"T3 verdict deferred: checking that the mailbox roles are absent in Entra threw {ex.GetType().Name}: {ex.Message}.");
+            }
+            var missing = mailboxResult is GraphAppRoleParityResult.Partial p
+                ? new HashSet<string>(p.MissingRoleValues, StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            var grantedInEntra = exchangeScopedRoles.Select(r => r.Value).Where(v => !missing.Contains(v)).ToArray();
+            if (grantedInEntra.Length > 0)
+            {
+                var diagnostic =
+                    $"T3 FAILED on UAMI SP objectId='{uamiSpObjectId}' (appId='{request.UamiClientId}') in tenant='{request.TenantId}': " +
+                    $"mailbox role(s) granted through Entra: {string.Join(", ", grantedInEntra)}. These are granted through Exchange, " +
+                    "scoped to the customer's group (H14a); an Entra grant reaches EVERY mailbox in the tenant and voids that scope. " +
+                    "Remove the Entra appRoleAssignment(s) on the UAMI service principal (Graph DELETE " +
+                    $"/servicePrincipals/{uamiSpObjectId}/appRoleAssignments/{{id}}) — H10 no longer grants them; a stamp provisioned " +
+                    "before task 251 still carries them.";
+                _logger.LogWarning("T3 probe FAILED (mailbox roles in Entra): {Diagnostic}", diagnostic);
+                return new TrapVerificationOutcome.Failed(Kind, diagnostic);
+            }
         }
 
         switch (parityResult)

@@ -4,7 +4,7 @@
     <title>Implement H3 Entra App Registration Handler (BFF app-reg + 14 grants; S2S dropped)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; auth-sensitive (Entra app-reg + Graph permission grants); FULL rigor triggered by auth tag per root CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

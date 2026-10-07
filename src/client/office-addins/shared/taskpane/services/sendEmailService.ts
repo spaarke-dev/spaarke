@@ -1,40 +1,37 @@
-import { cleanGuid } from '../utils/cleanGuid';
-import { buildOpenRecordUrl } from './openRecordLauncher';
-import { mintDocumentShareLink } from './shareLinkService';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { buildOpenRecordUrl, configuredSpaarkeAppName } from './openRecordLauncher';
 
 /**
- * sendEmailService.ts — spaarkeai-word-add-in-r1 task 036 (FR-15): Send Email via Outlook.
+ * sendEmailService.ts — spaarkeai-word-add-in-r1 task 036 (FR-15): Send Email via Outlook's native compose.
  *
- * Opens the host's own Outlook compose window pre-populated with a link to the open/filed
- * document and a link to its related Spaarke record, where each exists. This module owns the
- * PURE composition logic (link minting orchestration + HTML body building) — `App.tsx` owns the
- * capability gate (`hostAdapter.getCapabilities().canComposeEmail`, NFR-10) and the actual
- * `hostAdapter.composeNewEmail()` call, since opening the host window is host-adapter territory,
- * not this service's.
+ * Opens the host's own Outlook compose window pre-populated with a link to the open/filed document's Spaarke
+ * record and a link to its related Spaarke record, where each exists. This module owns the PURE composition
+ * logic (link building + HTML body) — `App.tsx` owns the capability gate (`canComposeEmail`, NFR-10) and the
+ * actual `hostAdapter.composeNewEmail()` call.
  *
- * **Scope, binding (spec Scope / design.md §4.2)**: the Spaarke email-client modal variant is
- * explicitly deferred. This service NEVER renders a Spaarke UI for composing the message — it only
- * builds the subject/body handed to the host's native compose window.
+ * **Task 096 (UAT round 4, 2026-10-04) — no sharing link, anywhere.** The document link used to be a Graph
+ * sharing link minted by `POST /api/documents/{id}/share-link`. Graph refuses `createLink` for files in
+ * SharePoint Embedded containers ("This sharing scenario is not supported on CSP Container site." — the
+ * owner's screenshot), so every Send Email failed. The document link is now the document's SPAARKE record
+ * (`sprk_document`, opened in the Spaarke app) — built the same way as the related-record link, with no
+ * server call, so it cannot fail. A recipient must be able to open Spaarke to follow it; to send the FILE
+ * itself, Word users use the in-pane Email tab (`components/views/EmailView.tsx`), which attaches it.
  *
- * **The document link** is minted through the EXISTING `POST /api/documents/{documentId}/share-link`
- * route (`FileAccessEndpoints.cs`), at that route's existing expiry policy — no expiry override is
- * ever sent, and no alternative minting route is used. A minting failure is treated as blocking:
- * this service returns an `'error'` outcome and callers must not open a compose window at all,
- * per the task's negative acceptance criterion ("no compose window opens with a broken or
- * placeholder link").
+ * Task 096 also removed task 086's Word "Send Email" choice (Spaarke email page / Outlook on the web in a
+ * browser tab): Word now has the Email tab instead, so this file serves Outlook's native compose only.
  *
  * **The record link** reuses `openRecordLauncher.buildOpenRecordUrl` (task 027) — the SAME
- * `main.aspx?etn=...&id=...&pagetype=entityrecord` URL shape already used to open a record from the
- * pane, not a second URL-building shape. Every record id is canonicalized via `cleanGuid` (ADR-044)
- * before it reaches the URL. When `ORG_URL` is unset, the record link is simply omitted (mirrors
- * `openRecordLauncher`'s own unset-`orgUrl` no-op and `SaveFlow.tsx`'s `openRecordAvailable` rule) —
- * never a broken link, never a blocking error.
+ * `main.aspx?...etn=...&id=...&pagetype=entityrecord` shape used everywhere the pane opens a record. Every id
+ * is canonicalized via `cleanGuid` (ADR-044) first. When `ORG_URL` is unset, links are omitted (mirrors
+ * `openRecordLauncher`'s own unset-`orgUrl` no-op) — never a broken link.
  */
 
 /** The document side of a Send Email request. */
 export interface SendEmailDocumentInput {
   /** `sprk_documentid`, any form — canonicalized via `cleanGuid` before use. */
   documentId: string;
+  /** The document's name, when known — used as the link label. */
+  name?: string | null;
 }
 
 /** The related-record side of a Send Email request (mirrors `ResolvedRelatedRecord`'s shape). */
@@ -58,7 +55,7 @@ export interface PrepareSendEmailInput {
   relatedRecord?: SendEmailRelatedRecordInput | null;
   /** The message subject (e.g. the open item's subject/title). Falls back to a generic subject when blank. */
   subject: string;
-  /** `ORG_URL` env — required to build the record link; unset degrades to "no record link" (never a broken one). */
+  /** `ORG_URL` env — required to build any Spaarke link; unset degrades to "no link" (never a broken one). */
   orgUrl: string | undefined;
 }
 
@@ -70,26 +67,25 @@ export interface SendEmailComposeContent {
 
 export type PrepareSendEmailResult =
   | { kind: 'ready'; content: SendEmailComposeContent }
-  /** Neither a document nor a related record was available to link — nothing to send. Callers should
-   *  gate the Send Email affordance's visibility so this is normally unreachable via the UI. */
-  | { kind: 'nothing-to-send' }
-  /** The document share link could not be minted. No compose window should be opened. */
-  | { kind: 'error'; message: string };
+  /** Nothing could be linked (no document/record, or `ORG_URL` unset). Callers gate the affordance so this
+   *  is normally unreachable via the UI. */
+  | { kind: 'nothing-to-send' };
 
 const DEFAULT_SUBJECT = 'Document from Spaarke';
 
-// The document link is minted by `shareLinkService.mintDocumentShareLink` (task 075): one minter for the Send
-// Email path and the Word ribbon's Share command, the same route at its existing expiry policy.
+/** A Spaarke deep link with its human-readable label. */
+export interface SpaarkeLink {
+  url: string;
+  label: string;
+}
 
 /**
- * Build the related-record deep link, reusing task 027's URL builder verbatim — never a second
- * URL-building shape. Returns `null` (a defined no-op, not an error) when `orgUrl` is unset or the
- * record id is empty once canonicalized, mirroring `openRecordLauncher.openRecord`'s own rule.
+ * Build a related-record deep link, reusing task 027's URL builder verbatim — never a second URL-building
+ * shape. Returns `null` (a defined no-op, not an error) when `orgUrl` is unset or the record id is empty once
+ * canonicalized, mirroring `openRecordLauncher.openRecord`'s own rule. Exported for the Email tab
+ * (`paneEmailService.ts`), so the pane builds record links for email in exactly one place.
  */
-function buildRecordLink(
-  orgUrl: string | undefined,
-  record: SendEmailRelatedRecordInput
-): { url: string; label: string } | null {
+export function buildRecordLink(orgUrl: string | undefined, record: SendEmailRelatedRecordInput): SpaarkeLink | null {
   if (!orgUrl) {
     return null;
   }
@@ -105,10 +101,29 @@ function buildRecordLink(
       : `${typeLabel}: ${record.displayName}`
     : `${typeLabel} record`;
 
-  return { url: buildOpenRecordUrl(orgUrl, record.entityType, id), label };
+  // Task 088: the record link names the Spaarke app (`SPAARKE_APP_NAME`), like every other record link the
+  // add-in builds, so a recipient lands in Spaarke rather than in their own default app.
+  return { url: buildOpenRecordUrl(orgUrl, record.entityType, id, configuredSpaarkeAppName()), label };
 }
 
-function escapeHtml(text: string): string {
+/**
+ * Build the link to the document's own Spaarke record (`sprk_document`) — task 096's replacement for the Graph
+ * sharing link, which SharePoint Embedded refuses. Same builder as {@link buildRecordLink}; never a server call.
+ */
+export function buildDocumentRecordLink(
+  orgUrl: string | undefined,
+  document: SendEmailDocumentInput
+): SpaarkeLink | null {
+  return buildRecordLink(orgUrl, {
+    entityType: 'sprk_document',
+    id: document.documentId,
+    typeLabel: 'Document',
+    displayName: document.name ?? null,
+  });
+}
+
+/** HTML-escape a value for interpolation into the compose body. Exported for the Email tab's body. */
+export function escapeHtml(text: string): string {
   const entities: Record<string, string> = {
     '&': '&amp;',
     '<': '&lt;',
@@ -119,67 +134,44 @@ function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, char => entities[char] || char);
 }
 
-/**
- * Build the compose body's HTML. Includes a link row for each of `documentLink`/`recordLink` that is
- * present — one when only one link exists, both when both do. Every value is HTML-escaped; nothing
- * here trusts `displayName`/`typeLabel` to already be safe for interpolation.
- */
-function buildComposeBody(
-  documentLink: { url: string; label: string } | null,
-  recordLink: { url: string; label: string } | null
-): string {
-  const rows: string[] = [];
-  if (documentLink) {
-    rows.push(`<p><a href="${escapeHtml(documentLink.url)}">${escapeHtml(documentLink.label)}</a></p>`);
-  }
-  if (recordLink) {
-    rows.push(`<p><a href="${escapeHtml(recordLink.url)}">${escapeHtml(recordLink.label)}</a></p>`);
-  }
-  return rows.join('\n');
+/** One `<p><a href="...">label</a></p>` row; every value HTML-escaped. Exported for the Email tab's body. */
+export function linkParagraph(link: SpaarkeLink): string {
+  return `<p><a href="${escapeHtml(link.url)}">${escapeHtml(link.label)}</a></p>`;
 }
 
 /**
- * Orchestrates a Send Email request: mints the document link (when a document is given), builds the
- * record link (when a related record is given and `orgUrl` is configured), and composes the message.
- *
- * - Both present → both links in the body.
- * - Only one present → that link only; the other is silently omitted, not an error.
- * - Neither present → `{ kind: 'nothing-to-send' }` (defensive; the UI should not have offered the
- *   action in this state).
- * - The document link mint fails → `{ kind: 'error' }`. This BLOCKS composition entirely, even when a
- *   record link is also available — the task's negative acceptance criterion is "no compose window
- *   opens with a broken or placeholder link", and silently downgrading to a record-only email would
- *   hide the fact that the user's actual request (send the document) failed.
+ * Orchestrates a Send Email request for Outlook's native compose window (task 036): builds the document's and
+ * the related record's Spaarke links and composes the HTML body — one row per link that exists.
  */
-export async function prepareSendEmail(input: PrepareSendEmailInput): Promise<PrepareSendEmailResult> {
-  const hasDocument = Boolean(input.document?.documentId && cleanGuid(input.document.documentId));
-  const hasRelatedRecord = Boolean(input.relatedRecord?.id && cleanGuid(input.relatedRecord.id));
-
-  if (!hasDocument && !hasRelatedRecord) {
-    return { kind: 'nothing-to-send' };
-  }
-
-  let documentLink: { url: string; label: string } | null = null;
-  if (hasDocument && input.document) {
-    const minted = await mintDocumentShareLink(input.document.documentId);
-    if (!minted.ok) {
-      return { kind: 'error', message: minted.message };
-    }
-    documentLink = { url: minted.url, label: 'Open document' };
-  }
-
-  const recordLink =
-    hasRelatedRecord && input.relatedRecord ? buildRecordLink(input.orgUrl, input.relatedRecord) : null;
+export function prepareSendEmail(input: PrepareSendEmailInput): PrepareSendEmailResult {
+  const documentLink =
+    input.document?.documentId && cleanGuid(input.document.documentId)
+      ? buildDocumentRecordLink(input.orgUrl, input.document)
+      : null;
+  const recordLink = input.relatedRecord ? buildRecordLink(input.orgUrl, input.relatedRecord) : null;
 
   if (!documentLink && !recordLink) {
-    // Only reachable when the sole available link source was a related record whose link could not
-    // be built (e.g. ORG_URL unset) — a defined "nothing to send" outcome, not a mint failure.
     return { kind: 'nothing-to-send' };
   }
 
   const subject = input.subject.trim() || DEFAULT_SUBJECT;
-  return {
-    kind: 'ready',
-    content: { subject, htmlBody: buildComposeBody(documentLink, recordLink) },
-  };
+  const rows = [documentLink, recordLink].filter((l): l is SpaarkeLink => l !== null).map(linkParagraph);
+  return { kind: 'ready', content: { subject, htmlBody: rows.join('\n') } };
+}
+
+/** The Send Email affordance shapes a host can offer — see {@link resolveSendEmailAffordance}. */
+export type SendEmailAffordance = 'outlook-native' | 'none';
+
+/**
+ * THE single gating decision for the Send Email BUTTON (NFR-10: capability-only, never `hostType`):
+ *
+ * - `'outlook-native'` — `canComposeEmail` is true (Outlook, read mode) and there is something to link.
+ * - `'none'` — otherwise. Word reports `canComposeEmail: false`, so it never shows the button; since task 096
+ *   Word emails a document from its own Email tab (gated on `canEmailFromPane`), not from this button.
+ */
+export function resolveSendEmailAffordance(
+  capabilities: { canComposeEmail: boolean },
+  hasSomethingToLink: boolean
+): SendEmailAffordance {
+  return hasSomethingToLink && capabilities.canComposeEmail ? 'outlook-native' : 'none';
 }

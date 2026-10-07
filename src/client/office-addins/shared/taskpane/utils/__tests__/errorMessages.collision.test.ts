@@ -80,6 +80,40 @@ describe('describeCollisionFailure', () => {
     expect(result.collisionExistingDocumentId).toBeUndefined();
   });
 
+  // ── Task 088 (UAT-5): the version retry is the server's canSaveAsVersion FLAG, never the id's presence ──
+
+  it('carries collisionCanSaveAsVersion only when the server says canSaveAsVersion: true', () => {
+    const offered = describeCollisionFailure({ ...baseProblem, canSaveAsVersion: true });
+    const refused = describeCollisionFailure({ ...baseProblem, canSaveAsVersion: false });
+
+    expect(offered.collisionCanSaveAsVersion).toBe(true);
+    // Filed to another record: still identified (the pane offers Open), but no version retry.
+    expect(refused.collisionCanSaveAsVersion).toBeUndefined();
+    expect(refused.collisionExistingDocumentId).toBe(baseProblem.existingDocumentId);
+  });
+
+  it('an id with NO canSaveAsVersion key does not imply the version retry (#1005: the id now also travels for documents filed elsewhere)', () => {
+    const result = describeCollisionFailure(baseProblem);
+
+    expect(result.collisionExistingDocumentId).toBe(baseProblem.existingDocumentId);
+    expect(result.collisionCanSaveAsVersion).toBeUndefined();
+  });
+
+  it('ignores canSaveAsVersion: true without an id, and treats JSON nulls as absent — the flag needs a document to name', () => {
+    const { existingDocumentId: _id, ...withheld } = baseProblem;
+    const flagWithoutId = describeCollisionFailure({ ...withheld, canSaveAsVersion: true });
+    const nulls = describeCollisionFailure({
+      ...withheld,
+      existingDocumentId: null,
+      existingDocumentName: null,
+    } as unknown as ProblemDetails);
+
+    expect(flagWithoutId.collisionCanSaveAsVersion).toBeUndefined();
+    expect(flagWithoutId.collisionExistingDocumentId).toBeUndefined();
+    expect(nulls.collisionExistingDocumentId).toBeUndefined();
+    expect(nulls.collisionExistingDocumentName).toBeUndefined();
+  });
+
   it('leaves any OTHER error code unaffected — safe to call unconditionally on every create-path failure', () => {
     const genericFailure: ProblemDetails = {
       type: 'https://spaarke.com/errors/office/service-error',

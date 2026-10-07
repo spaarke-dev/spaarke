@@ -1,5 +1,7 @@
 # Spaarke AI Platform Unification R2
 
+> **Portfolio**: [Project #1206](https://github.com/spaarke-dev/spaarke/issues/1206) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/spaarke-ai-platform-unification-r2`
 > **Created**: 2026-05-17

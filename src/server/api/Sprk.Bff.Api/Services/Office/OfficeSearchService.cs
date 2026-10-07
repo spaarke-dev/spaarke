@@ -10,7 +10,7 @@ using Sprk.Bff.Api.Services.Communication;
 namespace Sprk.Bff.Api.Services.Office;
 
 /// <summary>
-/// The Office add-in's Dataverse READS: the "File to" entity picker, the matter-type list, and the
+/// The Office add-in's Dataverse READS: the "File to" entity picker, the create form's reference lists (task 100), and the
 /// <c>sprk_recordtype_ref</c> lookup the To Do writer stamps onto its regarding fields.
 /// </summary>
 /// <remarks>
@@ -284,7 +284,13 @@ public class OfficeSearchService
     }
 
     /// <summary>Per-entity-type Dataverse Web API search metadata (mirrors RecordSyncJob's catalogue).</summary>
-    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField);
+    /// <param name="EmailField">
+    /// Task 091 (UAT-2): an additive, DISPLAY-only column — selected in the same impersonated query as every
+    /// other field above, never added to the <c>contains(...)</c> search predicate. <c>null</c> for every
+    /// entity type except Contact (<c>emailaddress1</c>), where it lets the Assigned-To picker tell apart
+    /// two contacts that share a display name.
+    /// </param>
+    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField, string? EmailField = null);
 
     private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
         new Dictionary<AssociationEntityType, EntitySearchMeta>
@@ -293,7 +299,7 @@ public class OfficeSearchService
             [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
             [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_description"),
             [AssociationEntityType.Account] = new("accounts", "accountid", "name", "accountnumber", "description"),
-            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle"),
+            [AssociationEntityType.Contact] = new("contacts", "contactid", "fullname", null, "jobtitle", "emailaddress1"),
         };
 
     /// <summary>
@@ -355,6 +361,9 @@ public class OfficeSearchService
         var selectFields = new List<string> { meta.IdField, meta.NameField, "modifiedon" };
         if (meta.RefField is not null) selectFields.Add(meta.RefField);
         if (meta.DescField is not null) selectFields.Add(meta.DescField);
+        // Task 091: selected (never searched — the contains() predicate above is built from NameField/RefField
+        // only) so the Assigned-To picker can tell apart two contacts sharing a display name.
+        if (meta.EmailField is not null) selectFields.Add(meta.EmailField);
 
         var odataQuery =
             $"$filter={filter}&$select={string.Join(",", selectFields)}&$top={top}";
@@ -392,6 +401,7 @@ public class OfficeSearchService
         var id = Guid.TryParse(GetJsonString(row, meta.IdField), out var g) ? g : Guid.Empty;
         var refVal = meta.RefField is not null ? GetJsonString(row, meta.RefField) : null;
         var desc = meta.DescField is not null ? GetJsonString(row, meta.DescField) : null;
+        var email = meta.EmailField is not null ? GetJsonString(row, meta.EmailField) : null;
         var modified = DateTimeOffset.TryParse(GetJsonString(row, "modifiedon"), out var mo)
             ? mo
             : DateTimeOffset.UtcNow;
@@ -404,6 +414,9 @@ public class OfficeSearchService
             Name = name!,
             DisplayInfo = !string.IsNullOrWhiteSpace(refVal) ? refVal! : (desc ?? GetLogicalName(type)),
             PrimaryField = !string.IsNullOrWhiteSpace(refVal) ? refVal! : name!,
+            // Task 091: additive display-only field; null for every type without an EmailField (i.e. all but
+            // Contact) and null for a Contact with no email on file. Never a fallback onto PrimaryField/Name.
+            Email = !string.IsNullOrWhiteSpace(email) ? email! : null,
             IconUrl = $"/icons/{type.ToString().ToLowerInvariant()}.svg",
             ModifiedOn = modified
         };
@@ -451,51 +464,85 @@ public class OfficeSearchService
         _ => throw new ArgumentOutOfRangeException(nameof(entityType))
     };
 
-    /// <inheritdoc cref="IOfficeService.GetMatterTypesAsync"/>
-    public async Task<MatterTypeListResponse> GetMatterTypesAsync(
+    /// <summary>
+    /// The reference lists the pane's "+ New" form loads (task 100; matter types since task 038), keyed by the
+    /// <c>{list}</c> route segment of <c>GET /api/office/search/{list}</c>. A CLOSED table: a key that is not here is
+    /// a 404, so the route can never be pointed at an arbitrary table. Columns verified against live metadata
+    /// (spaarkedev1, 2026-10-05): <c>sprk_projecttype_ref</c> has no code column and names its rows <c>sprk_name</c>.
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, OfficeReferenceList> ReferenceLists =
+        new Dictionary<string, OfficeReferenceList>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["matter-types"] = new("sprk_mattertype_refs", "sprk_mattertype_refid", "sprk_mattertypename", "sprk_mattertypecode"),
+            ["practice-areas"] = new("sprk_practicearea_refs", "sprk_practicearea_refid", "sprk_practiceareaname", "sprk_practiceareacode"),
+            ["project-types"] = new("sprk_projecttype_refs", "sprk_projecttype_refid", "sprk_name", null),
+        };
+
+    /// <summary>The reference list a <c>{list}</c> route segment names, or false for one that is not offered.</summary>
+    public static bool TryGetReferenceList(string? key, out OfficeReferenceList list)
+    {
+        if (!string.IsNullOrWhiteSpace(key) && ReferenceLists.TryGetValue(key.Trim(), out var found))
+        {
+            list = found;
+            return true;
+        }
+
+        list = null!;
+        return false;
+    }
+
+    /// <inheritdoc cref="IOfficeService.GetReferenceListAsync"/>
+    public async Task<ReferenceListResponse> GetReferenceListAsync(
+        OfficeReferenceList list,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(list);
+
+        var select = list.CodeColumn is null
+            ? $"{list.IdColumn},{list.NameColumn}"
+            : $"{list.IdColumn},{list.NameColumn},{list.CodeColumn}";
+
         var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
-            "sprk_mattertype_refs",
+            list.EntitySet,
             filter: "statecode eq 0",
-            select: "sprk_mattertype_refid,sprk_mattertypename,sprk_mattertypecode",
+            select: select,
             top: 50,
             cancellationToken: cancellationToken);
 
-        var options = new List<MatterTypeOption>(rows.Count);
+        var options = new List<ReferenceListOption>(rows.Count);
         foreach (var row in rows)
         {
-            var mapped = MapMatterTypeRow(row);
+            var mapped = MapReferenceRow(row, list);
             if (mapped is not null)
                 options.Add(mapped);
         }
 
-        return new MatterTypeListResponse
+        return new ReferenceListResponse
         {
             Results = options.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList()
         };
     }
 
     /// <summary>
-    /// Maps one Dataverse Web API JSON row from <c>sprk_mattertype_refs</c> to a <see cref="MatterTypeOption"/>,
-    /// or null when the row has no name or no parseable id (never surface an unusable reference row). Pure —
-    /// unit-tested (mirrors <see cref="MapSearchRow"/>'s shape).
+    /// Maps one Dataverse Web API JSON row of a reference list to a <see cref="ReferenceListOption"/>, or null when
+    /// the row has no name or no parseable id (never surface an unusable reference row). Pure — unit-tested
+    /// (mirrors <see cref="MapSearchRow"/>'s shape).
     /// </summary>
-    internal static MatterTypeOption? MapMatterTypeRow(Dictionary<string, JsonElement> row)
+    internal static ReferenceListOption? MapReferenceRow(Dictionary<string, JsonElement> row, OfficeReferenceList list)
     {
-        var name = GetJsonString(row, "sprk_mattertypename");
+        var name = GetJsonString(row, list.NameColumn);
         if (string.IsNullOrWhiteSpace(name))
             return null;
 
-        var id = Guid.TryParse(GetJsonString(row, "sprk_mattertype_refid"), out var g) ? g : Guid.Empty;
+        var id = Guid.TryParse(GetJsonString(row, list.IdColumn), out var g) ? g : Guid.Empty;
         if (id == Guid.Empty)
             return null;
 
-        return new MatterTypeOption
+        return new ReferenceListOption
         {
             Id = id,
             Name = name!,
-            Code = GetJsonString(row, "sprk_mattertypecode")
+            Code = list.CodeColumn is null ? null : GetJsonString(row, list.CodeColumn)
         };
     }
 
@@ -526,3 +573,14 @@ public class OfficeSearchService
         }
     }
 }
+
+/// <summary>
+/// One reference list served by <c>GET /api/office/search/{list}</c> (task 100): the Web API entity set to read and
+/// the columns that become a <see cref="ReferenceListOption"/>. Only the rows of
+/// <see cref="OfficeSearchService.ReferenceLists"/> exist — the route cannot name a table of its own.
+/// </summary>
+/// <param name="EntitySet">Web API entity set (e.g. <c>sprk_practicearea_refs</c>).</param>
+/// <param name="IdColumn">Primary key column.</param>
+/// <param name="NameColumn">Display-name column.</param>
+/// <param name="CodeColumn">Short-code column, or <see langword="null"/> when the table has none.</param>
+public sealed record OfficeReferenceList(string EntitySet, string IdColumn, string NameColumn, string? CodeColumn);

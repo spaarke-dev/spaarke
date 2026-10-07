@@ -27,6 +27,7 @@
  */
 
 import { getAccessToken, getClientUrl, isSameOriginDataverse } from './authInit';
+import { cleanGuid } from '@spaarke/ui-components';
 
 const LOG_PREFIX = '[PlaybookBuilder:DataverseClient]';
 
@@ -106,7 +107,7 @@ export async function createRecord(entitySetName: string, data: DataverseRecord)
 
   const body = await response.json();
   const idKey = Object.keys(body).find(k => k.endsWith('id') && typeof body[k] === 'string');
-  if (idKey) return (body[idKey] as string).replace(/[{}]/g, '');
+  if (idKey) return cleanGuid(body[idKey] as string);
 
   throw new Error('Could not extract record ID from create response');
 }
@@ -115,7 +116,7 @@ export async function createRecord(entitySetName: string, data: DataverseRecord)
  * Retrieve a single record by ID.
  */
 export async function retrieveRecord(entitySetName: string, id: string, options?: string): Promise<DataverseRecord> {
-  const cleanId = id.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(id);
   let url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
   if (options) url += `?${options}`;
 
@@ -127,7 +128,7 @@ export async function retrieveRecord(entitySetName: string, id: string, options?
  * Update an existing record by ID.
  */
 export async function updateRecord(entitySetName: string, id: string, data: DataverseRecord): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(id);
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
   await fetchWithAuth(url, {
     method: 'PATCH',
@@ -139,7 +140,7 @@ export async function updateRecord(entitySetName: string, id: string, data: Data
  * Delete a record by ID.
  */
 export async function deleteRecord(entitySetName: string, id: string): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(id);
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})`;
   await fetchWithAuth(url, { method: 'DELETE' });
 }
@@ -175,8 +176,8 @@ export async function associate(
   relatedEntitySetName: string,
   relatedId: string
 ): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, '');
-  const cleanRelatedId = relatedId.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(id);
+  const cleanRelatedId = cleanGuid(relatedId);
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}/$ref`;
   await fetchWithAuth(url, {
     method: 'POST',
@@ -196,8 +197,8 @@ export async function disassociate(
   navigationProperty: string,
   relatedId: string
 ): Promise<void> {
-  const cleanId = id.replace(/[{}]/g, '');
-  const cleanRelatedId = relatedId.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(id);
+  const cleanRelatedId = cleanGuid(relatedId);
   const url = `${getBaseUrl()}/${entitySetName}(${cleanId})/${navigationProperty}(${cleanRelatedId})/$ref`;
   await fetchWithAuth(url, { method: 'DELETE' });
 }

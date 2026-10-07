@@ -99,7 +99,7 @@ import {
   OpenRegular,
   DocumentRegular,
 } from '@fluentui/react-icons';
-import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
@@ -394,14 +394,15 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
     }
   })();
 
-  // Resolve the Xrm globals once (used by both the inline regarding-name link
-  // and the fallback "Open record" overflow-menu handler).
+  // Resolve Xrm via the shared cross-frame walker (task 081 / C-8) — used by
+  // both the inline regarding-name link and the fallback "Open record"
+  // overflow-menu handler.
   const resolveXrm = ():
     | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
-    | undefined => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-  };
+    | undefined =>
+    getXrm('navigation') as
+      | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
+      | undefined;
 
   const openRecordViaXrm = (entityType: string, entityId: string): void => {
     if (!entityType || !entityId) return;

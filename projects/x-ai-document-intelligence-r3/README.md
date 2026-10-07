@@ -1,5 +1,7 @@
 # AI Document Intelligence R3 - AI Implementation
 
+> **Portfolio**: [Project #1250](https://github.com/spaarke-dev/spaarke/issues/1250) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: COMPLETE
 > **Phase**: Project Wrap-up
 > **Progress**: 100%

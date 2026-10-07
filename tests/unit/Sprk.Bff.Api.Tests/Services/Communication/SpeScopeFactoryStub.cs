@@ -34,15 +34,27 @@ internal static class SpeScopeFactoryStub
     public static IServiceScopeFactory Create(SpeFileStore speFileStore)
         => Create(speFileStore, NonSecureContainerResolver());
 
+    /// <param name="speFileStore">The SPE double.</param>
+    /// <param name="containerResolver">The communication container resolver.</param>
+    /// <param name="documentPointerResolver">
+    /// The resolver whose document-pointer check (unified-access-control-r2 task 166 r1) runs before every app-only
+    /// download of a row's pointer. Defaults to an environment whose business units stamp every <c>drive-…</c>
+    /// container, which is the world every existing assertion was written against.
+    /// </param>
     public static IServiceScopeFactory Create(
         SpeFileStore speFileStore,
-        CommunicationContainerResolver containerResolver)
+        CommunicationContainerResolver containerResolver,
+        RecordContainerResolver? documentPointerResolver = null)
     {
         var scopedProvider = new Mock<IServiceProvider>();
         scopedProvider.Setup(sp => sp.GetService(typeof(SpeFileStore))).Returns(speFileStore);
         scopedProvider
             .Setup(sp => sp.GetService(typeof(CommunicationContainerResolver)))
             .Returns(containerResolver);
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(RecordContainerResolver)))
+            .Returns(documentPointerResolver
+                ?? TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("drive-", StringComparison.Ordinal)));
         var scope = new Mock<IServiceScope>();
         scope.Setup(s => s.ServiceProvider).Returns(scopedProvider.Object);
         var factory = new Mock<IServiceScopeFactory>();

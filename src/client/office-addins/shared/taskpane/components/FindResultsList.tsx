@@ -1,46 +1,65 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Badge, Body1, Button, Spinner, Text, makeStyles, tokens, type GriffelStyle } from '@fluentui/react-components';
-import { DocumentSearchRegular } from '@fluentui/react-icons';
+import {
+  Badge,
+  Button,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
+  Spinner,
+  Text,
+  makeStyles,
+  tokens,
+  type GriffelStyle,
+} from '@fluentui/react-components';
 import { useLazyResults } from '../hooks/useLazyResults';
 import type { AnnounceMode } from '../hooks/useAnnounce';
 import type { RecordSeedSource, RecordMatch, UseFindRecordMatchesResult } from '../hooks/useFindRecordMatches';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { FindSplitPane } from './FindSplitPane';
 
 /**
- * FindResultsList — renders the Find tab's results (spaarkeai-word-add-in-r1 task 034).
+ * FindResultsList — renders the Find tab's results (spaarkeai-word-add-in-r1 task 034, extended task 077,
+ * restructured task 092 / UAT-3+UAT-8, 2026-10-03 round-3 UAT).
  *
- * **Path 2 (owner-approved 2026-09-15, Find list only)** — the documented exception to ADR-051's
- * literal "fetch progressively" MUST. `GET /api/ai/visualization/related/{documentId}` (the only
- * source for these results, hardened by task 032) has no paging mechanism of any kind: it returns ONE
- * complete, authorization-trimmed, bounded response (at most 50 rows) per call — there is no "page 2"
- * to fetch. See `projects/spaarkeai-word-add-in-r1/notes/034-route-paging-escalation.md` for the full
- * evidence and the owner's decision.
+ * **Task 092 — two INDEPENDENT sections, not one combined list.** The owner's round-3 UAT (UAT-8) asked
+ * for "Most similar documents" and "Matching records" to be two separate sections, and (UAT-3) for
+ * Matching records to show something even while documents are still loading or have failed — the OLD
+ * behaviour nested records inside the documents half and only rendered either once the documents request
+ * had resolved. `documents` (this component's own loading/error/loaded state, mapped 1:1 from `FindView`'s
+ * `RelatedDocumentsState`) and `records` (`useFindRecordMatches`'s result) are now rendered UNCONDITIONALLY
+ * side by side, each owning its own heading, loading spinner, empty copy and error MessageBar — neither
+ * section's render path reads the other's state.
  *
- * **Framing.** This is rendered as a RANKED "top matches" list ("Most similar documents"), never as a
- * pageable dataset, and never implies further pages exist. Scrolling reveals more of the rows already
- * in hand (`useLazyResults` — DOM reveal only, no re-fetch); it never issues a second network call.
+ * **Task 102 (UAT round 6 item 4) — SUPERSEDES task 092's "one scroll container".** The two sections are
+ * now separate panes ("Similar Documents", "Matching records"), each a fixed heading + its OWN scroll
+ * container (`find-documents-scroll`, `find-records-scroll`), sharing the Find tab's height through a
+ * draggable/keyboard-operable divider (`FindSplitPane`). The pre-092 fixed-height cap stays gone — heights
+ * come from the split ratio, never a pixel cap. Each progressive-load sentinel (documents reveal, records
+ * paging) sits at the end of its own scroller, so each is triggered by its OWN list's scroll.
+ *
+ * **Path 2 (owner-approved 2026-09-15, Find list only)** — the documented exception to ADR-051's literal
+ * "fetch progressively" MUST, for the DOCUMENTS half only. `GET /api/ai/visualization/related/{documentId}`
+ * has no paging mechanism of any kind: it returns ONE complete, authorization-trimmed, bounded response (at
+ * most 50 rows) per call. See `projects/spaarkeai-word-add-in-r1/notes/034-route-paging-escalation.md`.
  *
  * **Hub nodes** (`matter` / `project` / `invoice` / `email`) are the SOURCE document's own parent
- * record(s) — built from the source document's Dataverse lookups
- * (`VisualizationService.GetHardcodedRelationshipsAsync`), never a content-similarity match. They
- * render in their own, distinctly labeled section and are never mixed into the ranked list.
+ * record(s) — never a content-similarity match. They render inside the Documents section, in their own,
+ * distinctly labeled sub-section.
  *
- * **No pager, ever** (ADR-051): no numbered pages, no prev/next, no chevron, no "Load more" button.
- * The only navigation is scroll.
+ * **Records (task 077)** come from `POST /api/ai/search/records` (per-row authorized), seeded by the
+ * document's own AI-profile keywords. They are a TEXT match on the document's subject, not content
+ * similarity, and the heading/caption say so.
  *
- * **F-c (records bridge) — task 077 REVERSED task 034's documents-only decision.** Records now render
- * after the documents, from `POST /api/ai/search/records` (per-row authorized), seeded by the document's
- * own AI-profile keywords — the seed task 034 never considered (it rejected title and body text, both
- * genuinely bad). Fetching lives in `useFindRecordMatches`; this component only presents. Records are a
- * TEXT match on the document's subject, not content similarity, and the heading says so. Omitting the
- * `records` prop keeps the documents-only behaviour exactly as before.
+ * **Opening a result (task 092).** `onOpenRecord`, when provided, is called with `(entityType, recordId)`
+ * for a document row (`sprk_document`), a hub/parent row (`sprk_matter` / `sprk_project` / `sprk_invoice` /
+ * `sprk_document` for an email hub — see `extractHubRecordId`'s doc comment), or a matching-record row
+ * (`record.recordType` / `record.recordId`). `FindView` is the only caller and wires this to
+ * `openRecord` from `services/openRecordLauncher.ts`, gated on `canOpenBrowserWindow` + `ORG_URL` (NFR-10).
+ * Omitting the prop (no capability / no config) renders every row as plain, non-interactive text — never a
+ * dead link.
  *
- * **One scroll area, two paging models, no conflict.** Documents are revealed from a single bounded
- * response (reveal-only); records are fetched page by page (progressive). Records sit AFTER the
- * documents, so the only section that ever grows is the tail — content never moves under the reader.
- *
- * **Opening a result is out of scope.** `onOpenResult` is a seam only — task 027's
- * `openRecordLauncher.ts` wires the actual navigation separately. When omitted, rows render as
- * non-interactive text (still legible, just not actionable yet).
+ * **No pager, ever** (ADR-051): no numbered pages, no prev/next, no chevron, no "Load more" button. The
+ * only navigation is scroll.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -62,6 +81,16 @@ export interface FindResultNode {
   data: FindResultNodeData;
 }
 
+/**
+ * Task 092 — the Documents section's own state, mapped 1:1 from `FindView`'s `RelatedDocumentsState`
+ * (that type keeps its own `idle` transient; this component only ever needs these three, so `FindView`
+ * folds `idle` into `loading` at the call site).
+ */
+export type DocumentsResultState =
+  | { kind: 'loading' }
+  | { kind: 'error'; message: string }
+  | { kind: 'loaded'; nodes: FindResultNode[]; partialResultsWarning?: string | null };
+
 /** Mirrors the server's `NodeTypes` hub-type set (`IsParentHub`) — matter/project/invoice/email. */
 const HUB_NODE_TYPES = new Set(['matter', 'project', 'invoice', 'email']);
 const SOURCE_NODE_TYPE = 'source';
@@ -73,6 +102,47 @@ const HUB_LABELS: Record<string, string> = {
   email: 'Email',
 };
 
+/**
+ * The Dataverse entity a hub node's OWN record opens as. An "email" hub is the parent EMAIL DOCUMENT
+ * (a `sprk_document`), not a distinct "email" entity — `VisualizationService.CreateParentHubNode`'s
+ * `SameEmail` branch builds its `RecordUrl` via the exact same `BuildRecordUrl(documentId)` plain
+ * document rows use (`etn=sprk_document`), confirmed by reading that method. See
+ * {@link extractHubRecordId} for why a `thread-` id is deliberately excluded.
+ */
+const HUB_ENTITY_TYPES: Record<string, string> = {
+  matter: 'sprk_matter',
+  project: 'sprk_project',
+  invoice: 'sprk_invoice',
+  email: 'sprk_document',
+};
+
+const GUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A stable empty-array identity — see `DocumentsSection`'s `nodes` memo for why this matters. */
+const EMPTY_NODES: FindResultNode[] = [];
+
+/**
+ * The real Dataverse id behind a hub node, or `null` when there is none to open.
+ *
+ * `node.id` is server-prefixed, never the bare record id — confirmed by reading
+ * `VisualizationService.CreateParentHubNode`: `matter-{sourceDoc.MatterId}`, `project-{…}`,
+ * `invoice-{…}`, `email-{sourceDoc.ParentDocumentId}` (or `email-{sourceDoc.Id}`) are real GUIDs behind
+ * a prefix, but the `SameThread` branch's `thread-{conversationIndexPrefix}` carries NO record id at
+ * all — a truncated conversation index, not a GUID — and is typed `email` exactly like the openable
+ * case. This strips the prefix matching the node's own type and verifies what remains is actually
+ * GUID-shaped before offering an open action, so a `thread-` hub degrades to plain text rather than
+ * building a broken deep link — the same "never open a link that can't resolve" discipline
+ * `openRecord` itself applies for a missing/empty id.
+ */
+export function extractHubRecordId(node: FindResultNode): { entityType: string; recordId: string } | null {
+  const entityType = HUB_ENTITY_TYPES[node.type];
+  if (!entityType) return null;
+  const prefix = `${node.type}-`;
+  if (!node.id.startsWith(prefix)) return null;
+  const candidate = cleanGuid(node.id.slice(prefix.length));
+  return GUID_RE.test(candidate) ? { entityType, recordId: candidate } : null;
+}
+
 function isHubNode(node: FindResultNode): boolean {
   return HUB_NODE_TYPES.has(node.type);
 }
@@ -80,6 +150,37 @@ function isHubNode(node: FindResultNode): boolean {
 /** Mirrors the server's `IsResultRow`: a genuine similarity match — not the source, not a hub. */
 function isResultRow(node: FindResultNode): boolean {
   return node.type !== SOURCE_NODE_TYPE && !isHubNode(node);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Task 092 — safe match-reason rendering (security constraint). `<em>…</em>` (Azure AI Search's own
+// highlight pre/post tags — plain, no attributes) becomes bold; ANY other tag is dropped — never via
+// `dangerouslySetInnerHTML`. Every piece of text this function returns is a plain JS string passed as
+// React children, so even an unstripped payload could never execute; stripping is defense-in-depth
+// (and satisfies the "drop any other tag" wording) on top of that structural guarantee.
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+const EM_PATTERN = /<em>([\s\S]*?)<\/em>/gi;
+const ANY_TAG_PATTERN = /<[^>]*>/g;
+
+/** Pure — independently unit-tested. Never touches the DOM, never parses HTML into elements. */
+export function renderMatchReason(raw: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = [];
+  let lastIndex = 0;
+  let key = 0;
+  let match: RegExpExecArray | null;
+  EM_PATTERN.lastIndex = 0;
+  while ((match = EM_PATTERN.exec(raw)) !== null) {
+    const plain = raw.slice(lastIndex, match.index).replace(ANY_TAG_PATTERN, '');
+    if (plain) nodes.push(plain);
+    // Defense-in-depth: strip any tag INSIDE the <em> span too, before bolding its text.
+    const bold = (match[1] ?? '').replace(ANY_TAG_PATTERN, '');
+    if (bold) nodes.push(<strong key={`em-${key++}`}>{bold}</strong>);
+    lastIndex = EM_PATTERN.lastIndex;
+  }
+  const rest = raw.slice(lastIndex).replace(ANY_TAG_PATTERN, '');
+  if (rest) nodes.push(rest);
+  return nodes.length > 0 ? nodes : [raw.replace(ANY_TAG_PATTERN, '')];
 }
 
 // Recreated locally per `.claude/patterns/ui/thin-scrollbar.md` — the add-in does not depend on
@@ -100,10 +201,12 @@ const thinScrollbarStyle: GriffelStyle = {
 };
 
 const useStyles = makeStyles({
+  // Task 092: the single root this component contributes to the flex:1/minHeight:0 chain — see
+  // FindView's own container comment. This element itself never scrolls; `scrollArea` below does.
   root: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
+    flex: 1,
     minHeight: 0,
   },
   heading: {
@@ -120,12 +223,33 @@ const useStyles = makeStyles({
   hubLabel: {
     color: tokens.colorNeutralForeground3,
   },
-  scrollArea: {
+  hubRowButton: {
+    justifyContent: 'flex-start',
+    textAlign: 'left',
+    height: 'auto',
+    minHeight: 0,
+    padding: tokens.spacingVerticalXS,
+  },
+  // Task 102 (UAT round 6 item 4): each section is a pane = fixed heading + its OWN scroll container.
+  // The pane fills whatever height `FindSplitPane` gives its region (flex:1/minHeight:0); the heading
+  // never scrolls away, the `scroller` below it does. The scroller is a grid with max-content rows so
+  // rows keep their natural height and the scroller scrolls instead of crushing them.
+  section: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
+    flex: 1,
+    minHeight: 0,
+  },
+  scroller: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr)',
+    gridAutoRows: 'max-content',
+    alignContent: 'start',
+    gap: tokens.spacingVerticalXS,
+    flex: 1,
+    minHeight: 0,
     overflowY: 'auto',
-    maxHeight: '360px',
     ...thinScrollbarStyle,
   },
   row: {
@@ -159,28 +283,15 @@ const useStyles = makeStyles({
   sentinel: {
     height: '1px',
   },
-  emptyState: {
+  emptyLine: {
+    color: tokens.colorNeutralForeground3,
+    padding: tokens.spacingVerticalXS,
+  },
+  loadingLine: {
     display: 'flex',
-    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalM,
-    padding: tokens.spacingVerticalXXL,
-    textAlign: 'center',
-    color: tokens.colorNeutralForeground3,
-  },
-  icon: {
-    fontSize: '32px',
-    color: tokens.colorNeutralForeground3,
-  },
-  // Task 077 — records group. Semantic tokens only (ADR-021); a divider rather than a second scroller.
-  recordsGroup: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXS,
-    marginTop: tokens.spacingVerticalM,
-    paddingTop: tokens.spacingVerticalS,
-    borderTop: `1px solid ${tokens.colorNeutralStroke2}`,
+    gap: tokens.spacingHorizontalS,
+    padding: tokens.spacingVerticalXS,
   },
   groupCaption: {
     color: tokens.colorNeutralForeground3,
@@ -204,51 +315,119 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontSize: tokens.fontSizeBase200,
   },
-  documentsEmptyLine: {
-    color: tokens.colorNeutralForeground3,
-    padding: tokens.spacingVerticalXS,
+  reasonsList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    marginTop: '2px',
+  },
+  reasonLine: {
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
   },
 });
 
 type Styles = ReturnType<typeof useStyles>;
+type OpenRecordHandler = (entityType: string, recordId: string) => void;
 
-function HubSection({ hubNodes, styles }: { hubNodes: FindResultNode[]; styles: Styles }): React.ReactElement {
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Documents section
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
+function HubSection({
+  hubNodes,
+  onOpenRecord,
+  styles,
+}: {
+  hubNodes: FindResultNode[];
+  onOpenRecord: OpenRecordHandler | undefined;
+  styles: Styles;
+}): React.ReactElement {
   return (
     <div className={styles.hubSection} data-testid="find-results-hub-section">
       <Text size={200} weight="semibold" className={styles.hubLabel}>
         This document&rsquo;s record{hubNodes.length > 1 ? 's' : ''} — not a similarity match
       </Text>
-      {hubNodes.map(node => (
-        <Text key={node.id} size={200}>
-          {HUB_LABELS[node.type] ?? 'Related record'}: {node.data.label || 'Untitled'}
-        </Text>
-      ))}
+      {hubNodes.map(node => {
+        const label = hubRowLabel(node);
+        const target = onOpenRecord ? extractHubRecordId(node) : null;
+        if (target) {
+          return (
+            <Button
+              key={node.id}
+              appearance="subtle"
+              size="small"
+              className={styles.hubRowButton}
+              onClick={() => onOpenRecord!(target.entityType, target.recordId)}
+            >
+              {label}
+            </Button>
+          );
+        }
+        return (
+          <Text key={node.id} size={200}>
+            {label}
+          </Text>
+        );
+      })}
     </div>
   );
 }
 
+/**
+ * Task 102 label check. The BFF's `CreateParentHubNode` builds `Label = sourceDoc.MatterName ?? "Matter"`
+ * (likewise Project/Invoice/Email), so when the parent record's NAME is unavailable the "name" it sends is
+ * the TYPE word — which this row used to render as "Matter: Matter". A label equal to the type word is a
+ * placeholder, not a name: show the type with an honest "name unavailable" instead of repeating it.
+ */
+function hubRowLabel(node: FindResultNode): string {
+  const typeLabel = HUB_LABELS[node.type] ?? 'Related record';
+  const name = node.data.label?.trim();
+  if (!name || name.toLowerCase() === typeLabel.toLowerCase()) {
+    return `${typeLabel} (name unavailable)`;
+  }
+  return `${typeLabel}: ${name}`;
+}
+
+/**
+ * The BFF's `CreateNode` sends `DocumentType = document.DocumentType ?? "Unknown"` — a server fallback
+ * for an index row with no document type, not a type. Showing it as a type is noise, so it is omitted.
+ */
+function displayableDocumentType(documentType: string | null | undefined): string | null {
+  const trimmed = documentType?.trim();
+  return trimmed && trimmed.toLowerCase() !== 'unknown' ? trimmed : null;
+}
+
 function rowMetaText(node: FindResultNode): string {
   const similarityPct = typeof node.data.similarity === 'number' ? Math.round(node.data.similarity * 100) : null;
-  return [node.data.documentType, similarityPct !== null ? `${similarityPct}% match` : null, node.data.parentEntityName]
+  return [
+    displayableDocumentType(node.data.documentType),
+    similarityPct !== null ? `${similarityPct}% match` : null,
+    node.data.parentEntityName,
+  ]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
 }
 
 function ResultRow({
   node,
-  onOpenResult,
+  onOpenRecord,
   styles,
 }: {
   node: FindResultNode;
-  onOpenResult: ((node: FindResultNode) => void) | undefined;
+  onOpenRecord: OpenRecordHandler | undefined;
   styles: Styles;
 }): React.ReactElement {
   const label = node.data.label || 'Untitled document';
   const meta = rowMetaText(node);
 
-  if (onOpenResult) {
+  if (onOpenRecord) {
     return (
-      <Button appearance="subtle" className={styles.row} onClick={() => onOpenResult(node)}>
+      <Button
+        appearance="subtle"
+        className={styles.row}
+        onClick={() => onOpenRecord('sprk_document', cleanGuid(node.id))}
+      >
         <span className={styles.rowLabel}>{label}</span>
         {meta && <span className={styles.rowMeta}>{meta}</span>}
       </Button>
@@ -263,8 +442,113 @@ function ResultRow({
   );
 }
 
+function DocumentsSection({
+  documents,
+  onOpenRecord,
+  announce,
+  styles,
+}: {
+  documents: DocumentsResultState;
+  onOpenRecord: OpenRecordHandler | undefined;
+  announce: (message: string, mode?: AnnounceMode) => void;
+  styles: Styles;
+}): React.ReactElement {
+  // A stable empty-array identity for the non-loaded cases, so the memos/effects below don't see a
+  // fresh `[]` (and therefore a "changed" dependency) on every render while loading/erroring.
+  const nodes = useMemo(() => (documents.kind === 'loaded' ? documents.nodes : EMPTY_NODES), [documents]);
+  const resultRows = useMemo(() => nodes.filter(isResultRow), [nodes]);
+  const hubNodes = useMemo(() => nodes.filter(isHubNode), [nodes]);
+
+  const { visibleItems, hasMore, sentinelRef } = useLazyResults(resultRows);
+
+  // NFR-11: announce the empty state once per empty, LOADED result set (never while loading/error).
+  const announcedEmptyForRef = useRef<FindResultNode[] | null>(null);
+  useEffect(() => {
+    if (documents.kind === 'loaded' && resultRows.length === 0 && announcedEmptyForRef.current !== nodes) {
+      announcedEmptyForRef.current = nodes;
+      announce('No similar documents found.', 'polite');
+    }
+  }, [documents.kind, resultRows.length, nodes, announce]);
+
+  // NFR-11: announce each SCROLL-DRIVEN reveal (not the first chunk — the parent view's own
+  // state-transition announcement already covers "results are here").
+  const prevVisibleCountRef = useRef(visibleItems.length);
+  const isFirstRevealRef = useRef(true);
+  useEffect(() => {
+    if (isFirstRevealRef.current) {
+      isFirstRevealRef.current = false;
+      prevVisibleCountRef.current = visibleItems.length;
+      return;
+    }
+    const added = visibleItems.length - prevVisibleCountRef.current;
+    prevVisibleCountRef.current = visibleItems.length;
+    if (added > 0) {
+      announce(`${added} more document${added === 1 ? '' : 's'} shown.`, 'polite');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems.length]);
+
+  return (
+    <div className={styles.section} data-testid="find-documents-section">
+      <Text className={styles.heading}>Similar Documents</Text>
+      <div className={styles.scroller} data-testid="find-documents-scroll">
+        {documents.kind === 'loading' && (
+          <div className={styles.loadingLine}>
+            <Spinner size="tiny" />
+            <Text size={200}>Finding similar documents…</Text>
+          </div>
+        )}
+
+        {documents.kind === 'error' && (
+          <MessageBar intent="error" layout="multiline">
+            <MessageBarBody>
+              <MessageBarTitle>Couldn&rsquo;t load similar documents</MessageBarTitle>
+              {documents.message}
+            </MessageBarBody>
+          </MessageBar>
+        )}
+
+        {documents.kind === 'loaded' && (
+          <>
+            {documents.partialResultsWarning && (
+              <MessageBar intent="warning" layout="multiline">
+                <MessageBarBody>
+                  <MessageBarTitle>Results may be incomplete</MessageBarTitle>
+                  {documents.partialResultsWarning}
+                </MessageBarBody>
+              </MessageBar>
+            )}
+            {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} onOpenRecord={onOpenRecord} styles={styles} />}
+            {resultRows.length === 0 ? (
+              <Text className={styles.emptyLine}>No similar documents found</Text>
+            ) : (
+              // A real list for screen readers (NFR-11). The sentinel sits outside the list, but must
+              // stay inside the scroll area: the observer only sees it once it scrolls into view there.
+              <div role="list" aria-label="Similar Documents" className={styles.list}>
+                {visibleItems.map(node => (
+                  <div key={node.id} role="listitem">
+                    <ResultRow node={node} onOpenRecord={onOpenRecord} styles={styles} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasMore && (
+              <div
+                ref={sentinelRef}
+                className={styles.sentinel}
+                aria-hidden="true"
+                data-testid="find-results-sentinel"
+              />
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────────────────────────────
-// Task 077 — the records group
+// Matching records section (task 077; restructured as an independent section — task 092)
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 const RECORD_TYPE_LABELS: Record<string, string> = {
@@ -288,12 +572,30 @@ const SEED_SOURCE_CAPTION: Record<RecordSeedSource, string> = {
 const NO_SEED_CAPTION =
   'Matching records are found using this document’s AI keywords or summary — none is available for it yet.';
 
-function RecordRow({ record, styles }: { record: RecordMatch; styles: Styles }): React.ReactElement {
+/** Up to 3 reasons are shown per record (task 092 / UAT-3) — the server returns up to 5. */
+const MAX_DISPLAYED_REASONS = 3;
+
+function recordMetaText(record: RecordMatch, reference: string | undefined): string {
+  const pct = Math.round((record.confidenceScore ?? 0) * 100);
+  return [`${pct}% match`, reference].filter((part): part is string => Boolean(part)).join(' · ');
+}
+
+function RecordRow({
+  record,
+  onOpenRecord,
+  styles,
+}: {
+  record: RecordMatch;
+  onOpenRecord: OpenRecordHandler | undefined;
+  styles: Styles;
+}): React.ReactElement {
   const typeLabel = RECORD_TYPE_LABELS[record.recordType.toLowerCase()] ?? 'Record';
   const reference = record.referenceNumbers?.find(ref => Boolean(ref?.trim()));
+  const meta = recordMetaText(record, reference);
+  const reasons = (record.matchReasons ?? []).filter(reason => Boolean(reason?.trim())).slice(0, MAX_DISPLAYED_REASONS);
 
-  return (
-    <div className={`${styles.row} ${styles.rowStatic}`} data-testid="find-record-row">
+  const content = (
+    <>
       <span className={styles.recordTitleLine}>
         {/* The type badge is what makes a record row visually distinct from a document row. */}
         <Badge appearance="outline" size="small" color="informative">
@@ -303,132 +605,142 @@ function RecordRow({ record, styles }: { record: RecordMatch; styles: Styles }):
           {record.recordName || 'Untitled record'}
         </Text>
       </span>
-      {reference && <Text className={styles.rowMeta}>{reference}</Text>}
-    </div>
-  );
-}
-
-function RecordsGroup({
-  records,
-  styles,
-}: {
-  records: UseFindRecordMatchesResult;
-  styles: Styles;
-}): React.ReactElement {
-  return (
-    <div className={styles.recordsGroup} data-testid="find-records-group">
-      <Text className={styles.heading}>Matching records</Text>
-      {records.seedSource && <Text className={styles.groupCaption}>{SEED_SOURCE_CAPTION[records.seedSource]}</Text>}
-
-      {records.status === 'no-seed' && <Text className={styles.groupCaption}>{NO_SEED_CAPTION}</Text>}
-
-      {records.status === 'loading' && (
-        <div className={styles.inlineStatus}>
-          <Spinner size="tiny" />
-          <Text size={200}>Finding matching records…</Text>
-        </div>
-      )}
-
-      {records.status === 'error' && (
-        <Text className={styles.inlineError} role="alert">
-          Couldn&rsquo;t load matching records. {records.error}
-        </Text>
-      )}
-
-      {records.status === 'ready' && records.records.length === 0 && (
-        <Text className={styles.groupCaption}>No records you can see match this document.</Text>
-      )}
-
-      {records.status === 'ready' && records.records.length > 0 && (
-        <div role="list" aria-label="Matching records" className={styles.list}>
-          {records.records.map(record => (
-            <div key={`${record.recordType}:${record.recordId}`} role="listitem">
-              <RecordRow record={record} styles={styles} />
-            </div>
+      <Text className={styles.rowMeta}>{meta}</Text>
+      {reasons.length > 0 && (
+        <div className={styles.reasonsList}>
+          {reasons.map(reason => (
+            <Text key={reason} size={200} className={styles.reasonLine}>
+              {renderMatchReason(reason)}
+            </Text>
           ))}
         </div>
       )}
+    </>
+  );
 
-      {records.isLoadingMore && (
-        <div className={styles.inlineStatus}>
-          <Spinner size="tiny" />
-          <Text size={200}>Loading more records…</Text>
-        </div>
-      )}
+  if (onOpenRecord) {
+    return (
+      <Button
+        appearance="subtle"
+        className={styles.row}
+        data-testid="find-record-row"
+        onClick={() => onOpenRecord(record.recordType, record.recordId)}
+      >
+        {content}
+      </Button>
+    );
+  }
 
-      {records.loadMoreError && (
-        <Text className={styles.inlineError} role="alert">
-          Couldn&rsquo;t load more records. {records.loadMoreError}
-        </Text>
-      )}
-
-      {/* The progressive-fetch sentinel (ADR-051). Must sit inside the scroll area, after the last row. */}
-      {records.status === 'ready' && records.hasMore && (
-        <div
-          ref={records.sentinelRef}
-          className={styles.sentinel}
-          aria-hidden="true"
-          data-testid="find-records-sentinel"
-        />
-      )}
+  return (
+    <div className={`${styles.row} ${styles.rowStatic}`} data-testid="find-record-row">
+      {content}
     </div>
   );
 }
 
+function RecordsSection({
+  records,
+  onOpenRecord,
+  styles,
+}: {
+  records: UseFindRecordMatchesResult;
+  onOpenRecord: OpenRecordHandler | undefined;
+  styles: Styles;
+}): React.ReactElement {
+  return (
+    <div className={styles.section} data-testid="find-records-section">
+      <Text className={styles.heading}>Matching records</Text>
+      <div className={styles.scroller} data-testid="find-records-scroll">
+        {records.seedSource && <Text className={styles.groupCaption}>{SEED_SOURCE_CAPTION[records.seedSource]}</Text>}
+
+        {records.status === 'no-seed' && <Text className={styles.groupCaption}>{NO_SEED_CAPTION}</Text>}
+
+        {records.status === 'loading' && (
+          <div className={styles.inlineStatus}>
+            <Spinner size="tiny" />
+            <Text size={200}>Finding matching records…</Text>
+          </div>
+        )}
+
+        {records.status === 'error' && (
+          <Text className={styles.inlineError} role="alert">
+            Couldn&rsquo;t load matching records. {records.error}
+          </Text>
+        )}
+
+        {records.status === 'ready' && records.records.length === 0 && (
+          <Text className={styles.emptyLine}>No matching records found</Text>
+        )}
+
+        {records.status === 'ready' && records.records.length > 0 && (
+          <div role="list" aria-label="Matching records" className={styles.list}>
+            {records.records.map(record => (
+              <div key={`${record.recordType}:${record.recordId}`} role="listitem">
+                <RecordRow record={record} onOpenRecord={onOpenRecord} styles={styles} />
+              </div>
+            ))}
+          </div>
+        )}
+
+        {records.isLoadingMore && (
+          <div className={styles.inlineStatus}>
+            <Spinner size="tiny" />
+            <Text size={200}>Loading more records…</Text>
+          </div>
+        )}
+
+        {records.loadMoreError && (
+          <Text className={styles.inlineError} role="alert">
+            Couldn&rsquo;t load more records. {records.loadMoreError}
+          </Text>
+        )}
+
+        {/* The progressive-fetch sentinel (ADR-051). Must sit inside the scroll area, after the last row. */}
+        {records.status === 'ready' && records.hasMore && (
+          <div
+            ref={records.sentinelRef}
+            className={styles.sentinel}
+            aria-hidden="true"
+            data-testid="find-records-sentinel"
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+
 export interface FindResultsListProps {
-  /** All nodes from the single bounded, per-row-authorized response (tasks 032/033). */
-  nodes: FindResultNode[];
+  /** Task 092: the Documents section's own state — loading / error / loaded. Always rendered. */
+  documents: DocumentsResultState;
   /**
-   * Announces reveal events (NFR-11) and the empty state. Pass the SAME `announce` the parent view
-   * already owns from its own `useAnnounce()` — this component renders no live region of its own.
+   * Announces reveal events (NFR-11) and the empty state for the DOCUMENTS section. Pass the SAME
+   * `announce` the parent view already owns from its own `useAnnounce()` — this component renders no
+   * live region of its own. (The records section announces via `FindView` today — unchanged by 092.)
    */
   announce: (message: string, mode?: AnnounceMode) => void;
   /**
-   * Seam only (task 034 does not implement opening a result — task 027's `openRecordLauncher.ts`
-   * wires this separately). Omitted → rows render as plain, non-interactive text.
+   * Task 092: opens a document row (`sprk_document`), a parent/hub row (`sprk_matter` /
+   * `sprk_project` / `sprk_invoice` / `sprk_document`), or a matching-record row (`record.recordType`)
+   * via `(entityType, recordId)`. `FindView` wires this to `openRecord`, gated on
+   * `canOpenBrowserWindow` + `ORG_URL` (NFR-10). Omitted → every row renders as plain, non-interactive
+   * text (never a dead link).
    */
-  onOpenResult?: (node: FindResultNode) => void;
+  onOpenRecord?: OpenRecordHandler;
   /**
-   * Task 077 — the records half, from `useFindRecordMatches` (fetching lives there; this component only
-   * presents). Omitted → documents-only, exactly as before task 077.
+   * The records half, from `useFindRecordMatches` (fetching lives there; this component only
+   * presents). Omitted → the Matching records section renders nothing at all (no heading either) —
+   * `FindView` always supplies it once a document is indexed, so this is a resilience fallback, not a
+   * real production path.
    */
   records?: UseFindRecordMatchesResult;
 }
 
-export const FindResultsList: React.FC<FindResultsListProps> = ({ nodes, announce, onOpenResult, records }) => {
+export const FindResultsList: React.FC<FindResultsListProps> = ({ documents, announce, onOpenRecord, records }) => {
   const styles = useStyles();
-
-  const resultRows = useMemo(() => nodes.filter(isResultRow), [nodes]);
-  const hubNodes = useMemo(() => nodes.filter(isHubNode), [nodes]);
-
-  const { visibleItems, hasMore, sentinelRef } = useLazyResults(resultRows);
-
-  // NFR-11: announce the empty state once per empty result set.
-  const announcedEmptyForRef = useRef<FindResultNode[] | null>(null);
-  useEffect(() => {
-    if (resultRows.length === 0 && announcedEmptyForRef.current !== nodes) {
-      announcedEmptyForRef.current = nodes;
-      announce('No similar documents found.', 'polite');
-    }
-  }, [resultRows.length, nodes, announce]);
-
-  // NFR-11: announce each SCROLL-DRIVEN reveal (not the first chunk — the parent view's own
-  // state-transition announcement already covers "results are here").
-  const prevVisibleCountRef = useRef(visibleItems.length);
-  const isFirstRevealRef = useRef(true);
-  useEffect(() => {
-    if (isFirstRevealRef.current) {
-      isFirstRevealRef.current = false;
-      prevVisibleCountRef.current = visibleItems.length;
-      return;
-    }
-    const added = visibleItems.length - prevVisibleCountRef.current;
-    prevVisibleCountRef.current = visibleItems.length;
-    if (added > 0) {
-      announce(`${added} more document${added === 1 ? '' : 's'} shown.`, 'polite');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleItems.length]);
 
   // NFR-11 (task 077): announce the records half — once when its first page settles, then each page
   // that scrolling appends. Keyed on the settled count so a re-render never repeats an announcement.
@@ -457,58 +769,23 @@ export const FindResultsList: React.FC<FindResultsListProps> = ({ nodes, announc
     }
   }, [recordsStatus, recordsCount, announce]);
 
-  // The big empty state is used only when there is NOTHING to show in either half. A documents-empty
-  // result must not hide records that are loading, that exist, or that failed (the failure must show).
-  //   - records omitted (pre-077 callers)  → exactly the pre-077 empty state
-  //   - records never searched (no seed)   → documents-empty state; it must NOT claim "no related
-  //                                          records", because none were looked for — a caption says why
-  //   - records searched, zero came back   → the combined "documents or records" empty state
-  const recordsSearchedAndEmpty = records?.status === 'ready' && recordsCount === 0;
-  const recordsNotSearched = records?.status === 'no-seed';
-  if (resultRows.length === 0 && (records === undefined || recordsSearchedAndEmpty || recordsNotSearched)) {
-    return (
-      <div className={styles.root}>
-        {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} styles={styles} />}
-        <div className={styles.emptyState}>
-          <DocumentSearchRegular className={styles.icon} />
-          <Text weight="semibold">
-            {recordsSearchedAndEmpty ? 'No similar documents or matching records found' : 'No similar documents found'}
-          </Text>
-          <Body1>
-            {recordsSearchedAndEmpty
-              ? 'Spaarke didn’t find any documents or records you can see that relate to this one.'
-              : 'Spaarke didn’t find any documents you can see that are similar to this one.'}
-          </Body1>
-          {recordsNotSearched && <Text className={styles.groupCaption}>{NO_SEED_CAPTION}</Text>}
-        </div>
-      </div>
-    );
-  }
+  const documentsSection = (
+    <DocumentsSection documents={documents} onOpenRecord={onOpenRecord} announce={announce} styles={styles} />
+  );
 
   return (
     <div className={styles.root}>
-      <Text className={styles.heading}>Most similar documents</Text>
-      {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} styles={styles} />}
-      <div className={styles.scrollArea} data-testid="find-results-scroll-area">
-        {resultRows.length === 0 ? (
-          <Text className={styles.documentsEmptyLine}>No similar documents found.</Text>
-        ) : (
-          /* A real list for screen readers (NFR-11). The sentinel sits outside the list, but must stay
-             inside the scroll area: the observer only sees it once it scrolls into view there. */
-          <div role="list" aria-label="Most similar documents" className={styles.list}>
-            {visibleItems.map(node => (
-              <div key={node.id} role="listitem">
-                <ResultRow node={node} onOpenResult={onOpenResult} styles={styles} />
-              </div>
-            ))}
-          </div>
-        )}
-        {hasMore && (
-          <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" data-testid="find-results-sentinel" />
-        )}
-        {/* Task 077: records AFTER documents, in the SAME scroll area — only the tail ever grows. */}
-        {records !== undefined && <RecordsGroup records={records} styles={styles} />}
-      </div>
+      {/* Task 102 — two sections, each with its OWN scroll container, sharing the height through a
+          draggable divider. Both always render, independently of each other's state (task 092 / UAT-3:
+          records must not wait on documents). Without `records` only the documents pane renders. */}
+      {records !== undefined ? (
+        <FindSplitPane
+          top={documentsSection}
+          bottom={<RecordsSection records={records} onOpenRecord={onOpenRecord} styles={styles} />}
+        />
+      ) : (
+        documentsSection
+      )}
     </div>
   );
 };

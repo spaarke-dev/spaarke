@@ -4,9 +4,11 @@
  *
  * - "Save" calls report.save() then PATCHes the sprk_report catalog entry
  *   via PATCH /api/reporting/reports/{id} to keep modified date in sync.
- * - "Save As" opens a Fluent v9 Dialog for the new report name, calls
- *   report.saveAs({name, targetWorkspaceId}), then POSTs a new sprk_report
- *   record with is_custom=true via POST /api/reporting/reports.
+ * - "Save As" opens a Fluent v9 Dialog for the new report name, then POSTs {name, sourceReportId} to
+ *   /api/reporting/reports: the BFF CLONES the source catalog row's Power BI report server-side and registers the
+ *   copy as a new catalog row (unified-access-control-r2 task 166 r2, owner round 23 item 2). The BFF no longer
+ *   registers a client-named Power BI report: embed tokens are view-only, so the SDK's report.saveAs() cannot create
+ *   one, and a client-named id could only alias an existing report.
  *
  * Both buttons are only shown in edit mode for Author / Admin users.
  * Results are communicated via toast notifications (Fluent v9 Toast).
@@ -18,7 +20,6 @@
  *
  * Power BI SDK reference:
  *   report.save()                              — in-place save
- *   report.saveAs({ name, targetWorkspaceId }) — copy to new report
  *   report.on("saved", handler)               — fires after save completes
  */
 
@@ -46,7 +47,7 @@ import {
   ToastIntent,
 } from "@fluentui/react-components";
 import { SaveRegular, SaveCopyRegular } from "@fluentui/react-icons";
-import { updateReport, saveAsReport } from "../services/reportingApi";
+import { updateReport, createReport } from "../services/reportingApi";
 import type { ReportCatalogItem } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -81,8 +82,6 @@ const useStyles = makeStyles({
 export interface SaveableReport {
   /** Trigger an in-place save of the report. */
   save(): Promise<void>;
-  /** Save the report as a new copy. */
-  saveAs(config: { name: string; targetWorkspaceId: string }): Promise<void>;
   /** Register for Power BI report events. */
   on<T>(eventName: string, handler: (event: CustomEvent<T>) => void): void;
   /** Remove an event listener. */
@@ -101,11 +100,6 @@ export interface SaveControlsProps {
   report: SaveableReport | null;
   /** The currently selected report's Dataverse catalog entry. */
   selectedReport: ReportCatalogItem | null;
-  /**
-   * The Power BI workspace ID for the customer's workspace.
-   * Required for saveAs — passed as targetWorkspaceId.
-   */
-  workspaceId: string | null;
   /** Whether the controls are disabled (e.g. while token is loading). */
   disabled?: boolean;
   /**
@@ -130,7 +124,6 @@ export interface SaveControlsProps {
 export const SaveControls: React.FC<SaveControlsProps> = ({
   report,
   selectedReport,
-  workspaceId,
   disabled = false,
   onSaveAsComplete,
 }) => {
@@ -239,12 +232,8 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
       setSaveAsError("Please enter a name for the report copy.");
       return;
     }
-    if (!report || !selectedReport) {
+    if (!selectedReport) {
       setSaveAsError("No report is currently selected.");
-      return;
-    }
-    if (!workspaceId) {
-      setSaveAsError("Workspace information is unavailable. Please try again.");
       return;
     }
 
@@ -252,26 +241,15 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
     setSaveAsError(null);
 
     try {
-      // Step 1: Call report.saveAs() via the PBI SDK
-      await report.saveAs({ name: trimmedName, targetWorkspaceId: workspaceId });
-
-      // Step 2: Create a new sprk_report Dataverse record via the BFF
-      const result = await saveAsReport({
+      // The BFF clones the SOURCE catalog row's report server-side and registers the copy (task 166 r2).
+      const result = await createReport({
         name: trimmedName,
         sourceReportId: selectedReport.id,
-        targetWorkspaceId: workspaceId,
-        isCustom: true,
       });
 
       if (!result.ok) {
-        console.error("[SaveControls] saveAsReport BFF call failed:", result.error);
-        // The PBI save succeeded but catalog sync failed — warn but don't fail
-        showToast(
-          "Report copied",
-          "Report saved in Power BI but could not register in catalog. Please refresh.",
-          "warning"
-        );
-        setSaveAsOpen(false);
+        console.error("[SaveControls] Save As (server-side copy) failed:", result.error);
+        setSaveAsError("The report copy could not be created. Please try again.");
         return;
       }
 
@@ -294,7 +272,7 @@ export const SaveControls: React.FC<SaveControlsProps> = ({
     } finally {
       setSavingAs(false);
     }
-  }, [saveAsName, report, selectedReport, workspaceId, showToast, onSaveAsComplete]);
+  }, [saveAsName, selectedReport, showToast, onSaveAsComplete]);
 
   const handleSaveAsKeyDown = React.useCallback(
     (ev: React.KeyboardEvent<HTMLInputElement>) => {

@@ -239,3 +239,22 @@ An independent reviewer (a separate agent, coverage-first) read the diff and the
 | Six sibling handlers: the crash half of the stale lock | **ISS-020 / #1089** |
 | The pane reads once after Generate Profile | **ISS-021 / #1090** |
 | A Communication seam test flakes under full-suite load | **ISS-019 / #1088** |
+
+## 9. Live check on `spaarke-bff-dev`, 2026-10-02 (after the deploy from master `5e39f2bea`)
+
+Owner-authorized deploy and restarts; user token `ralph.schroeder@spaarke.com`; document `fb79f621-43c5-4083-a721-d0d482074731`
+(saved for 060's check, §11 there).
+
+| Check (POML ui-test) | Result |
+|---|---|
+| Generate Profile answers at once | **202** at 12:23:03 UTC, `Location: /api/v1/documents/fb79f621-…`, job `3b90642b-a4ee-4caf-bf9c-d4b3ef47c3d8` |
+| Restart within ten seconds | `az webapp restart` issued at once (12:23:03). The job had been picked up at 12:23:02.27 (attempt 1/3) and **completed on the old process at 12:23:11.9 (9,661 ms)**; the new process started 12:23:29. So the restart did **not** interrupt the run: the old process was still running when the job ended, 9 s after the restart command (when it received the stop signal is not in the logs) |
+| Status Completed afterwards | From the new process, `GET /api/v1/documents/{id}` → `summaryStatus` 100000002 with summary, TL;DR, keywords and type written. App Insights: one "queued as job" line, one AppOnlyDocumentAnalysis "completed in" line for that job id. **PASS as written** |
+| Click twice | Jobs `862252c2-…` and `5217e424-…`: both queued, both **completed** (11,086 ms and 9,185 ms). **PASS** |
+| **Crash mid-run (hard kill)**, owner: "if we need to produce it live then we should do it" | Job `f2733e20-77a0-4ae4-b7fe-8cabe516440a` queued 13:18:45, attempt 1 started 13:18:45.2; `kill -9` on the `dotnet` process at 13:18:49 (over SSH), mid-run. No completion from attempt 1. The message came back as **delivery count 2** at 13:20:12, when the new process started. Its idempotency lock (taken by the same job 87 s earlier) was **taken back by its owner** (older than the 1-minute takeover age; logged at 13:20:12.31, Warning: *"taking over a processing lock left by an earlier attempt of the same job f2733e2077a04ae4b7fe8cabe516440a"*), and the run **completed in 10,764 ms**. Before 068, the 10-minute lock would have made this redelivery complete as "already being processed" and drop it. **PASS** |
+
+**What this shows.** Live, a profile request survives both a graceful restart (the work finished first) and a hard crash
+mid-run (redelivered, lock reclaimed, completed). A graceful restart could not cut a run: App Service left the old process
+running longer than the run took (twice: 9 s and 8 s runs, new processes 26 s and 23 s after the command). That path (stale lock released on a stop; owner takeover after a crash) stays proven by
+`Issue1086_OfficeBackgroundWorkRestartTests` only. Before 068 the same restart would have cancelled the in-process
+`Task.Run`, which was bound to `ApplicationStopping`.

@@ -32,10 +32,11 @@
  * ```
  */
 
+import { createChildRecordViaBff, isBffChildCreateTable } from '../utils/adapters/bffChildWriteAdapter';
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
-import { cleanGuid } from './PolymorphicResolverService';
+import { cleanGuid } from '../utils/guid';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -421,7 +422,7 @@ export class EntityCreationService {
    * @see design.md §5.0 (BU cascade source)
    */
   static async resolveUserBuDefaults(webApi: IWebApiLike, userId: string): Promise<IUserBuCascadeDefaults> {
-    const cleanUserId = userId.replace(/^\{|\}$/g, '');
+    const cleanUserId = cleanGuid(userId);
 
     // Step 1: user → BU id
     const userRecord = await webApi.retrieveRecord('systemuser', cleanUserId, '?$select=_businessunitid_value');
@@ -616,6 +617,11 @@ export class EntityCreationService {
    * @returns The GUID of the created record
    */
   async createEntityRecord(entityName: string, entityData: Record<string, unknown>): Promise<string> {
+    // UAC-r2 task 147 r1 (owner round 28 item 1): a CHILD record is created through the BFF (G5) — the server decides its
+    // owner. Roots (matter, project, work assignment) are unchanged here.
+    if (isBffChildCreateTable(entityName)) {
+      return createChildRecordViaBff(this._authenticatedFetch, this._bffBaseUrl, entityName, entityData);
+    }
     const result = await this._webApi.createRecord(entityName, entityData);
     return result.id;
   }
@@ -623,12 +629,13 @@ export class EntityCreationService {
   /**
    * Create sprk_document records in Dataverse linking uploaded SPE files to a parent entity.
    *
-   * Each document record contains:
+   * Each document record is created with:
    *   - sprk_documentname / sprk_filename: file name
-   *   - sprk_driveitemid: SPE drive item ID
-   *   - sprk_filepath: web URL to the file
    *   - sprk_filesize: file size in bytes
    *   - Navigation property @odata.bind to parent entity
+   * and then its file is ATTACHED by the BFF ({@link attachUploadedFile}), which stamps the SPE pointer
+   * (`sprk_graphdriveid` / `sprk_graphitemid`), `sprk_hasfile` and `sprk_filepath` server-side
+   * (unified-access-control-r2 task 166 f1). A row whose file the BFF refuses is removed and reported.
    *
    * @param parentEntityName Logical name of the parent entity set (e.g., 'sprk_matters')
    * @param parentEntityId GUID of the parent entity record
@@ -701,20 +708,19 @@ export class EntityCreationService {
         // `driveId` is always populated server-side (`ParentReference?.DriveId ?? containerId`), so
         // the `options.containerId` fallback below is retained only for callers that build document
         // rows for files they did not upload through `uploadFilesToSpe`.
-        const driveId = file.driveId ?? containerId ?? null;
+        const driveId = file.driveId ?? containerId ?? undefined;
 
-        // Payload aligned with canonical DocumentRecordService fields
+        // Payload aligned with canonical DocumentRecordService fields.
+        //
+        // 🔴 NO SPE POINTER IN THE CREATE PAYLOAD (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i)).
+        // `sprk_graphitemid` / `sprk_graphdriveid` are the pointer the BFF follows AS THE APPLICATION on every
+        // download, so they are field-secured and writable by the BFF identity only. The row is created without them
+        // (and without `sprk_hasfile` / `sprk_filepath`, which the BFF writes WITH the pointer so "has a file" and
+        // "points at a file" never disagree), then {@link attachUploadedFile} asks the BFF to verify and stamp them.
         const documentEntity: Record<string, unknown> = {
           sprk_documentname: file.name,
           sprk_filename: file.name,
           sprk_filesize: file.size ?? null,
-          sprk_graphitemid: file.id,
-          sprk_graphdriveid: driveId,
-          sprk_filepath: file.webUrl ?? null,
-          // Upload to SPE succeeded by the time we reach here — mark the file flag.
-          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
-          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
-          sprk_hasfile: true,
         };
 
         // Add @odata.bind navigation property to link document to parent entity.
@@ -749,8 +755,26 @@ export class EntityCreationService {
         }
 
         console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
-        const result = await this._webApi.createRecord('sprk_document', documentEntity);
-        createdDocumentIds.push(result.id);
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the document row is created through the BFF (G5) — the server
+        // decides its owner (the Secure Record Owners team when its parent is secure) and records the caller as its
+        // creator person; a refusal is this file's warning.
+        const documentId = await createChildRecordViaBff(
+          this._authenticatedFetch,
+          this._bffBaseUrl,
+          'sprk_document',
+          documentEntity
+        );
+
+        // The BFF stamps the pointer after verifying the file (task 166 f1). A row whose file could not be attached
+        // is removed rather than left looking like a document with no file.
+        try {
+          await this.attachUploadedFile(documentId, { id: file.id, driveId });
+        } catch (attachErr) {
+          await this._deleteUnattachedDocument(documentId);
+          throw attachErr;
+        }
+
+        createdDocumentIds.push(documentId);
         linkedCount++;
       } catch (err) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -772,6 +796,40 @@ export class EntityCreationService {
       createdDocumentIds,
       warnings,
     };
+  }
+
+  /**
+   * Ask the BFF to attach a file this caller uploaded to the `sprk_document` this caller created
+   * (`POST /api/v1/documents/{id}/file`, unified-access-control-r2 task 166 f1).
+   *
+   * The ONLY way the client gives a document its file: the pointer columns are field-secured and
+   * writable by the BFF identity only. The BFF checks that the caller created the row and uploaded
+   * the file and that the file sits in the container derived for the row, then stamps the pointer,
+   * `sprk_hasfile` and `sprk_filepath` server-side.
+   *
+   * @param documentId GUID of the `sprk_document` just created
+   * @param file the upload response (`id` = drive item id, `driveId` = where the bytes landed)
+   * @throws the server's refusal (403 / 409) — the caller decides what to do with the row
+   */
+  async attachUploadedFile(documentId: string, file: { id: string; driveId?: string }): Promise<void> {
+    await this._getSdapClient().attachDocumentFile(documentId, file);
+  }
+
+  /**
+   * Best-effort removal of a document row whose file could not be attached, so the user never sees a
+   * "document" that has no file. Uses `deleteRecord` when the host WebApi offers it (Xrm.WebApi does);
+   * never throws — the attach failure is what the caller reports.
+   */
+  private async _deleteUnattachedDocument(documentId: string): Promise<void> {
+    if (typeof this._webApi.deleteRecord !== 'function') {
+      return;
+    }
+
+    try {
+      await this._webApi.deleteRecord('sprk_document', documentId);
+    } catch (err) {
+      console.warn(`[EntityCreationService] Could not remove document ${documentId} whose file was not attached:`, err);
+    }
   }
 
   /**

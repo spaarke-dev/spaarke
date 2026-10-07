@@ -64,7 +64,7 @@ import {
   SearchRegular,
   ArrowUndo16Regular,
 } from '@fluentui/react-icons';
-import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
+import { FormModal, getXrmForPicker, cleanGuid } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
@@ -337,7 +337,7 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
         });
         if (!results || results.length === 0) return; // user cancelled
         const picked = results[0];
-        const id = picked.id.replace(/[{}]/g, '').toLowerCase();
+        const id = cleanGuid(picked.id);
         patchForm(key, { assignedTo: id });
         setAssignedNames(prev => ({ ...prev, [key]: picked.name }));
       } catch (err) {

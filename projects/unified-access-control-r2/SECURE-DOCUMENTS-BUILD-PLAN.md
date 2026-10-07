@@ -10,16 +10,34 @@
 
 **The BFF is the single access-decision point for every document and file byte, for every principal kind.**
 
-No user — workforce or contact — is ever granted a SharePoint Embedded container permission. `SpeContainerMembershipService.GrantMembershipAsync` has zero callers and **stays that way**. The BFF authorizes, then streams app-only.
+No user — workforce or contact — is ever granted a SharePoint Embedded container permission *(amended 2026-10-06 for Office edit only — see the box below)*. `SpeContainerMembershipService.GrantMembershipAsync` has zero callers and **stays that way** (the round-70 grants use the marked-grant primitives beside it). The BFF authorizes, then streams app-only.
 
 This was chosen over "container ACLs for workforce, broker for contacts" because that alternative answers one question with two mechanisms, and divergence between mechanisms is the bug class that produced every finding in this project.
+
+> **Amended 2026-10-06 — owner rounds 69 + 70 (built by task 171).** Every NON-edit byte path (upload, preview,
+> content, versions, Compose, AI, the Office add-in saves) is app-only after the BFF's Dataverse decision, on EVERY
+> container. "No user is ever granted a container permission" now has exactly two owner-approved exceptions, both for
+> **Office edit**, which runs as the user inside Office and therefore needs the user's own role:
+>
+> | Container | Who holds a role | Kept by |
+> |---|---|---|
+> | Environment / business-unit | **Standing writer**: every enabled, internal (`sprk_isexternal` not true) person user of the unit(s) the container serves | `SpeContainerMembershipSyncJob` (every 5 min): adds new / enabled / moved-in users, removes disabled / moved-out / flagged-external ones — only roles it created |
+> | Per-record **secure** | **Nobody standing.** A user with **Write** on the secure record gets a **just-in-time writer** role on an Office edit-open (`/office`, `/open-links`) | `OfficeEditAccessService` grants; `SpeContainerMembershipSyncJob` removes it once Dataverse answers the holder no longer has Write (or is disabled, or the record is Restricted and the holder is flagged external) |
+>
+> Grants are told apart from owner and hand-granted roles by a per-grant container custom property
+> (`SprkStd…` / `SprkJit…` + the systemuser id → the permission id); a user who already holds a role is never granted
+> and never removed. Contacts never receive a role. **Accepted consequence (round 70):** for NON-secure documents,
+> Dataverse privileges finer than "internal user" are not enforced on a direct SharePoint/Office path — content that
+> needs narrower access is made Secure, which gives it its own container. A removed role stops new opens and saves
+> within minutes (Office for the web re-checks every ≤5 min, Excel ≤15); a copy already open in desktop Office stays
+> readable until closed. Full reasoning: `notes/task-171-broker-only-document-bytes.md`.
 
 ### What each component is FOR, after this decision
 
 | Component | Role | NOT its role |
 |---|---|---|
 | **Dataverse BU + memberless owner team + `Secure Project Owner` role** | Isolates the secure *record* from standing role privilege | Not document isolation |
-| **Per-project SPE container** | **Blast-radius containment.** If a route is missed or the BFF is compromised, secure bytes are not sitting in a container everyone else's content shares | **NOT the live ACL.** No user ACLs are granted on it |
+| **Per-project SPE container** | **Blast-radius containment.** If a route is missed or the BFF is compromised, secure bytes are not sitting in a container everyone else's content shares | **NOT the live ACL.** No standing user ACLs; only just-in-time Office-edit writers (round 70) |
 | **BFF authorization** | **The** access decision, for both principal kinds, on every read path | — |
 | **Explicit share on the parent** | The only way a human gains access to a secure record | Never a per-document share |
 

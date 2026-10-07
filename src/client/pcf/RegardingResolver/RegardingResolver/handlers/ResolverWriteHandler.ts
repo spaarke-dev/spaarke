@@ -67,11 +67,16 @@ import {
   type ICoreAncestorStamp,
   type INavPropEntry,
   type IPolymorphicWebApi,
+  cleanGuid,
 } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import {
   TODO_REGARDING_CATALOG,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
+import {
+  isBffChildRefileTable,
+  isOwnershipChildTable,
+} from '@spaarke/ui-components/dist/utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -95,6 +100,100 @@ export interface IResolverWriteContext {
   hostEntity: string;
   /** Host record GUID. Empty / undefined when the form is creating a new record. */
   hostRecordId?: string;
+  /**
+   * v1.6.0 (UAC-r2 task 147 r1, owner round 28 item 1): re-files a SAVED child host through the BFF — the caller's own
+   * update, with the owner re-derived (the Secure Record Owners team under a secure record) and F3 on a move out of one.
+   * Used for every host table the BFF re-files (`isBffChildRefileTable`); without it such a host's write is REFUSED
+   * (never sent through `webApi.updateRecord`, which would leave the owner wrong). Other hosts keep `webApi.updateRecord`.
+   */
+  refileThroughBff?: (hostEntity: string, hostRecordId: string, payload: Record<string, unknown>) => Promise<void>;
+  /**
+   * v1.6.0 (task 147 r1, owner round 28 item 2): whether a project / matter / work assignment is SECURE — `true`, `false`,
+   * or `null` when it cannot be read. On a NEW (unsaved) host the selection rides the form's own save, which runs as the
+   * user, so a parent that is (or might be) secure is refused there: such a record is created from the secure record's
+   * New command, or saved first and then filed (a re-file through the BFF).
+   */
+  isSecureRoot?: (rootEntity: string, rootId: string) => Promise<boolean | null>;
+}
+
+/** The secure-flagged root tables (they carry `sprk_issecure`). */
+const SECURE_ROOT_TABLES = new Set(['sprk_project', 'sprk_matter', 'sprk_workassignment']);
+
+/**
+ * The core-ancestor stamps that are a root but can never be secure (the service request carries no `sprk_issecure`;
+ * owner S6 — its ownership is its own), so a target under one of them is decided without a flag read.
+ */
+const NEVER_SECURE_ROOTS = new Set(['sprk_servicerequest']);
+
+/**
+ * Party tables: a contact, an organization or an account is never an ownership parent (identity tables with no owning
+ * business unit — `RecordOwnershipResolver.OwnershipParentEntities` excludes them), so a record filed only under one is
+ * never under a secure record.
+ */
+const PARTY_TABLES = new Set(['contact', 'sprk_organization', 'account']);
+
+/**
+ * v1.6.0 (task 147 r1; r1c): the write of a SAVED host — through the BFF for every child table it re-files, else
+ * `webApi.updateRecord`. Fail closed: a BFF re-file table with no `refileThroughBff`, and an ownership CHILD table with no
+ * BFF re-file route at all (its owner would not follow the move), are REFUSED — never sent through `webApi.updateRecord`.
+ * Live hosts (spaarkedev1, 2026-10-04, read-only): the to-do, event and report card main forms — all three routed.
+ */
+async function writeSavedHost(ctx: IResolverWriteContext, payload: Record<string, unknown>): Promise<void> {
+  const hostId = (ctx.hostRecordId as string).replace(/[{}]/g, '');
+  if (isBffChildRefileTable(ctx.hostEntity)) {
+    if (!ctx.refileThroughBff) {
+      throw new Error(
+        `The ${ctx.hostEntity} was not re-filed: this control is not connected to the Spaarke service, which must save it.`
+      );
+    }
+    await ctx.refileThroughBff(ctx.hostEntity, hostId, payload);
+    return;
+  }
+  if (isOwnershipChildTable(ctx.hostEntity)) {
+    throw new Error(
+      `The ${ctx.hostEntity} was not re-filed: filing it under another record changes who owns it, and this form has no ` +
+        'Spaarke service route for that. Nothing was saved.'
+    );
+  }
+  await ctx.webApi.updateRecord(ctx.hostEntity, hostId, payload);
+}
+
+/**
+ * v1.6.0 (task 147 r1; tightened in r1c): on a NEW host, the reason the selection must not ride the form's own
+ * (as-the-user) save, or `null` when it may. The form's save creates the record OWNED BY THE USER, so it is allowed only
+ * when the selection is decided NOT to be under any secure record:
+ * - a party target (contact, organization, account) — never an ownership parent;
+ * - a target whose derived core ancestors are all read as not secure (or are a service request).
+ * Everything else is refused (fail closed, ADR-003): a secure root, a flag that cannot be read, and a target whose secure
+ * ancestry this control cannot see — no core-ancestor stamp to read (a document, an invoice, a budget, a report card, an
+ * event filed only under a document, …). The way on is to save first and then file: a SAVED host's re-file goes through
+ * the BFF, which decides the owner server-side.
+ */
+async function refusalForNewHost(
+  ctx: IResolverWriteContext,
+  targetEntityType: string,
+  stamps: ReadonlyArray<{ entityType: string; recordId: string }>
+): Promise<string | null> {
+  if (PARTY_TABLES.has((targetEntityType ?? '').toLowerCase())) return null;
+
+  const roots = stamps.filter(s => SECURE_ROOT_TABLES.has(s.entityType));
+  const neverSecure = stamps.filter(s => NEVER_SECURE_ROOTS.has(s.entityType));
+  if (roots.length === 0 && neverSecure.length === 0) {
+    return 'Whether this record would be filed under a secure record cannot be checked before it is saved. Save it first, then file it here.';
+  }
+  if (roots.length === 0) return null;
+  if (!ctx.isSecureRoot) {
+    return 'This record cannot be filed here before it is saved: whether its parent is secure cannot be checked. Save it first, then file it.';
+  }
+  for (const root of roots) {
+    const secure = await ctx.isSecureRoot(root.entityType, root.recordId);
+    if (secure !== false) {
+      return secure === true
+        ? 'This record would be filed under a secure record. Create it from that record (its New command), or save it first and then file it here.'
+        : "Whether this record's parent is secure could not be checked, so it is not filed before it is saved. Save it first, then file it.";
+    }
+  }
+  return null;
 }
 
 export interface IResolverWriteResult {
@@ -218,11 +317,11 @@ export async function discoverHostNavProps(
     }
 
     const json = (await resp.json()) as {
-      value?: Array<{
+      value?: {
         ReferencingAttribute: string;
         ReferencingEntityNavigationPropertyName: string;
         ReferencedEntity: string;
-      }>;
+      }[];
     };
 
     const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
@@ -273,7 +372,7 @@ export function _resetNavPropCacheForTests(): void {
  */
 export function resolveAllowedCatalog(
   regardingTargetsRaw: string | null | undefined
-): ReadonlyArray<ITodoRegardingTargetCatalogEntry> {
+): readonly ITodoRegardingTargetCatalogEntry[] {
   if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
     return TODO_REGARDING_CATALOG;
   }
@@ -350,7 +449,7 @@ function nulledLookupColumns(payload: Record<string, unknown>, navProps: INavPro
 export async function applyRegardingSelection(
   ctx: IResolverWriteContext,
   selection: IRegardingSelection,
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry> = TODO_REGARDING_CATALOG,
+  catalog: readonly ITodoRegardingTargetCatalogEntry[] = TODO_REGARDING_CATALOG,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
   const catalogEntry = catalog.find(c => c.entityType === selection.entityType);
@@ -406,10 +505,19 @@ export async function applyRegardingSelection(
   const clearLookups = nulledLookupColumns(payload, navProps);
 
   // Persist immediately if we have a host record; otherwise return for pre-save staging.
-  const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
+  if (!hasHostGuid) {
+    // v1.6.0 (task 147 r1): a NEW host's selection rides the form's own save, as the user. Never under a secure record.
+    // Every DERIVED ancestor counts here, including one the host has no stamp column for (`unstampable`): the record
+    // would still sit under it through the target.
+    const refusal = await refusalForNewHost(ctx, selection.entityType, built.ancestor.stamps);
+    if (refusal) {
+      return { success: false, catalogEntry, ancestorStatus: built.ancestor.status, error: refusal };
+    }
+  }
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await writeSavedHost(ctx, payload);
     } catch (err) {
       return {
         success: false,
@@ -526,10 +634,12 @@ export async function clearRegarding(
 
   const clearLookups = nulledLookupColumns(payload, navProps);
 
-  const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      // v1.6.0 (task 147 r1): a clear is a re-file OUT of the parent — through the BFF (F3 on a move out of a secure
+      // record, the owner re-derived).
+      await writeSavedHost(ctx, payload);
     } catch (err) {
       return {
         success: false,

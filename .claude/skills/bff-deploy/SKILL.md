@@ -47,7 +47,7 @@ Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 After every fresh-env deploy OR cutover involving MI/auth changes, verify per [`auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) §9 smoke tests:
 - §9a `/healthz` returns 200
 - §9b OBO endpoint round-trip (proves JWT validation + OBO exchange)
-- §9c `/healthz/dataverse/doc/{id}` (proves MI → Dataverse)
+- §9c `/healthz/dataverse` (proves MI → Dataverse; the per-document probe was retired by unified-access-control-r2 task 166)
 - §9d EXO mailbox access — no 403 in `InboundPollingBackupService` logs (if Email/Communication enabled)
 - §9e Browser MSAL regression on any Spaarke PCF/Code Page (no popup, tenant-specific authority)
 
@@ -154,14 +154,16 @@ Expected output:
 After deployment, verify that the specific endpoints you changed actually respond:
 
 ```bash
-# Unauthenticated test — expect 401 (route found, needs auth)
-curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/documents/test/preview-url
-# Expected: 401
-
-# If you get 404, the route is NOT registered — package is incomplete
+# Signed-in test — expect anything but 404 (the BFF API app id: docs/architecture/auth-azure-resources.md)
+TOKEN=$(az account get-access-token --resource api://<BFF-API-APP-ID> --query accessToken -o tsv)
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN"   https://spaarke-bff-dev.azurewebsites.net/api/documents/00000000-0000-0000-0000-000000000000/preview-url
+# Expected: 403 (routed; the per-document filter refuses the unknown id). 404 = the route did NOT register.
 ```
 
-**Key verification rule**: Any endpoint behind `.RequireAuthorization()` should return **401** without a token. If it returns **404**, the route didn't register (incomplete deployment).
+**Key verification rule**: prove registration with a **signed-in** request — anything but 404 means the route is
+registered. An **anonymous** request answers **401 whether or not the route exists**: since UAC-r2 task 167 the BFF's
+authorization FallbackPolicy also challenges requests that match no route. An anonymous 401 proves only that
+authentication is enforced.
 
 ---
 
@@ -177,7 +179,7 @@ When the user wants to deploy manually for fastest iteration:
 3. **Test endpoint**:
    ```bash
    curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/{your-endpoint}
-   # Expect 401 (auth required) — NOT 404
+   # With -H "Authorization: Bearer $TOKEN": expect anything but 404 (an anonymous 401 does not prove the route exists)
    ```
 
 ### When the User Says "I'll deploy manually" or "just build it"
@@ -245,7 +247,8 @@ If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop →
 | `az webapp deploy --type zip` returns 200 + "Deployment successful" but DLLs not actually replaced | Running .NET host holds file locks on `Sprk.Bff.Api.dll`; Windows silently refuses overwrites; OneDeploy reports success regardless | **2026-05-14 G-2 incident.** Always verify with SHA-256 hash via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically + auto-recovers via stop → Kudu zipdeploy → start. NEVER trust deploy "success" alone. |
 | Health check fails at 60s but the deploy actually succeeded | Default window sized for Windows warm-restart; Linux App Service cold-start is 90-120s | Default is now 120s (24 retries × 5s). Hash-verify success + healthz timeout = deploy correct, still booting. Wait one more cycle before declaring failure. |
 | Package size < 30 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 40-50 MB (net10). |
-| Health check passes but specific endpoints return 404 | Incomplete package: route handler couldn't compile at startup due to missing DLL | Test specific endpoints behind `.RequireAuthorization()` — should return 401 (route found, auth needed), NEVER 404. If 404, deploy is incomplete. |
+| Health check passes but specific endpoints return 404 to a SIGNED-IN request | Incomplete package: route handler couldn't compile at startup due to missing DLL | Call the endpoint WITH a bearer token — anything but 404 means it registered. Do not use an anonymous 401 as proof: the authorization FallbackPolicy (UAC-r2 task 167) answers 401 for a missing route too. |
+| `/healthz` or `/ping` returns 429 | More than 120 requests a minute from one client IP: the probes' "health-probe" rate limit (UAC-r2 task 167, owner round 14). Deploy and rotation pollers make at most 12/min | Wait for the window to slide (Retry-After header). A 429 is not a failed deploy. |
 | MSB3030 error during publish | Nested `publish/publish/` directory from leftover prior publish | Delete `src/server/api/Sprk.Bff.Api/publish/` before re-publishing. The script does this automatically (Step 1). |
 | `(ResourceNotFound) The Resource 'Microsoft.Web/sites/X' under resource group 'Y' was not found` | App Service was renamed/migrated since the skill or script defaults were last updated | **2026-05-27 incident**: skill + script defaults were `spe-api-dev-67e2xz` / `spe-infrastructure-westus2`; actual dev had moved to `spaarke-bff-dev` / `rg-spaarke-dev`. **Pre-flight FIX**: BEFORE running the deploy script, verify the target exists: `az webapp show -g $ResourceGroupName -n $AppServiceName --query state -o tsv`. If the resource doesn't exist, list active web apps (`az webapp list --query "[].{name:name, rg:resourceGroup}" -o table`) to find the current target. Updated skill defaults on 2026-05-27 to reflect post-migration names. |
 | `Get-FileHash : The term 'Get-FileHash' is not recognized` during hash-verify step | Script invoked with `powershell.exe` (Windows PowerShell 5.x missing module) instead of `pwsh` (PowerShell 7) | **2026-05-27 incident**: Always invoke deploy script with `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`. Windows PowerShell 5.x in certain harnesses doesn't auto-load `Microsoft.PowerShell.Utility`. PowerShell 7 (`pwsh`) loads it by default. |

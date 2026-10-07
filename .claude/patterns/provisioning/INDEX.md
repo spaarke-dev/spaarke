@@ -12,6 +12,7 @@
 |---------|--------------|--------|
 | [manifest-driven-secret-catalog.md](manifest-driven-secret-catalog.md) | Adding a new provisioning handler that seeds KV secrets | Skeleton |
 | [handler-registration-completeness.md](handler-registration-completeness.md) | Adding a new `IProvisioningHandler` implementation | Skeleton |
+| [run-context-contract.md](run-context-contract.md) | A handler needs a value (intake, run identity, or another handler's output); `RunContextContractTests` fails | Current (T245a) |
 | [progressive-fail-fast-recovery.md](progressive-fail-fast-recovery.md) | Diagnosing BFF SIGABRT chain / IOptions ValidateOnStart cascades | Skeleton |
 | [operator-rbac-bootstrap.md](operator-rbac-bootstrap.md) | Fresh sub + fresh KV data-plane bootstrap (F15/F18 pattern) | Skeleton |
 | [keyvault-reference-identity-invariant.md](keyvault-reference-identity-invariant.md) | App Service KV ref binding correctness (T1 + F16/F16.5) | Skeleton |
@@ -30,8 +31,8 @@ src/
 infrastructure/
 ├── bicep/
 │   ├── modules/                              # single-resource Bicep modules
-│   ├── stacks/                               # tier-level compositions (model1-shared, model2-full, platform-controlplane)
-│   ├── customer.bicep                        # per-customer stamp (Model 2)
+│   ├── stacks/                               # standalone stacks (ai-foundry only; model1-shared retired by T225a, model2-full by T249 — the customer stamp is customer.bicep)
+│   ├── customer.bicep                        # per-customer stamp — the template H2a deploys (Model 2; Model 1 after T225b + T228)
 scripts/
 ├── canonical-secret-catalog/manifest.yaml    # single source of truth for secrets (task 084 / FR-36)
 ├── provisioning-prereqs/prereqs.yaml         # single source of truth for manual prereqs (task 202)

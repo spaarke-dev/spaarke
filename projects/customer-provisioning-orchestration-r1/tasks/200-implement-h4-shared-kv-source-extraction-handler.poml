@@ -4,7 +4,7 @@
     <title>Implement H4SharedKvSecretsPopulationHandler: seed shared KV from source Azure services via SDK-native extraction (F19 automation)</title>
     <phase>H-Prime — Absorb F19/F20 first-live findings into handler catalog</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','azure-deployment'; introduces a NEW handler primitive (source-extraction pattern for shared-tier KV); modifies task 084's shipped canonical manifest schema + generator (additive but multi-file); .cs implementation on all 4 L2 projects (`.Core` handler + seams, `.Worker` DI, `.Tests` unit tests, `.Core` DI catalog); auth-sensitive (writes 6+ secrets that gate BFF startup); any bug produces silent BFF fail-fast at boot (F20 pattern).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -67,13 +67,35 @@ public class InternalUserShareTests
     private readonly FakeRecordShareTable _shares = new();
     private readonly FakeSystemUsers _users = new();
 
+    /// <summary>
+    /// Task 149: the secure-child synchronizer the share routes now fan out through, over a world with the Secure Record BU
+    /// and team but NO secure roots — the matter here is ordinary, so the fan-out reads its root, finds it ordinary and
+    /// writes nothing. The secure fan-out itself is pinned in SecureChildShareMirrorTests.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld _children =
+        Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.Standard();
+
     /// <summary>The record's flags, read by /unshare-user's S5 rule (task 139). Unseeded: Standard, not secure.</summary>
     private readonly GrantPolicyTestDoubles.FlagStubParticipationService _flags = new(defaultFlags: RootRecordFlags.None);
     private readonly Mock<ITenantCache> _cache = new();
     private readonly List<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
 
+    // Task 143 — the No Access check /share-user asks before any share write. The REAL guard over the real deny-list
+    // reader (wire seam only) and a row store for the user↔contact link; the record's flags come from _flags.
+    private readonly GrantPolicyTestDoubles.SeamNoAccessListReader _denyList = new();
+    private readonly IdentityBinding.InMemoryContactIdentityStore _identity = new();
+    private readonly SecureShareNoAccessGuard _guard;
+
+    /// <summary>Task 142: an inert materializer — its ledger is empty, so the share routes' operator markers are no-ops here
+    /// (the markers themselves are pinned by <c>AssignedAccessMarkerTests</c>).</summary>
+    private static Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer AssignedAccess =>
+        AssignedAccessTestDoubles.InertMaterializer();
+
     public InternalUserShareTests()
     {
+        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
+
         _users.SeedPerson(UserId, "Ada Lovelace");
         _users.SeedPerson(OtherUserId, "Brook Okafor");
 
@@ -87,6 +109,118 @@ public class InternalUserShareTests
     }
 
     private static DataversePrincipalRef User(Guid id) => DataversePrincipalRef.User(id);
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 143 — the No Access list binds internal users on SECURE records (owner Q4)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid UserOid = Guid.Parse("14314314-0000-0000-0000-0000000000b2");
+    private static readonly Guid LinkedContactId = Guid.Parse("14314314-0000-0000-0000-0000000000c1");
+    private static readonly Guid FirmId = Guid.Parse("14314314-0000-0000-0000-0000000000d1");
+    private static readonly Guid ReferencedOrgId = Guid.Parse("14314314-0000-0000-0000-0000000000d2");
+
+    /// <summary>The matter is SECURE, and the user's task-141 link is readable (linked to a contact).</summary>
+    private void SecureMatterWithLinkedUser()
+    {
+        _flags.Flags[MatterId] = new RootRecordFlags(IsSecure: true, IsRestricted: false);
+        _identity.AddContact(LinkedContactId);
+        _identity.AddSystemUser(UserId, UserOid, "ada@customer.example", primaryContactId: LinkedContactId);
+    }
+
+    /// <summary>Criterion 2: a systemuser-subject entry refuses the share — 403, the new code, a message, no write.</summary>
+    [Fact]
+    public async Task Share_AUserOnTheSecureRecordsNoAccessList_Is403SubjectNoAccess_AndWritesNothing()
+    {
+        SecureMatterWithLinkedUser();
+        _denyList.DenySystemUserOnRecord(UserId, MatterId);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((403, InternalShareEndpoints.SubjectNoAccessReasonCode));
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail
+            .Should().Be("This person is on the No Access list for this record, so it was not shared with them.");
+        _shares.Writes.Should().BeEmpty("the refusal comes before any Dataverse share write");
+        _shares.StrictReads.Should().Be(0, "and before the share table is even read");
+    }
+
+    /// <summary>Criterion 3: the same refusal through the linked contact, its organization, and an organization object.</summary>
+    [Theory]
+    [InlineData("linked contact")]
+    [InlineData("organization of the linked contact")]
+    [InlineData("organization the record references")]
+    public async Task Share_AUserWalledThroughAnyOtherSubjectOrObjectForm_IsRefusedToo(string form)
+    {
+        SecureMatterWithLinkedUser();
+        switch (form)
+        {
+            case "linked contact":
+                _denyList.DenyContactOnRecord(LinkedContactId, MatterId);
+                break;
+            case "organization of the linked contact":
+                _flags.ContactOrganizations[LinkedContactId] = new[] { FirmId };
+                _denyList.DenyOrganizationOnRecord(FirmId, MatterId);
+                break;
+            default:
+                _flags.RecordOrganizations[MatterId] = new[] { ReferencedOrgId };
+                _denyList.DenySystemUserOnOrganization(UserId, ReferencedOrgId);
+                break;
+        }
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((403, InternalShareEndpoints.SubjectNoAccessReasonCode), "walled through the {0}", form);
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Criterion 4: on a NON-secure record the same entry does not block the share (Q4 scope).</summary>
+    [Fact]
+    public async Task Share_OnANonSecureRecord_TheSameEntryDoesNotBlock()
+    {
+        _identity.AddSystemUser(UserId, UserOid, "ada@customer.example");
+        _denyList.DenySystemUserOnRecord(UserId, MatterId); // _flags answers Standard, not secure, by default
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        _denyList.Queries.Should().Be(0, "the internal wall is not consulted on a non-secure record");
+    }
+
+    /// <summary>Criterion 5: an unreadable deny list, flag set, link or membership refuses with a message and writes nothing.</summary>
+    [Theory]
+    [InlineData("deny list")]
+    [InlineData("flags")]
+    [InlineData("link")]
+    [InlineData("memberships")]
+    public async Task Share_WhenAnyInputOfTheNoAccessCheckCannotBeRead_RefusesWithAMessage_AndWritesNothing(string fault)
+    {
+        SecureMatterWithLinkedUser();
+        switch (fault)
+        {
+            case "deny list": _denyList.Faults = true; break;
+            case "flags": _flags.Flags[MatterId] = RootRecordFlags.Unreadable; break;
+            case "link": _identity.SystemUsers.Remove(UserId); break;
+            default: _flags.MembershipsUnreadable = true; break;
+        }
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        ProblemOf(result).Should().Be((500, InternalShareEndpoints.NoAccessUnverifiableReasonCode), "the {0} could not be read", fault);
+        result.Should().BeOfType<ProblemHttpResult>().Which.ProblemDetails.Detail.Should().NotBeNullOrWhiteSpace();
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>The control for criteria 2–5: a secure record, a readable list that names someone else — shared.</summary>
+    [Fact]
+    public async Task Share_OnASecureRecordWhoseListNamesSomeoneElse_IsShared()
+    {
+        SecureMatterWithLinkedUser();
+        _denyList.DenySystemUserOnRecord(OtherUserId, MatterId);
+
+        var result = await Share(UserId, ExternalAccessLevel.Collaborate);
+
+        OkBody<ShareRecordWithUserResponse>(result).Outcome.Should().Be(InternalShareEndpoints.OutcomeCreated);
+        _denyList.Queries.Should().BeGreaterThan(0, "the list WAS consulted, and named nobody here");
+    }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Acceptance criterion 1 — share, list, unshare
@@ -373,7 +507,8 @@ public class InternalUserShareTests
     {
         var result = await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", MatterId, UserId, ExternalAccessLevel.ViewOnly),
-            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(),
+            _shares, _users.Client, _cache.Object, new ThrowingCallerRightsProbe(), _children.Synchronizer(_shares), _guard,
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccessTestDoubles.InertMaterializer(),
             AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
         ProblemOf(result).Should().Be((500, InternalShareEndpoints.ReadFailedReasonCode));
@@ -829,6 +964,21 @@ public class InternalUserShareTests
     }
 
     /// <summary>
+    /// Task 150, round 17 item 3: a row whose <c>sprk_issecure</c> came back EMPTY (the column is field-secured; empty
+    /// means the app identity's Read was lost) is mapped by the ONE flag reader
+    /// (<see cref="ExternalParticipationService.FlagsFrom"/>) — and must reach this rule as secure, never "not secure".
+    /// </summary>
+    [Fact]
+    public async Task Unshare_WhenTheSecureFlagReadsEmpty_AppliesTheLastPersonRule()
+    {
+        _flags.Flags[MatterId] = ExternalParticipationService.FlagsFrom(isSecure: null, accessPermission: null, stateCode: 0);
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.LastReaderOnSecureRecordReasonCode));
+        _shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>
     /// The twin of the case above for a flag read that THROWS (not one that answers Unreadable): the catch around the
     /// read must also treat the record as secure. Without this, a regression of that catch to "not secure" would let
     /// the last person go from a secure record whenever the flag read faults (S5 / ADR-003).
@@ -1028,14 +1178,16 @@ public class InternalUserShareTests
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, MatterId, systemUserId, level),
             _shares, _users.Client, _cache.Object, new StubCallerRightsProbe(callerRights ?? FullWorkingRights),
-            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+            _children.Synchronizer(_shares), _guard, Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AssignedAccess, AuthenticatedContext(),
+            NullLogger<Program>.Instance,
+            CancellationToken.None);
 
     /// <summary>
     /// Reports fixed rights for the caller, which is what the intersection rule reads. A probe that answered
     /// <see cref="AccessRights.None"/> would make every share refuse, so the default has to be a caller who can
     /// actually grant — and a test that wants the narrowing path states the narrower rights explicitly.
     /// </summary>
-    private sealed class StubCallerRightsProbe : CallerRecordAccessProbe
+    internal sealed class StubCallerRightsProbe : CallerRecordAccessProbe
     {
         private readonly AccessRights _rights;
 
@@ -1064,8 +1216,9 @@ public class InternalUserShareTests
     private Task<IResult> Unshare(Guid? systemUserId, string? recordType = "matter") =>
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
-            _shares, _users.Client, _flags, _cache.Object, AuthenticatedContext(), NullLogger<Program>.Instance,
-            CancellationToken.None);
+            _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(),
+            NullLogger<Program>.Instance, CancellationToken.None);
 
     private Task<IResult> List(string? recordType = "matter") =>
         InternalShareEndpoints.ListAsync(
@@ -1114,7 +1267,7 @@ public class InternalUserShareTests
     /// is: it understands only <c>systemuserid eq {id}</c> clauses joined by <c>or</c>, rejects a <c>$select</c> naming a
     /// column the table does not have, and returns ONLY the selected columns.
     /// </summary>
-    private sealed class FakeSystemUsers
+    internal sealed class FakeSystemUsers
     {
         private static readonly HashSet<string> Columns = new(StringComparer.Ordinal)
         {

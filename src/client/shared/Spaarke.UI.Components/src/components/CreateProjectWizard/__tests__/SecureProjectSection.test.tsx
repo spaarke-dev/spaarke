@@ -75,7 +75,7 @@ describe('SecureProjectSection — copy matches shipped behaviour (FR-31)', () =
 
   describe('what it says instead', () => {
     it('states the share-only mechanism', () => {
-      // Traceable to ProvisionProjectEndpoint.ShareToCreatorAndPrincipalsAsync: the owner team is
+      // Traceable to ProvisionProjectEndpoint.MoveWithCreatorShareAsync (task 133): the owner team is
       // memberless, so the creator's explicit share is the only way in, and everyone else needs one.
       renderWithProviders(<SecureProjectSection isSecure onSecureChange={noop} />);
 

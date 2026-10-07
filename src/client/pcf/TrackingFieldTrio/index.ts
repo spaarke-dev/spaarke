@@ -120,6 +120,20 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.35 (task 140, unified-access-control-r2 — contact-side Grant Access, owner C4 / Q2):
+ * `fetchExistingGrants` also reads `_sprk_grantedbycontact_value` (the new contact-typed issuer lookup), and the
+ * bundled `AccessGrantModal` shows a contact-issued grant as "Granted by {contact} (external contact)". Revoking it
+ * from Current Access is unchanged (`/revoke`, Write on the record).
+ *
+ * v1.0.34 (task 142, unified-access-control-r2 — Assigned-To auto-grants, owner Q5 / A3 / A2):
+ * no change in this file's logic; the bundled `AccessGrantModal` now reads the record's Assigned-To ledger from the
+ * BFF (`GET /api/v1/external-access/assigned-access`) and shows SERVER-derived suggestions on a secure record
+ * ("Suggested from Assigned Paralegal 1", Grant / Dismiss — owner A3 = prompt), names the field behind an automatic
+ * grant in Current Access, and — owner A2 reversed (standing and organization access stay) — warns before and after
+ * removing an automatic grant whose contact still reaches the record through a standing or organization term.
+ * `CANDIDATE_ROLE_FIELDS` stays for the email-members feature; a candidate the server already suggests is offered
+ * once, in Suggested Access.
+ *
  * v1.0.33 (task 139, unified-access-control-r2 — the grant model, owner C4 + Q1):
  * no change in this file's logic; the bundled `AccessGrantModal` now reports a
  * `/grant` or `/invite-and-grant` that the server capped at the caller's own
@@ -190,6 +204,8 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/compo
 // instead of blanking the whole PCF (defense-in-depth alongside the
 // react/jsx-runtime dedupe in ../webpack.config.js).
 import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { initializeAuth } from './authInit';
 // Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
 // SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
@@ -283,12 +299,7 @@ const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
  * ASKED about with the id the server ANSWERED about. That comparison fails closed, so a purely cosmetic
  * disagreement would hide the Manage Access affordance rather than merely log something. Normalizing is
  * the cheap end of that trade. */
-function normalizeRecordId(id: string): string {
-  return id
-    .trim()
-    .replace(/^\{|\}$/g, '')
-    .toLowerCase();
-}
+const normalizeRecordId = cleanGuid;
 
 /** Resolves the Dataverse org URL for the MSAL redirect URI, mirroring the
  * `Xrm.Utility.getGlobalContext().getClientUrl()` pattern used by every other
@@ -590,18 +601,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return this.navService;
   }
 
-  /** Cross-frame Xrm accessor (PCF runs in an iframe). */
-  private getXrm(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    try {
-      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-    } catch {
-      return w.Xrm;
-    }
-  }
-
   /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
    * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
    * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
@@ -614,7 +613,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
    * 80%) so it covers the Manage Access footprint. */
   private openContactRecord = (contactId: string): void => {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation');
     const wasGrantOpen = this.isGrantModalOpen;
     const restore = (): void => {
       if (wasGrantOpen && !this.isGrantModalOpen) {
@@ -649,7 +649,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * primary attribute — entity-agnostic, no metadata call. Undefined outside an
    * MDA host (harness) or when unset (chip then shows the humanized entity type). */
   private getRecordDisplayName(): string | undefined {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8). `any` view: typed XrmContext
+    // does not declare Page.data.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = getXrm('page') as any;
     try {
       const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
       return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -911,7 +914,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
       `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+      // v1.0.35 (task 140): + _sprk_grantedbycontact_value — the CONTACT who issued the grant from the external SPA.
+      // ⚠️ Deploy order: the column (scripts/Deploy-ExternalRecordAccessContactGrantor.ps1) must exist first, or this
+      // read 400s and Current Access shows nothing.
+      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,_sprk_grantedbycontact_value,sprk_accesslevel,sprk_granteddate`;
 
     let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
     try {
@@ -940,6 +946,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
         grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
+        grantedByContactName: (row[`_sprk_grantedbycontact_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
@@ -1186,7 +1193,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.33 • Built 2026-10-02',
+      versionText: 'v1.0.35 • Built 2026-10-04',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

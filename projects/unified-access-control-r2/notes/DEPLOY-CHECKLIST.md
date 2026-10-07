@@ -23,8 +23,9 @@
 | 4 | **PCF `RegardingResolver`** v1.4.9 → **v1.5.0** | bundle rebuilt ✅ | ready |
 | 5 | **Code page `LegalWorkspace`** | real code changes, needs rebuild | ready to build |
 
-Plus **two operator actions** that are NOT deploys and must happen at specific points (§5), and **two
-config switches that must stay OFF** (§4).
+Plus **two operator actions** that are NOT deploys and must happen at specific points (§5), and the
+reconciliation job's **decided posture** (§4: schedule ON, writes OFF until the owner reviews one report — owner
+round 7 item 1, 2026-10-02).
 
 ---
 
@@ -203,22 +204,106 @@ privilege check (`hasEntityPrivilege`) to a **fail-CLOSED** call to the server's
 
 ---
 
-## 4. Config — two switches that must stay OFF
+## 4. Config — the reconciliation job: SCHEDULED, REPORT-ONLY (owner round 7 item 1, task 137)
 
-Both belong to the task 117 reconciliation job. **Neither is a deploy step; both are owner decisions.**
+Both switches belong to the task 117 reconciliation job (`ExternalAccessReconciliationJob`). The owner decided the
+posture on 2026-10-02 (§4.1). **Neither is a deploy step you choose: the code ships the decided posture.**
 
 | Switch | Ships as | Meaning |
 |---|---|---|
-| Scheduled-job registration | `enabled: false` | the job does not run |
-| `ExternalAccess:Reconciliation:WritesEnabled` | **absent → `false`** | report-only even if triggered |
+| Scheduled-job registration | **enabled** (`AddScheduledJob<ExternalAccessReconciliationJob>(DefaultCronSchedule)`, daily `0 5 * * *`) | every tick runs and reports |
+| `ExternalAccess:Reconciliation:WritesEnabled` | **`false`** (explicit in `appsettings.template.json`; absent / empty / unparseable also = `false`) | report-only: R1/R2/R3/R4 are counted and listed, nothing is written |
 
-This is belt **and** braces on purpose: even a manual admin trigger of the disabled job writes nothing,
-because writes are separately gated. The reason is in `ExternalAccessModule.cs:360-372` — rules R2 and
-R3 **remove access that exists today**, and R1 turns a row that (since task 107) confers nothing into
-one that confers access for 90 more days.
+**R4** *(owner round 71, 2026-10-06)*: an ACTIVE grant whose record is gone (`sprk_project`, `sprk_matter`,
+`sprk_workassignment` all empty — a deleted matter / work assignment leaves its grants active, RemoveLink) is
+deactivated; it confers nothing, so R4 removes no access, only a misleading "active" row. It rides the same switch.
+Post-deploy check: create a throwaway matter + a contact grant on it, delete the matter, then
+`POST /api/admin/jobs/external-access-reconciliation/trigger` → `GET …/status`: `R4-deactivate-grant-whose-record-is-gone`
+`planned: 1`, `changed: 0` (report-only), and a `before-state … rule=R4-… sprk_matter=(empty)` trace. The ledger side
+(`sprk_assignedaccess` rows of a deleted record → `Revoked` / `root-deleted`) is done by the Assigned-To job, which
+writes it without a switch (no access changes) after reading the record and getting "not found".
 
-Default cron if ever enabled: `0 5 * * *`. **Do not enable either without an owner decision and a
-before-state count.**
+Writes stay off because rules R2 and R3 **remove access that exists today**, and R1 turns a row that (since task 107)
+confers nothing into one that confers access for 90 more days (`ExternalAccessModule.cs`, the comment above the
+registration). **Do not set `WritesEnabled` to `true` until the owner has reviewed one report** (§4.1).
+
+### 4.1 Task 137 (#1060) — the reconciliation job's posture: ✅ DECIDED (owner round 7 item 1, 2026-10-02)
+
+Owner, verbatim ("follow recommended", recorded in `session27-owner-decisions-and-research.md`, round 7 item 1):
+
+> - Enable the schedule in **report-only** mode now. Enable writes only after the owner has reviewed one report.
+> - Inactive contacts and inactive roots stay READ guards only, so reactivating one restores access with no data repair.
+
+Applied by task 137 r3 (begun on `task/uac-r2-137-b1`, interrupted; finished and verified on `task/uac-r2-137-b2`),
+in one change:
+
+- `ExternalAccessModule.cs`: `enabled: false` removed — the job is registered ENABLED on its daily schedule
+  (`0 5 * * *`, unchanged). The owner's answer names no schedule, and R3/R4's "safety net at ≤ 5 min" is scoped to
+  tasks 142/143. It does not bind this job: none of R1–R3 changes when access ends. The read path already stops a
+  grant under an inactive organization and a membership past its end date (task 109), and it stops an undated grant
+  (task 107). The job only makes the row's own state match.
+- `ExternalAccess:Reconciliation:WritesEnabled`: **`false`** — now written explicitly in `appsettings.template.json`
+  (beside a comment naming this decision) so the switch the owner will flip is discoverable; absent still means `false`.
+- No writer rule for inactive contacts or inactive roots — they remain read-time guards (`AccessibleRecordSetService`).
+- Pinned by `ExternalAccessReconciliationTests.S2_TheJobShipsScheduled_AndItsShippingConfigurationIsReportOnly`
+  (registration enabled, schedule `0 5 * * *`, writes off with no key) and the existing S1 tests (every value but
+  `true` is report-only).
+
+**Owner's next action (not this task's):** after the first scheduled (or manually triggered) run on dev, review its
+report, then decide whether to set `ExternalAccess__Reconciliation__WritesEnabled = true` in the App Service
+configuration. The report comes from two sources, and only one of them lasts:
+
+- **Durable: Application Insights traces.** Each run writes one `[EXT-ACCESS-RECON] heartbeat` line with
+  `mode=report-only`, the per-rule `r1/r2/r3 Scanned / Planned / Changed / Failed` counts, `trigger=` and `runId=`.
+  It also writes one `[EXT-ACCESS-RECON] before-state` line for EVERY row a write run would change. Those lines are the
+  complete list. For example:
+  `traces | where message startswith "[EXT-ACCESS-RECON]" | where timestamp > ago(2d) | order by timestamp asc`.
+- **Process-local: the admin status endpoint.** `GET /api/admin/jobs/external-access-reconciliation/status` (as a
+  `SystemAdmin`) returns `RecentRuns[0].ResultJson`: `mode`, `writesEnabled`, the per-rule `planned` counts and up to 200
+  sampled ids per rule (`MaxSampledIdsPerRule`). The BFF's job store is `InMemoryBackgroundJobStore` (`SchedulingModule`), so this
+  history is lost on restart. It is also visible only on the instance that ran the job. **No `sprk_backgroundjobrun`
+  row is written.** Corrects the earlier notes; the Dataverse-backed store is ADR-036's target, not today's.
+
+Before-state (dev, read-only, 2026-10-02 — `notes/task-137-soft-revocation.md` §2):
+
+| Rule | Rows that would change | Note |
+|---|---|---|
+| R1 — active grant with no expiry | **0** | of 31 active grants (26 contact-only, 5 carrying an organization — one of them also names a contact) |
+| R2 — active grant under an inactive organization | **0** | |
+| R3 — active membership past its end date | **0** | 2 active memberships, both with no end date |
+| (task 137) active grant whose CONTACT is inactive | **0** | read guard, no writer rule (owner round 7 item 1) |
+| (task 137) active grant whose ROOT is inactive | **0** | read guard, no writer rule (owner round 7 item 1) |
+
+The before-state was re-taken with the job's own scan shape (grants scanned 5, memberships scanned 0;
+R1 = R2 = R3 = 0). With the schedule now enabled, the first report-only RUN happens at the next 05:00 UTC tick after the
+dev deploy. It writes no Dataverse data at all: the run record goes to the in-memory job store, and the report goes
+to the log lines above. To get it sooner, a `SystemAdmin` caller runs
+`POST /api/admin/jobs/external-access-reconciliation/trigger`, then `GET …/status`. Expect `mode: report-only`, every
+rule `planned: 0` and `changed: 0`, and a matching heartbeat trace (`notes/task-137-soft-revocation.md` §2). This run
+is still a pending live gate (needs the deploy). The manual trigger is a live call into dev, so the main session runs
+it.
+
+History: escalation 1 fired 2026-10-02 (rounds 1–6 did not answer it — round 4 item 6's "reconciliation job" is task
+141's `IdentityLinkReconciliationJob`); answered by round 7 item 1 the same day.
+
+### 4.2 Task 137 — manual live gate (dev, no CI) — ⏳ PENDING, needs live WRITES
+
+Run by the main session with existing test data only (no user relocation): the CIAM Test User contact
+`394fda9f-ab95-f111-b8dc-7ced8ddc4cc6`, which holds a direct grant on matter `2444af6d-e1f2-f011-8406-7ced8d1dc988`
+(View Only, row `0452ab4b-…`) and inherits organization grants through organization `67577f8c-4301-f111-8407-7ced8d1dc988`
+(e.g. matter `042f4462-860e-f111-8342-7c1e520aa4df`, Full Access org grant row `9aed8ab9-c29c-f111-b8de-7ced8ddc4a05`
+— chosen because the contact holds NO direct grant on that matter, unlike `b68299c6…`).
+Requires the task 137 BFF deployed to dev first.
+
+1. Deactivate matter `2444af6d…` (statecode 1, statuscode 2) → the external SPA loses it on the next request.
+2. Reactivate it → it returns, with no other change.
+3. Deactivate the contact `394fda9f…` → the next sign-in is refused (`sdap.access.deny.contact_inactive`), and an
+   already-signed-in session loses every record on its next request. Reactivate afterwards.
+4. As an existing non-admin Write-holder, revoke the organization grant `9aed8ab9…` → the CIAM session loses matter
+   `042f4462…` on the next request (no 60-second wait). Restore the grant afterwards (re-grant the organization at
+   Full Access, expiry 2026-12-10). If no existing non-admin Write-holder exists at that level, ask the owner to
+   create one (owner round 4 item 1) rather than reusing the root-BU users.
+5. Record evidence (timestamps, responses) in `notes/task-137-soft-revocation.md` §8.
 
 ---
 

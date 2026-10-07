@@ -25,7 +25,8 @@ last-reviewed: 2026-05-16
 ### MUST:
 - ✅ **MUST** use unmanaged solution unless explicitly told to use managed (ADR-022)
 - ✅ **MUST** use Dataverse publisher `Spaarke` with prefix `sprk_`
-- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`)
+- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`, via `scripts/Invoke-PcfBuildProd.ps1`)
+- ✅ **MUST** stop if the PCF build failed, judged from its **output**: `pcf-scripts build` **exits 0 when webpack fails** (logs `[build] Failed:` / `[pcf-1033]` and returns), so trusting the exit code can pack and import the PREVIOUS bundle. `scripts/Invoke-PcfBuildProd.ps1` exits 1 on failure (found 2026-10-04: CI reported 17/18 PCFs passing when 9 had failed)
 - ✅ **MUST** copy ALL 3 files to Solution folder (bundle.js, ControlManifest.xml, styles.css)
 - ✅ **MUST** update version in ALL 5 locations
 - ✅ **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
@@ -57,9 +58,10 @@ last-reviewed: 2026-05-16
 ### Step 1: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}
-rm -rf out/ bin/
-npm run build:prod
+cd src/client/pcf/{ControlName}   # stay here for Steps 1-4
+rm -rf out/ bin/                  # a failed build must leave NO bundle behind
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+# STOP on a non-zero exit. A bare `npm run build:prod` exits 0 even when webpack fails.
 
 # Verify size (~200-400KB, NOT 8MB)
 ls -la out/controls/control/bundle.js
@@ -207,7 +209,7 @@ Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md
 |----------|----------------|
 | **Always use unmanaged** | Never export/pack as managed unless user explicitly requests |
 | **Always use Spaarke publisher** | Never create a new publisher - use `Spaarke` (`sprk_`) |
-| **Always build fresh** | Run `npm run build:prod`, never reuse old artifacts |
+| **Always build fresh** | Run `scripts/Invoke-PcfBuildProd.ps1` (`npm run build:prod` + a failure check, since pcf-scripts exits 0 on a failed build); never reuse old artifacts |
 | **Always use pack.ps1** | Never use `Compress-Archive` (creates backslashes) |
 | **Version footer** | Every PCF MUST display `vX.Y.Z • Built YYYY-MM-DD` in the UI |
 | **Version bumping** | Increment version in ALL 5 locations |
@@ -262,7 +264,7 @@ pac auth select --index 1
 
 **Use the "Deployment Workflow" section above.** Follow [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for the complete workflow:
 
-1. Build fresh (`npm run build:prod`)
+1. Build fresh with `scripts/Invoke-PcfBuildProd.ps1` (runs `npm run build:prod`; stop on a non-zero exit)
 2. Update version in ALL 5 locations
 3. Copy ALL 3 files to Solution folder
 4. Pack with `pack.ps1` (NOT `Compress-Archive`)
@@ -420,9 +422,9 @@ When you open a Custom Page in Power Apps Studio, it may **downgrade** your PCF 
 #### Quick Steps
 
 ```bash
-# 1. Build
+# 1. Build (exits 1 if the build failed; a bare `npm run build:prod` exits 0 even then)
 cd src/client/pcf/{ControlName}
-npm run build:prod
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
 
 # 2. Update version in 4 locations (manual)
 
@@ -670,7 +672,7 @@ pac solution import --path Y            # Import solution
 pac solution publish                    # Publish customizations
 
 # PCF Controls - Use pack.ps1 workflow (see Deployment Workflow above)
-npm run build:prod                      # Build control
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .   # in src/client/pcf/X: build control (fails on a failed build)
 powershell -File Solution/pack.ps1      # Pack solution (NOT Compress-Archive)
 pac solution import --path bin/X.zip    # Import solution
 
@@ -730,7 +732,7 @@ Spaarke ships **no Dataverse plugins**, so there is no plugin deployment — man
 When deploying PCF updates, the #1 cause of "deployment succeeded but nothing changed" is forgetting to update the control manifest version. Follow this exact order:
 
 1. **FIRST**: Update `control/ControlManifest.Input.xml` version attribute
-2. **THEN**: Rebuild with `npm run build:prod` (or `pcf-scripts build --buildMode production`)
+2. **THEN**: Rebuild with `scripts/Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/{ControlName}` (runs `npm run build:prod`; it exits 1 when the build failed, which a bare `npm run build:prod` does not)
 3. **THEN**: Copy ALL 3 files to Solution folder
 4. **THEN**: Update `solution.xml` and `pack.ps1` versions
 5. **THEN**: Pack and import

@@ -21,6 +21,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateInvoiceFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
@@ -35,6 +36,7 @@ import {
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -86,40 +88,9 @@ function _resolveLookupHint(entityLogicalName: string): string {
 // ---------------------------------------------------------------------------
 
 function _getCurrentUserId(): string {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 // ---------------------------------------------------------------------------
@@ -144,13 +115,15 @@ export class InvoiceService {
     private readonly _getCurrentUserIdOverride?: () => string | null
   ) {
     this._tenantId = tenantId ?? '';
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
+    // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
+        const id = await this._dataService.createRecord(entityName, data);
         return { id };
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
@@ -158,7 +131,7 @@ export class InvoiceService {
       retrieveMultipleRecords: (entityName: string, options?: string) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
+        await this._dataService.updateRecord(entityName, id, data);
         return { id };
       },
       deleteRecord: async (entityName: string, id: string) => {

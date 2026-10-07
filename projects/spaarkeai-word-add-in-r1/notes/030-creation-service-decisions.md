@@ -1,5 +1,10 @@
 # Task 030: server-side creation service (Matter): decisions
 
+> ⚠️ **SUPERSEDED on numbering by task 076 (owner decisions 2026-10-02).** Records are no longer nameless: Dataverse's
+> platform autonumber assigns `MAT-######` / `PRJ-######` on create (interim until the numbering function), set up per
+> environment by `scripts/Set-RecordNumberingSchema.ps1`; the service still never writes the number. See
+> `notes/076-record-numbering.md`. The rest of this note stands.
+
 > **Task**: `tasks/030-creation-service-matter.poml` (FR-13, Matter only)
 > **Date**: 2026-09-11. **Revised the same day** after the owner's decisions that **numbering moves out of task 030**, and that a missing, empty or unknown matter type is **never a rejection** (§7).
 > **Author**: task-execute sub-agent (opus / xhigh)

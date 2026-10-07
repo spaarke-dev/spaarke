@@ -4,7 +4,7 @@
     <title>FR-13 — a pane-created Matter has a BLANK display name everywhere, because sprk_matternumber is the primary name column and nothing writes it</title>
     <phase>5 Remediation — spec integrity</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Implements server-side record creation semantics against Dataverse. Tags include bff-api + dataverse. Modifies `.cs`.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -67,6 +67,15 @@
       (a) the PROJECT number format - projects have no number from any path today; (b) random 6 digits (current
       convention, 53 of 59 live matters) or a per-type sequence; (c) who verifies production matter numbers are
       unique before the alternate key is added (dev verified: 0 duplicates). Evidence: notes/030-numbering-handoff.md.
+
+      ✅ OWNER ANSWERS 2026-10-02 — the scope is CONFIRMED, so escalation trigger 1 is satisfied; implement:
+      (a) Project: PRJ-###### , SEQUENTIAL. (b) Matter: MAT-###### , SEQUENTIAL (not typeCode-random6). (c) "we will
+      manually check it" — the owner verifies production uniqueness. Owner's framing, verbatim: "we need to build a
+      numbering schema component ; for now just use PRJ-###### sequential; for matters MAT-###### ; we will manually
+      check it--don't make it a project spike". So: an interim, server-side sequential number in the pane's creation
+      path — NOT a numbering component, NOT a spike. A real per-environment sequence is required (sequential, not
+      random), so trigger 2's "server-side sequence" is the owner's chosen answer, not an escalation. Spec FR-13 now
+      states the interim format (amended 2026-10-02 by task 079). Wizards (Create*Wizard) are still not modified.
     </background>
   </context>
 
@@ -107,9 +116,20 @@
     <step>Write `notes/076-record-numbering.md`. Update TASK-INDEX.md: 076 → ✅.</step>
   </steps>
 
+  <justification>
+    <existing>The client wizards generate a matter number (`matterService.ts`, random, no uniqueness); nothing generates a project number; Dataverse's platform autonumber already numbers three Spaarke tables' primary names. No server component numbers matters or projects.</existing>
+    <extension>Yes — the platform's own autonumber on the two existing columns (no new column, table or service); `RecordCreationService` is extended with a retry and a read-back; the one new file surface is `scripts/Set-RecordNumberingSchema.ps1`, needed because the autonumber seed is per environment and not carried by a solution import. Full comparison with a BFF-owned counter: `notes/076-record-numbering.md` §2.</extension>
+    <cost-of-doing-nothing>Every Matter/Project created without a number — the Office pane, the Create Project wizard (7 of 19 dev projects), MDA forms, the AI create tool — is nameless in every lookup, subgrid and To Do regarding (reproduced live, notes §1); SC-8 stays FAIL.</cost-of-doing-nothing>
+  </justification>
+
   <relevant-files>
     <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
     <file role="edit">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+    <file role="edit">tests/integration/contract/Api/Office/OfficeQuickCreateProjectContractTests.cs</file>
+    <file role="new">tests/unit/Sprk.Bff.Api.Tests/Services/Office/RecordCreationNumberReadBackTests.cs</file>
+    <file role="new">scripts/Set-RecordNumberingSchema.ps1</file>
     <file role="edit">projects/spaarkeai-word-add-in-r1/notes/030-numbering-handoff.md</file>
     <file role="new">projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md</file>
   </relevant-files>
@@ -140,4 +160,23 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Fire the scope escalation BEFORE implementing.</protocol>
   </execution>
+
+  <notes>
+    COMPLETED 2026-10-03. Record: notes/076-record-numbering.md.
+    Owner decisions 2026-10-02/03: Dataverse platform autonumber MAT-/PRJ-{SEQNUM:6}, INTERIM ("until we build the
+    numbering function"); blank rows backfilled on first run; dev apply approved after the dry run; ADR-002 WP-1 conflict
+    resolved as path A now (spec ADR Tensions) + path B as task 087.
+    Dev: scripts/Set-RecordNumberingSchema.ps1 applied (sprk_MatterNumber key created; 7 nameless wizard projects now
+    PRJ-000001..007); -Verify PASS. Live through the deployed BFF: pane matter/project numbered; 6 concurrent creates got
+    6 distinct numbers; the To Do regarding lookup that was blank shows the number; a supplied wizard number is kept; a
+    typed-ahead collision is refused 0x80060892 and the next attempt gets the next number. Test rows deleted.
+    BFF: never sends the number; retries only a key-refused create (3 attempts, then 409 record_number_unavailable);
+    reads the number back and warns if blank; a failed or cancelled read never fails a committed create.
+    Gates: touched classes 78/78; seeds caught 3/1/2 + W3 2; full suite 14,217 passed / 1 failed (pre-existing
+    PinnedMemory metrics-tag flake, passes alone 15/15) / 54 skipped; ArchTests 345/345; publish +981 B (212 = 212
+    files); no vulnerable packages. Step 9.5: code review (W1-W4 fixed, W5 = the ADR conflict, W6 fixed) and adr-check
+    (V-1 resolved by owner, W-2/W-3/W-6 fixed) — notes §9.
+    Open: run the script in every other environment (production after the owner's uniqueness check); the BFF's retry and
+    warning run live with the next deploy from master.
+  </notes>
 </task>
