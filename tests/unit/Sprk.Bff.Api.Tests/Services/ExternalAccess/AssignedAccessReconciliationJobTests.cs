@@ -340,6 +340,107 @@ public class AssignedAccessReconciliationJobTests
         _h.Shares.Writes.Should().BeEmpty("fail closed");
     }
 
+    // ── Owner round 71: ledger rows whose record was deleted ──────────────────────────────────────────
+
+    /// <summary>A matter is deleted after its auto grant was made: its ledger row is marked Revoked (root-deleted), and no
+    /// access is touched by this job — the grant row is ExternalAccessReconciliationJob R4's.</summary>
+    [Fact]
+    public async Task ALedgerRowWhoseRecordWasDeleted_IsMarkedRevoked_RootDeleted_AndNoAccessIsTouched()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        var row = _h.Store.RowsOf(matter, contact).Single();
+        var grantsBefore = _h.Grants.Rows.Count;
+        _h.Store.DeleteRoot(ExternalGrantRootType.Matter, matter);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var after = _h.Store.Ledger.Single(r => r.Id == row.Id);
+        after.State.Should().Be(AssignedAccessState.Revoked);
+        after.Reason.Should().Be(AssignedAccessReason.RootDeleted);
+        _h.Grants.Rows.Count.Should().Be(grantsBefore, "the job changes no access for a deleted record");
+        var rootless = Result(result).GetProperty("rootlessLedger");
+        rootless.GetProperty("found").GetInt32().Should().Be(1);
+        rootless.GetProperty("revoked").GetInt32().Should().Be(1);
+        result.ProcessedItems.Should().Be(1);
+
+        var again = await RunAsync();
+        Result(again).GetProperty("rootlessLedger").GetProperty("found").GetInt32().Should().Be(0, "a Revoked row is not revisited");
+    }
+
+    /// <summary>The lookup is empty but the record its key names is still there: not a deletion — left exactly as it is.</summary>
+    [Fact]
+    public async Task ALedgerRowWithNoRecordLookup_WhoseRecordStillExists_IsLeftUnchanged()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        var row = _h.Store.RowsOf(matter, contact).Single();
+        var state = row.State;
+        _h.Store.Assign(ExternalGrantRootType.Matter, matter, Attorney1, null); // no longer a candidate root
+        _h.Store.ClearRootLookup(matter);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Store.Ledger.Single(r => r.Id == row.Id).State.Should().Be(state);
+        Result(result).GetProperty("rootlessLedger").GetProperty("recordExists").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>A read of the record that FAILS is never read as "deleted": nothing is written and the run is not clean.</summary>
+    [Fact]
+    public async Task ALedgerRowWhoseRecordCannotBeRead_IsLeftUnchanged_AndTheRunIsNotClean()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        var row = _h.Store.RowsOf(matter, contact).Single();
+        var state = row.State;
+        _h.Store.DeleteRoot(ExternalGrantRootType.Matter, matter);
+        _h.Store.FailRootRead = true;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        _h.Store.Ledger.Single(r => r.Id == row.Id).State.Should().Be(state);
+        Result(result).GetProperty("rootlessLedger").GetProperty("unresolved").GetInt32().Should().Be(1);
+        Result(result).GetProperty("rootlessLedger").GetProperty("revoked").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ARootlessLedgerScanThatFails_RecordsTheRunFailed_AndWritesNothing()
+    {
+        var contact = _h.Contact();
+        var matter = AssignedMatter(contact);
+        await RunAsync();
+        var row = _h.Store.RowsOf(matter, contact).Single();
+        var state = row.State;
+        _h.Store.DeleteRoot(ExternalGrantRootType.Matter, matter);
+        _h.Store.FailRootlessScan = true;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Result(result).GetProperty("status").GetString().Should().Be(AssignedAccessReconciliationJob.StatusError);
+        Result(result).GetProperty("rootlessLedger").GetProperty("scanFailed").GetBoolean().Should().BeTrue();
+        _h.Store.Ledger.Single(r => r.Id == row.Id).State.Should().Be(state);
+    }
+
+    [Fact]
+    public void TheLedgerKey_NamesItsRecord_SoADeletedRecordCanBeConfirmedByARead()
+    {
+        var matter = Guid.NewGuid();
+        var key = AssignedAccessStore.LedgerKey(ExternalGrantRootType.Matter, matter, Attorney1,
+            new AssignedSubject(AssignedSubjectKind.Contact, Guid.NewGuid()));
+
+        AssignedAccessStore.RootFromLedgerKey(key).Should().Be(new AssignedRootRef(ExternalGrantRootType.Matter, matter, null));
+        AssignedAccessStore.RootFromLedgerKey(null).Should().BeNull();
+        AssignedAccessStore.RootFromLedgerKey("not-a-key").Should().BeNull();
+        AssignedAccessStore.RootFromLedgerKey($"account:{matter:D}:x").Should().BeNull("only a project, matter or work assignment");
+    }
+
     [Fact]
     public async Task ALinkThatAppearsBetweenRuns_ConvertsTheGrantToAShare()
     {

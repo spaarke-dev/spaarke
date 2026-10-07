@@ -396,6 +396,47 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
+        /// <summary>
+        /// Owner round 71: live Assigned-To rows whose every root lookup is empty — the production OData predicate, pinned
+        /// itself by <c>AssignedAccessStoreODataTests</c>.
+        /// </summary>
+        internal override Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(CancellationToken ct)
+        {
+            if (FailRootlessScan)
+                throw new HttpRequestException("Simulated rootless-ledger scan failure.");
+            lock (_gate)
+            {
+                var rows = Ledger.Where(r => r.State != AssignedAccessState.Revoked && RootIdOf(r) is null
+                                             && InheritedSourceOf(r.SourceField) is null)
+                    .Select(Clone).ToList();
+                return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>((rows, false));
+            }
+        }
+
+        /// <summary>
+        /// Models the record's DELETION as Dataverse performs it for a matter or work assignment: the record is gone and the
+        /// RemoveLink cascade empties the root lookup of every ledger row on it (the key, text, keeps the id).
+        /// </summary>
+        public void DeleteRoot(ExternalGrantRootType type, Guid rootId)
+        {
+            Roots.TryRemove((type, rootId), out _);
+            ClearRootLookup(rootId);
+        }
+
+        /// <summary>Empties the root lookup of every ledger row on <paramref name="rootId"/>, leaving the record itself in place.</summary>
+        public void ClearRootLookup(Guid rootId)
+        {
+            lock (_gate)
+            {
+                foreach (var row in Ledger.Where(r => RootIdOf(r) == rootId))
+                {
+                    row.ProjectId = row.MatterId = row.WorkAssignmentId = null;
+                    Bump(row);
+                }
+            }
+        }
+
+        public bool FailRootlessScan { get; set; }
         public bool FailScan { get; set; }
         public int? ScanCeiling { get; set; }
         public ConcurrentDictionary<Guid, DateTimeOffset> Modified { get; } = new();
