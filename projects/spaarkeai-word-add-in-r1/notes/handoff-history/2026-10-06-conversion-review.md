@@ -78,4 +78,4 @@ Verdict: the conversion is sound. Almost every live item reached CLAUDE.md, this
 
 **Audit — wrongly carried:** #1011 line **corrected** (issue auto-closed 2026-09-30; reopening asked of the owner). Share-link lines **corrected** earlier today. Row 097 ✅. CLAUDE.md L113 **corrected**.
 
-**Not this project's:** a generic hygiene brief of 2026-10-06 named INCOMING-141/145 (customer-provisioning delivery), `notes/task-165-admin-surfaces.md` §13.9(b) `-MintClientSecret`, the `[open]/[done]` token rule and the "Secure Projects BU" name, and "309 commits behind". None exists in this project (grep, 2026-10-06); this branch was 1 commit behind master. They appear to belong to unified-access-control-r2.
+**Brief priorities (owner's hygiene brief, 2026-10-06):** (a) 065 residual — in current-task "Waiting on others", the 065 note header and TASK-INDEX row 065. (b) #1011 — corrected; reopening asked of the owner. (c) composer-link "owner not yet asked" line removed; the share-link Decisions row corrected (route refusal reverted). (d) row-097 note removed, CLAUDE.md L113 corrected, Project Status block rewritten (103/105).

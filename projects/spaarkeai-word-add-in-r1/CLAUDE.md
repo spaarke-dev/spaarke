@@ -7,10 +7,9 @@
 
 ## Project Status
 
-- **Phase**: Phase 0 complete; Phases 1–3 under way. **28 of 47 tasks ✅ as of 2026-09-15** (per `tasks/TASK-INDEX.md`); 026 (related-record card) and 046(a) are merged and awaiting their gate run. Open owner discussion: how Word documents are matched to avoid duplicates (decides 014 and 025). Live state: `current-task.md`
-- **Last Updated**: 2026-09-15
-- **Current Task**: see [`current-task.md`](current-task.md) — the authoritative live state; this block is a summary only
-- **Next Action**: see `current-task.md` Quick Recovery
+- **Phase**: Phase 6 — owner UAT rounds (042). **103 of 105 tasks ✅** (per `tasks/TASK-INDEX.md`, 2026-10-06); open: 042 (UAT, ongoing) and 090 (wrap-up with `/test-diet`).
+- **Last Updated**: 2026-10-06
+- **Live state**: [`current-task.md`](current-task.md) — the authoritative current state; this block is a summary only
 
 ---
 
