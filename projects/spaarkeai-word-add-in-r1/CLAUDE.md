@@ -310,7 +310,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **CI pins Node 20**; this desktop runs Node 22 (2026-09-21) — local office-addins gate runs are advisory.
 - **Local add-in build needs the CI env values** from `.github/workflows/deploy-office-addins.yml` (2026-10-05): ADDIN_CLIENT_ID, TENANT_ID, BFF_API_CLIENT_ID, BFF_API_BASE_URL, ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL.
 - **`ADDIN_EMAIL_TAB_ENABLED`** (2026-10-06): the code default is OFF (`webpack.config.js`, only the exact string `"true"` turns it on). The deploy workflow sets it ON; set it back to `"false"` to hide the tab, no code change.
-- **`scripts/check-task-status-drift.ps1` and this TASK-INDEX** (2026-09-30 / 2026-10-06): status sits in cell 3. Fix `233ff9341` (customer-provisioning) IS on master as of 2026-10-06 — re-run the script once before trusting it; until it passes here, verify POML ⇔ index pairs by hand.
+- **`scripts/check-task-status-drift.ps1` and this TASK-INDEX** (2026-09-30 / 2026-10-06): status sits in cell 3. Fix `233ff9341` (customer-provisioning) is on master and the script now parses all 105 rows here with no drift (verified 2026-10-06) — trust it.
 
 ### Deploy
 - **The add-in site follows master** (2026-10-05/06): every PR merge runs `deploy-office-addins.yml` on master. A branch build still needs `workflow_dispatch`.
