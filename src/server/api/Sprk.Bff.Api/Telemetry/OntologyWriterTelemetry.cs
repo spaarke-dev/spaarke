@@ -44,6 +44,17 @@ public static class OntologyWriterTelemetry
                      "only guaranteed observation point for an invalid policy version.");
 
     /// <summary>
+    /// <c>customMetrics/ontology.decisionplan.refused</c> (task 036): one decision plan refused at read time because it
+    /// does not resolve against the closed action catalog. Same <see cref="MeterName"/> (CLAUDE.md section 11: extend,
+    /// do not stand up a second Meter). Dimensioned by <c>reason</c> (<see cref="DecisionPlanRefusalReason"/>).
+    /// </summary>
+    private static readonly Counter<long> DecisionPlanRefusedCounter = Meter.CreateCounter<long>(
+        name: "ontology.decisionplan.refused",
+        unit: "{plan}",
+        description: "Count of sprk_policyversion decision plans refused at read time (fail closed), by reason. " +
+                     "A refused plan means the wizard cannot offer that Signal's actions.");
+
+    /// <summary>
     /// Records one Signal-writer refusal/failure. <paramref name="reason"/> MUST be one of
     /// <see cref="OntologyWriterFailureReason"/>'s bounded-cardinality constants — never a raw exception
     /// message, a policy code, or any fact/sentence content.
@@ -58,6 +69,33 @@ public static class OntologyWriterTelemetry
     /// </summary>
     public static void RecordPolicyInvalid(string reason) =>
         PolicyInvalidCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>
+    /// Records one refused decision plan (task 036). <paramref name="reason"/> MUST be one of
+    /// <see cref="DecisionPlanRefusalReason"/>'s constants.
+    /// </summary>
+    public static void RecordDecisionPlanRefused(string reason) =>
+        DecisionPlanRefusedCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+}
+
+/// <summary>Bounded-cardinality reasons a decision plan is refused (task 036). Shared by the metric and the log.</summary>
+public static class DecisionPlanRefusalReason
+{
+    /// <summary>The policy version has no decision plan, or an empty one.</summary>
+    public const string PlanMissing = "plan_missing";
+
+    /// <summary>The plan is not the expected JSON shape.</summary>
+    public const string PlanMalformed = "plan_malformed";
+
+    /// <summary>A code in the plan is not in the closed action catalog.</summary>
+    public const string UnknownAction = "unknown_action";
+
+    /// <summary>A code is in the catalog but may not appear in this position (an action that is not a plan action for
+    /// the Signal's lane, or a Next step that is not a Next-step creator).</summary>
+    public const string ActionNotAllowed = "action_not_allowed";
+
+    /// <summary>The same code appears twice in one list.</summary>
+    public const string DuplicateAction = "duplicate_action";
 }
 
 /// <summary>
