@@ -4,7 +4,7 @@
     <title>On-branch cleanup the worklist depends on (C-8, C-11, C-13, C-17)</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx across several packages and hoists two new shared primitives.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -105,6 +105,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-42 remainder. Rescoped 2026-10-03: C-7 moved to 089, C-25 to 087. Owner decision: C-17 tier scheme is 3/7/10 days. Task 086 deletes the AI.Outputs chat-history ChatSessionCard (zero consumers), which held one of the five relative-time formatter copies: count four live copies. 086 REPORTED it WAS the most correct: Intl.RelativeTimeFormat, invalid-date guard, future dates, week/month buckets. Start from 62277d50a:src/client/shared/Spaarke.AI.Outputs/src/chat-history/ChatSessionCard.tsx lines 30-61 and fix its two weaknesses: the hard-coded locale (en) and day buckets computed from elapsed 24h periods instead of local-midnight calendar days (use dateLocal.ts from 084). ROUTE (owner 2026-10-05): 081 ships as its OWN PR to master after re-review, not via docs/ontology-platform-design (about 37 projects edit these shared packages). LOCALE (coordinator 2026-10-05, review F11): the surrounding UI strings are English, so following navigator.language produced mixed strings ("Modified vor 5 Minuten"); the formatter takes an optional locale, default 'en'. This narrows the "hard-coded locale" fix above to "configurable, English by default". Review findings and decisions: notes/081-progress.md.</notes>
+
+  <completion>COMPLETED 2026-10-07 (recorded by main session). PR #1309 squash-merged as 14a5e229c (owner-approved "merge when green"; the only red check was the advisory Tier 2 ADR Compliance 3-minute timeout, fixed separately by PR #1346). Nine rounds, seven independent reviews (one FAIL on a pre-existing CI router hole; every finding fixed). Outcome: shared UI duplication removed (relative-time formatter configurable/English default, one due-urgency palette = SmartTodo's, dateLocal helpers); Xrm access consolidated on getXrm(capability) (window-first, ancestor walk, per-frame capability predicates) across ~260 sites with a wrapper-safe API; a TypeScript-AST analyzer (xrmCapabilityAnalyzer.ts, 85 tests, unknown shapes reported as blind spots, seven documented limits) now runs as a BLOCKING Tier 1 job (xrm-capability-guard, ~40-60 s, client/solution/workflow PRs) — owner-approved §6.5 path-A exception to ci-cd-unit-test-remediation-r1 FR-A02 (spec ADR Tensions), extended to fix ci-router.yml docs_only (now: docs-only only when every changed file is documentation; PRs over 3,000 files fail closed); .claude/skills/ci-cd and CHANGELOG updated by the main session. Merged with master after #1312 and #1302 (TodoSection.tsx deletion kept; nothing replaced it). Final: guard 259 sites / 0 violations / 0 blind spots; tsc/jest no new failures vs master. Review history: notes/081-progress.md.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

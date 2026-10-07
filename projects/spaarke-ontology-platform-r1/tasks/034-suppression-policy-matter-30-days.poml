@@ -40,6 +40,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-13): suppression is what task 031's re-raise rule reads. While sprk_suppresseduntil is in the future no new episode is raised for that (policy, matter); after it lapses the next pass MAY raise a new episode (the 30-day expiry is now reachable). The 14-day quiet window after a 1st or 2nd dismissal (FR-17a) is implemented in task 031's re-raise rule; this task must not implement a second one.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (reconciliation R-8, R-10; FR-50): a dismissal whose reason code carries countsTowardSuppression = false in task 036's catalog (Wrong matter - misresolved) is recorded and queryable but never increments the counter. Read the code from the "code - detail" form of sprk_reason.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (reconciliation B.2 row 034): expose a read of the (policy, matter) dismissal count and the current sprk_suppresseduntil for the decision wizard's dismissal step (task 058) and admin (task 100). Authorize it as the caller (caller can read the matter) and add it to the route census (NFR-10).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
   </constraints>
 
   <knowledge>
@@ -73,6 +74,7 @@
 
   <escalation>
     <trigger>If dismissals cannot be counted per (policy, matter) because the Decision Record does not carry enough to group by, STOP and escalate rather than falling back to the dedupe-key grain. The grain was chosen deliberately in D-11 and the fallback silently fails the criterion-4 fatigue case.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
   <justification>

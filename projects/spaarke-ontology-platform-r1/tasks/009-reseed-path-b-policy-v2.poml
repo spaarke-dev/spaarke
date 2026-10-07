@@ -10,7 +10,7 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Two rows and one stamp, every value stated below.</model-tier-reason>
     <effort>medium</effort>
-    <parallel-group>M</parallel-group>
+    <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
     <deps>007, 008</deps>
     <tags>dataverse,policy,seed</tags>

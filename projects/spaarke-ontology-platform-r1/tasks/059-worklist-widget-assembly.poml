@@ -66,6 +66,7 @@
 
   <escalation>
     <trigger>If a behaviour in HANDOFF section 1.2 needs data the 038 route does not return, STOP and extend the route through its own task rather than reading Dataverse from the widget.</trigger>
+    <trigger>Where a matterless To Do item (D-31) appears in the Do lane, since there is no matter card for it, is NOT decided (spec section 11.1 O-21). Ask the owner before choosing a grouping.</trigger>
   </escalation>
 
   <justification>

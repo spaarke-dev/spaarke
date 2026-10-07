@@ -17,7 +17,7 @@
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
 
-  <prompt>Apply exactly the role edits the owner approved on 2026-10-07, assign the administrator role to the owner's account, add the five ontology tables read-only to Spaarke Platform, and re-run task 002's union check.</prompt>
+  <prompt>Apply exactly the role edits the owner approved on 2026-10-07 (D-14, D-18, D-22, D-29, and D-33's three), assign the administrator role to the owner's account, add the five ontology tables read-only to Spaarke Platform, and re-run task 002's union check.</prompt>
   <role>SPAARKE platform developer. Security fails closed; add only what was approved and prove nothing else moved.</role>
   <goal>Each approved privilege is present on every business-unit copy of the named role, nothing else changed, the union check is recorded, and the owner's spaarkedev1 user holds Spaarke Ontology Administrator.</goal>
 
@@ -30,14 +30,17 @@
   </context>
 
   <constraints>
-    <constraint source="owner">Scope (D-29): add prvAppendTosprk_Communication, prvAppendTosprk_Event, prvAppendTosprk_Todo and prvAppendTosprk_WorkAssignment to Spaarke Ontology Service. Use the depth that matches its existing AppendTo on sprk_policy and sprk_policyversion, and record it.</constraint>
+    <constraint source="owner">Scope (D-29): add prvAppendTosprk_Communication, prvAppendTosprk_Event, prvAppendTosprk_Todo and prvAppendTosprk_WorkAssignment to Spaarke Ontology Service. Use ORGANIZATION depth, not Deep: once the writer sits in a customer child BU (#1094), Deep would not reach Secure-team-owned subjects in the sibling Secure Record BU (notes/secure-signals-scoping.md section 4.2). Record the depth.</constraint>
     <constraint source="owner">Scope (D-18): add prvCreatesprk_BudgetRevision to Spaarke Ontology Service. Do NOT add Write or Delete on sprk_budgetrevision, and do NOT add any privilege on sprk_budget (which identity updates the budget amount is undecided, spec section 11.1 O-16).</constraint>
     <constraint source="owner">Scope (D-14): add prvWritesprk_PolicyVersion to Spaarke Ontology Administrator only. No other role gains it.</constraint>
     <constraint source="owner">Scope (D-22): add Create, Write and Read on sprk_triagecategory to Spaarke Ontology Administrator only. sprk_triagecategory is organisation-owned; use organisation depth and record it. Assign Spaarke Ontology Administrator to the owner's spaarkedev1 user (ask the owner for the exact user if it is not unambiguous from systemuser).</constraint>
     <constraint source="owner">Scope (D-22): add sprk_signal, sprk_decisionrecord, sprk_policy, sprk_policyversion and sprk_budgetrevision to the Spaarke Platform model-driven app for inspection, with forms that are read-only (a form or field setting, no plugin, ADR-002). Check spec section 8.1 first: the owner may already have done part of this.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-33): three more edits, owner-approved. (a) Secure Record Owner: prvReadsprk_Signal and prvReadsprk_DecisionRecord at User (Basic) depth, matching its other codified child tables; BEFORE applying, the live refusal for each table (an assign of a row to the Secure Record Owners team fails with 0x80040299 Read Privilege Check For Owner) must be recorded per config/secure-record-owner-role.json's howToExtend: by task 079 if it has run, otherwise here, and handed to 079. (b) Spaarke Basic User (the role BU default teams hold): prvReadsprk_Signal and prvReadsprk_DecisionRecord at Basic depth, so unsecuring a matter can release its children to the default team. (c) Spaarke Ontology Service: prvAssignsprk_DecisionRecord at Organization depth, which changes a ledger row's OWNER only; Write and Delete on sprk_decisionrecord stay absent from every Spaarke role.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-33 deploy order): in every environment these role edits land BEFORE any BFF build carrying the new secure-child config (task 039). Otherwise the NFR-05 census clause 5 goes red and every Secure-matter create fails with 0x80040299. Record, per environment, the date applied; task 039 re-runs scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify against the new config.</constraint>
     <constraint source="project">Scope: edit ALL business-unit copies of each role (task 002 constraint: a top-1 read returns an arbitrary copy). Do not touch Service Writer or Service Deleter.</constraint>
     <constraint source="project">Scope: do NOT remove prvWritesprk_Signal from Spaarke Console User here (task 049 does it after the BFF closes Signals). Do NOT add any privilege not listed above.</constraint>
     <constraint source="project">Scope: after the edits, repeat task 002's union check: every role holding Write or Delete on sprk_decisionrecord, or Write on sprk_policyversion, classified as platform, admin, human or Spaarke identity. prvWritesprk_DecisionRecord and prvDeletesprk_DecisionRecord must remain absent from all three Spaarke Ontology roles and from Spaarke Console User.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
   </constraints>
 
   <knowledge>
@@ -59,6 +62,7 @@
     <step order="1">Record the before state: every BU copy of Spaarke Ontology Service, Spaarke Ontology Administrator and Spaarke Console User, with their privileges on sprk_communication, sprk_event, sprk_todo, sprk_workassignment, sprk_budgetrevision, sprk_policyversion, sprk_triagecategory and sprk_signal.</step>
     <step order="2">Apply the D-29 and D-18 edits to Spaarke Ontology Service.</step>
     <step order="3">Apply the D-14 and D-22 edits to Spaarke Ontology Administrator and assign it to the owner's user.</step>
+    <step order="3a">D-33: confirm the two live refusals are recorded (079, or record them now), then apply Secure Record Owner Read on sprk_signal and sprk_decisionrecord, Spaarke Basic User Basic Read on both, and Ontology Service Assign on sprk_decisionrecord.</step>
     <step order="4">Add the five tables to Spaarke Platform with read-only forms; publish the app.</step>
     <step order="5">Re-read every BU copy and diff against the before state: only the listed privileges changed.</step>
     <step order="6">Run the union check and the live negative: as a non-admin user holding only the Spaarke roles, an update to a sprk_decisionrecord row is refused.</step>
@@ -71,6 +75,7 @@
   <escalation>
     <trigger>If any human user or any Spaarke application identity ends up holding Write or Delete on sprk_decisionrecord, STOP and escalate: that breaks the append-only guarantee.</trigger>
     <trigger>If a needed edit is not in the list above (for example Write on sprk_budget for the amount update), STOP and ask the owner; do not add it.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
   <tools>
@@ -91,10 +96,13 @@
     <criterion testable="true">Negative: as a non-admin user holding only the Spaarke roles, an update to a sprk_decisionrecord row is refused.</criterion>
     <criterion testable="true">Negative: Spaarke Ontology Service holds no privilege on sprk_budget and no Write or Delete on sprk_budgetrevision.</criterion>
     <criterion testable="true">Given the writer identity, when the seam test writes a Signal whose subject is a communication, then it succeeds (F26 closed).</criterion>
+    <criterion testable="true">Given every BU copy of Secure Record Owner, Spaarke Basic User and Spaarke Ontology Service, when listed, then Read (Basic) on sprk_signal and sprk_decisionrecord, Read (Basic) on both, and Assign (Organization) on sprk_decisionrecord respectively are present (D-33), and a recorded live refusal exists for each of the two tables from before the Secure Record Owner edit.</criterion>
+    <criterion testable="true">Negative: after the D-33 edits, no Spaarke role holds Write or Delete on sprk_decisionrecord; the AppendTo privileges added for D-29 are at Organization depth.</criterion>
+    <criterion testable="true">Given the deploy log, when read, then the role edits are dated before any BFF deploy carrying the secure-child config.</criterion>
     <criterion testable="true">Given the Spaarke Platform app, when a user opens a sprk_signal or sprk_policyversion form, then it is read-only.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-21 (amended, D-14), FR-52, FR-56, NFR-11. Task 049 removes Console User Write on sprk_signal and re-runs the same union check.</notes>
+  <notes>spec.md FR-14a (amended, D-33), FR-21 (amended, D-14), FR-52, FR-56, NFR-11; notes/secure-signals-scoping.md sections 4.2-4.4, 5.2. Task 049 removes Console User Write on sprk_signal and re-runs the same union check.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

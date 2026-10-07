@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Register sprk_signal and sprk_decisionrecord as secure children; Signal writer takes its owner from the resolver</title>
+    <phase>3 Evaluator, Signal lifecycle and read</phase>
+    <gate>007, 008, 079 complete; uac-r2 batch 4 deployed in dev</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security: changes who owns and who can read Signals and Decision Records on Secure matters, edits two files another project owns, and adds an ownership path to the writer.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive cross-project change (uac-r2-owned registration files, ownership invariant I-6) with a live gate and a deploy-order hazard.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SignalWriter.cs (also 037, 031) and uac-r2-owned files; 031, 037 and 040 build on it.</parallel-reason>
+    <deps>007, 008, 079</deps>
+    <tags>bff-api,auth,security,signals,decision-record,dataverse</tags>
+    <estimated-effort>3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Bring sprk_signal and sprk_decisionrecord under the unified-access-control (uac-r2) secure-record mechanism: add their entries to SecureChildLineage.cs and config/secure-record-owner-role.json, change SignalWriter to take its owner from RecordOwnershipResolver the way task 146 changed the spend-signal writer, measure the load nightly re-evaluation puts on the 2-minute secure sync, and prove it live in dev on a real Secure matter.</prompt>
+  <role>SPAARKE backend developer. Reuse uac-r2's mechanism; build nothing parallel; security fails closed.</role>
+  <goal>A Signal written on a Secure matter is owned by the Secure Record Owners team at create, reaches exactly the matter's sharees within 2 minutes, and is released to the BU default team on unsecure; non-Secure behaviour is unchanged; the two registration entries are reviewed by uac-r2.</goal>
+
+  <context>
+    <background>D-33 (spec section 9; replaces D-15's skip): Restricted and Limited exclude external contacts only (ADR-003); the staff wall is the Secure flag (sprk_issecure), owned by the memberless Secure Record Owners team in the Secure Record BU and reached only through shares. Today's writer would leave a Secure-matter Signal owned by the writer in the Secure Record BU: unreadable by the matter's own sharees in production (under-share) and readable by every root-BU principal in dev (over-share). The owner chose to register both tables as secure children in R1. notes/secure-signals-scoping.md is the plan: section 2 (how uac-r2 works), section 4.1 (the two lineage entries with their lookups, from live describe), section 4.2 (the writer change: about 40-60 lines, task 146's shape), section 4.4 (sync events), section 5.1 (estimate) and section 5.2 (risks). The three role edits and the deploy-order rule are in task 008; the uac-r2 review and the recorded live refusals are task 079. The Decision Record writer's owner path is task 040; the Do-lane subjects' resolver parents are task 037.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</file>
+      <file role="modify">config/secure-record-owner-role.json</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/OntologyWriterEvents.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildShareSynchronizer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs</file>
+      <file role="canonical-reference">scripts/Set-SecureRecordOwnerRolePrivileges.ps1</file>
+      <file role="modify">tests/unit/domain/Signals/SignalWriterTests.cs</file>
+      <file role="new">projects/spaarke-ontology-platform-r1/notes/039-secure-signals-progress.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">Scope (D-33): config/secure-record-owner-role.json gains exactly two kind: child entries, sprk_signal (prvReadsprk_Signal) and sprk_decisionrecord (prvReadsprk_DecisionRecord), each citing its recorded live refusal (task 079 / 008). SecureChildLineage.Children gains exactly two entries: sprk_signal / sprk_signals with lookups sprk_matter (matter); sprk_regardingmatter, sprk_regardingproject, sprk_regardingworkassignment (roots); sprk_regardingcommunication, sprk_regardingtodo, sprk_regardingevent, sprk_regardinginvoice, sprk_regardingdocument (children); sprk_decisionrecord; and NOT sprk_regardingservicerequest, sprk_policy or sprk_policyversion. sprk_decisionrecord / sprk_decisionrecords with sprk_matter only. Re-check every lookup against a live describe first. RecordOwnershipResolver.OwnershipParentEntities is NOT changed; RecordOwnerAssignmentCensusTests.ChildTables is NOT extended in R1 (scoping section 4.1; note it for uac-r2).</constraint>
+    <constraint source="owner">Scope (D-33, task 146 shape): in SignalWriter.WriteAsync, after the grouping matter is resolved, call IRecordOwnershipResolver.ResolveOwnerAsync with the matter AND the subject as parents. Secure answer: set ownerid to the Secure Record Owners team in the create itself (ownerid@odata.bind), do NOT set owningbusinessunit, and verify by reading back owningteam. Not secure: keep today's FR-14 path unchanged (owner = writer, owningbusinessunit = the matter's BU) because a full I-6 switch to default-team ownership hits 0x80040299 on most BUs. Refused: skip, log at Warning with a stable EventId, increment ontology.writer.failures with a new OntologyWriterFailureReason, never write. The writer grants no shares (the 2-minute reconcile does).</constraint>
+    <constraint source="owner">Scope (D-33): Restricted and Limited matters are NOT skipped anywhere. The only skip is D-33's narrow case (a To Do with no matter filed under a Secure project), which is task 031's / 037's to apply; this task adds no other skip.</constraint>
+    <constraint source="owner">Scope (D-33 deploy order): this task's BFF build must not be deployed to an environment until task 008's role edits are applied there; run scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify with the new config in dev and record a clean result before any deploy.</constraint>
+    <constraint source="project">Scope (scoping section 5.2 item 4): measure the 2-minute SecureChildReconciliationJob / SecureChildShareReconciliationJob run after a nightly pass that stamps sprk_lastevaluated on every open Signal: rows listed, duration, Dataverse calls, against the 20 x 5,000 listing cap. Record the numbers; if the pass would approach the cap or the 2-minute window at realistic volume, escalate (a filter would be a uac-r2 code change).</constraint>
+    <constraint source="project">Scope (live gate, uac G149-2 recipe; spaarkedev1 has 0 Secure matters): provision a Secure probe matter; write a Signal on it via the writer; confirm it is Secure-team-owned; share the matter to user A; confirm A reads the Signal within 2 minutes and user B does not; unshare; unsecure and confirm release to the BU default team; then delete every probe row and the probe matter, and record each step.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: uac-r2's lineage and census suites (SecureChildLineageTests, NFR-05 census, SecureChildShareWorld) pass with the two entries; new writer tests cover secure, not-secure and refused, paired with the live gate. No DI-registration or ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Secure-record isolation (uac-r2)</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/secure-signals-scoping.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/030-signal-writer-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Background writer owned by the resolver (task 146)" location="src/server/api/Sprk.Bff.Api/Services/Finance/SignalEvaluationService.cs">The spend-signal change: inject the resolver, resolve once per matter, skip and log on refusal, ownerid@odata.bind in the create. Same shape here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8; fetch origin/master; re-read the uac-r2 files listed in the coordination constraint and record their commit; check uac-r2's open PRs and active work; run /conflict-check.</step>
+    <step order="1">Confirm task 008's D-33 role edits are applied in dev and task 079 holds the two recorded refusals and uac-r2's review request.</step>
+    <step order="2">Re-check the lookups by live describe; add the two lineage entries and the two config entries; run uac-r2's suites.</step>
+    <step order="3">Change SignalWriter (resolver call, secure / not secure / refused paths, new failure reason); unit tests.</step>
+    <step order="4">Run Set-SecureRecordOwnerRolePrivileges.ps1 -Verify in dev with the new config; record a clean result.</step>
+    <step order="5">Run the live gate on a provisioned Secure probe matter; clean up every probe.</step>
+    <step order="6">Measure the 2-minute secure-sync load after a full nightly pass; record the numbers.</step>
+    <step order="7">Open the PR with uac-r2's reviewer named and the review linked; do not merge without it.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="9">Record any deviation from this POML, and the uac-r2 files and commit read, in projects/spaarke-ontology-platform-r1/notes/039-secure-signals-progress.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the uac-r2 code (resolver, lineage, config, synchronizer, reconciler, census) has changed since notes/secure-signals-scoping.md in a way that invalidates this plan, STOP and escalate rather than adapting silently.</trigger>
+    <trigger>If uac-r2's owner does not accept the two entries, or uac-r2 batch 4 (synchronizer and reconciler jobs) is not deployed and running in dev, STOP: a Secure-team-owned Signal would be readable by nobody. The owner's fallback (scoping section 6) is a skip keyed on the Secure flag; do not apply it without the owner.</trigger>
+    <trigger>If the secure-sync load measurement approaches the 100k listing cap or the 2-minute window at realistic volume, STOP and escalate (a filter is a uac-r2 code change).</trigger>
+    <trigger>If any step would need a privilege beyond task 008's list (for example Write on sprk_decisionrecord), STOP and ask the owner.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>uac-r2's SecureChildLineage, RecordOwnershipResolver, SecureChildShareSynchronizer, SecureChildReconciler and their jobs already isolate 23 child tables (scoping section 2); sprk_spendsignal was brought under it by task 146 with a +34-line writer change.</existing>
+    <extension>Yes: this task adds two data entries to each uac-r2 list and extends SignalWriter; no new service, job or mechanism.</extension>
+    <cost-of-doing-nothing>A Signal on a Secure matter is unreadable by the matter's own sharees in production and readable by every root-BU principal in dev (scoping section 1); with D-15's skip withdrawn (D-33), Secure-matter Work Items would be written with the wrong visibility.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+    <tool name="pwsh">Set-SecureRecordOwnerRolePrivileges.ps1 -Verify; live gate</tool>
+    <tool name="gh">uac-r2 open PRs; the review request</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</output>
+    <output type="code">config/secure-record-owner-role.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</output>
+    <output type="test">tests/unit/domain/Signals/SignalWriterTests.cs</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/039-secure-signals-progress.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the lineage map and the owner-role config, when read, then each contains exactly the two new entries described (sprk_signal with the listed lookups; sprk_decisionrecord with sprk_matter only), each config entry cites a recorded live refusal, and uac-r2's lineage and census suites pass.</criterion>
+    <criterion testable="true">Given a Signal on a Secure matter, when written, then its owningteam is the Secure Record Owners team, set in the create, and owningbusinessunit was not sent.</criterion>
+    <criterion testable="true">Given a Signal on a Standard, Limited or Restricted matter, when written, then ownership is exactly today's FR-14 path and no row is skipped.</criterion>
+    <criterion testable="true">Given a resolver refusal, when the writer runs, then nothing is written, a Warning with the stable EventId is logged and ontology.writer.failures increments with the new reason.</criterion>
+    <criterion testable="true">Given the live gate in dev, when run, then the Signal is Secure-team-owned, user A (shared) reads it within 2 minutes, user B (not shared) cannot, unsecure releases it to the BU default team, and every probe row and the probe matter are deleted.</criterion>
+    <criterion testable="true">Given Set-SecureRecordOwnerRolePrivileges.ps1 -Verify in dev with the new config, when run, then it reports no drift.</criterion>
+    <criterion testable="true">The secure-sync load after a full nightly pass (rows listed, duration, calls) is recorded against the listing cap and the 2-minute window.</criterion>
+    <criterion testable="true">Negative: RecordOwnershipResolver.OwnershipParentEntities and RecordOwnerAssignmentCensusTests.ChildTables are unchanged; no new mechanism, job or share code was added.</criterion>
+    <criterion testable="true">The PR links uac-r2's review; the completion record names the uac-r2 files and the origin/master commit read.</criterion>
+    <criterion testable="true">Tests cover the stated contract (secure, not secure, refused); anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-14 (amended, D-31, D-33), FR-14a (amended, D-33), NFR-11; D-33. notes/secure-signals-scoping.md is the evidence and file list. The Decision Record writer's resolver path is task 040 (built after this, deps 039); the Do-lane subjects' resolver parents are task 037 (deps 039). On the critical path to 031: 031 drops the D-15 skip, so its first write must already carry the secure ownership.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

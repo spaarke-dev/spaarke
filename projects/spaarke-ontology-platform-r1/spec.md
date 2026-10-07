@@ -253,7 +253,25 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   open, with the matter lookup rendering **blank** while the sentence tells them anyway. Live across **6
   business units**. `Spaarke Ontology Service` already holds **`Assign`**, so this needs no privilege change.
   One line now; a re-own of every row later, and invisible until then because nothing errors.
-- **FR-14a** *(added 2026-10-07, D-15)*: The evaluator **skips Restricted and Limited matters**.
+  *Amended 2026-10-07 (D-31, D-33)*: ownership is decided by the uac-r2 `RecordOwnershipResolver` with the grouping
+  matter **and the subject** as parents. **Secure** answer (a parent is owned in the `Secure Record` business unit) →
+  `ownerid` = the `Secure Record Owners` team, set **in the create** (owning BU derives from the team). **Otherwise**
+  → today's path (owner = writer, owning BU = the matter's BU). A **To Do with no matter** (D-31) takes the **To Do
+  owner's business unit** — a second, non-matter ownership path. A resolver **refusal** skips, logs and counts the
+  subject.
+- **FR-14a** *(added 2026-10-07, D-15; **amended 2026-10-07, D-33 — the Restricted/Limited skip is withdrawn**)*:
+  ~~The evaluator **skips Restricted and Limited matters**.~~ **Signals and Decision Records on Secure matters are
+  secure children** (D-33); Restricted and Limited matters get Signals normally.
+  *Amended acceptance (D-33)*: `sprk_signal` and `sprk_decisionrecord` are registered in `SecureChildLineage.cs` and
+  `config/secure-record-owner-role.json` (reviewed by the access-control project, each with a recorded live
+  refusal); a Signal or Decision Record on a Secure matter is owned by the `Secure Record Owners` team at create and
+  receives the matter's sharees within the 2-minute secure sync; unsecuring the matter releases it to the BU default
+  team; the Decision Record stays append-only (no human role holds Write/Delete, so mirrored rights are inert). The
+  **only** skip is the narrow case D-33 names: a To Do with **no matter** filed under a **Secure** project (its Decision
+  Record would have no lineage) — skipped, logged and counted. The load the nightly pass adds to the 2-minute secure
+  sync is measured. *Why*: Restricted/Limited exclude **external contacts** only (ADR-003); the staff wall is the
+  **Secure** flag (`sprk_issecure`), which the D-15 skip missed (`notes/secure-signals-scoping.md` §1).
+  *Original D-15 text, superseded:*
   *Acceptance*: no `sprk_signal` row is written for a subject whose grouping matter's Access Permission is
   Restricted or Limited — the subject is skipped, logged and counted (never an error and never a silent drop);
   a Signal that already exists on such a matter is not refreshed. Secured matters have **no** Signals in R1, so
@@ -278,7 +296,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   **Superseded** — publishing a new version closes the open Signals citing the old version as `Superseded` and
   stamps the old version's `sprk_inforceto` (D-14); where the **new** version still holds for that subject, the
   evaluator raises a **new episode** citing the new version (FR-03). **Off** (`sprk_enabled = No`): open Signals
-  close as `PolicyRetired` at the next pass. **Retire** (admin, reason required; `statuscode` Retired +
+  close as `PolicyRetired` at the next pass; switching it **On** again re-raises the subjects that still hold as new
+  episodes (*amended 2026-10-07, D-32*). **Retire** (admin, reason required; `statuscode` Retired +
   `sprk_retiredreason`): open Signals close as `PolicyRetired` **immediately**. None of the three writes a Decision
   Record; Retire and Off are audited admin changes. **The evaluator never re-closes a Signal that is already
   Resolved** — a task completed or a budget revised *through a decision* is closed as `Acted` by the commit route
@@ -367,6 +386,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   matter the caller cannot read**, and returns **only the caller's own work** in the Do lane. The widget renders a
   card list from the route's response, not `<DataGrid>`. Actions come from the policy version's **decision plan**
   (FR-49), never from the grid configuration.
+  *Amended 2026-10-07, D-33*: the read route and Do-lane scoping stand. On a Secure matter the caller's read of the
+  matter comes through its share, and the Signal itself reaches them through the mirrored share, so the two checks
+  agree. A **matterless To Do** Signal (D-31) has no matter to check: what the route checks instead is open (§11.1 O-21).
 - **FR-25**: Build **one** row component rendering **every** signal shape, with data-driven variants.
   *Acceptance*: the three signal shapes (threshold, cross-source, SLA) and the Do-lane items all render
   through the same component; **a second row component is a design failure, not a feature.**
@@ -552,6 +574,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   this grammar is still **refused at save and at evaluation** (FR-08, fail closed) and still compiles to **one**
   Dataverse filter (CM-3). A subject with no derivable matter (a task filed under a project; a To Do with no
   regarding record) never produces a Signal with a null `sprk_matter` (FR-14, D-3).
+  *Amended 2026-10-07 (D-31, D-33)*: **except a To Do**: the overdue-To-Do rule covers **all** To Dos, and a To Do with
+  no matter gets a Signal with no `sprk_matter`, owned by the To Do owner's BU (FR-14 as amended) — unless it is filed
+  under a **Secure** project, the one narrow skip (FR-14a as amended).
   *Why*: only Path B can be written or evaluated today; the Do lane, the overdue rules and the To Do subject are
   hard refusals in the validator, the compiler and the writer (#12). D-16 chose the smallest extension that keeps
   **one** evaluator.
@@ -620,7 +645,7 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
 
 #### Group M — Reading Signals and the decision wizard (D-15, D-26)
 
-- **FR-54** *(added 2026-10-07, D-15)*: **The BFF Signal read route.** The worklist (and anything else in the
+- **FR-54** *(added 2026-10-07, D-15; amended 2026-10-07, D-33 — stands unchanged in purpose; see FR-24's D-33 note)*: **The BFF Signal read route.** The worklist (and anything else in the
   Console) reads `sprk_signal` only through this route.
   *Acceptance*: the route runs the worklist configuration's FetchXML (FR-24), then removes every row whose grouping
   matter the **caller** cannot read; in the Do lane it returns **only the caller's own work**; it passes the #1312
@@ -726,9 +751,12 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   with a record-level check. A caller who cannot be resolved gets **#1312's single 403** — no new 401/503 split.
 - **NFR-11** *(added 2026-10-07; D-14, D-17, D-18, D-22, D-29)*: **Every role edit is re-verified as a union.** The
   owner-approved role edits (writer AppendTo on four tables and Create on `sprk_budgetrevision`; administrator Write
-  on `sprk_policyversion` and Create/Write/Read on `sprk_triagecategory`; Console User losing Write on `sprk_signal`)
+  on `sprk_policyversion` and Create/Write/Read on `sprk_triagecategory`; Console User losing Write on `sprk_signal`;
+  *amended 2026-10-07, D-33*: Secure Record Owner Read on `sprk_signal` and `sprk_decisionrecord`, Spaarke Basic User
+  Basic Read on both, Spaarke Ontology Service Assign on `sprk_decisionrecord` — owner only, never content)
   are each followed by the task-002 union check, and `prvWritesprk_DecisionRecord` / `prvDeletesprk_DecisionRecord`
-  stay absent from every Spaarke role.
+  stay absent from every Spaarke role. **Deploy order (D-33)**: in every environment the role edits land **before** a
+  BFF carrying the new secure-child config, or every Secure-matter create fails with `0x80040299`.
 
 ---
 
@@ -910,6 +938,7 @@ would report ~0% action rate on every Do rule, making a noisy policy and a perfe
 | **§8.1 dev seed data** | ⬜ All five tables at 0 rows. The exit triple is criterion 2's minimum input |
 | **[ISS-003](https://github.com/spaarke-dev/spaarke/issues/1050)** | ⬜ 48 `sprk_event` rows stranded in `Draft` — must land **before the Do lane ships**, or the lane under-reports |
 | **ADR-040 amendment** | ⬜ Per D-9 path B; merges before or alongside the evaluator |
+| **uac-r2 batch 4 deployed in dev** *(added 2026-10-07, D-33)* | ⬜ Its secure-share synchronizer and reconciler jobs must be running, or a Secure-team-owned Signal is readable by nobody; task 039 checks it |
 | **Merge master** | ⬜ Branch is 44+ behind and master moves fast (70 commits in hours, observed). **Merge before any deploy**, or you revert other projects' work |
 
 ### 8.2 External
@@ -920,6 +949,20 @@ App Insights (the only way to diagnose the swallow-and-log paths) · the Console
 between it and what the solution can actually do are flagged for the owner (`notes/v4-prototype-vs-solution.md`);
 its reconciliation against this spec is `notes/v4-reconciliation.md` · a communication-intelligence domain owner for
 the PR #1032 semantics review.
+
+
+### 8.3 Coordination with uac-r2 (owner rule, 2026-10-07)
+
+Every task that touches Restricted, Limited or Secure matters, record access, secure children, ownership or grants
+is coordinated with the **latest** unified-access-control-r2 code, because that project is actively changing access
+control. Such a task (tagged **[uac]** in `tasks/TASK-INDEX.md`; today 008, 024, 031, 032, 034, 036, 037, 038, 039,
+040, 042, 043, 044, 045, 046, 049, 079, 101, 104) MUST: (1) before starting, fetch `origin/master`, re-read the uac-r2
+implementation it depends on (`SecureChildLineage.cs`, `config/secure-record-owner-role.json`, `RecordOwnershipResolver`
+(I-6), `RecordRouteAccessAuthorizationFilter`, `CallerRecordAccessProbe`, `RouteAuthorizationGuardTests.Ledger.cs`,
+ADR-034 and its amendments, `ExternalCallerContext` (ADR-003)) and name the files in its completion record; (2) check
+uac-r2's open PRs and active work and run `/conflict-check`; (3) reuse uac-r2's mechanisms and never build a parallel
+one, routing any change to uac-r2-owned files through uac-r2's review with the PR linked; (4) stop and escalate if
+uac-r2's code has changed in a way that invalidates the task's plan.
 
 ---
 
@@ -1006,11 +1049,11 @@ where noted.
 
 | # | Open point | Source | Task |
 |---|---|---|---|
-| O-1 | **Severity source** — `sprk_policy.sprk_severity` column or derived in code | reconciliation C-2, #1 | 007 (blocks only the severity column) |
+| ~~O-1~~ | ✅ **Decided D-30**: a severity column on `sprk_policy` | reconciliation C-2, #1 | 007 |
 | O-2 | **Rank formula** — §11 Q1 above; whether `sprk_highpriority` is the 2nd key | C-9, W-13, W-14 | 038, 062 |
 | O-3 | **Record class** of *Reassign* and *Extend response date* | C-3 | 036 |
 | O-4 | **Initial overdue threshold** — v4's 1 day or the collector's 5 | C-6 | 061 |
-| O-5 | **Overdue To Do policy in R1**, and a To Do with no regarding matter | C-7, W-15, S-4 | 037, 061 |
+| ~~O-5~~ | ✅ **Decided D-31**: overdue-To-Do rule for all To Dos; no matter → Signal owned by the To Do owner's BU | C-7, W-15, S-4 | 037, 061 |
 | O-6 | **Work assignment "mine"** — assignee or assigner (`sprk_createdbyperson`) | C-8, #3 | 038 |
 | O-7 | Drop the row ⋮ menu (`DocumentRowMenu`) and the `OutcomeCard` extension | C-10, W-4, Z-15 | 052 |
 | O-8 | **Console Decision Record tab** in R1 | C-14 | 045 |
@@ -1022,10 +1065,11 @@ where noted.
 | O-14 | **Assistant drafts** inside the wizard (facade call vs templated drafts) | #32 | 058 |
 | O-15 | *Record the response* on a work assignment (no column; #3 recommends deactivate + record) | #3, #30 | 044 |
 | O-16 | Which identity writes the **new budget amount** onto `sprk_budget` (D-18) | D-18, #26 | 044 |
-| O-17 | Does D-15's skip also cover a matter whose Access Permission is **Secure**? | D-15 | 031 |
+| ~~O-17~~ | ✅ **Decided D-33** (replaces D-15's skip): Signals and Decision Records become secure children; one narrow skip | D-15 | 031, 039 |
 | O-18 | Does the Inquiry still stamp `sprk_responseduedate` now the SLA is deferred? | D-20 | 070 |
-| O-19 | Off → On again: does a policy's re-enable re-raise its `PolicyRetired` subjects as new episodes? | D-13 | 031 |
-| O-20 | Decision Records the communications gate writes on **Restricted/Limited** matters (D-15 covers only the evaluator) | D-15 | 042 |
+| ~~O-19~~ | ✅ **Decided D-32**: yes, still-true subjects re-raise as new episodes | D-13 | 031, 033 |
+| ~~O-20~~ | ✅ **Dissolved by D-33**: Restricted/Limited restrict only external contacts; gate records on Secure matters are secure children like any Decision Record | D-15 | 042 |
+| O-21 | A **matterless To Do** Signal / Decision Record (D-31): is `sprk_matter` Required at the platform level on either table (relax it?), what does the read route check instead of the matter, and where does the worklist group it (no MatterCard)? | D-31 | 007, 038, 059 |
 
 ---
 

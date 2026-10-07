@@ -35,10 +35,11 @@
 
   <constraints>
     <constraint source="project">Scope: every column in this task is created via the recorded Web API recipe (notes/schema-draft.md banner): explicit PascalCase SchemaName, the MSCRM.SolutionUniqueName header for OntologyPlatformSolution, DateTimeBehavior on every date column. NEVER MCP create_table or any tool without a publisher parameter (this environment's default publisher is new and logical names are immutable).</constraint>
-    <constraint source="project">Scope: create exactly these columns and no others. sprk_signal: sprk_duedate (Date Only, behaviour DateOnly; the subject's due or response date, refreshed while the Signal is open). sprk_policy: sprk_shortname (text, 100), sprk_worktype (choice; values = the v4 work types per lane listed in notes/v4-reconciliation.md W-8: Ask outside counsel, Approve or rebudget, Chase a reply, Finish or reschedule, Coming due, Chase a response), sprk_retiredreason (multiline text) plus a statuscode value Retired on the Inactive state. sprk_policyversion: sprk_decisionplan (multiline text, JSON). sprk_decisionrecord: sprk_steps (multiline text, JSON), sprk_followons (multiline text, JSON), sprk_gatetier (text, 100).</constraint>
+    <constraint source="project">Scope: create exactly these columns and no others. sprk_signal: sprk_duedate (Date Only, behaviour DateOnly; the subject's due or response date, refreshed while the Signal is open). sprk_policy: sprk_severity (choice, D-30, see the next constraint), sprk_shortname (text, 100), sprk_worktype (choice; values = the v4 work types per lane listed in notes/v4-reconciliation.md W-8: Ask outside counsel, Approve or rebudget, Chase a reply, Finish or reschedule, Coming due, Chase a response), sprk_retiredreason (multiline text) plus a statuscode value Retired on the Inactive state. sprk_policyversion: sprk_decisionplan (multiline text, JSON). sprk_decisionrecord: sprk_steps (multiline text, JSON), sprk_followons (multiline text, JSON), sprk_gatetier (text, 100).</constraint>
     <constraint source="project">Scope: sprk_dedupekey is NOT recreated. Read its current MaxLength; if the longest key ({policycode max 100}|{type}|{36-char guid}|{episode up to 6 digits}) does not fit, raise MaxLength on the existing column (an in-place metadata update; record before and after). The alternate key on sprk_dedupekey must stay Active.</constraint>
     <constraint source="project">Scope: re-key every existing sprk_signal row (dev seed only) by appending |1 to its sprk_dedupekey (D-13: existing Signals are episode 1). Record the row count before and after; zero rows is a valid result and must be recorded as such.</constraint>
-    <constraint source="project">Scope: do NOT add sprk_policy.sprk_severity in this task unless the owner has answered reconciliation C-2 (where severity comes from). It is the only v4 column whose home is undecided (spec section 11.1 O-1).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-30): add sprk_policy.sprk_severity, a choice column reusing sprk_signal.sprk_severity's values (Info 100000000, Warning 100000001, Critical 100000002; read the live option set and reuse a global option set if the Signal's is global), optional, no default. The UI labels High / Medium / Low are display only (Critical = High, Warning = Medium, Info = Low); the admin sets it per rule.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-31): a To Do with no matter gets a Signal with no sprk_matter, and every human resolution writes a Decision Record (FR-18). Read the RequiredLevel of sprk_signal.sprk_matter and sprk_decisionrecord.sprk_matter and record it. Do NOT change either in this task: whether to relax a platform-required column is open (spec section 11.1 O-21); see escalation.</constraint>
     <constraint source="project">Scope: do NOT add a separate sprk_episode column. The episode lives in the key (D-13); the writer finds the latest episode by a begins-with query on sprk_dedupekey. A column would be new surface with no failure mode to cite (root CLAUDE.md section 11).</constraint>
     <constraint source="project">Scope: no column is added to any table outside the five ontology tables (sprk_triagecategory recall columns are reconciliation C-16, undecided).</constraint>
     <constraint source="ADR-038">Scope: any test written against these columns later must be paired with something touching the real schema; this task's live describe is that evidence.</constraint>
@@ -73,7 +74,7 @@
   <escalation>
     <trigger>If any column would land under a prefix other than sprk, or in a solution other than OntologyPlatformSolution, STOP before creating it: logical names are immutable.</trigger>
     <trigger>If raising sprk_dedupekey's MaxLength would require dropping or recreating the alternate key, STOP and escalate rather than recreating it.</trigger>
-    <trigger>If the owner has not answered C-2 (severity source) when this task runs, create everything else and list sprk_policy.sprk_severity as outstanding in the notes; do not choose its home.</trigger>
+    <trigger>If sprk_signal.sprk_matter or sprk_decisionrecord.sprk_matter is ApplicationRequired or SystemRequired at the platform level, STOP after recording it and ask the owner whether to relax it for D-31's matterless To Do Signals (O-21); do not change a required level on your own.</trigger>
   </escalation>
 
   <justification>
@@ -99,11 +100,12 @@
     <criterion testable="true">Given the longest possible episode-scoped key, when compared with sprk_dedupekey's MaxLength, then it fits, and the sprk_dedupekey alternate key is Active.</criterion>
     <criterion testable="true">Given every existing sprk_signal row, when read, then its sprk_dedupekey ends in |1 (or the recorded count is zero).</criterion>
     <criterion testable="true">Negative: no sprk_episode column exists; no column was added to any table outside sprk_signal, sprk_policy, sprk_policyversion and sprk_decisionrecord.</criterion>
-    <criterion testable="true">Negative: sprk_policy.sprk_severity was created only if the owner answered C-2, and the notes say which.</criterion>
+    <criterion testable="true">Given sprk_policy.sprk_severity, when described, then it exists with exactly the Info / Warning / Critical values sprk_signal.sprk_severity uses (D-30).</criterion>
+    <criterion testable="true">Given sprk_signal.sprk_matter and sprk_decisionrecord.sprk_matter, when described, then their RequiredLevel is recorded in the notes and neither was changed by this task.</criterion>
     <criterion testable="true">notes/007-schema-verification.md carries the before and after describes.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-03 (amended, D-13), FR-48..FR-51, FR-57; section 11.1 O-1. Task 002's union check is repeated by task 008 after these adds (a column add touches the tables the append-only guarantee protects).</notes>
+  <notes>spec.md FR-03 (amended, D-13), FR-48..FR-51, FR-57; D-30 (severity, decided), D-31 (O-21 open). Task 002's union check is repeated by task 008 after these adds (a column add touches the tables the append-only guarantee protects).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

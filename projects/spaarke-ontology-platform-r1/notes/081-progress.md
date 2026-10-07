@@ -85,3 +85,9 @@ replaces this section when it reports.
 
 Note: several of these "pre-existing" failures (UI.Components, DailyBriefing, AI.Widgets) are the ones PR #1123
 fixes; after #1123 merges and master is merged here, re-baseline.
+
+
+## Final record (2026-10-07)
+
+**MERGED** as `14a5e229c` (PR #1309), owner-approved. Rounds 5-9 after the round-4 review: R4-1..R4-9 fixed; round-5 review PASS-WITH-FINDINGS (R5-1..R5-9: analyzer silent passes, guard not enforced, package-only test install, eslint directives, `||` sites, pinning tests, main.tsx, nameResolution metadata source, wizard userId frame skip) fixed in round 6; round-6 review PASS-WITH-FINDINGS (anonymous fns/IIFE/getters/dynamic import silent) fixed in round 7 + owner decision to make the guard a BLOCKING Tier 1 job; round-7 review FAIL on B1 (ci-router docs_only skipped all Tier 1 for client+doc PRs, pre-existing) - owner approved fixing the router (every-file-is-docs) in round 8 with analyzer M1/M2/m1-m5; final review PASS-WITH-FINDINGS (3,000-file cap, CHANGELOG conflict, nits) fixed in round 9. Master merges after #1312 and #1302 (TodoSection.tsx deletion kept). Guard 259/0/0 at merge.
+

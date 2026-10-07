@@ -3,7 +3,7 @@
   <metadata>
     <title>The Decision Record writer with record class and mandatory fact snapshot</title>
     <phase>4 The Decision Record</phase>
-    <gate>001, 030, 007, 036 complete</gate>
+    <gate>001, 030, 007, 036, 008, 039 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes the append-only artifact the whole defensibility story rests on; it cannot be edited after the fact.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Tasks 041 and 042 both build on the writer.</parallel-reason>
-    <deps>001, 030, 007, 036</deps>
+    <deps>001, 030, 007, 036, 008, 039</deps>
     <tags>bff-api,dataverse,decision-record</tags>
     <estimated-effort>4-5 hours</estimated-effort>
   </metadata>
@@ -43,7 +43,10 @@
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-17; reconciliation R-6, S-10; #6, #16): the writer writes ONE record per REVIEW, not per action. Its input is the review outcome from the commit route (task 043): every action the plan offered, each taken or skipped with the values used and its actual outcome, the Next steps created with their ids, the strictest gate tier among taken actions, and the resolved Signal ids. It writes sprk_steps (JSON), sprk_followons (JSON) and sprk_gatetier (task 007); sprk_actioncode = the first action taken (the catalog code; sprk_action stays the nullable lookup and is left null for catalog actions, #6); sprk_proposedaction = the offered action labels joined. It is called LAST by the commit route, after every other write succeeded; it never runs on a failed review.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-17, FR-50): sprk_recordclass comes from task 036's catalog (Dismissal when nothing was taken; Judgement when any taken action or any Next step is Judgement; Routine otherwise), never from the client and never from scattered conditionals. The decider's role and the "because" text go into sprk_factsnapshot (#16, S-10).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-33): the Decision Record is a SECURE CHILD and still APPEND-ONLY. Before the create, call RecordOwnershipResolver.ResolveOwnerAsync with the record's matter as parent (task 039 registered sprk_decisionrecord with sprk_matter as its only lineage lookup); on a Secure answer set ownerid to the Secure Record Owners team IN the create (Spaarke Ontology Service holds Assign on sprk_decisionrecord from task 008: owner only, never content); otherwise keep the writer's current ownership; on a refusal, write nothing and fail the review (the commit route reports it, no record). No human role and not the writer holds Write or Delete on sprk_decisionrecord, so the mirrored share rights are inert and append-only by privilege still holds. Do not use the 2-minute-reconcile alternative (the owner approved Assign).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-31, D-33): a record for a matterless To Do Signal has no sprk_matter (if the column is platform-required, task 007 escalates, O-21) and is not a secure child; the D-33 narrow skip means no Signal, and so no record, exists for a matterless To Do under a Secure project.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (FR-22, R-7): setting sprk_signal.sprk_decisionrecord covers every Signal the review resolves (the primary and any ticked Also-resolve Decide Signals on the same matter).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
   </constraints>
 
   <knowledge>
@@ -80,6 +83,7 @@
 
   <escalation>
     <trigger>If an action arises that maps cleanly to none of Judgement, Routine or Dismissal, STOP and escalate rather than defaulting it. Defaulting silently mis-types the Report Card, and the option set is closed.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
   <justification>
@@ -107,6 +111,8 @@
     <criterion testable="true">Negative: nothing in the writer branches on sprk_privilegeflagged.</criterion>
     <criterion testable="true">Given a review offering three actions of which two were taken and one Next step created, when written, then exactly one record exists whose sprk_steps lists all three (one skipped) with values and outcomes, sprk_followons lists the Next step id, sprk_actioncode is the first taken action and the class is Judgement.</criterion>
     <criterion testable="true">Given a review resolving a primary Signal and one Also-resolve Signal, when completed, then both Signals reference the one record.</criterion>
+    <criterion testable="true">Given a review on a Secure matter, when the record is written, then its owningteam is the Secure Record Owners team, set in the create; given a Standard, Limited or Restricted matter, then ownership is unchanged from the non-secure path (D-33).</criterion>
+    <criterion testable="true">Negative: after the D-33 change, an update to a Secure-team-owned sprk_decisionrecord row by a user holding a mirrored share is refused (append-only by privilege still holds).</criterion>
     <criterion testable="true">Negative: the writer is never invoked for a review that failed before the record step (task 043 contract), and it refuses a review whose record class cannot be derived from the catalog.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>

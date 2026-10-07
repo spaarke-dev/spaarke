@@ -1,70 +1,85 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="079" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>File the follow-up issue: extend the secure-record mirror to sprk_signal and sprk_decisionrecord</title>
-    <phase>8 Remaining cleanup and repairs</phase>
+    <title>Coordinate with uac-r2: recorded live refusals and review of the two secure-child entries</title>
+    <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>startable</gate>
     <status>not-started</status>
-    <rigor>MINIMAL</rigor>
-    <rigor-reason>Files one GitHub issue and records its URL; no code.</rigor-reason>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Cross-project coordination plus two live refusal probes in dev; no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Issue authoring from a settled decision.</model-tier-reason>
+    <model-tier-reason>Probe, record and request review against a settled decision (D-33).</model-tier-reason>
     <effort>medium</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
     <deps>none</deps>
-    <tags>documentation,issue,security</tags>
-    <estimated-effort>1 hour</estimated-effort>
+    <tags>security,coordination,dataverse</tags>
+    <estimated-effort>2-3 hours plus review wait</estimated-effort>
   </metadata>
 
-  <prompt>File one GitHub issue, addressed to the unified-access-control project, asking it to extend its secure-record mirror (SecureChildLineage) to sprk_signal and sprk_decisionrecord, and record the URL in notes/defer-issues.md.</prompt>
-  <role>SPAARKE engineer.</role>
-  <goal>An issue exists with the decision, the evidence and the R1 interim, and its URL is in notes/defer-issues.md.</goal>
+  <prompt>Record a live refusal for sprk_signal and for sprk_decisionrecord as config/secure-record-owner-role.json's howToExtend requires, then get the unified-access-control (uac-r2) project's review of the two entries task 039 will add to SecureChildLineage.cs and the owner-role config.</prompt>
+  <role>SPAARKE engineer. The other project owns these files; its review is the gate.</role>
+  <goal>Two recorded live refusals (one per table) and a uac-r2 review, accepted or with requested changes, are linked in notes; task 039 can proceed.</goal>
 
   <context>
-    <background>D-15 (spec section 9; v4-prototype-vs-solution #17): R1 skips Restricted and Limited matters in the evaluator and reads Signals only through a caller-checked BFF route; later, the access-control project's secure-record mirror is extended to sprk_signal and sprk_decisionrecord. No data migration is needed because secured matters have no Signals until then. sprk_signal is not in SecureChildLineage on master and does not appear in master's server code at all (#17).</background>
+    <background>AMENDED 2026-10-07: was "file a later-mirror issue" under D-15. D-33 (spec section 9) replaces D-15's skip: sprk_signal and sprk_decisionrecord become secure children IN R1, in two uac-r2-owned files, reviewed by uac-r2. The config's howToExtend demands a recorded live refusal before a table is added (notes/secure-signals-scoping.md section 2.5, 4.1): assigning a row of the table to the Secure Record Owners team fails with 0x80040299 Read Privilege Check For Owner while the Secure Record Owner role lacks Read on it. The refusal must be recorded BEFORE task 008 grants that Read.</background>
     <relevant-files>
-      <file role="modify">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file role="canonical-reference">config/secure-record-owner-role.json</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/secure-signals-scoping.md</file>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/079-uac-coordination.md</file>
     </relevant-files>
   </context>
 
   <constraints>
-    <constraint source="owner">Scope (D-15): the issue states the owner decision, the evidence (#17), the R1 interim (FR-14a skip, FR-54 read route), and that no data migration is needed. It is addressed to the unified-access-control project (check projects/INDEX.md for its current name and owner).</constraint>
-    <constraint source="project">Scope: file the issue only; change no code and no Dataverse metadata. Use gh with the repository's issue conventions (project-defer-issue-tracking skill).</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">Scope (D-33): one refusal probe per table in spaarkedev1, following the config's howToExtend exactly: create a probe row (via the writer or the BFF application user), attempt to assign it to the Secure Record Owners team, capture the 0x80040299 refusal, delete the probe row. Run BEFORE task 008's Secure Record Owner edit; if 008 has already applied it, STOP (escalation).</constraint>
+    <constraint source="owner">Scope (D-33): the review package sent to uac-r2 contains the two exact entries from notes/secure-signals-scoping.md section 4.1 (re-checked against live describe), the two refusals, the three D-33 role edits and the deploy-order rule, the writer change summary, the "not in R1" items (OwnershipParentEntities unchanged; RecordOwnerAssignmentCensusTests.ChildTables not extended; sprk_createdbyperson stamping), and the load-measurement plan. Address it to the uac-r2 owner named in projects/INDEX.md.</constraint>
+    <constraint source="project">Scope: no code change and no role change in this task.</constraint>
   </constraints>
 
   <knowledge>
-    <topic>Deferred work tracking</topic>
+    <topic>uac-r2 coordination</topic>
     <files>
-      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
-      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/secure-signals-scoping.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
       <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+      <file>projects/INDEX.md</file>
     </files>
   </knowledge>
 
   <steps mode="prescriptive">
-    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
-    <step order="1">Draft the issue body; file it with gh.</step>
-    <step order="2">Record the URL in notes/defer-issues.md.</step>
-    <step order="3">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8; fetch origin/master; re-read the uac-r2 files and record their commit; check uac-r2's open PRs and active work; run /conflict-check.</step>
+    <step order="1">Confirm the Secure Record Owner role still lacks Read on both tables; run the two refusal probes and delete the probe rows.</step>
+    <step order="2">Record both refusals with timestamps and error codes in notes/079-uac-coordination.md.</step>
+    <step order="3">Send the review package to uac-r2 (issue or PR comment); link it in notes.</step>
+    <step order="4">Record uac-r2's answer (accepted, or the changes requested) and hand it to task 039.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
   </steps>
 
+  <escalation>
+    <trigger>If the Secure Record Owner role already holds Read on either table before the probe, STOP: the refusal can no longer be recorded honestly; ask the owner and uac-r2 how to evidence it.</trigger>
+    <trigger>If uac-r2 rejects either entry or asks for a uac-r2 code change, STOP and bring it to the owner (the fallback in scoping section 6 is a skip keyed on the Secure flag, not applied without the owner).</trigger>
+    <trigger>If the uac-r2 code has changed in a way that invalidates the scoping note's plan, STOP and escalate.</trigger>
+  </escalation>
+
   <tools>
-    <tool name="gh">GitHub CLI</tool>
+    <tool name="dataverse-mcp">Probe rows and refusal capture</tool>
+    <tool name="gh">uac-r2 open PRs; the review request</tool>
   </tools>
 
   <outputs>
-    <output type="doc">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/079-uac-coordination.md</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given GitHub, when the issue is opened, then it names sprk_signal and sprk_decisionrecord, cites D-15 and #17, states the R1 interim and that no migration is needed.</criterion>
-    <criterion testable="true">notes/defer-issues.md lists the issue URL.</criterion>
-    <criterion testable="true">Negative: no code or Dataverse change was made.</criterion>
+    <criterion testable="true">Given each of sprk_signal and sprk_decisionrecord, when the probe assign to the Secure Record Owners team ran, then a 0x80040299 refusal is recorded with time and payload, before any Secure Record Owner Read grant, and the probe row was deleted.</criterion>
+    <criterion testable="true">Given the review package, when read, then it contains the two entries, both refusals, the three role edits with the deploy-order rule, the writer change summary, the not-in-R1 items and the load plan, and a link to where uac-r2 received it.</criterion>
+    <criterion testable="true">uac-r2's answer is recorded in notes and referenced by task 039.</criterion>
+    <criterion testable="true">Negative: no code, role or config change was made by this task.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-14a, FR-54; D-15.</notes>
+  <notes>spec.md FR-14a (amended, D-33), NFR-11; D-33. Was the D-15 "later mirror" follow-up issue; no longer a deferral.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

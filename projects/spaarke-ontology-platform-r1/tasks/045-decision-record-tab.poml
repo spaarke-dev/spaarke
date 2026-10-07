@@ -30,10 +30,11 @@
   </context>
 
   <constraints>
-    <constraint source="project">Scope: the list is a sprk_gridconfiguration row on the shipped DataGrid framework; reads go through a caller-authorized path (D-15 applies to Decision Records on secured matters the same way: the evaluator writes none there in R1).</constraint>
+    <constraint source="project">Scope: the list is a sprk_gridconfiguration row on the shipped DataGrid framework; reads go through a caller-authorized path. Decision Records on Secure matters are secure children (D-33, tasks 039/040) and reach only the matter's sharees through mirrored shares; the tab must not read them with a service identity.</constraint>
     <constraint source="project">Scope: no edit or delete affordance on any row (FR-21, R-13).</constraint>
     <constraint source="project">Scope: Open opens task 058's wizard read-only on that record's item; nothing else is built.</constraint>
     <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
   </constraints>
 
   <knowledge>
@@ -56,6 +57,7 @@
 
   <escalation>
     <trigger>Reconciliation C-14 (is a Console Decision Record tab in R1?) is NOT decided. Do not start until the owner answers; on a no, set this task to deferred with the owner's answer in notes.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
   <justification>

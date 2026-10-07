@@ -3,16 +3,16 @@
   <metadata>
     <title>Signal writer accepts Do-lane subjects: event, To Do, work assignment</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
-    <gate>007, 008, 024 complete</gate>
+    <gate>007, 008, 024, 039 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes secured Dataverse rows for three new subject types; a wrong grouping matter is a data-exposure or worklist-grouping bug that does not error.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Extends task 030's closed derivation set with the same verified pattern; the security judgement was made in FR-14 and D-15.</model-tier-reason>
+    <model-tier-reason>Extends task 030's closed derivation set with the same verified pattern; the security judgements were made in FR-14, D-31 and D-33.</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>M</parallel-group>
+    <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>007, 008, 024</deps>
+    <deps>007, 008, 024, 039</deps>
     <tags>bff-api,dataverse,security,signals</tags>
     <estimated-effort>4-5 hours</estimated-effort>
   </metadata>
@@ -34,13 +34,15 @@
   <constraints>
     <constraint source="owner">Scope (D-16): add sprk_event, sprk_todo and sprk_workassignment to the closed grouping-matter derivation set, each via its sprk_regardingmatter lookup, read as the writer. sprk_servicerequest stays refused. Do not infer a matter by any other path.</constraint>
     <constraint source="owner">Scope (D-16): decide what a subject filed under a project (sprk_regardingproject set, sprk_regardingmatter empty) does: either SKIP it (logged + metered, no Signal) or group it under the project's matter if the project carries exactly one matter lookup. Implement the choice, and FLAG it to the owner in the PR description and notes with the live count of such subjects in spaarkedev1.</constraint>
-    <constraint source="project">Scope: a To Do with NO regarding matter and no project is NOT decided (spec section 11.1 O-5). Skip it (logged + metered, never a null sprk_matter) and list it as an open point; do not group it under any other record.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-31): the overdue-To-Do rule covers ALL To Dos. A To Do with NO regarding matter (and not filed under a Secure root) gets a Signal with no sprk_matter, owned by the writer with owningbusinessunit = the To Do OWNER's business unit: a second, non-matter ownership path, read back and verified like the matter path. If sprk_signal.sprk_matter is platform-required (task 007 records it), STOP (escalation; spec section 11.1 O-21).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-33): call task 039's resolver path with the grouping matter (if any) AND the subject as parents for every new subject type. A Secure answer (for example a To Do or event under a Secure project or work assignment) makes the Secure Record Owners team the owner, mirrored through the subject's lineage (sprk_regardingtodo / sprk_regardingevent / sprk_regardingworkassignment). The ONE skip is D-33's narrow case: a To Do with no matter filed under a Secure project (skip, log, meter). Restricted and Limited are never skipped.</constraint>
     <constraint source="project">Scope: sprk_signal.sprk_duedate = sprk_event.sprk_duedate (D-27; never sprk_finalduedate), sprk_todo.sprk_duedate, or sprk_workassignment.sprk_responseduedate. Write it on create AND refresh it on reconcile while sprk_signalstatus is Open or Acknowledged; never change it on a Resolved Signal (it is the date the Signal last saw, which D-13's date-change rule compares).</constraint>
     <constraint source="project">Scope: everything task 030 guarantees still holds for the new subjects: create-first then reconcile, owning business unit from the grouping matter read back and verified, typed regarding lookup plus the ADR-024 trio in one call, lowercase brace-stripped ids, refusals logged at Error with EventId and metered, the dedicated writer identity only.</constraint>
     <constraint source="project">Scope: the dedupe key format and the episode are NOT changed here; task 031 changes BuildDedupeKey (D-13). Do not edit BuildDedupeKey in this task.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: column-name assertions for the three subjects are paired with the live seam test.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
   </constraints>
 
   <knowledge>
@@ -62,9 +64,9 @@
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
     <step order="1">Count, live, the event / To Do / work-assignment rows that have sprk_regardingmatter, only a project, or neither.</step>
-    <step order="2">Add the three derivation branches and the due-date mapping; implement the project-filed choice and the matterless skip.</step>
+    <step order="2">Add the three derivation branches and the due-date mapping; implement the project-filed choice, the D-31 no-matter To Do path and the D-33 resolver call and narrow skip.</step>
     <step order="3">Refresh sprk_duedate on reconcile for open Signals only.</step>
-    <step order="4">Unit tests for each subject, the project-filed choice, the matterless skip and the resolved-Signal freeze; seam tests creating and reconciling one Signal per subject type as the writer against spaarkedev1, cleaned up afterwards.</step>
+    <step order="4">Unit tests for each subject, the project-filed choice, the D-31 no-matter To Do path, the D-33 secure answer and narrow skip, and the resolved-Signal freeze; seam tests creating and reconciling one Signal per subject type as the writer against spaarkedev1, cleaned up afterwards.</step>
     <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
     <step order="6">Record any deviation from this POML, and the project-filed decision with its count, in projects/spaarke-ontology-platform-r1/notes/.</step>
   </steps>
@@ -72,6 +74,7 @@
   <escalation>
     <trigger>If the writer gets an access-denied creating a Signal for any of the three subjects after task 008, STOP and report the privilege; do not request or add one.</trigger>
     <trigger>If a project carries more than one matter, or none, the group-under-project's-matter option is not available: skip and flag; do not pick one.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
   <tools>
@@ -89,7 +92,9 @@
     <criterion testable="true">Given each subject, when written, then sprk_signal.sprk_duedate equals the subject's sprk_duedate (event, To Do) or sprk_responseduedate (work assignment).</criterion>
     <criterion testable="true">Given an open Signal whose subject's date changed, when reconciled, then sprk_duedate is refreshed; given a Resolved Signal, when reconciled, then sprk_duedate is unchanged.</criterion>
     <criterion testable="true">Given a subject filed only under a project, when written, then the implemented choice applies (skip with log+metric, or the project's single matter), and the notes record the choice and the live count.</criterion>
-    <criterion testable="true">Negative: a To Do with no regarding matter and no project produces no Signal and is logged and metered.</criterion>
+    <criterion testable="true">Given a To Do with no regarding matter and no Secure root, when written, then a Signal exists with no sprk_matter, owned by the writer with owningbusinessunit = the To Do owner's business unit, verified by read-back (D-31).</criterion>
+    <criterion testable="true">Given a To Do or event filed under a Secure project or work assignment and a matter, when written, then the Signal is owned by the Secure Record Owners team (D-33); given a To Do with no matter filed under a Secure project, then no Signal is written and the skip is logged and metered.</criterion>
+    <criterion testable="true">Negative: no subject on a Restricted or Limited matter is skipped.</criterion>
     <criterion testable="true">Negative: a sprk_servicerequest subject is still refused; BuildDedupeKey is unchanged in the diff.</criterion>
     <criterion testable="true">Given the writer identity, when the seam test runs for each subject against spaarkedev1, then create and reconcile both succeed and the test rows are removed.</criterion>
     <criterion testable="true">Tests cover the stated contract and edge cases; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
