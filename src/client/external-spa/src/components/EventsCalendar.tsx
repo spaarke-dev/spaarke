@@ -175,45 +175,50 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Map Dataverse sprk_status option set value to a human-readable label.
- * Status values are from the internal EventsPage pattern.
+ * Map the event's `sprk_status` wire value to a label. The BFF reads it from the
+ * event's status of record, Dataverse `statuscode` (task 097 review F2 — the same
+ * column POST /api/v1/events/{id}/complete writes; `sprk_eventstatus` is not used).
+ * Live option set, verified 2026-10-05. An unknown or missing value is shown as
+ * such — never defaulted to "Open".
  */
+const EVENT_STATUS_LABELS: Record<number, string> = {
+  1: 'Draft',
+  659490001: 'Open',
+  659490002: 'Completed',
+  659490003: 'Closed',
+  659490004: 'Cancelled',
+  659490005: 'Transferred',
+  659490006: 'On Hold',
+  659490007: 'Reassigned',
+  2: 'No Further Action',
+};
+
 function getEventStatusLabel(status: number | null | undefined): string {
-  switch (status) {
-    case 1:
-      return 'Open';
-    case 2:
-      return 'In Progress';
-    case 3:
-      return 'Completed';
-    case 4:
-      return 'Cancelled';
-    default:
-      return 'Open';
-  }
+  if (status === null || status === undefined) return 'Unknown';
+  return EVENT_STATUS_LABELS[status] ?? 'Unknown';
 }
 
 /**
- * Map status to Fluent Badge color.
- * Follows internal EventsPage colour conventions.
+ * Map status to Fluent Badge color (statuscode values; see EVENT_STATUS_LABELS).
  */
 function getEventStatusColor(
   status: number | null | undefined
 ): 'brand' | 'success' | 'warning' | 'danger' | 'informative' | undefined {
   switch (status) {
-    case 1:
+    case 659490001: // Open
       return 'brand';
-    case 2:
+    case 659490006: // On Hold
+    case 659490007: // Reassigned
       return 'warning';
-    case 3:
+    case 659490002: // Completed
+    case 659490003: // Closed
       return 'success';
-    case 4:
+    case 659490004: // Cancelled
       return 'danger';
-    default:
-      return 'brand';
+    default: // Draft, Transferred, No Further Action, unknown
+      return 'informative';
   }
 }
-
 // ---------------------------------------------------------------------------
 // Date formatting helpers
 // ---------------------------------------------------------------------------
@@ -373,7 +378,7 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
       const payload: CreateEventPayload = {
         sprk_name: title.trim(),
         ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
-        sprk_status: 1, // Open
+        // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
       };

@@ -52,6 +52,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-13: A Dataverse `$select` is all-or-nothing — one bad column name blanks the entire control](#g-13-a-dataverse-select-is-all-or-nothing)
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
+- [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
 
 ---
 
@@ -1112,3 +1113,13 @@ every read that carries a value — and in-memory doubles that serialize the sha
 ---
 
 *Established 2026-05-14 by project `ai-procedure-quality-r1` (task 013). Cross-reference: [.claude/CHANGELOG.md](CHANGELOG.md) for the entry stream.*
+
+### G-17: A test that pins a cache-version constant to an exact value
+
+> **Added 2026-10-06** by `unified-access-control-r2` task 172 (#1011).
+
+**What happens.** A cache key carries a version constant so a deploy can retire entries whose meaning changed. A test that asserts `CacheVersion.Should().Be(N)` passes on the day it is written, then fails on the next change that legitimately bumps the version. That makes a correct bump look like a regression. In task 172, `AccessCacheFaultCachingTests` pinned the membership resolver cache version at exactly 5, and the needed bump to 6 failed it.
+
+**Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
+
+---

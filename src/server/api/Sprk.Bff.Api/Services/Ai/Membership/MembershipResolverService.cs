@@ -91,6 +91,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// keeps them from being served after the deploy — the "bump REQUIRED" case below.
     /// </para>
     /// <para>
+    /// <b>Bumped 5 → 6 by task 172 (GitHub #1011)</b> — the "bump REQUIRED" case below: the options hash is
+    /// unchanged, but the query's semantics changed (the Owner column now also binds the caller's teams), so a
+    /// pre-deploy entry would be served as a valid answer for up to <see cref="CacheTtl"/> with team-owned records
+    /// missing from the <c>owner</c> role.
+    /// </para>
+    /// <para>
     /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
     /// question came up and the answer was non-obvious). This constant and
     /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
@@ -113,7 +119,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// authorization decision.
     /// </para>
     /// </summary>
-    internal const int CacheVersion = 5;
+    internal const int CacheVersion = 6;
 
     /// <summary>
     /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in
@@ -640,14 +646,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// plane, because the registry can only declare Contact/Organization types.
     /// </para>
     /// <para>
-    /// ⚠️ <b><c>owningteam</c> is the load-bearing one, not <c>ownerid</c></b> — records in this
-    /// deployment are owned primarily at team / business-unit level (owner, 2026-09-17). Discovery binds
-    /// the FIRST target matching <c>IncludedIdentityTables</c>, whose order starts at
-    /// <c>systemuser</c>, so a polymorphic Owner column always resolves to <b>SystemUser</b> and is bound
-    /// against the caller's own <c>SystemUserId</c>. On a team-owned record <c>ownerid</c> holds the
-    /// TEAM's id, so that condition never matches; the access arrives via <c>owningteam</c> →
-    /// <c>Team</c> → <c>identity.TeamIds</c>. Keying on <c>ownerid</c> alone would look like a fix and
-    /// confer nothing.
+    /// ⚠️ <b>Team ownership arrives through BOTH <c>owningteam</c> and, since task 172 (GitHub #1011),
+    /// <c>ownerid</c></b> — records in this deployment are owned primarily at team / business-unit level
+    /// (owner, 2026-09-17; D-11, 2026-09-22). Until task 172, discovery bound only the FIRST target of
+    /// the polymorphic Owner column (<c>systemuser</c>), so <c>ownerid</c> was compared against the
+    /// caller's own <c>SystemUserId</c> only and a team-owned record matched through <c>owningteam</c>
+    /// alone. Discovery now emits <c>ownerid</c> as SystemUser AND Team; both descriptors pass here by
+    /// NAME. On a team-owned row <c>owningteam</c> = <c>ownerid</c> (platform-maintained), so on a table
+    /// where <c>owningteam</c> is discovered the Team leg of <c>ownerid</c> selects exactly the rows
+    /// <c>owningteam</c> already selects — the access set is unchanged; what changes is that the Owner
+    /// column's own role (<c>owner</c>) now carries them, for callers that narrow by role or identity type.
     /// </para>
     /// <para>
     /// Residual worth knowing: <c>TeamIds</c> comes from the <c>teammembership</c> query in
@@ -766,6 +774,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
             if (!string.Equals(registeredType, d.IdentityType, StringComparison.OrdinalIgnoreCase))
             {
+                // Task 172 (#1011): discovery emits one descriptor per matched identity type of a POLYMORPHIC
+                // column. When ANOTHER descriptor of this same field carries the registered type, this one is
+                // simply the column's other type — dropped (only the registered type confers; never widened),
+                // and not a stale entry, so no warning.
+                if (discovered.Any(other => !ReferenceEquals(other, d)
+                        && string.Equals(other.Field?.Trim(), d.Field.Trim(), StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(other.IdentityType, registeredType, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
                 // The registry's assertion about this column's type disagrees with what live discovery
                 // just resolved (e.g. the column's target table changed since the registry was last
                 // reviewed). Malformed/stale — log and ignore rather than trust either side blindly.
@@ -787,6 +806,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// The user-valued ownership columns that name exactly ONE person. <c>ownerid</c> is polymorphic: on a
     /// team-owned row it holds the team's id, so the SystemUser binding (the caller's own id) never matches it — a
     /// team-owned row is never selected through ownership. <c>owninguser</c> is user-only by construction.
+    /// <para>
+    /// Since task 172 (GitHub #1011) discovery emits <c>ownerid</c> TWICE — SystemUser and Team. Only the SystemUser
+    /// descriptor is admitted here (the check below is on the name AND the identity type); the Team descriptor falls
+    /// through and selects nothing, so this surface stays exactly what ADR-034 A3 fixed.
+    /// </para>
     /// </summary>
     private static readonly HashSet<string> PersonOwnershipColumns =
         new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owninguser" };

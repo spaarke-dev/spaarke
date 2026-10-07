@@ -29,6 +29,7 @@ import {
   applyResolverFields,
   findNavProp,
   discoverNavProps,
+  toNavPropMap,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
@@ -667,11 +668,21 @@ export class WorkAssignmentService {
         entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
       }
 
-      // Assigned To (systemuser)
+      // Assigned To (contact) -- task 097. `sprk_event.sprk_assignedto` targets CONTACT
+      // in the live schema (nav prop `sprk_AssignedTo`). The former
+      // `findNavProp(navProps, 'systemuser', 'assignedto')` matched no assignedto
+      // column, fell back to the FIRST systemuser lookup (`createdby`) and bound the
+      // picked user there -- the assignee was silently dropped on every follow-on
+      // event. Resolved by exact column (sprk_event has five contact lookups whose
+      // names contain "assignedto"), never by substring.
       if (eventState.assignedToId) {
-        const assignedNavProp = findNavProp(navProps, 'systemuser', 'assignedto');
+        const assignedNavProp = toNavPropMap(navProps)['sprk_assignedto'];
         if (assignedNavProp) {
-          entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${cleanGuid(eventState.assignedToId)})`;
+          entity[`${assignedNavProp}@odata.bind`] = `/contacts(${cleanGuid(eventState.assignedToId)})`;
+        } else {
+          console.warn(
+            '[WorkAssignmentService] sprk_event.sprk_assignedto nav-prop not found; follow-on event assignee not set'
+          );
         }
       }
 

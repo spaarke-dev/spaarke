@@ -305,8 +305,7 @@ internal sealed class TodoRegardingBuilder
     /// Returns a RELATIVE URL — the host origin is resolved by the model-driven
     /// app at click time. No org URL or tenant id is hard-coded here.
     /// </remarks>
-    internal static string BuildRecordUrl(string entityLogicalName, string recordId)
-    {
-        return $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
-    }
+    internal static string BuildRecordUrl(string entityLogicalName, string recordId) =>
+        // One server-side owner of the ADR-024 record-URL format (task 097 review F3b): sprk_event uses it too.
+        RegardingRecordType.BuildRecordUrl(entityLogicalName, recordId);
 }

@@ -10,7 +10,9 @@
 //      .OrganizationService.Execute) — protected virtual seam allows unit-test
 //      subclasses to bypass Dataverse without inventing a new interface.
 //   3. Classify each Lookup attribute:
-//        a. Targets[]-intersects-configured-identity-tables → keep
+//        a. Targets[]-intersects-configured-identity-tables → keep — ONE descriptor
+//           per matched identity type, in target order (task 172 / #1011: the
+//           polymorphic Owner column yields SystemUser + Team)
 //        b. matches GlobalFieldExclusions → ExcludedField (reason="global-exclusion")
 //           (unless per-entity IncludedFields force-includes it — reason="override")
 //        c. matches per-entity ExcludedFields → ExcludedField (reason="per-entity-exclusion")
@@ -73,7 +75,16 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
     internal const string CacheResource = "membership-discovery";
 
     /// <summary>Cache schema version per ADR-009.</summary>
-    private const int CacheVersion = 1;
+    /// <remarks>
+    /// <b>Bumped 1 → 2 by unified-access-control-r2 task 172 (GitHub #1011).</b> The cache KEY is
+    /// unchanged (tenant + entity type), but the cached VALUE's shape changed: a polymorphic lookup now
+    /// yields one descriptor per matched identity type (<c>ownerid</c> → SystemUser AND Team) instead of
+    /// one. A v1 entry is still addressable under the same key, so without the bump a pre-deploy
+    /// single-descriptor result would be served for up to <see cref="MembershipOptions.MetadataCacheTtlMinutes"/>
+    /// (60 min) and team-owned records would keep resolving to nobody. The bump orphans every v1 entry;
+    /// they expire on their own TTL.
+    /// </remarks>
+    internal const int CacheVersion = 2;
 
     // Strip trailing decimal digits from a logical name suffix, e.g.,
     // "assignedattorney1" → "assignedattorney". Matches the CamelCase strategy
@@ -91,6 +102,9 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
     // filter drops them (Owner/Customer are separate AttributeTypeCode values
     // but the SDK exposes them without a distinct LookupAttributeMetadata
     // subclass; see FetchLookupAttributesAsync rationale block for evidence).
+    // ORDER is load-bearing for determinism only, not for which type binds: since
+    // task 172 (#1011) the classifier emits a descriptor for EVERY configured target,
+    // in this order (SystemUser first, then Team).
     private static readonly IReadOnlyList<string> OwnerAttributeTargets =
         new[] { "systemuser", "team" };
     private static readonly IReadOnlyList<string> CustomerAttributeTargets =
@@ -279,27 +293,35 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                 continue;
             }
 
-            // Find the FIRST target that matches a configured identity table.
-            // Most lookups have exactly one target; polymorphic lookups (e.g.,
-            // customerid → account/contact) are rare on membership-bearing
-            // fields and an operator-curated identity list should disambiguate.
-            string? matchedTarget = null;
-            string? matchedIdentityType = null;
+            // Collect EVERY target that matches a configured identity table, in the
+            // target array's order, one per identity type (unified-access-control-r2
+            // task 172, GitHub #1011). Most lookups have exactly one target and are
+            // unaffected. A POLYMORPHIC lookup binds every identity type its targets
+            // admit — above all the Owner column, whose synthetic targets are
+            // { systemuser, team } (OwnerAttributeTargets): it becomes a SystemUser
+            // descriptor AND a Team descriptor for the same field and role, so a
+            // TEAM-owned row (ownerid = the team's id) resolves to that team's
+            // members. Before this, the scan stopped at the first hit, `ownerid`
+            // was always SystemUser-only, and a team-owned record resolved to
+            // nobody through its Owner column — while team ownership is the product
+            // convention (owner decision D-11, 2026-09-22).
+            // Consumers that need ONE descriptor per field (the people-targeting
+            // surface, the reconciliation job) select or de-duplicate explicitly.
+            var matches = new List<(string Target, string IdentityType)>(1);
             foreach (var target in lookup.Targets ?? Array.Empty<string>())
             {
                 if (string.IsNullOrWhiteSpace(target))
                 {
                     continue;
                 }
-                if (identityTypeByTable.TryGetValue(target.Trim(), out var idType))
+                if (identityTypeByTable.TryGetValue(target.Trim(), out var idType)
+                    && !matches.Any(m => string.Equals(m.IdentityType, idType, StringComparison.OrdinalIgnoreCase)))
                 {
-                    matchedTarget = target.Trim();
-                    matchedIdentityType = idType;
-                    break;
+                    matches.Add((target.Trim(), idType));
                 }
             }
 
-            if (matchedTarget is null || matchedIdentityType is null)
+            if (matches.Count == 0)
             {
                 // Capture the first concrete target (if any) for operator visibility.
                 var visibleTarget = (lookup.Targets ?? Array.Empty<string>())
@@ -329,17 +351,25 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                 source = isForceIncluded ? "override" : "auto";
             }
 
-            discoveredFields.Add(new MembershipDescriptor(
-                Field: field,
-                Role: role,
-                IdentityType: matchedIdentityType,
-                TargetTable: matchedTarget,
-                Source: source));
+            foreach (var (matchedTarget, matchedIdentityType) in matches)
+            {
+                discoveredFields.Add(new MembershipDescriptor(
+                    Field: field,
+                    Role: role,
+                    IdentityType: matchedIdentityType,
+                    TargetTable: matchedTarget,
+                    Source: source));
+            }
         }
 
-        // Stable ordering for deterministic admin-endpoint output. By field
-        // ascending — matches the design.md report-endpoint example shape.
-        discoveredFields.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
+        // Stable ordering for deterministic admin-endpoint output and FetchXml
+        // (FR-14). By field ascending — matches the design.md report-endpoint
+        // example shape. OrderBy is a STABLE sort, so the descriptors of one
+        // polymorphic field keep the target array's order (ownerid: SystemUser,
+        // then Team); List.Sort is unstable and could reorder them run to run.
+        discoveredFields = discoveredFields
+            .OrderBy(d => d.Field, StringComparer.Ordinal)
+            .ToList();
         excludedFields.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
         ignoredFields.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
 
