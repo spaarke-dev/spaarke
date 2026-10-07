@@ -348,7 +348,16 @@ public sealed class MembershipReconciliationJob : IScheduledJob
         try
         {
             var discoveryResult = await discovery.DiscoverAsync(entityType, ct).ConfigureAwait(false);
-            descriptors = discoveryResult.DiscoveredFields;
+            // Task 172 (GitHub #1011): discovery emits one descriptor per matched identity type of a
+            // polymorphic column (ownerid → SystemUser AND Team). This job works PER FIELD — it projects the
+            // column once, keys the orphan scan by field, and types each value from its own
+            // EntityReference.LogicalName (ReadLookupAsIdentity) — so it keeps ONE descriptor per field (the
+            // first, in discovery's stable order). Without this, ToDictionary below threw on the duplicate
+            // key and every value of a polymorphic column was dispatched twice.
+            descriptors = discoveryResult.DiscoveredFields
+                .GroupBy(d => d.Field, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
         }
         catch (OperationCanceledException)
         {
@@ -771,8 +780,9 @@ public sealed class MembershipReconciliationJob : IScheduledJob
     /// Task 152 (ADR-034 A3): an <see cref="EntityReference"/> value is typed from its OWN
     /// <see cref="EntityReference.LogicalName"/> — a team-valued <c>ownerid</c> is a Team, a user-valued one a User.
     /// The descriptor's type is only the fallback for a bare <see cref="Guid"/> value. Typing from the descriptor
-    /// recorded every team-owned row's team id as a User, because the polymorphic Owner column always DISCOVERS as
-    /// SystemUser (ADR-034 A1.1) — and it made this writer and the create-time publishers key one membership two ways.
+    /// recorded every team-owned row's team id as a User, because the polymorphic Owner column then DISCOVERED as
+    /// SystemUser only (ADR-034 A1.1; since task 172 it discovers as SystemUser AND Team, and this job keeps the first)
+    /// — and it made this writer and the create-time publishers key one membership two ways.
     /// </remarks>
     internal static (Guid? personId, PersonIdentityType? personIdType)
         ReadLookupAsIdentity(Entity parent, MembershipDescriptor descriptor)
