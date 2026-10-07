@@ -113,13 +113,14 @@ AI-search trimming for contacts (finding A-21 → AI/indexing owner) · field-le
 > - **Where the rest went:** the old file is archived verbatim at `notes/handoff-history/current-task-archive-2026-10-06.md`. Items the conversion could not classify are in `notes/handoff-history/2026-10-06-conversion-review.md`; resolve them when convenient.
 > - **Going forward:** add a new standing directive or gotcha HERE (one dated bullet), not in `current-task.md`.
 >
-> **Also new, repo-wide:** task-execute Step 9.5 "Finding triage and round limits" generalizes this project's owner rounds 56/59.
-> - F1–F4 fix-now / K1–K4 known-limit.
-> - At most 2 fix rounds, each re-verifying the fix diff only.
-> - 1 verifier pass per task (2 for auth/security/tenant-isolation).
-> - Escalate any F1 still open instead of starting round 3.
+> **Also new, repo-wide:** task-execute Step 9.5 "Finding triage and review scope" generalizes this project's owner rounds 56/59. 🔴 **Corrected by the owner 2026-10-06 (PR #1336). The earlier "at most 2 fix rounds, never start round 3" is WITHDRAWN.**
+> - F1–F4 fix-now / K1–K4 known-limit. A K class never holds a confirmed real-path defect.
+> - **The limits cut review CEREMONY, never FIXING.** Fix → re-verify the fix diff plus its direct callers and callees → repeat until no F-class finding remains. There is no round cap on fixing.
+> - One full verifier pass per task (two for auth/security/tenant-isolation). Every later re-check covers the fix diff only.
+> - **Every defect found is fixed in scope, or filed and reported to the owner.** This holds whether the work caused it directly or indirectly, or only uncovered it (pre-existing code, another lane's code, config, data). Owner: "this is critical".
+> - Escalate when fixes are not converging, or when the fix needs an owner decision. Never on a round count.
 >
-> The skill files reach this worktree on the next master merge (`work/procedure-throughput-fixes-r1`); the rules apply now.
+> The skill files reach this worktree on the next master merge; the rules apply now.
 >
 > Already elsewhere, so not repeated here: the Opus pin, the session-cwd rule, the workflow-agent SendMessage ban and the finding bar (rounds 56/59) are in project memory; full integration suites, publish size and `/conflict-check` are in the sections above. Decisions are recorded as numbered rounds in `notes/session27-owner-decisions-and-research.md`.
 

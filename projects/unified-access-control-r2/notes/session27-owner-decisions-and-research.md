@@ -1104,6 +1104,14 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Action:** task 172 created (`tasks/172-membership-resolver-team-owned-owner-column.poml`). Bind every matched identity type of a polymorphic lookup; the people-targeting surface (A3, task 152) stays byte-identical; the C-1 name-keyed allowance stays. Regression test: a team-owned record resolves to that team's members. PR text uses "refs #1011" only.
 - **Owed to spaarkeai-word-add-in-r1:** whether any Office-route access result changes (their saves create team-owned `sprk_document` / `sprk_todo`). Answered from task 172's step-0 trace.
 
+## Round 74 (2026-10-06): BINDING. OWNER correction of the review round limits
+
+- **Withdrawn:** "at most 2 fix rounds; escalate any F1 still open instead of starting round 3" (the 2026-10-06 hygiene rule, CLAUDE.md standing directives, repo task-execute Step 9.5). The owner: "we should never allow known broken code to not be fixed just because it takes more than 2 rounds ... the policy change was to avoid unnecessary testing checks and pseudo fixes."
+- **In force:** limits cut review ceremony, never fixing. That means fix-diff-scoped re-checks, one full verifier pass (two for auth/security), no speculative findings and no pseudo-fixes. Fixing continues until no F-class finding remains. Escalate on non-convergence or an owner-only decision.
+- **Also binding:** every defect found is fixed directly or surfaced to the owner, "whether or not it was directly or indirectly caused by the current work or only uncovered or found in the course of the work ... this is critical."
+- **Applied:** project CLAUDE.md; project memory; repo-wide PR #1336.
+- **Consequence for task 171:** the round-2 re-verify findings V1–V7 are all fixed in a further round, then a fix-diff-scoped check.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
