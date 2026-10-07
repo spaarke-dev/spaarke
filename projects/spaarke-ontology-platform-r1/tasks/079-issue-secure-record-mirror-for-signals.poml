@@ -4,7 +4,7 @@
     <title>Coordinate with uac-r2: recorded live refusals and review of the two secure-child entries</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Cross-project coordination plus two live refusal probes in dev; no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,6 +80,10 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-14a (amended, D-33), NFR-11; D-33. Was the D-15 "later mirror" follow-up issue; no longer a deferral.</notes>
+
+  <completion>
+    2026-10-07 (STANDARD rigor). DONE: steps 0-3. Refusals recorded for sprk_signal and sprk_decisionrecord (0x80040299, 3 of 3 polls each, before task 008's grant; probes deleted and confirmed gone). Review requested from uac-r2 via GitHub issue 1355 (no live-session listing available). PENDING: step 4 (uac-r2 answer) and step 5 (TASK-INDEX marker plus POML status completed, deferred until the answer is in). Evidence: notes/079-uac-coordination.md. uac-r2 files read on origin/master dbc58d139 (lineage and role config last changed d254d7166).
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
