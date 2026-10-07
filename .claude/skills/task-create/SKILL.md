@@ -350,6 +350,13 @@ FOR each new-component task:
 
 **Audit trail**: tasks with hollow or missing `<justification>` are blocked from code review per CLAUDE.md §11. The `code-review` skill Step 6.6 verifies justification concreteness at PR time.
 
+**Anti-patterns this catches** (real examples from chat-routing-redesign-r1; moved verbatim from root CLAUDE.md §11 on 2026-10-07):
+- ❌ "Delete LegalWorkspace `CreateRecordStep.tsx` as dead code per OC-R4-05" — retirement doc actually preserves it as library; cost-of-doing-nothing was assumed wrongly
+- ❌ "Add new `sprk_playbookcode` lookup keys" — `sprk_playbookid` already exists as the immutable opaque ID; existing-question unanswered
+- ❌ "Build 8 retrieval tool handlers" — 7 of 8 fail extension test for the MVP use case; one excellent handler beats five that partially overlap
+
+Cost-of-rule: one paragraph per new component. Cost-of-rule-absence: shipped scope creep.
+
 **Component-complexity check (per [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md))** — for any task that creates a new component OR **materially grows an existing one**, evaluate **complexity/cohesion, not line count**:
 - If the task would add a **second (or Nth) responsibility** to an already-multi-purpose component, design the task to **extract the diverging responsibility into the right seam** up front — don't accrete another concern onto a god-class. (Prefer extending a *cohesive* component; don't manufacture thin components to dodge a size number.)
 - A large file is **not** a defect by itself — a large, single-responsibility/cohesive component (state machine, exhaustive mapping, generated code) is legitimate; note it in the task if relevant.

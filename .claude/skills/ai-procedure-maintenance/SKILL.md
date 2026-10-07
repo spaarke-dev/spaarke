@@ -101,10 +101,9 @@ When creating a new Architecture Decision Record:
      → Step 3.4: Tag-to-Knowledge Mapping table
      → Step 3.5: ADR mapping section
 
-□ 9. UPDATE root CLAUDE.md (if ADR adds critical constraint)
-   Location: /CLAUDE.md
-   Section: "Architecture Decision Records (ADRs)" table
-   Action: Add summary row for high-impact ADRs
+□ 9. UPDATE .claude/adr/INDEX.md (NOT root CLAUDE.md — it has no ADR table)
+   Add a root CLAUDE.md §17 trigger ONLY if agents must read the ADR before a specific
+   action they would not otherwise connect to it — one line, ≤ 200 chars (see Checklist F).
 
 □ 10. UPDATE CROSS-REFERENCE-MAP.md
    Location: /CROSS-REFERENCE-MAP.md
@@ -188,14 +187,18 @@ When adding a code pattern:
 The `.claude/protocols/AIP-00x` layer was **removed 2026-07-08**. It duplicated the executable skills, was dropped from root CLAUDE.md in the 2026-05-17 rewrite, and had drifted (stale context thresholds). Do **not** recreate a standalone `protocols/` layer. Execution/behavioral rules now live in exactly two load-bearing surfaces:
 
 ```
-□ Behavioral RULE the agent must apply every turn (context thresholds, escalation triggers,
-  task-execution flow) → root /CLAUDE.md (the always-loaded layer)
+□ Behavioral RULE the agent must apply every turn (escalation triggers, task-execution
+  routing, review limits) → root /CLAUDE.md (the always-loaded layer)
+
+□ RULE that applies only when editing certain files → .claude/rules/{name}.md with
+  `paths:` frontmatter (loads when Claude reads/edits a matching file). Example: bff-hygiene.md.
 
 □ Procedural HOW-TO the agent runs on demand (task-create, task-execute, code-review, adr-check)
   → the relevant .claude/skills/{name}/SKILL.md
 
-When in doubt, follow root CLAUDE.md §18: binding rule applied every turn → CLAUDE.md;
-reference/tutorial/procedure → skill or docs/. There is no third "protocol" home.
+When in doubt, follow the maintainer notes at the top of root CLAUDE.md (§18): binding
+every-turn rule → CLAUDE.md; path-specific rule → .claude/rules/; reference/tutorial/procedure
+→ skill or docs/. There is no "protocol" home.
 ```
 
 ### Checklist E: New Skill
@@ -230,14 +233,12 @@ When creating a new skill:
    Add: Skill to interaction matrix
    Update: Workflow diagrams if needed
 
-□ 5. UPDATE root CLAUDE.md
-   Location: /CLAUDE.md
-   Section: "AI Agent Skills" → Trigger Phrases table
-   Add: Trigger phrase → skill mapping
+□ 5. TRIGGER PHRASES go in the skill's own frontmatter (`description`, `appliesTo`) and in
+   .claude/skills/INDEX.md — NOT root CLAUDE.md (it has no skills, trigger or slash-command
+   tables; Claude Code lists skills from their frontmatter).
 
-□ 6. ADD slash command (if user-invocable)
-   Location: /CLAUDE.md → Slash Commands table
-   Add: /{skill-name} with description
+□ 6. Add a root CLAUDE.md §17 trigger only if the skill MUST run before an action an agent
+   would not otherwise connect to it (one line, see Checklist F)
 
 □ 7. VERIFY tags use standard vocabulary
    Reference: .claude/skills/INDEX.md → Standard Tag Vocabulary
@@ -262,6 +263,14 @@ When modifying the main instruction file:
 
 □ 3. UPDATE "Last Updated" dates
    All affected files should have current date
+
+□ 4. RESPECT the budget and placement rules in the maintainer notes (HTML comment at the
+   top of root CLAUDE.md): < 200 lines and ≤ 30 KB; one-line §17 triggers; no findings,
+   history or aging numbers; never renumber sections. Path-specific rules go to
+   .claude/rules/; the full doc catalogue is docs/INDEX.md.
+
+□ 5. STATE the byte delta in the .claude/CHANGELOG.md entry, and run /doctor prompt-audit
+   (Claude Code ≥ 2.1.283) after the change.
 
 □ 4. RUN consistency check
    Grep for old paths that might have been left behind
