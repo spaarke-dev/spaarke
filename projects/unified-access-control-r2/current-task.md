@@ -1,97 +1,87 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite this file at each checkpoint, never prepend; keep it ≤10 KB. Standing rules live in the project `CLAUDE.md` ("Standing directives & gotchas"). Decisions live in `notes/session27-owner-decisions-and-research.md` (numbered rounds). Narrative goes in checkpoint commit messages. The old journal is `notes/handoff-history/current-task-archive-2026-10-06.md`: grep it, never load it.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–77) and `notes/decisions.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-06 ~23:50 UTC (checkpoint #20, before /compact).
+> **Last Updated**: 2026-10-07 ~20:00 UTC (checkpoint #21, before /compact; the owner is about to test on dev).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 5 started. **Task 171** (broker-only SPE document bytes + JIT Office edit) is DRAFT PR **#1333**, branch `task/uac-r2-171`, worktree `C:\wt171`. 116/168 tasks complete. |
-| **Status** | 2026-10-07. **114** MERGED #1342 (`d437b9738`) and DEPLOYED to dev. In order: guest flags (2 `#EXT#` users, owner-approved), then the BFF, web resources `access_ribbon.js` 1.6.0 and `assignedaccess_postsave.js` 1.1.0, then TrackingFieldTrio 1.0.36. **Ribbon step BLOCKED:** `Set-AccessRibbon.ps1 -Verify` finds no `Mscrm.Form/HomepageGrid.<entity>.Share` button live. Agent `exec114` is fixing it on `fix/uac-r2-114-share-ribbon`, along with the TrackingFieldTrio `pack.ps1` version. **171 hotfix** PR #1353: the verifier found `tid` read only in short form (prod maps it long, so every upload would fail); agent `exec171` is fixing it, then a re-check, merge and deploy, then re-test the attach on the kept rows (PS 31e232ae docs 2b97180e, b02ebe33; BU doc 08cbce55). **172 done.** Drift-script fix #1358 merged. Procedure update done: work branch merged with master; CLAUDE.md restructured (`b350f2ec7`). |
-| **Next Action** | (1) When `exec171` reports: run ONE narrow re-verification of the round-2 diff only, plus its direct callers and callees (171 is security work: 2 verifier passes allowed, both now used). Any F1 left open is ESCALATED, never a round 3. Then apply its F4 schema/FLS script and backfill on dev in the order it gives (owner-approved by round 72), mark #1333 ready, merge on Router green, deploy the BFF and the DocumentUploadWizard code page, and run 171's live checklist (`notes/task-171-broker-only-document-bytes.md` on that branch: A–J, D0, C2). (2) **The owner is ready for the screen session NOW** (list below); run it right after /compact. (3) The owner approved deleting the 20 empty test SPE containers: give the owner SharePoint-admin commands (`Remove-SPOContainer`), because the BFF has no delete route. (4) Then batch 5: 154 → 113, 114 (round 67), 105, 101 → 064 → 153, 067 → 099 → 036 → 090. |
+| **Task** | Batch 5. Tasks 171 (broker-only SPE bytes + JIT Office edit) and 114 (`sprk_isexternal` eligibility + Restricted) are MERGED and DEPLOYED to dev, and wait only on owner UI checks. Task 172 (#1011) is COMPLETE. Index: 117 done · 17 wip · 17 open · 10 cancelled · 5 deferred · 3 escalated. |
+| **Status** | **The owner is testing on dev now.** No agent is running. One PR is open: **#1368**, a script/doc change: `Set-AccessRibbon -Apply` retries its post-publish verify, plus the dev-BFF name corrected in `auth-azure-resources.md`. Router passed; one legacy check was pending at checkpoint. |
+| **Next Action** | (1) Merge #1368 once no check is pending (`gh pr merge 1368 --squash`). (2) Collect the owner's test results; fix or file every defect found (§3 rule). (3) Then batch 5: 154 → 113, 105, 101 → 064 → 153, 067 → 099 → 036 → 090. 036's ADR-034 amendment is approved (round 75). |
 
-## Owner decisions
-- **Decided in round 72:**
-  - F4: add the locked `sprk_graphitemidbound` copy.
-  - F10: refuse share-link on secure and Restricted records.
-  - "Modified by" = the BFF app is accepted.
-  - The test containers are to be deleted.
-- **Owner said "not following, but ok" (2026-10-06). Explain plainly and confirm the concrete action before changing any app setting (a change restarts the BFF; do it AFTER the screen session):**
-  - G146-3: name the admin who receives ownership-hold alerts (`Communication__OwnershipHoldAlertUserIds__0`; proposed: the owner's own systemuser).
-  - 137: set `ExternalAccess:Reconciliation:WritesEnabled=true` on dev (the report shows 0 changes; it also enables R4's deactivations).
-- **Decided round 75:** 036's ADR-034 path B amendment APPROVED (owner delegated: approve ADR decisions consistent with the project's objectives).
-- **Still pending:**
-  - Accept 133(e)'s `sharesRestored` as proven by tests.
-  - Close 166's reporting gates as "not configured" and Redis-down as proven by tests.
-  - Is the Copilot agent deployed in dev (164 j/d)?
+## Dev state (master `dc189faac`, deployed 2026-10-07)
+- **Contains:** 171 + hotfix #1353 (upload binding, 0x80048306 = no access, current-version content), 172 (#1337), 114 (#1342) and the ribbon fix #1366.
+- **171 rollout done:**
+  - `sprk_graphitemidbound` schema + FLS;
+  - backfill 544/544;
+  - `DocumentPointer__ItemIdBoundBackfillComplete=true`;
+  - `sprk_documentuploadwizard` page deployed.
+- **114 rollout done:**
+  - guest flags on 2 `#EXT#` users, including the owner's hotmail guest, owner-approved;
+  - BFF;
+  - `access_ribbon.js` 1.6.0 + `assignedaccess_postsave.js` 1.1.0;
+  - TrackingFieldTrio 1.0.36;
+  - the Access ribbon (`SpaarkeAccessRibbons`, `-SecureTransitionDeployed`), whose read-only `-Verify` PASSED.
+- **Live re-tests PASSED:** upload then attach on secure and BU; another user's file 403 `NotTheUploader`; JIT removal after a full unshare (`jit.removed: 1`). Record: `notes/batch5-live-gates-2026-10-07.md`.
+- **Test data kept:**
+  - PS `31e232ae…` (secure; docs 2b97180e, b02ebe33);
+  - BU project `fb73b08c…` (docs 08cbce55, d4300ad0).
+  - testuser1 holds the creator share on PS.
 
-## Owner screen session (~2.5–3 h)
-- **CIAM:** 136/037/039/135, 137's observations, 140's invite flows (needs 3–4 CIAM identities), 157's grid walk.
-- **Workforce sign-in:** 141 G-8 (test.user@demo.spaarke.com; a guest token).
-- **Wizards and forms:** 047 (one secure Create Project), 142 G-7 + UX, 147 G147-4/6, 150 G-10 + UI tests, 168 (h), 169 probes (the invoice form has a To Do subgrid), 163 d/e, 164 b/g/f/l/m, 166 27 (wizard).
-- **Setup:** a BU1 SPE admin user (165 leaf gates); a second non-admin login (reset `uac.child.user` or another user); a second non-admin WITHOUT the Create privilege (166 f).
-- **Before the CIAM session (status unknown):** `POST /api/v1/external-access/invite-and-grant` returned 500 on 2026-09-25, with two 500 paths (onboard vs grant). Reproduce with an ALREADY-invited email (a fresh one sends a real invitation). Nothing records a fix.
-- **API smoke checks still owed (dev writes on test records):**
-  - 098: `set-record-share-expiry`, then read back `sprk_expiresdate` for the exact date.
-  - R15: create and read through `POST /api/v1/external/projects/{id}/documents`. The field names and the case-sensitive `sprk_Project@odata.bind` have never run live, and gate 23 now locks `sprk_graphdriveid`, which that route writes.
+## Owner checks still owed (what "wip" waits on)
+- **171 (Word, browser):**
+  - B1 Word web/desktop editability on a secure doc;
+  - B3 SharePoint refusing a Read-only user;
+  - C3 how long saves keep working after removal;
+  - D3 user create/enable/disable and flag removal;
+  - E contact plane (CIAM);
+  - G Office add-in save;
+  - H desktop change detection;
+  - J1 the wizard offers only "Keep both";
+  - J4 demo self-registration marker.
+- **114 (UI):** Share hidden on a Restricted record's form and in a grid selection that includes one; Manage Access shows "External user — no access"; after the job's first runs, `no-internal-reader` / `owner-is-external` reports go to an admin.
+- **Other wip lanes (unchanged):**
+  - CIAM: 136/037/039/135, 137's observations, 140's invites, 157's grid walk;
+  - 141 G-8 (013);
+  - wizards and forms: 047, 142 G-7, 147 G147-4/6, 150 G-10, 168 (h), 169 probes, 163 d/e, 164 b/g/f/l/m, 166 27.
+  - 143's gate 14 needs task 154.
+- **Setup owed:** a BU1 SPE admin (165 leaf gates); a second non-admin login; a non-admin without Create (166 f).
+- **Before CIAM:** reproduce the 2026-09-25 invite-and-grant 500 with an ALREADY-invited email.
+- **API smoke checks owed:** 098 `set-record-share-expiry` read-back; R15 `POST /api/v1/external/projects/{id}/documents`.
 
-## Branches and environment
-- **Work branch** `work/unified-access-control-r2` holds notes and tasks only, and is **314 commits BEHIND master** (2026-10-06). Never build here (CLAUDE.md).
-- **Master and dev BFF:** `cc96ea6d7` (#1332). Deployed today, in order: #1312 → #1314 → #1319 → #1320 → #1322 → #1327 + #1328 → #1332. Deploy from a fresh short-path master worktree.
-- **171:** `task/uac-r2-171`, worktree `C:\wt171`, master merged in; builds clean; 1,950 overlap-area tests + 809 arch tests pass after the merge.
-- **Live gates:** run as `testuser1@spaarke.com` (non-admin, BU1, `sprk_isexternal` = false). Token via `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`. Gate helpers and the per-group results G1–G9 are in the session scratchpad `gates\` (COMMON.md, INVENTORY*.md). The durable record is `notes/batch4-live-gates-2026-10-06.md`.
-- **Held by the owner:** the Power BI workspace id stays unset (reporting answers 503); `PowerBi__ClientSecret` stays a plain setting.
-- **Kept on purpose:** `C:\wtD\scripts\logs\` holds the batch-4 deploy backups and manifests. Don't remove `C:\wtD`.
+## Pending owner decisions
+- **Hook cap:** raise `.claude/hooks/reinject-project-state.ps1`'s 15,000-char cap (CLAUDE.md §2+§3+§6 are at 14,817), or prune to add rules.
+- **Settings:** set `ExternalAccess:Reconciliation:WritesEnabled=true` (137 + R4) and `Communication__OwnershipHoldAlertUserIds__0` (G146-3)? Explain plainly and confirm first; it restarts the BFF.
+- **Smaller:** 133(e) proven by tests; 166's reporting gates "not configured" and Redis-down proven by tests; is the Copilot agent deployed in dev (164 j/d)?
+- **#1350:** share-link returns 502 on every standard document (SPE refuses the link). Retire the route or replace it with an in-app link?
+- **Containers:** the owner runs `scratchpad\gates\Remove-TestContainers.ps1 -WhatIfOnly`, then without the switch, as a SharePoint admin, to delete 21 empty test containers.
 
-## Task status
-- **🔄 wip, completes at live gates (15):** 137, 140, 142, 143, 146, 147, 150, 157, 162, 163, 164, 165, 166, 168, 169. Each list above names what is left. 143's gate 14 needs task 154 first.
-- **🔲 open:**
-  - 171 (PR #1333);
-  - batch-5 KEEPs 154, 113, 114, 105, 101, 064, 153, 067, 099, 036;
-  - merged-into-gate items 013 (141 G-8), 037/039/136 (CIAM session), 047 (wizard), 058 (090), 066 (067);
-  - 090 wrap-up.
-- **Completed 2026-10-06:** 003, 132, 133, 148, 149, 156, 158, 159, 160, 161, 167.
+## Open issues filed this session (not this project's code, or not yet scheduled)
+- #1339: membership `byRole` attribution.
+- #1340: role/identity vocabulary.
+- #1343: the Spaarke Demo team holds System Administrator; owner said not deliberate.
+- #1344: CA2024 breaks `Spaarke.sln -warnaserror`.
+- #1345: ui-components jest failures on master.
+- #1350: share-link 502.
+- #1351: the SPE admin user grant doesn't bind the UPN.
+- #1352: the sync job reports Failed because of 65a3fab2/#1313.
+- **Earlier:** #1313 (do NOT mint a secret), #1317, #1318, #1324–1326, #1293, #969, #974, #1290, #1303–1307, #1310.
+- **Minor fix candidates (2026-10-06):** a playbook sharing revoked team shows as Read; "Unknown Team" (`/api/data/teams(id)` is missing `v9.2/`); a raw 403 on a failed push child.
+- **#1094:** cpo-r1 hand-offs INCOMING-141/145 delivered; track until acknowledged.
 
-## Open follow-ups and issues
-- **cpo-r1 hand-offs** INCOMING-141 and INCOMING-145, plus the batch-4 schema check: delivered on #1094 2026-10-06 (issuecomment-6028915048). Track until acknowledged.
-- **#1313:** the Model 1 SPE config has no secret. Do NOT mint one (CLAUDE.md; cpo-r1 D16).
-- **Other issues:**
-  - #1317: insert-template returns raw XSLT (email-r5).
-  - #1318: provisioning seeder lookup filter.
-  - #1324: notification Condition node.
-  - #1325: AI catalog drift.
-  - #1326: matter-health-single schema/index.
-  - #1293: DRAFT, open; rebase after #1123.
-  - #969: CI lane.
-  - #974: open.
-  - #1290 and #1303–1307, #1310.
-- **Minor (f) fix candidates found 2026-10-06:**
-  - playbook sharing info shows a revoked team as Read (mask 0 → Read);
-  - shared teams show "Unknown Team" (`/api/data/teams(id)` is missing `v9.2/`);
-  - a failed push child shows a raw 403 message.
-- **Known limits (2026-10-06):**
-  - inherited-share ledger rows (158) of a deleted filed work assignment aren't retired;
-  - R4 doesn't scan `sprk_invoice`/`sprk_recordtype` grant lookups;
-  - 171's limits are listed in its note.
-- **#1314 follow-ups:**
-  - `/disable` doesn't survive a restart;
-  - the `pac` bash shim;
-  - `deploy-spaarke-ai.yml` fails ("Could not resolve react");
-  - orphan `sprk_OpenDocumentQuickCreate` and the empty "Upload Documents" form;
-  - the `Create_Task_From_Email` schema (missing `dueDate`);
-  - the thread `sprk_regardingreportcard` fault on send.
-- **Unticked items in `notes/batch4-integration-steps.md`:** one F3 check, 6 external-SPA `tsc` errors, the 160 A5 note, and CHANGELOG entries. Reconcile them at 090.
-- **Deferred tests and notes for 090:** ISS-032 (search-filter oid regression test), ISS-033 (bare 401 ProblemDetails), in `notes/defer-issues.md`.
-- **Housekeeping:**
-  - consumed worktrees `C:\wt4i`, `C:\wv*`/`C:\wvs*`;
-  - ~169 agent worktrees under `C:/code_files/spaarke/.claude/worktrees`;
-  - undeletable `wf_*` folders.
+## Branches and worktrees
+- **Work branch:** `work/unified-access-control-r2`, merged with master 2026-10-07 (`9589680a3`). Task and fix work still happens in fresh short-path worktrees from `origin/master`.
+- **Deploy worktree:** `C:\wtR2` (master `dc189faac`, clean).
+- **Older worktrees:** C:\wt171, C:\wt172, C:\wt172m, C:\wt172b, C:\wt114, C:\wt114s, C:\wt114v, C:\wtatt, C:\wtR, C:\wtDS — all merged or used; remove at leisure (`cmd /c rmdir` any `node_modules` junction first).
+- **Keep:** `C:\wtD\scripts\logs\` (batch-4 deploy backups).
+- **Remove by hand:** `C:\wt114m` (undeletable leftover).
+- **Agents this session (all finished):** exec171, exec172, exec114, and the verifiers.
+- **Rule breach to remember:** exec171 once pushed with `locksverify` disabled. It acknowledged, and nothing was changed in config.
 
 ## Key notes
-- `notes/session27-owner-decisions-and-research.md` (rounds 1–71)
-- `notes/batch4-live-gates-2026-10-06.md`
-- `notes/batch5-scope-review-2026-10-05.md`
-- `notes/handoffs/INCOMING-141*.md`, `INCOMING-145*.md`
-- `notes/handoff-history/2026-10-06-conversion-review.md` (with this session's resolutions)
+- `notes/batch5-live-gates-2026-10-07.md` (171/172/114 live record)
+- `notes/task-171-broker-only-document-bytes.md`, `notes/task-114-isexternal-eligibility.md`, `notes/task-172-team-owned-owner-column.md` (on master)
+- `notes/decisions.md` (index + superseded rules), `notes/batch4-live-gates-2026-10-06.md`
