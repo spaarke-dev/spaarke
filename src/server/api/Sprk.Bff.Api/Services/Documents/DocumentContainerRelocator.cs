@@ -2003,6 +2003,16 @@ public sealed class DocumentContainerRelocator
                     "it no longer names the source");
             }
 
+            // Task 171 round 74 (K1): the other row's item must be the one the BFF bound to IT — a move-along re-points the
+            // row and writes a matching copy, so moving a forged pointer along would launder it. Same rule as the main path.
+            if (_resolver.ItemBindingRefusal(row, entry.SourceItem) is { } bindingRefusal)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] Document {Other} is NOT moved along: {Reason}. Nothing is re-pointed.", other, bindingRefusal);
+                return DocumentRelocationOutcome.Of(other, RelocationState.SourceUnverified, entry.SourceDrive, entry.SourceItem,
+                    targetDrive, null, bindingRefusal + " — an administrator must repair it; it is not moved");
+            }
+
             var ledger = RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn));
             if (ledger is null)
             {

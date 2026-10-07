@@ -1076,6 +1076,26 @@ public class DocumentContainerRelocatorTests
         rig.LedgerOf(OtherDocumentId).Should().BeNull();
     }
 
+    [Fact(DisplayName = "Round 74 K1: a row named for move-along whose item DIFFERS from its field-secured copy is not moved along, and the source is not deleted on its account")]
+    public async Task MakeSecure_AMoveAlongRowWithAMismatchedCopy_IsNotRepointed()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var other = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item, id: OtherDocumentId);
+        other[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = "01THEITEMTHEBFFBOUNDTOTHEOTHERROW";
+        world.Rows[("sprk_document", OtherDocumentId)] = other;
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        var outcome = result.Outcomes.Should().ContainSingle().Subject;
+        outcome.MovedAlong.Should().ContainSingle().Which.State.Should().Be(RelocationState.SourceUnverified);
+        rig.ItemOf(OtherDocumentId).Should().Be(Item, "a forged pointer is never moved along — and so never re-bound");
+        rig.DriveOf(OtherDocumentId).Should().Be(CustomerAContainer);
+        rig.Copies.Should().ContainSingle("only the document's own file was copied");
+        world.ItemFacts(CustomerAContainer, Item).Should().NotBeNull("a row still names the source, so it is not deleted");
+    }
+
     [Fact]
     public async Task ALedgerEntryWithoutAWitness_NeverDeletesOrCopiesItsSource()
     {
