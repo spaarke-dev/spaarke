@@ -120,6 +120,11 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.38 (task 114, unified-access-control-r2 — owner test round 2, 2026-10-07): dark mode. The control and the
+ *   Manage Access modal (which renders inside this control's FluentProvider) hard-coded `webLightTheme`; they now use
+ *   `resolveThemeWithUserPreference` and re-render on a theme change (`setupThemeListener`), per ADR-021. While a
+ *   lookup is open the modal now dims without turning see-through.
+ *
  * v1.0.37 (task 114, unified-access-control-r2 — owner test feedback 2026-10-07):
  * - `pickUser` honours the modal's `excludeExternal` (set on a Restricted record): the "+ User" lookup leaves out
  *   users flagged `sprk_isexternal = true` (blank counts as internal), and the pick carries the user's email so the
@@ -163,7 +168,6 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import {
   FluentProvider,
-  webLightTheme,
   Dialog,
   DialogSurface,
   DialogBody,
@@ -195,6 +199,9 @@ import {
   type AccessPermissionState,
   resolveAccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
+// Spaarke theme resolution (ADR-021 dark mode): the user's Spaarke theme choice, then the MDA's own theme — the same
+// helpers the Communication PCFs use.
+import { resolveThemeWithUserPreference, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 // Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
 // host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
 // passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
@@ -325,6 +332,8 @@ function getClientUrl(): string {
 }
 
 export class TrackingFieldTrio implements ComponentFramework.StandardControl<IInputs, IOutputs> {
+  /** Removes the theme-change listeners added in `init` (dark mode, task 114 owner test 2026-10-07). */
+  private themeListenerCleanup?: () => void;
   private container: HTMLDivElement;
   private notifyOutputChanged: () => void;
   private context: ComponentFramework.Context<IInputs>;
@@ -434,6 +443,9 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // Read the record's Secure flag for the Access Permission gate (task 138) — also not awaited; until it
     // answers, the modal state is the fail-closed Limited.
     this.ensureSecureFlag();
+
+    // Re-render when the user switches the Spaarke theme (same tab or another tab).
+    this.themeListenerCleanup = setupThemeListener(() => this.renderControl(), context);
 
     this.renderControl();
   }
@@ -1235,7 +1247,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.37 • Built 2026-10-07',
+      versionText: 'v1.0.38 • Built 2026-10-07',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -1295,7 +1307,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     ReactDOM.render(
       React.createElement(
         FluentProvider,
-        { theme: webLightTheme, style: { width: '100%' } },
+        { theme: resolveThemeWithUserPreference(this.context), style: { width: '100%' } },
         React.createElement(
           React.Fragment,
           null,
@@ -1467,6 +1479,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   }
 
   public destroy(): void {
+    this.themeListenerCleanup?.();
     // React 16 API per ADR-022 - use unmountComponentAtNode, NOT root.unmount()
     ReactDOM.unmountComponentAtNode(this.container);
   }
