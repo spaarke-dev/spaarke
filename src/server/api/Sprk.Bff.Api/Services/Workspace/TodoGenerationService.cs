@@ -1184,6 +1184,17 @@ public sealed class TodoGenerationService : IScheduledJob
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Internal test seam (task 097 round 11): injects the two Dataverse services that <c>ExecuteAsync</c> otherwise
+    /// resolves lazily (<c>TryEnsureDependencies</c>), so <see cref="RunGenerationPassAsync"/> can run against fakes
+    /// without reflection into private fields (tests/CLAUDE.md B8). The production path never calls it.
+    /// </summary>
+    internal void SetDataverseForTest(IDataverseService dataverse, IEventDataverseService events)
+    {
+        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _events = events ?? throw new ArgumentNullException(nameof(events));
+    }
+
+    /// <summary>
     /// Internal test seam (task 146): injects the ownership resolver that <c>ExecuteAsync</c> otherwise resolves
     /// lazily, so creation paths can run without the BackgroundService loop — the same shape as
     /// <see cref="SetRegardingBuilderForTest"/>.

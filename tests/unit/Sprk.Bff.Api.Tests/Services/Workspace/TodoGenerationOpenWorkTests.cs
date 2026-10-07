@@ -449,10 +449,8 @@ public class TodoGenerationOpenWorkTests
             _logger,
             Options.Create(new TodoGenerationOptions { EnableEventSourcedGeneration = eventSourced }));
 
-        typeof(TodoGenerationService).GetField("_dataverse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(svc, _dataverse.Object);
-        typeof(TodoGenerationService).GetField("_events", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!
-            .SetValue(svc, _events.Object);
+        svc.SetDataverseForTest(_dataverse.Object, _events.Object);
+
         svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(
             _comm.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
