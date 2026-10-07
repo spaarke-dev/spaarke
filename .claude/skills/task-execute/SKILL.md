@@ -732,7 +732,7 @@ SKIP quality gates IF:
     → The SKIP block above does NOT apply.
     → Reason: prevents wiring-test antipatterns and KEEP-path violations per ADR-038 + spec FR-B07.
     → This override is binding for ≥6 months from 2026-06-26 (cultural reset window).
-    → Path-check enforcement: any deletion under a KEEP path — `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**`, `tests/unit/domain/**`, `tests/Spaarke.ArchTests/**` (ADR-038 §2) — requires a same-PR replacement covering the same scenario (FR-B06).
+    → Path-check enforcement: any deletion under a KEEP path — `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**`, `tests/unit/domain/**`, `tests/Spaarke.ArchTests/**` (ADR-038 §2) — requires a same-PR replacement covering the same scenario (FR-B06), or — for an orphaned test whose subject was deleted — the evidence ADR-038 Amendment A3 lists, which code-review verifies in the diff.
 
 UPDATE current-task.md:
   - Add "Quality Gates" section:

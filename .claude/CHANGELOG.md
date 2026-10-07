@@ -24,7 +24,7 @@ The owner's rule: *"we want guardrails but not such strong constraints that we c
 
 **Open loops → stopping conditions:** failed wave tasks are retried only after the cause is named and addressed; an unexplained failure is escalated.
 
-**Not changed (owner decision pending):** KEEP-path deletion stays unconditional — ADR-038 requires a same-PR replacement even when the tested feature is removed. Allowing "the scenario no longer exists" would need an ADR-038 amendment (root §6.5 path B).
+**ADR-038 Amendment A3 (owner-ratified 2026-10-07): orphaned and detached tests.** An orphaned test (its subject was *deleted*, not moved) may be deleted without a same-PR replacement when the PR carries evidence: the deletion named; the behaviour not continuing elsewhere; a retirement test for a removed route or security path; invariants still in force re-targeted; no dependent tests; verified at code-review. A detached test (re-creates the logic in the test file, calls no production code) is rewritten against production code or deleted. Retirement tests and ArchTests are never orphans. Applied in ADR-038 §2/§6, `constraints/testing.md`, `tests/CLAUDE.md`, `task-execute` Step 9.5, `TEST-ARCHITECTURE.md` and `test-diet` (new ORPHAN / DETACHED classes and checks 13–14).
 
 **Hard stops given a reason or an escalation path:** HIGH CVE with no upstream fix (`.claude/rules/bff-hygiene.md` item 5: advisory ID, reachability, follow-up, owner sign-off — the finding stays open until the sign-off exists); Plan Mode in a non-interactive session (Steps 0–1.7 read-only, then stop with a report); the 6-agent cap (API-overload guard); ≥ 60 MB publish size (roll back, extract, or ADR-029 amendment); provisioning Step 0.5 failures (record, remediate, resume).
 

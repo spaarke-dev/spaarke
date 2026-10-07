@@ -26,7 +26,7 @@ Load when:
 
 ### 1. Eight KEEP path categories (deletion-protected)
 
-Tests under these eight paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
+Tests under these eight paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario — unless the test is **orphaned** (its subject was deleted, not moved) and the PR carries the evidence ADR-038 **Amendment A3** lists: deletion named, behaviour not continuing elsewhere, a retirement test for a removed route or security path, invariants still in force re-targeted, no dependent tests, verified at code-review. Tests that exercise no production code (**detached**) are rewritten against production code or deleted (A3). Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
 
 | Path | Category | What lives here |
 |---|---|---|

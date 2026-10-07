@@ -29,7 +29,7 @@ tests/
 └── Spaarke.ArchTests/**  # structural fitness functions (eighth KEEP path, ADR-038 Amendment A1)
 ```
 
-Removing a file under any KEEP path requires a same-PR replacement covering the same scenario (enforced at code-review, `task-execute` Step 9.5).
+Removing a file under any KEEP path requires a same-PR replacement covering the same scenario (enforced at code-review, `task-execute` Step 9.5). **Exception — orphaned tests** (ADR-038 Amendment A3): when the code a test exercises is *deleted* (not moved, renamed or re-routed), the test may go without a replacement if the PR names the deletion, says the behaviour does not continue elsewhere, adds a retirement test for a removed route or security path (`tests/integration/regression/*RouteRetirementTests.cs`), re-targets any invariant that still applies, and no other test depends on the file. Retirement tests themselves are never orphans. **Detached tests** — ones that re-create the logic in the test file and never call production code — are rewritten against production code or deleted.
 
 **Where they compile.** The seven `integration/*` and `unit/domain` folders have no project file of their own; they are compiled into `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` (`Compile Include` per folder). The globs already exist: a new file under a KEEP folder needs no csproj change, and a second identical glob breaks the build (NETSDK1022 — it happened once, from two branches each adding it). `Spaarke.ArchTests` is its own project and is **not** in `Spaarke.sln`.
 
