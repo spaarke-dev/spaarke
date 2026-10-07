@@ -542,6 +542,61 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Clear();
         _fixture.Conflicts.Clear();
         _fixture.RestampQueue.Children.Clear();
+        _fixture.Attribution.Recorded.Clear();
+        _fixture.Attribution.RecordFaults = false;
+    }
+
+    [Fact(DisplayName = "Attach fix: a record-keyed small upload records the created item as uploaded FOR THE CALLER")]
+    public async Task Put_RecordsTheItemForTheCaller()
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt", new ByteArrayContent([1]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var recorded = _fixture.Attribution.Recorded.Should().ContainSingle().Subject;
+        recorded.Session.Should().BeFalse();
+        recorded.Target.Should().Be("item-155", "the item id Graph returned for the upload");
+        recorded.Drive.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
+        recorded.Caller.Should().NotBeNullOrWhiteSpace("the binding names the signed-in caller");
+    }
+
+    [Fact(DisplayName = "Attach fix: when the upload binding cannot be recorded the upload answers 503 — a file nobody can attach is not reported as uploaded")]
+    public async Task Put_WhenTheBindingCannotBeRecorded_Is503()
+    {
+        _fixture.Attribution.RecordFaults = true;
+
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt", new ByteArrayContent([1]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
+        body.Should().Contain("upload_attribution_unavailable");
+    }
+
+    [Fact(DisplayName = "Attach fix: an upload session records its exact target for the caller BEFORE it opens, with conflict behaviour fail")]
+    public async Task UploadSession_RecordsItsTarget_AndUsesFail()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf", content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var recorded = _fixture.Attribution.Recorded.Should().ContainSingle().Subject;
+        recorded.Session.Should().BeTrue();
+        recorded.Target.Should().Be("big.pdf");
+        _fixture.Conflicts.Should().ContainSingle().Which.Should().Be(ConflictBehavior.Fail,
+            "the session's item is attached by its exact name, so Graph may not rename it");
+    }
+
+    [Fact(DisplayName = "Attach fix: an upload session asking to RENAME is refused 400 and opens nothing")]
+    public async Task UploadSession_Rename_IsRefused()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf&conflictBehavior=rename",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().BeEmpty();
+        _fixture.Attribution.Recorded.Should().BeEmpty();
     }
 
     [Theory(DisplayName = "Task 171 (finding 1): an app-only upload asking to REPLACE is refused 409 upload_replace_not_supported before any Graph call")]
@@ -872,6 +927,39 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     /// <summary>Task 171 (finding 1): the conflict behaviour each upload reached Graph with.</summary>
     public ConcurrentQueue<ConflictBehavior> Conflicts { get; } = new();
 
+    /// <summary>Task 171 attach fix: what the upload routes recorded as "uploaded for whom".</summary>
+    internal RecordingAttribution Attribution { get; } = new();
+
+    /// <summary>Records each binding; <see cref="RecordFaults"/> makes the write fail (a Redis outage).</summary>
+    internal sealed class RecordingAttribution : Sprk.Bff.Api.Services.Documents.UploadAttribution
+    {
+        public RecordingAttribution()
+            : base(new Sprk.Bff.Api.Infrastructure.Cache.TenantCache(
+                new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                    Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.Cache.TenantCache>.Instance))
+        {
+        }
+
+        public ConcurrentQueue<(string Caller, string Drive, string Target, bool Session)> Recorded { get; } = new();
+
+        public bool RecordFaults { get; set; }
+
+        public override Task RecordItemAsync(string caller, string drive, string item, CancellationToken ct = default)
+        {
+            if (RecordFaults) return Task.FromException(new TimeoutException("Redis unavailable"));
+            Recorded.Enqueue((caller, drive, item, false));
+            return base.RecordItemAsync(caller, drive, item, ct);
+        }
+
+        public override Task RecordSessionAsync(string caller, string drive, string path, CancellationToken ct = default)
+        {
+            if (RecordFaults) return Task.FromException(new TimeoutException("Redis unavailable"));
+            Recorded.Enqueue((caller, drive, path, true));
+            return base.RecordSessionAsync(caller, drive, path, ct);
+        }
+    }
+
     /// <summary>Task 156: every stale row the resolver enqueued for re-stamping (no Service Bus is reached).</summary>
     internal RecordingRestampQueue RestampQueue { get; } = new();
 
@@ -902,6 +990,9 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
             services.RemoveAll<SpeFileStore>();
             services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts));
+
+            services.RemoveAll<Sprk.Bff.Api.Services.Documents.UploadAttribution>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Documents.UploadAttribution>(Attribution);
 
             // Task 156: where a container_ancestor_stale refusal enqueues the stale row.
             services.RemoveAll<CoreAncestorRestampQueue>();

@@ -101,6 +101,7 @@ public static class OBOEndpoints
         // PUT: small upload against the owning record.
         app.MapPut("/api/obo/records/{entityLogicalName}/{recordId:guid}/files/{*path}", async (
             string entityLogicalName, Guid recordId, string path, HttpRequest req, HttpContext ctx,
+            [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,
             [FromServices] SpeFileStore speFileStore,
             [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ILogger<Program> logger,
@@ -184,6 +185,14 @@ public static class OBOEndpoints
                     "upload.small");
 
                 logger.LogInformation("Record-keyed upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // Task 171 attach fix: the upload is app-only, so Graph records the APPLICATION as its creator. Record who
+                // it was for, so POST /api/v1/documents/{id}/file can attach it for THIS caller and nobody else.
+                if (item is not null
+                    && !await TryRecordUploadAsync(caller => uploadAttribution.RecordItemAsync(caller, driveId, item.Id, ct), ctx, logger))
+                {
+                    return AttributionUnavailable();
+                }
 
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
@@ -269,6 +278,7 @@ public static class OBOEndpoints
         // to authorize"). Its waiver is Permanent for that reason, NOT to make a build go green.
         app.MapPut("/api/obo/me/files/{*path}", async (
             string path, HttpRequest req, HttpContext ctx,
+            [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,
             [FromServices] SpeFileStore speFileStore,
             [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ILogger<Program> logger,
@@ -321,6 +331,13 @@ public static class OBOEndpoints
                     "upload.small");
 
                 logger.LogInformation("Record-less upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // Task 171 attach fix: who this app-only upload was for (see the record-keyed route).
+                if (item is not null
+                    && !await TryRecordUploadAsync(caller => uploadAttribution.RecordItemAsync(caller, driveId, item.Id, ct), ctx, logger))
+                {
+                    return AttributionUnavailable();
+                }
 
                 // The response carries the drive id the SERVER chose. Per the 2026-08-28 Q5 answer this
                 // is NOT option (B): accepting a container in the REQUEST lets the caller choose where
@@ -381,6 +398,7 @@ public static class OBOEndpoints
         // where this task's invariant lives.
         app.MapPost("/api/obo/records/{entityLogicalName}/{recordId:guid}/upload-session", async (
             string entityLogicalName, Guid recordId, [FromQuery] string path, HttpContext ctx,
+            [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,
             [FromServices] SpeFileStore speFileStore,
             [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ILogger<Program> logger,
@@ -394,13 +412,27 @@ public static class OBOEndpoints
             {
                 return TypedResults.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    ["conflictBehavior"] = new[] { "conflictBehavior must be one of: fail, rename" }
+                    ["conflictBehavior"] = new[] { "conflictBehavior must be: fail" }
                 });
             }
 
             if (behavior == ConflictBehavior.Replace)
             {
                 throw ReplaceRefused();
+            }
+
+            // Task 171 attach fix: the session's item is attached by matching its EXACT folder + name to the session the
+            // BFF opened for the caller, so Graph may not rename it. Upload under a new name instead.
+            if (behavior == ConflictBehavior.Rename)
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["conflictBehavior"] = new[]
+                    {
+                        "rename is not supported for an upload session: the file is attached by its exact name. Choose a new "
+                        + "name and upload again (conflictBehavior=fail is the default).",
+                    },
+                });
             }
 
             try
@@ -434,6 +466,13 @@ public static class OBOEndpoints
 
                 // APP-ONLY (task 171): this is the call that 403'd for a creator uploading into its own new secure
                 // project on 2026-10-06 — the secure container has no members, by design.
+                // Task 171 attach fix: record the session's exact target for the caller BEFORE it is opened, so the item
+                // it creates is necessarily created after the binding (the attach checks that).
+                if (!await TryRecordUploadAsync(caller => uploadAttribution.RecordSessionAsync(caller, driveId, path, ct), ctx, logger))
+                {
+                    return AttributionUnavailable();
+                }
+
                 var session = await GraphCallScope.Run(
                     () => speFileStore.CreateUploadSessionAsync(driveId, path, behavior, ct),
                     "upload.session.create");
@@ -540,7 +579,8 @@ public static class OBOEndpoints
     {
         if (string.IsNullOrWhiteSpace(raw))
         {
-            behavior = ConflictBehavior.Rename;
+            // Task 171 attach fix: FAIL (was rename) — the session's item is attached by its exact name.
+            behavior = ConflictBehavior.Fail;
             return true;
         }
 
@@ -622,6 +662,39 @@ public static class OBOEndpoints
 
         return raw.Equals("rename", StringComparison.OrdinalIgnoreCase) ? ConflictBehavior.Rename : ConflictBehavior.Fail;
     }
+
+    /// <summary>
+    /// Records who an app-only upload was for (task 171 attach fix). <see langword="false"/> when the caller cannot be
+    /// resolved or the record could not be written — the upload then reports <see cref="AttributionUnavailable"/>, because
+    /// a file nobody can attach would leave the user's document without its file.
+    /// </summary>
+    private static async Task<bool> TryRecordUploadAsync(Func<string, Task> record, HttpContext ctx, ILogger logger)
+    {
+        var caller = CallerResolution.ResolveObjectId(ctx.User);
+        if (string.IsNullOrWhiteSpace(caller))
+        {
+            logger.LogWarning("Upload attribution: the caller's object id could not be resolved.");
+            return false;
+        }
+
+        try
+        {
+            await record(caller).ConfigureAwait(false);
+            return true;
+        }
+        catch (Exception ex) when (!ctx.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Upload attribution could not be recorded; the upload is reported as not completed.");
+            return false;
+        }
+    }
+
+    private static IResult AttributionUnavailable() => TypedResults.Problem(
+        title: "Upload could not be completed",
+        detail: "The file could not be recorded as yours just now, so it could not be attached to its document. Try the "
+                + "upload again shortly.",
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        extensions: new Dictionary<string, object?> { ["code"] = "upload_attribution_unavailable" });
 
     /// <summary>The refusal of <c>conflictBehavior=replace</c> on an app-only upload route (task 171 finding 1).</summary>
     internal const string ReplaceRefusedCode = "upload_replace_not_supported";

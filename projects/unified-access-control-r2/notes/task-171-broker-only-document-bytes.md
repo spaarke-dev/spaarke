@@ -353,6 +353,42 @@ to move a row whose copy DIFFERS (and, after step 5, one with NO copy) — but d
 row is still moved under its existing source rules, and a forged pointer on such a row (Make Secure skips the uploader
 test) would be bound by the move. It is the same pre-lock residual as (ii), closed by step 5.
 
+### Live regression fix (2026-10-07) — attach of an app-only upload
+
+**Regression (dev, master `dae5869d2`):** every Document Upload Wizard upload ended with a row that has NO file. The
+record-keyed / record-less uploads are app-only since this task, so Graph's `createdBy` is the Spaarke application, and
+`DocumentContainerRelocator.AttachFileAsync` still required `createdBy.user.id == caller` → `POST /api/v1/documents/{id}/file`
+403 `document_file_attach_refused` / NotTheUploader. Fix branch `fix/uac-r2-171-attach-app-upload`.
+
+**Design — the uploader binding comes from the SERVER** (`Services/Documents/UploadAttribution.cs`, over the existing
+`ITenantCache`/Redis, TTL 24 h, key-versioned; no table or column):
+- small PUT (record-keyed and `/me/files`): after Graph returns the created item, `item:{itemId}` → (caller oid, drive, time);
+- upload session: BEFORE the session opens, `path:{drive}:{path}` → (caller, drive, time); sessions now use conflict
+  behaviour `fail` (default; `rename` → 400) so the item's name cannot change; the attach matches the item's folder +
+  name and requires its `createdDateTime` ≥ the binding time (−5 min skew) — and never matches by path an item that
+  carries another user's ITEM binding;
+- `AttachFileAsync`: a PERSON-uploaded item keeps the existing rule (uploader == caller); a BFF-uploaded item
+  (`RecordContainerResolver.IsUploadedByTheBffIdentity`) needs a binding naming the caller (consumed on success); no
+  binding / another user's → the existing NotTheUploader 403; a cache READ fault → new `UploaderUnverifiable` 503 "try
+  again" (never allow); a binding WRITE fault fails the upload with 503 `upload_attribution_unavailable`.
+- Other server paths comparing `createdBy.user.id`: the pointer check's interim ITEM rule and the relocation-source check
+  (`ItemWasCreatedByTheRowsCreatorAsync`) — both already accept a BFF-uploaded item on a BFF-created row (every wizard
+  row since task 147), so reads keep working; no change.
+
+**F1 (live C2 answer):** after testuser1 was fully unshared from secure project PS 31e232ae, the impersonated
+`RetrievePrincipalAccess` answered 403 **0x80048306** ("does not have ReadAccess right(s)"); the strict read treated it as
+UNKNOWN, so sync run d03f01eb kept the JIT writer on b!OKn3… (`jit.unknown=1, removed=0`) — an unshared user kept
+container-wide SPE write indefinitely. `DataverseWebApiService.AccessDeniedErrorCodes` = { **0x80040220** (access-check
+denial), **0x80048306** (no ReadAccess) } now read as "no rights" → the grant is removed. Still UNKNOWN (kept + logged):
+0x8004A110 CannotActOnBehalfOfAnotherUser, any other 403 code, an unreadable 403 body; throttling / 5xx THROW (kept).
+The grant side (`OfficeEditAccessService` → `CallerRecordAccessProbe`) already maps every failure — 0x80048306 included —
+to `None`, so a user without access is never granted; the standing pass decides on user facts, not rights.
+
+**F4 (pre-existing):** `GET /api/documents/{id}/versions/{v}/content` for the CURRENT version was a 500 (Graph 400 "You
+cannot get the content of the current version"). The route now reads the current version id (the versions list's newest
+entry) first and serves the current bytes through the same app-only download `/content` uses; a prior version still uses
+version content; an unknown id is 404.
+
 ## Known limits (owner round 56 classes d–f, plus recorded trade-offs)
 
 - **(adversarial round, finding 8 — recorded, no code)** Grants NO pass revisits:

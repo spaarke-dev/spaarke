@@ -306,7 +306,12 @@ public class DriveItemOperations
             // time a relocation's witness records when Graph lists no version.
             var item = await _factory.ForApp().Drives[driveId].Items[itemId]
                 .GetAsync(
-                    req => req.QueryParameters.Select = new[] { "id", "name", "createdBy", "size", "file", "webUrl", "lastModifiedDateTime" },
+                    // createdDateTime + parentReference: the pointer attach matches an upload-SESSION item to the session the
+                    // BFF opened for the caller (task 171 attach fix) by its folder, name and creation time.
+                    req => req.QueryParameters.Select = new[]
+                    {
+                        "id", "name", "createdBy", "size", "file", "webUrl", "lastModifiedDateTime", "createdDateTime", "parentReference",
+                    },
                     cancellationToken: ct);
 
             if (item is null)
@@ -321,7 +326,9 @@ public class DriveItemOperations
                 item.Size,
                 item.File?.Hashes?.QuickXorHash,
                 item.WebUrl,
-                item.LastModifiedDateTime);
+                item.LastModifiedDateTime,
+                item.CreatedDateTime,
+                item.ParentReference?.Path);
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
