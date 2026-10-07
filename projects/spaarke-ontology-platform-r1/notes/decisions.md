@@ -1,0 +1,91 @@
+# Decisions log — Spaarke Ontology Platform R1
+
+> **What this is**: the consolidated log of every owner decision for this project — one line per decision, its
+> source, and whether it still binds. The binding subset is restated as one-liners in [`../CLAUDE.md`](../CLAUDE.md)
+> §3; full rationale stays in the source documents linked here (not copied).
+> **Created**: 2026-10-07 (project CLAUDE.md restructure). **Add** new decisions here AND as a one-liner in
+> CLAUDE.md §3 in the same commit; when a decision is replaced, move it to "Superseded" below with the date.
+
+Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §10 (29 settled items) ·
+**spec** = [`spec.md`](../spec.md) §9 Owner clarifications (D-9..D-41) and §6 ADR tensions ·
+**v4** = [`v4-prototype-vs-solution.md`](v4-prototype-vs-solution.md) (`#n` entries) and
+[`v4-reconciliation.md`](v4-reconciliation.md) (R-/C-/S- rows).
+
+---
+
+## Design-time decisions (2026-09-30 → 2026-10-03)
+
+| ID | Outcome (one line) | Source | Status |
+|---|---|---|---|
+| §10 ×29 | 29 settled design decisions — "do not re-litigate" | design §10 | Binding |
+| D-1 | Spend-data spike resolved by **seeding dev data** (§8.1 checklist) | design §8 | Done (task 005) |
+| D-2 | Decision Record field list approved: mandatory `sprk_factsnapshot`; nullable action; nullable decision ref on the Signal; **Decision Record 1 → N Signals** (FK on the Signal) | design §8, schema-draft §2 | Binding |
+| D-3..D-8 | Remaining design-phase resolutions (taxonomy reuse D-4: `sprk_memo` reuses `sprk_triagecategory`; MM connector out of scope D-5; …) | design §8 | Binding as written there |
+| D-9 | **ADR-039 → path A** (Policy decides what is *true*, Binding what *executes*); **ADR-040 → path B** (`SessionGate` and Decision Record are siblings) | spec §9, §6; design §8.0c | Binding (ADR-040 amended, task 003) |
+| D-10 | Classifier recall floor **≥ 80% on ≥ 50 labelled items** — exit gate (task 074) | spec §9 | Binding |
+| D-11 | Suppression: 3 dismissals → suppressed, **expires after 30 days**. Grain amended by D-34/D-36/D-39 (per policy + core record; per item when no core record) | spec §9 | Binding (as amended) |
+| D-12 | **One evaluator, cadence by lane, two event hooks** (nightly `IScheduledJob` + classification and budget-revision triggers) | spec §9; design §8.3 | Binding |
+
+## Earlier owner decisions recorded during execution (2026-10-04 → 2026-10-06)
+
+| Date | Outcome | Source | Status |
+|---|---|---|---|
+| 2026-10-04 | **ADR-028 path A**: the Signal writer uses its own managed identity (`mi-ontology-writer-dev`), never the BFF's System Administrator identity, with no credential-chain fallback | spec §6; task 006 | Binding — implementation shape under review 2026-10-07 (tenant-isolation rule I5; see CLAUDE.md §3) |
+| 2026-10-05 | Task 022: validate rule bodies **at evaluation** and fail closed; model-driven app authoring stays allowed | task 022 | Binding |
+| 2026-10-05 | **ADR-009 path A** for task 096's in-process verdict cache | spec §6 | Done (#1294) |
+| 2026-10-05 | Prototype **v4 `HANDOFF.md` @ `ae1cc9f`** is the UI/UX baseline; where v4 shows something the solution can't do, flag it to the owner | design header, spec §8.2 | Binding |
+| 2026-10-05 | **Ontology admin is in R1** (coordinator's call, delegated) | spec D-22 | Binding |
+| 2026-10-05 | One canonical modal approach (dark mode, no white OOB header) → became D-26 | spec D-26 | Binding |
+| 2026-10-05 | SmartTodo's palette is the ONE due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey) | notes/081-progress.md | Binding |
+| 2026-10-05 | Unrelated defects found by this project ship as **their own PRs** to master (081, 084–099 …) | task POMLs | Binding |
+| 2026-10-05 | Event date columns → **Date Only** (task 098) | task 098 | Binding |
+| 2026-10-06 | Event routes use the solution's record-level authorization; after #1312: **one mechanism, `RecordRouteAccessAuthorizationFilter`**, #1312's route deletions stand | task 097 completion | Done (#1302) |
+| 2026-10-06 | **Reassigned events are completable**: one predicate `EventStatusCode.IsOpenWork` (Draft, Open, On Hold, Reassigned) for the complete gate and all To Do generation rules | task 097 | Binding |
+| 2026-10-06 | **"My events"** = owner OR assigned to caller's linked contact OR `sprk_createdbyperson` = caller; runs as the caller | task 097 | Binding |
+| 2026-10-06 | To Do generation's "today" = the **To Do recipient's** time zone (→ owner if a systemuser → UTC), cached per user | task 098 (PR #1359) | Binding |
+| 2026-10-06 | The Xrm capability guard is a **blocking Tier 1 job**; `ci-router.yml` docs-only = every changed file is documentation — **path A exception** to ci-cd-unit-test-remediation-r1 FR-A02 | spec §6 | Done (#1309) |
+
+## v4 consolidated decisions (2026-10-07) — spec §9 D-13..D-41
+
+| ID | Outcome | Status |
+|---|---|---|
+| D-13 | **R-11**: episode-scoped dedupe key `{policycode}|{type}|{id}|{episode}`; re-raise when not suppressed AND (Decide) the per-rule quiet window (default 14 d) passed, or (Do) the subject's date changed | Binding |
+| D-14 | Spaarke Ontology Administrator gets **Write on `sprk_policyversion`** so publishing stamps `sprk_inforceto`; the rule body stays immutable by code | Binding (granted, task 008) |
+| D-16 | R1 ships Path B + the Do-lane grammar extension + the **Threshold** rule type; Switch and the inquiry SLA deferred | Binding |
+| D-17 | **One BFF commit route, record last**; no record on failure; Console User loses Write on Signal (task 049) | Binding |
+| D-18 | The **writer creates budget revisions** (after a caller check) and the revision **updates the budget amount** | Binding (privilege granted, task 008) |
+| D-19 | Approve variance = **record-only** action | Binding |
+| D-20 | Inquiry SLA + its three actions **deferred after R1** | Binding |
+| D-21 | This project builds the **server-side work-assignment create** | Binding |
+| D-22 | Ontology admin = a **gated workspace tab**, writes as the caller; admin role granted on `sprk_triagecategory`; five tables in Spaarke Platform read-only; owner's account holds the admin role | Binding (role + app done, task 008) |
+| D-23 | The **UI composes the row headline**; the rule sentence stays literal | Binding |
+| D-24 | **FR-28 amended** to name the UI kit; reuse first | Binding |
+| D-25 | "Today" for each item = **assignee's → owner's → UTC** time zone | Binding |
+| D-26 | **Adopt the canonical modal** (`SprkModal` + `WizardShell`, in-app, ADR-050 amendment) **and migrate existing wizards** in this project | Binding |
+| D-27 | Events: the Do lane, Reschedule and the Daily Briefing use **`sprk_duedate` always**; `sprk_finalduedate` informational | Binding |
+| D-28 | **`statuscode` is authoritative**; `sprk_eventstatus` deprecated (inventory readers first) | Binding |
+| D-29 | To Do score on **calendar days**; writer **AppendTo** on communication/event/todo/workassignment; caller-unresolved stays **#1312's single 403**; Tier 2 ADR Compliance timeout **5 min** | Binding (grants + CI done) |
+| D-30 | **Severity column on `sprk_policy`** (Info/Warning/Critical, shown High/Medium/Low) | Binding (column live, task 007) |
+| D-31 | Overdue-To Do rule applies to **all To Dos** | Binding (no-core visibility per D-35) |
+| D-32 | Switching a rule Off → On **re-raises** still-true subjects as new episodes | Binding |
+| D-33 | **Signals and Decision Records are secure children** of secured records (access-control mechanism), with three role edits | Binding (roles done, task 008; registration = task 039, awaiting uac-r2 review #1355) |
+| D-34 | Signals and Decision Records group under the item's **core record** (not "matter" only), reusing `CoreAncestorResolver` | Binding (extended by D-36) |
+| D-35 | Items with **no core record** → Signal visible to the item's **owner only**, "Not filed" group | Binding |
+| D-36 | **All four core types** (matter, project, work assignment, service request), and the model is **extensible**: generic core-record reference (catalog type + id) on Signal and Decision Record; typed lineage lookups on the Decision Record only where the secure mechanism needs them | Binding (columns live, task 007) |
+| D-37 | Two core records → the item's **direct filed-under** record wins; ambiguous → matter over project | Binding |
+| D-38 | **No skips** anywhere | Binding |
+| D-39 | No-core items: suppression per **(policy, item)**; their Decision Record is owned by the item's owner | Binding |
+| D-40 | Rule date fields may take **one lower + one upper bound** (nothing more) | Binding (done, task 024) |
+| D-41 | **To Do date columns → Date Only**, own task 106 (031 depends on it) | Binding |
+
+## Superseded or withdrawn
+
+| ID | What it said | Replaced by | Date |
+|---|---|---|---|
+| D-15 | Skip **Restricted/Limited** matters in R1 and read Signals only through a BFF route | **D-33** — the premise was wrong: Restricted/Limited only exclude external contacts (ADR-003); the staff wall is the **Secure** flag. The BFF read route part of D-15 still stands (FR-24) | 2026-10-07 |
+| D-31 (wording) | A no-matter To Do's Signal is "secured by the To Do owner's business unit" | **D-35** (owner only) | 2026-10-07 |
+| D-34 (scope) | Core record = matter **or project** only | **D-36** (all four core types, extensible) | 2026-10-07 |
+| D-11 (grain) | Suppression per **(policy, matter)** | **D-34/D-36** per (policy, core record); **D-39** per (policy, item) for no-core items | 2026-10-07 |
+| C-12 option | Derive a version's end from its successor (never write `sprk_inforceto`) | **D-14** (grant Write; stamp at publish) | 2026-10-07 |
+| task 053 | Gate host + acting | Tasks **058** (decision wizard) + **043** (commit route), per D-17/D-26 | 2026-10-07 |
+| Narrow skip | Skip a To Do under a Secure project with no matter | **D-38** (no skips) | 2026-10-07 |
