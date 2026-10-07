@@ -9,9 +9,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
-| **Step** | Steps 1–6 DONE (commits c5df5f07c code, tests, 466e75e75 docs). ControlPlane 2257/0 (1 skip). **Step 9.5 running**: code-review + adr-check sub-agents (background) + ArchTests. |
-| **Status** | in-progress (started 2026-10-07). |
-| **Next Action** | Read the code-review + adr-check findings; fix F1–F4 now (≤ 2 rounds; 2 verifier passes — security/isolation task); re-run ControlPlane + ArchTests; close (POML notes, TASK-INDEX ✅, plan G10 already ✅, current-task → T233, devops sync). Owner note: PAYG meter is per active user PER APP (K1); deviation D9 (skill checks PRQs at 1e-bis, not Step 0.5). |
+| **Step** | Step 9.5 done to the round cap: round 1 `07a92eca3`, round 2 `79ca02b3c`. ControlPlane 2273/0 (1 skip), ArchTests 836/836, Worker + Api 0 warnings. **Final verifier: 1 Critical OPEN (C1) — ESCALATED to owner, no round 3.** |
+| **Status** | blocked — awaiting owner decision on C1 (2026-10-07). |
+| **Next Action** | On owner approval: fix C1 — SKILL.md Step 1e-bis PRQ-C-10 `$ppEnvId` call: `az.cmd` on Windows breaks on the `)` in `RetrieveCurrentOrganization(AccessType=@p)` → use `az account get-access-token --resource $dvRes` + `Invoke-RestMethod` (recommended), also W1 (anchor `Enabled` with -cmatch once T186 shows the shape; record in K3), W2 (tests for the consent-timeout filter + timeout message), S1 (two stale lines). Then close: POML notes, TASK-INDEX ✅, current-task → T233, devops sync (Tasks Completed 193). |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 
