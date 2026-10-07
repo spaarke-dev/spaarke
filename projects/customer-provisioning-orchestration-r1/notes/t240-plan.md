@@ -5,6 +5,10 @@ on 2026-10-07, the split into three tasks, and the live test plan.
 
 ## Owner input, 2026-10-07
 
+Decisions (later the same day, after the external-access-r3 reply): (1) the External Access SPA's production origin is
+`external.spaarke.com`; (2) drop the Teams-SSO fallback for the multi-customer build; (3) customer BFFs serve CIAM external
+contacts (task 240d). External contacts do not use the Teams app (CIAM accounts cannot sign in to Teams).
+
 - The live tests may go ahead.
 - **The add-ins and the Teams tab are used only by Dataverse-licensed users, internal or B2B guest. No external contact
   uses them.**
@@ -59,8 +63,8 @@ No anonymous endpoint, no published customer list, and Model 2 later becomes dat
 - **Add-in:** one production site on a Spaarke custom domain, recommended `addins.spaarke.com` (F10, F11). The owner adds
   a CNAME at Namecheap; the add-in app gets `brk-multihub://addins.spaarke.com` and
   `https://addins.spaarke.com/auth-callback.html` as SPA redirects when the site is created.
-- **Teams tab / External Access SPA:** one shared production site on a Spaarke custom domain (recommended
-  `external.spaarke.com`, owner decision pending); every customer BFF lists it once in CORS (it covers Teams and the
+- **Teams tab / External Access SPA:** one shared production site on a Spaarke custom domain, `external.spaarke.com`
+  (owner 2026-10-07); every customer BFF lists it once in CORS (it covers Teams and the
   browser). Sign-in in Teams: a dedicated Spaarke Teams client app with nested app auth, the add-ins' shape (agreed by
   external-access-r3). Recommended: drop the Teams-SSO fallback for the multi-customer build, because a single manifest can
   name only one audience; then Teams' first-party clients (F9) need no pre-authorization on customer BFFs.
@@ -72,11 +76,14 @@ No anonymous endpoint, no published customer list, and Model 2 later becomes dat
 | 2026-10-07 | Created Static Web App `swa-spaarke-office-addins-prod` (Standard, westus2, RG `rg-spaarke-shared-prod`, subscription Spaarke Shared Production `cd95fcec-6b89-49ea-8339-c2b579b12587`; tags application/environment/scope from the RG) for the production add-in site | default host `green-plant-09ecafa1e.1.azurestaticapps.net`; empty until word-add-in-r1 deploys |
 | 2026-10-07 | Owner added CNAME `addins` → `green-plant-09ecafa1e.1.azurestaticapps.net` at Namecheap; custom domain `addins.spaarke.com` added to the site (`az staticwebapp hostname set`, CNAME validation) | Ready; `https://addins.spaarke.com` serves HTTP 200 with a valid managed certificate |
 
+| 2026-10-07 | Created Static Web App `swa-spaarke-external-spa-prod` (Standard, westus2, RG `rg-spaarke-shared-prod`, same subscription and tags) for the External Access SPA | default host `orange-stone-09288801e.3.azurestaticapps.net`; empty until external-access-r3 deploys |
+| 2026-10-07 | Owner adds CNAME `external` → `orange-stone-09288801e.3.azurestaticapps.net` at Namecheap; then custom domain `external.spaarke.com` on the site | pending |
+
 ## Split
 
 | Task | Scope | Depends on |
 |---|---|---|
 | **240a** server side, needed either way | (1) **CORS:** provisioning sets `Cors__AllowedOrigins__N` on every stamp BFF (the customer's Dataverse origins + the platform's shared client origins), so the BFF starts (F1). (2) **H3:** SPA redirect = the customer's own Dataverse origin(s) on its BFF app registration (fixes code pages, F3; H7's default kept); `preAuthorizedApplications` for the platform's configured client ids (the add-in `c1258e2d` now; Teams' clients if F12's answer needs them). | — |
 | **240b** live test (owner-approved 2026-10-07) | A work-account guest from another tenant, in Outlook and Word (desktop + web): get a Spaarke-tenant token for the dev BFF through Office's nested app auth, and record `tid`, `oid`, `acct`, `idp`, `iss`, `aud`. Teams moves to the external-access project. | a guest account; the word-add-in-r1 diagnostics build |
-| **240d** external contacts on stamps (F13) | Stamp BFFs serve CIAM external contacts: `Ciam:*` settings per stamp; the CIAM audience shape; a keyless CIAM Graph provisioner (federated credential from the stamp identity instead of the Key Vault certificate); how a contact reaches the right customer (the directory or the invitation); CORS for the SPA origin. Designed with spaarke-SPA-external-access-platform-r3 and unified-access-control-r2. | owner answer to Q3 (external contacts on customer BFFs) |
+| **240d** external contacts on stamps (F13; owner 2026-10-07: yes) | Stamp BFFs serve CIAM external contacts: `Ciam:*` settings per stamp; the CIAM audience shape; a keyless CIAM Graph provisioner (federated credential from the stamp identity instead of the Key Vault certificate); how a contact reaches the right customer (the directory or the invitation); CORS for the SPA origin. Designed with spaarke-SPA-external-access-platform-r3 and unified-access-control-r2. | owner answer to Q3 (external contacts on customer BFFs) |
 | **240c** directory + client discovery | The directory service (owner OK for a new shared-prod service), H-step assigning each environment group to the directory app, the registry fields it needs (e.g. the BFF app id for `scope`), the directory app registration with the add-in pre-authorized (one-time); the client change in the add-in (word-add-in-r1). | 240a, 240b; owner OK; word-add-in-r1 |

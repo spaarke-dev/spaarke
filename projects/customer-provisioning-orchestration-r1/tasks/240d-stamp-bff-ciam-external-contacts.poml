@@ -3,7 +3,7 @@
   <metadata>
     <title>Stamp BFFs serve CIAM external contacts: per-stamp Ciam settings, CIAM audience shape, keyless CIAM Graph provisioner, and how a contact reaches the right customer</title>
     <phase>Model 1 dedicated-stamp remediation — T240 (G14), found 2026-10-07 from the external-access-r3 reply</phase>
-    <gate>owner answer to Q3 (do customer BFFs serve external contacts)</gate>
+    <gate>owner 2026-10-07: yes, customer BFFs serve external contacts; needs the design note with external-access-r3 + UAC-r2</gate>
     <status>pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth and tenant isolation across every customer stamp (a second identity plane), new provisioning settings and a credential change.</rigor-reason>
@@ -39,7 +39,7 @@
   </constraints>
 
   <steps mode="directional">
-    <step order="1">Owner answers Q3. Design note with external-access-r3 and UAC-r2: CIAM audience (one shared CIAM API app vs one per customer), contact-to-customer routing (directory vs invitation), keyless provisioner.</step>
+    <step order="1">(Q3 answered yes, owner 2026-10-07.) Design note with external-access-r3 and UAC-r2: CIAM audience (one shared CIAM API app vs one per customer), contact-to-customer routing (directory vs invitation), keyless provisioner.</step>
     <step order="2">Provisioning: `Ciam:*` settings per stamp (catalog + H4b), the CIAM app registration step if per customer, the provisioner's federated credential; tests.</step>
     <step order="3">H13 probe: the stamp accepts a CIAM token for its audience and refuses one for another stamp's.</step>
     <step order="4">Docs (deployment guide, inventory, provisioning.md); Step 9.5 with two verifier passes; close.</step>
