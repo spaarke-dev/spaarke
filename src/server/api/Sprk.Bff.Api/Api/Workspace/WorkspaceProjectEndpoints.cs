@@ -1,8 +1,8 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
-using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 

@@ -5,10 +5,10 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
