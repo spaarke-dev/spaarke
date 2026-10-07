@@ -21,7 +21,8 @@
 //   T7  Missing speContainerId → Failure(Resumable, MissingUpstreamState) naming speContainerId.
 //   T8  Missing ClientSecret → Failure(Resumable, MissingClientSecret).
 //   T9  All 7 canonical schema names present with exact spelling (enumeration).
-//   T10 bffApiBaseUrl defaults to https://api.spaarke.com when parameter absent.
+//   T10 bffApiBaseUrl is the stamp's own BFF (InterStepState.BffApiUrl, H9 output); absent →
+//       MissingUpstreamState naming bffApiUrl — never the platform BFF (task 245b).
 //   T11 msalClientId defaults to bffAppRegId when parameter absent.
 //   T12 shareLinkBaseUrl resolves to empty string when parameter absent (no failure).
 //   T13 Writer Failure DefinitionNotFound → Resumable EnvVarDefinitionNotFound.
@@ -44,6 +45,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -60,6 +62,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     private const string EnvUrl = "https://acme.crm.dynamics.com/";
     private const string OpenAiEndpoint = "https://acme-openai.openai.azure.com/";
     private const string SpeContainerId = "b!acmeContainerIdBase64";
+    private const string StampBffUrl = "https://sprk-acme-prod-api.azurewebsites.net";   // H9 output (task 245b)
     private const string ClientSecret = "test-client-secret-placeholder";
 
     // ---------- T1 happy path ----------
@@ -80,7 +83,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
         repo.LastWrittenRun.CurrentPhase.Should().Be("H7");
-        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H7");
+        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H7");
 
         var gate = repo.LastWrittenRun.GateStates[H7DataverseEnvVarValuesHandler.EnvVarsSetGateId];
         gate.Status.Should().Be(GateState.Verified);
@@ -214,6 +217,27 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         writer.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task ASpeContainerIdWrittenBeforeH8Completed_IsNeverConsumed_NoWriterCall()
+    {
+        // unified-access-control-r2 task 165, owner round 41 item 1: the pre-round-41 replication-pending path wrote
+        // the root container's id while it was still UNBOUND. H7 writes sprk_SharePointEmbeddedContainerId only from a
+        // container H8 has completed — that is, bound.
+        var run = BuildRun();
+        foreach (var h8 in run.CompletedPhases.Where(cp => cp.Phase == "H8").ToList()) { run.CompletedPhases.Remove(h8); }
+        var repo = new FakeRepository(run, etag: "etag-7b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
+        failure.Diagnostic.Should().Contain("H8 has not completed");
+        writer.CallCount.Should().Be(0, "an unbound container must never become sprk_SharePointEmbeddedContainerId");
+    }
+
     // ---------- T8 missing client secret ----------
 
     [Fact]
@@ -343,7 +367,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
     // ---------- T10-T12 default resolution ----------
 
     [Fact]
-    public async Task BffApiBaseUrl_DefaultsToCanonicalUrl_WhenParameterAbsent()
+    public async Task BffApiBaseUrl_IsTheStampsOwnBff_FromH9()
     {
         var run = BuildRun();
         var repo = new FakeRepository(run, etag: "etag-10");
@@ -353,7 +377,25 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         writer.LastRequest!.Values.Single(kv => kv.Key == "sprk_BffApiBaseUrl").Value
-            .Should().Be("https://api.spaarke.com");
+            .Should().Be(StampBffUrl);
+    }
+
+    [Fact]
+    public async Task MissingBffApiUrl_FailsResumable_NamesBffApiUrl_NeverFallsBackToThePlatformBff()
+    {
+        var run = BuildRun();
+        run.InterStepState.BffApiUrl = null;
+        var repo = new FakeRepository(run, etag: "etag-10b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
+        failure.Diagnostic.Should().Contain("bffApiUrl");
+        writer.CallCount.Should().Be(0, "no write with a guessed (platform) BFF URL");
     }
 
     [Fact]
@@ -569,21 +611,210 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         failure.RejectionCode.Should().Be(expectedCode);
     }
 
+    // ---------- A44.5 (task 205i): FR-39 ordered credential chain ----------
+    // The H7/task-142 half of A30's sentinel contract. Secret-free envs (§6.5
+    // resolution prong 1) run the Worker with EnvVarValues__ClientSecret
+    // OMITTED (empty is the SIGNAL — auth-v4 §9.1); the chain
+    // EnvVarValues:Credentials:Order:0=ManagedIdentityFederated selects MI-FIC.
+    // Pre-migration (prong-3) envs keep task-142 semantics unchanged — those
+    // are the pre-existing tests above (default legacy chain).
+
+    /// <summary>
+    /// Goal (a)+(d) proxy at the handler boundary: under the MI-FIC-first
+    /// secret-free chain an EMPTY secret slot does NOT fail the run — the
+    /// handler proceeds to the writer (which resolves MI-FIC via
+    /// WorkerDataverseCredentialFactory). No boot-loop, no sentinel.
+    /// </summary>
+    [Fact]
+    public async Task SecretFree_MiFicFirstChain_EmptySecret_ProceedsToWriterAndSucceeds()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a44");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer, clientSecret: null, credentials: SecretFreeChain());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.CallCount.Should().Be(1);
+        // The empty slot flows through EMPTY — never a fabricated placeholder
+        // (§9.1: the ordered selector cannot distinguish a sentinel from a
+        // real secret; AADSTS7000215 otherwise).
+        writer.LastRequest!.ClientSecret.Should().BeNull();
+    }
+
+    /// <summary>Legacy chain + empty secret keeps failing (task-142 semantics preserved — explicit Order variant of T8).</summary>
+    [Fact]
+    public async Task ExplicitSecretFirstChain_EmptySecret_StillFailsMissingClientSecret()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a44b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer, clientSecret: null,
+            credentials: new WorkerCredentialSelectionOptions { Order = { nameof(CredentialKind.ClientSecret) } });
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingClientSecret);
+        writer.CallCount.Should().Be(0);
+    }
+
+    // ---------- A44.5: EnvVarValuesOptions.Validate() chain-aware boundary ----------
+
+    /// <summary>Goal (c): the §10.2 secret-free contract boots with an EMPTY secret slot.</summary>
+    [Fact]
+    public void OptionsValidate_Accepts_EmptyClientSecret_When_MiFicFirst()
+    {
+        var options = new EnvVarValuesOptions { ClientSecret = null, Credentials = SecretFreeChain() };
+
+        var act = () => options.Validate();
+
+        act.Should().NotThrow(
+            "on a secret-free environment the EnvVarValues__ClientSecret KV-ref is omitted and empty is " +
+            "the signal (auth-v4 §9.1) — the MI-FIC-first chain authenticates without it");
+    }
+
+    /// <summary>MI-FIC-first with the transitional secret still present is also valid (rollback-capable shape).</summary>
+    [Fact]
+    public void OptionsValidate_Accepts_MiFicFirst_WithTransitionalSecretPresent()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ManagedIdentityFederated),
+                    nameof(CredentialKind.ClientSecret),
+                },
+            },
+        };
+
+        options.Invoking(o => o.Validate()).Should().NotThrow();
+    }
+
+    /// <summary>Fail-fast preserved when a secret-based provider is REQUIRED (explicit secret-first chain, empty slot).</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_ExplicitSecretFirstChain_And_EmptySecret()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = "",
+            Credentials = new WorkerCredentialSelectionOptions { Order = { nameof(CredentialKind.ClientSecret) } },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:ClientSecret*required*");
+    }
+
+    /// <summary>Invalid provider-chain configuration fail-fasts: unknown kind name (incl. the unsupported KeyVaultCertificate).</summary>
+    [Theory]
+    [InlineData("NotARealKind")]
+    [InlineData("KeyVaultCertificate")]
+    public void OptionsValidate_Throws_On_UnknownCredentialKind(string kind)
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions { Order = { kind } },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*EnvVarValues:Credentials:Order*not a known credential kind*");
+    }
+
+    /// <summary>Invalid provider-chain configuration fail-fasts: duplicate kind.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_On_DuplicateCredentialKind()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ClientSecret),
+                    nameof(CredentialKind.ClientSecret),
+                },
+            },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*more than once*");
+    }
+
+    /// <summary>§10.2 mirror of BFF IdentityConfigurationValidator rule 6: RequireSecretFreeIdentity + secret kind listed → fail-fast.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_RequireSecretFreeIdentity_And_ClientSecretListed()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = ClientSecret,
+            Credentials = new WorkerCredentialSelectionOptions
+            {
+                Order =
+                {
+                    nameof(CredentialKind.ManagedIdentityFederated),
+                    nameof(CredentialKind.ClientSecret),
+                },
+                RequireSecretFreeIdentity = true,
+            },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*RequireSecretFreeIdentity*ClientSecret*");
+    }
+
+    /// <summary>RequireSecretFreeIdentity with NO order configured is contradictory (legacy default is secret-based) → fail-fast.</summary>
+    [Fact]
+    public void OptionsValidate_Throws_When_RequireSecretFreeIdentity_And_NoOrderConfigured()
+    {
+        var options = new EnvVarValuesOptions
+        {
+            ClientSecret = null,
+            Credentials = new WorkerCredentialSelectionOptions { RequireSecretFreeIdentity = true },
+        };
+
+        options.Invoking(o => o.Validate())
+            .Should().Throw<InvalidOperationException>()
+            .WithMessage("*RequireSecretFreeIdentity*Order*");
+    }
+
     private static H7DataverseEnvVarValuesHandler BuildHandler(
         IProvisioningRunRepository repo,
         IEnvVarValuesWriter writer,
-        string? clientSecret = ClientSecret)
+        string? clientSecret = ClientSecret,
+        WorkerCredentialSelectionOptions? credentials = null)
     {
         var options = Options.Create(new EnvVarValuesOptions
         {
             ClientSecret = clientSecret,
             RequestTimeout = TimeSpan.FromSeconds(5),
+            // A44.5: default (unconfigured) = legacy [ClientSecret] chain —
+            // every pre-existing test in this file exercises task-142
+            // semantics unchanged.
+            Credentials = credentials ?? new WorkerCredentialSelectionOptions(),
         });
         return new H7DataverseEnvVarValuesHandler(
             repo, writer, options,
             TimeProvider.System,
             NullLogger<H7DataverseEnvVarValuesHandler>.Instance);
     }
+
+    /// <summary>The §10.2 secret-free chain: MI-FIC as the ONLY entry + fail-fast assertion.</summary>
+    private static WorkerCredentialSelectionOptions SecretFreeChain() => new()
+    {
+        Order = { nameof(CredentialKind.ManagedIdentityFederated) },
+        RequireSecretFreeIdentity = true,
+    };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -601,7 +832,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
@@ -613,12 +844,22 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         run.InterStepState.DataverseEnvUrl = EnvUrl;
         run.InterStepState.OpenAiEndpoint = OpenAiEndpoint;
         run.InterStepState.SpeContainerId = SpeContainerId;
+        run.InterStepState.BffApiUrl = StampBffUrl;
+        // H8 has completed: it hands the root container to H7 only once bound (unified-access-control-r2 task 165).
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H8",
+            IdempotencyKey = $"spe-{CustomerId}",
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-9),
+            JobId = RunId,
+        });
         return run;
     }
 
     private static List<KeyValuePair<string, string>> ExpectedValues(ProvisioningRun run) => new()
     {
-        new("sprk_BffApiBaseUrl", "https://api.spaarke.com"),
+        new("sprk_BffApiBaseUrl", run.InterStepState.BffApiUrl!),
         new("sprk_BffApiAppId", run.InterStepState.BffAppRegId!),
         new("sprk_MsalClientId", run.InterStepState.BffAppRegId!),
         new("sprk_TenantId", TenantId),

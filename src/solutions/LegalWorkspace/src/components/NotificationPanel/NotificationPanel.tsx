@@ -10,11 +10,11 @@ import {
   Text,
   Spinner,
 } from "@fluentui/react-components";
-import { DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
+import { DismissRegular, ArrowClockwiseRegular, AlertRegular } from "@fluentui/react-icons";
+import { EmptyState } from "@spaarke/ui-components";
 import { INotificationItem, NotificationCategory } from "../../types";
 import { NotificationItem } from "./NotificationItem";
 import { NotificationFilters } from "./NotificationFilters";
-import { EmptyState } from "./EmptyState";
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -59,6 +59,15 @@ const useStyles = makeStyles({
     justifyContent: "center",
     padding: tokens.spacingVerticalXXL,
     flex: "1 1 auto",
+  },
+  // Spacing of the pre-081 local NotificationPanel EmptyState, kept on top of
+  // the shared compact EmptyState (task 081 / C-11) so the panel looks as before.
+  emptyStateSpacing: {
+    paddingTop: "48px",
+    paddingBottom: "48px",
+    paddingLeft: tokens.spacingHorizontalXXL,
+    paddingRight: tokens.spacingHorizontalXXL,
+    gap: tokens.spacingVerticalM,
   },
 });
 
@@ -157,7 +166,15 @@ export const NotificationPanel: React.FC<INotificationPanelProps> = ({
         {/* Notification list or empty state */}
         {!hasFilteredNotifications ? (
           <EmptyState
-            reason={hasAnyNotifications ? "no-match" : "no-notifications"}
+            size="compact"
+            className={styles.emptyStateSpacing}
+            icon={<AlertRegular style={{ color: tokens.colorNeutralForeground4 }} />}
+            heading={hasAnyNotifications ? "No matching notifications" : "No notifications"}
+            description={
+              hasAnyNotifications
+                ? "No notifications match the selected filters. Try removing some filters to see more results."
+                : "You're all caught up. New activity across your matters and projects will appear here."
+            }
           />
         ) : (
           <div

@@ -2277,7 +2277,8 @@ public class SprkChatAgentFactory
                 speFileStore,
                 textExtractor,
                 openAiClient,
-                loggerFactory.CreateLogger<DocumentContextService>());
+                loggerFactory.CreateLogger<DocumentContextService>(),
+                serviceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>());
 
             // Multi-document mode: primary + additional documents share the 30K budget
             if (additionalDocumentIds is { Count: > 0 })

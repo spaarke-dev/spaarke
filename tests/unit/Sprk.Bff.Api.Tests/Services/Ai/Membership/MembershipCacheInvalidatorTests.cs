@@ -52,6 +52,8 @@ public class MembershipCacheInvalidatorTests
         return new MembershipCacheInvalidator(
             redis.Object,
             options,
+            // Task 132: the InstanceName the access-eviction patterns carry; irrelevant to the publish under test.
+            Options.Create(new Sprk.Bff.Api.Configuration.RedisOptions()),
             clock,
             NullLogger<MembershipCacheInvalidator>.Instance);
     }

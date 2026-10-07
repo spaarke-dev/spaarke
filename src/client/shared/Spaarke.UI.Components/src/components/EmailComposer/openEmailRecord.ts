@@ -27,7 +27,7 @@
  * @see src/solutions/EmailPage/src/main.tsx — the receiving code page (reads
  *   `data` → `id` → host form, in that order).
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
 
@@ -73,7 +73,7 @@ export async function openEmailRecord(communicationId: string, options?: OpenEma
     return;
   }
 
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   if (typeof xrm?.Navigation?.navigateTo !== 'function') {
     console.warn(
       '[openEmailRecord] Xrm.Navigation.navigateTo is unavailable — this launcher only works inside a Model-Driven App host. No-op.'

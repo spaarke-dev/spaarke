@@ -49,8 +49,10 @@ The card calls **`POST /api/insights/ask`** with:
 }
 ```
 
-- `question` accepts EITHER a `sprk_analysisplaybook` Guid OR a canonical playbook name registered as an enabled `sprk_playbookconsumer` row (consumerType `insights-ask`, `sprk_consumercode` = the canonical name). The endpoint resolves via `IConsumerRoutingService.ResolveBindingAsync` with exact consumer-code matching (`InsightEndpoints.cs`; FR-P3-01 single-routing-surface cutover, task 040).
-- `subject` is the **subject scheme** — for r1 Matter Health, it is `matter:<sprk_matterid>`.
+- `question` accepts a canonical playbook name registered as an enabled `sprk_playbookconsumer` row (consumerType `insights-ask`, `sprk_consumercode` = the canonical name), resolved with exact consumer-code matching — or a `sprk_analysisplaybook` Guid ONLY when the Binding that targets it is an `insights-ask` one (`InsightEndpoints.cs`; FR-P3-01; unified-access-control-r2 task 163).
+- `subject` is the **subject scheme** — for r1 Matter Health, it is `matter:<sprk_matterid>` (a real record GUID).
+- `parameters` go through the SHARED playbook-parameter policy (`PlaybookParameterPolicy`, task 164 — the same one `/api/ai/playbooks/{id}/execute` applies): server-owned keys, undeclared keys and mistyped values are a 400 (`errorCode = playbook.parameter-rejected`). Cards send `{}`.
+- **Rights (unified-access-control-r2 task 163, owner round 16 item 1)**: the route asks Dataverse AS THE CALLER for **Read** on the host record when the card's playbook cannot write to it, and **Write** when it can — a card that persists its envelope into the host record (the pattern below; Matter Health's `persistEnvelope` UpdateRecord) needs **Write**. A user without the right gets the uniform 404 (`reasonCode = sdap.access.deny.record_unavailable`), so design the card's error state for readers who cannot regenerate it (they still see the persisted envelope).
 - The endpoint returns `200 OK` with the envelope; the persisted form lands in the host record's target longtext field (per registry `sprk_targetfield`).
 
 ### 1.2 What r1 ships (your reference implementation)

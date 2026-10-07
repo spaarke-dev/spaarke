@@ -237,180 +237,21 @@ public class SpeContainerMembershipService
         }
     }
 
-    /// <summary>
-    /// Lists all external members of an SPE container.
-    /// Returns only external members (those with a user identity in their permission grant).
-    /// </summary>
-    /// <param name="containerId">The SPE container ID (GUID format).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>A read-only list of external container members. Empty means the container genuinely has none.</returns>
-    /// <exception cref="ServiceException">Graph could not be reached or refused the request.</exception>
-    /// <remarks>
-    /// <para><b>Failures propagate (task 017, filed by task 016).</b> This method used to catch both
-    /// <see cref="ServiceException"/> and <see cref="Exception"/> and return <c>[]</c> in each — so an
-    /// unreachable Graph was indistinguishable from an empty container. Its only caller,
-    /// <see cref="RemoveAllExternalMembersAsync"/>, therefore answered "0 removed" either way, and
-    /// close-project reported <c>200 OK</c> while every external user might still hold file permission on
-    /// the container. That is FR-15's own acceptance ("no participant retains access post-closure")
-    /// failing silently on the SPE half.</para>
-    ///
-    /// <para>An empty list now means one thing only: the container has no external members. Callers that
-    /// need to keep going on failure should catch deliberately — and report the failure, not absorb it.</para>
-    /// </remarks>
-    public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync(
-        string containerId,
-        CancellationToken ct = default)
-    {
-        var (members, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
+    // ListExternalMembersAsync, its worker ReadExternalMembersAsync, ToContainerMember and the SpeContainerMember record
+    // were DELETED 2026-10-04 by unified-access-control-r2 task 166 f1 (verifier item 14): their only caller,
+    // RemoveAllExternalMembersAsync, was deleted by task 166 (below), and no other code listed members. The honesty rules
+    // they carried live on in the one paged reader every remaining path uses (ReadPermissionsAsync — an incomplete read
+    // is never an absence), pinned by SpeContainerPagingTests through RemoveMembershipsAsync and RevokeMembershipAsync.
+    // "External" there meant "has a user identity", which on SPE includes internal users — do not rebuild a removal on
+    // such a list.
 
-        if (!enumerationComplete)
-        {
-            // This signature can return a list or throw — it has no way to say "here are SOME of them".
-            // Returning the partial list would recreate the very defect task 016 filed, one layer up:
-            // the caller would read a short list as the whole truth. Task 024 / finding M1.
-            throw new InvalidOperationException(
-                $"External members of container '{containerId}' could not be fully enumerated " +
-                $"({members.Count} read before the read gave out). A partial list must not be returned " +
-                $"here: an empty or short list is indistinguishable from the whole set to the caller.");
-        }
-
-        _logger.LogInformation(
-            "Found {Count} external members in container {ContainerId}", members.Count, containerId);
-
-        return members;
-    }
-
-    /// <summary>
-    /// The worker behind <see cref="ListExternalMembersAsync"/>: the external members that were read,
-    /// AND whether the underlying permission collection was enumerated to its end.
-    /// </summary>
-    /// <remarks>
-    /// Separate from the public method because the two callers need different things from a partial read.
-    /// <see cref="ListExternalMembersAsync"/> returns a bare list, so it cannot express partiality and
-    /// must throw. <see cref="RemoveAllExternalMembersAsync"/> SHOULD still remove everyone it managed to
-    /// see — aborting would leave strictly MORE access in place, which is the same reasoning tasks 016
-    /// and 017 used for not aborting the loop on a per-member failure — and then report the read as
-    /// incomplete so the closure guard fails.
-    /// </remarks>
-    internal async Task<(IReadOnlyList<SpeContainerMember> Members, bool EnumerationComplete)>
-        ReadExternalMembersAsync(string containerId, CancellationToken ct)
-    {
-        _logger.LogInformation("Listing external SPE members: containerId={ContainerId}", containerId);
-
-        var graphClient = _graphClientFactory.ForApp();
-
-        var read = await ReadPermissionsAsync(graphClient, containerId, ct);
-
-        // External members are those with a GrantedToV2.User (individual user grants).
-        // System / app permissions and container-type-level grants do not have a User identity.
-        var externalMembers = read.Permissions
-            .Where(p => p.GrantedToV2?.User != null)
-            .Select(ToContainerMember)
-            .Where(m => m != null)
-            .Cast<SpeContainerMember>()
-            .ToList()
-            .AsReadOnly();
-
-        return (externalMembers, read.EnumerationComplete);
-    }
-
-    /// <summary>
-    /// Removes all external members from an SPE container.
-    /// Used when a project is closed (task 016 - Project Closure).
-    /// </summary>
-    /// <param name="containerId">The SPE container ID (GUID format).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>How many members were removed AND how many could not be.</returns>
-    /// <exception cref="ServiceException">The member list could not be read at all — nothing was removed.</exception>
-    /// <remarks>
-    /// <para><b>Returns a count of FAILURES too (task 017, filed by task 016).</b> This used to return a
-    /// bare <c>int</c> of successes while swallowing every per-member error, so "3 of 12 removed" and
-    /// "12 of 12 removed" were both just a number the caller could not interpret — and a caller that
-    /// treats any completed call as success reports a closed project while nine people keep file access.</para>
-    ///
-    /// <para>Per-member failures still do not abort the loop: every other member should lose access, and
-    /// stopping at the first error would leave strictly more access in place. They are counted instead.
-    /// A failure to LIST propagates, because then nothing was removed and there is nothing to report.</para>
-    /// </remarks>
-    public virtual async Task<SpeBulkRemovalResult> RemoveAllExternalMembersAsync(
-        string containerId,
-        CancellationToken ct = default)
-    {
-        _logger.LogInformation("Removing all external members from container {ContainerId}", containerId);
-
-        // The worker, not ListExternalMembersAsync: a partial read must still have its members removed
-        // (aborting leaves strictly MORE access in place), with the incompleteness reported afterwards.
-        var (externalMembers, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
-
-        if (!enumerationComplete)
-        {
-            _logger.LogError(
-                "Container {ContainerId} permissions could not be fully enumerated; removing the {Count} " +
-                "external member(s) that WERE read, but the container CANNOT be reported cleared.",
-                containerId, externalMembers.Count);
-        }
-
-        if (externalMembers.Count == 0)
-        {
-            _logger.LogInformation("No external members to remove from container {ContainerId}", containerId);
-            return new SpeBulkRemovalResult(0, 0, enumerationComplete);
-        }
-
-        _logger.LogInformation(
-            "Removing {Count} external members from container {ContainerId}",
-            externalMembers.Count, containerId);
-
-        var graphClient = _graphClientFactory.ForApp();
-        int removedCount = 0;
-        int failedCount = 0;
-
-        foreach (var member in externalMembers)
-        {
-            try
-            {
-                await graphClient.Storage.FileStorage
-                    .Containers[containerId].Permissions[member.PermissionId]
-                    .DeleteAsync(cancellationToken: ct);
-
-                removedCount++;
-                _logger.LogDebug(
-                    "Removed external member: containerId={ContainerId}, permissionId={PermissionId}",
-                    containerId, member.PermissionId);
-            }
-            catch (ServiceException ex)
-            {
-                failedCount++;
-                _logger.LogError(ex,
-                    "Failed to remove external member: containerId={ContainerId}, permissionId={PermissionId}, " +
-                    "status={StatusCode}. They RETAIN file access. Continuing with the rest.",
-                    containerId, member.PermissionId, ex.ResponseStatusCode);
-            }
-            catch (Exception ex)
-            {
-                failedCount++;
-                _logger.LogError(ex,
-                    "Unexpected error removing external member: containerId={ContainerId}, " +
-                    "permissionId={PermissionId}. They RETAIN file access. Continuing with the rest.",
-                    containerId, member.PermissionId);
-            }
-        }
-
-        if (failedCount > 0)
-        {
-            _logger.LogError(
-                "INCOMPLETE removal of external members from container {ContainerId}: {Removed}/{Total} " +
-                "removed, {Failed} RETAIN file access.",
-                containerId, removedCount, externalMembers.Count, failedCount);
-        }
-        else
-        {
-            _logger.LogInformation(
-                "Completed removal of external members from container {ContainerId}: {Removed}/{Total} removed",
-                containerId, removedCount, externalMembers.Count);
-        }
-
-        return new SpeBulkRemovalResult(removedCount, failedCount, enumerationComplete);
-    }
+    // RemoveAllExternalMembersAsync DELETED 2026-10-03 — unified-access-control-r2 task 166 (route-authorization
+    // sweep amendment (e)). Its only caller was ProjectClosureEndpoint, and it deleted EVERY container permission
+    // carrying a user identity — which on SPE is every individual grant, INTERNAL users included (demo provisioning
+    // and the SPE admin console both add internal users). Closing a project revokes EXTERNAL access; it must not
+    // lock the project's own people out of its files. Closure now removes exactly the revoked grantees through
+    // RemoveMembershipsAsync below (the single-grant revoke's email-keyed mechanism). Its result type
+    // (SpeBulkRemovalResult) went with it. Do not re-add an "everyone with a user identity" sweep.
 
     /// <summary>
     /// Removes MANY contacts' permissions from one container using a SINGLE paged read of the
@@ -430,9 +271,10 @@ public class SpeContainerMembershipService
     /// worse — N reads became N × pages — so consolidating went from a nicety to the thing that keeps
     /// the sweep affordable at the 200-member bound.</para>
     ///
-    /// <para><b>Why not <see cref="RemoveAllExternalMembersAsync"/></b> (task 020's warning, preserved):
-    /// that removes EVERY external member of the container, not just the target organization's. An
-    /// organization revoke must not evict the other organizations' people.</para>
+    /// <para><b>Why not a whole-container sweep</b> (task 020's warning, preserved; the sweep itself,
+    /// <c>RemoveAllExternalMembersAsync</c>, was deleted by task 166): it removed EVERY permission carrying a user
+    /// identity, not just the target grantees' — other organizations' people AND internal users. A revoke or a
+    /// closure must evict exactly the people whose grants it revoked. Project closure uses this method too.</para>
     ///
     /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every email
     /// unanswerable, so each one gets a failed result rather than the method throwing — that preserves
@@ -520,6 +362,349 @@ public class SpeContainerMembershipService
         }
 
         return results;
+    }
+
+    // =========================================================================
+    // MARKED grants — unified-access-control-r2 task 171 (owner rounds 69 + 70)
+    //
+    // The ONLY code that grants a user an SPE container role. Two kinds, one mechanism:
+    //   * STANDING writers on an environment / business-unit container (round 70 option (c)) — every enabled,
+    //     internal person user of the business unit(s) that container serves, kept by SpeContainerMembershipSyncJob.
+    //   * JUST-IN-TIME writers on a per-record SECURE container (round 69 (2), round 70) — a user with Write on the
+    //     secure record, granted on an Office edit-open by OfficeEditAccessService and removed by the same job.
+    //
+    // How a grant is told apart from a hand-granted or owner role (step 0, no Dataverse schema): the grant is POSTed
+    // as a plain POST (the container-permission API takes no conflict parameter; Graph answers 409 when the user already
+    // holds a role — pinned live by the task-171 gate D2), so a user who ALREADY holds a role answers 409 and is never
+    // recorded — a role this code did not create is never removed. On 201 the permission id is recorded in ONE
+    // container custom property per grant (<prefix><systemuserid:N> = <permission id>). If that record cannot be
+    // written the permission is deleted again, so no unrecorded grant is ever left behind. Removal deletes only a
+    // permission whose id the marker names, and only while it is still a plain writer role.
+    // =========================================================================
+
+    /// <summary>Marker prefix of a STANDING business-unit writer grant (round 70).</summary>
+    public const string StandingWriterMarkerPrefix = "SprkStd";
+
+    /// <summary>Marker prefix of a just-in-time Office-edit writer grant on a secure container (round 69 / 70).</summary>
+    public const string JitWriterMarkerPrefix = "SprkJit";
+
+    /// <summary>The narrowest container role that lets Office edit a file (step 0 (b)).</summary>
+    internal const string WriterRole = "writer";
+
+    /// <summary>
+    /// <c>Prefer</c> value that makes a container-permission DELETE leave the identity's ITEM-level permissions alone
+    /// (by default the delete also removes access to every item in the container). A marked grant is a container role,
+    /// so that is all its removal takes away.
+    /// </summary>
+    internal const string OnlyContainerScopedPrefer = "onlyRemoveContainerScopedPermission";
+
+    /// <summary>
+    /// Is <paramref name="propertyName"/> a grant marker (either prefix, case-insensitive)? The SPE admin custom-property
+    /// editor RESERVES these names (task 171, adversarial finding 7): a marker edited by hand would make a hand-granted
+    /// role removable — or make a marked grant unremovable — so no admin route may create, change, delete or show one.
+    /// </summary>
+    public static bool IsGrantMarkerName(string? propertyName)
+    {
+        var name = propertyName?.Trim();
+        return !string.IsNullOrEmpty(name)
+               && (name.StartsWith(StandingWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase)
+                   || name.StartsWith(JitWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The marker key for <paramref name="systemUserId"/> under <paramref name="prefix"/>.</summary>
+    public static string MarkerKey(string prefix, Guid systemUserId) => prefix + systemUserId.ToString("N");
+
+    /// <summary>The system user a marker key names, when <paramref name="key"/> is a marker key of <paramref name="prefix"/>.</summary>
+    public static bool TryParseMarkerKey(string? key, string prefix, out Guid systemUserId)
+    {
+        systemUserId = Guid.Empty;
+        return key is not null
+               && key.StartsWith(prefix, StringComparison.Ordinal)
+               && key.Length == prefix.Length + 32
+               && Guid.TryParseExact(key[prefix.Length..], "N", out systemUserId)
+               && systemUserId != Guid.Empty;
+    }
+
+    /// <summary>One user's role on a container, as Graph lists it.</summary>
+    public sealed record ContainerUserRole(string PermissionId, IReadOnlyList<string> Roles, string? UserPrincipalName, string? UserObjectId)
+    {
+        /// <summary>Is this the user named by <paramref name="upn"/> or <paramref name="objectId"/>?</summary>
+        public bool IsFor(string? upn, Guid? objectId)
+            => (!string.IsNullOrWhiteSpace(upn) && string.Equals(UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase))
+               || (objectId is { } oid && oid != Guid.Empty && Guid.TryParse(UserObjectId, out var mine) && mine == oid);
+
+        /// <summary>Exactly one role, writer — the only shape a marked grant takes and the only one removal deletes.</summary>
+        public bool IsPlainWriter => Roles.Count == 1 && string.Equals(Roles[0], WriterRole, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Does the role let Office edit (writer, manager or owner — a reader cannot)?</summary>
+        public bool CanEdit => Roles.Any(r => r.Equals(WriterRole, StringComparison.OrdinalIgnoreCase)
+                                              || r.Equals("manager", StringComparison.OrdinalIgnoreCase)
+                                              || r.Equals("owner", StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// A container's user roles and the grant markers on it. <see cref="RolesComplete"/> false means the role list is a
+    /// PREFIX (the page bound was hit, or Graph returned no body): nothing may be concluded from an absence.
+    /// </summary>
+    public sealed record ContainerAccess(
+        IReadOnlyList<ContainerUserRole> Roles,
+        bool RolesComplete,
+        IReadOnlyDictionary<string, string> Markers);
+
+    /// <summary>The outcome of <see cref="GrantMarkedWriterAsync"/>.</summary>
+    public enum MarkedGrantOutcome
+    {
+        /// <summary>A new writer role was created and its marker recorded.</summary>
+        Granted,
+
+        /// <summary>The user already held a role (Graph 409). Nothing was created or recorded.</summary>
+        AlreadyHeld,
+
+        /// <summary>No grant stands: Graph refused it, or the marker could not be recorded and the grant was undone.</summary>
+        Failed,
+    }
+
+    /// <summary>The outcome of <see cref="RemoveMarkedGrantAsync"/>.</summary>
+    public enum MarkedRemovalOutcome
+    {
+        /// <summary>The marked writer role was deleted and its marker cleared.</summary>
+        Removed,
+
+        /// <summary>The permission no longer exists, or is no longer a plain writer role (someone changed it): only the marker was cleared.</summary>
+        MarkerCleared,
+
+        /// <summary>Nothing changed (a read or write failed); the next pass retries.</summary>
+        Failed,
+    }
+
+    /// <summary>
+    /// Reads <paramref name="containerId"/>'s user roles (paged, honest about completeness) and its grant markers
+    /// (<see cref="StandingWriterMarkerPrefix"/> / <see cref="JitWriterMarkerPrefix"/> custom properties).
+    /// Returns <see langword="null"/> when the container does not exist. Faults propagate.
+    /// </summary>
+    public virtual async Task<ContainerAccess?> ReadAccessAsync(string containerId, CancellationToken ct = default)
+    {
+        var markers = await ReadMarkersAsync(containerId, ct).ConfigureAwait(false);
+        if (markers is null)
+        {
+            return null;
+        }
+
+        var read = await ReadPermissionsAsync(_graphClientFactory.ForApp(), containerId, ct).ConfigureAwait(false);
+        var roles = read.Permissions
+            .Where(p => !string.IsNullOrEmpty(p.Id) && p.GrantedToV2?.User is not null)
+            .Select(p => new ContainerUserRole(
+                p.Id!,
+                (IReadOnlyList<string>)(p.Roles?.Where(r => !string.IsNullOrWhiteSpace(r)).ToList() ?? new List<string>()),
+                GetUpnFromPermission(p),
+                p.GrantedToV2!.User!.Id))
+            .ToList();
+
+        return new ContainerAccess(roles, read.EnumerationComplete, markers);
+    }
+
+    /// <summary>
+    /// Only the grant markers on <paramref name="containerId"/> (one container read) — the cheap first look the removal
+    /// pass takes at every secure container. <see langword="null"/> when the container does not exist; faults propagate.
+    /// </summary>
+    public virtual async Task<IReadOnlyDictionary<string, string>?> ReadMarkersAsync(string containerId, CancellationToken ct = default)
+    {
+        Microsoft.Graph.Models.FileStorageContainer? container;
+        try
+        {
+            container = await _graphClientFactory.ForApp().Storage.FileStorage.Containers[containerId]
+                .GetAsync(c => c.QueryParameters.Select = new[] { "id", "customProperties" }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            return null;
+        }
+
+        if (container is null)
+        {
+            return null;
+        }
+
+        return SpeAdminGraphService.ReadCustomProperties(container)
+            .Where(p => p.Name.StartsWith(StandingWriterMarkerPrefix, StringComparison.Ordinal)
+                        || p.Name.StartsWith(JitWriterMarkerPrefix, StringComparison.Ordinal))
+            .GroupBy(p => p.Name, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Value ?? string.Empty, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Grants <paramref name="userPrincipalName"/> a WRITER role on <paramref name="containerId"/> and records it under
+    /// <c><paramref name="markerPrefix"/><paramref name="systemUserId"/></c>. Graph 409 (the user already holds a role)
+    /// is <see cref="MarkedGrantOutcome.AlreadyHeld"/> and records nothing. A marker that cannot be written undoes the
+    /// grant (<see cref="MarkedGrantOutcome.Failed"/>), so every grant this code leaves standing is removable.
+    /// </summary>
+    public virtual async Task<MarkedGrantOutcome> GrantMarkedWriterAsync(
+        string containerId,
+        string markerPrefix,
+        Guid systemUserId,
+        string userPrincipalName,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(containerId) || string.IsNullOrWhiteSpace(userPrincipalName) || systemUserId == Guid.Empty)
+        {
+            return MarkedGrantOutcome.Failed;
+        }
+
+        var graphClient = _graphClientFactory.ForApp();
+        string permissionId;
+        try
+        {
+            var created = await graphClient.Storage.FileStorage.Containers[containerId].Permissions
+                .PostAsync(new Permission
+                {
+                    Roles = [WriterRole],
+                    GrantedToV2 = new SharePointIdentitySet
+                    {
+                        User = new SharePointIdentity
+                        {
+                            AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = userPrincipalName },
+                        },
+                    },
+                }, cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(created?.Id))
+            {
+                _logger.LogError(
+                    "[SPE-MEMBERSHIP] Graph returned no permission id granting writer on {ContainerId} to user {SystemUserId}.",
+                    containerId, systemUserId);
+                return MarkedGrantOutcome.Failed;
+            }
+
+            permissionId = created.Id;
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 409)
+        {
+            // The user already holds a role on this container — hand-granted, an owner, or a grant of ours made
+            // concurrently. It is not recorded, so nothing here will ever remove it.
+            _logger.LogInformation(
+                "[SPE-MEMBERSHIP] User {SystemUserId} already holds a role on container {ContainerId}; nothing granted.",
+                systemUserId, containerId);
+            return MarkedGrantOutcome.AlreadyHeld;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] Granting writer on container {ContainerId} to user {SystemUserId} failed.",
+                containerId, systemUserId);
+            return MarkedGrantOutcome.Failed;
+        }
+
+        var key = MarkerKey(markerPrefix, systemUserId);
+        try
+        {
+            await WriteMarkerAsync(graphClient, containerId, key, permissionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // An unrecorded grant could never be told apart from a hand-granted one, so it must not stand.
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] The grant on container {ContainerId} for user {SystemUserId} could not be recorded; undoing it.",
+                containerId, systemUserId);
+            try
+            {
+                await DeleteContainerScopedPermissionAsync(graphClient, containerId, permissionId, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception undoEx)
+            {
+                _logger.LogCritical(undoEx,
+                    "[SPE-MEMBERSHIP] UNRECORDED writer permission {PermissionId} for user {SystemUserId} remains on container "
+                    + "{ContainerId} and could not be removed; an operator must remove it.",
+                    permissionId, systemUserId, containerId);
+            }
+
+            return MarkedGrantOutcome.Failed;
+        }
+
+        _logger.LogInformation(
+            "[SPE-MEMBERSHIP] Granted writer on container {ContainerId} to user {SystemUserId} ({Marker}).",
+            containerId, systemUserId, markerPrefix);
+        return MarkedGrantOutcome.Granted;
+    }
+
+    /// <summary>
+    /// Removes the grant the marker <paramref name="markerKey"/> records (permission <paramref name="permissionId"/>):
+    /// deletes it only while it is still a plain WRITER role, with <see cref="OnlyContainerScopedPrefer"/>, then clears
+    /// the marker. A permission that is gone, or was changed by someone else, only loses its marker.
+    /// </summary>
+    public virtual async Task<MarkedRemovalOutcome> RemoveMarkedGrantAsync(
+        string containerId,
+        string markerKey,
+        string permissionId,
+        ContainerAccess access,
+        CancellationToken ct = default)
+    {
+        var graphClient = _graphClientFactory.ForApp();
+        try
+        {
+            var current = access.Roles.FirstOrDefault(r => string.Equals(r.PermissionId, permissionId, StringComparison.Ordinal));
+            if (current is null && !access.RolesComplete)
+            {
+                // Not seen, but the list was not read to its end: unproven — leave both and retry next pass.
+                return MarkedRemovalOutcome.Failed;
+            }
+
+            var outcome = MarkedRemovalOutcome.MarkerCleared;
+            if (current is not null && current.IsPlainWriter)
+            {
+                await DeleteContainerScopedPermissionAsync(graphClient, containerId, permissionId, ct).ConfigureAwait(false);
+                outcome = MarkedRemovalOutcome.Removed;
+            }
+            else if (current is not null)
+            {
+                _logger.LogWarning(
+                    "[SPE-MEMBERSHIP] Permission {PermissionId} on container {ContainerId} is no longer a plain writer role "
+                    + "(someone changed it); it is no longer treated as this code's grant — only its marker is cleared.",
+                    permissionId, containerId);
+            }
+
+            await WriteMarkerAsync(graphClient, containerId, markerKey, value: null, ct).ConfigureAwait(false);
+            return outcome;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] Removing marked grant {MarkerKey} (permission {PermissionId}) from container {ContainerId} failed.",
+                markerKey, permissionId, containerId);
+            return MarkedRemovalOutcome.Failed;
+        }
+    }
+
+    private static async Task WriteMarkerAsync(
+        GraphServiceClient graphClient, string containerId, string key, string? value, CancellationToken ct)
+    {
+        // PATCH /containers/{id}/customProperties merges; a null value REMOVES the property (both proven live,
+        // SpeAdminGraphService.UpdateCustomPropertiesAsync, 2026-08-28).
+        var body = new Dictionary<string, object?>
+        {
+            [key] = value is null ? null : new Dictionary<string, object> { ["value"] = value, ["isSearchable"] = false },
+        };
+        var url = $"{SpeAdminGraphService.ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/"
+                  + $"{Uri.EscapeDataString(containerId)}/customProperties";
+        using var _ = await SpeAdminGraphService.SendGraphJsonAsync(
+            graphClient, HttpMethod.Patch, url, System.Text.Json.JsonSerializer.Serialize(body), ct).ConfigureAwait(false);
+    }
+
+    private static async Task DeleteContainerScopedPermissionAsync(
+        GraphServiceClient graphClient, string containerId, string permissionId, CancellationToken ct)
+    {
+        try
+        {
+            await graphClient.Storage.FileStorage.Containers[containerId].Permissions[permissionId]
+                .DeleteAsync(rc => rc.Headers.Add("Prefer", OnlyContainerScopedPrefer), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            // Already gone — the state the caller wanted.
+        }
     }
 
     // =========================================================================
@@ -738,26 +923,6 @@ public class SpeContainerMembershipService
         return null;
     }
 
-    /// <summary>
-    /// Converts a Graph Permission to a SpeContainerMember.
-    /// Uses the user's DisplayName as a fallback identifier when UPN is unavailable.
-    /// Returns null if the permission lacks a valid ID.
-    /// </summary>
-    private static SpeContainerMember? ToContainerMember(Permission permission)
-    {
-        if (string.IsNullOrEmpty(permission.Id)) return null;
-
-        var user = permission.GrantedToV2?.User;
-        if (user == null) return null;
-
-        // Prefer UPN from AdditionalData; fall back to DisplayName as identifier
-        var upn = GetUpnFromPermission(permission);
-        var identifier = upn ?? user.DisplayName ?? user.Id ?? string.Empty;
-
-        var roles = permission.Roles?.ToList() ?? [];
-
-        return new SpeContainerMember(permission.Id, identifier, roles.AsReadOnly());
-    }
 }
 
 /// <summary>
@@ -767,43 +932,3 @@ public sealed record SpeContainerMembershipResult(
     bool Success,
     string? PermissionId,
     string? Error);
-
-/// <summary>
-/// Outcome of removing every external member from a container.
-/// </summary>
-/// <param name="Removed">Members whose permission was deleted.</param>
-/// <param name="Failed">
-/// Members whose permission could NOT be deleted. Non-zero means those people still have file access,
-/// so a caller must not report the container cleared.
-/// </param>
-/// <param name="EnumerationComplete">
-/// Whether the container's permission collection was read to its END (task 024, finding M1).
-/// <para><c>false</c> means members may exist that this sweep never saw, so <c>Removed</c> and
-/// <c>Failed</c> describe only the part that was read. <b>A guard that could not finish its check must
-/// report failure, not success</b> — reporting clean on an unenumerated set is worse than having no
-/// guard, because a clean report gets acted on. Defaults to <c>true</c> so the existing two-argument
-/// construction keeps its meaning.</para>
-/// </param>
-public sealed record SpeBulkRemovalResult(int Removed, int Failed, bool EnumerationComplete = true)
-{
-    /// <summary>
-    /// True only when every external member was seen AND removed.
-    /// </summary>
-    /// <remarks>
-    /// Both conjuncts are load-bearing. <c>Failed == 0</c> alone once meant "cleared" — which was a false
-    /// clean whenever the member list itself was a partial read, since members nobody enumerated cannot
-    /// fail to be removed. <c>ProjectClosureEndpoint</c> maps this straight onto
-    /// <c>container_not_cleared</c>, so an incomplete enumeration now surfaces there with no change at
-    /// the endpoint.
-    /// </remarks>
-    public bool IsComplete => Failed == 0 && EnumerationComplete;
-}
-
-/// <summary>
-/// Represents an external member of an SPE container.
-/// Email contains the user's UPN / email when available, or their DisplayName as a fallback.
-/// </summary>
-public sealed record SpeContainerMember(
-    string PermissionId,
-    string Email,
-    IReadOnlyList<string> Roles);

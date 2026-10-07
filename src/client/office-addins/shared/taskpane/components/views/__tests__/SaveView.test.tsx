@@ -54,6 +54,7 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,
@@ -356,7 +357,6 @@ describe('SaveView', () => {
       const onSavedStateChange = jest.fn();
       const savedState = {
         savedDocument: null,
-        profileRegenerated: false,
         profileRefreshSignal: 0,
         contentChangedSinceSave: false,
       };

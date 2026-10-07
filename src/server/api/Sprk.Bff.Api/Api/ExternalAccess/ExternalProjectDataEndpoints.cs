@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -73,8 +74,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// deliberately do NOT select, accept, or return sprk_todoflag. To-dos remain exclusively on
 /// sprk_todo via /todos. If a future change makes these two surfaces overlap again, that is the
 /// regression FR-29 existed to prevent — keep them disjoint.
-/// PATCH /events/{id} was NOT restored: the only client caller (web-api-client.updateEvent) has
-/// zero call sites, so there is no consumer to justify the write surface (CLAUDE.md §11).
+/// PATCH /events/{id} was NOT restored: its only client wrapper (web-api-client.updateEvent) had zero call sites
+/// and was deleted (spaarke-ontology-platform-r1 task 097), so there is no consumer to justify the write surface
+/// (CLAUDE.md §11).
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.
@@ -136,7 +138,8 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict); // task 146: no owner resolvable from the root
 
         // ---------------------------------------------------------------------------------------
         // To-do parity for the other two accessible roots (task 029 / FR-08).
@@ -165,7 +168,8 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
 
         group.MapGet("/workassignments/{id:guid}/todos", GetWorkAssignmentTodos)
             .WithName("GetExternalWorkAssignmentTodos")
@@ -180,7 +184,8 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalTodoDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
 
         // POST /api/v1/external/projects/{id}/documents — upload a file and create its document row.
         // Container is SERVER-DERIVED from the project (never client-named) and the upload uses
@@ -221,7 +226,8 @@ public static class ExternalProjectDataEndpoints
             .Produces<ExternalEventDto>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden);
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict); // task 146
 
         // GET /api/v1/external/projects/{id}/contacts
         group.MapGet("/projects/{id:guid}/contacts", GetContacts)
@@ -422,6 +428,7 @@ public static class ExternalProjectDataEndpoints
         CreateExternalTodoRequest request,
         HttpContext httpContext,
         ExternalDataService dataService,
+        IRecordOwnershipResolver ownership,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -458,15 +465,54 @@ public static class ExternalProjectDataEndpoints
         // The parent flows from the ROUTE — the owner's "flows from the creation context". The
         // caller cannot name a parent in the body: CreateExternalTodoRequest is a closed DTO with no
         // regarding member, so the root gated above is necessarily the root written.
+        //
+        // Task 146: the to-do is owned by its ROOT's team — the named Secure team when the root is secure — resolved
+        // before anything is written. A refusal is a ProblemDetails, and nothing is created.
+        var rootEntity = ExternalDataService.TryGetRootBinding(rootKind)!.EntityLogicalName;
+        var (owningTeamId, refusal) = await ResolveChildOwnerAsync(ownership, rootEntity, rootId, "to-do", ct);
+        if (refusal is not null)
+            return refusal;
+
         // Task 152 (#1044 split): the calling contact is the triggering person — it becomes Assigned To. A workforce
         // systemuser with no linked contact carries Guid.Empty here; the to-do is then created unassigned (logged).
         var created = await dataService.CreateTodoAsync(
             rootKind,
             rootId,
             request,
+            owningTeamId,
             callerContext.ContactId == Guid.Empty ? null : callerContext.ContactId,
             ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
+    }
+
+    /// <summary>
+    /// The owner of a child created on this surface (unified-access-control-r2 task 146, C10 part 2): resolved
+    /// record-first from the ROOT the route names, through the ONE resolver — the named Secure team when the root is
+    /// secure, the root's business-unit default team otherwise. Every create here is app-only, so without it
+    /// Dataverse makes the BFF application user the owner, in the root business unit, readable by any root-BU user
+    /// with ordinary depth: the hole that left a secure project's children unisolated.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A refusal</b> (the root missing or unreadable, flagged secure but not isolated, its team missing) is
+    /// a 409 ProblemDetails carrying the stable <see cref="RecordOwnerRefusal"/> code as <c>reasonCode</c> and a detail
+    /// naming the reason. Nothing is written — the external upload resolves this BEFORE the bytes go to SPE.</para>
+    /// <para><b>A Dataverse fault</b> during resolution is not a refusal: it propagates as the request's 5xx
+    /// (PR #1045 F2), so a throttled read is retried rather than reported as a configuration problem.</para>
+    /// <para>Contact access is untouched: contacts reach a root's children through these app-only routes, keyed on
+    /// the root, whatever the child's owner.</para>
+    /// </remarks>
+    private static async Task<(Guid OwningTeamId, IResult? Refusal)> ResolveChildOwnerAsync(
+        IRecordOwnershipResolver ownership, string rootEntityLogicalName, Guid rootId, string childNoun,
+        CancellationToken ct)
+    {
+        var resolution = await ownership.ResolveOwnerAsync(
+            new RecordOwnershipContext { TargetEntityLogicalName = rootEntityLogicalName, TargetRecordId = rootId },
+            ct);
+
+        if (resolution.IsOwned)
+            return (resolution.OwningTeamId!.Value, null);
+
+        return (Guid.Empty, Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(resolution, childNoun));
     }
 
     /// <summary>
@@ -534,18 +580,18 @@ public static class ExternalProjectDataEndpoints
 
     private static Task<IResult> CreateTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.Project, id, request, httpContext, dataService, ownership, ct);
 
     private static Task<IResult> CreateMatterTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.Matter, id, request, httpContext, dataService, ownership, ct);
 
     private static Task<IResult> CreateWorkAssignmentTodo(
         Guid id, CreateExternalTodoRequest request, HttpContext httpContext,
-        ExternalDataService dataService, CancellationToken ct) =>
-        CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ct);
+        ExternalDataService dataService, IRecordOwnershipResolver ownership, CancellationToken ct) =>
+        CreateTodoForRoot(ExternalDataService.TodoRootKind.WorkAssignment, id, request, httpContext, dataService, ownership, ct);
 
     /// <summary>
     /// POST /api/v1/external/projects/{id}/documents — upload a file and create its <c>sprk_document</c>.
@@ -586,6 +632,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         RecordContainerResolver containerResolver,
         ISpeFileOperations fileStore,
+        IRecordOwnershipResolver ownership,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -625,7 +672,18 @@ public static class ExternalProjectDataEndpoints
         // it to a single bare segment. Both facts are enforced by SpeUploadPathIsFlatGuardTests.
         var uploadPath = SpeUploadPath.SanitizeFileName(file.FileName);
 
-        // ── AUTHORIZED — derive the container from the PROJECT, never from the request ──
+        // ── AUTHORIZED — resolve the document's OWNER from the project BEFORE any write (task 146) ──
+        // A document filed to a secure project is owned by the named Secure team. Resolved before the SPE upload so a
+        // refusal leaves neither bytes nor a row behind.
+        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "document", ct);
+        if (ownerRefusal is not null)
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Refused upload to project {ProjectId}: no owner could be resolved for the document", id);
+            return ownerRefusal;
+        }
+
+        // ── Derive the container from the PROJECT, never from the request ──
         ContainerDecision decision;
         try
         {
@@ -686,6 +744,7 @@ public static class ExternalProjectDataEndpoints
                 FileName: uploaded.Name,
                 FileSizeBytes: uploaded.Size,
                 WebUrl: uploaded.WebUrl),
+            owningTeamId,
             ct);
 
         logger.LogInformation(
@@ -718,6 +777,7 @@ public static class ExternalProjectDataEndpoints
         ExternalDataService dataService,
         IDocumentStorageResolver storageResolver,
         ISpeFileOperations fileStore,
+        Spaarke.Dataverse.IGenericEntityService entityService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -748,12 +808,17 @@ public static class ExternalProjectDataEndpoints
         {
             var (driveId, itemId) = await storageResolver.GetSpePointersAsync(documentId, ct);
 
-            var versions = await fileStore.ListFileVersionsAsync(driveId, itemId, ct);
-            if (versions is null)
+            var listed = await fileStore.ListFileVersionsAsync(driveId, itemId, ct);
+            if (listed is null)
             {
                 return Results.Problem(statusCode: 404, title: "Not Found",
                     detail: "Document content is not available.");
             }
+
+            // unified-access-control-r2 task 166, owner round 45 item 1: a version a relocation replayed into a moved
+            // file reports its ORIGINAL author and date, so the history an external participant sees is unchanged.
+            var versions = await Sprk.Bff.Api.Services.Documents.RelocatedVersionHistory.WithOriginalAuthorshipAsync(
+                entityService, documentId, itemId, listed, logger, ct);
 
             // Project to the external contract. Graph pointers (driveId/itemId) are NEVER surfaced —
             // same rule the content-download route states explicitly.
@@ -766,9 +831,10 @@ public static class ExternalProjectDataEndpoints
                     VersionLabel = v.Id,
                     CreatedAt = v.LastModifiedDateTime.ToString("o"),
                     FileSizeBytes = v.Size,
-                    // CreatedByName is intentionally left null: VersionInfoDto does not carry
-                    // lastModifiedBy, and inventing an author is worse than omitting one. The client
-                    // types it optional and renders a dash. Widening VersionInfoDto is a separate change.
+                    // CreatedByName stays null on the EXTERNAL surface: an external participant has never been shown
+                    // who wrote a version, and task 166 f1-v2 (round 45 item 1: "the history a user sees is unchanged")
+                    // keeps it so — only the dates of replayed versions are the recorded originals. Showing internal
+                    // authors to external contacts is a disclosure decision of its own, not a side effect of a move.
                 })
                 .ToList();
 
@@ -817,6 +883,7 @@ public static class ExternalProjectDataEndpoints
         CreateExternalEventRequest request,
         HttpContext httpContext,
         ExternalDataService dataService,
+        IRecordOwnershipResolver ownership,
         CancellationToken ct)
     {
         var callerContext = GetCallerPrincipal(httpContext);
@@ -840,7 +907,18 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
 
-        var created = await dataService.CreateEventAsync(id, request, ct);
+        // Task 097 review F9: never write an arbitrary status integer. Draft or Open only; omitted ⇒ Open. Checked
+        // before the owner is resolved, so a malformed body costs no Dataverse read.
+        if (request.SprkStatus is { } status && !ExternalDataService.ExternalCreatableStatuses.Contains(status))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
+
+        // Task 146: owned by the project's team (the named Secure team for a secure project), or refused.
+        var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "event", ct);
+        if (ownerRefusal is not null)
+            return ownerRefusal;
+
+        var created = await dataService.CreateEventAsync(id, request, owningTeamId, ct);
         return Results.Created($"/api/v1/external/projects/{id}/events/{created.SprkEventid}", created);
     }
 

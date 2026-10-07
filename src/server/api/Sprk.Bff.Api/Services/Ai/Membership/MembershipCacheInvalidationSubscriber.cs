@@ -11,13 +11,14 @@
 //   2. On StopAsync: unsubscribes cleanly and disposes resources.
 //
 // Eviction strategy:
-//   The cache key prefix is "membership:resolved:{personId:D}:" — see
-//   MembershipResolverService.CacheKeyPrefix + BuildCacheKey. The
+//   The cache key is "tenant:{tid}:membership-resolved:{personId:D}:{entity}:{hash}:v{n}" —
+//   see MembershipResolverService.CacheResource + ComposeCacheId. The
 //   StackExchange.Redis distributed cache prefixes everything with the
-//   configured InstanceName (default "sdap:"). To wipe per-user entries
+//   configured InstanceName (default "spaarke:"). To wipe per-user entries
 //   for a specific entity type, we SCAN the Redis keyspace for
-//   "{instanceName}membership:resolved:{personId:D}:{entityLogicalName}:*"
-//   and delete each match. SCAN is O(N) over the keyspace but is the
+//   "{instanceName}tenant:*:membership-resolved:{personId:D}:{entityLogicalName}:*"
+//   and delete each match. (The BFF write-path evictions of task 132 use the same
+//   SCAN + DEL, directly from MembershipCacheInvalidator, without this channel.) SCAN is O(N) over the keyspace but is the
 //   only safe way to remove a prefix-batch on StackExchange.Redis
 //   without KEYS (which blocks).
 //
@@ -38,7 +39,7 @@
 //   - On message deserialization failure: log Warning + skip (do NOT
 //     unsubscribe — one bad payload should not break the channel).
 //   - On Redis SCAN/DEL failure during eviction: log Warning + return.
-//     The 5-min cache TTL is the backstop.
+//     The 2-min cache TTL (task 132) is the backstop.
 //   - On unsubscribe failure (during shutdown): log Warning; do not
 //     block host shutdown.
 //
@@ -307,15 +308,15 @@ public sealed class MembershipCacheInvalidationSubscriber : IHostedService, IAsy
         {
             _logger.LogWarning(
                 ex,
-                "MembershipCacheInvalidationSubscriber Redis connection error during eviction — personId={PersonId} entity={EntityLogicalName} (TTL backstop: stale entries clear within 5 min)",
-                msg.PersonId, entity);
+                "MembershipCacheInvalidationSubscriber Redis connection error during eviction — personId={PersonId} entity={EntityLogicalName} (TTL backstop: stale entries clear within {Ttl})",
+                msg.PersonId, entity, MembershipResolverService.CacheTtl);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "MembershipCacheInvalidationSubscriber error during eviction — personId={PersonId} entity={EntityLogicalName} (TTL backstop: stale entries clear within 5 min)",
-                msg.PersonId, entity);
+                "MembershipCacheInvalidationSubscriber error during eviction — personId={PersonId} entity={EntityLogicalName} (TTL backstop: stale entries clear within {Ttl})",
+                msg.PersonId, entity, MembershipResolverService.CacheTtl);
         }
     }
 }

@@ -36,10 +36,9 @@
  * `OpenBrowserWindowApi` lifecycle Spike-2 selected. They share no state.
  *
  * **Task 086 (FR-10 amended 2026-10-02)**: the opened record is a FOCUSED page (`navbar=off`, command
- * bar kept) — see {@link buildOpenRecordUrl}'s doc comment. This file also exposes
- * {@link openUrlInBrowserWindow}, a generic version of the same opener, reused by
- * `sendEmailService.ts`'s Word Send Email choice so the two compose URLs open through the SAME
- * mechanism as an opened record, not a second one.
+ * bar kept) — see {@link buildOpenRecordUrl}'s doc comment. (Task 086 also added a generic
+ * `openUrlInBrowserWindow` for its Word Send Email choice; task 096 replaced that choice with the Email tab and
+ * removed the then-unused helper.)
  *
  * **Task 088 (UAT-1, `notes/042-uat-round3-2026-10-03.md` §3a)**: a link that names no app opens in the
  * user's DEFAULT model-driven app, which may not be Spaarke's. Every record link therefore names the Spaarke
@@ -55,7 +54,7 @@
  * @see projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md
  */
 
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 /**
  * The Spaarke model-driven app's unique name, from the `SPAARKE_APP_NAME` build setting (task 088). An unset
@@ -164,17 +163,6 @@ export function buildOpenSpaarkeUrl(orgUrl: string | undefined, appName: string)
  */
 function defaultOpener(url: string): void {
   Office.context.ui.openBrowserWindow(url);
-}
-
-/**
- * Opens an arbitrary URL in a new browser tab/window via `Office.context.ui.openBrowserWindow` — the
- * SAME mechanism {@link openRecord} uses, exposed generically for other pane-driven browser-tab opens
- * (spaarkeai-word-add-in-r1 task 086 / FR-15: the Word Send Email choice's two compose URLs). Never
- * `window.open` / the Office Dialog API. Callers MUST gate on `HostCapabilities.canOpenBrowserWindow`
- * themselves (NFR-10) — this function does not re-check the capability.
- */
-export function openUrlInBrowserWindow(url: string, opener: (url: string) => void = defaultOpener): void {
-  opener(url);
 }
 
 /**

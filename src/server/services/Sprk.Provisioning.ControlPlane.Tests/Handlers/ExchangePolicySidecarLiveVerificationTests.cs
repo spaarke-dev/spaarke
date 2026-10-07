@@ -26,12 +26,12 @@
 //   SIDECAR_LIVE_VERIFY_POLICY_GROUP_ID    (default: all-zero GUID — same)
 //   SIDECAR_LIVE_VERIFY_APP_ID_1           (default: all-zero GUID)
 //   SIDECAR_LIVE_VERIFY_APP_ID_2           (default: all-ones GUID)
+//   SIDECAR_LIVE_VERIFY_ORGANIZATION       (default: contoso.onmicrosoft.com — the tenant's initial domain)
 //
 // The default all-zero-GUID payload is intentionally SAFE against a real
 // sidecar: Listener.ps1 accepts it (the validation is shape-only — 2 entries),
-// forwards to Set-ExchangeApplicationAccessPolicy.ps1, which will either
-// fail at Connect-ExchangeOnline (bad tenantId) OR at the get-before-set
-// against the empty policy scope — either way the response is a wire Failure
+// connects to Exchange with the (not real) token and fails at
+// Connect-ExchangeOnline — either way the response is a wire Failure
 // with a diagnostic, NOT a real Exchange mutation. This means the test's
 // AUTH-REJECTION and HEALTH-CHECK checks are always deterministic regardless
 // of what tenant/policy the operator points it at, while the ROUND-TRIP check
@@ -245,7 +245,7 @@ public sealed class ExchangePolicySidecarLiveVerificationTests
         var neverInvokedReader = new NeverInvokedKvReader();
         var http = new HttpClient { BaseAddress = new Uri(_sidecarUrl!) };
         var client = new ExchangePolicySidecarClient(
-            http, neverInvokedReader, Options.Create(options),
+            http, neverInvokedReader, NewTokenSource(options), Options.Create(options),
             NullLogger<ExchangePolicySidecarClient>.Instance);
 
         var outcome = await client.ApplyAsync(BuildRequest(), CancellationToken.None);
@@ -269,14 +269,16 @@ public sealed class ExchangePolicySidecarLiveVerificationTests
     private static ExchangePolicyApplyRequest BuildRequest()
     {
         var tenantId = Environment.GetEnvironmentVariable(TenantIdEnvVar) ?? DefaultTenantId;
-        var policyGroupId = Environment.GetEnvironmentVariable(PolicyGroupIdEnvVar) ?? DefaultPolicyGroupId;
-        var appId1 = Environment.GetEnvironmentVariable(AppId1EnvVar) ?? DefaultAppId1;
-        var appId2 = Environment.GetEnvironmentVariable(AppId2EnvVar) ?? DefaultAppId2;
+        var scopeGroupId = Environment.GetEnvironmentVariable(PolicyGroupIdEnvVar) ?? DefaultPolicyGroupId;
+        var appId = Environment.GetEnvironmentVariable(AppId1EnvVar) ?? DefaultAppId1;
+        var objectId = Environment.GetEnvironmentVariable(AppId2EnvVar) ?? DefaultAppId2;
         return new ExchangePolicyApplyRequest(
             tenantId,
-            new[] { appId1, appId2 },
-            policyGroupId,
-            DescriptionPrefix: "Spaarke-Provisioning-AppAccessPolicy-LiveVerify",
+            AppId: appId,
+            ServicePrincipalObjectId: objectId,
+            DisplayName: "Spaarke-liveverify-stamp-identity",
+            ScopeGroupId: scopeGroupId,
+            Assignments: new[] { new ExchangeRoleAssignmentSpec("Spaarke-liveverify-MailRead", "Application Mail.Read") },
             CorrelationId: $"live-verify-{Guid.NewGuid():N}");
     }
 
@@ -288,25 +290,45 @@ public sealed class ExchangePolicySidecarLiveVerificationTests
         SidecarSharedSecretVaultName = "live-verify-vault",
         SidecarSharedSecretSubscriptionId = "live-verify-subscription",
         SidecarSharedSecretName = "Sidecar-Shared-Secret",
+        ExchangeAdminAppId = "00000000-0000-0000-0000-000000000001",
     };
+
+    // The sidecar connects with whatever token it is given. The default is not a real token, so the
+    // round trip ends in a wire Failure at Connect-ExchangeOnline — never a real Exchange change. Set
+    // SIDECAR_LIVE_VERIFY_EXCHANGE_TOKEN to exercise a real tenant (a live-ceremony operation).
+    private static ExchangeAdminTokenSource NewTokenSource(IntegrationWiringOptions options)
+        => new((_, _) => new StaticToken(Environment.GetEnvironmentVariable("SIDECAR_LIVE_VERIFY_EXCHANGE_TOKEN") ?? "live-verify-not-a-real-token"),
+            (_, _) => Task.FromResult<string?>(Environment.GetEnvironmentVariable("SIDECAR_LIVE_VERIFY_ORGANIZATION") ?? "contoso.onmicrosoft.com"),
+            Options.Create(options));
 
     private static ExchangePolicySidecarClient NewClient(string baseUrl, string sharedSecretValue)
     {
         var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
         var reader = new CannedKvSecretReader(new KvSecretReadResult.Success(sharedSecretValue));
+        var options = NewOptions(baseUrl);
         return new ExchangePolicySidecarClient(
-            http, reader,
-            Options.Create(NewOptions(baseUrl)),
+            http, reader, NewTokenSource(options),
+            Options.Create(options),
             NullLogger<ExchangePolicySidecarClient>.Instance);
     }
 
     private static string DescribeOutcome(ExchangePolicyApplyOutcome outcome) => outcome switch
     {
-        ExchangePolicyApplyOutcome.Applied a => $"Applied(CreatedCount={a.CreatedCount}, Observed=[{string.Join(",", a.ObservedAppIds)}])",
-        ExchangePolicyApplyOutcome.Drift d => $"Drift(Expected=[{string.Join(",", d.ExpectedAppIds)}], Observed=[{string.Join(",", d.ObservedAppIds)}])",
+        ExchangePolicyApplyOutcome.Applied a => $"Applied(CreatedCount={a.CreatedCount}, Assignments=[{string.Join(",", a.AssignmentNames)}])",
+        ExchangePolicyApplyOutcome.Drift d => $"Drift([{string.Join(" ", d.Conflicts)}])",
         ExchangePolicyApplyOutcome.Failure f => $"Failure({f.Diagnostic})",
         _ => outcome.ToString() ?? "(null)",
     };
+
+    private sealed class StaticToken : Azure.Core.TokenCredential
+    {
+        private readonly string _token;
+        public StaticToken(string token) { _token = token; }
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(_token, DateTimeOffset.UtcNow.AddHours(1));
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
+    }
 
     private sealed class CannedKvSecretReader : IKvSecretReader
     {

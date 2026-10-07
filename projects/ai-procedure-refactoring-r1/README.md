@@ -1,5 +1,7 @@
 # AI Procedure Refactoring R1
 
+> **Portfolio**: [Project #1135](https://github.com/spaarke-dev/spaarke/issues/1135) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/ai-procedure-refactoring-r1`
 > **Created**: 2026-03-31

@@ -173,6 +173,8 @@ The user should hard-refresh **`spaarkedev1`** in Incognito to verify SpaarkeAi 
 
 **Fallback** (Node script remains a safety net): `node scripts/master-deploy/build-all-vite-solutions.mjs` — calls `npm run build` per solution serially. Use if the PS1 ever exhibits new failure modes.
 
+**Clean-checkout fixes (PR #1286)**: Step 1 built `Spaarke.Events.Components` / `Spaarke.SmartTodo.Components` before the `Spaarke.UI.Components` they depend on (a clean checkout stopped at Step 1), and the PCF step was one aggregate dev-mode build that never worked from a clean checkout. Both fixed; verified 14/14 shared libs + 19/19 PCFs from a fresh worktree. The full run takes over an hour (each PCF installs and builds on its own).
+
 ### F-3: `dotnet publish --no-restore` fails inside `Deploy-BffApi.ps1`
 
 **Cause**: Script Step 1 ran `dotnet publish ... --no-restore` with no preceding `dotnet restore`. Fresh checkouts failed with exit 1.
@@ -230,4 +232,4 @@ When triggered with no explicit blockers from the user:
 
 - **Deploy ledger** (`~/.spaarke-deploy-ledger.json`): proposed but not built. Would record `{branch, commit, deployed_at}` per web resource and warn on cross-branch overwrites. ~60-90 min of work.
 - **Per-PR pre-flight CI**: detect when a PR adds a transitive `@spaarke/*` import that consumers don't declare. Would prevent the F-1 firefight at deploy time.
-- **`Build-AllClientComponents.ps1` failure root-cause**: until diagnosed, the Node fallback is the canonical path.
+- **`Build-AllClientComponents.ps1` as this skill's build path**: its F-2 root cause was fixed 2026-06-11 and its clean-checkout defects 2026-10-05 (see F-2). The Node script stays this skill's canonical Vite build until someone deliberately switches it; the PS1 is what `Deploy-Release.ps1` uses.

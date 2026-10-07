@@ -89,17 +89,23 @@ internal sealed class TodoRegardingBuilder
 
     private readonly ICommunicationDataverseService _communicationService;
     private readonly CoreAncestorResolver _coreAncestors;
-    private readonly ILogger<TodoRegardingBuilder> _logger;
+    private readonly ILogger _logger;
 
     /// <summary>
     /// Lazy cache for <c>sprk_recordtype_ref</c> lookups (entity logical name → GUID + display name).
     /// </summary>
     private readonly Dictionary<string, (Guid Id, string DisplayName)?> _recordTypeRefCache = new();
 
+    /// <param name="communicationService">The <c>sprk_recordtype_ref</c> lookup (<c>QueryRecordTypeRefAsync</c>).</param>
+    /// <param name="coreAncestors">The FR-26 core-ancestor stamp (step 3 of <see cref="ApplyResolverFieldsAsync"/>).</param>
+    /// <param name="logger">
+    /// Any logger: <c>TodoGenerationService</c> passes its <c>ILogger&lt;TodoRegardingBuilder&gt;</c>; <c>TaskActionCore</c>,
+    /// which reuses <see cref="ApplyResolverPairAsync"/> for <c>sprk_event</c>, passes its own (owner round 8 item 2).
+    /// </param>
     public TodoRegardingBuilder(
         ICommunicationDataverseService communicationService,
         CoreAncestorResolver coreAncestors,
-        ILogger<TodoRegardingBuilder> logger)
+        ILogger logger)
     {
         _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
         _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
@@ -176,29 +182,7 @@ internal sealed class TodoRegardingBuilder
         };
 
         // 2) Resolver fields (4) — populated atomically
-        var cleanId = regardingId.ToString("D").ToLowerInvariant();
-        todoEntity[FieldRegardingRecordId] = cleanId;
-        todoEntity[FieldRegardingRecordName] = regardingDisplayName ?? string.Empty;
-        todoEntity[FieldRegardingRecordUrl] = BuildRecordUrl(regardingEntityName, cleanId);
-
-        var recordTypeRef = await ResolveRecordTypeRefAsync(regardingEntityName, ct);
-        if (recordTypeRef.HasValue)
-        {
-            todoEntity[FieldRegardingRecordType] = new EntityReference(
-                "sprk_recordtype_ref", recordTypeRef.Value.Id)
-            {
-                Name = recordTypeRef.Value.DisplayName
-            };
-        }
-        else
-        {
-            // Non-fatal: log + continue. Specific lookup + id/name/url still populated.
-            // sprk_recordtype_ref is used by cross-entity views; missing it loses the entity
-            // type icon but does not break correctness.
-            _logger.LogWarning(
-                "sprk_recordtype_ref not found for entity '{Entity}'. Resolver type field left unset.",
-                regardingEntityName);
-        }
+        await ApplyResolverPairAsync(todoEntity, regardingEntityName, regardingId, regardingDisplayName, ct);
 
         // 3) FR-26 core-ancestor stamp — LAST, so it can never be overwritten by steps 1–2, and so the
         //    ADR-024 mutual-exclusion guard above (which fires on an ALREADY-SET lookup) does not mistake
@@ -224,7 +208,55 @@ internal sealed class TodoRegardingBuilder
 
         _logger.LogDebug(
             "Applied resolver fields to sprk_todo: Entity={Entity}, Id={Id}, Name={Name}, AncestorStatus={Status}",
-            regardingEntityName, cleanId, regardingDisplayName, stamp.Status);
+            regardingEntityName, regardingId.ToString("D").ToLowerInvariant(), regardingDisplayName, stamp.Status);
+    }
+
+    /// <summary>
+    /// The four ADR-024 resolver fields — the polymorphic regarding PAIR — on <paramref name="host"/>, for the parent
+    /// <paramref name="regardingEntityName"/> <paramref name="regardingId"/>: <c>sprk_regardingrecordid</c> (lowercase
+    /// "D" GUID), <c>sprk_regardingrecordname</c> (empty when unknown), <c>sprk_regardingrecordurl</c> (the relative
+    /// model-driven record URL) and, when a <c>sprk_recordtype_ref</c> row exists for the parent's type,
+    /// <c>sprk_regardingrecordtype</c>. Step 2 of <see cref="ApplyResolverFieldsAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// Host-agnostic on purpose (unified-access-control-r2 task 156, owner decisions round 8 item 2): <c>TaskActionCore</c>
+    /// writes the same pair on the <c>sprk_event</c> tasks it creates by calling this method rather than a copy of it, so
+    /// the pair a task carries is exactly the one a to-do carries. A missing record-type row is non-fatal (logged; the id,
+    /// name and url are still written — the id is what the core-ancestor reconciliation job finds a regarding cleared on a
+    /// form by, F-051-6). This method writes nothing else: the caller owns the typed lookup and the core-ancestor stamp.
+    /// </remarks>
+    internal async Task ApplyResolverPairAsync(
+        Entity host,
+        string regardingEntityName,
+        Guid regardingId,
+        string? regardingDisplayName,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+
+        var cleanId = regardingId.ToString("D").ToLowerInvariant();
+        host[FieldRegardingRecordId] = cleanId;
+        host[FieldRegardingRecordName] = regardingDisplayName ?? string.Empty;
+        host[FieldRegardingRecordUrl] = BuildRecordUrl(regardingEntityName, cleanId);
+
+        var recordTypeRef = await ResolveRecordTypeRefAsync(regardingEntityName, ct);
+        if (recordTypeRef.HasValue)
+        {
+            host[FieldRegardingRecordType] = new EntityReference(
+                "sprk_recordtype_ref", recordTypeRef.Value.Id)
+            {
+                Name = recordTypeRef.Value.DisplayName
+            };
+        }
+        else
+        {
+            // Non-fatal: log + continue. Specific lookup + id/name/url still populated.
+            // sprk_recordtype_ref is used by cross-entity views; missing it loses the entity
+            // type icon but does not break correctness.
+            _logger.LogWarning(
+                "sprk_recordtype_ref not found for entity '{Entity}'. Resolver type field left unset.",
+                regardingEntityName);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -273,8 +305,7 @@ internal sealed class TodoRegardingBuilder
     /// Returns a RELATIVE URL — the host origin is resolved by the model-driven
     /// app at click time. No org URL or tenant id is hard-coded here.
     /// </remarks>
-    internal static string BuildRecordUrl(string entityLogicalName, string recordId)
-    {
-        return $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
-    }
+    internal static string BuildRecordUrl(string entityLogicalName, string recordId) =>
+        // One server-side owner of the ADR-024 record-URL format (task 097 review F3b): sprk_event uses it too.
+        RegardingRecordType.BuildRecordUrl(entityLogicalName, recordId);
 }

@@ -17,11 +17,7 @@ import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { RelatedToPicker, type CreateRecordResult, type RelatedToPickerProps } from '../RelatedToPicker';
 import type { EntitySearchResult, EntityType } from '../../hooks/useEntitySearch';
-import type { MatterTypeChoice } from '../../services/matterTypeLookupService';
-
-const MATTER_TYPES: MatterTypeChoice[] = [
-  { id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' },
-];
+import type { CreateRecordInput } from '../CreateRecordForm';
 
 // ResizeObserver (Fluent v9 MessageBar/Dropdown reflow) is polyfilled globally in jest.setup.js
 // (task 071) — removed the per-file copy that used to live here.
@@ -32,8 +28,8 @@ const MATTER_TYPES: MatterTypeChoice[] = [
 jest.setTimeout(60000);
 configure({ asyncUtilTimeout: 10000 });
 
-type PickerOverrides = Partial<Pick<RelatedToPickerProps, 'allowedTypes' | 'defaultType' | 'matterTypeOptions'>> & {
-  onCreateRecord?: jest.Mock<Promise<CreateRecordResult | null>, [EntityType, string, string?]>;
+type PickerOverrides = Partial<Pick<RelatedToPickerProps, 'allowedTypes' | 'defaultType'>> & {
+  onCreateRecord?: jest.Mock<Promise<CreateRecordResult | null>, [EntityType, CreateRecordInput]>;
   onSearch?: jest.Mock<Promise<EntitySearchResult[]>, [string, EntityType]>;
 };
 
@@ -48,7 +44,6 @@ function pickerElement(props: PickerOverrides, onChange: jest.Mock) {
         {...(props.onCreateRecord ? { onCreateRecord: props.onCreateRecord } : {})}
         allowedTypes={props.allowedTypes ?? ['Matter', 'Project', 'Invoice']}
         defaultType={props.defaultType ?? 'Project'}
-        matterTypeOptions={props.matterTypeOptions ?? MATTER_TYPES}
       />
     </FluentProvider>
   );

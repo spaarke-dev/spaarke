@@ -25,7 +25,39 @@ last-reviewed: 2026-05-16
 
 This skill creates a checkpoint of working state that enables another Claude instance (or the same instance post-compaction) to continue work without loss. It addresses the critical gap where automatic or manual compaction can occur without state being persisted.
 
-**Key Principle**: After this skill runs, `current-task.md` alone should contain everything needed to continue work.
+**Key Principle**: After this skill runs, `current-task.md` + the project `CLAUDE.md` contain everything needed to continue work. `current-task.md` holds **current state only** — see [State, not history](#state-not-history-binding--added-2026-10-06) below.
+
+---
+
+## State, not history (BINDING — added 2026-10-06)
+
+**Every checkpoint REWRITES `current-task.md` to describe the present. Never prepend a new block on top of old ones, and never keep a superseded block "for reference".**
+
+**Why this rule exists.** Before this rule, this skill said "don't overwrite history" and its template ended in `[... rest of current-task.md content ...]`, so each checkpoint added a "supersedes everything below" block and kept the rest. In long projects the file reached 150–480 KB (`unified-access-control-r2`: 5 KB on 2026-08-21 → 483 KB on 2026-10-06, 27 sessions stacked). That cost accuracy as well as tokens:
+- `task-execute` reads the file at Step 0 and Step 2 of **every** task, so a 480 KB file is ~120k tokens before any work starts. That fills the context, forces compaction, and recovery re-reads the same file.
+- Superseded blocks still carry imperative instructions ("Running — do NOT relaunch" for runs long finished) that a recovering agent can act on.
+- The items that genuinely outlive a session (owner directives, environment gotchas) end up buried thousands of lines down, where recovery never reaches them.
+
+**Budget.** Target ≤ 10 KB. If the file is over **20 KB** when you checkpoint, you are carrying history: move it out (table below) before writing the new state.
+
+**What belongs in `current-task.md`** — only what is true now:
+- active task(s) or parallel lanes, their step and status (finished lanes are removed, not struck through);
+- running background work (workflow run IDs, monitors) that is still running;
+- explicit next actions, in order;
+- open blockers, pending owner questions, manual gates;
+- uncommitted or unpushed state.
+
+**Where everything else goes:**
+
+| Content | Destination |
+|---|---|
+| Owner directives and standing rules that outlive a task | Project `CLAUDE.md` → `## Standing directives & gotchas` (one bullet each, with the date) |
+| Environment gotchas ("do not re-learn this") | Same section; if it applies beyond this project, `.claude/FAILURE-MODES.md` |
+| Decisions with rationale | The task's notes file (`notes/task-NNN-*.md`) or `notes/decisions.md` |
+| What happened in a session | The checkpoint **commit message** — git log is the journal |
+| A finished checkpoint you still want verbatim | Append to `notes/handoff-history/YYYY-MM.md` — never loaded on recovery; grep it only for a specific past detail |
+
+**Accuracy check before writing.** Anything you delete from `current-task.md` must be (a) no longer true, or (b) now in one of the destinations above. When unsure whether a standing item is still in force, keep it in the project `CLAUDE.md` section and mark it `(verify)`; don't drop it.
 
 ---
 
@@ -104,9 +136,9 @@ CAPTURE (in memory first):
    - Files to reference
 ```
 
-### Step 3: Update current-task.md
+### Step 3: Rewrite current-task.md
 
-**Structure the update with Quick Recovery at top:**
+**First, move out anything no longer current** (see [State, not history](#state-not-history-binding--added-2026-10-06)). Then **rewrite** the file. Don't prepend; the result is one state, with Quick Recovery at the top:
 
 ```markdown
 # Current Task State - {Project Name}
@@ -134,10 +166,17 @@ CAPTURE (in memory first):
 
 ---
 
-## Full State (Detailed)
+## Active Task / Lanes
+{status of each active task or lane — remove finished ones}
 
-[... rest of current-task.md content ...]
+## Next Actions
+{ordered list}
+
+## Open Owner Questions / Blockers
+{only those still open}
 ```
+
+There is no "previous checkpoints" section. Each checkpoint replaces the whole file.
 
 ### Step 4: Verify and Report
 
@@ -189,7 +228,7 @@ Example:
 | **Next Action** | Test deployment with: `az webapp deploy --slot staging` |
 
 ### Files Modified This Session
-- `infrastructure/bicep/stacks/model2-full.bicep` - Added AI Search config
+- `infrastructure/bicep/customer.bicep` - Added AI Search config
 - `src/server/api/Sprk.Bff.Api/Program.cs` - Registered RagService
 
 ### Critical Context
@@ -335,7 +374,7 @@ Output:
 - **Keep Quick Recovery minimal** - Recovery should take < 30 seconds to read
 - **Next Action must be explicit** - "Continue working" is NOT explicit; "Run `dotnet test`" IS explicit
 - **Timestamp is critical** - Always update Last Updated when checkpointing
-- **Don't overwrite history** - Move detailed history to "Full State" section, not delete
+- **Rewrite, don't accumulate** - `current-task.md` is current state. Move durable items to the project `CLAUDE.md`, decisions to notes, and the session narrative to the commit message (see [State, not history](#state-not-history-binding--added-2026-10-06))
 - **Files Modified is session-scoped** - Reset when task changes, not accumulate forever
 - **Verify before reporting** - Actually read back current-task.md to confirm save worked
 
@@ -362,6 +401,7 @@ This can be automatic if the user's first message is work-related, or explicit v
 | Post-compaction agent has stale `current-task.md` but believes it's current | Checkpoint was skipped or interrupted; `Last Updated:` timestamp wasn't refreshed | Always update the `Last Updated:` timestamp during checkpoint. On resume, compare it against `git log -1 --format=%ci current-task.md` — large gap = handoff was incomplete. |
 | Quick Recovery says step N but the work was actually on step N+2 | Checkpoint ran early in a step; agent did 2 more steps before context ran out | Checkpoint after EACH completed step (per root CLAUDE.md proactive checkpointing rules), not just before compaction. Background work between checkpoints is at-risk. |
 | `current-task.md` updated but the relevant project files weren't committed | Checkpoint saved the state file; uncommitted code changes lost across compaction | If "Files Modified This Session" list has uncommitted changes, prompt user to commit BEFORE compaction. Don't silently lose work. |
+| `current-task.md` grows to hundreds of KB; recovery is slow, compaction comes early, and an agent obeys a stale "do not relaunch" | Each checkpoint prepended a "supersedes everything below" block and kept the old ones (the pre-2026-10-06 wording of this skill told agents to keep history) | Rewrite per [State, not history](#state-not-history-binding--added-2026-10-06). One-time cleanup: copy the file verbatim to `notes/handoff-history/current-task-archive-{date}.md`, move standing items to the project `CLAUDE.md`, and rewrite the file from the newest checkpoint. |
 | Recovery loads project-continue but `current-task.md` is for a different project | Multiple worktrees, agent loaded wrong project's state | Verify branch name matches expected project before trusting `current-task.md`. If mismatch, the user opened the wrong working directory. |
 
 ---

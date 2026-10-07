@@ -8,7 +8,6 @@ using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Ai.Audit;
 using Sprk.Bff.Api.Services.Ai.Feedback;
 using Sprk.Bff.Api.Services.Ai.Memory;
-using Sprk.Bff.Api.Services.Ai.PromptLibrary;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -151,16 +150,18 @@ public static class AiPersistenceModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IPreferenceMemoryCapture,
             Sprk.Bff.Api.Services.Ai.PublicContracts.PreferenceMemoryCapture>();
 
-        // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
-        // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +
-        // NotificationService (AAD oid → systemuserid). Scoped: both dependencies are Singletons, so
-        // Scoped is safe; per-request usage from the governance endpoints.
+        // AIR2-052: memory-governance subject port (FR-B-03). Thin seam over the existing
+        // NotificationService (AAD oid → systemuserid). Its record-read half (an entity-type privilege
+        // check over IDataversePrivilegeChecker) was deleted with GET /api/memory/records by
+        // unified-access-control-r2 task 166. Scoped: the dependency is a Singleton, so Scoped is safe;
+        // per-request usage from the governance endpoints.
         services.AddScoped<IMemoryAccessAuthorizer, MemoryAccessAuthorizer>();
 
-        // AIPU2-035: PromptLibraryService — Personal + Team template CRUD (Cosmos DB prompts container).
-        // Scoped: one instance per HTTP request; shares the singleton CosmosClient.
-        // Org + System template tiers are deferred to AIPU2-036 (Dataverse integration).
-        services.AddScoped<IPromptLibraryService, PromptLibraryService>();
+        // AIPU2-035's PromptLibraryService (Personal + Team template CRUD) was REMOVED with its six
+        // /api/ai/prompts routes by unified-access-control-r2 task 164 (owner round 10 item 1): no caller in
+        // the repo, not in any published API description, and sweep findings #56/#57 (any signed-in user
+        // could read, overwrite, delete or plant another user's or team's templates). The Cosmos "prompts"
+        // container is still provisioned by infrastructure/bicep; retiring it is a separate infra change.
 
         // AIPU2-036: FeedbackService — per-response thumbs up/down storage and aggregation.
         // Scoped: one instance per HTTP request; shares the singleton CosmosClient.

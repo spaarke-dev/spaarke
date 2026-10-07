@@ -7,10 +7,12 @@
 // PURPOSE:
 //   Registers the BFF app-registration AND the UAMI as Dataverse System
 //   Administrator Application Users on the target Dataverse environment, then
-//   syncs the Microsoft Graph application (app-only) permission catalog (15
-//   roles as of task 144; Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally
-//   via IGraphAppRolesRegistry — see that file's header for the L2/BFF
-//   assembly-isolation rationale) onto the UAMI service principal.
+//   syncs the Microsoft Graph application (app-only) permission catalog
+//   (Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles, mirrored locally via
+//   IGraphAppRolesRegistry — see that file's header for the L2/BFF
+//   assembly-isolation rationale) onto the UAMI service principal: the 11
+//   Entra-granted roles. The 4 mailbox roles are granted by H14a through
+//   Exchange, scoped to the customer's group (task 251) — never here.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-13 (H10
@@ -90,6 +92,29 @@
 //   successors (H12c/H14 per the plan.md critical path). This handler mutates
 //   Cosmos state (advancing CurrentPhase + CompletedPhases + InterStepState +
 //   GateStates) and returns Success; it does not enqueue anything directly.
+//
+// MODEL 1 / MODEL 2 CODE PATH (task 205d / punch row A41 — auth-v4 §10.1 Δ5):
+//   H10 itself is DELIBERATELY tenancy-model-agnostic — it always registers
+//   exactly the two systemuser rows named by whatever bffAppRegId/miClientId/
+//   miObjectId InterStepState carries, without branching on run.TenancyModel.
+//   The Model 1 vs Model 2 SHAPE is established upstream, not here:
+//     - Model 1 (dedicated stamp in Spaarke's Azure tenant — D-12/D-13, 2026-09-28):
+//       the same shape as Model 2 below — a per-customer BFF app-reg (H3) and a
+//       per-stamp UAMI (H2a), so H10 writes this customer's own systemuser rows.
+//       (H2a refuses Model 1 runs until tasks 225b + 228 land — task 225a.)
+//       The former shared shape (one multitenant app-reg + `sprk-{env}-shared-bff-uami`
+//       registered once per DV environment for every Model 1 customer) is retired:
+//       H3's shared branch by task 222, the shared stack by task 225a.
+//     - Model 2 (dedicated stamp): H3 provisions a per-customer BFF app-reg +
+//       federated identity credential per customer, and H2a's uami.bicep
+//       provisions a per-stamp UAMI (`mi-spaarke-{customerId}-{env}`, customer.bicep) — see
+//       GraphRegistrationProvisioner.cs:547-557 (task 130) for the per-profile
+//       issuer derivation that makes the Model 2 app-reg's identity genuinely
+//       per-customer. H10's dispatch for a Model 2 customer therefore writes
+//       systemuser rows unique to that customer's stamp.
+//   No `if (run.TenancyModel == ...)` branch belongs in this handler — adding
+//   one would duplicate a decision that upstream handlers already made and
+//   InterStepState already encodes.
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
@@ -285,8 +310,21 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         var bffSystemUserId = ((DataverseAppUserCreationOutcome.Success)bffOutcome).SystemUserId;
 
         // (10) Register the UAMI as a Dataverse System Administrator App User.
+        // auth-v4 §10.4 BINDING (punch row A41, the documented "single
+        // most-missed item"): azureactivedirectoryobjectid MUST be set
+        // EXPLICITLY to the UAMI's principalId (uamiObjectId — InterStepState
+        // .miObjectId, H2a's Bicep output) — NEVER the UAMI's clientId
+        // (uamiClientId, used for `applicationid` only). Both are valid-shaped
+        // GUIDs; a row created with the wrong one still passes the T2
+        // existence/count check below AND H13's independent re-verification
+        // count check — only the app-only Dataverse call's oid-claim match
+        // fails at first real use, 401ing every call for this customer. See
+        // DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+        // remarks + mi-proof-dataverse-side.md for the full trap shape.
         var uamiOutcome = await _appUserCreator.EnsureAppUserAsync(
-            new DataverseAppUserCreationRequest(dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName),
+            new DataverseAppUserCreationRequest(
+                dataverseEnvUrl, tenantId, uamiClientId, _options.SecurityRoleName,
+                AzureActiveDirectoryObjectId: uamiObjectId),
             cancellationToken).ConfigureAwait(false);
         if (uamiOutcome is DataverseAppUserCreationOutcome.Failure uamiFailure)
         {
@@ -311,9 +349,13 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         }
         var uamiSystemUserId = ((DataverseAppUserVerificationResult.Verified)t2Result).SystemUserId;
 
-        // (12) Grant all Graph app-roles (15 as of task 144) onto the UAMI service principal.
+        // (12) Grant the Entra-granted Graph app-roles onto the UAMI service principal. The mailbox
+        //      roles (Mail.*, MailboxSettings.Read) are NOT granted here: H14a grants them through
+        //      Exchange, scoped to the customer's group (task 251, owner D26) — an Entra grant would
+        //      reach every mailbox in the tenant and void that scope.
+        var entraRoles = _rolesRegistry.GetEntraGranted();
         var grantOutcome = await _roleGranter.GrantRolesAsync(
-            uamiObjectId, tenantId, expectedRoles, cancellationToken).ConfigureAwait(false);
+            uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
         if (grantOutcome is GraphAppRoleGrantOutcome.Failure grantFailure)
         {
             var diagnostic =
@@ -326,7 +368,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
 
         // (13) T3 SILENT-FAIL TRAP — independent post-grant re-query.
         var t3Result = await _roleParityVerifier.VerifyAsync(
-            uamiObjectId, tenantId, expectedRoles, cancellationToken).ConfigureAwait(false);
+            uamiObjectId, tenantId, entraRoles, cancellationToken).ConfigureAwait(false);
         if (t3Result is GraphAppRoleParityResult.Partial partial)
         {
             var diagnostic =
@@ -344,7 +386,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         _logger.LogInformation(
             "H10 succeeded: runId={RunId} customerId={CustomerId} uamiSystemUserId={UamiSystemUserId} " +
             "bffSystemUserId={BffSystemUserId} rolesGranted={RolesGranted} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, uamiSystemUserId, bffSystemUserId, expectedRoles.Count,
+            envelope.RunId, envelope.CustomerId, uamiSystemUserId, bffSystemUserId, entraRoles.Count,
             stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(

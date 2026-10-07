@@ -49,6 +49,12 @@ const ENV_CONFIG = {
   // same in every environment; a customer whose app has another name changes this one setting. UNSET →
   // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
   SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
+  // Optional: switches Word's Email tab (task 096) on. Default OFF in code; only the exact string "true" turns
+  // it on. The deploy workflow (`.github/workflows/deploy-office-addins.yml`) sets it to "true" since task 097
+  // (2026-10-06): `/api/communications/send` now authorizes every attachment and association as the caller
+  // (unified-access-control-r2 task 161, on master via #1312). A local or other build without the setting
+  // keeps the tab off.
+  ADDIN_EMAIL_TAB_ENABLED: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true' ? 'true' : 'false',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -214,10 +220,48 @@ module.exports = async (env, options) => {
           __dirname,
           '../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
         ),
+        // Task 096 (owner 2026-10-04: "use our shared UI components so it looks consistent"): the
+        // Word pane's Email tab mounts the SAME compose engine the Spaarke email page mounts
+        // (`EmailComposer`), through its pane wrapper `SendEmailPane` (ADR-045: every send UX goes
+        // through a thin wrapper over the one engine). Exact ($) match to the WRAPPER FILE only —
+        // never the `@spaarke/ui-components` barrel, which would pull in the library's Xrm-bound
+        // components (the ADR-012 Path A reason this package does not consume the barrel). The
+        // wrapper's import closure (22 files) has no Xrm/host dependency; its third-party imports
+        // (react, Fluent v9, lexical) resolve from THIS package's node_modules — see the first rule
+        // under `module.rules`.
+        // Task 099 (ADR-012 amended 2026-10-05 / ADR-044): the ONE shared `cleanGuid` (`utils/guid.ts` — a pure
+        // module, zero imports), by exact alias — replaces this package's former local copy.
+        '@spaarke/ui-components/guid$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/utils/guid.ts'
+        ),
+        '@spaarke/ui-components/send-email-pane$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
+        ),
+        // Task 100 (owner decision C, ADR-012 amended 2026-10-05): the "+ New" form's Assigned To picker is the
+        // shared host-agnostic `LookupField` (`onSearch` injected; imports Fluent, react-icons, LookupTypes and the
+        // shared thin scrollbar — no Xrm). Exact ($) match to the component FILE, never the barrel.
+        '@spaarke/ui-components/lookup-field$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx'
+        ),
       },
     },
     module: {
       rules: [
+        {
+          // Task 096: the aliased shared compose sources live outside this package, where no node_modules is
+          // installed in CI. Their bare imports resolve from THIS package's node_modules FIRST, so the shared
+          // engine binds to the add-in's own single copy of react / react-dom / Fluent / lexical (two React
+          // copies break hooks) even on a machine that has the shared library installed. Scoped to requests
+          // ISSUED by the shared source (Rule.resolve), so the add-in's own dependency resolution — including
+          // any nested package versions — is untouched.
+          include: path.resolve(__dirname, '../shared/Spaarke.UI.Components/src'),
+          resolve: {
+            modules: [path.resolve(__dirname, 'node_modules'), 'node_modules'],
+          },
+        },
         {
           test: /\.tsx?$/,
           use: {
@@ -370,6 +414,7 @@ module.exports = async (env, options) => {
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
         'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
+        'process.env.ADDIN_EMAIL_TAB_ENABLED': JSON.stringify(ENV_CONFIG.ADDIN_EMAIL_TAB_ENABLED),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
         // Task 089: the pane footer shows the app-package version, not a hand-maintained literal.
@@ -404,7 +449,10 @@ module.exports = async (env, options) => {
           vendor: {
             test: /[\\/]node_modules[\\/]/,
             name: 'vendors',
-            chunks: 'all',
+            // 'initial', not 'all': packages reached only through a lazy import (the Email tab's compose engine
+            // and its rich-text editor) stay in that lazy chunk instead of the startup `vendors` bundle every pane
+            // loads (task 096 review).
+            chunks: 'initial',
           },
         },
       },

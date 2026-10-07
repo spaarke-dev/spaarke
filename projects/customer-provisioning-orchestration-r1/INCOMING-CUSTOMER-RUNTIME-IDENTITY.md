@@ -1,5 +1,10 @@
 # 📨 INCOMING — the BFF now requires a customer identity at startup. Your provisioning handler must emit it.
 
+> ✅ **STATUS (2026-10-01, customer-provisioning-orchestration-r1 T238)**: §1.1 done — H4b writes `Customer__Id` =
+> the run's customerId (verbatim) to BOTH slots; §1.2 done — H13 trap T7 (`CustomerIdentityT7Probe`) quarantines a
+> run whose stamp lacks it, has it blank, or carries another value on either slot. §1.3 (the two pre-D-12 platform
+> stamps) remains an **owner decision** — not touched.
+
 > **From**: `unified-access-control-r2`, task 123 (2026-09-29)
 > **Decision**: [D-14](../unified-access-control-r2/notes/D-14-customer-discriminator.md) — option (c) for the
 > source, §8 option D for the strictness. Owner-raised.

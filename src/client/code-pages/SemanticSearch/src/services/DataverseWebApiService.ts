@@ -10,6 +10,7 @@
  * @see DataverseMetadataService.ts (PCF version) for reference
  */
 
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 import type { FilterOption } from '../types';
 
 // =============================================
@@ -57,8 +58,8 @@ interface OptionMetadata {
  */
 export function getOrgUrl(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl');
     if (xrm?.Utility?.getGlobalContext) {
       return xrm.Utility.getGlobalContext().getClientUrl();
     }

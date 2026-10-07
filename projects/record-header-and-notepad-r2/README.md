@@ -1,6 +1,6 @@
 # Configurable Record Header — R2
 
-> **Portfolio**: TBD — not yet registered on [Project #2](https://github.com/users/spaarke-dev/projects/2). Parent Epic (inherited from R1): [Epic #535 — ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535)
+> **Portfolio**: [Project #1175](https://github.com/spaarke-dev/spaarke/issues/1175) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
 > **Status**: 🔲 Design complete, pre-spec. Not started.
 > **Worktree**: `c:/code_files/spaarke-wt-record-header-and-notepad-r2`
 > **Branch**: `work/record-header-and-notepad-r2` · **PR**: none yet

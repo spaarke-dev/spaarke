@@ -1,5 +1,7 @@
 # AI Resource Activation & Integration (R3)
 
+> **Portfolio**: [Project #1142](https://github.com/spaarke-dev/spaarke/issues/1142) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Code Complete (pending deployment)
 > **Branch**: work/ai-resource-activation-r3
 > **Created**: 2026-03-04

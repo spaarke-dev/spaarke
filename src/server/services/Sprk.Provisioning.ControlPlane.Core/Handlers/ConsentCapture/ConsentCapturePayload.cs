@@ -18,7 +18,7 @@
 // WIRE FORMAT (System.Text.Json, camelCase — parity with HandlerEnvelope):
 //
 //     {
-//       "customerId":    "acme-corp",
+//       "customerId":    "acme",
 //       "tenantId":      "00000000-0000-0000-0000-000000000000",
 //       "correlationId": "0HN..." (optional; caller TraceIdentifier)
 //     }

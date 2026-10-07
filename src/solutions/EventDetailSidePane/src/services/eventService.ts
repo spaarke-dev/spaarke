@@ -7,7 +7,9 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
+import { splitFilingPayload } from "@spaarke/ui-components";
+import { refileEventThroughBff } from "./childRecordWrites";
 import {
   IEventRecord,
   EVENT_HEADER_SELECT_FIELDS,
@@ -36,33 +38,16 @@ interface IXrmWebApi {
 }
 
 /**
- * Get the Xrm.WebApi object from window context
- *
- * In Custom Pages, Xrm is available from window.parent.Xrm (when in iframe)
- * or window.Xrm (when running directly).
+ * Get the Xrm.WebApi object via the shared cross-frame walker (task 081 / C-8).
  */
 function getXrmWebApi(): IXrmWebApi | null {
-  try {
-    // Try window.parent.Xrm first (Custom Page in iframe)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi) {
-      return parentXrm.WebApi as IXrmWebApi;
-    }
-
-    // Try window.Xrm (direct access)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.WebApi) {
-      return windowXrm.WebApi as IXrmWebApi;
-    }
-
-    console.warn("[EventService] Xrm.WebApi not available");
-    return null;
-  } catch (error) {
-    console.error("[EventService] Error accessing Xrm.WebApi:", error);
-    return null;
+  const webApi = getXrm()?.WebApi;
+  if (webApi) {
+    return webApi as unknown as IXrmWebApi;
   }
+
+  console.warn("[EventService] Xrm.WebApi not available");
+  return null;
 }
 
 /**
@@ -349,75 +334,71 @@ export async function saveEvent(
     };
   }
 
-  try {
-    const normalizedId = cleanGuid(eventId);
+  const normalizedId = cleanGuid(eventId);
 
-    // Split payload into scalar fields and lookup bindings.
-    // Lookups use @odata.bind which can require separate handling.
-    const scalarPayload: Record<string, unknown> = {};
-    const lookupPayload: Record<string, unknown> = {};
-    const savedFieldNames: string[] = [];
-
-    for (const [field, value] of Object.entries(dirtyFields)) {
-      const val = value === undefined ? null : value;
-      savedFieldNames.push(field);
-
-      if (field.endsWith("@odata.bind")) {
-        lookupPayload[field] = val;
-      } else {
-        scalarPayload[field] = val;
-      }
-    }
-
-    console.log(
-      `[EventService] Saving ${savedFieldNames.length} field(s):`,
-      savedFieldNames
-    );
-
-    // Save scalar fields first (statuscode, dates, text, choice)
-    if (Object.keys(scalarPayload).length > 0) {
-      console.log("[EventService] Scalar payload:", JSON.stringify(scalarPayload, null, 2));
-      await webApi.updateRecord(EVENT_ENTITY, normalizedId, scalarPayload);
-      console.log("[EventService] Scalar fields saved");
-    }
-
-    // Save lookup bindings separately
-    if (Object.keys(lookupPayload).length > 0) {
-      console.log("[EventService] Lookup payload:", JSON.stringify(lookupPayload, null, 2));
-      try {
-        await webApi.updateRecord(EVENT_ENTITY, normalizedId, lookupPayload);
-        console.log("[EventService] Lookup fields saved");
-      } catch (lookupError) {
-        const lookupMsg = lookupError instanceof Error
-          ? lookupError.message
-          : (typeof lookupError === "object" ? JSON.stringify(lookupError) : String(lookupError));
-        console.error("[EventService] Lookup save failed:", lookupMsg);
-        // Scalar fields already saved — report partial success
-        return {
-          success: false,
-          error: `Scalar fields saved but lookup update failed: ${lookupMsg}`,
-          savedFields: Object.keys(scalarPayload),
-        };
-      }
-    }
-
-    console.log("[EventService] Save successful");
-
-    return {
-      success: true,
-      savedFields: savedFieldNames,
-    };
-  } catch (error) {
-    const errorMsg = error instanceof Error
-      ? error.message
-      : (typeof error === "object" ? JSON.stringify(error) : String(error));
-    console.error("[EventService] Failed to save event:", errorMsg);
-
-    return {
-      success: false,
-      error: errorMsg,
-    };
+  // A field cleared in the pane arrives as `undefined`; Dataverse clears it on `null`.
+  const payload: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(dirtyFields)) {
+    payload[field] = value === undefined ? null : value;
   }
+
+  // Split the payload into the event's FILING (its `sprk_regarding…` lookups and regarding fields) and everything else.
+  // UAC-r2 task 147 r1c (owner round 36): the filing goes through the BFF's ONE event re-file route, which takes nothing
+  // else; every other field — scalars and the other lookups (completed by, approved by, …) — stays the caller's own
+  // Xrm.WebApi update. ONE rule for which key is filing: the seam's `splitFilingPayload` (the server's IsFilingColumn).
+  const { filing, rest } = splitFilingPayload(payload);
+  const filingFields = Object.keys(filing);
+  const restFields = Object.keys(rest);
+
+  console.log(`[EventService] Saving ${filingFields.length + restFields.length} field(s):`, [...filingFields, ...restFields]);
+
+  // The FILING FIRST, through the BFF (UAC-r2 task 147, owner rounds 28 and 36): a change to what the event is filed under
+  // is a re-file — its owner is re-derived (the Secure Record Owners team under a secure record), F3 applies to a move out
+  // of one, and what is filed under the event follows it. Task 147 r1c-v1 (verifier item 6): the seam's order
+  // (`updateFilingThenRest`) — a refused or failed re-file writes NOTHING, so the pane never leaves the other fields saved
+  // around a filing the server refused.
+  if (filingFields.length > 0) {
+    try {
+      await refileEventThroughBff(normalizedId, filing);
+      console.log("[EventService] Filing saved");
+    } catch (filingError) {
+      const filingMsg = messageOf(filingError);
+      console.error("[EventService] Filing save failed; nothing was saved:", filingMsg);
+      return { success: false, error: filingMsg, savedFields: [] };
+    }
+  }
+
+  // Then every other field — the caller's own update.
+  if (restFields.length > 0) {
+    try {
+      await webApi.updateRecord(EVENT_ENTITY, normalizedId, rest);
+      console.log("[EventService] Fields saved");
+    } catch (restError) {
+      const restMsg = messageOf(restError);
+      console.error("[EventService] Failed to save event fields:", restMsg);
+      return {
+        success: false,
+        error: filingFields.length > 0
+          ? `What the event is filed under was saved, but the other changes were not: ${restMsg}`
+          : restMsg,
+        savedFields: filingFields,
+      };
+    }
+  }
+
+  console.log("[EventService] Save successful");
+
+  return {
+    success: true,
+    savedFields: [...filingFields, ...restFields],
+  };
+}
+
+/** The message of a failed write: the server's (or Dataverse's) own words when there are any. */
+function messageOf(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : (typeof error === "object" ? JSON.stringify(error) : String(error));
 }
 
 /**

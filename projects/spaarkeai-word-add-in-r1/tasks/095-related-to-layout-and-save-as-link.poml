@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 4 (2-5): a compact Related-to row (search icon, "+ New" beside the type pills, the label moves into the lookup box) and a saved file just "Save"s — the "Save as" choice becomes a secondary "Save as new document" link</title>
+    <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`RelatedToPicker.tsx`, `SaveFlow.tsx`, the Save-as section) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only layout and flow changes, fully decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 096. Disjoint: 095 owns `RelatedToPicker.tsx`, `SaveFlow.tsx`, the Save-as section component and their tests; it MUST NOT edit `App.tsx`, `TaskPaneToolbar.tsx`, `TaskPaneNavigation.tsx`, `sendEmailService.ts`, `shareLinkService.ts`, `webpack.config.js`, `tsconfig.json` or the new email view (096's). Client-only; runs no `dotnet`.</parallel-reason>
+    <deps>094</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 4 (2026-10-04), items 1-5. Record: `notes/042-uat-round4-2026-10-04.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>The Related-to row is one compact line plus a lookup box that names what it looks up, and a document already in Spaarke is saved with a plain "Save" (a new version), with "Save as new document" as a quiet secondary link.</goal>
+
+  <context>
+    <background>
+      - **Owner, verbatim (round 4)**: (2) *"for search execute, use an icon instead of 'search' pill"*; (3) *"for +New
+        move it up to be next to the 'Related to' pills"*; (4) *"remove the 'Related to' label and move it into the
+        Lookup box (keep the search icon and replace the 'Look up another Matter' and instead use 'Look up related
+        {matter}'); this way the filter pills can be align left and open up room for the +New"*; (5) *"The 'Save As new
+        document' flow isn't intuitive"* -> owner choice **"Hide the choice; Save = new version"**: once the file is in
+        Spaarke, show no "Save as" radio buttons; the main button just saves (a new version of the same document);
+        "Save as new document" becomes a small secondary link that unlocks the name.
+      - **Target layout** (Related-to):
+        ```
+        [Matter] [Project] [Invoice]                    [+ New]
+        [search-icon  Look up related Matter...      ] [search icon button]
+        ```
+        The placeholder follows the selected pill ("Look up related Project..."). Today: `RelatedToPicker.tsx` header
+        "Related to" + chips (`:411`), a "Look up another ..." box with a "Search" text pill, "+ New" on the search row.
+      - **Today's Save-as UI**: radios "A new version of the existing document" / "A new document" with helper text,
+        shown when the pane is on a document already in Spaarke (version mode, tasks 023/024/051), plus task 094's name
+        lock and "Saved"/"Save" button. Read `notes/094-saved-state-follow-up.md` first.
+      - **Item 1 (width)**: confirm on Microsoft Learn (researcher subagent) whether Word offers ANY supported way for an
+        add-in to set the task pane's default width (manifest or Office.js). Expected answer: no. If yes, apply +75 px;
+        if no, record the evidence in the note and make sure the new layout fits at the default width.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-04">No "Save as" radio group for a document already in Spaarke. The primary button reads "Save" (or gray "Saved", per 094) and saves a new version. A secondary link "Save as new document" switches to create mode and unlocks the name (094's unlock); while in that mode a "Keep as version" control returns to version mode.</constraint>
+    <constraint source="owner 2026-10-04">The "Related to" label is removed; the lookup box placeholder is "Look up related {Type}..." for the selected type; the search runs from an icon button (accessible name "Search"); Enter still searches; "+ New" sits on the pill row, right-aligned.</constraint>
+    <constraint source="NFR-10">Same layout in both hosts; no `hostType` branches.</constraint>
+    <constraint source="ADR-021">Fluent v9, semantic tokens, dark mode; the icon button has an accessible name and visible focus; the row fits at 320 px without clipping.</constraint>
+    <constraint source="ADR-038">Update the existing tests that pin the old layout/radios (`RelatedToPicker.*`, `SaveFlow.versionMode`, `SaveFlow.savedState`, `SaveModeSection`); list new suites in `ci-gated-suites.txt`.</constraint>
+    <constraint source="parallel wave">Do NOT edit 096's files (see parallel-reason). Do NOT run `npm run build` (the main session does).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">No "Related to" label; the pills are left-aligned with "+ New" on the same row; the lookup placeholder reads "Look up related Matter..." and follows the selected pill.</criterion>
+    <criterion testable="true">An icon button (accessible name "Search") runs the search; Enter in the box runs it; there is no "Search" text pill.</criterion>
+    <criterion testable="true">On a document already in Spaarke: no "Save as" radios; the primary button reads "Save" and sends a version save (`existingDocumentId` + `isNewVersion`).</criterion>
+    <criterion testable="true">"Save as new document" switches to create mode, unlocks the name, and the save is a create (no `existingDocumentId`); "Keep as version" returns to version mode.</criterion>
+    <criterion testable="true">A document NOT yet in Spaarke shows neither the link nor radios (a plain new-document save, as today).</criterion>
+    <criterion testable="true">Item 1: the note records the width verdict with its Microsoft Learn source; if a supported setting exists, it is +75 px and tested.</criterion>
+    <criterion testable="true">Gates: gated jest green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): the round-4 layout and Save flow as above. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-4 note, `notes/094-saved-state-follow-up.md`, `RelatedToPicker.tsx`, the Save-as section and SaveFlow.</step>
+    <step>Width check (researcher); record.</step>
+    <step>Related-to layout; tests.</step>
+    <step>Save-as flow; tests.</step>
+    <step>Gates; `notes/095-related-to-and-save-as.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>`RelatedToPicker`, the version/create save modes and 094's name lock exist.</existing>
+    <extension>Yes — re-layout and a simpler control over existing modes; no new component, route or capability.</extension>
+    <cost-of-doing-nothing>The owner found the Save-as choice unintuitive and the Related-to row crowded (round 4, items 2-5).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Round 4 layout">
+      <steps>
+        <step>Save tab: pills left, "+ New" right on the same row; the lookup reads "Look up related Matter..."; the search icon runs the search.</step>
+        <step>On a saved document: no radios; "Save" saves a version; "Save as new document" unlocks the name and creates a new document.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/095-related-to-and-save-as.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round4-2026-10-04.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/024-save-mode-and-deviations.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <notes>
+    Code complete 2026-10-04; see notes/095-related-to-and-save-as.md. Width: a released runtime API exists
+    (Office.extensionLifeCycle.taskpane.setWidth, TaskPaneApi 1.1), so +75 px was applied (web 405, Windows 395,
+    Mac 345); no released manifest setting. Gates: gated jest 74/74 suites, 1016/1016 tests, lint 0, typecheck 0 production.
+    Live acceptance (criterion 8) left open pending deploy.
+  </notes>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/095-related-to-and-save-as.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

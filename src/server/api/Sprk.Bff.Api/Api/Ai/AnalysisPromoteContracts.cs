@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// Optional GUID of the source <c>sprk_document</c> for the new Analysis. When omitted, the
 /// session's own <see cref="Models.Ai.Chat.ChatSession.DocumentId"/> is used (falls back to a 400
 /// when neither is available — <c>sprk_analysis</c> is document-anchored, mirroring
-/// <see cref="CreateAnalysisRequest"/> / <see cref="AnalysisForkRequest"/>).
+/// <see cref="CreateAnalysisRequest"/>).
 /// </param>
 /// <param name="PlaybookId">
 /// Optional playbook GUID applied to the new Analysis. When omitted, the session's own

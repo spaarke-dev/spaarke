@@ -3,6 +3,16 @@
 # Reusable helper: acquire a Microsoft Graph (or SharePoint) app-only token
 # via confidential-client cert-based flow.
 #
+# NOTE (2026-10-03, customer-provisioning-orchestration-r1 task 248): owning apps
+# set up per docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (MI-FIC) — e.g.
+# `Spaarke SPE Model 1 Owner` (bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e) — have NO
+# certificate and NO client secret. The L2 control plane acts as such an owning
+# app through the L2 Worker UAMI's federated identity credential on the app; this
+# helper cannot sign in as them and must not be used to justify adding a cert.
+# It applies only to legacy owning apps that still carry a certificate. The KV
+# secret `SPE-OwnerCert-Pfx` used in the examples below was never created and is
+# no longer part of the design.
+#
 # Why this exists (SPE T6 fix, spec.md FR-11):
 #   Microsoft Graph SPE container-type / container APIs reject public / delegated
 #   clients with 403 "public client not allowed". Confidential-client with a
@@ -67,7 +77,7 @@ function Get-SpeConfidentialClientToken {
         -TenantId $env:TENANT_ID `
         -ClientId $env:API_APP_ID `
         -KeyVaultName $env:SPE_KV_NAME `
-        -CertSecretName 'spe-owner-cert-pfx'
+        -CertSecretName 'SPE-OwnerCert-Pfx'
 
     .EXAMPLE
     $spToken = Get-SpeConfidentialClientToken `

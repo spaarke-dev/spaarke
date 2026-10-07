@@ -101,10 +101,11 @@ public sealed class CosmosSmokeTests : IAsyncLifetime
             containerName: container,
             logger: NullLogger<CosmosProvisioningRunRepository>.Instance);
 
-        // Isolate this test run from other partitions by prefixing with the
-        // machine + a fresh guid; test cleanup deletes what we created but a
+        // Isolate this test run from other partitions with a fresh-guid-derived
+        // id that still satisfies the customerId standard (^[a-z][a-z0-9]{2,7}$):
+        // "s" + 7 lowercase hex chars. Test cleanup deletes what we created but a
         // late failure will not leak into any real customer partition.
-        _testCustomerId = $"smoke-{Environment.MachineName.ToLowerInvariant()}-{Guid.NewGuid():N}";
+        _testCustomerId = "s" + Guid.NewGuid().ToString("N")[..7];
         return Task.CompletedTask;
     }
 
@@ -188,7 +189,8 @@ public sealed class CosmosSmokeTests : IAsyncLifetime
 
         // §4D I3: a read against a DIFFERENT partition key must NOT find the
         // document — proves the SDK is honoring our explicit PartitionKey.
-        var wrongCustomer = $"other-{Guid.NewGuid():N}";
+        // "o" prefix guarantees this differs from _testCustomerId ("s" prefix).
+        var wrongCustomer = "o" + Guid.NewGuid().ToString("N")[..7];
         var read = await _repository.ReadRunAsync(wrongCustomer, run.RunId, CancellationToken.None);
         read.Should().BeNull();
     }
@@ -262,7 +264,7 @@ public sealed class CosmosSmokeTests : IAsyncLifetime
             RunId = runId,
             CustomerId = _testCustomerId,
             EnvironmentId = Guid.NewGuid().ToString("D"),
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.NotStarted,
             Profile = "spaarke-hosted-model2",
         };

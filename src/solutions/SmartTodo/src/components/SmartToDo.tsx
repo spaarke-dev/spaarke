@@ -34,12 +34,12 @@
  *   - No 6-layer navigation detection / side pane cleanup
  */
 
+import { createTodoThroughBff } from '../services/childRecordWrites';
 import * as React from "react";
 import {
   makeStyles,
   shorthands,
   tokens,
-  Text,
   Button,
   Spinner,
   MessageBar,
@@ -47,6 +47,7 @@ import {
 } from "@fluentui/react-components";
 import {
   KanbanBoard,
+  EmptyState,
   OrientationToggle,
   type Orientation,
   // smart-todo-r5 task 011 (FR-02/FR-03) — the SAME shared choice→score
@@ -209,18 +210,19 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
 
-  // ── Empty state ───────────────────────────────────────────────────────────
-  emptyContainer: {
+  // ── Empty state (pre-081 look on top of the shared compact EmptyState) ──
+  emptyStateContainer: {
     flex: "1 1 0",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  emptyStateHeading: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+  },
+  emptyStateDescription: {
+    maxWidth: "none",
   },
 
   // ── Kanban board area ─────────────────────────────────────────────────────
@@ -239,20 +241,24 @@ const useStyles = makeStyles({
 
 // ---------------------------------------------------------------------------
 // Empty state sub-component
+//
+// The shared `EmptyState` from `@spaarke/ui-components` (task 081 round 4,
+// review F4) with the SAME class hooks the hoisted
+// `Spaarke.SmartTodo.Components` `SmartToDo.tsx` uses, so both SmartTodo
+// surfaces render one empty state with their pre-081 look.
 // ---------------------------------------------------------------------------
 
 const TodoEmptyState: React.FC = () => {
   const styles = useStyles();
   return (
-    <div className={styles.emptyContainer} role="status" aria-live="polite">
-      <Text size={300} weight="semibold">
-        All caught up
-      </Text>
-      <Text size={200}>
-        No to-do items at the moment. Items flagged from the Updates Feed or
-        system-generated tasks will appear here.
-      </Text>
-    </div>
+    <EmptyState
+      size="compact"
+      className={styles.emptyStateContainer}
+      headingClassName={styles.emptyStateHeading}
+      descriptionClassName={styles.emptyStateDescription}
+      heading="All caught up"
+      description="No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here."
+    />
   );
 };
 
@@ -757,11 +763,15 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       }
       void (async () => {
         try {
-          await webApi.createRecord('sprk_todo', payload);
+          // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5) — the server decides the owner.
+          await createTodoThroughBff(payload);
           refetch();
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[SmartToDo] three-field quickAdd create failed:', err);
+          // UAC-r2 task 147 r1c (owner round 28 item 1: "refusals show the ProblemDetails message"): the server's own
+          // words reach the user — the to-do was NOT created (nothing is left owned by the user).
+          setAddError(err instanceof Error && err.message ? err.message : 'Failed to create to-do item. Please try again.');
         }
       })();
     };

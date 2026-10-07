@@ -90,13 +90,14 @@ export function useEmbedToken({
       if (cancelled) return;
 
       if (result.ok) {
-        const { token, embedUrl, reportId: pbiReportId, expiration, refreshAfter, workspaceId } = result.data;
+        // task 166 r1: the BFF's field is `expiry` (the client read `expiration`, which never arrived).
+        const { token, embedUrl, reportId: pbiReportId, expiry, refreshAfter, workspaceId } = result.data;
 
         setEmbedConfig({
           id: pbiReportId,
           embedUrl,
           accessToken: token,
-          expiry: expiration,
+          expiry,
           refreshAfter,
           workspaceId,
         });

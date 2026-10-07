@@ -42,7 +42,9 @@ public class TaskActionCoreAssignedToTests
     private TaskActionCore Core(Guid? linkedContact) => new(
         _entities.Object,
         CoreAncestorResolverFixtures.Inert(),
+        new RecordOwnershipResolverDouble(),
         IdentityNormalizationFixtures.WithContact(linkedContact).Object,
+        Mock.Of<ICommunicationDataverseService>(),
         _logger);
 
     private static Guid? AssignedTo(Entity e) =>
@@ -94,7 +96,9 @@ public class TaskActionCoreAssignedToTests
             new TemplateEngine(Microsoft.Extensions.Logging.Abstractions.NullLogger<TemplateEngine>.Instance),
             _entities.Object,
             CoreAncestorResolverFixtures.Inert(),
+            new RecordOwnershipResolverDouble(),
             IdentityNormalizationFixtures.WithContact(ActingUsersContact).Object,
+            Mock.Of<ICommunicationDataverseService>(),
             Mock.Of<ILogger<CreateTaskNodeExecutor>>());
 
         var actionId = Guid.NewGuid();
@@ -105,8 +109,14 @@ public class TaskActionCoreAssignedToTests
             UserId = ActingUser,
             Node = new PlaybookNodeDto
             {
-                Id = Guid.NewGuid(), PlaybookId = Guid.NewGuid(), ActionId = actionId, Name = "Create Task",
-                ExecutionOrder = 1, OutputVariable = "task", ConfigJson = """{"subject":"Review"}""", IsActive = true,
+                Id = Guid.NewGuid(),
+                PlaybookId = Guid.NewGuid(),
+                ActionId = actionId,
+                Name = "Create Task",
+                ExecutionOrder = 1,
+                OutputVariable = "task",
+                ConfigJson = """{"subject":"Review"}""",
+                IsActive = true,
             },
             Action = new AnalysisAction { Id = actionId, Name = "Create Task" },
             ExecutorType = ExecutorType.CreateTask,

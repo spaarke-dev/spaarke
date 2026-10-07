@@ -38,8 +38,17 @@ public abstract record DataverseAppUserVerificationResult
 {
     private DataverseAppUserVerificationResult() { }
 
-    /// <summary>Exactly one App User row found — T2 cleared.</summary>
-    public sealed record Verified(string SystemUserId) : DataverseAppUserVerificationResult;
+    /// <summary>Exactly one App User row found — T2 (count) cleared.</summary>
+    /// <param name="SystemUserId">The Dataverse <c>systemuserid</c> GUID.</param>
+    /// <param name="AzureActiveDirectoryObjectId">
+    /// The row's observed <c>azureactivedirectoryobjectid</c> field value (may be null if the query
+    /// did not request/return it, or if the field is genuinely unset on the row). Task 205d / punch
+    /// row A41: <c>DataverseAppUserPairT2Probe</c> compares this against the expected UAMI principalId
+    /// for the auth-v4 §10.4 byte-equality assertion — a value present here does NOT by itself mean
+    /// the row is correct; it must equal the caller's expected principalId.
+    /// </param>
+    public sealed record Verified(string SystemUserId, string? AzureActiveDirectoryObjectId = null)
+        : DataverseAppUserVerificationResult;
 
     /// <summary>
     /// Observed count != 1 (zero — registration silently did not persist; or

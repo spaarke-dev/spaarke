@@ -32,6 +32,7 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,

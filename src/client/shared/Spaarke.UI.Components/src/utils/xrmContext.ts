@@ -1,8 +1,9 @@
 /**
  * Xrm Context Utility
  *
- * Provides unified access to Xrm object from PCF controls and Custom Pages.
- * PCF controls have Xrm on window, Custom Pages (iframe) need parent.Xrm.
+ * Provides unified access to the host's Xrm object from PCF controls, Custom
+ * Pages, code pages and embedded frames. See {@link getXrm} for the one frame
+ * walk and its window-first order rule.
  *
  * @see docs/architecture/universal-dataset-grid-architecture.md
  * @see ADR-022 PCF Platform Libraries
@@ -90,7 +91,30 @@ export interface EntityReference {
 export interface XrmNavigation {
   openForm(options: OpenFormOptions): Promise<OpenFormResult>;
   openUrl(url: string, options?: WindowOptions): void;
-  navigateTo(pageInput: PageInput): Promise<void>;
+  /**
+   * `navigationOptions` widened by task 081 (C-8) when `openEmailCompose.ts`
+   * / `openEmailRecord.ts` converged onto this interface from the untyped
+   * `services/xrmGlobal.ts` walker — both already called the real
+   * `Xrm.Navigation.navigateTo(pageInput, navigationOptions)` two-argument
+   * form (`target`/`position`/`width`/`height` to open as a centered modal
+   * dialog), which this interface hadn't declared because nothing typed had
+   * exercised it yet.
+   */
+  navigateTo(pageInput: PageInput, navigationOptions?: NavigateToOptions): Promise<void>;
+}
+
+/**
+ * The real `Xrm.Navigation.navigateTo` second-argument shape (target window /
+ * dialog sizing). See {@link XrmNavigation.navigateTo}.
+ */
+export interface NavigateToOptions {
+  /** `1` = inline, `2` = modal dialog. */
+  target?: number;
+  /** `1` = center (only meaningful with `target: 2`). */
+  position?: number;
+  /** Pixels, or a percentage-of-viewport object (structurally matches `OobSizeDimension`). */
+  width?: number | { value: number; unit: '%' };
+  height?: number | { value: number; unit: '%' };
 }
 
 export interface OpenFormOptions {
@@ -278,22 +302,132 @@ export interface SidePane {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
- * Get the Xrm object from the appropriate context.
+ * A capability the resolved Xrm must have, checked PER FRAME during the walk
+ * (a frame whose Xrm lacks it is skipped, and the walk continues outward).
  *
- * - PCF controls have Xrm on window.Xrm or via context.webAPI
- * - Custom Pages run in a single iframe, so Xrm is on window.parent.Xrm
- * - Side-pane hosts (task 010, spaarke-side-pane-navigation-history-r1) run
- *   the code page nested one level deeper inside UCI's pane iframe, so Xrm
- *   may only be reachable on window.top.Xrm
- * - Returns undefined if Xrm is not available on any of the three frames
- *   (graceful degradation) — this function NEVER throws.
+ * - `'webApi'` (the default): `Xrm.WebApi` is present
+ * - `'navigation'`: `Xrm.Navigation.navigateTo` is a function
+ * - `'openForm'`: `Xrm.Navigation.openForm` is a function
+ * - `'openUrl'`: `Xrm.Navigation.openUrl` is a function
+ * - `'utility'`: `Xrm.Utility.getGlobalContext` is a function
+ * - `'clientUrl'`: `Xrm.Utility.getGlobalContext().getClientUrl()` returns a non-empty string
+ * - `'lookupObjects'`: `Xrm.Utility.lookupObjects` is a function
+ * - `'metadata'`: `Xrm.Utility.getEntityMetadata` is a function
+ * - `'pageContext'`: `Xrm.Utility.getPageContext` is a function
+ * - `'sidePanes'`: `Xrm.App.sidePanes` is present
+ * - `'page'`: `Xrm.Page` is present
+ * - a predicate, for anything else
+ *
+ * Why per frame: a child frame can carry a PARTIAL Xrm (e.g. a web resource
+ * that loaded `ClientGlobalContext.js.aspx`, or an embedding host's shim with
+ * only `WebApi`), so "first frame with any Xrm" can return an object that
+ * lacks what the caller needs while an outer frame has it.
+ */
+export type XrmCapability =
+  | 'webApi'
+  | 'navigation'
+  | 'openForm'
+  | 'openUrl'
+  | 'utility'
+  | 'clientUrl'
+  | 'lookupObjects'
+  | 'metadata'
+  | 'pageContext'
+  | 'sidePanes'
+  | 'page'
+  | ((xrm: any) => boolean); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/**
+ * What {@link getXrm} returns for a capability OTHER than the default
+ * `'webApi'`: the frame's Xrm is only guaranteed to have what was asked for,
+ * so `WebApi` is optional here (task 081 round 4, review F10). The default
+ * form, `getXrm()` / `getXrm('webApi')`, returns {@link XrmContext} with a
+ * non-optional `WebApi`.
+ */
+export type XrmPartialContext = Omit<XrmContext, 'WebApi'> & { WebApi?: XrmWebApi };
+
+/** How many ancestors {@link getXrm} visits above `window` before trying `window.top`. */
+export const XRM_MAX_FRAME_DEPTH = 10;
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function hasCapability(xrm: any, capability: XrmCapability): boolean {
+  if (typeof capability === 'function') return capability(xrm) === true;
+  switch (capability) {
+    case 'webApi':
+      return !!xrm.WebApi;
+    case 'navigation':
+      return typeof xrm.Navigation?.navigateTo === 'function';
+    case 'openForm':
+      return typeof xrm.Navigation?.openForm === 'function';
+    case 'openUrl':
+      return typeof xrm.Navigation?.openUrl === 'function';
+    case 'utility':
+      return typeof xrm.Utility?.getGlobalContext === 'function';
+    case 'clientUrl': {
+      const url = xrm.Utility?.getGlobalContext?.()?.getClientUrl?.();
+      return typeof url === 'string' && url.length > 0;
+    }
+    case 'lookupObjects':
+      return typeof xrm.Utility?.lookupObjects === 'function';
+    case 'metadata':
+      return typeof xrm.Utility?.getEntityMetadata === 'function';
+    case 'pageContext':
+      return typeof xrm.Utility?.getPageContext === 'function';
+    case 'sidePanes':
+      return !!xrm.App?.sidePanes;
+    case 'page':
+      return !!xrm.Page;
+    default:
+      return false;
+  }
+}
+
+/** The frame's Xrm if it has every required capability; undefined otherwise. Never throws. */
+function usableXrm(frame: Window, required: readonly XrmCapability[]): XrmContext | undefined {
+  try {
+    const xrm = (frame as any).Xrm;
+    if (xrm && required.every(c => hasCapability(xrm, c))) return xrm as XrmContext;
+  } catch {
+    // Cross-origin frame (SecurityError reading .Xrm) or a throwing capability probe.
+  }
+  return undefined;
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
+
+/**
+ * THE Xrm lookup (spaarke-ontology-platform-r1 task 081 / C-8). Every client
+ * surface resolves the host's Xrm through this function; there is no second
+ * frame walk.
+ *
+ * ## Order (the rule)
+ * **window first**, then each ancestor in turn (`window.parent`,
+ * `window.parent.parent`, ... at most {@link XRM_MAX_FRAME_DEPTH} levels), then
+ * `window.top`. The NEAREST frame whose Xrm has the required capability wins.
+ *   - A PCF control on a form runs in the main UCI document: `window.Xrm`.
+ *   - A Custom Page / code page in a dialog iframe: `window.parent.Xrm`.
+ *   - Side panes and Teams-style hosts nest deeper; every intermediate frame
+ *     is tried (the former window -> parent -> top walk skipped them).
+ * Window-first is correct because the nearest Xrm belongs to the context the
+ * code runs in. The historical reason some sites read `parent` first ("the
+ * child frame's Xrm may lack `Navigation.navigateTo`", VisualHost) is handled
+ * by the capability check, not by frame order: pass `'navigation'` and a child
+ * frame whose Xrm lacks it is skipped.
+ *
+ * Each frame is read in its own try/catch, so a cross-origin frame anywhere in
+ * the chain is skipped instead of aborting the walk. NEVER throws.
+ *
+ * Child frames (embedded code pages, iframes) must call this rather than read
+ * `parent.Xrm` / `window.Xrm` directly: no host writes a global `window.Xrm`
+ * shim any more.
  *
  * Cheap and safe to call on every poll tick: it does no caching itself, so
  * callers that need fresh Xrm (e.g. a capture poller) should call getXrm()
  * again each time rather than holding a reference — per the task 001 spike
  * lesson, a cached Xrm reference can go stale across MDA navigations.
  *
- * @returns XrmContext or undefined if not available
+ * @param required capability (or capabilities, all required) the Xrm must
+ *   have; default `'webApi'`.
+ * @returns the nearest Xrm with the capability, or undefined.
  *
  * @example
  * ```typescript
@@ -301,43 +435,46 @@ export interface SidePane {
  * if (xrm) {
  *   const result = await xrm.WebApi.retrieveMultipleRecords("account", "?$top=10");
  * }
+ * const nav = getXrm('navigation')?.Navigation; // nearest frame that can navigate
  * ```
  */
-export function getXrm(): XrmContext | undefined {
-  // SDK boundary: Xrm is injected at runtime by the host (PCF / Custom Page).
-  // Walk window -> parent -> top and return the first frame with a usable Xrm.
-  // Try window.Xrm first (PCF controls or direct script access)
-  try {
-    const windowXrm = (window as unknown as { Xrm?: XrmContext }).Xrm;
-    if (windowXrm?.WebApi) {
-      return windowXrm;
+export function getXrm(required?: 'webApi'): XrmContext | undefined;
+/** A capability list that starts with `'webApi'` also guarantees `WebApi`. */
+export function getXrm(required: readonly ['webApi', ...XrmCapability[]]): XrmContext | undefined;
+export function getXrm(required: XrmCapability | readonly XrmCapability[]): XrmPartialContext | undefined;
+export function getXrm(
+  required: XrmCapability | readonly XrmCapability[] = 'webApi'
+): XrmContext | XrmPartialContext | undefined {
+  if (typeof window === 'undefined') return undefined;
+  const capabilities: readonly XrmCapability[] = Array.isArray(required)
+    ? (required as readonly XrmCapability[])
+    : [required as XrmCapability];
+
+  const visited: Window[] = [];
+  let frame: Window = window;
+  for (let depth = 0; depth <= XRM_MAX_FRAME_DEPTH; depth++) {
+    visited.push(frame);
+    const xrm = usableXrm(frame, capabilities);
+    if (xrm) return xrm;
+
+    let next: Window | null = null;
+    try {
+      next = frame.parent;
+    } catch {
+      next = null;
     }
-  } catch {
-    // window.Xrm not available
+    if (!next || next === frame) break;
+    frame = next;
   }
 
-  // Try parent.Xrm for Custom Pages running in a single iframe
   try {
-    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
-      const parentXrm = (window.parent as unknown as { Xrm?: XrmContext }).Xrm;
-      if (parentXrm?.WebApi) {
-        return parentXrm;
-      }
+    const top = window.top;
+    if (top && !visited.includes(top)) {
+      const xrm = usableXrm(top, capabilities);
+      if (xrm) return xrm;
     }
   } catch {
-    // Cross-origin access denied - expected in some environments
-  }
-
-  // Try top.Xrm for hosts nested deeper than one iframe (e.g. side panes)
-  try {
-    if (typeof window !== 'undefined' && window.top && window.top !== window) {
-      const topXrm = (window.top as unknown as { Xrm?: XrmContext }).Xrm;
-      if (topXrm?.WebApi) {
-        return topXrm;
-      }
-    }
-  } catch {
-    // Cross-origin access denied - expected in some environments
+    // window.top unavailable
   }
 
   return undefined;
@@ -351,16 +488,13 @@ export function getXrm(): XrmContext | undefined {
  *
  * THE single shared accessor (FR-20) — consolidates the two near-identical
  * private `getXrmPage()` duplicates that previously lived in
- * `FieldMappingHandler.ts` and `MatterHeaderView.tsx`. Deliberately walks
- * only window -> parent (NOT the third `top` frame {@link getXrm} also
- * checks) — this mirrors exactly what both former duplicates did, per the
- * "no behavior change at either call site beyond swapping the accessor"
- * constraint (FR-20 task notes). Widen to a 3-frame walk in a follow-up if a
- * side-pane host ever needs `Xrm.Page` from `window.top`.
+ * `FieldMappingHandler.ts` and `MatterHeaderView.tsx`. Resolves through
+ * {@link getXrm} with the `'page'` capability (task 081 / C-8), so it uses the
+ * one frame walk: the nearest frame whose Xrm has `Page`. Before task 081 it
+ * had its own window -> parent walk; the result is unchanged wherever that
+ * walk found `Xrm.Page`, and it now also finds it on deeper ancestors / top.
  *
- * NEVER throws — returns `null` when `Xrm.Page` is not reachable on either
- * frame (Xrm not yet injected, or a cross-origin SecurityError accessing
- * `window.parent`).
+ * NEVER throws — returns `null` when `Xrm.Page` is not reachable.
  *
  * @returns `Xrm.Page` (structurally typed as {@link XrmPageLike}), or `null`
  *
@@ -371,29 +505,42 @@ export function getXrm(): XrmContext | undefined {
  * ```
  */
 export function getXrmPage(): XrmPageLike | null {
-  // Try window.Xrm.Page first (PCF controls or direct script access)
-  try {
-    const windowXrm = (window as unknown as { Xrm?: XrmContext }).Xrm;
-    if (windowXrm?.Page) {
-      return windowXrm.Page;
-    }
-  } catch {
-    // window.Xrm not available
-  }
+  return getXrm('page')?.Page ?? null;
+}
 
-  // Try parent.Xrm.Page for Custom Pages running in a single iframe
-  try {
-    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
-      const parentXrm = (window.parent as unknown as { Xrm?: XrmContext }).Xrm;
-      if (parentXrm?.Page) {
-        return parentXrm.Page;
-      }
+/**
+ * The id of the record whose FORM hosts this code page / web resource, or
+ * `undefined` when no frame exposes one.
+ *
+ * Read from the nearest frame (the shared {@link getXrm} walk) whose Xrm yields
+ * an id: the legacy form buffer `Xrm.Page.data.entity.getId()` first, then
+ * `Xrm.Utility.getPageContext().input.entityId`. Returned as the platform
+ * gives it (may be brace-wrapped) — callers normalise with `cleanGuid`.
+ *
+ * One copy for the dataset code pages that are launched from a parent form
+ * (`sprk_kpiassessmentspage`, `sprk_invoicespage`), which each hand-rolled the
+ * same `parent -> top` walk (task 081 round 4, review F3). NEVER throws.
+ *
+ * Frame set: the shared walk — window FIRST, then every ancestor (up to
+ * {@link XRM_MAX_FRAME_DEPTH}), then `top`. The replaced loops tried only
+ * `[parent, top]`: they never read the page's own window and skipped
+ * intermediate ancestors. In the dataset pages' normal host (a dialog iframe
+ * whose own window has no Xrm) the result is the same.
+ */
+export function getHostFormRecordId(): string | undefined {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const read = (x: any): string | undefined => {
+    try {
+      const legacyId = x?.Page?.data?.entity?.getId?.();
+      if (legacyId) return legacyId as string;
+      const entityId = x?.Utility?.getPageContext?.()?.input?.entityId;
+      return entityId ? (entityId as string) : undefined;
+    } catch {
+      return undefined;
     }
-  } catch {
-    // Cross-origin access denied - expected in some environments
-  }
-
-  return null;
+  };
+  return read(getXrm((x: any) => !!read(x)));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 /**
@@ -447,7 +594,7 @@ export function detectThemeFromHost(): {
 } {
   // Try Xrm global context first
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('utility');
     if (xrm?.Utility) {
       const globalContext = xrm.Utility.getGlobalContext();
       if (globalContext?.userSettings?.isDarkTheme !== undefined) {
@@ -475,7 +622,7 @@ export function detectThemeFromHost(): {
  */
 export function getClientUrl(): string | undefined {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     if (xrm?.Utility) {
       return xrm.Utility.getGlobalContext().getClientUrl();
     }
@@ -492,7 +639,7 @@ export function getClientUrl(): string | undefined {
  */
 export function getCurrentUserId(): string | undefined {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('utility');
     if (xrm?.Utility) {
       return xrm.Utility.getGlobalContext().userSettings.userId;
     }
@@ -515,7 +662,7 @@ export function getCurrentUserId(): string | undefined {
  */
 export function getCurrentUserName(): string | undefined {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('utility');
     if (xrm?.Utility) {
       return xrm.Utility.getGlobalContext().userSettings.userName;
     }

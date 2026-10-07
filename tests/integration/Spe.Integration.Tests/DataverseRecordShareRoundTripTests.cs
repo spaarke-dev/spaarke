@@ -50,7 +50,12 @@ public class DataverseRecordShareRoundTripTests
         Guid.TryParse(cfg[key], out var id) && id != Guid.Empty ? id : null;
 
     private static DataverseWebApiService BuildService(IConfiguration cfg, HttpClient http) =>
-        new(http, cfg, NullLogger<DataverseWebApiService>.Instance);
+        new(
+            http,
+            cfg,
+            NullLogger<DataverseWebApiService>.Instance,
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
 
     /// <summary>
     /// Grant → read → revoke → read, for a systemuser principal. The second read is the assertion that

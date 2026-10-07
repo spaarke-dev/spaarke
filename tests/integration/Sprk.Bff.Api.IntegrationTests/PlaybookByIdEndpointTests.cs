@@ -105,7 +105,7 @@ public class PlaybookByIdEndpointTests : IClassFixture<PlaybookByIdIntegrationTe
         var expected = SampleChatSummarizePlaybook(Guid.Parse("22222222-3333-4444-5555-666666666666"));
         // Use an id unique to this test to avoid cross-test cache pollution since the BFF
         // IMemoryCache is a singleton across the IClassFixture.
-        const string id = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        const string id = PlaybookByIdTestConstants.WarmHitId;
         _fixture.PlaybookLookup.Setup(id, expected);
         _fixture.PlaybookLookup.SetColdPathDelay(TimeSpan.FromMilliseconds(100));
 

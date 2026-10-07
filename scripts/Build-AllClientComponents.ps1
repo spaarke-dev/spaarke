@@ -4,18 +4,29 @@
 
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
-    1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-       NOTE: Spaarke.DailyBriefing.Components and Spaarke.LegalWorkspace are intentionally excluded —
-       they're source-only libs (tsc --noEmit) with @spaarke peerDependencies; type-check happens via
-       the consumer's tsc pass.
+    1. Shared libraries (14 packages in src/client/shared/, in dependency order -- the $SharedLibs list
+       below is authoritative; it includes Spaarke.DailyBriefing.Components)
+       NOTE: Spaarke.LegalWorkspace is intentionally excluded -- it is a source-only lib (tsc --noEmit)
+       with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
-    3. Webpack code pages (4 projects in src/client/code-pages/)
-    4. PCF controls (src/client/pcf/)
+    3. Webpack code pages (3 projects in src/client/code-pages/)
+    4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
     5. External SPA (src/client/external-spa/)
 
-    Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed —
+    Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed --
     see the in-line "Install dependencies" comment for the trigger logic) followed by
     `npm run build`. Shared libraries must build first because downstream components depend on them.
+
+    PCF controls (Step 4) are different, mirroring .github/workflows/pcf-build-prod-nightly.yml:
+    every git-tracked src/client/pcf/<name>/package.json that declares a `build:prod` script is a
+    PCF; each one ALWAYS gets `npm install` and then `npm run build:prod`, and is judged from its
+    OUTPUT by scripts/PcfBuildResult.psm1 (pcf-scripts exits 0 when webpack fails). Each PCF is its
+    own row in the summary, so a failure names the control. Finding zero PCFs is a FAILED row, as is
+    a package.json that cannot be parsed. A -Component name that matches nothing (e.g. PCF/Nope) is
+    also a FAILED row, so a typo cannot exit 0.
+    (Until 2026-10 this step ran one aggregate dev-mode `npm run build` over all controls at
+    src/client/pcf; that never worked from a clean checkout - TS5083 on the controls' relative
+    tsconfig `extends`, then out-of-memory building every control in one process.)
 
 .PARAMETER SkipSharedLibs
     Skip the shared library builds (step 1). Use when shared libs are already built
@@ -25,6 +36,10 @@
     Build only specific components by name. Accepts an array of component names.
     Names match directory names (e.g., "LegalWorkspace", "SemanticSearch", "PCF").
     Special names: "SharedLibs", "PCF", "ExternalSPA".
+    "PCF" selects every PCF; "PCF/<folder>" (e.g. "PCF/VisualHost") selects one. Bare PCF folder
+    names are NOT accepted, because some collide with code pages (DocumentRelationshipViewer).
+    "PCF" does not build the shared libraries the PCFs import; on a clean checkout use
+    -Component SharedLibs,PCF.
 
 .EXAMPLE
     .\Build-AllClientComponents.ps1
@@ -40,7 +55,11 @@
 
 .EXAMPLE
     .\Build-AllClientComponents.ps1 -Component PCF -WhatIf
-    # Preview what would happen when building PCF controls.
+    # Preview what would happen when building PCF controls (lists every discovered PCF).
+
+.EXAMPLE
+    .\Build-AllClientComponents.ps1 -Component SharedLibs, PCF/VisualHost
+    # Build the shared libraries, then only the VisualHost PCF (production mode).
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -60,8 +79,9 @@ if ($Component) {
 
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
+Import-Module (Join-Path $PSScriptRoot "PcfBuildResult.psm1") -Force   # PCF build result from output (pcf-scripts exits 0 on failure)
 
-# Shared libraries (build order matters — downstream deps must come after their dependencies)
+# Shared libraries (build order matters -- downstream deps must come after their dependencies)
 #
 # Spaarke.DailyBriefing.Components is now INCLUDED (standalone build restored 2026-07-08 by
 # spaarke-daily-update-service-r5, superseding PR #506). Its `@spaarke/*` deps are declared as
@@ -74,22 +94,30 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 # spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
 # populated src/index.ts as a RE-EXPORT barrel of files that stay under src/solutions/LegalWorkspace/src/.
 # Its `@spaarke/*` deps are peerDependencies and `npm run build` is `tsc --noEmit`; standalone
-# type-check fails with TS2307 "Cannot find module '@spaarke/*'" — verified in task 020. Type-check
+# type-check fails with TS2307 "Cannot find module '@spaarke/*'" -- verified in task 020. Type-check
 # is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
-    @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep → builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry → fresh-master SpaarkeAi builds failed on the unbuilt lib).
+    @{ Name = "Spaarke.Notifications";        Path = "$RepoRoot\src\client\shared\Spaarke.Notifications" }        # depends on Auth (peer + file: devDep -> builds standalone). Added 2026-07-21 by spaarke-notification-spine-r1 (task 021 shipped @spaarke/notifications + the SpaarkeAi file: dep but omitted this build-orchestration entry -> fresh-master SpaarkeAi builds failed on the unbuilt lib).
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
     @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # type-only, no @spaarke/* deps (auth dep dropped 2026-10-03, reuse audit C-14)
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
     @{ Name = "Spaarke.DocumentOperations";   Path = "$RepoRoot\src\client\shared\Spaarke.DocumentOperations" }   # depends on Auth (added 2026-06-29 by spaarkeai-compose-r1 task 030)
-    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
-    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
-    @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) → MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above — its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
+    # Events.Components and SmartTodo.Components MUST come AFTER UI.Components (moved 2026-10-04,
+    # spaarke-ontology-platform-r1 task 094). Events.Components imports UI.Components SOURCE by relative
+    # path (CalendarWorkspaceWidget -> ../Spaarke.UI.Components/src/...), so tsc needs UI.Components'
+    # node_modules; SmartTodo.Components path-maps @spaarke/ui-components to ../Spaarke.UI.Components/dist.
+    # Listed before it, both failed on every clean checkout (TS2307 'react' / '@spaarke/ui-components'),
+    # and Step 1's fail-fast stopped the whole build. A developer machine with UI.Components already
+    # installed and built hides this.
+    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }    # depends on UI.Components (source + node_modules)
+    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" } # depends on UI.Components (dist)
+    @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) -> MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above -- its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
+    @{ Name = "Spaarke.Visuals";              Path = "$RepoRoot\src\client\shared\Spaarke.Visuals" }              # no @spaarke/* deps; `build` is `tsc --noEmit`. Consumed FROM SOURCE (main: ./src/index.ts) by PCF VisualHost via a file: dep, so its OWN node_modules must exist: webpack/ts-loader resolve its bare imports (@fluentui/*) from its real path, never from VisualHost's node_modules. Added 2026-10-04 by task 092 (PR #1123) - same reason Spaarke.Communication.Components is here for the Communication PCFs.
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
     @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
-    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets — re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
+    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets -- re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
 )
 
 # Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.
@@ -129,41 +157,58 @@ $WebpackCodePages = @(
 
 # --- Results Tracking ---
 $Results = [System.Collections.ArrayList]::new()
+# -Component names that selected at least one component (used to fail on a name that matches nothing).
+$MatchedFilters = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
 
 function Invoke-ComponentBuild {
     param(
         [string]$Name,
         [string]$BuildPath,
-        [string]$Category
+        [string]$Category,
+        # Names that select this component under -Component (default: just $Name).
+        [string[]]$SelectBy,
+        # npm script to run (PCF controls use build:prod).
+        [string]$NpmScript = 'build',
+        # Always run npm install, ignoring the node_modules freshness check (PCF controls).
+        [switch]$AlwaysInstall
     )
+
+    if (-not $SelectBy) { $SelectBy = @($Name) }
 
     # Filter check: if -Component was specified, only build matching components
     if ($Component -and $Component.Count -gt 0) {
-        if ($Name -notin $Component) {
+        $hit = @($SelectBy | Where-Object { $_ -in $Component })
+        if ($hit.Count -eq 0) {
             return
         }
+        foreach ($h in $hit) { $null = $MatchedFilters.Add($h) }
     }
 
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
-    if (-not (Test-Path $BuildPath)) {
-        Write-Host "  SKIP  $Name - directory not found: $BuildPath" -ForegroundColor Yellow
+    # -LiteralPath everywhere: a folder named like Br[1] is a wildcard to plain -Path and would be
+    # reported as not found.
+    if (-not (Test-Path -LiteralPath $BuildPath)) {
+        # A PCF was discovered from git ls-files, so a missing folder is a real failure, not a skip.
+        $missingStatus = if ($Category -eq 'PCF Controls') { "FAILED" } else { "SKIPPED" }
+        $missingColor = if ($missingStatus -eq 'FAILED') { 'Red' } else { 'Yellow' }
+        Write-Host "  $($missingStatus.Substring(0,4))  $Name - directory not found: $BuildPath" -ForegroundColor $missingColor
         $null = $Results.Add([PSCustomObject]@{
             Component = $Name
             Category  = $Category
-            Status    = "SKIPPED"
+            Status    = $missingStatus
             Duration  = "0.0s"
             Detail    = "Directory not found"
         })
         return
     }
 
-    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "install then npm run build")) {
+    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "install then npm run $NpmScript")) {
         Write-Host "  BUILD $Name" -ForegroundColor Cyan -NoNewline
         Write-Host " - $BuildPath" -ForegroundColor DarkGray
 
         try {
-            Push-Location $BuildPath
+            Push-Location -LiteralPath $BuildPath
 
             # Install dependencies.
             # NOTE (2026-05-13): Many Vite solutions have drifted package-lock.json
@@ -177,7 +222,7 @@ function Invoke-ComponentBuild {
             #      a sibling file: dep), re-run install so symlinks get created.
             #      [2026-06-28 fix: prior "skip if node_modules exists" optimization
             #      left stale state when package.json gained a new `file:..` ref
-            #      between branches — SpaarkeAi missed daily-briefing-components.]
+            #      between branches -- SpaarkeAi missed daily-briefing-components.]
             #   3. Otherwise skip install entirely and build directly.
             #   4. Tracked separately: scheduled regeneration of locks once we have
             #      bandwidth to deploy-verify the transitive upgrades. Until then,
@@ -185,13 +230,18 @@ function Invoke-ComponentBuild {
             $nodeModulesPath = Join-Path $BuildPath "node_modules"
             $packageJsonPath = Join-Path $BuildPath "package.json"
             $needsInstall = $false
-            if (-not (Test-Path $nodeModulesPath)) {
+            if ($AlwaysInstall) {
+                # PCF controls: always install, like the nightly PCF workflow.
+                $needsInstall = $true
+                Write-Host "        installing..." -ForegroundColor DarkGray
+            }
+            elseif (-not (Test-Path -LiteralPath $nodeModulesPath)) {
                 $needsInstall = $true
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
             }
-            elseif ((Test-Path $packageJsonPath) -and (Get-Item $packageJsonPath).LastWriteTime -gt (Get-Item $nodeModulesPath).LastWriteTime) {
+            elseif ((Test-Path -LiteralPath $packageJsonPath) -and (Get-Item -LiteralPath $packageJsonPath).LastWriteTime -gt (Get-Item -LiteralPath $nodeModulesPath).LastWriteTime) {
                 $needsInstall = $true
-                Write-Host "        installing (package.json newer than node_modules — sibling-dep drift)..." -ForegroundColor DarkGray
+                Write-Host "        installing (package.json newer than node_modules -- sibling-dep drift)..." -ForegroundColor DarkGray
             }
             if ($needsInstall) {
                 # Localize $ErrorActionPreference inside the script block so
@@ -210,13 +260,22 @@ function Invoke-ComponentBuild {
                 }
             }
 
-            # npm run build (same localized $ErrorActionPreference rationale)
+            # npm run <script> (same localized $ErrorActionPreference rationale)
             $buildOutput = & {
                 $ErrorActionPreference = 'Continue'
-                npm run build 2>&1
+                npm run $NpmScript 2>&1
             }
             if ($LASTEXITCODE -ne 0) {
-                throw "npm run build failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
+                throw "npm run $NpmScript failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
+            }
+            # pcf-scripts EXITS 0 WHEN THE WEBPACK BUILD FAILS, so for PCF builds the exit code above
+            # proves nothing. Judge the result from the output (rule shared with
+            # scripts/Invoke-PcfBuildProd.ps1 and the nightly CI workflow).
+            if ($Category -eq 'PCF Controls') {
+                $pcfResult = Get-PcfBuildResult -Output $buildOutput -ExitCode $LASTEXITCODE
+                if (-not $pcfResult.Succeeded) {
+                    throw "PCF build $($pcfResult.Status.ToLower()) ($($pcfResult.Reason)) although npm exited $LASTEXITCODE`n$($pcfResult.Excerpt -join "`n")"
+                }
             }
 
             $stopwatch.Stop()
@@ -320,9 +379,64 @@ foreach ($cp in $WebpackCodePages) {
 Write-Host ""
 
 # --- Step 4: PCF Controls ---
-Write-Host "Step 4/5: PCF Controls" -ForegroundColor White
-Write-Host "--------------------------------------" -ForegroundColor DarkGray
-Invoke-ComponentBuild -Name "PCF" -BuildPath "$RepoRoot\src\client\pcf" -Category "PCF Controls"
+# One PCF at a time, production mode, same discovery rules as .github/workflows/pcf-build-prod-nightly.yml:
+# a git-tracked src/client/pcf/<name>/package.json (exactly one level deep) with a build:prod script;
+# an unparseable package.json is an error in both, never a silent drop. (The old single aggregate
+# dev-mode `npm run build` at src/client/pcf never worked from a clean checkout and ran out of memory;
+# nothing consumes its src/client/pcf/out output, so it is gone.)
+$pcfStepSelected = (-not $Component) -or [bool]($Component | Where-Object { $_ -eq 'PCF' -or $_ -like 'PCF/*' })
+if ($pcfStepSelected) {
+    $pcfFolders = @()
+    $pcfDiscoveryErrors = @()
+    $pcfPackageJsons = @(git -C $RepoRoot ls-files -- 'src/client/pcf/*/package.json' |
+        Where-Object { $_ -match '^src/client/pcf/[^/]+/package\.json$' })
+    foreach ($rel in $pcfPackageJsons) {
+        $dir = Split-Path (Join-Path $RepoRoot $rel) -Parent
+        try {
+            $scripts = (Get-Content -LiteralPath (Join-Path $dir 'package.json') -Raw | ConvertFrom-Json).scripts
+        }
+        catch {
+            $pcfDiscoveryErrors += "PCF/$(Split-Path $dir -Leaf): package.json could not be parsed: $($_.Exception.Message)"
+            continue
+        }
+        if ($scripts -and $scripts.'build:prod') { $pcfFolders += $dir }
+    }
+
+    Write-Host "Step 4/5: PCF Controls ($($pcfFolders.Count) discovered, npm run build:prod each)" -ForegroundColor White
+    Write-Host "--------------------------------------" -ForegroundColor DarkGray
+
+    foreach ($err in $pcfDiscoveryErrors) {
+        Write-Host "  FAIL  $err" -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = ($err -split ':')[0]
+            Category  = "PCF Controls"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = $err
+        })
+    }
+
+    if ($pcfFolders.Count -eq 0) {
+        # Zero PCFs is a discovery bug, not an empty repo: fail loudly rather than report a vacuous green.
+        Write-Host "  FAIL  No PCF with a build:prod script found under src/client/pcf (git ls-files)." -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = "PCF (discovery)"
+            Category  = "PCF Controls"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = "No git-tracked src/client/pcf/*/package.json with a build:prod script"
+        })
+    }
+
+    foreach ($dir in $pcfFolders) {
+        $leaf = Split-Path $dir -Leaf
+        Invoke-ComponentBuild -Name "PCF/$leaf" -SelectBy "PCF", "PCF/$leaf" -BuildPath $dir `
+            -Category "PCF Controls" -NpmScript "build:prod" -AlwaysInstall
+    }
+}
+else {
+    Write-Host "Step 4/5: PCF Controls - not selected by -Component" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # --- Step 5: External SPA ---
@@ -330,6 +444,24 @@ Write-Host "Step 5/5: External SPA" -ForegroundColor White
 Write-Host "--------------------------------------" -ForegroundColor DarkGray
 Invoke-ComponentBuild -Name "ExternalSPA" -BuildPath "$RepoRoot\src\client\external-spa" -Category "External SPA"
 Write-Host ""
+
+# --- Unmatched -Component names ---
+# A name that selected nothing (typo, or a PCF/<name> that does not exist) must not exit 0.
+if ($Component -and $Component.Count -gt 0) {
+    $sharedNames = @($SharedLibs | ForEach-Object { $_.Name })
+    foreach ($req in $Component) {
+        if ($MatchedFilters.Contains($req)) { continue }
+        if ($SkipSharedLibs -and $req -in $sharedNames) { continue }   # skipped on purpose
+        Write-Host "  FAIL  -Component '$req' matched no component" -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = "filter:$req"
+            Category  = "Filter"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = "-Component '$req' matched no component"
+        })
+    }
+}
 
 # --- Summary ---
 $totalStopwatch.Stop()

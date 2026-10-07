@@ -17,10 +17,25 @@ parent or a date on every read.
 | **R1** | ACTIVE `sprk_externalrecordaccess` with no `sprk_expiresdate` | `sprk_expiresdate = ExternalGrantLifecycle.DefaultExpiry(today)` |
 | **R2** | ACTIVE grant whose `sprk_organization` points at an INACTIVE `sprk_organization` | `statecode=1, statuscode=2` |
 | **R3** | ACTIVE `sprk_contactorganization` whose `sprk_enddate` has PASSED | `statecode=1, statuscode=2` |
+| **R4** *(owner round 71, 2026-10-06)* | ACTIVE grant whose record is GONE — `sprk_project`, `sprk_matter` AND `sprk_workassignment` all empty | `statecode=1, statuscode=2` |
 
-**R2 beats R1 on the same row**, and that precedence is *structural* rather than a dedupe step: ONE scan
-serves both rules, so a row is classified once and cannot land in two change sets — which is also what
-stops two updates for one id entering one transaction.
+**R4 beats R2, which beats R1, on the same row**, and that precedence is *structural* rather than a dedupe
+step: ONE scan serves all three grant rules, so a row is classified once and cannot land in two change sets —
+which is also what stops two updates for one id entering one transaction.
+
+**R4 — why it exists (found live at gate G8, 2026-10-06).** Deleting a matter or work assignment does not delete
+its grants: the record lookups' delete behaviour is RemoveLink (Dataverse allows one cascade-delete parent per
+table), so the grant survives ACTIVE with its record cleared — task 142's Assigned-To auto-grants included. It
+confers nothing (no record → no key, `ExternalGrantLifecycle.DeriveKey`) but reads as an active grant. Owner
+decision: this job deactivates it. The grant carries no TEXT copy of its record id (live metadata: the only text
+column is `sprk_grantedbycontactid`; the live `sprk_invoice` / `sprk_recordtype` lookups are not in the repo's
+schema and no grant code reads them), so the empty lookups are the evidence and no per-row read is made. The scan
+gained a third disjunct (all three record lookups null) so an orphan with a date and no organization is still
+returned; it already selected the three lookups. Same switch, chunks, claims, before-state lines, per-rule counts
+(`r4Scanned/Planned/Changed/…` in the heartbeat, `R4-deactivate-grant-whose-record-is-gone` in `ResultJson`) and
+fail-closed scan as R1–R3 — a failed scan writes nothing. The matching Assigned-To LEDGER rows are retired by
+`AssignedAccessReconciliationJob` (`Revoked` / `root-deleted`, only after a read confirms the record is gone —
+`sprk_assignedaccess` entity-schema.md).
 
 ## 2. Coherence with task 107, which shipped first (the thing that changed the design)
 
@@ -90,6 +105,11 @@ dev and its records are test records; the counts must be re-taken against any re
 switch is thrown.
 
 ## 6. The two switches, and why there are two
+
+> **Superseded in part (2026-10-02, task 137 r3, owner round 7 item 1).** Switch 1 is now ON: the job is registered
+> enabled on its daily `0 5 * * *` schedule, and every tick runs report-only. Switch 2 is unchanged:
+> `WritesEnabled` stays `false` until the owner has reviewed one report. See `task-137-soft-revocation.md` §6 and
+> `DEPLOY-CHECKLIST.md` §4.1. The text below records the posture as shipped by task 117.
 
 Both must be thrown before a single row is written.
 

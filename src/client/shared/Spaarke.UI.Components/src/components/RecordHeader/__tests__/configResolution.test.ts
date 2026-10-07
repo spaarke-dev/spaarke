@@ -1031,7 +1031,22 @@ describe('resolveHeaderConfig', () => {
 
   describe('module purity — static source scan', () => {
     const sourcePath = path.join(__dirname, '..', 'configResolution.ts');
-    const source = fs.readFileSync(sourcePath, 'utf8');
+    // Normalize CRLF → LF (task 092, 2026-10-04) BEFORE any comment-stripping
+    // runs. The git-stored blob is LF-only, but a Windows checkout with
+    // `core.autocrlf=true` (the repo's own documented local-dev convention —
+    // see `.gitattributes`'s "Windows (core.autocrlf=true) checks out CRLF"
+    // comment) materializes this file with CRLF line endings. The per-line
+    // `.replace(/\/\/.*$/, '')` below then silently fails to strip trailing
+    // `//` comments: JS regex `.` excludes line-terminator characters
+    // (including `\r`), so on a line ending `...comment text\r`, `.*` cannot
+    // consume the `\r` and `$` (no `m` flag, matches ONLY absolute
+    // end-of-string) can never be satisfied — the match fails outright and
+    // the comment survives into `codeOnly`, producing false "found a banned
+    // token in code" positives for tokens that only ever appear in comments.
+    // Reproduces 100% deterministically on any Windows checkout with
+    // `core.autocrlf=true`; a Linux CI runner checks out LF and never hits
+    // it — a real CI/local parity gap, not flakiness.
+    const source = fs.readFileSync(sourcePath, 'utf8').replace(/\r\n/g, '\n');
 
     /**
      * Source with all comments removed. The scans below MUST run against this,

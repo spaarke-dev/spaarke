@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="225a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Item 4 (D-12) — retire `model1-*.bicep` across all seven surfaces atomically, plus the shared-UAMI branch in `bff-runtime-rbac.bicep`, the shared entries in `prereqs.yaml`, and the Redis Bicep default (Basic C0 → Standard C1)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T225a (INCOMING §5 Item 4 + §6 bullets for bff-runtime-rbac / prereqs.yaml; gap G7)</phase>
+    <gate>startable — master merged 2026-09-30 (40c4b2a02)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes Bicep stacks/modules/params and edits a CI workflow + JSON schema + a test script; seven surfaces must move together or the build breaks; deploy-adjacent (H2a reads the ARM-artifact manifest at provisioning time).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by INCOMING §5 Item 4 (file + line list); the risk is completeness, not judgment. xhigh because the change is multi-file and atomic with an inverted-polarity test assertion trap.</model-tier-reason>
+    <effort>xhigh</effort>
+    <tags>provisioning, bicep, infrastructure, ci-workflows, testing, d-12, model1-dedicated</tags>
+    <deps>master-merge</deps>
+  </metadata>
+
+  <goal>
+    `model1-shared.bicep` / `model1-customer.bicep` and everything that references them are gone, the build and the Bicep
+    E2E dry run are green with three stacks, the ARM-artifact workflow no longer compiles or uploads `model1-shared`, and
+    H2a's manifest schema no longer requires it. No Bicep path provisions a shared Model 1 identity, RG or service.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>infrastructure/bicep/stacks/model1-shared.bicep</file>
+      <file>infrastructure/bicep/stacks/model1-customer.bicep</file>
+      <file>infrastructure/bicep/modules/model1-shared-l2-rbac.bicep</file>
+      <file>infrastructure/bicep/modules/bff-runtime-rbac.bicep</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>scripts/tests/bicep-e2e-dry-run.ps1</file>
+      <file>.github/workflows/publish-provisioning-arm-artifacts.yml</file>
+      <file>.github/workflows/schemas/provisioning-arm-manifest.json</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="INCOMING §5 Item 4 (BINDING)">
+      All seven surfaces change in ONE commit: (1) `stacks/model1-shared.bicep` + checked-in `model1-shared.json`;
+      (2) `stacks/model1-customer.bicep`; (3) `modules/model1-shared-l2-rbac.bicep`; (4) `parameters/model1-prod.bicepparam`;
+      (5) `dev.bicepparam`, `prod.bicepparam`, `staging.bicepparam` (each `using` the stack — repoint or delete per what
+      they parameterize); (6) `scripts/tests/bicep-e2e-dry-run.ps1` — remove the `$Stacks` entry, Assertion 8
+      `Model1SharedDeferredCallerFix` (inverted polarity: it passes only while the build fails), the doc lines, stack count
+      4 → 3; (7) `publish-provisioning-arm-artifacts.yml` stops compiling/uploading the stack and
+      `schemas/provisioning-arm-manifest.json` drops `model1-shared` from `required`. INCOMING line numbers were taken
+      pre-merge — re-locate by content after the master merge.
+    </constraint>
+    <constraint source="project CLAUDE.md — .github/workflows/** ownership is temporary-by-default">
+      Before editing `.github/workflows/**`, re-check whether `ci-cd-unit-test-remediation-r1` (or any CI-governance
+      project) is active in `projects/INDEX.md` / recent master commits. If it is, author a coord-note for that owner instead
+      of committing the workflow change directly (see escalation).
+    </constraint>
+    <constraint source="owner decision D12 (2026-09-30) — supersedes §9 Q3 / G7">
+      Do NOT change the Redis default in `customer.bicep`. Standard C1 is superseded by Azure Managed Redis B0 (T242).
+    </constraint>
+    <constraint source="scope">
+      Code-path convergence in the control plane (H2b Model 1 branch, H12c shared OpenAI endpoint, ArmDeploymentRunner /
+      FileBicepTemplateInspector template selection, `Seed-PlatformKeyVault.ps1`, worker Bicep config) is T225b. If
+      deleting the stack makes a control-plane template-key lookup fail at test time, apply the minimal repoint to
+      `customer` in the same commit and record it — do not refactor further.
+      `controlplane-subscription-rbac.bicep` fleet-subscription assumption is T228 — do not touch.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>`ci-cd-unit-test-remediation-r1` or another CI-governance project is active → STOP before editing `.github/workflows/**`; ask the owner whether to coord-note or proceed.</trigger>
+    <trigger>A `dev`/`prod`/`staging` bicepparam carries parameters for a LIVE shared environment still in use (e.g. `spaarke-bff-dev` in `rg-spaarke-dev`) → STOP; retiring its stack may orphan live infra docs/pipelines. Report what it deploys.</trigger>
+    <trigger>`bicep-e2e-dry-run.ps1` not green with 3 stacks after the change → STOP; do not re-add an inverted assertion.</trigger>
+  </escalation>
+
+  <steps mode="prescriptive">
+    <step n="0">Confirm the branch is 0 behind origin/master (merge 40c4b2a02 landed 2026-09-30; re-merge if master moved) and ArchTest 337/337. Re-check `.github/workflows/**` ownership. `git grep -n "model1-shared\|model1-customer\|model1-prod\|shared-bff-uami\|rg-spaarke-shared"` → categorized hit list (code / Bicep / workflow / script / docs).</step>
+    <step n="1">Delete surfaces 1–4; repoint or delete surface 5 per what each bicepparam deploys.</step>
+    <step n="2">`bff-runtime-rbac.bicep`: remove the `sprk-{env}-shared-bff-uami` branch; the stamp UAMI is the only principal.</step>
+    <step n="3">DROPPED — owner D12 (2026-09-30) supersedes Standard C1 with Azure Managed Redis B0 (T242). Do not touch the Redis default here.</step>
+    <step n="4">`bicep-e2e-dry-run.ps1`: remove stack entry, Assertion 8, doc lines; count 4 → 3.</step>
+    <step n="5">Workflow + manifest schema (surface 7), subject to the ownership check.</step>
+    <step n="6">`prereqs.yaml`: remove/rewrite PRQ-E-05, PRQ-E-06, PRQ-C-02 (and any other entry from the Step 0 hit list) that names the shared BFF, `rg-spaarke-shared-{env}` or `model1-shared.bicep`; run `scripts/provisioning-prereqs/validate.ps1`.</step>
+    <step n="7">Verify: `az bicep build` on every remaining stack + `customer.bicep`; `pwsh scripts/tests/bicep-e2e-dry-run.ps1` green; `dotnet build` ControlPlane Api/Worker/Tests; ArchTest 337/337; ControlPlane.Tests ≤ 23 baseline failures; repeat the Step 0 grep → only historical docs remain (list them for T235).</step>
+    <step n="8">Step 9.5 quality gates (tests + workflow touched). Close: POML notes, TASK-INDEX row 225a, plan §3 (Item 4 + §6 bff-runtime-rbac / prereqs bullets) + §4 G7, current-task.md. Commit + push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>All seven INCOMING §5 Item 4 surfaces changed in one commit; `model1-shared.bicep`, `model1-shared.json`, `model1-customer.bicep`, `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam` no longer exist.</criterion>
+    <criterion>`bicep-e2e-dry-run.ps1` passes with 3 stacks; Assertion 8 removed (not inverted, not skipped).</criterion>
+    <criterion>`publish-provisioning-arm-artifacts.yml` neither compiles nor uploads `model1-shared`; `provisioning-arm-manifest.json` does not require it — OR, if the ownership check routed it to a coord-note, the coord-note exists and the POML records why.</criterion>
+    <criterion>`bff-runtime-rbac.bicep` has no shared-UAMI branch. (Redis default unchanged — D12/T242.)</criterion>
+    <criterion>`prereqs.yaml` has no entry naming the shared BFF, `rg-spaarke-shared-{env}` or `model1-shared.bicep`; `validate.ps1` passes.</criterion>
+    <criterion>Every remaining stack + `customer.bicep` compiles; ControlPlane builds 0/0; ArchTest 337/337; ControlPlane.Tests ≤ 23 baseline failures, zero new.</criterion>
+    <criterion>`controlplane-subscription-rbac.bicep` untouched (T228); no control-plane refactor beyond a minimal template-key repoint if the build required it (recorded).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-02). Verified: every remaining stack + customer.bicep builds and each checked-in ARM JSON matches
+    a fresh compile; bicep-e2e-dry-run.ps1 Build mode OVERALL PASS with 3 stacks; ControlPlane Api/Worker/Tests/LoadTests
+    0/0; ControlPlane.Tests 2141 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip;
+    ArchTests 340/340 (master added 3); prereqs validate.ps1 OK (manifest v4); catalog -Verify OK.
+
+    Step 0: master re-merged (5de91f095 — 93 behind → 0; only conflict .claude/CHANGELOG.md, both kept).
+    ESCALATION TRIGGER 1 — should have fired and was escalated late: ci-cd-unit-test-remediation-r1 was REACTIVATED
+    2026-08-27 (projects/INDEX.md); I checked its stale branch tip and called it dormant, so the workflow edits (and
+    T245b's trigger-path edit) were made before asking. Raised at Step 9.5 (adr-check F1); OWNER 2026-10-02: "we need to
+    resolve this here; the ci-cd-r1 project is closed" → edits kept; INDEX.md + project CLAUDE.md updated.
+    TRIGGER 2 — not fired: parameters/{dev,staging,prod}.bicepparam deploy only the shared tier (rg-spaarke-shared-{env},
+    sprkshared{env}-*), not spaarke-bff-dev; read-only check: rg-spaarke-shared-prod exists in "Spaarke Model 1
+    Production" with sprksharedprod-api STOPPED (owner Q4, decommission T241); dev/staging shared RGs do not exist.
+    TRIGGER 3 — the first run was red for customer.bicep, but not because of the stack: `az bicep build --stdout` crashes
+    on Windows (cp1252, non-ASCII in the compiled template — pre-existing, HEAD's customer.json already carried 'Δ'/'→').
+    Harness fixed to --outfile; green with 3 stacks; no inverted assertion re-added.
+
+    DEVIATIONS / ADDITIONS:
+    - parameters/{dev,staging,prod}.bicepparam DELETED (not repointed): they parameterize only the retired shared tier;
+      Model 2's per-env files are stacks/{env}.bicepparam.
+    - deploy-infrastructure.yml edited (not in INCOMING's list): it builds stacks/*.bicep on every push/PR and offered a
+      model1-shared dispatch option bound to the deleted parameter files.
+    - Control plane: the POML permitted a minimal `customer` repoint only if a lookup failed at test time; it did not.
+      adr-check F2 (ADR-027): repointing made a Model 1 run deploy customer.bicep into a non-dedicated subscription,
+      half-wired to shared services. Pivoted to comply (path C): ArmDeploymentRunner's Model 1 arm FAILS CLOSED (H2a →
+      Resumable arm-template-unavailable, nothing deployed) until T225b (code path) + T228 (subscription per customer);
+      T2 test pins the throw. Model 1 runs stay blocked until both land (G28 blocks every run today anyway).
+    - Manifest schema keeps `model1-shared` as an OPTIONAL deprecated property (ADR-020: manifests published before
+      2026-10-02 still validate); no longer required or published. H2a never reads it.
+    - bff-runtime-rbac.bicep: no code branch existed — comments + parameter descriptions name only the stamp UAMI; the
+      DEPLOYED role-assignment description is kept verbatim (code-review CR-1: changing it makes every existing stamp's
+      upgrade what-if report a Modify, which ArmWhatIfDriftDetector rejects as drift).
+    - PRQ-E-05 rescoped once_per_env → once_per_customer and pointed at the stamp's own BFF (it is an H2a postcondition;
+      new tokens {stampSubscriptionId} / {stampEnvironment} documented). PRQ-E-06 / E-10 / C-02 reworded. prereqs.yaml
+      manifest_version 3 → 4 (also covers T245c's PRQ-C-08).
+    - bicep-e2e-dry-run.ps1: EXPECTED_FAILURE mechanism removed (zero users; a free-text build-failure mask), MISSING now
+      fails the verdict, Assertion 7 (checked the working tree's git status, not the Bicep) removed.
+    - Recompiled stale checked-in JSON: modules/bff-runtime-rbac.json, customer.json, stacks/model2-full.json (gpt-4o pin
+      drifted after the master merge), platform.json.
+    - RECORD CORRECTED: "model1-shared.bicep has not compiled since 2026-08-17" was false (caller migrated 6ff75702a
+      2026-08-18; deployed live 2026-08-22) — it only failed on Windows via the --stdout crash. For T241: the stack is
+      last present at 5de91f095 and was last modified in 1bc049e4c.
+    - Redis default unchanged (D12/T242); controlplane-subscription-rbac.bicep untouched (T228).
+
+    FOR T235 (references left, non-breaking): BFF comment-only references — CustomerIdResolver.cs:107,
+    ConfigurationModule.cs:42, SessionFileBlobStore.cs:146, appsettings.template.json:432, CustomerIdResolverTests.cs
+    (the reserved 'shared' id is intentional); AZURE-RESOURCE-NAMING-CONVENTION.md; docs/assessments (dated, historical);
+    the two unreconciled full-stamp templates (customer.bicep via H2a vs stacks/model2-full.bicep via
+    deploy-infrastructure.yml, which deploys into the single secrets.AZURE_SUBSCRIPTION_ID — also a T228 concern); the
+    infrastructure README's legacy keyed-secret post-deploy steps.
+
+    Test-scope justification: ArmDeploymentRunnerTests T2 rewritten to pin the fail-closed behaviour (the changed
+    production behaviour); no other test added.
+  </notes>
+
+  <outputs>
+    <output type="file-deleted">infrastructure/bicep/stacks/model1-shared.bicep, model1-shared.json, model1-customer.bicep; modules/model1-shared-l2-rbac.bicep; parameters/model1-prod.bicepparam</output>
+    <output type="file-modified">dev/prod/staging bicepparam, bff-runtime-rbac.bicep, customer.bicep, bicep-e2e-dry-run.ps1, publish-provisioning-arm-artifacts.yml, provisioning-arm-manifest.json, prereqs.yaml</output>
+    <output type="task-status">POML completed; TASK-INDEX row 225a ✅; plan §3/§4 updated.</output>
+  </outputs>
+</task>

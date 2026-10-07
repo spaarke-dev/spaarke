@@ -197,3 +197,15 @@ export interface IndexFileResult {
   /** Error message when `success` is false. */
   errorMessage?: string;
 }
+
+/**
+ * Result returned by `SdapApiClient.attachDocumentFile()` — the pointer the BFF stamped on the
+ * document (unified-access-control-r2 task 166 f1).
+ */
+export interface AttachDocumentFileResult {
+  documentId: string;
+  driveId: string;
+  itemId: string;
+  /** True when this same file was already attached (the call was idempotent). */
+  alreadyAttached: boolean;
+}

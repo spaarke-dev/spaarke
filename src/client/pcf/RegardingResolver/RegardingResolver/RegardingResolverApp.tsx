@@ -282,6 +282,7 @@ import {
 } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 
 /**
  * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
@@ -301,6 +302,8 @@ import {
   type IRegardingSelection,
   type IResolverWriteContext,
 } from './handlers/ResolverWriteHandler';
+import { refileThroughBff, isSecureRootReader } from './handlers/bffWrites';
+import type { ISecureFlagReader } from './handlers/bffWrites';
 
 // ---------------------------------------------------------------------------
 // Build date embedded in the version footer per src/client/pcf/CLAUDE.md
@@ -308,7 +311,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-09-04';
+const BUILD_DATE = '2026-10-05';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -476,30 +479,25 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Walk through window / parent frames to locate Xrm. PCF runs in an iframe,
- * so the form host is exposed via window.parent or window.top.
+ * Typed local view of the host `Xrm` members this control reads. The shared
+ * `getXrm()` walker (task 081 / C-8) returns the narrower `XrmContext`, which
+ * does not declare `Page` as `Xrm.Page` or this `navigateTo` signature.
  */
-function getXrm():
-  | {
-      Utility?: {
-        getGlobalContext?: () => unknown;
-      };
-      Page?: Xrm.Page;
-      Navigation?: {
-        navigateTo?: (
-          pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
-          navigationOptions: {
-            target: 1 | 2;
-            width: { value: number; unit: '%' | 'px' };
-            height: { value: number; unit: '%' | 'px' };
-          }
-        ) => Promise<unknown>;
-      };
-    }
-  | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+interface HostXrm {
+  Utility?: {
+    getGlobalContext?: () => unknown;
+  };
+  Page?: Xrm.Page;
+  Navigation?: {
+    navigateTo?: (
+      pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
+      navigationOptions: {
+        target: 1 | 2;
+        width: { value: number; unit: '%' | 'px' };
+        height: { value: number; unit: '%' | 'px' };
+      }
+    ) => Promise<unknown>;
+  };
 }
 
 /**
@@ -530,7 +528,8 @@ async function autoRefreshForm(formType: number): Promise<void> {
   // Skip auto-refresh on CREATE (formType === 1) — presave bridge handles that path.
   if (formType === 1) return;
 
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   if (!xrm) {
     console.warn('[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).');
     return;
@@ -572,7 +571,8 @@ async function autoRefreshForm(formType: number): Promise<void> {
  * inner Xrm-unavailable check in autoRefreshForm covers the actual no-op.
  */
 function getFormType(): number {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ui = (xrm?.Page as any)?.ui;
@@ -600,7 +600,8 @@ function getFormType(): number {
  *      handler's defensive posture).
  */
 async function handleRefreshInternal(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data;
@@ -710,7 +711,8 @@ async function resolveClickTarget(
 
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data?.entity;
@@ -742,7 +744,8 @@ function getHostRecordId(): string | undefined {
 function detectPrePopulatedParent(
   catalog: readonly ITodoRegardingTargetCatalogEntry[]
 ): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') {
@@ -787,7 +790,8 @@ function detectPrePopulatedParent(
  * unavailable → warn + return false. Never throws to the host form.
  */
 function setFormLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
@@ -807,7 +811,8 @@ function setFormLookupValue(fieldName: string, entityType: string, id: string, n
 }
 
 function setFormTextValue(fieldName: string, value: string | null): boolean {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
@@ -936,6 +941,10 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       webApi: context.webAPI as unknown as IResolverWriteContext['webApi'],
       hostEntity,
       hostRecordId: getHostRecordId(),
+      // v1.6.0 (UAC-r2 task 147 r1, owner round 28): a saved host is re-filed through the BFF (the owner follows the
+      // record it is filed under); a new host is never filed under a secure record before it is saved.
+      refileThroughBff,
+      isSecureRoot: isSecureRootReader(context.webAPI as unknown as ISecureFlagReader),
     }),
     [context.webAPI, hostEntity]
   );
@@ -1606,7 +1615,8 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           return;
         }
 
-        const xrm = getXrm();
+        // Shared cross-frame walker (task 081 / C-8).
+        const xrm = getXrm('navigation') as unknown as HostXrm | undefined;
         if (typeof xrm?.Navigation?.navigateTo !== 'function') {
           // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
           // (developer-visible), do not throw (host-safe).

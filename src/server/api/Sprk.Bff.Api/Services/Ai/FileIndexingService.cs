@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -28,6 +29,7 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly ITextChunkingService _chunkingService;
     private readonly IRagService _ragService;
     private readonly ILogger<FileIndexingService> _logger;
+    private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
@@ -37,35 +39,56 @@ public sealed class FileIndexingService : IFileIndexingService
     /// <param name="chunkingService">Text chunking service.</param>
     /// <param name="ragService">RAG indexing service.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
+    /// <param name="containerResolver">
+    /// Verifies a <c>sprk_document</c> row's pointer before the app-only download (unified-access-control-r2 task 166 r1).
+    /// </param>
     public FileIndexingService(
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         ITextChunkingService chunkingService,
         IRagService ragService,
-        ILogger<FileIndexingService> logger)
+        ILogger<FileIndexingService> logger,
+        RecordContainerResolver containerResolver)
     {
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _chunkingService = chunkingService;
         _ragService = ragService;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Identity (unified-access-control-r2 task 171, owner round 69 — broker-only).</b> A request that names a
+    /// <c>sprk_document</c> is indexed APP-ONLY through <see cref="IndexFileAppOnlyAsync"/>, which verifies the row's
+    /// pointer first. Every caller that names a document authorized the caller on it before calling (the index-file
+    /// route's Targeted filter + the request-to-row hold, send-to-index's per-document Write check, the post-upload
+    /// enqueuer after a save the caller was authorized for). The OBO read it used to make worked only for a caller
+    /// holding a role on the container, so a secure record's documents were never indexed from the request path.</para>
+    /// <para>A request WITHOUT a document id names a drive item that no Dataverse record stands behind, so SPE's answer
+    /// for the caller remains the decision and the read stays OBO (task 171 escalation trigger 2 — reported, not
+    /// converted).</para>
+    /// </remarks>
     public async Task<FileIndexingResult> IndexFileAsync(
         FileIndexRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(request.DocumentId))
+        {
+            return await IndexFileAppOnlyAsync(request, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             _logger.LogDebug(
-                "Starting OBO file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
+                "Starting OBO file indexing (no document named) for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
 
-            // Download via OBO authentication
+            // Download via OBO authentication: no Dataverse record stands behind this item (see remarks).
             await using var stream = await _speFileOperations.DownloadFileAsUserAsync(
                 httpContext,
                 request.DriveId,
@@ -138,6 +161,17 @@ public sealed class FileIndexingService : IFileIndexingService
             _logger.LogDebug(
                 "Starting app-only file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
+
+            // task 166 r1 (owner round 21 item 1b): a request that names a sprk_document follows that row's
+            // pointer, so the pointer's container is verified before the app-only download (fail closed; an id that
+            // is not a GUID is refused). A request with NO document id carries a pointer the server built itself — an
+            // orphan file the BFF just uploaded, or the API-key service route — and follows no row.
+            if (!string.IsNullOrWhiteSpace(request.DocumentId)
+                && !await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    request.DocumentId, request.DriveId, request.ItemId, cancellationToken))
+            {
+                return FileIndexingResult.Failed("Document storage could not be verified");
+            }
 
             // Download via app-only authentication
             await using var stream = await _speFileOperations.DownloadFileAsync(

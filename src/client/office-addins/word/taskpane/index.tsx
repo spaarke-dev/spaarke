@@ -5,6 +5,7 @@ import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
 import type { IHostAdapter } from '@shared/adapters';
 import { WordAdapter } from '@shared/adapters/WordAdapter';
 import { authService, apiClient } from '@shared/services';
+import { requestWiderTaskPane } from '@shared/taskpane/services/taskPaneWidthService';
 
 // Version information. Task 089 (round-3 note §5): this used to be a hand-maintained literal ('1.0.9') that had
 // drifted from the app package the admin actually uploads (1.1.0). It is now the unified package's version,
@@ -112,6 +113,9 @@ async function init() {
     renderError(error as Error, 'Office.js initialization');
     throw error;
   }
+
+  // Task 095: ask the host for a task pane 75 px wider than its default (best effort, never throws).
+  requestWiderTaskPane();
 
   // Stage 2: Initialize auth service
   console.log('[Spaarke] Stage 2: Initializing auth service...');

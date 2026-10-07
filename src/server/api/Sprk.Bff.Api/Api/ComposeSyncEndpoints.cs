@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 using static Sprk.Bff.Api.Api.ComposeEndpoints;
@@ -63,13 +64,20 @@ internal static class ComposeSyncEndpoints
         // EnumerateChangesAsync) rather than a second ad hoc etag-comparison path, so "stored vs
         // current SPE etag" always means the one Redis-backed comparison task 052 built
         // (ADR-009); no Microsoft.Graph type crosses this endpoint (ADR-007).
+        //
+        // Task 166 (S-65): AUTHORIZED in the handler by an OBO read of the named item in the named container
+        // BEFORE the app-only delta runs — see CheckDocumentChangesAsync. The 404 is that refusal.
         group.MapPost("/document/{documentSpeId}/check-changes", CheckDocumentChangesAsync)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "read" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("read")
             .WithName("ComposeCheckDocumentChanges")
             .WithSummary("Poll fallback: compare the stored SPE etag vs the current SPE etag for a Compose document (FR-26)")
             .RequireRateLimiting("ai-context")
             .Produces<CheckChangesResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -227,6 +235,9 @@ internal static class ComposeSyncEndpoints
         string documentSpeId,
         [FromBody] CheckChangesBody? body,
         SpeSyncOrchestrator orchestrator,
+        // Task 166 (S-65): the SPE facade (ADR-007). Task 171: the authorization decision is the route filter's row
+        // decision (ComposeDocumentAuthorizationFilter) when the item has a sprk_document; otherwise the OBO read below.
+        ISpeFileOperations spe,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -236,6 +247,50 @@ internal static class ComposeSyncEndpoints
         if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required in the request body.");
+
+        // ── Task 166 (S-65): the CALLER must be able to see THIS item in THIS container, BEFORE the delta ──
+        //
+        // EnumerateChangesAsync runs an APP-ONLY Graph delta over the container the body names, returns the named
+        // item's name/eTag/deleted flag, and creates or advances the SHARED per-container delta + eTag state in
+        // Redis (adding the container to the tracked index). Unchecked, any signed-in caller could run it over
+        // any container the managed identity reaches — an existence and filename oracle — and, by advancing the
+        // shared state, suppress change detection for the users the poll exists to serve.
+        //
+        // The question asked is the narrowest one that answers it: an OBO metadata read (GetFileMetadataAsUserAsync
+        // — SPE evaluating the caller's own ACLs) of documentSpeId in the drive the container resolves to. Null, a
+        // throw, or a container that will not resolve are ONE 404, and the orchestrator is never called — so no
+        // delta or eTag state is created or advanced for a caller who cannot see the document. The try covers the
+        // decision only; the delta's own faults keep their existing handling below.
+        bool visibleToCaller;
+        try
+        {
+            var driveId = await spe.ResolveDriveIdAsync(body.ContainerId, ct).ConfigureAwait(false);
+            var item = string.IsNullOrWhiteSpace(driveId)
+                ? null
+                : await spe.GetMetadataForComposeAsync(httpContext, driveId, documentSpeId, ct).ConfigureAwait(false);
+            visibleToCaller = item is not null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Compose check-changes: the caller's OBO visibility check for item={DocumentSpeId} in container={ContainerId} "
+                + "failed; answering the uniform 404. TraceId={TraceId}",
+                documentSpeId, body.ContainerId, httpContext.TraceIdentifier);
+            visibleToCaller = false;
+        }
+
+        if (!visibleToCaller)
+        {
+            logger.LogWarning(
+                "Compose check-changes DENIED: item={DocumentSpeId} in container={ContainerId} is not visible to the caller. "
+                + "No delta was run and no change-detection state was touched. TraceId={TraceId}",
+                documentSpeId, body.ContainerId, httpContext.TraceIdentifier);
+            return DocumentNotVisible(httpContext);
+        }
 
         try
         {
@@ -271,6 +326,26 @@ internal static class ComposeSyncEndpoints
                 detail: "An unexpected error occurred while checking for changes.");
         }
     }
+
+    /// <summary>The reason code of the ONE check-changes refusal (task 166).</summary>
+    internal const string DocumentNotVisibleReasonCode = "sdap.compose.deny.document_not_visible";
+
+    /// <summary>
+    /// The ONE check-changes refusal (task 166): an item the caller cannot see, an item that does not exist, a
+    /// container that will not resolve, and a failed visibility read all return exactly this — status, title,
+    /// detail and reasonCode — so the route cannot be used to learn which items exist. Names no id.
+    /// </summary>
+    internal static IResult DocumentNotVisible(HttpContext httpContext) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Document Not Found",
+            detail: "The document was not found or you do not have access to it.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = DocumentNotVisibleReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

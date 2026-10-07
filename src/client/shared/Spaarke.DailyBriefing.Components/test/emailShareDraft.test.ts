@@ -8,7 +8,7 @@
  * deterministicRenderer test) applied to the shared-item email.
  */
 
-import { buildItemEmailDraft, buildRecordDeepLink, buildEmailActivityRecord } from '../src/components/DailyBriefingApp';
+import { buildItemEmailDraft, buildRecordDeepLink } from '../src/components/DailyBriefingApp';
 import type { HighPriorityItemResult } from '../src/services/briefingService';
 
 const CLIENT_URL = 'https://contoso.crm.dynamics.com';
@@ -46,26 +46,18 @@ describe('buildRecordDeepLink', () => {
   });
 });
 
-describe('buildEmailActivityRecord', () => {
-  const payload = { to: { id: 'to-user-999' }, subject: 'Matter: Acme', body: 'see link' };
-
-  it('maps subject/body and builds From (mask 1) + To (mask 2) systemuser parties', () => {
-    const record = buildEmailActivityRecord('from-user-111', payload);
-    expect(record.subject).toBe('Matter: Acme');
-    expect(record.description).toBe('see link');
-    expect(record.email_activity_parties).toEqual([
-      { 'partyid_systemuser@odata.bind': '/systemusers(from-user-111)', participationtypemask: 1 },
-      { 'partyid_systemuser@odata.bind': '/systemusers(to-user-999)', participationtypemask: 2 },
-    ]);
-  });
-
-  it('omits the From party when the caller systemuserid is unknown (Dataverse defaults it)', () => {
-    const record = buildEmailActivityRecord('', payload);
-    expect(record.email_activity_parties).toEqual([
-      { 'partyid_systemuser@odata.bind': '/systemusers(to-user-999)', participationtypemask: 2 },
-    ]);
-  });
-});
+// `buildEmailActivityRecord` describe block REMOVED (task 092, 2026-10-04).
+// The function itself was deliberately deleted by commit 4dc8f9d709
+// (2026-08-03, "DailyBriefing on canonical email process; legacy
+// SendEmailDialog DELETED") — its own commit message says so explicitly:
+// "the bespoke webApi email-activity + SendEmail bound-action path is
+// deleted (buildEmailActivityRecord removed, no users)". DailyBriefingApp's
+// "Email Item" action now goes through the canonical SendEmailDialog engine
+// instead of hand-building a Dataverse `email` activity record. This test
+// block was never removed alongside it, so every run since has failed to
+// even compile (`TS2305: Module has no exported member
+// 'buildEmailActivityRecord'`) — there is no replacement function to point
+// this test at; the behavior it covered no longer exists in this component.
 
 describe('buildItemEmailDraft', () => {
   it('composes subject from kindLabel + name', () => {

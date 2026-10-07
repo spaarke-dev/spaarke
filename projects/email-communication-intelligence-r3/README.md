@@ -1,5 +1,7 @@
 # Email Communication Intelligence — R3
 
+> **Portfolio**: [Project #1158](https://github.com/spaarke-dev/spaarke/issues/1158) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: DRAFT charter — awaiting owner review before `/design-to-spec` → `/project-pipeline`.
 > **Created**: 2026-09-07 · **Branch**: `work/email-communication-intelligence-r3`
 > **Builds on**: `email-communication-intelligence-r2` (shipped, merged to master).

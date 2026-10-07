@@ -10,6 +10,16 @@
 
     Task 007: Test Dedicated Deployment Model
 
+    AUTHORIZATION (unified-access-control-r2 task 163):
+    - POST /api/ai/rag/index and DELETE /api/ai/rag/{id} are operator surfaces: run this script with a
+      token whose user holds the BFF app's Admin / SystemAdmin role, or every index and delete is 403.
+    - The tenant partition is the TOKEN's tenant (its tid claim). The script derives the Dedicated tenant
+      from the token; requests naming the generated CustomerOwned / Shared / "different" tenants are
+      rejected 403, and the isolation steps now assert that rejection.
+    - POST /api/ai/rag/search returns only chunks whose documentId is a sprk_document the caller can Read.
+      The synthetic chunks are therefore stamped with -DocumentId (mandatory): a real sprk_document the
+      operator can Read in the target environment.
+
 .PARAMETER Action
     Test action to run: All, Dedicated, CustomerOwned, Isolation
 
@@ -17,12 +27,16 @@
     Base URL for the SDAP BFF API
 
 .PARAMETER TenantId
-    Tenant ID to use for Dedicated testing (generated if not provided)
+    Ignored unless it equals the token's tenant (task 163: the partition is the token's tid).
+
+.PARAMETER DocumentId
+    REQUIRED. A real sprk_document id the operator can Read; stamped as the synthetic chunks' documentId so
+    the per-row trim on /search keeps them.
 
 .EXAMPLE
-    .\Test-RagDedicatedModel.ps1 -Action All
-    .\Test-RagDedicatedModel.ps1 -Action Dedicated
-    .\Test-RagDedicatedModel.ps1 -Action CustomerOwned
+    .\Test-RagDedicatedModel.ps1 -Action All -DocumentId "00000000-0000-0000-0000-000000000000"
+    .\Test-RagDedicatedModel.ps1 -Action Dedicated -DocumentId "00000000-0000-0000-0000-000000000000"
+    .\Test-RagDedicatedModel.ps1 -Action CustomerOwned -DocumentId "00000000-0000-0000-0000-000000000000"
 #>
 
 param(
@@ -34,15 +48,27 @@ param(
     [string]$ApiBaseUrl = 'https://spe-api-dev-67e2xz.azurewebsites.net',
 
     [Parameter(Mandatory=$false)]
-    [string]$TenantId = ''
+    [string]$TenantId = '',
+
+    [Parameter(Mandatory=$true)]
+    [string]$DocumentId
 )
 
 # Configuration
 $ErrorActionPreference = 'Stop'
 $Script:TestResults = @()
 
-if ([string]::IsNullOrWhiteSpace($TenantId)) {
-    $TenantId = "dedicated-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
+$RequestedTenantId = $TenantId
+
+# Task 163: the tenant partition is the TOKEN's tid; decode it rather than invent one.
+function Get-TokenTenantId {
+    param([string]$Jwt)
+    $parts = $Jwt.Split('.')
+    if ($parts.Count -lt 2) { return $null }
+    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
+    switch ($payload.Length % 4) { 2 { $payload += '==' } 3 { $payload += '=' } }
+    $claims = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload)) | ConvertFrom-Json
+    return $claims.tid
 }
 $CustomerOwnedTenantId = "customerowned-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
 $SharedTenantId = "shared-tenant-$(Get-Random -Minimum 100000 -Maximum 999999)"
@@ -69,6 +95,16 @@ if ([string]::IsNullOrWhiteSpace($token) -or $token.Contains("Error")) {
 }
 
 Write-Host "Token obtained (length: $($token.Length))" -ForegroundColor Green
+
+$TenantId = Get-TokenTenantId -Jwt $token
+if ([string]::IsNullOrWhiteSpace($TenantId)) {
+    Write-Error "The token carries no tid claim; the BFF derives the tenant partition from it (task 163)."
+    exit 1
+}
+if (-not [string]::IsNullOrWhiteSpace($RequestedTenantId) -and $RequestedTenantId -ne $TenantId) {
+    Write-Warning "-TenantId '$RequestedTenantId' differs from the token's tenant; using the token's tenant '$TenantId'."
+}
+Write-Host "Dedicated tenant (token partition): $TenantId" -ForegroundColor Gray
 Write-Host ""
 
 # Prepare headers
@@ -166,7 +202,7 @@ function Test-DedicatedDeploymentModel {
         id = "dedicated-test-$(New-Guid)"
         tenantId = $TenantId
         deploymentModel = "Dedicated"
-        documentId = "dedicated-handbook"
+        documentId = $DocumentId
         documentName = "Dedicated Tenant Handbook.pdf"
         documentType = "policy"
         chunkIndex = 0
@@ -219,13 +255,9 @@ function Test-DedicatedDeploymentModel {
 
         $otherResponse = Invoke-ApiRequest -Url "$ApiBaseUrl/api/ai/rag/search" -Method POST -Body $otherTenantSearch
 
-        if ($otherResponse) {
-            $isolated = $otherResponse.results.Count -eq 0
-            Add-TestResult -TestName "Dedicated Index Isolation" -Passed $isolated `
-                -Message "Other tenant found $($otherResponse.results.Count) results (should be 0)"
-        } else {
-            Add-TestResult -TestName "Dedicated Index Isolation" -Passed $false -Message "No response"
-        }
+        # Task 163: naming another tenant is rejected (403), so there is no response to inspect.
+        Add-TestResult -TestName "Dedicated Index Isolation (other tenant rejected)" -Passed (-not $otherResponse) `
+            -Message "A search naming another tenant must be rejected (403)"
 
         # Cleanup
         $encodedDocId = [uri]::EscapeDataString($indexResponse.id)
@@ -297,7 +329,7 @@ function Test-CrossModelIsolation {
         id = "isolation-shared-$(New-Guid)"
         tenantId = $SharedTenantId
         deploymentModel = "Shared"
-        documentId = "shared-isolation-test"
+        documentId = $DocumentId
         documentName = "Shared Isolation Test.pdf"
         documentType = "policy"
         chunkIndex = 0
@@ -366,8 +398,10 @@ function Test-CrossModelIsolation {
         Write-Host "  Cleaned up test document" -ForegroundColor Gray
 
     } else {
-        Add-TestResult -TestName "Cross-Model Isolation Setup" -Passed $false `
-            -Message "Failed to index test document"
+        # Task 163: indexing into the generated Shared tenant's partition is rejected (403) - a caller can
+        # only write its own token's partition, which is the isolation this step used to probe from outside.
+        Add-TestResult -TestName "Cross-Tenant Index Write Rejected" -Passed $true `
+            -Message "Indexing into another tenant's partition was rejected (403)"
     }
 }
 

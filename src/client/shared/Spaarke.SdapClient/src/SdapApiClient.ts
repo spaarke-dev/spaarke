@@ -5,6 +5,7 @@ import {
   AuthenticatedFetchFn,
   IndexFileRequest,
   IndexFileResult,
+  AttachDocumentFileResult,
 } from './types';
 import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
@@ -189,6 +190,53 @@ export class SdapApiClient {
   ): Promise<DriveItem> {
     this.guardSimpleUploadSize(file);
     return await this.uploadOp.uploadSmallWithoutRecord(file, options);
+  }
+
+  /**
+   * Attaches a file this caller just uploaded to the `sprk_document` row this caller just created
+   * (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i)).
+   *
+   * Uses: `POST /api/v1/documents/{documentId}/file` with `{ driveId, itemId }` — the ids the upload
+   * route returned.
+   *
+   * 🔴 **The client never writes `sprk_graphdriveid` / `sprk_graphitemid` itself.** Those columns are
+   * the pointer the BFF follows AS THE APPLICATION on every download, so they are field-secured and
+   * writable by the BFF identity only. The client creates the row WITHOUT them and calls this; the BFF
+   * verifies that the caller created the row and uploaded the file, and that the file sits in the
+   * container derived for the row, and only then stamps the pointer (and `sprk_hasfile` /
+   * `sprk_filepath`) server-side. Re-attaching the SAME file is idempotent; any other file on a row
+   * that already has one is refused (409).
+   *
+   * @param documentId - The `sprk_document` GUID (braces / case normalised here)
+   * @param file - The upload response: `id` is the drive item id, `driveId` the drive it landed in
+   * @throws SdapHttpError with the server's refusal (403 not the creator / not the uploader, 409 wrong
+   *   container / already attached)
+   */
+  public async attachDocumentFile(
+    documentId: string,
+    file: { id: string; driveId?: string }
+  ): Promise<AttachDocumentFileResult> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'attachDocumentFile');
+    if (!file?.id || !file.driveId) {
+      throw new Error(
+        'attachDocumentFile needs the uploaded file\'s item id and drive id (the upload response) — nothing was attached.'
+      );
+    }
+
+    const cleanId = documentId.replace(/[{}]/g, '').toLowerCase();
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}/api/v1/documents/${encodeURIComponent(cleanId)}/file`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveId: file.driveId, itemId: file.id }),
+        signal: AbortSignal.timeout(this.timeout),
+      },
+      'Failed to attach the file to its document'
+    );
+
+    return (await response.json()) as AttachDocumentFileResult;
   }
 
   /**

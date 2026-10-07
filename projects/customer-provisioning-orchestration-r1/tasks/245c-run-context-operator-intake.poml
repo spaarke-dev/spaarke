@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="245c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Run context, part 3 (G25) — operator intake for H11 users and H14 integration values: intake catalog + schema + POST /api/runs validation + /provision-environment prompts; known-gap list empty (contract test strict)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T245 (G25, notes/run-context-dataflow-gap.md)</phase>
+    <gate>none (T245b ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies RunsEndpoints (.cs), intake.schema.json, the L3 skill (.claude) and tests; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified extension of the T245a intake catalog and T237's intake/skill patterns; one owner decision is named as an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (provision-environment skill) — main-session-only (permission boundary)</parallel-reason>
+    <deps>245b</deps>
+    <tags>provisioning, l2-controlplane, api, endpoints, skill-directive, testing, customer-provisioning</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the remaining operator-owned handler inputs part of intake: H11's identity preset and user list, H14's Exchange
+    application-access-policy scope group and Graph subscription resources. Add them to the intake catalog, the intake
+    schema, POST /api/runs validation and the /provision-environment skill, so the run-context contract test runs with
+    no known gaps.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in ASP.NET Core
+    Minimal APIs, JSON Schema, PowerShell, Microsoft Graph subscriptions and Exchange Online application access policies.
+  </role>
+
+  <goal>
+    After this task: `identityPreset`, `usersJson`, `exchangePolicyScopeGroupId`, `communicationGraphResource` and
+    `emailGraphResource` are intake catalog entries with the required/optional rules H11 and H14 enforce today;
+    POST /api/runs rejects a payload that breaks those rules before any registry lookup, Cosmos write or enqueue;
+    `intake.schema.json` and the skill collect and send them; `RunContextContractTests` has an empty known-gap list.
+  </goal>
+
+  <context>
+    <background>
+      H11 requires `identityPreset` (B2BGuest | NativeAccount) and `usersJson` (`H11:119-122,235,255`; encoding in
+      `UserProvisioningEntry.cs`). H14 requires `exchangePolicyScopeGroupId` (mail-enabled security group scoping the
+      Exchange ApplicationAccessPolicy) and at least one of `communicationGraphResource` / `emailGraphResource`
+      (`H14:104-113,243-312`). Nothing sends any of them (notes/run-context-dataflow-gap.md). T237 is the reference for
+      intake + skill changes (Step 1a loop, batch hard stop, schema property + parity test).
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerRunInputs.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/{Api/RunsEndpointsTests,Api/IntakeSchemaProfileParityTests,Reconciler/RunContextContractTests}.cs</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml (only if the Exchange scope group is an operator prerequisite)</file>
+      <file>.claude/skills/provision-environment/SKILL.md (Step 1 prompts, Step 1.0 batch, Step 4.0 payload)</file>
+      <file>provisioning-runs/_templates/intake.md</file>
+      <file>.claude/CHANGELOG.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Validation rules at POST /api/runs equal the rules H11/H14 enforce (same allowed values, same "at least one of" rule, same usersJson shape); the handlers keep their own guards as defence in depth.</constraint>
+    <constraint source="ADR-001 / ADR-008">Rejections use the existing `BadRequest(httpContext, ...)` helper, before registry lookup / guard / Cosmos / enqueue.</constraint>
+    <constraint source="manifest/prereqs CI">`validate.ps1` and `npx --yes -p ajv-cli@5 -p ajv-formats@3 ajv compile --spec=draft2020 -c ajv-formats -s scripts/provisioning-prereqs/intake.schema.json` pass.</constraint>
+    <constraint source="NFR-11">No live change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t237-customerid-standard.md</file>
+      <file>.claude/patterns/provisioning/run-context-contract.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Decide, from code and prereqs.yaml, whether the Exchange scope group is created by an operator before the run (then it is intake + a prereqs.yaml entry) or should be created by H14a (then STOP — escalation trigger 1).</step>
+    <step order="2">Add the five keys to IntakeParameterCatalog with H11/H14's rules; POST /api/runs validates them (400 per rule); schema properties + required/conditional rules; parity test extended.</step>
+    <step order="3">Skill: Step 1 interactive prompts (preset, users, Exchange group, Graph resources) with the T237 loop style; Step 1.0 batch hard stops; Step 4.0 payload; intake template.</step>
+    <step order="3b">`Communication-DefaultMailbox` (manifest `from-run-parameter`, pinned in `RunContextContractTests.PinnedManifestGaps` by T245a): it is a per-customer, non-secret mailbox address — make it an intake value (catalog key + schema + skill) and the manifest entry `from-intake-parameter` (map it in `H4KvSecretsPopulationHandler.IntakeValueParameterKeys`), then remove it from `PinnedManifestGaps`.</step>
+    <step order="4">Empty the known-gap list; declare the inputs as Intake in HandlerRunInputs; RunContextContractTests strict.</step>
+    <step order="5">Tests, build, CHANGELOG, gap note §5 (G25 closed), plan G25 ✅, TASK-INDEX `✅ [done]`, POML status.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Exchange scope group has no defined owner (no prereqs.yaml entry, no handler creates it), STOP and escalate — who creates it is an owner decision.</trigger>
+    <trigger>If a user list at intake would carry personal data the project has not agreed to store in the run document, STOP and escalate.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">IntakeParameterCatalog.cs, RunsEndpoints.cs, HandlerRunInputs.cs, intake.schema.json, SKILL.md</output>
+    <output type="test">RunsEndpointsTests, IntakeSchemaProfileParityTests, RunContextContractTests</output>
+    <output type="docs">provisioning-runs/_templates/intake.md, .claude/CHANGELOG.md, notes/run-context-dataflow-gap.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/runs: missing or invalid identityPreset → 400; empty / malformed usersJson → 400; missing exchangePolicyScopeGroupId → 400; neither Graph resource → 400; a complete payload → 202. Each 400 happens with no registry lookup, Cosmos write or enqueue.</criterion>
+    <criterion testable="true">intake.schema.json accepts a complete sample intake and rejects each case above; the ajv command in the constraints passes.</criterion>
+    <criterion testable="true">The skill's interactive and batch paths collect and send all five values; batch stops on a missing one.</criterion>
+    <criterion testable="true">RunContextContractTests passes with an empty known-gap list.</criterion>
+    <criterion testable="true">Build 0/0; no new ControlPlane.Tests failures beyond the T221 baseline. Test scope: the rejection cases and acceptance case above plus the schema parity check. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-01). Verified: ControlPlane.Tests 2141 pass / 6 fail (the T221
+    CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 337/337; Api, Worker, LoadTests build 0/0;
+    ajv compile (constraint command) OK and 18 sample intakes behave as expected (4 valid, 14 rejected); validate.ps1 OK
+    (33 prereqs); Invoke-CatalogGenerator.ps1 -Verify OK; customer.json recompiled; skill Step 1e-bis parsed and
+    simulated (interactive via stdin with $users unassigned; batch valid / hard-stop); drift check exit 0.
+
+    BOTH ESCALATION TRIGGERS FIRED and were answered by the owner (2026-10-01): D14 — the Exchange scope group is an
+    operator prerequisite (PRQ-C-08, created by the stamp tenant's Exchange admin; L2 never creates it). D15 — the H11
+    user list is accepted as stored in the L2 run document; never in git. Recorded in the plan §2 and gap note §7.
+
+    DEVIATIONS / ADDITIONS (each surfaced in the summary):
+    - H11's rules moved into UserProvisioningIntake, called by both H11 and POST /api/runs (one code path, not two
+      copies). The whole user list is checked before the first Graph call: H11 used to find a missing B2B email
+      mid-loop (after earlier invitations) and threw on a missing NativeAccount name after earlier users were created.
+      Rules are what each preset needs — names for NativeAccount, email for B2BGuest (names optional; the B2B client
+      now omits a blank display name) — plus a 500-user cap (the list lives in a Cosmos item).
+    - API errorCodes for intake rules shared with a handler are the handler's codes (userprov-*, h14a-*, h14b-*);
+      ADR-019 compliant (adr-check). spec.md ADR-020 row added: the five keys become required (path A, T245a scope).
+    - Communication-DefaultMailbox → from-intake-parameter (step 3b), mailbox shape + 254-char cap at the API and schema.
+    - D15 applied beyond intake: H11 diagnostics (run.ErrorDetail) and the Graph collaborators' logs identify users by
+      position / Entra object id, never name/email/UPN; run-folder templates record counts only; the skill refuses a
+      batch intake file git would track; .gitignore runs/*-intake.json; the stale tracked runs/trial1-intake.json
+      (Model1Shared, retired profile — no personal data) was untracked (local copy kept, now ignored).
+    - Found by the quality gates and fixed: POST /api/runs left the I5 run guard held on any run-store failure other
+      than an id collision; the skill sent estimatedMonthlyUsd as a JSON number (cannot bind to the string map — 400);
+      interactive Step 1e-bis never prompted for users (@($null).Count is 1); the operator-intake step ran after the
+      Step 1f registry write (moved before it, renamed 1e-bis); RunContextContractTests' catalog-member map was hand-kept
+      (now reflection-derived); the skill claimed Model 2 skips H11 (nothing does).
+    - Not done (recorded): CreateRun's ~10 sequential intake checks could become one validator (code-review CR-18 —
+      structural refactor, not a defect).
+
+    Test-scope justification (beyond the closed list): the H11 whole-list test (regression for the moved rule); the
+    B2BGuest-without-email endpoint test (pins D15 position-only diagnostics); the mailbox rows (step 3b's rule); the
+    user-cap test (new rule); the guard-release test (defect found in review); the reverse-direction parity test
+    (schema examples through ValidateOperatorIntake — adr-check W7).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

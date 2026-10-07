@@ -63,6 +63,14 @@ function resolveSharedLibDeps(): import('vite').Plugin {
 }
 
 export default defineConfig({
+  // unified-access-control-r2 task 157: every copy of the shared Spaarke DataGrid in THIS bundle is the external
+  // host — no view picker, no saved-query list — whatever tree, root or module instance renders it. Vite replaces
+  // the constant in every module it bundles, the shared library's DataGridExternalHost.tsx included. A security
+  // setting (the BFF's external column allow-lists admit only each grid's own columns); asserted by
+  // ExternalSpaGridViewSelectorGuardTests. No other host defines it, so no other host changes behaviour.
+  define: {
+    __SPAARKE_DATAGRID_EXTERNAL_HOST__: 'true',
+  },
   plugins: [
     resolveSharedLibDeps(),
     react({

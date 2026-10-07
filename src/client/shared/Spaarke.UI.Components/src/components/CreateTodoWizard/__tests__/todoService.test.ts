@@ -15,6 +15,8 @@
  * @see ../todoService.ts
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, childWriteCalls, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import { TodoService, _resetTodoServiceNavPropCacheForTests } from '../todoService';
 import { EMPTY_TODO_FORM, type ICreateTodoFormState, type AssociationResult } from '../formTypes';
 import { createMockDataService } from '../../../__mocks__/mockDataService';
@@ -129,6 +131,49 @@ const MATTER_REGARDING: AssociationResult = {
 // Suite
 // ---------------------------------------------------------------------------
 
+describe('TodoService.createTodo — through the BFF (UAC-r2 task 147 r1)', () => {
+  beforeEach(() => {
+    _resetTodoServiceNavPropCacheForTests();
+    jest.clearAllMocks();
+  });
+
+  it('sends the sprk_todo create to POST /api/v1/child-records/sprk_todo, never to the data service directly', async () => {
+    installFetchMock();
+    const dataService = createMockDataService();
+    const bff = bffChildWriteFetch(dataService);
+    const service = new TodoService(dataService, bff, FAKE_BFF_BASE_URL);
+
+    const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
+
+    expect(result.success).toBe(true);
+    expect(childWriteCalls(bff)).toEqual([['POST', '/api/v1/child-records/sprk_todo']]);
+  });
+
+  it('REFUSES the create when the host wired no BFF connection — nothing is created as the user (fail closed)', async () => {
+    installFetchMock();
+    const dataService = createMockDataService();
+    const service = new TodoService(dataService);
+
+    const result = await service.createTodo(FORM_VALUES);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toMatch(/not connected to the Spaarke service/i);
+    expect(dataService.createRecord).not.toHaveBeenCalled();
+  });
+
+  it("shows the server's refusal message (ProblemDetails detail) and creates nothing else", async () => {
+    installFetchMock();
+    const dataService = createMockDataService();
+    dataService.createRecord.mockRejectedValue(new Error('A record this to-do is filed under was not found.'));
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
+
+    const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
+
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toContain('A record this to-do is filed under was not found.');
+  });
+});
+
 describe('TodoService.createTodo', () => {
   beforeEach(() => {
     _resetTodoServiceNavPropCacheForTests();
@@ -142,7 +187,7 @@ describe('TodoService.createTodo', () => {
   it('createsSprkTodoNotSprkEvent_whenNoRegarding', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     const result = await service.createTodo(FORM_VALUES);
 
@@ -163,7 +208,7 @@ describe('TodoService.createTodo', () => {
       entities: [{ sprk_recordtype_refid: 'rt-1234', sprk_recorddisplayname: 'Matter' }],
     });
 
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
 
     expect(result.success).toBe(true);
@@ -181,7 +226,7 @@ describe('TodoService.createTodo', () => {
       entities: [{ sprk_recordtype_refid: 'rt-1234', sprk_recorddisplayname: 'Matter' }],
     });
 
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     await service.createTodo(FORM_VALUES, MATTER_REGARDING);
 
     const [, payload] = dataService.createRecord.mock.calls[0] as [string, Record<string, unknown>];
@@ -196,7 +241,7 @@ describe('TodoService.createTodo', () => {
   it('populatesCoreSprkTodoFields_fromFormValues', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     await service.createTodo(FORM_VALUES);
 
@@ -215,7 +260,7 @@ describe('TodoService.createTodo', () => {
   it('omitsOptionalFields_whenEmpty', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     await service.createTodo({
       ...EMPTY_TODO_FORM,
@@ -238,7 +283,7 @@ describe('TodoService.createTodo', () => {
   it('bindsAssigneeLookup_whenAssignedToIdProvided', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     await service.createTodo({
       ...FORM_VALUES,
@@ -259,7 +304,7 @@ describe('TodoService.createTodo', () => {
   it('writesZeroLookupsAndZeroResolverFields_whenRegardingSkipped', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     await service.createTodo(FORM_VALUES); // no regarding arg
 
@@ -293,7 +338,7 @@ describe('TodoService.createTodo', () => {
   it('writesZeroLookupsAndZeroResolverFields_whenRegardingNull', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     await service.createTodo(FORM_VALUES, null);
 
@@ -318,7 +363,7 @@ describe('TodoService.createTodo', () => {
       entities: [{ sprk_recordtype_refid: 'matter-rt-id', sprk_recorddisplayname: 'Matter' }],
     });
 
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, MATTER_REGARDING);
 
     expect(result.success).toBe(true);
@@ -377,7 +422,7 @@ describe('TodoService.createTodo', () => {
         entities: [{ sprk_recordtype_refid: `rt-${t.entityType}`, sprk_recorddisplayname: t.entityType }],
       });
 
-      const service = new TodoService(dataService);
+      const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
       const result = await service.createTodo(FORM_VALUES, {
         entityType: t.entityType,
         recordId: '11111111-1111-1111-1111-111111111111',
@@ -399,7 +444,7 @@ describe('TodoService.createTodo', () => {
   it('returnsError_whenRegardingEntityTypeUnsupported', async () => {
     installFetchMock();
     const dataService = createMockDataService();
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
 
     const result = await service.createTodo(FORM_VALUES, {
       entityType: 'account', // not in TODO_REGARDING_CATALOG
@@ -418,7 +463,7 @@ describe('TodoService.createTodo', () => {
     const dataService = createMockDataService();
     dataService.createRecord.mockRejectedValue(new Error('Network blew up'));
 
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES);
 
     expect(result.success).toBe(false);
@@ -436,7 +481,7 @@ describe('TodoService.createTodo', () => {
       entities: [{ sprk_recordtype_refid: 'rt-matter', sprk_recorddisplayname: 'Matter' }],
     });
 
-    const service = new TodoService(dataService);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     await service.createTodo({ ...FORM_VALUES, assignedToId: 'u-1' }, MATTER_REGARDING);
 
     const [entityName, payload] = dataService.createRecord.mock.calls[0] as [string, Record<string, unknown>];

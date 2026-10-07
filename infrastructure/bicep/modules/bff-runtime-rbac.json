@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7944878029499895893"
+      "templateHash": "11370368152236243245"
     }
   },
   "parameters": {
@@ -13,19 +13,19 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Principal ID of the BFF RUNTIME UAMI (Model 1: sharedBffUami.outputs.principalId; Model 2: uami.outputs.principalId). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function)."
+        "description": "Principal ID of the stamp's BFF RUNTIME UAMI (customer.bicep: uami.outputs.principalId — the only principal, both tenancy models). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function)."
       }
     },
     "serviceBusNamespaceName": {
       "type": "string",
       "metadata": {
-        "description": "Name of the Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from. Model 1: sharedServiceBusName; Model 2: per-customer serviceBusName."
+        "description": "Name of the stamp's Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from."
       }
     },
     "searchServiceName": {
       "type": "string",
       "metadata": {
-        "description": "Name of the AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to. Model 1: sharedAiSearchName; Model 2: per-customer searchServiceName."
+        "description": "Name of the stamp's AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to."
       }
     }
   },

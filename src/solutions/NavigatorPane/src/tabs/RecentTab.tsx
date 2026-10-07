@@ -263,7 +263,7 @@ export const RecentTab: React.FC = () => {
     let cancelled = false;
 
     async function load(): Promise<void> {
-      const xrm = getXrm();
+      const xrm = getXrm(['webApi', 'utility']);
       const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
       if (!xrm || !ownerId) {
         if (!cancelled) {
@@ -315,7 +315,8 @@ export const RecentTab: React.FC = () => {
   }, []);
 
   const handleRowClick = React.useCallback((row: NavItemRecord) => {
-    const xrm = getXrm();
+    // A web-link row calls Navigation.openUrl; every other row navigateTo (task 081 round 5).
+    const xrm = getXrm(['webApi', row.sprk_pagetype === NavItemPageType.WebLink ? 'openUrl' : 'navigation']);
     if (!xrm) return;
     navigateToRow(xrm, row);
   }, []);

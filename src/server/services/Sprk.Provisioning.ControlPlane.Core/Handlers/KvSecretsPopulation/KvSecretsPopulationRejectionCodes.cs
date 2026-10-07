@@ -59,9 +59,6 @@ public static class KvSecretsPopulationRejectionCodes
     /// <summary>Run parameter <c>keyVaultName</c> missing — the target vault for all writes.</summary>
     public const string MissingKeyVaultName = "kvsecrets-missing-kv-name";
 
-    /// <summary>Run parameter <c>secretsVer</c> missing — feeds idempotency key kv-{customerId}-{secretsVer}.</summary>
-    public const string MissingSecretsVersion = "kvsecrets-missing-secrets-version";
-
     /// <summary>
     /// Run parameter <c>resourceGroupName</c> missing — H4 needs it to PATCH
     /// App Service keyVaultReferenceIdentity (T1) + query slot System-Assigned
@@ -145,4 +142,26 @@ public static class KvSecretsPopulationRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H4 was in flight.</summary>
     public const string RunDeletedDuringPopulation = "kvsecrets-run-deleted-during-population";
+
+    /// <summary>
+    /// Row A38a — the positive secret-free migration marker (KV tag
+    /// <c>spaarke-secret-free-identity</c> + registry
+    /// <c>sprk_credentialmode</c>) could not be applied on a
+    /// RequireSecretFreeIdentity environment. Resumable — writes/omits
+    /// succeeded and the marker applier is idempotent, so the operator fixes
+    /// the cause (tag RBAC / registry row / sprk_credentialmode column) and
+    /// resumes. FAIL-LOUD by design: an unmarked secret-free vault is the
+    /// remediation-plan §5.3 fleet-consistency gap.
+    /// </summary>
+    public const string SecretFreeMarkerApplyFailed = "kvsecrets-secret-free-marker-apply-failed";
+
+    /// <summary>
+    /// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18 verbatim.
+    /// Operator KV RBAC bootstrap (Key Vault Secrets Officer) failed on the
+    /// target vault. Without this grant, every SecretClient.SetSecretAsync
+    /// call fails with 403 on fresh RBAC-enabled KVs — SESSION 2 hit this on
+    /// BOTH per-tenant and shared KVs and manually granted the role.
+    /// Resumable: operator manually grants role + resumes.
+    /// </summary>
+    public const string OperatorKvRbacBootstrapFailed = "kvsecrets-operator-kv-rbac-bootstrap-failed";
 }

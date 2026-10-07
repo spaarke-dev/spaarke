@@ -7,12 +7,14 @@
 import {
   getXrm,
   getXrmPage,
+  getHostFormRecordId,
   isCustomPageContext,
   isPcfContext,
   detectThemeFromHost,
   getClientUrl,
   getCurrentUserId,
   getCurrentUserName,
+  XRM_MAX_FRAME_DEPTH,
   type SidePane,
   type SidePanesApi,
   type PageInput,
@@ -220,6 +222,23 @@ describe('xrmContext', () => {
       expect(getXrm()).toBeUndefined();
     });
 
+    // task 081 (C-8): several converged copies wrapped `w.Xrm ?? w.parent?.Xrm
+    // ?? w.top?.Xrm` in ONE try, so a cross-origin parent threw before `top`
+    // was ever tried. The shared walker guards each frame separately.
+    it('should still reach top.Xrm when reading parent.Xrm throws (cross-origin parent)', () => {
+      const crossOriginParent = {};
+      Object.defineProperty(crossOriginParent, 'Xrm', {
+        get() {
+          throw new DOMException('Blocked a frame with origin', 'SecurityError');
+        },
+      });
+      Object.defineProperty(window, 'parent', { value: crossOriginParent, writable: true });
+      setWindowTop({ Xrm: { WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' } } });
+
+      expect(() => getXrm()).not.toThrow();
+      expect((getXrm()?.WebApi as any).source).toBe('top');
+    });
+
     it('should be safe to call repeatedly (no caching) — re-acquires fresh each call', () => {
       // Task 001 spike lesson: consumers must re-read Xrm every poll rather
       // than caching a stale reference. getXrm() itself does no memoization,
@@ -231,9 +250,151 @@ describe('xrmContext', () => {
 
       expect((getXrm()?.WebApi as any).source).toBe('late-injected');
     });
+
+    // task 081 round 3 (M2/M3): the walk visits EVERY ancestor (bounded), not
+    // just window -> parent -> top, so a Teams-style host that nests the code
+    // page two or more frames below the frame carrying Xrm still resolves it.
+    describe('nesting depth (M3)', () => {
+      /** Builds window -> f1 -> f2 -> ... chain; `xrmAt` (1-based) carries Xrm. */
+      function nestFrames(depth: number, xrmAt: number | null): any[] {
+        const frames: any[] = [];
+        for (let i = 1; i <= depth; i++) frames.push({});
+        frames.forEach((f, i) => {
+          f.parent = i + 1 < frames.length ? frames[i + 1] : f; // outermost is its own parent
+          if (xrmAt === i + 1) f.Xrm = { WebApi: { retrieveMultipleRecords: jest.fn(), source: `level${i + 1}` } };
+        });
+        Object.defineProperty(window, 'parent', { value: frames[0], writable: true });
+        return frames;
+      }
+
+      it('finds Xrm on the grandparent (two levels up) when top has none', () => {
+        const frames = nestFrames(3, 2);
+        setWindowTop(frames[2]);
+        expect((getXrm()?.WebApi as any).source).toBe('level2');
+      });
+
+      it('prefers the NEAREST ancestor over top', () => {
+        const frames = nestFrames(4, 2);
+        frames[3].Xrm = { WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' } };
+        setWindowTop(frames[3]);
+        expect((getXrm()?.WebApi as any).source).toBe('level2');
+      });
+
+      it('skips a cross-origin intermediate frame and keeps walking', () => {
+        const frames = nestFrames(3, 3);
+        Object.defineProperty(frames[0], 'Xrm', {
+          get() {
+            throw new DOMException('Blocked a frame with origin', 'SecurityError');
+          },
+        });
+        setWindowTop({});
+        expect((getXrm()?.WebApi as any).source).toBe('level3');
+      });
+
+      it(`is bounded at XRM_MAX_FRAME_DEPTH (${XRM_MAX_FRAME_DEPTH}) ancestors, then tries top`, () => {
+        const frames = nestFrames(XRM_MAX_FRAME_DEPTH + 3, XRM_MAX_FRAME_DEPTH + 2);
+        setWindowTop({});
+        expect(getXrm()).toBeUndefined();
+
+        setWindowTop({ Xrm: { WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' } } });
+        expect((getXrm()?.WebApi as any).source).toBe('top');
+        expect(frames.length).toBe(XRM_MAX_FRAME_DEPTH + 3);
+      });
+
+      it('terminates on a self-referencing outermost frame without top', () => {
+        nestFrames(2, null);
+        setWindowTop(undefined);
+        expect(() => getXrm()).not.toThrow();
+        expect(getXrm()).toBeUndefined();
+      });
+    });
+
+    // task 081 round 3 (M2): the capability is checked PER FRAME, so a child
+    // frame whose Xrm is partial is skipped in favour of an outer frame that
+    // has what the caller needs.
+    describe('capability requirement (M2)', () => {
+      const webApiOnly = () => ({ WebApi: { retrieveMultipleRecords: jest.fn() }, source: 'webApiOnly' });
+      const full = (clientUrl = 'https://org.crm.dynamics.com') => ({
+        source: 'full',
+        WebApi: { retrieveMultipleRecords: jest.fn() },
+        Navigation: { navigateTo: jest.fn(), openForm: jest.fn(), openUrl: jest.fn() },
+        Utility: {
+          getGlobalContext: () => ({ getClientUrl: () => clientUrl }),
+          lookupObjects: jest.fn(),
+          getEntityMetadata: jest.fn(),
+          getPageContext: jest.fn(),
+        },
+        App: { sidePanes: {} },
+        Page: { getAttribute: jest.fn() },
+      });
+
+      it('defaults to WebApi: the nearest frame with WebApi wins', () => {
+        (window as any).Xrm = webApiOnly();
+        Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
+        expect((getXrm() as any).source).toBe('webApiOnly');
+      });
+
+      it.each([
+        'navigation',
+        'openForm',
+        'openUrl',
+        'utility',
+        'clientUrl',
+        'lookupObjects',
+        'metadata',
+        'pageContext',
+        'sidePanes',
+        'page',
+      ] as const)("'%s' skips a child frame whose Xrm lacks it", capability => {
+        (window as any).Xrm = webApiOnly();
+        Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
+        expect((getXrm(capability) as any).source).toBe('full');
+      });
+
+      it("'clientUrl' skips a frame whose getClientUrl returns an empty string", () => {
+        (window as any).Xrm = full('');
+        Object.defineProperty(window, 'parent', { value: { Xrm: { ...full(), source: 'parent' } }, writable: true });
+        expect((getXrm('clientUrl') as any).source).toBe('parent');
+      });
+
+      it('accepts a predicate and an array (all required)', () => {
+        (window as any).Xrm = webApiOnly();
+        Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
+        expect((getXrm(x => !!x.Navigation) as any).source).toBe('full');
+        expect((getXrm(['webApi', 'lookupObjects']) as any).source).toBe('full');
+      });
+
+      it('a throwing capability probe skips that frame instead of throwing', () => {
+        (window as any).Xrm = {
+          WebApi: {},
+          Utility: {
+            getGlobalContext: () => {
+              throw new Error('not ready');
+            },
+          },
+        };
+        Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
+        expect(() => getXrm('clientUrl')).not.toThrow();
+        expect((getXrm('clientUrl') as any).source).toBe('full');
+      });
+
+      it('returns undefined when no frame has the capability', () => {
+        (window as any).Xrm = webApiOnly();
+        expect(getXrm('navigation')).toBeUndefined();
+      });
+    });
   });
 
   describe('getXrmPage', () => {
+    it('uses the shared walk: finds Xrm.Page two levels up (task 081 round 3)', () => {
+      const page = { getAttribute: jest.fn() };
+      const grandparent: any = { Xrm: { WebApi: {}, Page: page } };
+      grandparent.parent = grandparent;
+      Object.defineProperty(window, 'parent', { value: { parent: grandparent }, writable: true });
+      setWindowTop(grandparent);
+      expect(getXrmPage()).toBe(page);
+    });
+
     // Task 021 (FR-20): the single shared accessor replacing the two former
     // private `getXrmPage()` duplicates in FieldMappingHandler.ts and
     // MatterHeaderView.tsx.
@@ -313,6 +474,84 @@ describe('xrmContext', () => {
       // Object.defineProperty(window, 'parent', { value: ... }) doesn't itself
       // throw against the getter-only descriptor installed above.
       Object.defineProperty(window, 'parent', { value: window, writable: true, configurable: true });
+    });
+  });
+
+  describe('getHostFormRecordId (task 081 round 4, F3)', () => {
+    it('reads the legacy Xrm.Page record id from the parent frame', () => {
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Page: { data: { entity: { getId: () => '{AAA}' } } } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('{AAA}');
+    });
+
+    // Frame set (round 5, R4-6): window first, then every ancestor, then top.
+    // The two hand-rolled loops this replaced tried [parent, top] only.
+    it('reads the WINDOW frame first (the former loops started at parent)', () => {
+      (window as any).Xrm = { Page: { data: { entity: { getId: () => 'from-window' } } } };
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Page: { data: { entity: { getId: () => 'from-parent' } } } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('from-window');
+    });
+
+    it('reads an intermediate ancestor before top (the former loops skipped it)', () => {
+      const grandparent: any = { Xrm: { Page: { data: { entity: { getId: () => 'from-grandparent' } } } } };
+      grandparent.parent = grandparent;
+      Object.defineProperty(window, 'parent', { value: { parent: grandparent }, writable: true });
+      setWindowTop({ Xrm: { Page: { data: { entity: { getId: () => 'from-top' } } } } });
+      expect(getHostFormRecordId()).toBe('from-grandparent');
+    });
+
+    it('falls back to Utility.getPageContext().input.entityId', () => {
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Utility: { getPageContext: () => ({ input: { entityId: 'bbb' } }) } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('bbb');
+    });
+
+    it('prefers the legacy Page id over the page context on the same frame (former order)', () => {
+      Object.defineProperty(window, 'parent', {
+        value: {
+          Xrm: {
+            Page: { data: { entity: { getId: () => 'legacy' } } },
+            Utility: { getPageContext: () => ({ input: { entityId: 'ctx' } }) },
+          },
+        },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('legacy');
+    });
+
+    it('skips a frame whose Xrm yields no id and keeps walking to top', () => {
+      (window as any).Xrm = { WebApi: {}, Page: { data: { entity: { getId: () => '' } } } };
+      Object.defineProperty(window, 'parent', { value: { Xrm: { WebApi: {} } }, writable: true });
+      setWindowTop({ Xrm: { Utility: { getPageContext: () => ({ input: { entityId: 'from-top' } }) } } });
+      expect(getHostFormRecordId()).toBe('from-top');
+    });
+
+    it('returns undefined (never throws) when no frame has an id or a probe throws', () => {
+      Object.defineProperty(window, 'parent', {
+        value: {
+          Xrm: {
+            Page: {
+              data: {
+                entity: {
+                  getId: () => {
+                    throw new Error('form not ready');
+                  },
+                },
+              },
+            },
+          },
+        },
+        writable: true,
+      });
+      expect(() => getHostFormRecordId()).not.toThrow();
+      expect(getHostFormRecordId()).toBeUndefined();
     });
   });
 

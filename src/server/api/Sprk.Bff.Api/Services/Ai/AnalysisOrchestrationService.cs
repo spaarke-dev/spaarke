@@ -1,11 +1,9 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
-using Sprk.Bff.Api.Services.Ai.Export;
 using AiExtractedEntities = Sprk.Bff.Api.Models.Ai.ExtractedEntities;
 // Explicit aliases to resolve ambiguity with types in the same namespace (Sprk.Bff.Api.Services.Ai).
 // AppOnlyAnalysisService defines DocumentAnalysisResult; AnalysisEndpoints defines ExtractedEntities.
@@ -87,198 +85,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     // for the full deletion-scope inventory.
 
     /// <inheritdoc />
-    public async Task<SavedDocumentResult> SaveWorkingDocumentAsync(
-        Guid analysisId,
-        AnalysisSaveRequest request,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("Saving working document for analysis {AnalysisId}", analysisId);
-
-        var analysis = await _documentLoader.GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
-
-        if (string.IsNullOrWhiteSpace(analysis.WorkingDocument))
-        {
-            throw new InvalidOperationException("Analysis has no working document to save");
-        }
-
-        // Convert working document to requested format
-        var (content, contentType) = ConvertToFormat(analysis.WorkingDocument, request.Format);
-
-        // Save to SPE via result persistence
-        return await _resultPersistence.SaveToSpeAsync(
-            analysisId,
-            request.FileName,
-            content,
-            contentType,
-            cancellationToken);
-    }
-
-    /// <inheritdoc />
-    public async Task<ExportResult> ExportAnalysisAsync(
-        Guid analysisId,
-        AnalysisExportRequest request,
-        CancellationToken cancellationToken)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var formatName = request.Format.ToString().ToLowerInvariant();
-
-        _logger.LogInformation("Exporting analysis {AnalysisId} to {Format}", analysisId, request.Format);
-
-        var analysis = await _documentLoader.GetOrReloadFromDataverseAsync(analysisId, cancellationToken);
-
-        // Get the export service for the requested format
-        var exportService = _resultPersistence.GetExportService(request.Format);
-        if (exportService == null)
-        {
-            _logger.LogWarning("Export format {Format} not supported", request.Format);
-            stopwatch.Stop();
-            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "format_not_supported");
-            return new ExportResult
-            {
-                ExportType = request.Format,
-                Success = false,
-                Error = $"Export format {request.Format} is not supported"
-            };
-        }
-
-        // Build export context from analysis
-        var context = new ExportContext
-        {
-            AnalysisId = analysisId,
-            Title = $"Analysis of {analysis.DocumentName}",
-            Content = analysis.WorkingDocument ?? analysis.FinalOutput ?? string.Empty,
-            Summary = ExtractSummary(analysis.FinalOutput),
-            SourceDocumentName = analysis.DocumentName,
-            SourceDocumentId = analysis.DocumentId,
-            CreatedAt = analysis.StartedOn.HasValue
-                ? new DateTimeOffset(analysis.StartedOn.Value, TimeSpan.Zero)
-                : DateTimeOffset.UtcNow,
-            CreatedBy = "User", // TRACKED: GitHub #233 - Extract from context when Dataverse integration complete
-            Options = request.Options
-        };
-
-        // Validate
-        var validation = exportService.Validate(context);
-        if (!validation.IsValid)
-        {
-            _logger.LogWarning("Export validation failed for {AnalysisId}: {Errors}",
-                analysisId, string.Join(", ", validation.Errors));
-            stopwatch.Stop();
-            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "validation_failed");
-            return new ExportResult
-            {
-                ExportType = request.Format,
-                Success = false,
-                Error = string.Join("; ", validation.Errors)
-            };
-        }
-
-        // Execute export
-        var result = await exportService.ExportAsync(context, cancellationToken);
-
-        if (!result.Success)
-        {
-            stopwatch.Stop();
-            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, false, errorCode: "export_failed");
-            return new ExportResult
-            {
-                ExportType = request.Format,
-                Success = false,
-                Error = result.Error
-            };
-        }
-
-        // For file exports (DOCX, PDF), return bytes directly for client-side download.
-        // The caller (ExportAnalysis endpoint) will stream these bytes as a file response.
-        if (result.FileBytes != null && request.Format is ExportFormat.Docx or ExportFormat.Pdf)
-        {
-            stopwatch.Stop();
-            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true, fileSizeBytes: result.FileBytes.Length);
-
-            return new ExportResult
-            {
-                ExportType = request.Format,
-                Success = true,
-                FileBytes = result.FileBytes,
-                FileContentType = result.ContentType ?? "application/octet-stream",
-                FileName = result.FileName ?? $"export_{analysisId:N}.{formatName}",
-                Details = new ExportDetails
-                {
-                    Status = "Ready for download"
-                }
-            };
-        }
-
-        // For Email format, extract metadata from the result
-        if (request.Format == ExportFormat.Email && result.Metadata != null)
-        {
-            var recipients = result.Metadata.TryGetValue("Recipients", out var r) ? r as string[] : null;
-            var subject = result.Metadata.TryGetValue("Subject", out var s) ? s as string : null;
-            var sentAt = result.Metadata.TryGetValue("SentAt", out var t) ? t : null;
-
-            stopwatch.Stop();
-            _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
-
-            return new ExportResult
-            {
-                ExportType = request.Format,
-                Success = true,
-                Details = new ExportDetails
-                {
-                    Status = $"Email sent to {recipients?.Length ?? 0} recipient(s)" +
-                             (sentAt != null ? $" at {sentAt:g}" : string.Empty)
-                }
-            };
-        }
-
-        // For other formats (Teams), return the result directly
-        stopwatch.Stop();
-        _resultPersistence.RecordExport(formatName, stopwatch.Elapsed.TotalMilliseconds, true);
-
-        return new ExportResult
-        {
-            ExportType = request.Format,
-            Success = true,
-            Details = new ExportDetails
-            {
-                Status = "Export completed"
-            }
-        };
-    }
-
-    /// <summary>
-    /// Extracts a summary from the analysis output.
-    /// Looks for a Summary section or takes the first paragraph.
-    /// </summary>
-    private static string? ExtractSummary(string? output)
-    {
-        if (string.IsNullOrWhiteSpace(output))
-            return null;
-
-        // Try to find a summary section
-        var summaryMatch = System.Text.RegularExpressions.Regex.Match(
-            output,
-            @"(?:##?\s*(?:Executive\s+)?Summary[\s:]*\n)([\s\S]*?)(?=\n##|\z)",
-            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-        if (summaryMatch.Success)
-        {
-            return summaryMatch.Groups[1].Value.Trim();
-        }
-
-        // Otherwise, take the first paragraph (up to 500 chars)
-        var firstPara = output.Split(["\n\n", "\r\n\r\n"], StringSplitOptions.RemoveEmptyEntries)
-            .FirstOrDefault()?.Trim();
-
-        if (firstPara != null && firstPara.Length > 500)
-        {
-            firstPara = firstPara[..500] + "...";
-        }
-
-        return firstPara;
-    }
-
-    /// <inheritdoc />
     public async Task<AnalysisDetailResult> GetAnalysisAsync(
         Guid analysisId,
         CancellationToken cancellationToken)
@@ -312,20 +118,6 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     }
 
     // === Private Helper Methods ===
-
-    private static (byte[] Content, string ContentType) ConvertToFormat(string markdown, SaveDocumentFormat format)
-    {
-        // Phase 1: Return markdown as text for all formats
-        // Full DOCX/PDF generation will be added in later tasks
-        return format switch
-        {
-            SaveDocumentFormat.Md => (Encoding.UTF8.GetBytes(markdown), "text/markdown"),
-            SaveDocumentFormat.Txt => (Encoding.UTF8.GetBytes(markdown), "text/plain"),
-            SaveDocumentFormat.Docx => (Encoding.UTF8.GetBytes(markdown), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-            SaveDocumentFormat.Pdf => (Encoding.UTF8.GetBytes(markdown), "application/pdf"),
-            _ => (Encoding.UTF8.GetBytes(markdown), "text/plain")
-        };
-    }
 
     private static string BuildFullPrompt(string systemPrompt, string userPrompt)
     {
@@ -431,7 +223,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             // Load document text before delegating
             yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-            var nodeDocText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+            var nodeDocText = await _documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Document text extracted: {CharCount} characters", nodeDocText.Length);
             yield return AnalysisStreamChunk.TextChunk(
@@ -630,7 +422,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // 6. Extract document text from SPE
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6: Extracting document text");
         yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
 
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6 OK: Extracted {CharCount} characters from document {DocumentId}",
             documentText.Length, documentId);
@@ -990,7 +782,9 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
                 documentId,
                 playbook.Name ?? "Unknown",
                 structuredOutputs,
-                cancellationToken);
+                cancellationToken,
+                // Task 146 c1-r1 (owner round 13 item 9): the person who ran it, recorded on the app-only rows.
+                Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
 
             if (!storageResult.Success)
             {

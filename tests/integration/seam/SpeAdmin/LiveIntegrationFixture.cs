@@ -140,7 +140,17 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
             ?? "https://sprk-prod-kv.vault.azure.net/";
         _secretName = Environment.GetEnvironmentVariable("SPE_LIVE_KEYVAULT_SECRET_NAME")
             ?? "spe-owning-app-secret";
+
+        // Every container the BFF creates is stamped with its owning business unit (unified-access-control-r2
+        // task 165, owner round 20). The throwaway container gets a marker unit no real business unit carries, so no
+        // SPE administrator reaches it through the admin plane; the fixture tears it down directly.
+        ThrowawayBusinessUnitId = Guid.TryParse(Environment.GetEnvironmentVariable("SPE_LIVE_BUSINESS_UNIT_ID"), out var unit)
+            ? unit
+            : Guid.Parse("5ea0be7e-0000-0000-0000-00000000165f");
     }
+
+    /// <summary>The business unit stamped on the throwaway container.</summary>
+    public Guid ThrowawayBusinessUnitId { get; }
 
     public async Task InitializeAsync()
     {
@@ -220,7 +230,8 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
             displayName: $"sdap-r2-live-test-{Guid.NewGuid():N}",
             description: "Throwaway container for the sdap-SPE-admin-app-r2 task 041 LiveIntegration " +
                 "suite. Created and torn down automatically by LiveIntegrationFixture. Safe to delete " +
-                "manually if this is ever found orphaned (indicates a teardown failure).")
+                "manually if this is ever found orphaned (indicates a teardown failure).",
+            owningBusinessUnitId: ThrowawayBusinessUnitId)
             .ConfigureAwait(false);
 
         ContainerId = created.Id;

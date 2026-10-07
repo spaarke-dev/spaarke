@@ -157,20 +157,7 @@ public static class CosmosModule
         //
         // ConnectionMode: Direct — 429-recovery latency is materially better
         // than Gateway mode on serverless accounts; matches BFF pattern.
-        services.AddSingleton(sp =>
-        {
-            var credential = sp.GetRequiredService<TokenCredential>();
-            return new CosmosClientBuilder(endpoint, credential)
-                .WithSerializerOptions(new CosmosSerializationOptions
-                {
-                    PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase,
-                })
-                .WithConnectionModeDirect()
-                .WithThrottlingRetryOptions(
-                    maxRetryWaitTimeOnThrottledRequests: TimeSpan.FromSeconds(30),
-                    maxRetryAttemptsOnThrottledRequests: 9)
-                .Build();
-        });
+        services.AddSingleton(sp => BuildCosmosClient(endpoint, sp.GetRequiredService<TokenCredential>()));
 
         // Repository — Scoped: CosmosClient itself is Singleton, but Scoped
         // per HTTP request matches the ADR-010 default (predictable
@@ -185,4 +172,23 @@ public static class CosmosModule
 
         return services;
     }
+
+    /// <summary>
+    /// THE construction of L2's <see cref="CosmosClient"/> — its serializer (the SDK default, Newtonsoft-based, camelCase),
+    /// connection mode and retry policy. One method so the tests persist runs through EXACTLY the serializer production
+    /// uses: <c>BuildCosmosClient(…).ClientOptions.Serializer</c> (unified-access-control-r2 task 165, owner round 49
+    /// item 2 — a fake repository that hands back the in-memory object could not show that H8's resume record was lost
+    /// in Cosmos). Building the client opens no connection.
+    /// </summary>
+    internal static CosmosClient BuildCosmosClient(string endpoint, TokenCredential credential) =>
+        new CosmosClientBuilder(endpoint, credential)
+            .WithSerializerOptions(new CosmosSerializationOptions
+            {
+                PropertyNamingPolicy = CosmosPropertyNamingPolicy.CamelCase,
+            })
+            .WithConnectionModeDirect()
+            .WithThrottlingRetryOptions(
+                maxRetryWaitTimeOnThrottledRequests: TimeSpan.FromSeconds(30),
+                maxRetryAttemptsOnThrottledRequests: 9)
+            .Build();
 }

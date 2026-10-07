@@ -22,6 +22,7 @@
 
 import { getAuthProvider } from "@spaarke/auth";
 import type { ITokenProvider } from "@spaarke/ui-components/services/document-upload";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 // ---------------------------------------------------------------------------
 // BFF API Token Provider
@@ -57,29 +58,20 @@ export function createBffTokenProvider(): ITokenProvider {
 /**
  * Dataverse organization URL resolved from Xrm context.
  *
- * Frame-walks through window -> parent -> top to find Xrm.Utility.getGlobalContext().
- * Falls back to known dev environment if Xrm is not available.
+ * Resolves Xrm.Utility.getGlobalContext() via the shared cross-frame walker.
+ * Throws if Xrm is not available.
  */
 export function resolveDataverseUrl(): string {
-    // Try Xrm global context via frame-walk
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const xrm = (frame as any).Xrm;
-            const clientUrl: string | undefined =
-                xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-            /* eslint-enable @typescript-eslint/no-explicit-any */
-            if (clientUrl) {
-                // Strip trailing slash
-                return clientUrl.endsWith("/") ? clientUrl.slice(0, -1) : clientUrl;
-            }
-        } catch {
-            // Cross-origin frame — skip
+    // Shared cross-frame walker (task 081 / C-8).
+    try {
+        const clientUrl: string | undefined =
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+        if (clientUrl) {
+            // Strip trailing slash
+            return clientUrl.endsWith("/") ? clientUrl.slice(0, -1) : clientUrl;
         }
+    } catch {
+        // getGlobalContext() unavailable — fall through to the error below
     }
 
     // No fallback — fail loudly if Xrm context is unavailable.

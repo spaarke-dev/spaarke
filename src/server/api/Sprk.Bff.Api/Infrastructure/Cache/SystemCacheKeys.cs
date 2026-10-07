@@ -79,6 +79,12 @@ public static class SystemCacheKeys
     /// <c>{InstanceName}scheduler:lease:{jobId}</c>.
     /// Justification: a scheduled job runs for the whole BFF, not for a tenant; like <see cref="IdempotencyLock"/>
     /// the lock must be tenant-agnostic so any instance can take and release it.
+    /// <para>Second site, same key family (unified-access-control-r2 task 143, catalogued in r2): the No Access
+    /// enforcer's per-record removal lock, <c>Infrastructure/ExternalAccess/NoAccessShareEnforcer.cs</c>. Raw key:
+    /// <c>{InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}</c>. A keyed mutex over the same store, never
+    /// a job's dispatch key (no job id starts with <c>no-access-enforce:</c>); it serializes owner S5's "someone else keeps
+    /// access" check across instances, so it must be tenant-agnostic for the same reason. The reuse is a recorded §6.5
+    /// path-A exception to ADR-036 A1-7 (<c>projects/unified-access-control-r2/design.md</c> §9).</para>
     /// </summary>
     public const string SchedulerLease = "scheduler-lease";
 

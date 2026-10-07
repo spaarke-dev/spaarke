@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
@@ -92,7 +93,12 @@ public static class InsightsSearchEndpoint
             .RequireRateLimiting("ai-context")
             .WithTags("Insights");
 
+        // Authorization (unified-access-control-r2 task 163, sweep finding #41): the subject (matter,
+        // project or invoice) is authorized for Read, AS THE CALLER, before IInsightsAi.SearchAsync runs.
+        // Privilege-group trimming in the RAG layer is not record access (and the groups are not stamped —
+        // finding A-21), so it was never the gate. Unreadable and absent subjects get the uniform 404.
         group.MapPost("/search", Search)
+            .AddFinanceAuthorizationFilter(ResolveSubjectTargets, FinanceDenial.UniformNotFound)
             .WithName("InsightsSearch")
             .WithSummary("Hybrid RAG retrieval + LLM-synthesized grounded summary (D-P15-06 / FR-04)")
             .WithDescription(
@@ -107,11 +113,52 @@ public static class InsightsSearchEndpoint
             .Produces<InsightsSearchResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
+    }
+
+    /// <summary>
+    /// Authorization declaration for <c>POST /api/insights/search</c> (task 163): Read on the subject's
+    /// record, the entity set resolved from the parsed scheme through the shared <c>EntityAccessFilter</c>
+    /// map. A missing body or subject, or a subject the parser rejects, is the handler's own 400, returned
+    /// BEFORE any rights query. A registered scheme with no entity-set mapping is denied (uniform 404).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveSubjectTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<InsightsSearchRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("Request body is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("'subject' is required and cannot be empty."));
+        }
+
+        var subjectParser = context.HttpContext.RequestServices.GetRequiredService<ISubjectParser>();
+        if (!subjectParser.TryParse(request.Subject, out var parsedSubject, out var subjectError))
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest($"'subject' is invalid: {subjectError}"));
+        }
+
+        if (!EntityAccessFilter.TryResolveEntitySet(parsedSubject.EntityType, out var entitySet))
+        {
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = entitySet,
+            RecordId = parsedSubject.EntityId,
+            Operation = "read",
+            Source = "body.subject",
+        });
     }
 
     /// <summary>

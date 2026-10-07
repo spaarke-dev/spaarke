@@ -210,7 +210,12 @@ public sealed class AssistantToolCallHandler
             Subject: request.Subject,
             Parameters: null,
             TenantId: request.TenantId,
-            AccessibleScopeHash: ComputeAccessibleScopeHash(request.TenantId, request.CallerOid));
+            AccessibleScopeHash: ComputeAccessibleScopeHash(request.TenantId, request.CallerOid))
+        {
+            // Task 163: the route's established subject right travels with the run — a playbook that can write runs
+            // only when the caller's Write on the subject was established (the facade refuses it otherwise).
+            SubjectWriteAuthorized = request.SubjectWriteAuthorized,
+        };
 
         // Step P3: invoke playbook via the supplied delegate (avoids handler→orchestrator cycle).
         var agentResult = await playbookInvoker(playbookRequest, cancellationToken).ConfigureAwait(false);

@@ -88,7 +88,7 @@ namespace Sprk.Provisioning.ControlPlane.LoadTests;
 
 public sealed class ReconcilerConcurrencyScenario
 {
-    private const string TestCustomerId = "recon-conc-customer";
+    private const string TestCustomerId = "reconcc";
 
     /// <summary>
     /// Wall-clock budget PER tick group — enough for at least ONE tick at
@@ -312,8 +312,8 @@ public sealed class ReconcilerConcurrencyScenario
             RunId = runId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-recon",
-            TenancyModel = "Model2Dedicated",
-            Profile = "spaarke-hosted-model2",
+            TenancyModel = "Model2",            // T224 renamed Model2Dedicated → Model2
+            Profile = "customer-owned-model2",  // T225b pairing: Model2 ↔ customer-owned-model2
             Status = status,
         };
         var now = DateTimeOffset.UtcNow;
@@ -346,5 +346,10 @@ public sealed class ReconcilerConcurrencyScenario
 
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+
+        // IActiveRunScanner gained this member on 2026-08-28 (f5ef16231d); this stub was never updated, so the
+        // LoadTests project did not compile until T237. The scenario seeds no terminal runs.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ProvisioningRun>>(Array.Empty<ProvisioningRun>());
     }
 }

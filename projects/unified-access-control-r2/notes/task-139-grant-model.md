@@ -38,9 +38,17 @@ round 2 item 3 + Q1, round 3 A1 / S5, round 3b (A1 settled: the cap stays for MA
   `CheckGrantAsync`) — documented on `GrantCeiling`.
 - **Refusals reuse `GrantPolicyDecision`** (task 138's typed refusal) — new factories `CallerCannotGrant` (403),
   `WouldLowerExisting` (409), `GranteeDenied` (422); `PolicyRefusalProblem` titles by status.
-- **Deny detail does not distinguish "on the list" from "list unreadable"**: `ResolveDenyVetoAsync` folds every fault into
-  "denied" (it returns a set), and the write-time entry point reuses it unchanged rather than forking it. The detail says
-  "it is on the record's No Access list, or that list could not be checked". It never names an entry or reason (task 143).
+- **Deny detail — SUPERSEDED by task 142 r4 (owner round 13 item 4, 2026-10-03); corrected here in task 142 round 18.**
+  As built by this task, `ResolveDenyVetoAsync` folded every fault into "denied" and the 422 `grantee_denied` detail said
+  "…it is on the record's No Access list, or that list could not be checked". That is no longer the wire contract. The
+  write-time check (`IAccessibleRecordSetService.CheckGranteeNoAccessAsync`) answers Allowed / Denied / Unverifiable, and
+  the grant core maps them apart:
+  - an entry → **422 `sdap.access.grant.grantee_denied`**, detail "This contact or organization cannot be given access to
+    this record: it is on the record's No Access list. Nothing was granted.";
+  - a check that could not be completed (a read fault) → **503 `sdap.access.grant.no_access_unverifiable`**, detail
+    "Whether this contact or organization is on the record's No Access list could not be checked, so nothing was
+    granted. Try again in a moment."
+  Neither detail names an entry or its reason (task 143). Record: task 142's note §14.1.
 - **Deny subjects for a contact grant include the request's firm (`OrganizationId`)** besides the contact's own active
   memberships — over-matching is the specified direction for a veto (B-10).
 - **S5 counts only enabled system users with a Read-bearing direct share**; team shares are not counted (membership not

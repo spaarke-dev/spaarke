@@ -600,5 +600,7 @@ public sealed class T5SlotMiKvRbacTrapProbeTests
     // ---------- helpers ----------
 
     private static T5SlotMiKvRbacTrapProbe BuildProbe(FakeArmHttpMessageHandler handler) =>
-        new(ArmSdkTestFakes.NewArmClient(handler), NullLogger<T5SlotMiKvRbacTrapProbe>.Instance);
+        new(ArmSdkTestFakes.NewArmClient(handler),
+            Microsoft.Extensions.Options.Options.Create(new H13AcceptanceOptions()),
+            NullLogger<T5SlotMiKvRbacTrapProbe>.Instance);
 }

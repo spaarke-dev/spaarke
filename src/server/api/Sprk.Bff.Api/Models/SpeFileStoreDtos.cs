@@ -23,11 +23,34 @@ public record FileHandleDto(
 // caller as the interesting property. The OBO path uses UploadSessionResponse — a different type, still
 // live, and NOT this one.
 
+/// <summary>One SharePoint Embedded version of a file.</summary>
+/// <param name="Id">The version id — for SharePoint also its label ("1.0", "2.0", …).</param>
+/// <param name="ETag">Not populated by the version list (null).</param>
+/// <param name="LastModifiedDateTime">When the version was written.</param>
+/// <param name="Size">The version's size in bytes.</param>
+/// <param name="LastModifiedBy">
+///   Who wrote the version (Graph <c>lastModifiedBy</c> display name). For a version a relocation REPLAYED into a moved
+///   file, the version history routes report the ORIGINAL author and date the relocation recorded (unified-access-control-r2
+///   task 166, owner round 45 item 1; <c>Services.Documents.RelocatedVersionHistory</c>), because Graph cannot set them.
+/// </param>
 public record VersionInfoDto(
     string Id,
     string? ETag,
     DateTimeOffset LastModifiedDateTime,
-    long Size);
+    long Size,
+    string? LastModifiedBy = null)
+{
+    /// <summary>
+    /// The writer's Entra object id (<c>lastModifiedBy.user.id</c>), when a person wrote it. Server-side only (never
+    /// serialized): the relocation records it as the replayed version's original author.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? LastModifiedByUserId { get; init; }
+
+    /// <summary>The writing application's id (<c>lastModifiedBy.application.id</c>) for an app-only write. Server-side only.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? LastModifiedByApplicationId { get; init; }
+}
 
 public record ContainerDto(
     string Id,
@@ -83,6 +106,33 @@ public record SpeDriveItemSummary(
     string? ParentReferencePath,
     DateTimeOffset? LastModifiedDateTime,
     DateTimeOffset? CreatedDateTime);
+
+/// <summary>
+/// Who created a SharePoint Embedded drive item — Graph's <c>createdBy</c> identity set, without SDK types (ADR-007).
+/// The document-pointer check (unified-access-control-r2 task 166 r2, owner round 23 item 1) compares it with the
+/// <c>sprk_document</c> row's creator before the BFF follows the row's pointer as the application.
+/// </summary>
+/// <param name="Name">The item's name (an archive-path item is named <c>{communicationId:N}_…</c>).</param>
+/// <param name="UserObjectId">
+///   <c>createdBy.user.id</c>: the Entra object id of the person who uploaded it (delegated / OBO uploads). Null for an
+///   app-only upload (SharePoint reports "SharePoint App" with no id).
+/// </param>
+/// <param name="ApplicationId"><c>createdBy.application.id</c>: the Entra app (client) id the upload ran under.</param>
+/// <param name="Size">The item's size in bytes (task 166 f1: the relocation copy is verified against it).</param>
+/// <param name="QuickXorHash">The SPE content identity, when Graph has computed it (task 166 f1: copy verification).</param>
+/// <param name="WebUrl">The item's web URL (task 166 f1: <c>sprk_filepath</c> of a server-attached or relocated file).</param>
+/// <param name="LastModified">
+///   <c>lastModifiedDateTime</c> (task 166, owner round 54 item 3): the time a relocation's witness records when Graph lists
+///   no version, so the versions written after the move can still be put in order by their times.
+/// </param>
+public record SpeItemCreator(
+    string? Name,
+    string? UserObjectId,
+    string? ApplicationId,
+    long? Size = null,
+    string? QuickXorHash = null,
+    string? WebUrl = null,
+    DateTimeOffset? LastModified = null);
 
 /// <summary>
 /// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).

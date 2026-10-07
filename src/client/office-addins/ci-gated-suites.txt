@@ -96,7 +96,15 @@ shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
 # cached only on success and cleared when the server says the type is gone.
 shared/taskpane/components/__tests__/RelatedToPicker.matterType.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.matterTypeQuickCreate.test.tsx
-shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
+# Task 100 RENAMED matterTypeLookupService.cache.test.ts -> referenceListService.cache.test.ts with its service
+# (generalized to every create-form reference list). Every case it held is kept, run per list; not a removal.
+shared/taskpane/services/__tests__/referenceListService.cache.test.ts
+# --- the "+ New" create form's fields (task 100, UAT round 5 item 3) — green from creation --------------------
+# Pins: exactly the listed fields per type and order; Matter Type AND Practice Area required on a Matter; the
+# Assigned To picker is the REAL shared LookupField by exact alias; Assigned To prefilled from the server's default,
+# optional (cleared = omitted = the server's default, stated in the form), a late prefill never overwrites the user;
+# every value entered is submitted; the server's own error shown.
+shared/taskpane/components/__tests__/CreateRecordForm.test.tsx
 
 # --- related-record card (task 026, FR-09) - green from creation ----------
 # Pins: the card reads only the four direct slots (never sprk_related* or the
@@ -216,7 +224,11 @@ shared/taskpane/services/__tests__/documentIdentityService.stampPrecedence.test.
 # idempotency key hashes document content, so a double click collapses to one
 # key while a real edit does not.
 word/commands/__tests__/commands.test.ts
-shared/taskpane/services/__tests__/shareLinkService.test.ts
+# (shareLinkService.test.ts was listed here. Task 096 DELETED shareLinkService.ts together with its suite: Graph
+# refuses sharing links for SharePoint Embedded files ("This sharing scenario is not supported on CSP Container
+# site"), its last caller (Send Email) no longer mints one, and the module had no other caller. The suite went
+# with the code it tested — not removed to turn a gate green. Its replacement guard is in sendEmailService.test.ts:
+# "never mints a sharing link — no share-link route call and no network call at all".)
 # --- pickable equals savable (task 084, #1037 + #1075) - green from creation ---
 # Pins: a record the caller can read but not FILE to (canFile === false, from
 # `access=file` search or the suggestions route's filingAccess) renders DISABLED
@@ -238,6 +250,8 @@ outlook/commands/__tests__/commands.test.ts
 # and openRecordLauncher's URL now carrying navbar=off without cmdbar=false.
 # (openRecordLauncher.test.ts and sendEmailService.test.ts already existed from task 027/036 and are
 # listed above; this section exists so the diff is traceable to task 086.)
+# SUPERSEDED by task 096 (2026-10-04): the Word two-choice menu is gone (Word has the Email tab) and the
+# encoding/gating tests above went with it; see the task 096 section at the end of this file.
 # --- the final 10 (task 071, 2026-09-21) — repaired and gated in one change --
 # Every one of these was a stale test or a harness gap, never a shipped code
 # bug (full diagnosis table: notes/071-jest-repair.md). Representative causes:
@@ -311,3 +325,33 @@ shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
 # OutlookAdapter.
 shared/adapters/__tests__/WordAdapter.documentChangeDetection.test.ts
 shared/taskpane/components/views/__tests__/SaveView.documentChangeDetection.test.tsx
+shared/taskpane/components/__tests__/RelatedToPicker.layout.test.tsx
+# Task 099 (UAT round 5): Document header owns the name; "+ New" hides the rest; focus when the locked name goes away.
+shared/taskpane/components/__tests__/SaveFlow.round5.test.tsx
+shared/taskpane/services/__tests__/taskPaneWidthService.test.ts
+# --- Word Email tab from the shared compose engine; no sharing links (task 096, UAT round 4 items 6-8) --------
+# Pins: the Email tab renders the REAL shared `EmailComposer` via its new pane wrapper `SendEmailPane`
+# (@spaarke/ui-components, by exact alias — a test
+# asserts the module resolves to the shared source, not a copy); Send posts to the EXISTING
+# POST /api/communications/send with sendMode "User", the open document as attachmentDocumentIds, the related
+# record as associations (logical name), archiveToSpe false and the pane's bearer token; success shows "Email
+# sent" + "Open in Spaarke" (gated on canOpenRecord) and resets the form; a refused send (403/400/500) shows the
+# server's reason and is never reported as sent; a 2xx without a record id says "sent, but not recorded"; a
+# document not yet in Spaarke offers "Save to Spaarke first" and no Send. The Email tab follows Find and is gated
+# on the canEmailFromPane CAPABILITY (Word true, Outlook false). Since the owner's 2026-10-04 decision (task 097
+# note §6) Word's value is the ADDIN_EMAIL_TAB_ENABLED build setting — default OFF, only "true" turns it on,
+# Outlook stays false either way (capabilities suite). Changed suites already listed above:
+# sendEmailService (Outlook body = Spaarke record links, no mint, no network call), capabilities,
+# TaskPaneNavigation (tab order + capability gate, live toolbar).
+shared/taskpane/components/views/__tests__/EmailView.test.tsx
+shared/taskpane/services/__tests__/paneEmailService.test.ts
+# UAT round 6 (2026-10-06): task 102 - Find's two independently scrolling sections and the keyboard-operable divider;
+# task 103 - expand/collapse width stepping (3x, then screen fractions, then the web cap) and the toolbar button's gating.
+shared/taskpane/components/__tests__/FindSplitPane.test.tsx
+shared/taskpane/services/__tests__/taskPaneExpand.test.ts
+shared/taskpane/components/__tests__/TaskPaneExpand.test.tsx
+# UAT round 7 (2026-10-06): task 105 - View Document / Copy Link confirmation states; the Profile Summary's resize handle (shared ResizeHandle).
+shared/taskpane/components/__tests__/SaveFlow.buttonFeedback.test.tsx
+shared/taskpane/components/__tests__/DocumentProfileSection.resize.test.tsx
+# UAT rounds 9-10 (2026-10-07): tasks 107/108 - icon-only tabs at a normal width, labels when wide (both hosts), overflow guard, Expand right-most.
+shared/taskpane/components/__tests__/TaskPaneToolbar.fit.test.tsx

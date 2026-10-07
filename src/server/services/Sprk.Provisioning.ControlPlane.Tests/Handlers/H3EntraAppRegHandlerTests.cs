@@ -15,14 +15,13 @@
 // project precedent this follows).
 //
 // COVERAGE MAP:
-//   AC-M2-1  Model 2 happy path (Verified) — Success + CompletedPhase(H3) +
+//   AC-M2-1  Happy path (Verified) — Success + CompletedPhase(H3) +
 //            bffAppRegId + 3 RunParameters.Secrets entries + admin-consent
 //            gate Verified + CommitPendingSecretsAsync called ONCE with the
 //            3 staged writes (AFTER consent verified — DS-4 §3 ordering).
-//   AC-M1-1  Model 1 happy path — VerifySharedAsync=Current + consent
-//            Verified → Success; ProvisionAsync NEVER called (0 new app-reg /
-//            0 new FIC); CommitPendingSecretsAsync NEVER called (nothing to
-//            commit — Model 1 only references pre-existing shared entries).
+//            (Historically labeled "Model 2 happy path"; post-task-222/D-13
+//            H3 runs the same per-customer creation path for both tenancy
+//            values, so this is now the sole happy path.)
 //   AC-I6-1  Missing tenancyModel → Resumable MissingOrInvalidTenancyModel;
 //            provisioner never touched (I6 fires before any branch logic).
 //   AC-I6-2  Unrecognized tenancyModel value → same as AC-I6-1 (no silent
@@ -36,7 +35,8 @@
 //   AC-6     Verifier throws (simulating ODataError bubble) → Resumable, not
 //            Quarantined.
 //   AC-7     Idempotency: second invocation short-circuits.
-//   AC-9     Model 2 missing keyVaultName.
+//   AC-9     Missing InterStepState.KeyVaultName (H2a output; task 245a) →
+//            Resumable MissingKeyVaultName.
 //   AC-10    ExpectedDelegatedScopeCount <= 0.
 //   AC-11    Provisioner returns Failure.
 //   AC-12    Provisioner returns Success with blank BffAppRegId.
@@ -44,14 +44,21 @@
 //   AC-14    Idempotency key format determinism.
 //   AC-15    Run not found.
 //   AC-16    KV URI-ref format is safe (cleartext scanner short-circuits).
-//   AC-M2-2  Missing InterStepState.MiObjectId (Model 2 FIC subject) →
-//            Resumable MissingUamiObjectId; provisioner never called.
-//   AC-M1-2  Missing shared app-reg config (Model 1) → Resumable
-//            MissingSharedAppRegConfig; VerifySharedAsync never called.
-//   AC-M1-3  Shared app-reg Drifted → Resumable SharedAppRegConfigurationDrift.
+//   AC-M2-2  Missing InterStepState.MiObjectId (FIC subject) → Resumable
+//            MissingUamiObjectId; provisioner never called. (Historically
+//            labeled "Model 2 FIC subject"; post-task-222/D-13 the FIC
+//            subject requirement applies unconditionally in both models.)
 //   AC-KV-1  Deferred KV commit fails AFTER consent verified → QuarantineRequired
 //            (app-reg + consent both real; KV state now ambiguous).
 //   AC-PARSE KV URI reference round-trip parse (vault, secretName).
+//
+// RETIRED 2026-09-29 (task 222 per D-13): the shared multitenant BFF app-reg
+// branch was deleted from H3EntraAppRegHandler. The three tests that pinned
+// that branch's behavior (AC-M1-1 happy path, AC-M1-2 missing shared config,
+// AC-M1-3 shared drift) were deleted with it — they exercised a code path
+// that no longer exists. RunsEndpointsTests continues to cover Model1Shared
+// as a valid tenancy STRING (H3 routes it through the same per-customer
+// creation path as Model2Dedicated post-Item-1).
 // -----------------------------------------------------------------------------
 
 using System.Text.Json;
@@ -75,21 +82,17 @@ public sealed class H3EntraAppRegHandlerTests
     private const string KeyVaultName = "sprk-acme-prod-kv";
     private const string BffAppRegId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
     private const string UamiObjectId = "ffffffff-1111-2222-3333-000000000000";
-    private const string SharedAppId = "shared-app-id-0000-0000-000000000000";
-    private const string SharedPlatformKv = "sprk-platform-prod-kv";
     private const int ExpectedScopeCount = 5;
 
     private static readonly string ExpectedKvUriRef =
         GraphAppRegistrationProvisioner.BuildKvUriReference(KeyVaultName, GraphAppRegistrationProvisioner.ClientSecretName);
-    private static readonly string ExpectedSharedKvUriRef =
-        GraphAppRegistrationProvisioner.BuildKvUriReference(SharedPlatformKv, GraphAppRegistrationProvisioner.ClientSecretName);
 
     // ---------- AC-M2-1 Model 2 happy path ----------
 
     [Fact]
     public async Task AcM2_1_Model2HappyPath_ConsentVerified_CommitsKvAfterConsent()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-1");
         var pendingWrites = BuildPendingWrites();
         var provisioner = FakeProvisioner.Success(BuildOutputs(pendingWrites));
@@ -110,18 +113,14 @@ public sealed class H3EntraAppRegHandlerTests
         repo.LastWrittenRun.GateStates.Should().ContainKey(EntraAppRegGates.AdminConsent)
             .WhoseValue.Status.Should().Be(GateState.Verified);
 
-        // BFF-API-ClientId / Audience / ClientSecret all referenced (task 129 contract).
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.ClientIdSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.ClientIdSecretName));
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.AudienceSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.AudienceSecretName));
-        repo.LastWrittenRun.Parameters.Secrets.Should().ContainKey(GraphAppRegistrationProvisioner.ClientSecretName)
-            .WhoseValue.Should().Be(new KeyVaultSecretRef(KeyVaultName, GraphAppRegistrationProvisioner.ClientSecretName));
+        // Task 245a: H3 commits BFF-API-ClientId / BFF-API-Audience to the vault itself (asserted via
+        // LastCommittedWrites below) and hands nothing on through run.Parameters.Secrets — H4 runs before
+        // H3 and could never read such refs (the deadlock the old task-129 refs caused).
+        repo.LastWrittenRun.Parameters.Secrets.Should().BeEmpty();
 
         provisioner.ProvisionCallCount.Should().Be(1);
         provisioner.CommitCallCount.Should().Be(1, "KV writes commit exactly once, AFTER consent is verified");
         provisioner.LastCommittedWrites.Should().BeEquivalentTo(pendingWrites);
-        provisioner.VerifySharedCallCount.Should().Be(0, "Model 2 never calls the Model-1-only verification path");
         verifier.CallCount.Should().Be(1);
         verifier.LastBffAppRegId.Should().Be(BffAppRegId);
         verifier.LastTenantId.Should().Be(TenantId);
@@ -130,37 +129,21 @@ public sealed class H3EntraAppRegHandlerTests
         // Request threaded to the provisioner carried the UAMI principalId (FIC subject) + profile.
         provisioner.LastProvisionRequest!.UamiPrincipalId.Should().Be(UamiObjectId);
         provisioner.LastProvisionRequest.Profile.Should().Be("spaarke-hosted-model2");
-    }
 
-    // ---------- AC-M1-1 Model 1 happy path ----------
-
-    [Fact]
-    public async Task AcM1_1_Model1HappyPath_NoNewAppRegOrFic_NoKvWrites()
-    {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model1Shared, includeKvName: false, includeUamiObjectId: false);
-        var repo = new FakeRepository(run, etag: "etag-m1");
-        var provisioner = FakeProvisioner.SharedCurrent();
-        var verifier = FakeVerifier.Verified(ExpectedScopeCount);
-        var handler = BuildHandler(repo, provisioner, verifier,
-            sharedAppId: SharedAppId, sharedKv: SharedPlatformKv);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        provisioner.ProvisionCallCount.Should().Be(0, "Model 1 MUST create ZERO new app-reg objects");
-        provisioner.CommitCallCount.Should().Be(0, "Model 1 has nothing to commit — references only");
-        provisioner.VerifySharedCallCount.Should().Be(1);
-        provisioner.LastVerifySharedRequest!.SharedAppId.Should().Be(SharedAppId);
-
-        repo.LastWrittenRun!.InterStepState.BffAppRegId.Should().Be(SharedAppId);
-        repo.LastWrittenRun.Parameters.Secrets[GraphAppRegistrationProvisioner.ClientIdSecretName]
-            .Should().Be(new KeyVaultSecretRef(SharedPlatformKv, GraphAppRegistrationProvisioner.ClientIdSecretName));
-        repo.LastWrittenRun.Parameters.Secrets[GraphAppRegistrationProvisioner.AudienceSecretName]
-            .Should().Be(new KeyVaultSecretRef(SharedPlatformKv, GraphAppRegistrationProvisioner.AudienceSecretName));
-        repo.LastWrittenRun.Parameters.Secrets[GraphAppRegistrationProvisioner.ClientSecretName]
-            .Should().Be(new KeyVaultSecretRef(SharedPlatformKv, GraphAppRegistrationProvisioner.ClientSecretName));
-
-        verifier.LastBffAppRegId.Should().Be(SharedAppId, "Model 1 still verifies THIS customer tenant's consent for the SHARED app");
+        // Bucket B HIGH#3 SESSION 18 (customer-provisioning-orchestration-r1 adversarial
+        // e2e verify workflow wepdcb8we) + .claude/constraints/provisioning.md § KV
+        // credential lifecycle rule 1: H3 MUST request the secret-free identity path
+        // on every Model 2 dispatch — BFF-API-ClientSecret was DELETED from KV by
+        // auth-v4 task 033 (2026-08-24) and re-introduction is a HARD-fail contract
+        // violation. This assertion locks the H3 handler's explicit-true call site
+        // so a future refactor that drops the parameter or flips the DTO default
+        // to false will fail the build here rather than silently re-open the
+        // silent-mint path the verify workflow surfaced.
+        provisioner.LastProvisionRequest.RequireSecretFreeIdentity.Should().BeTrue(
+            "H3 handler MUST always request secret-free identity for Model 2 dispatches — " +
+            "both spaarke-hosted-model2 and customer-owned-model2 profiles are secret-free " +
+            "per ADR-028 A4. Any dispatch with RequireSecretFreeIdentity=false would let " +
+            "GraphAppRegistrationProvisioner mint a BFF-API-ClientSecret contra auth-v4 §10.");
     }
 
     // ---------- AC-I6 tenancy model I6 enforcement ----------
@@ -180,7 +163,6 @@ public sealed class H3EntraAppRegHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.MissingOrInvalidTenancyModel);
         provisioner.ProvisionCallCount.Should().Be(0);
-        provisioner.VerifySharedCallCount.Should().Be(0);
         verifier.CallCount.Should().Be(0);
     }
 
@@ -198,7 +180,6 @@ public sealed class H3EntraAppRegHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.MissingOrInvalidTenancyModel);
         provisioner.ProvisionCallCount.Should().Be(0);
-        provisioner.VerifySharedCallCount.Should().Be(0);
     }
 
     // ---------- AC-2 missing tenantId ----------
@@ -206,7 +187,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac2_MissingTenantId_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeTenantId: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2), includeTenantId: false);
         var repo = new FakeRepository(run, etag: "etag-2");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -229,7 +210,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac3_S2SAppRegAlreadyPresent_FailsQuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         run.InterStepState.S2SAppRegId = "phantom-s2s-app-reg-id";
         var repo = new FakeRepository(run, etag: "etag-3");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
@@ -258,7 +239,7 @@ public sealed class H3EntraAppRegHandlerTests
             BffClientSecretKvUri = "Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789.-_",
             PendingKvWrites = BuildPendingWrites(),
         };
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-4");
         var provisioner = FakeProvisioner.Success(leakyOutputs);
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -280,7 +261,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac5_ConsentPending_TransitionsToWaitingOnGate_DoesNotCommitKv()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-5");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Pending(0, ExpectedScopeCount,
@@ -311,7 +292,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac6_VerifierThrowsUnexpected_FailsResumable_NotQuarantined()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-6");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Throws(new InvalidOperationException("Graph ODataError bubbled up: 503 Service Unavailable"));
@@ -331,7 +312,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac7_Idempotent_SecondInvocationWithMatchingCompletedPhase_IsNoOp()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var expectedKey = H3EntraAppRegHandler.BuildIdempotencyKey(CustomerId, TenantId);
         run.CompletedPhases.Add(new CompletedPhase
         {
@@ -359,7 +340,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac9_Model2MissingKeyVaultName_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeKvName: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2), includeKvName: false);
         var repo = new FakeRepository(run, etag: "etag-9");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -378,7 +359,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac10_ExpectedScopeCountZero_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-10");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -397,7 +378,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac11_ProvisionerReturnsFailure_FailsResumable()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-11");
         var provisioner = FakeProvisioner.Failure("Graph ODataError 403 InsufficientPrivileges");
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -423,7 +404,7 @@ public sealed class H3EntraAppRegHandlerTests
             BffAppRegId = "   ",
             BffClientSecretKvUri = ExpectedKvUriRef,
         };
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-12");
         var provisioner = FakeProvisioner.Success(incompleteOutputs);
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -441,7 +422,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task Ac13_HandlerIdMismatch_Throws()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-13");
         var handler = BuildHandler(repo,
             FakeProvisioner.Success(BuildOutputs(BuildPendingWrites())),
@@ -513,7 +494,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Fact]
     public async Task AcM2_2_MissingUamiObjectId_FailsResumable_NoProvisionerCall()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated, includeUamiObjectId: false);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2), includeUamiObjectId: false);
         var repo = new FakeRepository(run, etag: "etag-m2-2");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         var verifier = FakeVerifier.Verified(ExpectedScopeCount);
@@ -527,51 +508,12 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.ProvisionCallCount.Should().Be(0);
     }
 
-    // ---------- AC-M1-2 missing shared app-reg config ----------
-
-    [Fact]
-    public async Task AcM1_2_MissingSharedAppRegConfig_FailsResumable_NoVerifyCall()
-    {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model1Shared, includeKvName: false, includeUamiObjectId: false);
-        var repo = new FakeRepository(run, etag: "etag-m1-2");
-        var provisioner = FakeProvisioner.SharedCurrent();
-        var verifier = FakeVerifier.Verified(ExpectedScopeCount);
-        // No sharedAppId/sharedKv configured.
-        var handler = BuildHandler(repo, provisioner, verifier);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.MissingSharedAppRegConfig);
-        provisioner.VerifySharedCallCount.Should().Be(0);
-    }
-
-    // ---------- AC-M1-3 shared app-reg drift ----------
-
-    [Fact]
-    public async Task AcM1_3_SharedAppRegDrifted_FailsResumable()
-    {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model1Shared, includeKvName: false, includeUamiObjectId: false);
-        var repo = new FakeRepository(run, etag: "etag-m1-3");
-        var provisioner = FakeProvisioner.SharedDrifted("signInAudience mismatch");
-        var verifier = FakeVerifier.Verified(ExpectedScopeCount);
-        var handler = BuildHandler(repo, provisioner, verifier, sharedAppId: SharedAppId, sharedKv: SharedPlatformKv);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(EntraAppRegRejectionCodes.SharedAppRegConfigurationDrift);
-        failure.Diagnostic.Should().Contain("signInAudience mismatch");
-    }
-
     // ---------- AC-KV-1 deferred commit failure after consent verified ----------
 
     [Fact]
     public async Task AcKv_1_CommitFailsAfterConsentVerified_QuarantineRequired()
     {
-        var run = BuildRun(tenancyModel: H3EntraAppRegHandler.Model2Dedicated);
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2));
         var repo = new FakeRepository(run, etag: "etag-kv-1");
         var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
         provisioner.CommitFailureDiagnostic = "SecretClient.SetSecretAsync failed: RequestFailedException 403";
@@ -587,35 +529,17 @@ public sealed class H3EntraAppRegHandlerTests
         provisioner.CommitCallCount.Should().Be(1);
     }
 
-    // ---------- AC-PARSE KV URI reference round-trip ----------
-
-    [Fact]
-    public void AcParse_KvUriReference_RoundTrips()
-    {
-        var (vault, name) = H3EntraAppRegHandler.ParseKvUriReference(ExpectedKvUriRef);
-        vault.Should().Be(KeyVaultName);
-        name.Should().Be(GraphAppRegistrationProvisioner.ClientSecretName);
-
-        var (sharedVault, sharedName) = H3EntraAppRegHandler.ParseKvUriReference(ExpectedSharedKvUriRef);
-        sharedVault.Should().Be(SharedPlatformKv);
-        sharedName.Should().Be(GraphAppRegistrationProvisioner.ClientSecretName);
-    }
-
     // ---------- helpers ----------
 
     private static H3EntraAppRegHandler BuildHandler(
         FakeRepository repo,
         FakeProvisioner provisioner,
         FakeVerifier verifier,
-        int expectedScopeCount = ExpectedScopeCount,
-        string? sharedAppId = null,
-        string? sharedKv = null)
+        int expectedScopeCount = ExpectedScopeCount)
     {
         var options = Options.Create(new EntraAppRegOptions
         {
             ExpectedDelegatedScopeCount = expectedScopeCount,
-            SharedBffAppRegistrationId = sharedAppId,
-            SharedPlatformKeyVaultName = sharedKv,
         });
         return new H3EntraAppRegHandler(
             repo, provisioner, verifier, options,
@@ -652,7 +576,8 @@ public sealed class H3EntraAppRegHandlerTests
         }
         if (includeKvName)
         {
-            run.Parameters.NonSecret[H3EntraAppRegHandler.KeyVaultNameParameterKey] = KeyVaultName;
+            // Task 245a (G25): the customer vault name is H2a's output, not a run parameter.
+            run.InterStepState.KeyVaultName = KeyVaultName;
         }
         if (includeUamiObjectId)
         {
@@ -705,50 +630,33 @@ public sealed class H3EntraAppRegHandlerTests
         }
     }
 
-    /// <summary>Provisioner fake — records calls + returns canned outcomes for all 3 IEntraAppRegProvisioner members.</summary>
+    /// <summary>Provisioner fake — records calls + returns canned outcomes for the 2 remaining IEntraAppRegProvisioner members (ProvisionAsync + CommitPendingSecretsAsync). The VerifySharedAsync member was removed in task 222 per D-13 (the shared-app-reg branch was retired).</summary>
     private sealed class FakeProvisioner : IEntraAppRegProvisioner
     {
         private readonly EntraAppRegOutcome? _provisionOutcome;
-        private readonly EntraAppRegSharedVerifyOutcome? _verifySharedOutcome;
 
         public int ProvisionCallCount { get; private set; }
-        public int VerifySharedCallCount { get; private set; }
         public int CommitCallCount { get; private set; }
         public EntraAppRegRequest? LastProvisionRequest { get; private set; }
-        public EntraAppRegSharedVerifyRequest? LastVerifySharedRequest { get; private set; }
         public IReadOnlyList<PendingKvSecretWrite>? LastCommittedWrites { get; private set; }
         public string? CommitFailureDiagnostic { get; set; }
 
-        private FakeProvisioner(EntraAppRegOutcome? provisionOutcome, EntraAppRegSharedVerifyOutcome? verifySharedOutcome)
+        private FakeProvisioner(EntraAppRegOutcome? provisionOutcome)
         {
             _provisionOutcome = provisionOutcome;
-            _verifySharedOutcome = verifySharedOutcome;
         }
 
         public static FakeProvisioner Success(EntraAppRegOutputs outputs)
-            => new(new EntraAppRegOutcome.Success(outputs), null);
+            => new(new EntraAppRegOutcome.Success(outputs));
 
         public static FakeProvisioner Failure(string diagnostic)
-            => new(new EntraAppRegOutcome.Failure(diagnostic), null);
-
-        public static FakeProvisioner SharedCurrent()
-            => new(null, new EntraAppRegSharedVerifyOutcome.Current());
-
-        public static FakeProvisioner SharedDrifted(string diagnostic)
-            => new(null, new EntraAppRegSharedVerifyOutcome.Drifted(diagnostic));
+            => new(new EntraAppRegOutcome.Failure(diagnostic));
 
         public Task<EntraAppRegOutcome> ProvisionAsync(EntraAppRegRequest request, CancellationToken ct)
         {
             ProvisionCallCount++;
             LastProvisionRequest = request;
             return Task.FromResult(_provisionOutcome!);
-        }
-
-        public Task<EntraAppRegSharedVerifyOutcome> VerifySharedAsync(EntraAppRegSharedVerifyRequest request, CancellationToken ct)
-        {
-            VerifySharedCallCount++;
-            LastVerifySharedRequest = request;
-            return Task.FromResult(_verifySharedOutcome!);
         }
 
         public Task<string?> CommitPendingSecretsAsync(IReadOnlyList<PendingKvSecretWrite> pendingWrites, CancellationToken ct)

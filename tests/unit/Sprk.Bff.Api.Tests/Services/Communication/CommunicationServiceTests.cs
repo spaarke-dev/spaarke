@@ -71,6 +71,7 @@ public class CommunicationServiceTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 
@@ -155,6 +156,7 @@ public class CommunicationServiceTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 

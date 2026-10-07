@@ -6,7 +6,7 @@
 // a live customer stamp WITHOUT the full trap-probe wiring in place.
 //
 // SCOPE (task 055):
-//   Live-Azure probe implementations for T1–T6 belong in the Phase F
+//   Live-Azure probe implementations for T1–T7 belong in the Phase F
 //   acceptance suite (task 089). This placeholder satisfies the DI contract +
 //   surfaces the "verifier not yet exercisable from L2 host" state cleanly
 //   (Resumable — operator restarts the run once the probe seams land) so the
@@ -65,6 +65,7 @@ public sealed class PlaceholderTrapVerifier : IE2ETrapVerifier
             new TrapVerificationOutcome.InfraFault(TrapKind.T4ExchangePolicyCount, DeferralDiagnostic),
             new TrapVerificationOutcome.InfraFault(TrapKind.T5SlotMiKvRbac, DeferralDiagnostic),
             new TrapVerificationOutcome.InfraFault(TrapKind.T6SpeConfidentialClient, DeferralDiagnostic),
+            new TrapVerificationOutcome.InfraFault(TrapKind.T7CustomerIdentityExplicit, DeferralDiagnostic),
         };
 
         return Task.FromResult(new TrapCatalogVerificationResult(outcomes));

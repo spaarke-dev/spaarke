@@ -21,6 +21,7 @@
 
 import * as React from "react";
 import type { IChatMessage } from "@spaarke/ui-components";
+import { getXrm } from "@spaarke/ui-components";
 
 export interface PlaybookOptionsPayloadShape {
   candidates: Array<{
@@ -135,15 +136,9 @@ export function usePlaybookOptions(deps: PlaybookOptionsDeps): PlaybookOptionsHa
    * Also invoked by the `/playbooks` hard slash (browse mode, empty ids).
    */
   const handleOpenLibraryModal = React.useCallback((sessionAttachmentIds: string[]): void => {
-    let nav: { navigateTo?: (...args: unknown[]) => Promise<unknown> } | null = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any;
-      const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
-      nav = xrm?.Navigation ?? null;
-    } catch {
-      nav = null;
-    }
+    // Shared cross-frame walker (task 081 / C-8).
+    const nav: { navigateTo?: (...args: unknown[]) => Promise<unknown> } | null =
+      (getXrm('navigation')?.Navigation as { navigateTo?: (...args: unknown[]) => Promise<unknown> } | undefined) ?? null;
 
     if (!nav?.navigateTo) {
       console.warn(

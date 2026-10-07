@@ -53,17 +53,22 @@ internal sealed class ComposeCreateOnSavePromoter
     private readonly ILogger _logger;
     private readonly ContentDedupDetector? _dedupDetector;
     private readonly ComposeRecordResolution _recordResolution;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     internal ComposeCreateOnSavePromoter(
         IGenericEntityService dataverse,
         ILogger logger,
         ContentDedupDetector? dedupDetector,
-        ComposeRecordResolution recordResolution)
+        ComposeRecordResolution recordResolution,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership)
     {
         _dataverse = dataverse;
         _logger = logger;
         _dedupDetector = dedupDetector;
         _recordResolution = recordResolution;
+        // unified-access-control-r2 task 146: the promoted sprk_document is owned by the team of the records it is
+        // filed to (the named Secure team when one is secure), else the saving user's business-unit team.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
     }
 
     // ORPHANED DOC COMMENT REMOVED (task 070, 2026-09-01). A `<summary>` describing "STEP 5 (FR-30,
@@ -178,6 +183,7 @@ internal sealed class ComposeCreateOnSavePromoter
         //    OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write.
         var entity = new Entity(ComposeService.DocumentLogicalName);
         entity[ComposeService.GraphItemIdAttribute] = request.DocumentSpeId;
+        entity[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = request.DocumentSpeId; // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
         var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
             ? request.DisplayName!
             : $"Compose document ({request.DocumentSpeId})";
@@ -243,6 +249,10 @@ internal sealed class ComposeCreateOnSavePromoter
         // read logs LOUDLY and the create proceeds unassociated (mirrors the source having no links —
         // never fails the save); the idempotent existing-row branch above never reaches here, so an
         // existing record's links are never mutated.
+        // Task 146: the records the new document is FILED to — exactly the inherited links, never the dedup
+        // canonical link below (a byte-identical canonical is not a parent; following it could hand the saver's own
+        // document to another record's team).
+        var filedUnder = new List<Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent>();
         if (request.SourceDocumentRecordId is { } sourceRecordId)
         {
             try
@@ -269,6 +279,7 @@ internal sealed class ComposeCreateOnSavePromoter
                     foreach (var (attribute, reference) in links)
                     {
                         entity[attribute] = new EntityReference(reference.LogicalName, reference.Id);
+                        filedUnder.Add(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(reference.LogicalName, reference.Id));
                         inherited++;
                     }
                 }
@@ -341,6 +352,31 @@ internal sealed class ComposeCreateOnSavePromoter
         // opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID
         // canonicalization does NOT apply (verified — the alt-key lookup keys on the raw string).
         entity.KeyAttributes[ComposeService.GraphItemIdAttribute] = request.DocumentSpeId;
+        entity[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = request.DocumentSpeId; // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+
+        // Task 146 (C10 part 2): the row is owned by the team the ONE resolver names — secure-if-any over the records
+        // it is filed to (the named Secure team for a secure one), else the saving user's business-unit team (a Compose
+        // draft is usually unfiled: the owner's required unfiled-save case). A REFUSAL throws before the upsert, so no
+        // row is written; SaveAsync's catch reports it as partially-recorded with this reason (the bytes are already in
+        // the container the save resolved). A Dataverse fault propagates the same way. Set on the upsert itself: the
+        // alternate key is NOT relaxed, and a create cannot be assigned afterwards without an app-owned interval.
+        var savingUserOid = CallerResolution.ResolveObjectId(httpContext.User);
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                filedUnder,
+                callerObjectId: Guid.TryParse(savingUserOid, out var savingOid) ? savingOid : null) with
+            {
+                // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for the row the application upserts.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(savingUserOid),
+            },
+            cancellationToken).ConfigureAwait(false);
+        if (!owner.IsOwned)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(ComposeService.DocumentLogicalName, owner);
+        }
+
+        entity["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+        owner.StampCreatorOn(entity); // task 146 c1-r1 — the saving user, recorded on the app-created row
 
         Guid newId;
         bool rowCreatedThisCall;

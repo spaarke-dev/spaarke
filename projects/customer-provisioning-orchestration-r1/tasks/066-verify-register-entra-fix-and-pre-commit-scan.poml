@@ -4,7 +4,7 @@
     <title>Verify Register-EntraAppRegistrations.ps1:63 fix (v3.3, commit 1834b77bc) + add ArchTest scanning provisioning scripts for tenant-shaped GUID defaults</title>
     <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'testing','integration-test','auth'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also I1 tenant-isolation invariant enforcement.</rigor-reason>
     <model-tier>sonnet</model-tier>

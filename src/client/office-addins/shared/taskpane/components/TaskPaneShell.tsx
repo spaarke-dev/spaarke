@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
 import type { HostType } from './TaskPaneHeader';
-import { getDefaultTab, type NavigationTab } from './TaskPaneNavigation';
+import { getDefaultTab, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import { TaskPaneToolbar } from './TaskPaneToolbar';
 import { TaskPaneFooter, type ConnectionStatus } from './TaskPaneFooter';
 import { ErrorBoundary } from './ErrorBoundary';
 import { LoadingSkeleton } from './LoadingSkeleton';
 import type { ThemePreference } from '../hooks/useTheme';
+import { isTaskPaneResizeSupported, expandTaskPane, collapseTaskPane } from '../services/taskPaneWidthService';
 
 /**
  * TaskPaneShell - Main layout component for Office Add-in task pane.
@@ -44,6 +45,11 @@ const useStyles = makeStyles({
     flex: 1,
     overflow: 'auto',
     padding: tokens.spacingVerticalM,
+    // Task 103 (UAT round 6, item 5): no visible scroll bar on the pane's MAIN container (it ate width in a
+    // narrow pane). Wheel, touch and keyboard scrolling are unaffected. Inner scroll regions (e.g. Find's lists)
+    // are separate elements and keep their own bars.
+    scrollbarWidth: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
   },
   contentCompact: {
     padding: tokens.spacingVerticalS,
@@ -58,6 +64,8 @@ export interface TaskPaneShellProps {
   title?: string;
   /** Type of Office host */
   hostType?: HostType;
+  /** Task 096: host capabilities for capability-gated tabs (the Word-only Email tab). */
+  tabCapabilities?: Partial<TabCapabilities>;
   /** Current user display name */
   userName?: string;
   /** Current user email */
@@ -96,6 +104,10 @@ export interface TaskPaneShellProps {
   children: React.ReactNode;
   /** Whether to remove padding from content area */
   noPadding?: boolean;
+  /** Task 106: Outlook's Send Email action, rendered in the toolbar after Find (see `TaskPaneToolbar`). */
+  onSendEmail?: () => void;
+  /** Task 106: Send Email is opening the compose window. */
+  isSendingEmail?: boolean;
 }
 
 /**
@@ -127,6 +139,7 @@ function useResponsiveLayout(): { isCompact: boolean; width: number } {
 
 export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   hostType = 'outlook',
+  tabCapabilities,
   userName,
   userEmail,
   isAuthenticated = false,
@@ -146,9 +159,31 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   showErrorDetails = false,
   children,
   noPadding = false,
+  onSendEmail,
+  isSendingEmail = false,
 }) => {
   const styles = useStyles();
   const { isCompact } = useResponsiveLayout();
+
+  // Task 103 (UAT round 6, item 6): expand/collapse the pane. Gated on the TaskPaneApi 1.1 requirement set.
+  const [resizeSupported] = useState<boolean>(() => isTaskPaneResizeSupported());
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isResizing, setIsResizing] = useState(false);
+  const handleToggleExpand = useCallback(async () => {
+    if (isResizing) return;
+    setIsResizing(true);
+    try {
+      if (isExpanded) {
+        collapseTaskPane();
+        setIsExpanded(false);
+      } else {
+        const applied = await expandTaskPane();
+        if (applied !== null) setIsExpanded(true);
+      }
+    } finally {
+      setIsResizing(false);
+    }
+  }, [isExpanded, isResizing]);
 
   // Internal state for uncontrolled navigation
   const [internalSelectedTab, setInternalSelectedTab] = useState<NavigationTab>(() => getDefaultTab(hostType));
@@ -189,6 +224,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
       {/* Single consolidated toolbar: logo + tabs (left) + overflow tools (right). */}
       <TaskPaneToolbar
         hostType={hostType}
+        {...(tabCapabilities ? { capabilities: tabCapabilities } : {})}
         showTabs={showNavigation}
         selectedTab={selectedTab}
         onTabChange={handleTabChange}
@@ -199,6 +235,8 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
         {...(onSettings ? { onSettings } : {})}
         themePreference={themePreference}
         {...(onThemeChange ? { onThemeChange } : {})}
+        {...(resizeSupported ? { onToggleExpand: handleToggleExpand, isExpanded, isResizing } : {})}
+        {...(onSendEmail ? { onSendEmail, isSendingEmail } : {})}
       />
 
       {/* Main Content with Error Boundary */}

@@ -61,6 +61,7 @@ import type {
 // components/FindSimilarViewer/. The shared-lib rename left this consumer's import stale, which
 // broke the whole solution build (present on master too). Same component, corrected path/name.
 import { FindSimilarViewerDialog } from "@spaarke/ui-components/components/FindSimilarViewer";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
@@ -156,29 +157,6 @@ const DYNAMIC_CANONICAL_ORDER = [
     DYNAMIC_WORK_ON_ANALYSIS_STEP_ID,
     DYNAMIC_FIND_SIMILAR_STEP_ID,
 ];
-
-// ---------------------------------------------------------------------------
-// Xrm resolution helpers (for inline playbook WebApi + clientUrl)
-// ---------------------------------------------------------------------------
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-function resolveWebApi(): any {
-    try {
-        if (typeof (window as any).Xrm !== "undefined" && (window as any).Xrm?.WebApi?.retrieveMultipleRecords) return (window as any).Xrm.WebApi;
-    } catch { /* */ }
-    try {
-        const p = (window.parent as any)?.Xrm;
-        if (p?.WebApi?.retrieveMultipleRecords) return p.WebApi;
-    } catch { /* */ }
-    try {
-        const t = (window.top as any)?.Xrm;
-        if (t?.WebApi?.retrieveMultipleRecords) return t.WebApi;
-    } catch { /* */ }
-    return undefined;
-}
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -432,7 +410,12 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
     onAnalysisCreated,
 }) => {
     const styles = useStyles();
-    const webApi = React.useMemo(() => resolveWebApi(), []);
+    // Shared cross-frame walker (task 081 / C-8).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const webApi: any = React.useMemo(() => {
+        const api = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
+        return api?.retrieveMultipleRecords ? api : undefined;
+    }, []);
 
     // Data state
     const [isLoading, setIsLoading] = React.useState(true);

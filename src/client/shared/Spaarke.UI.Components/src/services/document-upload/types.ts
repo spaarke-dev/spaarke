@@ -53,6 +53,12 @@ export interface IDataverseClient {
    * @param data - Fields to update
    */
   updateRecord(entityLogicalName: string, id: string, data: Record<string, unknown>): Promise<void>;
+
+  /**
+   * Delete a record (optional). Used only to remove a `sprk_document` whose file the BFF refused to
+   * attach (unified-access-control-r2 task 166 f1), so no "document" is left without its file.
+   */
+  deleteRecord?(entityLogicalName: string, id: string): Promise<void>;
 }
 
 /**
@@ -152,7 +158,7 @@ export interface ServiceResult<T = void> {
    *
    * Distinct from `error` because it is recoverable and the recovery needs a user decision:
    * nothing was written, the existing file is intact, and retrying the same upload with
-   * `conflictBehavior: 'rename' | 'replace'` will succeed. A caller that only reads `error` still
+   * `conflictBehavior: 'rename'` will succeed (`'replace'` is refused by the BFF since task 171). A caller that only reads `error` still
    * behaves correctly (it shows the message) — this field is additive so existing consumers are
    * unaffected.
    */

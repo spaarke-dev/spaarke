@@ -8,13 +8,15 @@ import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 /**
  * Name-collision behaviour for an upload, mirroring Graph's `@microsoft.graph.conflictBehavior`.
  *
- * There are deliberately only two values a UI offers:
- *   - `rename`  — keep both; the server stores the new file under a non-colliding name
- *   - `replace` — save as a new version; SharePoint retains the prior content, so it stays recoverable
+ * The one value a UI offers after a collision is `rename` — keep both; the server stores the new file under a
+ * non-colliding name. `fail` is the SERVER's default, so a caller normally omits the option entirely and handles
+ * {@link UploadNameConflictError}.
  *
- * `fail` exists for completeness but is the SERVER's default, so a caller normally omits the option
- * entirely and handles {@link UploadNameConflictError}. There is no "replace and discard" — at the
- * Graph level that is the same call as `replace`; a user who wants the old document gone deletes it.
+ * ⚠️ `replace` is REFUSED by the BFF since unified-access-control-r2 task 171 (409 `upload_replace_not_supported`,
+ * surfaced here as {@link UploadReplaceNotSupportedError}). The uploads are written by the BFF on the strength of the
+ * caller's right to file content under the RECORD, which is not a right to overwrite whichever file already holds the
+ * name in a shared container. Updating an existing document is a version save of THAT document (Word, the Office
+ * add-in, Compose). The value stays in the type only so an older caller still compiles and gets the clear error.
  */
 export type ConflictBehaviorOption = 'fail' | 'rename' | 'replace';
 
@@ -39,6 +41,25 @@ export class UploadNameConflictError extends Error {
     this.fileName = fileName;
     // Required for `instanceof` to survive the ES5 downlevel target some consumers build with.
     Object.setPrototypeOf(this, UploadNameConflictError.prototype);
+  }
+}
+
+/**
+ * Thrown when a `conflictBehavior: 'replace'` upload is refused (BFF 409 `upload_replace_not_supported`, task 171).
+ * Nothing was uploaded or changed. Offer "keep both" (`rename`) instead, or tell the user to open the existing
+ * document and save a new version there.
+ */
+export class UploadReplaceNotSupportedError extends Error {
+  public readonly fileName: string;
+
+  constructor(fileName: string) {
+    super(
+      `"${fileName}" was not uploaded: an upload never replaces an existing file. Upload it under a new name, or open ` +
+        'the existing document and save your changes there as a new version.'
+    );
+    this.name = 'UploadReplaceNotSupportedError';
+    this.fileName = fileName;
+    Object.setPrototypeOf(this, UploadReplaceNotSupportedError.prototype);
   }
 }
 
@@ -141,6 +162,11 @@ export class UploadOperation {
       'Upload failed',
       status => {
         if (status === 409) {
+          // A replace is refused before the server looks at the container (task 171), so its 409 is NOT a name
+          // collision — re-offering the collision prompt would loop.
+          if (options?.conflictBehavior === 'replace') {
+            throw new UploadReplaceNotSupportedError(file.name);
+          }
           throw new UploadNameConflictError(file.name);
         }
       }

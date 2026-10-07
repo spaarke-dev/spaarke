@@ -77,6 +77,16 @@ is never consulted.
 
 ## 🔔 Escalation trigger 2 FIRED: the root stamp can be stale and send bytes to the wrong root
 
+> **Superseded by task 156 (2026-10-02, owner round 4 item 5 — option b).** The held position below
+> (`container_ancestor_unverifiable` for every child filed under another record) is REPLACED: the record a child is filed
+> under is read LIVE and its root compared with the child's copy — equal resolves exactly like a direct root link,
+> different refuses **`container_ancestor_stale`** (409) and enqueues a re-stamp, unreadable refuses 503. Every BFF re-file
+> path re-stamps the copies in the same operation (`CoreAncestorRestamper`), and `CoreAncestorStampReconciliationJob`
+> repairs out-of-band staleness every 5 minutes. Still held: a service request, and an intermediate on a row that carries
+> no copy (work assignment, project, contact, invoice / document / agreement filed under another record). Interpretation
+> (viii) below is superseded too: the communication's invoice is compared, not followed. See
+> [task-156-stamp-freshness.md](task-156-stamp-freshness.md).
+
 When a to-do regards a project, `sprk_regardingproject` is the link the user chose. When it regards a
 communication, event, invoice, document or analysis, its `sprk_regarding{core}` value is a denormalized copy of
 that record's root. `CoreAncestorResolver` writes the copy once and nothing refreshes it:
@@ -1076,7 +1086,7 @@ reverses it. All but (vii) are in `RecordContainerResolver.cs`.
   - *Reverse:* add `("sprk_communicationthread", "sprk_communicationthread")` to the communication entry and
     `KindByEntity["sprk_communicationthread"] = RecordKind.Intermediate`. That refuses EVERY threaded message (95 live,
     all new inbound). Alternatively, follow the thread live — that is option (a), task 156's territory.
-- **(viii) f4 — a communication's `sprk_regardinginvoice` is FOLLOWED live** (the invoice's own flag, container and
+- **(viii) f4 — SUPERSEDED by task 156 (interpretation xiv there): the invoice is now compared like every other intermediate.** As written in f4: a communication's `sprk_regardinginvoice` is FOLLOWED live (the invoice's own flag, container and
   links), not held like a to-do's. This preserves what the communication path has done since task 155 r0. An invoice's
   typed `sprk_project` / `sprk_matter` are its own links, not a stamp.
   - *Reverse:* drop `followed: ["sprk_invoice"]` from the communication entry. An email regarding an invoice then refuses

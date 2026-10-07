@@ -48,9 +48,12 @@ public interface IGenericEntityService
     /// documented batch size and the same ceiling this method always had; the transaction documentation
     /// states no figure of its own. Splitting a larger set into several calls gives per-call atomicity only —
     /// decide whether that is acceptable before doing it.</para>
-    /// <para><b>Fields.</b> A C# <c>null</c> value SKIPS that key, as in <see cref="UpdateAsync"/>.
-    /// <see cref="DBNull.Value"/> is rejected with <see cref="ArgumentException"/> before any I/O — to clear
-    /// a column, use <see cref="UpdateAsync"/>.</para>
+    /// <para><b>Fields.</b> Exactly <see cref="UpdateAsync"/>'s convention: a C# <c>null</c> value SKIPS that key,
+    /// and <see cref="DBNull.Value"/> explicitly CLEARS that column to null, inside the same transaction (e.g.
+    /// severing a lookup as part of the all-or-nothing change — unified-access-control-r2 task 140, round 34 item 3:
+    /// <c>set-record-share-expiry</c> takes a contact-issued grant over in the same write). It was rejected before
+    /// 2026-10-04 because the builder put the <see cref="DBNull"/> itself into the entity, which cannot be
+    /// serialized; it is now mapped to null, as <see cref="UpdateAsync"/> maps it.</para>
     /// <para><b>Failure.</b> Throws <see cref="InvalidOperationException"/> whose message states only what
     /// is known: when Dataverse identifies the request that faulted, the message names its index and record
     /// and states that NO update was applied; otherwise it states that the updates were applied all together

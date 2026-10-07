@@ -9,7 +9,7 @@
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C — 4-class
 //     rollback taxonomy: Resumable / Retryable-with-cleanup / Quarantine-required
 //     / Successful-but-drifted. H0 preflight is quintessentially Resumable
-//     (external precondition — quota bump / cert bootstrap — resolves the
+//     (external precondition — quota bump / SPE owner setup — resolves the
 //     issue; operator then POST /api/runs/{id}/resume).
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-24 (rollback
 //     semantics) + FR-01 (H0 acceptance: block run + emit distinct diagnostic

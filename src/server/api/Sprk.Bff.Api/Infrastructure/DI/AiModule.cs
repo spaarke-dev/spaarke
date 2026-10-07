@@ -43,9 +43,9 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///   - AddScoped&lt;AnalysisChatContextResolver&gt;            — analysis context (Dataverse + Redis)
 ///   - AddScoped&lt;StandaloneChatContextProvider&gt;          — standalone chat context (Redis-only)
 ///
-/// CONDITIONAL (DocumentIntelligence:Enabled = true) — 3 additional feature-gated registrations:
+/// CONDITIONAL (DocumentIntelligence:Enabled = true) — 2 additional feature-gated registrations:
 ///  12. AddSingleton&lt;RagIndexingPipeline&gt;               — ADR-010 (AIPL-013) — conditional: requires SearchIndexClient + IOpenAiClient
-///  13. AddSingleton&lt;ReferenceIndexingService&gt;          — ADR-010 (AIRA-011) — conditional: golden reference knowledge indexing
+///  13. (ReferenceIndexingService — removed by unified-access-control-r2 task 163 with its only consumer)
 ///  14. AddSingleton&lt;ReferenceRetrievalService&gt;         — ADR-010 (AIRA-013) — conditional: reference knowledge retrieval
 ///
 /// Plus 1 framework registration: AddHttpClient&lt;LlamaParseClient&gt; (not counted per ADR-010)
@@ -200,7 +200,7 @@ public static class AiModule
         // in AnalysisOrchestrationService.  Stateless and thread-safe.
         services.AddSingleton<RagQueryBuilder>();
 
-        // RagIndexingPipeline, ReferenceIndexingService, ReferenceRetrievalService all depend
+        // RagIndexingPipeline and ReferenceRetrievalService both depend
         // on IOpenAiClient + SearchIndexClient — both gated on DocumentIntelligence:Enabled.
         // Register conditionally so DI does not fail when AI is disabled.
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
@@ -214,13 +214,10 @@ public static class AiModule
             //           IOpenAiClient, IOptions<AiSearchOptions>.
             services.AddSingleton<RagIndexingPipeline>();
 
-            // ReferenceIndexingService — concrete singleton per ADR-010 (AIRA-011).
-            // Indexes golden reference knowledge sources into spaarke-rag-references index.
-            // 512-token chunks, 100-token overlap, 3072-dim embeddings.
-            // Called by AdminKnowledgeEndpoints (admin-only, not Service Bus).
-            // Requires: ITextChunkingService, SearchIndexClient, IOpenAiClient,
-            //           IScopeResolverService, IOptions<AiSearchOptions>.
-            services.AddSingleton<ReferenceIndexingService>();
+            // ReferenceIndexingService REMOVED (unified-access-control-r2 task 163): its only consumer was
+            // AdminKnowledgeEndpoints (/api/admin/knowledge/*), deleted under owner round 10 item 1 (no
+            // caller in the repo, in no published API description). The reference index is populated by the
+            // operator scripts scripts/ai-search/Add-ReferenceToIndex.ps1 / Index-AllReferences.ps1.
 
             // ReferenceRetrievalService — concrete singleton per ADR-010 (AIRA-013).
             // Queries spaarke-rag-references index for golden reference knowledge using
@@ -323,7 +320,7 @@ public static class AiModule
 // CONDITIONAL (DocumentIntelligence:Enabled=true) — feature-gated, excluded from ADR-010 limit
 // -----------------------------------------------------------------------------
 // 12. AddSingleton<RagIndexingPipeline>                    — RAG indexing pipeline (AIPL-013)
-// 13. AddSingleton<ReferenceIndexingService>               — reference knowledge indexing (AIRA-011)
+// 13. (ReferenceIndexingService — removed by unified-access-control-r2 task 163 with AdminKnowledgeEndpoints)
 // 14. AddSingleton<ReferenceRetrievalService>              — reference knowledge retrieval (AIRA-013)
 // -----------------------------------------------------------------------------
 // PHASE 2 SERVICES — registered in appropriate feature modules, not here (AIPU-075 audit)

@@ -2,7 +2,7 @@
 // Task 033 (2026-06-21): Public contract for the top-level membership resolver.
 // Combines IMembershipFieldDiscoveryService (task 030), IIdentityNormalizationService
 // (task 031), IOrganizationMembershipResolver (task 032 — consumed transitively via
-// task 031), and a per-user Redis cache (5-min TTL Phase 1A per FR-1A.8) to build
+// task 031), and a per-user Redis cache (2-min TTL since unified-access-control-r2 task 132; was 5) to build
 // + execute a single OR-joined FetchXML query against the target entity and group
 // matching rows by role.
 //
@@ -22,8 +22,9 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// field discovery (per-entity metadata scan), identity normalization (systemuser
 /// → 6-path PersonIdentity), and a per-user FetchXML query against the target
 /// entity to return matching row ids grouped by role. Results cached in Redis
-/// for 5 minutes (Phase 1A; Phase 2 task 086 extends TTL + adds pub/sub
-/// invalidation per FR-2P2.8).
+/// for 2 minutes (5 before unified-access-control-r2 task 132; a response built
+/// over a faulted read is never cached); evicted by the BFF's own team / BU /
+/// owner writes (task 132) and by the Phase 2 pub/sub invalidation (FR-2P2.8).
 /// </summary>
 public interface IMembershipResolverService
 {

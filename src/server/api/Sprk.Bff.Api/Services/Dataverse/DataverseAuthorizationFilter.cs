@@ -1,14 +1,22 @@
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
-using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
 
 namespace Sprk.Bff.Api.Services.Dataverse;
 
 /// <summary>
 /// Strategy describing where the <see cref="DataverseAuthorizationFilter"/> resolves the entity
-/// (or entities) to privilege-check for the current endpoint.
+/// to privilege-check for the current endpoint.
 /// </summary>
+/// <remarks>
+/// The <c>FromFetchXmlBody</c> and <c>FromRouteValueWithRecord</c> members were DELETED with the only
+/// two routes that used them, the internal <c>POST /api/dataverse/fetch</c> and
+/// <c>GET /api/dataverse/record/{entityLogicalName}/{id}</c> (unified-access-control-r2 task 160, owner
+/// round 10 item 1: no caller in the repo, in no published API description). Those routes ran the
+/// caller's query app-only, so this entity-level check was their only control (route sweep findings
+/// #9 and #10). Do not re-add a FetchXML-body mode for a route that reads app-only: this filter checks a
+/// table-level privilege at any depth, and it never consults a record.
+/// </remarks>
 internal enum EntitySource
 {
     /// <summary>Single entity logical name from a route value (default key: <c>entityLogicalName</c>).</summary>
@@ -18,19 +26,7 @@ internal enum EntitySource
     /// Single entity derived by looking up the SavedQuery from a <c>savedQueryId</c> route value
     /// (the SavedQueryService caches savedquery→entity mapping for fast lookup).
     /// </summary>
-    FromSavedQueryEntity,
-
-    /// <summary>
-    /// Primary entity plus every <c>&lt;link-entity&gt;</c> inside the FetchXML body (FR-BFF-04).
-    /// Requires <see cref="IFetchXmlEntityExtractor"/> to be DI-registered (task 013 owns the impl).
-    /// </summary>
-    FromFetchXmlBody,
-
-    /// <summary>
-    /// Single entity from a route value with the record id passed through to the handler for
-    /// downstream existence/row-level validation (FR-BFF-05).
-    /// </summary>
-    FromRouteValueWithRecord
+    FromSavedQueryEntity
 }
 
 /// <summary>
@@ -41,9 +37,18 @@ internal sealed record DataverseAuthorizationFilterOptions(
     string RouteKey = "entityLogicalName");
 
 /// <summary>
-/// Authorization filter for Dataverse projection endpoints (FR-BFF-01..05, FR-BFF-07).
-/// Validates that the caller has Read privilege on every Dataverse entity referenced by the request.
+/// Authorization filter for Dataverse projection endpoints (FR-BFF-01..03, FR-BFF-07).
+/// Validates that the caller has Read privilege on the Dataverse entity named by the request.
 /// </summary>
+/// <remarks>
+/// <para>
+/// ENTITY-LEVEL ONLY. The caller's readable-entity set is built from <c>RetrieveUserPrivileges</c>
+/// and keeps any <c>prvRead*</c> privilege at ANY depth (Basic, Local, Deep or Global); no record is
+/// consulted. It is a cheap, documented 403 for table metadata and view definitions, and it is NOT a
+/// record-level control: a route that returns record DATA must run that read as the caller (or
+/// pre-check the exact record) and must not rely on this filter.
+/// </para>
+/// </remarks>
 /// <remarks>
 /// <para>
 /// Follows ADR-008 (endpoint-filter authorization), ADR-019 (ProblemDetails), ADR-028 (Spaarke Auth v2).
@@ -52,14 +57,13 @@ internal sealed record DataverseAuthorizationFilterOptions(
 /// <para>
 /// Constructed per-request by <see cref="DataverseAuthorizationFilterExtensions"/> with the
 /// per-endpoint <see cref="DataverseAuthorizationFilterOptions"/>. The class is NOT registered in DI
-/// directly — its dependencies (<see cref="IDataversePrivilegeChecker"/>, <see cref="IFetchXmlEntityExtractor"/>)
-/// are resolved from the request-scoped service provider.
+/// directly — its dependency (<see cref="IDataversePrivilegeChecker"/>) is resolved from the
+/// request-scoped service provider.
 /// </para>
 /// </remarks>
 internal sealed class DataverseAuthorizationFilter : IEndpointFilter
 {
     private readonly IDataversePrivilegeChecker _privilegeChecker;
-    private readonly IFetchXmlEntityExtractor? _fetchXmlExtractor;
     private readonly ILogger<DataverseAuthorizationFilter> _logger;
     private readonly DataverseAuthorizationFilterOptions _options;
 
@@ -70,12 +74,10 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
 
     public DataverseAuthorizationFilter(
         IDataversePrivilegeChecker privilegeChecker,
-        IFetchXmlEntityExtractor? fetchXmlExtractor,
         ILogger<DataverseAuthorizationFilter> logger,
         DataverseAuthorizationFilterOptions options)
     {
         _privilegeChecker = privilegeChecker ?? throw new ArgumentNullException(nameof(privilegeChecker));
-        _fetchXmlExtractor = fetchXmlExtractor; // Optional: only required for EntitySource.FromFetchXmlBody.
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options ?? throw new ArgumentNullException(nameof(options));
     }
@@ -101,19 +103,11 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
 
         var tenantId = httpContext.User.FindFirst(TenantIdClaimType)?.Value;
 
-        // Step 2: Resolve entity (or entities) to check.
-        IReadOnlyList<string> entities;
+        // Step 2: Resolve the entity to check.
+        string entity;
         try
         {
-            entities = ResolveEntities(context);
-        }
-        catch (FetchXmlParseException ex)
-        {
-            _logger.LogWarning(
-                "Dataverse authorization denied: malformed FetchXML (correlationId={CorrelationId}, reason={Reason})",
-                httpContext.TraceIdentifier, ex.Message);
-            return DataverseProblem(400, "Bad Request", "FetchXML payload could not be parsed",
-                "DV_FETCHXML_MALFORMED", httpContext);
+            entity = ResolveEntity(context);
         }
         catch (InvalidOperationException ex)
         {
@@ -123,65 +117,47 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
             return DataverseProblem(400, "Bad Request", ex.Message, "DV_NO_TARGET_ENTITY", httpContext);
         }
 
-        if (entities.Count == 0 || entities.Any(string.IsNullOrWhiteSpace))
+        if (string.IsNullOrWhiteSpace(entity))
         {
             return DataverseProblem(400, "Bad Request", "Target entity not resolvable from request",
                 "DV_NO_TARGET_ENTITY", httpContext);
         }
 
-        // Step 3: Privilege check.
-        // For a single entity we call HasReadPrivilegeAsync directly. For multi-entity (FetchXML) we
-        // hydrate the readable-entity set once via GetReadableEntitiesAsync and check set membership
-        // in-process — this yields a single Dataverse call regardless of FetchXML breadth (FR-BFF-04 <500ms p50).
-        var distinct = entities.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        // Step 3: Privilege check (entity-level; see the class remarks).
+        var allowed = await _privilegeChecker.HasReadPrivilegeAsync(userOid, entity, ct);
 
-        List<string> denied;
-        if (distinct.Count == 1)
-        {
-            var allowed = await _privilegeChecker.HasReadPrivilegeAsync(userOid, distinct[0], ct);
-            denied = allowed ? new List<string>() : new List<string> { distinct[0] };
-        }
-        else
-        {
-            var readable = await _privilegeChecker.GetReadableEntitiesAsync(userOid, ct);
-            denied = distinct.Where(e => !readable.Contains(e)).ToList();
-        }
-
-        if (denied.Count > 0)
+        if (!allowed)
         {
             _logger.LogWarning(
-                "Dataverse authorization denied: user={UserOid}, tenant={TenantId}, deniedEntities={DeniedEntities}, entitySource={EntitySource}, correlationId={CorrelationId}",
-                userOid, tenantId, denied, _options.EntitySource, httpContext.TraceIdentifier);
+                "Dataverse authorization denied: user={UserOid}, tenant={TenantId}, deniedEntity={DeniedEntity}, entitySource={EntitySource}, correlationId={CorrelationId}",
+                userOid, tenantId, entity, _options.EntitySource, httpContext.TraceIdentifier);
 
-            // Per design §4 Step 3: include only the FIRST denied entity in the detail to avoid
-            // information disclosure about other entities referenced in the query.
             return DataverseProblem(
                 403,
                 "Forbidden",
-                $"Read privilege denied on entity '{denied[0]}'",
+                $"Read privilege denied on entity '{entity}'",
                 "DV_PRIVILEGE_DENIED",
                 httpContext);
         }
 
         // Step 4: Log success + delegate.
         _logger.LogInformation(
-            "Dataverse authorization granted: user={UserOid}, tenant={TenantId}, entities={Entities}, entitySource={EntitySource}, correlationId={CorrelationId}",
-            userOid, tenantId, distinct, _options.EntitySource, httpContext.TraceIdentifier);
+            "Dataverse authorization granted: user={UserOid}, tenant={TenantId}, entity={Entity}, entitySource={EntitySource}, correlationId={CorrelationId}",
+            userOid, tenantId, entity, _options.EntitySource, httpContext.TraceIdentifier);
 
         return await next(context);
     }
 
     /// <summary>
-    /// Resolves the set of entities to privilege-check based on the configured <see cref="EntitySource"/>.
+    /// Resolves the entity to privilege-check based on the configured <see cref="EntitySource"/>.
     /// </summary>
-    private IReadOnlyList<string> ResolveEntities(EndpointFilterInvocationContext context)
+    private string ResolveEntity(EndpointFilterInvocationContext context)
     {
         var routeValues = context.HttpContext.Request.RouteValues;
 
         switch (_options.EntitySource)
         {
             case EntitySource.FromRouteValue:
-            case EntitySource.FromRouteValueWithRecord:
                 {
                     var entityLogicalName = routeValues[_options.RouteKey]?.ToString();
                     if (string.IsNullOrWhiteSpace(entityLogicalName))
@@ -189,7 +165,7 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
                         throw new InvalidOperationException(
                             $"Route value '{_options.RouteKey}' is missing or empty");
                     }
-                    return new[] { entityLogicalName.Trim().ToLowerInvariant() };
+                    return entityLogicalName.Trim().ToLowerInvariant();
                 }
 
             case EntitySource.FromSavedQueryEntity:
@@ -219,61 +195,10 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
                         "EntitySource.FromSavedQueryEntity must be handled by the endpoint (see handler-side privilege check)");
                 }
 
-            case EntitySource.FromFetchXmlBody:
-                {
-                    if (_fetchXmlExtractor is null)
-                    {
-                        throw new InvalidOperationException(
-                            "EntitySource.FromFetchXmlBody requires IFetchXmlEntityExtractor to be DI-registered");
-                    }
-
-                    var fetchXml = ExtractFetchXmlFromArguments(context);
-                    if (string.IsNullOrWhiteSpace(fetchXml))
-                    {
-                        throw new InvalidOperationException("FetchXML payload not found in request");
-                    }
-
-                    var extracted = _fetchXmlExtractor.ExtractEntities(fetchXml);
-                    return extracted.ToList();
-                }
-
             default:
                 throw new InvalidOperationException(
                     $"Unsupported EntitySource: {_options.EntitySource}");
         }
-    }
-
-    /// <summary>
-    /// Finds a string-typed FetchXML payload in the endpoint arguments. Mirrors the
-    /// <c>ExtractSearchRequest</c> pattern in <c>SemanticSearchAuthorizationFilter</c>.
-    /// </summary>
-    private static string? ExtractFetchXmlFromArguments(EndpointFilterInvocationContext context)
-    {
-        // Task 013 will define the actual request DTO shape. For now the filter looks for either
-        // a property named FetchXml on any argument (via reflection-free duck check on common shapes)
-        // or a raw string argument. Task 013 may refine this once the FetchRequest record exists.
-        foreach (var arg in context.Arguments)
-        {
-            if (arg is null) continue;
-
-            if (arg is string s)
-            {
-                return s;
-            }
-
-            // Common shape: record / class with a FetchXml property.
-            var prop = arg.GetType().GetProperty("FetchXml");
-            if (prop is not null && prop.PropertyType == typeof(string))
-            {
-                var value = prop.GetValue(arg) as string;
-                if (!string.IsNullOrWhiteSpace(value))
-                {
-                    return value;
-                }
-            }
-        }
-
-        return null;
     }
 
     /// <summary>
@@ -307,7 +232,7 @@ internal static class DataverseAuthorizationFilterExtensions
     /// </summary>
     /// <param name="builder">The endpoint convention builder.</param>
     /// <param name="entitySource">Where the filter finds the entity(ies) to privilege-check.</param>
-    /// <param name="routeKey">Route key for <see cref="EntitySource.FromRouteValue"/> / <c>FromRouteValueWithRecord</c> (default: <c>entityLogicalName</c>).</param>
+    /// <param name="routeKey">Route key for <see cref="EntitySource.FromRouteValue"/> (default: <c>entityLogicalName</c>).</param>
     public static TBuilder AddDataverseAuthorizationFilter<TBuilder>(
         this TBuilder builder,
         EntitySource entitySource,
@@ -319,10 +244,9 @@ internal static class DataverseAuthorizationFilterExtensions
         {
             var sp = context.HttpContext.RequestServices;
             var checker = sp.GetRequiredService<IDataversePrivilegeChecker>();
-            var extractor = sp.GetService<IFetchXmlEntityExtractor>(); // Optional — only used by FromFetchXmlBody.
             var logger = sp.GetRequiredService<ILogger<DataverseAuthorizationFilter>>();
 
-            var filter = new DataverseAuthorizationFilter(checker, extractor, logger, options);
+            var filter = new DataverseAuthorizationFilter(checker, logger, options);
             return await filter.InvokeAsync(context, next);
         });
     }

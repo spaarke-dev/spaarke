@@ -4,13 +4,10 @@ import {
   tokens,
   Button,
   Checkbox,
-  Field,
   MessageBar,
   MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
-  Radio,
-  RadioGroup,
   Spinner,
   Text,
 } from '@fluentui/react-components';
@@ -121,6 +118,15 @@ const useStyles = makeStyles({
   hint: {
     color: tokens.colorNeutralForeground2,
   },
+  // A quiet secondary link-style action (task 095): brand foreground, no chrome, left-aligned.
+  linkBtn: {
+    alignSelf: 'flex-start',
+    minWidth: 'auto',
+    paddingLeft: 0,
+    paddingRight: 0,
+    color: tokens.colorBrandForegroundLink,
+    ':hover': { color: tokens.colorBrandForegroundLinkHover },
+  },
 });
 
 export interface SaveModeSectionProps {
@@ -134,10 +140,6 @@ export interface SaveModeSectionProps {
   onRetryIdentity?: () => void;
   /** True while a save is in flight. */
   disabled?: boolean;
-}
-
-function quoted(label: string | null): string {
-  return label ? `“${label}”` : 'the existing document';
 }
 
 export function SaveModeSection({
@@ -161,24 +163,26 @@ export function SaveModeSection({
       );
 
     case 'version': {
-      const isVersion = resolution.effectiveChoice !== 'new';
+      // Task 095 (owner, 2026-10-04 — "Hide the choice; Save = new version"): no "Save as" radios. In version
+      // mode (the default) there is nothing to show here — the primary button just saves a new version, and
+      // the quiet "Save as new document" link lives with the locked name it unlocks (SaveFlow's
+      // renderDocumentDetails('locked')). Only after the user chose create mode does this section render,
+      // to offer the way back: a "Keep as version" link.
+      if (resolution.effectiveChoice !== 'new') return null;
       return (
         <div className={styles.section}>
-          <Field label="Save as">
-            <RadioGroup
-              value={isVersion ? 'version' : 'new'}
-              onChange={(_e, data) => onChoiceChange(data.value === 'new' ? 'new' : 'version')}
-              disabled={disabled}
-            >
-              <Radio value="version" label={`A new version of ${quoted(resolution.documentLabel)}`} />
-              <Radio value="new" label="A new document" />
-            </RadioGroup>
-          </Field>
           <Text size={200} className={styles.hint}>
-            {isVersion
-              ? `Save will add a new version to ${quoted(resolution.documentLabel)} in Spaarke. Its name and related records stay as they are.`
-              : 'Save will create a separate Spaarke document. The existing document is not changed.'}
+            Save will create a separate Spaarke document. The existing document is not changed.
           </Text>
+          <Button
+            appearance="transparent"
+            size="small"
+            className={styles.linkBtn}
+            onClick={() => onChoiceChange('version')}
+            disabled={disabled}
+          >
+            Keep as version
+          </Button>
         </div>
       );
     }

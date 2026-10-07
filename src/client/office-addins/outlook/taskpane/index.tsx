@@ -8,8 +8,11 @@ import type { IHostAdapter } from '@shared/adapters';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with outlook/manifest.json's "version" field
-const APP_VERSION = '1.0.22';
+// Version information. Like the Word pane (task 089), this is the unified package's version injected at build time
+// (`UNIFIED_PACKAGE.VERSION` → `process.env.ADDIN_PACKAGE_VERSION`). It was a hand-maintained '1.0.22' — the old
+// Outlook-only manifest's version — so Outlook showed v1.0.22 while Word showed the package the admin uploads
+// (owner UAT 2026-10-06). 'unknown' only outside a webpack build.
+const APP_VERSION = process.env.ADDIN_PACKAGE_VERSION || 'unknown';
 // Task 040 / FR-B0: fallback (used only outside webpack, e.g. non-build test
 // contexts) was a stale hardcoded date; webpack's DefinePlugin always injects
 // the real build date, so this fallback should never be user-visible.
@@ -108,8 +111,12 @@ function installMockAuth(): void {
   mutableAuth.isAuthenticated = () => true;
   mutableAuth.getAccount = () => mockAccount;
   mutableAuth.getAccessToken = async () => 'mock-access-token';
-  mutableAuth.signIn = async () => { /* no-op */ };
-  mutableAuth.signOut = async () => { /* no-op */ };
+  mutableAuth.signIn = async () => {
+    /* no-op */
+  };
+  mutableAuth.signOut = async () => {
+    /* no-op */
+  };
 }
 
 // Global root for error rendering

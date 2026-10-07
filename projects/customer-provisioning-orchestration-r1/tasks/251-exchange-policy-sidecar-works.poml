@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="251" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Make the Exchange-policy sidecar work on the L2 Worker (G30) — correct its settings wiring, give it a real Exchange identity (preferably managed identity), deploy the Worker + sidecar together healthy</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T251 (gap G30, found during T248's dev deploy 2026-10-03)</phase>
+    <gate>startable now; the Exchange identity choice is an owner decision (escalation 1)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive (Exchange Online app-only identity for H14a), Bicep for a live App Service, sidecar code, and a dev deployment.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive identity design across Entra, Exchange Online RBAC and App Service sidecars; live deploy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (provisioning constraints / skill) — main-session-only; live steps need owner confirmation; Worker Bicep module overlap with T248</parallel-reason>
+    <tags>provisioning, l2-controlplane, provisioning-handler, auth, exchange, sidecar, bicep, deploy, testing, model1-dedicated</tags>
+    <deps>248</deps>
+  </metadata>
+
+  <prompt>
+    The Exchange-policy sidecar (H14a's Exchange Online ApplicationAccessPolicy step) has never run. Make it start,
+    authenticate to Exchange Online with a real identity, and run beside the Worker so the dev Worker is healthy again
+    and H14a can work before the first customer run (T186).
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 control plane: App Service sidecar containers (`Microsoft.Web/sites/sitecontainers`),
+    Exchange Online PowerShell app-only auth, Entra workload identity. Follow ADR-028 A4 strictly.
+  </role>
+
+  <goal>
+    The dev Worker serves `/healthz` 200 with the `exchange-policy-sidecar` container running; the sidecar receives every
+    setting it needs; it authenticates to Exchange Online with an identity the owner approved (managed identity preferred
+    — ADR-028 A4; a Key Vault certificate only if managed identity cannot work, and only by owner decision); the Worker →
+    sidecar call H14a makes succeeds against the dev tenant; a fresh `platform-controlplane` deploy can never again leave
+    the Worker down because of the sidecar.
+  </goal>
+
+  <context>
+    <background>
+      Found 2026-10-03 (T248 step 7): the first `platform-controlplane` deploy since 2026-08-21 created the sidecar for the
+      first time. It logs `missing required environment variables — refusing to bind port: SIDECAR_SHARED_SECRET,
+      PLATFORM_KV_URI, …`, and App Service holds the whole Worker at 503 until every container is up (the deploy CLI's
+      "Starting the site…" wait). Root causes:
+      (1) Microsoft's `sitecontainers` schema: an environment variable's `value` "must be the name of an AppSetting. The actual
+      value … will be retrieved from the specified AppSetting at runtime. If the AppSetting is not found, the value will be set
+      to an empty string". `modules/controlplane-worker-app-service.bicep` passes LITERAL values (vault URI, secret names, app id,
+      a KV reference), so every variable arrives empty.
+      (2) `Exchange-Connect-Cert` in `sprk-controlplane-dev-kv` is a SENTINEL (tags `provenance: sentinel`, seeded
+      2026-08-21 by Seed-PlatformKeyVault) and `exchangeConnectAppId` is the all-zeros placeholder — no real Exchange identity
+      exists. (3) The image exists (`sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar`, tags incl. `latest`, 2026.08.27-*),
+      and `Sidecar-Shared-Secret` exists (generated).
+      Owner direction 2026-10-03: fix the sidecar properly and bring the Worker and sidecar up together; the dev Worker being
+      down meanwhile is acceptable (nothing uses it yet).
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/ (Listener.ps1, Dockerfile — the sidecar)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/ (H14a client of the sidecar)</file>
+      <file>infrastructure/bicep/modules/controlplane-worker-app-service.bicep (exchangePolicySidecar resource + app settings)</file>
+      <file>infrastructure/bicep/platform-controlplane.bicep (+ .json), infrastructure/bicep/parameters/platform-controlplane-dev.bicepparam</file>
+      <file>scripts/provisioning/Deploy-ControlPlane.ps1</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H14 / Exchange sections), docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md</file>
+      <file>.claude/constraints/provisioning.md, .claude/skills/provision-environment/SKILL.md (main session)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (D14, G30)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-028 A4">The sidecar's Exchange identity is a managed identity if Exchange Online app-only auth supports it from an App Service sidecar container; a Key Vault certificate only by owner decision with the reason recorded; never a client secret.</constraint>
+    <constraint source="live-change discipline">Every live change (app registration / Exchange role assignment, deploys, sidecar removal) is stated exactly and confirmed by the owner first. Read-only checks need no confirmation.</constraint>
+    <constraint source=".claude/constraints/provisioning.md § KV credential lifecycle">No Key Vault secret is deleted or purged; do not overwrite `Exchange-Connect-Cert` unless the owner chose the certificate path.</constraint>
+    <constraint source="scope">H14a's handler logic and the D14 scope-group design are unchanged unless the identity choice requires it (then escalate).</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>Choosing the sidecar's Exchange identity (managed identity vs a certificate app; which identity; which Exchange RBAC role) → present the researched options with a recommendation; the owner decides.</trigger>
+    <trigger>Exchange Online app-only auth cannot use a managed identity from an App Service sidecar → STOP and report before designing a certificate path.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="1">Read the sidecar (Listener.ps1, Dockerfile) and H14a's client: the full list of variables it needs, its auth flow, its port and health contract.</step>
+    <step order="2">Research (researcher agent): Exchange Online PowerShell app-only auth from an App Service sidecar — `Connect-ExchangeOnline -ManagedIdentity [-ManagedIdentityAccountId]` support outside Azure Automation/Functions/VMs, required Graph/Exchange roles (`Exchange.ManageAsApp`, an Exchange RBAC role such as Exchange Administrator or a narrower role group), and how the sidecar reaches the App Service managed-identity endpoint.</step>
+    <step order="3">Owner decision on the identity (escalation 1).</step>
+    <step order="4">Bicep: emit each sidecar value as a Worker app setting and reference it BY NAME in `environmentVariables`; drop the sentinel / placeholder defaults so a missing identity fails the deploy or is clearly reported rather than starting a sidecar that cannot run. Recompile JSON.</step>
+    <step order="5">Sidecar code changes needed for the chosen identity; tests per test-scope criterion.</step>
+    <step order="6">Live (confirm first): identity + Exchange role setup; deploy `platform-controlplane` (dev) then the Worker; verify `/healthz` 200, sidecar running, and one Worker → sidecar call.</step>
+    <step order="7">Docs + `.claude` + CHANGELOG; plan G30 closed; Step 9.5 gates; close + commit + push.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Dev Worker `/healthz` returns 200 with the `exchange-policy-sidecar` container running (log shows it bound its port).</criterion>
+    <criterion testable="true">Every sidecar `environmentVariables` entry names an app setting that exists on the Worker; no literal values; checked-in JSON = fresh compile.</criterion>
+    <criterion testable="true">The sidecar authenticates to Exchange Online with the owner-approved identity (no client secret anywhere); one Worker → sidecar request returns success against the dev tenant.</criterion>
+    <criterion testable="true">ControlPlane.Tests no new failures beyond the T221 baseline; ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: the sidecar's settings validation (all present / one missing) and the auth-mode selection for the chosen identity. Anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-03 during T248 (owner direction: fix the sidecar properly rather than remove it). Hard prerequisite of
+    T186 (first live customer run): H14a cannot set the Exchange ApplicationAccessPolicy without it.
+
+    COMPLETED 2026-10-04. Design + spike log: notes/t251-exchange-sidecar-design.md (owner D24-D26).
+    - Identity: the sidecar holds no credential; the Worker signs in as 'Spaarke Exchange Admin' via its UAMI's
+      federated credential and sends the token per request (D24). Narrowed Exchange role + delegating x4 (D25).
+    - H14a moved from ApplicationAccessPolicy to RBAC for Applications, stamp UAMI only, group-scoped (D26); H10 no
+      longer grants the four mailbox roles in Entra; T3/T4 follow.
+    - Root cause of the spike blocker: -Organization <tenant GUID> lets Exchange connect and read but fails every
+      write ("write permission to target DC"). The Worker now resolves the initial domain from Graph GET
+      /organization and the sidecar requires it. No support case (owner).
+    - Live read-back shape: RecipientWriteScope = Group + CustomResourceScope = group Name (no RecipientGroupScope
+      property); Get-Group lacks ExternalDirectoryObjectId (Get-Recipient has it). Code matches this.
+    Acceptance:
+    - /healthz 200 with the sidecar running: deployed 2026-10-04 (image provisioning-sidecar:633eb5ff3 / latest);
+      sidecar log "Sidecar listening, degraded:false" at 20:19:36Z. platform-controlplane deploy: Worker module
+      Succeeded; Api module failed only on the known pending swap (owner item).
+    - Sidecar environmentVariables name app settings; JSON = fresh compile (verified after prettier).
+    - Owner-approved identity, no secret: in-tenant run of Verify-Sidecar-Live.ps1 -InTenant (the deployed image,
+      the Worker UAMI, the dev tenant): read HTTP 200 Success; wrong secret 401; tenant id as organization 400.
+      Report notes/sidecar-live-verification-2026-10-04.json. The literal in-Worker call runs first in T186 —
+      no endpoint makes the Worker call the sidecar outside a provisioning run.
+    - ControlPlane 2100 / 6 T221 baseline / 1 skip; ArchTests 346/346; Pester 16/16.
+    Tests beyond the stated scope (one line each):
+    - Pester Invoke-MailboxAccessApply cases (code review W5): Drift must create nothing and success needs read-back.
+    - Pester organization checks + the management-scope Drift case: guard the two failure modes found live.
+    - Contract tests for the initial-domain lookup (failure, per-tenant cache, parser): a GUID fallback would
+      silently break every write.
+    Open, recorded for T186: CustomResourceScope was confirmed to carry the group's name on a group whose Name =
+    DisplayName; if Exchange reports DisplayName instead, a group with different values fails closed (read-back
+    Failure), never open (code review W1).
+    Also fixed at discovery: Verify-Sidecar-Live.ps1 could never reach the sidecar on Linux (Kudu runs in its own
+    container) — reworked; Deploy-ControlPlane.ps1 checked the Worker for the pre-rename Cosmos__Endpoint key.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; Step 9.5 gates mandatory; live steps need owner confirmation each time.</protocol>
+  </execution>
+</task>

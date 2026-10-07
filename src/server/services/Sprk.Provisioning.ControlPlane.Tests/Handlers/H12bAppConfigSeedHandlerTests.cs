@@ -19,7 +19,9 @@
 //
 // Plus defensive negative branches:
 //   - Missing tenantId (§4D I1) → Failure(Resumable, MissingTenantId); NO seeder fires
-//   - Missing dataverseUrl (§4D I1) → Failure(Resumable, MissingDataverseUrl); NO seeder fires
+//   - Missing InterStepState.DataverseEnvUrl (H5 output, task 245a; §4D I1) → Failure(Resumable, MissingDataverseUrl); NO seeder fires
+//   - Env URL present only in NonSecret["dataverseUrl"] is NOT read → MissingDataverseUrl (G25 guard)
+//   - Seeder input carries InterStepState.DataverseEnvUrl
 //   - Run not found in Cosmos partition → Failure(Resumable, RunNotFound)
 //   - HandlerId mismatch → throws InvalidOperationException (defensive dispatch bug detector)
 //   - Manifest not found → Failure(Resumable, ManifestNotFound)
@@ -46,7 +48,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H12bAppConfigSeedHandlerTests : IDisposable
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-appconfig-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
     private const string DataverseUrl = "https://acme.crm.dynamics.com";
@@ -165,8 +167,8 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
     [Fact]
     public void AC3_BuildIdempotencyKey_UsesExpectedFormat()
     {
-        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("cust-x", "MANIFESTHASH");
-        key.Should().Be("h12b-cust-x-MANIFESTHASH");
+        var key = H12bAppConfigSeedHandler.BuildIdempotencyKey("custx", "MANIFESTHASH");
+        key.Should().Be("h12b-custx-MANIFESTHASH");
     }
 
     [Fact]
@@ -272,13 +274,13 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
-    // ---------- Defensive: Missing dataverseUrl ----------
+    // ---------- Defensive: Missing Dataverse env URL (H5's InterStepState output) ----------
 
     [Fact]
     public async Task MissingDataverseUrl_ReturnsFailure_MissingDataverseUrl_NoSeederFires()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove("dataverseUrl");
+        run.InterStepState.DataverseEnvUrl = null; // H5's output not recorded on this run.
         var repo = new FakeRepository(run, etag: "etag-1");
         var enqueuer = new FakeEnqueuer();
         var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
@@ -289,6 +291,21 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(AppConfigSeedRejectionCodes.MissingDataverseUrl);
         seeder.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task SeederInput_CarriesInterStepStateDataverseEnvUrl()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-1");
+        var enqueuer = new FakeEnqueuer();
+        var seeder = FakeSeeder.Ok(AppConfigSeedScopes.DataGrid);
+        var handler = NewHandler(repo, enqueuer, new IAppConfigSeeder[] { seeder });
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        seeder.LastInput.Should().NotBeNull();
+        seeder.LastInput!.TargetDataverseUrl.Should().Be(DataverseUrl);
     }
 
     // ---------- Defensive: Run not found ----------
@@ -511,8 +528,8 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
             Status = RunStatus.Running,
             CurrentPhase = "H12b",
         };
-        run.Parameters.NonSecret["tenantId"] = TenantId;
-        run.Parameters.NonSecret["dataverseUrl"] = DataverseUrl;
+        run.Parameters.NonSecret["tenantId"] = TenantId;       // intake value
+        run.InterStepState.DataverseEnvUrl = DataverseUrl;      // H5's output (task 245a, G25)
         return run;
     }
 
@@ -606,6 +623,7 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
 
         public string ScopeName { get; }
         public int CallCount { get; private set; }
+        public AppConfigSeedInput? LastInput { get; private set; }
 
         public static FakeSeeder Ok(string scopeName)
             => new(scopeName, () => AppConfigSeederResult.Ok($"{scopeName} ok"));
@@ -614,6 +632,7 @@ public sealed class H12bAppConfigSeedHandlerTests : IDisposable
             AppConfigSeedInput input, CancellationToken cancellationToken)
         {
             CallCount++;
+            LastInput = input;
             return Task.FromResult(_resultProducer());
         }
     }

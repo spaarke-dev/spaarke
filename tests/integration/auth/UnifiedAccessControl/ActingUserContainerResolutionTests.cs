@@ -92,6 +92,43 @@ public class ActingUserContainerResolutionTests
                 + "would either throw or silently fail to match");
     }
 
+    [Theory(DisplayName = "Task 171 (finding 2): a caller who is not an enabled internal PERSON is refused 403 acting_user_not_eligible — no container is derived")]
+    [InlineData("disabled")]
+    [InlineData("external")]
+    [InlineData("application")]
+    [InlineData("non-interactive")]
+    public async Task ResolveForActingUser_WhenTheCallerIsNotStandingEligible_Refuses(string shape)
+    {
+        var row = UserRow(BusinessUnitId);
+        switch (shape)
+        {
+            case "disabled": row["isdisabled"] = true; break;
+            case "external": row["sprk_isexternal"] = true; break;
+            case "application": row["applicationid"] = Guid.NewGuid(); break;
+            case "non-interactive": row["accessmode"] = new OptionSetValue(4); break;
+        }
+
+        var resolver = Build(userRows: [row], buContainer: BuContainer);
+
+        var act = () => resolver.ResolveForActingUserAsync(CallerOid);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be("acting_user_not_eligible",
+            "record-less content is written app-only into the business unit's shared container, whose writers are "
+            + "exactly the round-70 population — an enabled internal person");
+        ex.StatusCode.Should().Be(403);
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 2): a BLANK sprk_isexternal is internal (round 67) — the caller resolves")]
+    public async Task ResolveForActingUser_BlankIsExternal_IsInternal()
+    {
+        var resolver = Build(userRows: [UserRow(BusinessUnitId)], buContainer: BuContainer);
+
+        var decision = await resolver.ResolveForActingUserAsync(CallerOid);
+
+        decision.ContainerId.Should().Be(BuContainer);
+    }
+
     [Fact(DisplayName = "No record: a caller with NO Dataverse user is REFUSED, never given a default container")]
     public async Task ResolveForActingUser_WhenNoDataverseUserMatchesTheOid_Refuses()
     {
@@ -182,7 +219,13 @@ public class ActingUserContainerResolutionTests
 
     private static Entity UserRow(Guid? businessUnitId)
     {
-        var row = new Entity("systemuser", Guid.NewGuid());
+        var row = new Entity("systemuser", Guid.NewGuid())
+        {
+            // Task 171 (finding 2): an enabled internal person — the round-70 population.
+            ["domainname"] = "acting.user@contoso.example",
+            ["isdisabled"] = false,
+            ["accessmode"] = new OptionSetValue(0),
+        };
 
         if (businessUnitId is { } id)
         {

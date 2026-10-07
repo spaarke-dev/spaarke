@@ -56,4 +56,15 @@ public sealed record AssistantQueryFacadeRequest(
     string? PreviousTurnSummary,
     string TenantId,
     string CallerOid,
-    ClaimsPrincipal? CallerPrincipal);
+    ClaimsPrincipal? CallerPrincipal)
+{
+    /// <summary>
+    /// True only when the route's authorization filter established, as the caller, Write on the subject record
+    /// (unified-access-control-r2 task 163). Carried onto the playbook path's
+    /// <see cref="InsightsAgentRequest.SubjectWriteAuthorized"/>, so the playbook the router or the classifier picks
+    /// runs only if it cannot write, or the caller may write the subject — the SAME subject rule as
+    /// <c>POST /api/insights/ask</c> (owner round 16 item 1; the task-163 amendment on the Assistant tool path).
+    /// Default <c>false</c> (fail closed).
+    /// </summary>
+    public bool SubjectWriteAuthorized { get; init; }
+}
