@@ -27,7 +27,8 @@
    sit outside their config). 039 starts when they answer. A direct cross-session message expired unread.
 4. **Owner's procedure update (2026-10-07)** — step 1 (merge master) done; steps 2–3 (this restructure) done in the
    commit that introduced this file; reply to the owner with sizes and what moved.
-5. **Pass on to the owner** (no decision needed unless they object): D-25 in dev falls back to UTC because dev events
+5. **Owner chose all five parallel streams (2026-10-07)** — table below; stream table at top of TASK-INDEX. Merge stream branches back one at a time (036 and 046 both edit the route ledger). D-42..D-56 decided; no open points remain.
+6. **Pass on to the owner** (no decision needed unless they object): D-25 in dev falls back to UTC because dev events
    fill only `sprk_assignedto`, which `AssignedToDefaults` (uac-r2) doesn't read; task 008 kept the writer's existing
    Read on `sprk_budget` (the evaluator needs it); the read-only Spaarke Platform forms show only Name and Owner.
 
@@ -36,6 +37,13 @@
 | Agent | Work | Notes |
 |---|---|---|
 | 098 | PR #1359 follow-ups (065 + TZ tests) | Own worktree `C:\wt098`; no merge |
+| credential fix | I5 tenant rule: writer credential rebuilt like the central factory (owner-approved) | This worktree; commits code only; main session commits its spec/decisions/CLAUDE.md lines |
+| Stream C | 036 → 026 | `C:\wts-c` branch `stream/c-036-026` → main session merges into this branch |
+| Stream C2 | 047 → 046 | `C:\wts-c2` branch `stream/c2-047-046` → merge back; needs work-assignment owner agreement |
+| Stream D | 072 (then 073/074) | `C:\wts-d` branch `stream/d-072` → merge back |
+| Stream B | 057 UI kit | `C:\wts-b` branch `feat/console-ui-kit-057` → own PR to master |
+| Stream E | 060 | `C:\wts-e` (own PR or `stream/e-060` per POML) |
+| Main session | 110 ADR-050 amendment (own PR to master) | then 056 |
 
 ### Housekeeping for the owner
 

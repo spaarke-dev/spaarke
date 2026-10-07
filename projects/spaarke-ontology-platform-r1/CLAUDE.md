@@ -158,6 +158,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — `dotnet build Spaarke.sln` does not rebuild `tests/Spaarke.ArchTests`; build it explicitly before trusting an arch run (a stale build showed 16 false failures).
 - 2026-10-07 — A POML quoting a bare element name in prose breaks its XML parse — escape angle brackets; `scripts/Validate-TaskPoml.ps1` catches it. Apostrophes break bash heredocs — write commit messages to a file.
 - 2026-10-07 — A cross-session message to another Claude session can be held for approval and expire; use a GitHub issue as the durable channel.
+- 2026-10-07 — In PowerShell, `[IO.File]` resolves relative paths against the PROCESS directory (this worktree), not `cd`'s location: an edit meant for another worktree silently landed here. Always pass absolute paths to .NET file APIs.
 
 ## 7. Key documents
 

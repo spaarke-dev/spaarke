@@ -4,7 +4,7 @@
     <title>ISS-003: resolve the sprk_event rows stranded in Draft</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Data correctness in another domain that this project depends on; the Do lane under-reports without it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,4 +83,10 @@
   <notes>spec.md section 8.1 step 4 dependency. ISS-003. This BLOCKS the Do lane: shipping the lane first makes it under-report silently.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <status>blocked-escalated</status>
+    <date>2026-10-07</date>
+    <summary>Escalation trigger fired at step 2; NO data was changed. Live re-count (spaarkedev1): Draft 49 (not 48), Open 22, Completed 7, Cancelled 1. All 49 Draft rows were created by the same single user (1d02f31c-...), 0 have sprk_regardingcommunication, so the issue-1050 classifier (createdby + regardingcommunication) does not separate system-generated from human-authored. Names are mixed: generic 'Task' rows (Feb 2026), 'Assign Work', 'Analysis AI review', 'Event', and obvious manual test rows ('Task 5 7/9/2026', 'Test new event'). Of these only the Task-type rows could be argued Open; the rest are Event/untyped. Note IsOpenWork already counts Draft, so the Do lane does not under-report these; only the briefing's statuscode=Open filter misses them.</summary>
+    <needs>Owner / communication-intelligence domain owner decision on the classification rule and approval of any bulk update (count and plan reported to the main session). Issue 1050 left open; TASK-INDEX untouched.</needs>
+  </completion>
 </task>
