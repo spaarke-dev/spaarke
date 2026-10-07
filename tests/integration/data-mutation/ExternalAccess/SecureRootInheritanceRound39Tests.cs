@@ -126,7 +126,8 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest(recordType, recordId, user, level),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, _fixture.NoAccessReads,
+            new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),
@@ -147,7 +148,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     private static (int Status, string? Code, JsonElement Body, string? Detail) Problem(IResult result)

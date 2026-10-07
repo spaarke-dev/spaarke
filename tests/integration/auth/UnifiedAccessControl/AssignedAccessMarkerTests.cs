@@ -64,7 +64,7 @@ public class AssignedAccessMarkerTests
     private Task<IResult> ShareUser(Guid user) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", _matter, user, ExternalAccessLevel.Collaborate),
-            _h.Shares, _h.Grants, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
+            _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object, new WriteProbe(), Children(), _h.Guard,
             Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _h.Materializer, Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     /// <summary>Batch 4 integration (task 149): the share routes fan out to a secure root's children — the REAL
@@ -76,7 +76,7 @@ public class AssignedAccessMarkerTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("matter", _matter, user),
             _h.Shares, _h.Grants, _h.Participations, _h.Cache.Mock.Object,
-            _h.Materializer, Children(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
+            _h.Materializer, Children(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Criterion 9 — removal through Manage Access sticks; a manual grant afterwards still succeeds

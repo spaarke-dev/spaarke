@@ -1832,7 +1832,7 @@ public class AccessibleRecordSetServiceTests
         INoAccessListReader? noAccessList = null,
         IContactIdentityStore? identityStore = null)
         => new(membership, participations, standing, noAccessList ?? NeverDeniesReader(),
-               identityStore ?? UnlinkedIdentityStore(),
+               identityStore ?? UnlinkedIdentityStore(), InternalSystemUsers(),
                NullLogger<AccessibleRecordSetService>.Instance);
 
     /// <summary>

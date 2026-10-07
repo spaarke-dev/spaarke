@@ -120,6 +120,17 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.37 (task 114, unified-access-control-r2 — owner test feedback 2026-10-07):
+ * - `pickUser` honours the modal's `excludeExternal` (set on a Restricted record): the "+ User" lookup leaves out
+ *   users flagged `sprk_isexternal = true` (blank counts as internal), and the pick carries the user's email so the
+ *   modal can tell same-named users apart and name the person in a refusal.
+ * - The bundled `AccessGrantModal` keeps itself visible (docked left of the lookup pane, dimmed) while a lookup is
+ *   open instead of hiding — hiding read as the modal closing — and names the person in `/share-user`'s refusals.
+ *
+ * v1.0.36 (task 114, unified-access-control-r2 — owner round 67 amendment 4(c)): no change in this file's logic; the
+ * bundled `AccessGrantModal` labels a user share the BFF marks `externalNoAccess` (a Restricted record, a user flagged
+ * `sprk_isexternal = true`) as "External user — no access" until the server removes it.
+ *
  * v1.0.35 (task 140, unified-access-control-r2 — contact-side Grant Access, owner C4 / Q2):
  * `fetchExistingGrants` also reads `_sprk_grantedbycontact_value` (the new contact-typed issuer lookup), and the
  * bundled `AccessGrantModal` shows a contact-issued grant as "Granted by {contact} (external contact)". Revoking it
@@ -178,6 +189,7 @@ import {
   type IContactSearchResult,
   type IOrganizationPick,
   type IUserPick,
+  type IUserPickOptions,
   type ISecureOwnerInfo,
   type ExternalGrantRootType,
   type AccessPermissionState,
@@ -1038,15 +1050,45 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * generically by `entityType`/`entityTypes` with no per-entity allow-list, so
    * `systemuser` works with no adapter change — verified against
    * `xrmNavigationServiceAdapter.ts`'s `openLookup`, which passes
-   * `entityTypes` straight through. Returns `null` when the user cancels. */
-  private pickUser = async (): Promise<IUserPick | null> => {
+   * `entityTypes` straight through. Returns `null` when the user cancels.
+   *
+   * Task 114 (owner test feedback 2026-10-07): with `excludeExternal` (a Restricted record) the lookup leaves out
+   * users flagged `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops
+   * nulls). The lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user
+   * and the modal names them. The pick is enriched with the user's email, like {@link pickContact}. */
+  private pickUser = async (options?: IUserPickOptions): Promise<IUserPick | null> => {
     const results = await this.getNavService().openLookup({
       entityType: 'systemuser',
       entityTypes: ['systemuser'],
       allowMultiSelect: false,
+      filters: options?.excludeExternal
+        ? [
+            {
+              entityLogicalName: 'systemuser',
+              filterXml:
+                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
+                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
+            },
+          ]
+        : undefined,
     });
     const picked = results[0];
-    return picked ? { id: picked.id, name: picked.name } : null;
+    if (!picked) return null;
+    try {
+      const rec = (await this.context.webAPI.retrieveRecord(
+        'systemuser',
+        picked.id,
+        '?$select=fullname,internalemailaddress'
+      )) as unknown as { fullname?: string; internalemailaddress?: string };
+      return {
+        id: picked.id,
+        name: rec?.fullname ?? picked.name,
+        email: rec?.internalemailaddress ?? undefined,
+      };
+    } catch {
+      // Email enrichment failed — still return the pick, named as the lookup named it.
+      return { id: picked.id, name: picked.name };
+    }
   };
 
   /** Reads the bound record's secure-project owner + business-unit alignment
@@ -1193,7 +1235,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.35 • Built 2026-10-04',
+      versionText: 'v1.0.37 • Built 2026-10-07',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

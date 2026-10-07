@@ -31,6 +31,7 @@
 using Spaarke.Dataverse;               // AccessRights — the rights type (root CLAUDE.md §11: reuse, do not fork)
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -637,6 +638,66 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
+    /// The systemuser plane's Restricted survivor: its ADR-034 membership term — EXCEPT on a Restricted record when the
+    /// systemuser is flagged <c>sprk_isexternal = true</c> (task 114 verifier K1, owner round 67: a Restricted record is for
+    /// internal use only, and <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> is
+    /// the one predicate). There membership survives nothing, exactly as a contact's access does not. Inactive-only records
+    /// keep the survivor rule unchanged — inactivity is not a Restricted question.
+    /// </summary>
+    /// <remarks>
+    /// The flag is read only when a membership candidate is Restricted (NFR-02), through the authoritative cached
+    /// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> (a flag change is seen within its cache lifetime). A read
+    /// that fails is answered as external (fail closed, ADR-003): the Restricted candidates lose their membership term.
+    /// Not here: Dataverse's own business-unit read of a NON-secure Restricted record by a user in that business unit —
+    /// accepted as a known limit (owner round 77).
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<Guid, AccessRights>> SurvivesRestrictedForSystemUserAsync(
+        Guid systemUserId, string entityType, IReadOnlyList<KeyValuePair<Guid, AccessRights>> membershipTerm,
+        IReadOnlyDictionary<Guid, RootRecordFlags> flags, CancellationToken ct)
+    {
+        var survives = new Dictionary<Guid, AccessRights>();
+        foreach (var (id, rights) in membershipTerm)
+        {
+            survives[id] = rights;
+        }
+
+        var restricted = survives.Keys.Where(id => flags.TryGetValue(id, out var f) && f.IsRestricted).ToList();
+        if (restricted.Count == 0)
+        {
+            return survives;
+        }
+
+        bool isExternal;
+        try
+        {
+            isExternal = await _systemUsers.IsExternalAsync(systemUserId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "[WF-AUTHZ] Whether systemuser {SystemUserId} is flagged external could not be read: failing CLOSED — their " +
+                "membership term does not survive on the {Count} Restricted {EntityType} candidate(s) (task 114).",
+                systemUserId, restricted.Count, entityType);
+            isExternal = true;
+        }
+
+        if (!Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted(isExternal, rootIsRestricted: true))
+        {
+            return survives;
+        }
+
+        foreach (var id in restricted)
+        {
+            survives.Remove(id);
+        }
+
+        _logger.LogInformation(
+            "[WF-AUTHZ] Systemuser {SystemUserId} is flagged external: {Count} Restricted {EntityType} record(s) keep no " +
+            "membership-term access (owner round 67, task 114).", systemUserId, restricted.Count, entityType);
+        return survives;
+    }
+
+    /// <summary>
     /// The LAST step of every composition, after <see cref="ApplyVetoPipeline"/>: delete every entry whose
     /// rights lack <see cref="AccessRights.Read"/> (unified-access-control-r2 task 136 · defect C2).
     /// </summary>
@@ -1180,6 +1241,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly ISubjectStandingGrantReader _standingGrant;
     private readonly INoAccessListReader _noAccessList;
     private readonly IContactIdentityStore _identityStore;
+    private readonly ISystemUserIdentityResolver _systemUsers;
     private readonly ILogger<AccessibleRecordSetService> _logger;
 
     /// <param name="membership">ADR-034 membership.</param>
@@ -1189,6 +1251,8 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// <param name="identityStore">The status-bearing systemuser↔contact link reads (task 143 r1): the systemuser-plane
     /// veto resolves a SECURE candidate's subjects through them, so a faulted link read removes the record instead of
     /// reading as "no contact".</param>
+    /// <param name="systemUsers">The authoritative <c>sprk_isexternal</c> read (task 114 verifier K1): a systemuser flagged
+    /// external keeps no membership-term access to a Restricted record on this plane.</param>
     /// <param name="logger">Logger.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
@@ -1196,6 +1260,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ISubjectStandingGrantReader standingGrant,
         INoAccessListReader noAccessList,
         IContactIdentityStore identityStore,
+        ISystemUserIdentityResolver systemUsers,
         ILogger<AccessibleRecordSetService> logger)
     {
         ArgumentNullException.ThrowIfNull(membership);
@@ -1203,12 +1268,14 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ArgumentNullException.ThrowIfNull(standingGrant);
         ArgumentNullException.ThrowIfNull(noAccessList);
         ArgumentNullException.ThrowIfNull(identityStore);
+        ArgumentNullException.ThrowIfNull(systemUsers);
         ArgumentNullException.ThrowIfNull(logger);
         _membership = membership;
         _participations = participations;
         _standingGrant = standingGrant;
         _noAccessList = noAccessList;
         _identityStore = identityStore;
+        _systemUsers = systemUsers;
         _logger = logger;
     }
 
@@ -1727,7 +1794,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             composed,
             veto.RemoveWhole,
             flags,
-            membershipTerm.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+            await SurvivesRestrictedForSystemUserAsync(systemUserId, entityType, membershipTerm, flags, ct).ConfigureAwait(false),
             veto.ContactSourcedOnly);
 
         // Last: no key without Read (task 136 · C2). On this plane the reachable case is the linked contact's

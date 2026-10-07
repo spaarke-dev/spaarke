@@ -178,6 +178,44 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
     // (3) OPEN PRIOR — v3's EXACT bytes after v4 exists, read-only; nothing mutated.
     // ═══════════════════════════════════════════════════════════════════════════════════════════
 
+    [Fact(DisplayName = "F4: opening the CURRENT version streams the current content (Graph refuses it through the versions API); a prior version still uses version content; an unknown id is 404")]
+    public async Task OpenCurrentVersion_StreamsTheCurrentContent_PriorUsesVersionContent_UnknownIs404()
+    {
+        _fixture.ResetBoundaries();
+        var current = Encoding.UTF8.GetBytes("CURRENT bytes (version 2.0) — what /content serves.");
+        var prior = Encoding.UTF8.GetBytes("PRIOR bytes (version 1.0).");
+
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsync(DriveId, ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.0");
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsync(DriveId, ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(current));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileVersionAsync(DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, string, CancellationToken>((_, _, versionId, _) =>
+                versionId == "2.0"
+                    ? throw new InvalidOperationException("Graph 400: You cannot get the content of the current version.")
+                    : Task.FromResult<Stream?>(versionId == "1.0" ? new MemoryStream(prior) : null));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var currentResponse = await client.GetAsync($"/api/documents/{DocumentId}/versions/2.0/content");
+        currentResponse.StatusCode.Should().Be(HttpStatusCode.OK, await currentResponse.Content.ReadAsStringAsync());
+        (await currentResponse.Content.ReadAsByteArrayAsync()).Should().Equal(current);
+
+        var priorResponse = await client.GetAsync($"/api/documents/{DocumentId}/versions/1.0/content");
+        priorResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await priorResponse.Content.ReadAsByteArrayAsync()).Should().Equal(prior);
+
+        (await client.GetAsync($"/api/documents/{DocumentId}/versions/9.0/content")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        _fixture.SpeMock.Verify(
+            s => s.DownloadFileVersionAsync(DriveId, ItemId, "2.0", It.IsAny<CancellationToken>()), Times.Never,
+            "the current version is never asked of the versions API — Graph answers it with a 400");
+        _fixture.SpeMock.Verify(s => s.DownloadFileAsync(DriveId, ItemId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Fact]
     public async Task OpenPriorVersion_AfterLaterVersionExists_ReturnsThatVersionsExactBytes_AndMutatesNothing()
     {

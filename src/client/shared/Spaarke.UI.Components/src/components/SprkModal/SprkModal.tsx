@@ -32,6 +32,19 @@ export type { SprkModalDismiss, SprkModalBodyScroll, SprkModalNav, SprkModalProp
 // — that is React 18+; this shell must stay React-16/17-safe (NFR-04).
 let sprkModalTitleIdCounter = 0;
 
+// Room left at the right edge for the platform's lookup side pane while
+// `yieldToSidePane` is on: at least the pane's width, more on wide windows.
+const SIDE_PANE_CLEARANCE = 'max(440px, 34vw)';
+const SIDE_PANE_YIELD_STYLE: React.CSSProperties = {
+  marginLeft: 'auto',
+  marginRight: SIDE_PANE_CLEARANCE,
+  maxWidth: `calc(100vw - ${SIDE_PANE_CLEARANCE} - 16px)`,
+  // `filter`, not `opacity`: newer Fluent animates the surface's opacity with a persisted Web Animation, which
+  // overrides an inline opacity. Pointer input is blocked here; keyboard focus is blocked by `inert` (see below).
+  filter: 'opacity(0.6)',
+  pointerEvents: 'none',
+};
+
 const useStyles = makeStyles({
   surface: {
     padding: 0,
@@ -129,6 +142,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   dismiss = 'light',
   nonBlocking = false,
   hidden = false,
+  yieldToSidePane = false,
   uiScale = 1,
   maximizable = true,
   nav,
@@ -145,6 +159,17 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   // (aria-labelledby) — we render a custom header, not Fluent's DialogTitle,
   // so the auto-wiring DialogTitle provides must be supplied here explicitly.
   const [titleId] = React.useState(() => `sprk-modal-title-${++sprkModalTitleIdCounter}`);
+  const surfaceRef = React.useRef<HTMLDivElement>(null);
+
+  // While yielding to a side pane the surface is `inert`: Tab and Enter cannot reach Save / Cancel / × behind the
+  // lookup (pointer-events alone blocks only the mouse). Set as a DOM attribute — React 16/17 do not know `inert`.
+  const surfaceInert = yieldToSidePane && !hidden;
+  React.useEffect(() => {
+    const el = surfaceRef.current;
+    if (!el) return;
+    if (surfaceInert) el.setAttribute('inert', '');
+    else el.removeAttribute('inert');
+  }, [surfaceInert, open]);
 
   React.useEffect(() => {
     if (!open) setMaximized(false);
@@ -170,10 +195,18 @@ export const SprkModal: React.FC<SprkModalProps> = ({
       }}
     >
       <DialogSurface
+        ref={surfaceRef}
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
         // `hidden` keeps the surface mounted (state preserved) but out of the way
-        // of a page-level native lookup pane — see the `hidden` prop doc.
-        style={hidden ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' } : surfaceStyle}
+        // of a page-level native lookup pane; `yieldToSidePane` keeps it visible,
+        // docked left of the pane and dimmed — see the two prop docs.
+        style={
+          hidden
+            ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' }
+            : yieldToSidePane
+              ? { ...surfaceStyle, ...SIDE_PANE_YIELD_STYLE }
+              : surfaceStyle
+        }
         aria-labelledby={titleId}
       >
         <div className={styles.header}>

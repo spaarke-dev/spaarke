@@ -42,7 +42,7 @@ Spaarke.AssignedAccess.Config = {
     apiBaseUrl: null,
     syncPath: "/api/v1/external-access/assigned-access/sync",
     notificationId: "sprk_assignedaccess_sync",
-    version: "1.0.0"
+    version: "1.1.0"
 };
 
 /** The record types the sync route accepts, by table. */
@@ -218,6 +218,24 @@ Spaarke.AssignedAccess.summarize = function (response) {
             "hide the record.");
     }
 
+    // Task 114 (owner round 67): a Restricted record keeps no share of a user flagged external.
+    var restricted = (response && response.restrictedExternal) || {};
+    var removedExternal = (restricted.removed || []).length;
+    if (removedExternal > 0) {
+        messages.push("Removed access for " + removedExternal + " external " + (removedExternal === 1 ? "user" : "users") +
+            ": this record is Restricted to internal users.");
+    }
+
+    if (restricted.ownerIsExternal) {
+        messages.push("This record is owned by a user flagged as external, who keeps access as its owner: ask an " +
+            "administrator to reassign it to an internal owner.");
+    }
+
+    if (restricted.noInternalReader) {
+        messages.push("Nobody internal can open this record now: it is Restricted and its only other readers were " +
+            "external users. Ask an administrator to share it with an internal user.");
+    }
+
     return messages.join(" ");
 };
 
@@ -247,6 +265,15 @@ Spaarke.AssignedAccess.onLoad = function (executionContext) {
     try {
         var formContext = executionContext.getFormContext();
         formContext.data.entity.addOnPostSave(Spaarke.AssignedAccess.onPostSave);
+
+        // Task 114: the Share command is hidden on a Restricted record (access_ribbon.js isShareAllowed reads this field),
+        // so a change to the field refreshes the command bar at once rather than after the next save.
+        var accessPermission = formContext.getAttribute && formContext.getAttribute("sprk_accesspermission");
+        if (accessPermission) {
+            accessPermission.addOnChange(function () {
+                try { formContext.ui.refreshRibbon(); } catch (e) { /* never break the form */ }
+            });
+        }
         Spaarke.AssignedAccess.getApiBaseUrl().then(function (url) {
             Spaarke.AssignedAccess.Config.apiBaseUrl = url;
         }).catch(function (error) {
