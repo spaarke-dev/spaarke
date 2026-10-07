@@ -296,14 +296,29 @@ public sealed class RestrictedExternalShareRemover
         }
 
         var userMasks = DirectUserMasks(shares);
-        if (userMasks.Count == 0)
-            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
 
-        // ── Who among them is flagged external ─────────────────────────────────
+        // ── The record's OWNER, read on EVERY Restricted pass (verifier V3): an external owner keeps access by ownership
+        //    whether or not they also hold a share, so it is reported either way ──
+        var (owner, ownerRead) = await ReadOwningUserAsync(rootType, recordId, ct).ConfigureAwait(false);
+        // An unreadable owner is a pass that cannot say whether an external user owns the record — not a complete one.
+        var ownerFailures = ownerRead
+            ? Array.Empty<RestrictedExternalShareFailure>()
+            : new[]
+            {
+                new RestrictedExternalShareFailure(null, "owner-unreadable",
+                    "Who owns this Restricted record could not be read, so whether an external user owns it is unknown. Try again."),
+            };
+        if (userMasks.Count == 0 && owner is null)
+            return Evaluated(logical, recordId, Array.Empty<Guid>(), ownerFailures);
+
+        // ── Who among them (and the owner) is flagged external ─────────────────
         Dictionary<Guid, InternalShareEndpoints.SystemUserRow> users;
         try
         {
-            users = await ReadUsersAsync(userMasks.Keys.ToList(), ct).ConfigureAwait(false);
+            var toRead = userMasks.Keys.ToList();
+            if (owner is { } ownerToRead && !toRead.Contains(ownerToRead))
+                toRead.Add(ownerToRead);
+            users = await ReadUsersAsync(toRead, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -316,25 +331,28 @@ public sealed class RestrictedExternalShareRemover
                     "removed. Try again."));
         }
 
-        // Only a STORED true is external (owner round 67 item 3: a blank flag is not).
-        var external = userMasks.Keys
-            .Where(id => users.TryGetValue(id, out var u) && u.IsExternal == true)
-            .OrderBy(id => id)
-            .ToList();
-        if (external.Count == 0)
-            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
+        // The ONE predicate (InternalShareEndpoints.IsBarredOnRestricted): a STORED true — a blank flag is not external (owner
+        // round 67 item 3) — whether or not the user is enabled or a person (verifier V4).
+        bool Barred(Guid id) =>
+            users.TryGetValue(id, out var u) && InternalShareEndpoints.IsBarredOnRestricted(u.IsExternal, rootIsRestricted: true);
 
         // ── An external OWNER: ownership is not a share — reassign the record (an administrator's act) ──
-        var owner = await ReadOwningUserOrNullAsync(rootType, recordId, ct).ConfigureAwait(false);
-        Guid? externalOwner = owner is { } o && external.Contains(o) ? o : null;
+        Guid? externalOwner = owner is { } o && Barred(o) ? o : null;
         if (externalOwner is { } ownerId)
         {
             _logger.LogWarning(
                 "[RESTRICTED-EXTERNAL] {Kind}: Restricted {Type} {RecordId} is OWNED by {UserId}, who is flagged external. " +
                 "Ownership confers access no share revoke can remove — reassign the record to an internal owner.",
                 RestrictedExternalShareReport.OwnerIsExternalKind, logical, recordId, ownerId);
-            external.Remove(ownerId);
         }
+
+        var external = userMasks.Keys
+            .Where(id => Barred(id) && id != externalOwner)
+            .OrderBy(id => id)
+            .ToList();
+        if (external.Count == 0)
+            return Evaluated(logical, recordId, Array.Empty<Guid>(), ownerFailures)
+                with { OwnerIsExternal = externalOwner };
 
         // ── Restricted wins over the last-reader rule (owner round 67 item 3): whether anyone internal remains is REPORTED ──
         // An enabled internal (not external-flagged) user with a readable direct share. Only a SECURE record depends on its
@@ -342,12 +360,12 @@ public sealed class RestrictedExternalShareRemover
         var internalReaderRemains = !flags.IsSecure || userMasks.Any(p =>
             !external.Contains(p.Key) && p.Key != externalOwner
             && RecordShareLevels.CanRead(p.Value)
-            && users.TryGetValue(p.Key, out var u) && u.IsDisabled is false && u.IsExternal != true);
+            && users.TryGetValue(p.Key, out var u) && u.IsDisabled is false && !Barred(p.Key));
 
         // ── Remove each, confirm by read-back — the lease proven ours before every revoke ──
         var entitySet = ExternalGrantRoot.BindFor(rootType).EntitySet;
         var removed = new List<Guid>();
-        var failures = new List<RestrictedExternalShareFailure>();
+        var failures = new List<RestrictedExternalShareFailure>(ownerFailures);
         foreach (var userId in external)
         {
             if (!await RenewLockAsync(recordLock, logical, recordId, userId, failures, ct).ConfigureAwait(false))
@@ -432,8 +450,11 @@ public sealed class RestrictedExternalShareRemover
         return false;
     }
 
-    /// <summary>The record's OWNING user, or <c>null</c> when it is team-owned or the owner cannot be read (logged).</summary>
-    private async Task<Guid?> ReadOwningUserOrNullAsync(ExternalGrantRootType rootType, Guid recordId, CancellationToken ct)
+    /// <summary>
+    /// The record's OWNING user (<c>null</c> when it is team-owned), and whether the read succeeded — a failed read is
+    /// logged and reported as a failure by the caller, never taken as "no external owner".
+    /// </summary>
+    private async Task<(Guid? Owner, bool Read)> ReadOwningUserAsync(ExternalGrantRootType rootType, Guid recordId, CancellationToken ct)
     {
         var logical = ExternalGrantRoot.LogicalNameFor(rootType);
         try
@@ -444,14 +465,14 @@ public sealed class RestrictedExternalShareRemover
                 select: "_owninguser_value",
                 top: 1,
                 cancellationToken: ct).ConfigureAwait(false);
-            return rows.FirstOrDefault()?.OwningUser is { } user && user != Guid.Empty ? user : null;
+            return (rows.FirstOrDefault()?.OwningUser is { } user && user != Guid.Empty ? user : null, true);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             _logger.LogWarning(ex,
                 "[RESTRICTED-EXTERNAL] The owner of {Type} {RecordId} could not be read; external users' shares are removed " +
-                "regardless (a refused owner revoke is reported).", logical, recordId);
-            return null;
+                "regardless and the pass is reported incomplete.", logical, recordId);
+            return (null, false);
         }
     }
 

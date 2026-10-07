@@ -1440,6 +1440,13 @@ public sealed class AssignedAccessMaterializer
         // gets nothing: no share, and no contact grant either, since a Restricted record admits no contact-based access.
         // That is recorded as Restricted (the reason a contact gets there), so lifting Restricted gives the share back.
         var user = represented[0];
+
+        // Verifier V4: the ONE "barred on Restricted" predicate is asked FIRST — a DISABLED or non-person user flagged external
+        // on a Restricted record is Restricted (the remover's known cause), never Ineligible (which would turn the remover's
+        // removal into a sticky Declined and keep the share away after Restricted is lifted and the user re-enabled).
+        if (InternalShareEndpoints.IsBarredOnRestricted(user.IsExternal, flags.IsRestricted))
+            return Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId);
+
         return InternalShareEndpoints.ClassifyEligibility(
                 user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
         {

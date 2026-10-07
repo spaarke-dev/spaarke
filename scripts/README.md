@@ -1261,7 +1261,7 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../p
 
 ### `Set-ExternalFlagForB2BGuests.ps1`
 **Purpose:** One-off data step: every B2B guest system user (`#EXT#` in its user name, `systemuser.domainname`) gets `sprk_isexternal = Yes`; nothing else is changed. Since task 114 (owner round 67) a BLANK flag means NOT external — "+ User" and the Assigned-To rule share with the user, internal-only messages reach them, and a Restricted record keeps their share — so guests must be marked explicitly. JSON report of every user listed.
-**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
+**Usage:** 🔴 Once per environment after users are provisioned (customer deployment guide §12.2 Phase 7b), and again when guests are added outside the product: dry run → owner review → `-Apply` → `-Verify` (exit 0). In an **existing** environment run it **before** deploying the BFF that carries task 114 (that BFF reads a blank flag as internal); if the BFF went first, run it at once and allow 10 minutes (the identity resolver's `sprk_isexternal` cache) after `-Apply`. ⚠️ Within 5 minutes of `-Apply` the BFF removes each newly flagged guest's share on every Restricted record.
 **Lifecycle:** ✅ Maintained (added 2026-10-06 by `unified-access-control-r2` task 114, GitHub #1003)
 **Dependencies:** Azure CLI (`az login`, Write on systemuser), PowerShell 7+
 **Owner:** `unified-access-control-r2`

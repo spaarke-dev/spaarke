@@ -1128,6 +1128,9 @@ public static class ProvisionProjectEndpoint
         // administrator still sees it and shares it with an internal user. Never a failure: the record is provisioned.
         bool? noInternalReader = null;
         string? noInternalReaderMessage = null;
+        // A person this run did not share to is never reported as shared to (task 114 verifier round 3): the empty GUID,
+        // and they are named in skippedPrincipals instead.
+        var sharedToCreator = creatorRule.SkippedCreator == creatorId ? Guid.Empty : creatorId;
         if (creatorRule.SkippedCreator is { } skippedCreator)
         {
             skippedPrincipals = skippedPrincipals
@@ -1205,7 +1208,7 @@ public static class ProvisionProjectEndpoint
                 OwnerTeamId: ownerTeamId,
                 OwnerTeamName: ownerTeamName,
                 SpeContainerId: keptContainerId,
-                SharedToCreatorSystemUserId: creatorId,
+                SharedToCreatorSystemUserId: sharedToCreator,
                 AdditionalPrincipalsShared: additionalShared,
                 RecordType: root.WireToken,
                 RecordId: recordId,
@@ -1277,7 +1280,7 @@ public static class ProvisionProjectEndpoint
             OwnerTeamId: ownerTeamId,
             OwnerTeamName: ownerTeamName,
             SpeContainerId: speContainerId,
-            SharedToCreatorSystemUserId: creatorId,
+            SharedToCreatorSystemUserId: sharedToCreator,
             AdditionalPrincipalsShared: additionalShared,
             RecordType: root.WireToken,
             RecordId: recordId,
@@ -1310,11 +1313,13 @@ public static class ProvisionProjectEndpoint
         public Guid? SkippedCreator { get; private set; }
 
         /// <summary><c>true</c> = not shared to; <c>false</c> = shared to; <c>null</c> = could not be read (fail closed).</summary>
-        public async Task<bool?> IsBarredAsync(Guid userId, ILogger logger, CancellationToken ct)
+        /// <param name="fresh">Read the flag again rather than answer from this request's cache (task 114 verifier V1: the
+        /// last-resort grant after an unverifiable owner move asks a FRESH answer before writing a share).</param>
+        public async Task<bool?> IsBarredAsync(Guid userId, ILogger logger, CancellationToken ct, bool fresh = false)
         {
             if (!recordIsRestricted)
                 return false;
-            if (_answers.TryGetValue(userId, out var known))
+            if (!fresh && _answers.TryGetValue(userId, out var known))
                 return known;
 
             bool? answer;
@@ -1323,7 +1328,8 @@ public static class ProvisionProjectEndpoint
                 var rows = await client.QueryAsync<InternalShareEndpoints.SystemUserRow>(
                     InternalShareEndpoints.SystemUserEntitySet, filter: "systemuserid eq " + userId,
                     select: "systemuserid,sprk_isexternal", top: 1, cancellationToken: ct);
-                answer = rows.FirstOrDefault(r => r.Id == userId)?.IsExternal == true;
+                answer = InternalShareEndpoints.IsBarredOnRestricted(
+                    rows.FirstOrDefault(r => r.Id == userId)?.IsExternal, rootIsRestricted: true);
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -1975,7 +1981,7 @@ public static class ProvisionProjectEndpoint
         {
             var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
             wroteCreatorShare = first.WriteAttempted;
-            creatorShareProven = first.Proven;
+            creatorShareProven = first.Proven && !first.Barred; // a barred person holds no share (verifier V2)
 
             if (!first.Proven)
             {
@@ -2053,29 +2059,49 @@ public static class ProvisionProjectEndpoint
             // the same complete read every other share write on this path uses (task 133 verifier round 1) — a share
             // proven before the move is not assumed to have survived it (live gate (b)).
             var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
-            var shareConfirmed = ensured.Proven;
-            var shareIssued = ensured.Proven;
+            // Task 114 verifier V2: a person barred on a Restricted record holds NO share — "proven" only that none is owed —
+            // so it is never reported as a share in place.
+            var creatorBarred = ensured.Barred;
+            var shareConfirmed = ensured.Proven && !ensured.Barred;
+            var shareIssued = shareConfirmed;
 
-            if (!shareConfirmed)
+            if (!ensured.Proven)
             {
                 // The read or the write failed. Issue the share without a read to confirm it: leaving no share risks a
                 // record nobody can open if the move DID land. The response then says the share is NOT confirmed. A Make
                 // Secure caller's is issued at their floor (round 46 item 1: never lower than they held), not below it.
-                var fallbackMask = shareTarget?.Invoke(0) ?? CreatorAccessMask;
-                var fallbackRights = fallbackMask == CreatorAccessMask
-                    ? CreatorAccessRights
-                    : RecordShareLevels.RightsCsvForMask(fallbackMask);
-                try
+                // Task 114 verifier V1: never to a person flagged external on a Restricted record — a FRESH read of the
+                // flag must answer "not barred" before this unconfirmed write; barred or unreadable, nothing is written.
+                var barredNow = await creatorRule.IsBarredAsync(creatorId, logger, ct, fresh: true);
+                if (barredNow == false)
                 {
-                    await recordShare.GrantAccessAsync(
-                        root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), fallbackRights, ct);
-                    shareIssued = true;
+                    var fallbackMask = shareTarget?.Invoke(0) ?? CreatorAccessMask;
+                    var fallbackRights = fallbackMask == CreatorAccessMask
+                        ? CreatorAccessRights
+                        : RecordShareLevels.RightsCsvForMask(fallbackMask);
+                    try
+                    {
+                        await recordShare.GrantAccessAsync(
+                            root.EntitySet, recordId, DataversePrincipalRef.User(creatorId), fallbackRights, ct);
+                        shareIssued = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex,
+                            "[PROVISION] The creator's share on {RecordType} {RecordId} could not be issued after an " +
+                            "unverifiable owner move. TraceId={TraceId}", root.WireToken, recordId, traceId);
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    logger.LogError(ex,
-                        "[PROVISION] The creator's share on {RecordType} {RecordId} could not be issued after an " +
-                        "unverifiable owner move. TraceId={TraceId}", root.WireToken, recordId, traceId);
+                    creatorBarred = barredNow == true;
+                    logger.LogError(
+                        "[PROVISION] No last-resort share to {CreatorId} on {RecordType} {RecordId} after an unverifiable " +
+                        "owner move: {Why}. TraceId={TraceId}", creatorId, root.WireToken, recordId,
+                        creatorBarred
+                            ? "the record is Restricted and they are flagged external"
+                            : "whether they are flagged external on this Restricted record could not be read",
+                        traceId);
                 }
 
                 // A share proven before the move was issued too, even if it cannot be confirmed now.
@@ -2085,6 +2111,28 @@ public static class ProvisionProjectEndpoint
             // Task 132 (C12): the PATCH may have re-owned the record, and the creator's share may have been written —
             // evict (always safe, never fails the request) before either answer below.
             await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+
+            if (creatorBarred)
+            {
+                logger.LogCritical(
+                    "[PROVISION] {RecordType} {RecordId}: the owner move could not be verified, and the record is Restricted " +
+                    "while {CreatorId} is flagged external, so it was NOT shared to them. If the Secure Record owner team now " +
+                    "owns it, no internal user may be able to open it. TraceId={TraceId}",
+                    root.WireToken, recordId, creatorId, traceId);
+
+                return CreatorShareStep.Failed(Problem(
+                    StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    "The record's owner could not be read back after the assignment, so whether it is now owned by the " +
+                    "Secure Record owner team is not known. " + unlinkedNote +
+                    "This record is Restricted to internal users and the person it would be shared to is flagged as " +
+                    "external, so it was NOT shared to them. If the team now owns it, no internal user may be able to " +
+                    "open it: an administrator shares it with an internal user and calls provisioning again. If the " +
+                    "assignment did not take effect, the record is where it was and provisioning can be called again.",
+                    traceId, (ReasonKey, ReasonOwnerAssignmentUnverified), ("ownerTeamId", ownerTeamId),
+                    ("creatorShareConfirmed", false),
+                    ("creatorShareSkippedReason", ReasonPrincipalExternalOnRestricted),
+                    ("containerKept", keepsOwnContainer)));
+            }
 
             if (shareIssued)
             {
@@ -3389,7 +3437,7 @@ public static class ProvisionProjectEndpoint
                 logger.LogWarning(
                     "[PROVISION] Restricted {RecordType} {RecordId}: {CreatorId} is flagged external, so the record is NOT " +
                     "shared to them (owner round 67: Restricted wins over the last-reader rule).", root.WireToken, recordId, creatorId);
-                return new ShareEnsureResult(Proven: true, WriteAttempted: false);
+                return new ShareEnsureResult(Proven: true, WriteAttempted: false, Barred: true);
             }
         }
 
@@ -3683,7 +3731,7 @@ public static class ProvisionProjectEndpoint
         foreach (var id in colleagues)
         {
             var row = users.FirstOrDefault(u => u.Id == id);
-            if (row?.IsExternal == true)
+            if (InternalShareEndpoints.IsBarredOnRestricted(row?.IsExternal, rootIsRestricted: true))
             {
                 logger.LogWarning(
                     "[PROVISION] Not sharing Restricted {RecordType} {RecordId} with named principal {PrincipalId}: flagged " +
@@ -4169,7 +4217,10 @@ public static class ProvisionProjectEndpoint
     /// Whether a read proved the creator's share exact, and whether this call wrote (or tried to write) it — the
     /// second decides whether an undo has anything to undo.
     /// </summary>
-    private readonly record struct ShareEnsureResult(bool Proven, bool WriteAttempted);
+    /// <param name="Barred">Task 114 verifier V2: the person is flagged external on a Restricted record, so NO share was written
+    /// and none is owed — <see cref="Proven"/> is <c>true</c> (nothing to prove), but the person holds no share, and a caller
+    /// that would otherwise say "the share is in place" must say it was not given.</param>
+    private readonly record struct ShareEnsureResult(bool Proven, bool WriteAttempted, bool Barred = false);
 
     /// <summary>The creator whose share is proven, or the response that stopped provisioning.</summary>
     private sealed record CreatorShareStep(Guid CreatorId, IResult? Error)

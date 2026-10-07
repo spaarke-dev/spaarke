@@ -1057,7 +1057,7 @@ public static class InternalShareEndpoints
                 s.Mask,
                 RecordShareLevels.LevelForMask(s.Mask),
                 s.ModifiedOn,
-                ExternalNoAccess: restricted && people.GetValueOrDefault(s.SystemUserId)?.IsExternal == true))
+                ExternalNoAccess: IsBarredOnRestricted(people.GetValueOrDefault(s.SystemUserId)?.IsExternal, restricted)))
             .OrderBy(s => s.FullName is null)
             // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
             // host's culture configuration, or one record lists its users in different orders across hosts — or
@@ -1305,11 +1305,22 @@ public static class InternalShareEndpoints
         if (applicationId is not null || accessMode is not (>= 0 and <= LastPersonAccessMode))
             return ShareEligibility.NotAPerson;
 
-        if (isExternal == true && rootIsRestricted is not false)
+        if (IsBarredOnRestricted(isExternal, rootIsRestricted))
             return ShareEligibility.ExternalOnRestricted;
 
         return ShareEligibility.Eligible;
     }
+
+    /// <summary>
+    /// The ONE "barred on a Restricted record" predicate (owner round 67): a stored <c>sprk_isexternal = true</c> on a record
+    /// that is Restricted — or whose Restricted state the caller did not read (<c>null</c>, fail closed). Whether the user is
+    /// enabled or a person does not enter it: <see cref="ClassifyEligibility"/> asks those first for a NEW share, but every
+    /// component that removes, keeps away or records the absence of an existing share on a Restricted record (the Restricted
+    /// remover, the Assigned-To materializer's known cause, the secure-root inheritance's barred set, provisioning) asks THIS,
+    /// so a disabled or non-person external user's removal is the same known cause as anyone else's.
+    /// </summary>
+    internal static bool IsBarredOnRestricted(bool? isExternal, bool? rootIsRestricted)
+        => isExternal == true && rootIsRestricted is not false;
 
     /// <summary>The single refusal shape: ProblemDetails with a reason code (ADR-003) and the trace id (ADR-019).</summary>
     private static IResult Refused(HttpContext httpContext, int statusCode, string title, string reasonCode, string detail)

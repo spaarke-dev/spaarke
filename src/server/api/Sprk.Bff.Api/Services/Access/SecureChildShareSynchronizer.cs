@@ -1002,8 +1002,8 @@ public sealed class SecureChildShareSynchronizer
 
     /// <summary>
     /// Task 114 (owner round 67): which of <paramref name="principals"/> a RESTRICTED <paramref name="rootTable"/> record may not
-    /// be shared with — the users <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ClassifyEligibility"/> answers
-    /// <c>ExternalOnRestricted</c> for (a stored <c>sprk_isexternal = true</c>; a blank flag is not external). Empty when the
+    /// be shared with — the users <see cref="Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted"/> bars
+    /// (a stored <c>sprk_isexternal = true</c>, disabled or not; a blank flag is not external). Empty when the
     /// record is not Restricted (one read) or names no user. Teams are never barred here. Throws when the record or the users
     /// cannot be read, so a caller never reads a fault as "nobody is barred".
     /// </summary>
@@ -1032,7 +1032,7 @@ public sealed class SecureChildShareSynchronizer
         {
             var query = new QueryExpression("systemuser")
             {
-                ColumnSet = new ColumnSet("systemuserid", "isdisabled", "accessmode", "applicationid", "sprk_isexternal"),
+                ColumnSet = new ColumnSet("systemuserid", "sprk_isexternal"),
                 NoLock = true,
             };
             query.Criteria.AddCondition("systemuserid", ConditionOperator.In, batch.Cast<object>().ToArray());
@@ -1040,13 +1040,10 @@ public sealed class SecureChildShareSynchronizer
             {
                 if (!batch.Contains(row.Id))
                     continue; // a row for any other user is not an answer about these
-                var eligibility = Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ClassifyEligibility(
-                    row.GetAttributeValue<bool?>("isdisabled"),
-                    row.GetAttributeValue<OptionSetValue>("accessmode")?.Value,
-                    row.GetAttributeValue<Guid?>("applicationid") is { } app && app != Guid.Empty ? app : null,
-                    row.GetAttributeValue<bool?>("sprk_isexternal"),
-                    rootIsRestricted: true);
-                if (eligibility == Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.ShareEligibility.ExternalOnRestricted)
+                // Verifier V4: the ONE predicate — disabled or not, person or not — so the inheritance's barred set is the
+                // remover's and the materializer's, never a narrower "eligible AND external".
+                if (Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.IsBarredOnRestricted(
+                        row.GetAttributeValue<bool?>("sprk_isexternal"), rootIsRestricted: true))
                     barred.Add(DataversePrincipalRef.User(row.Id));
             }
         }

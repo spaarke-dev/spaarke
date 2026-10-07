@@ -255,6 +255,91 @@ public class RestrictedExternalShareRemoverTests
         report.Removed.Should().Equal(external);
     }
 
+    /// <summary>
+    /// Verifier V3: the owner is read on EVERY Restricted pass — an external owner who holds NO share (ownership alone gives
+    /// access) is still reported owner-is-external, with nothing else on the record to remove.
+    /// </summary>
+    [Fact]
+    public async Task AnExternalOwnerWithNoShare_AndNoOtherShares_IsStillReportedOwnerIsExternal()
+    {
+        Restricted();
+        var owner = _h.SystemUser(isExternal: true);
+        _h.Grants.RootOwners[_matter] = owner;
+
+        var report = await RunAsync();
+
+        report.OwnerIsExternal.Should().Be(owner);
+        report.Complete.Should().BeTrue();
+        report.Removed.Should().BeEmpty();
+        _h.Shares.Writes.Should().BeEmpty();
+    }
+
+    /// <summary>Verifier V3: an external owner with no share, on a record whose other sharers are internal, is reported.</summary>
+    [Fact]
+    public async Task AnExternalOwnerWithNoShare_WhereOnlyInternalUsersHoldShares_IsStillReportedOwnerIsExternal()
+    {
+        Restricted();
+        var owner = _h.SystemUser(isExternal: true);
+        var internalUser = _h.SystemUser(isExternal: false);
+        Share(internalUser);
+        _h.Grants.RootOwners[_matter] = owner;
+
+        var report = await RunAsync();
+
+        report.OwnerIsExternal.Should().Be(owner);
+        report.Removed.Should().BeEmpty();
+        MaskOf(internalUser).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>The twin: the same record with a BLANK-flag owner reports no external owner (a blank flag is internal).</summary>
+    [Fact]
+    public async Task ABlankFlagOwnerWithNoShare_IsNotReported()
+    {
+        Restricted();
+        _h.Grants.RootOwners[_matter] = _h.SystemUser(isExternal: null);
+
+        var report = await RunAsync();
+
+        report.OwnerIsExternal.Should().BeNull();
+        report.Complete.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// When the owner cannot be read, external sharers are still removed but the pass is NOT complete — it cannot say whether
+    /// an external user owns the record, so the job retries rather than reporting "no external owner".
+    /// </summary>
+    [Fact]
+    public async Task WhenTheOwnerCannotBeRead_ExternalSharesAreStillRemoved_AndThePassIsIncomplete()
+    {
+        Restricted();
+        var external = _h.SystemUser(isExternal: true);
+        Share(external);
+        _h.Grants.FailRootOwnerQueries = true;
+
+        var report = await RunAsync();
+
+        report.Removed.Should().Equal(external);
+        report.Complete.Should().BeFalse();
+        report.Failures.Should().ContainSingle().Which.Kind.Should().Be("owner-unreadable");
+    }
+
+    /// <summary>
+    /// Verifier V4: ONE predicate — a stored sprk_isexternal = true on a Restricted root, regardless of disabled. A DISABLED
+    /// external user's share is removed too (re-enabling them must not hand back a Restricted record).
+    /// </summary>
+    [Fact]
+    public async Task ADisabledExternalUsersShare_IsRemoved()
+    {
+        Restricted();
+        var disabledExternal = _h.SystemUser(isExternal: true, disabled: true);
+        Share(disabledExternal);
+
+        var report = await RunAsync();
+
+        report.Removed.Should().Equal(disabledExternal);
+        MaskOf(disabledExternal).Should().BeNull();
+    }
+
     // ── Serialized with task 143's enforcer (follow-up item 4) ──────────────────
 
     /// <summary>

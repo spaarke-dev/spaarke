@@ -26,10 +26,14 @@
     project, matter and work assignment (task 114's RestrictedExternalShareRemover), the record's next save does it at
     once, and those guests stop receiving internal-only messages (the resolver's cache lapses within 10 minutes).
 
-    Run order per environment (docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, task 114 step):
+    Run order per environment (docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §12.2 Phase 7b, task 114):
       1. dry run - review the list with the owner;  2. -Apply;  3. -Verify (exit 0).
-    Safe to run before or after the BFF carrying task 114 is deployed; until it is, the old BFF treats a blank flag as
-    external, so running it first only marks explicitly what that BFF already assumed for guests.
+    In an EXISTING environment run all three BEFORE deploying the BFF that carries task 114. That BFF reads a BLANK flag
+    as internal, so a guest still blank when it starts is shared with on Restricted records and receives internal-only
+    messages. The BFF before task 114 already treats a blank flag as external, so running this first changes nothing
+    for it - it only marks explicitly what that BFF assumed. If the BFF was deployed first anyway: run this at once, and
+    allow 10 minutes after -Apply (the identity resolver's sprk_isexternal cache, which also decides a licensed user's
+    Restricted-record access on the SPA/Teams plane) before relying on the guests being treated as external.
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com

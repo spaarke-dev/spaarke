@@ -512,6 +512,9 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public ConcurrentDictionary<Guid, Guid> RootOwners { get; } = new();
 
+        /// <summary>Task 114 verifier V3: a root-owner read fails (every other query still answers).</summary>
+        public bool FailRootOwnerQueries { get; set; }
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -591,6 +594,9 @@ internal static class AssignedAccessTestDoubles
 
             if (entitySetName == GrantSet)
                 BeforeGrantQuery?.Invoke(Interlocked.Increment(ref _grantQueries));
+
+            if (FailRootOwnerQueries && entitySetName is "sprk_projects" or "sprk_matters" or "sprk_workassignments")
+                throw new HttpRequestException("Simulated root-owner read failure.");
 
             object rows = entitySetName switch
             {

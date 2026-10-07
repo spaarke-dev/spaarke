@@ -180,6 +180,35 @@ public class AssignedAccessMaterializerTests
         LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared);
     }
 
+    /// <summary>
+    /// Verifier V4: the ONE "barred on Restricted" predicate ignores disabled. A user flagged external who is DISABLED when the
+    /// record becomes Restricted has the share removed by the remover too, and the materializer records the SAME known cause
+    /// Skipped(restricted) — never Declined (removed out of band), which would keep the share away for good.
+    /// </summary>
+    [Fact]
+    public async Task WhenARecordBecomesRestricted_ADisabledExternalUsersAutoShareIsRemoved_RecordedRestricted_NotDeclined()
+    {
+        var (contact, user) = _h.LinkedContact(isExternal: true);
+        _h.SystemUser(isExternal: true, id: user);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        // The user is disabled (both reads the BFF makes of them), then the record becomes Restricted.
+        var candidates = _h.Store.UsersByLink[contact];
+        candidates[0] = candidates[0] with { IsDisabled = true };
+        _h.SystemUser(isExternal: true, disabled: true, id: user);
+        Restricted();
+        var removal = await _h.RestrictedRemover.RemoveForRecordAsync(Matter, _matter, new[] { TestTenant }, CancellationToken.None);
+        await Sync();
+
+        removal.Removed.Should().Equal(user);
+        ShareMask(user).Should().BeNull();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "the remover's removal is a known cause whether or not the user is disabled");
+        row.Reason.Should().Be(AssignedAccessReason.Restricted);
+    }
+
     [Theory]
     [InlineData(true, 0, false)]   // disabled
     [InlineData(false, 4, false)]  // non-interactive account — not a person

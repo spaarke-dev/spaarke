@@ -43,7 +43,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="SharedToCreatorSystemUserId">
 /// The creating user the record was explicitly shared to (task 061) — on Make Secure, the caller (task 150). Because the
 /// owner team has no members, this share is what makes the record reachable at all — a successful response always carries
-/// it.
+/// it, except (task 114, owner round 67 item 3: Restricted wins) when that person is flagged external on a Restricted
+/// record: nothing is shared to them, this is <see cref="Guid.Empty"/>, and they are named in <c>SkippedPrincipals</c>
+/// with <c>sdap.provision.principal_external_on_restricted</c>.
 /// </param>
 /// <param name="AdditionalPrincipalsShared">
 /// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort). On Make Secure

@@ -126,6 +126,36 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
    user's share alone, reports `ownerIsExternal` (kind `owner-is-external`) with a warning naming the record, and the job
    counts it (`ownerIsExternal`) without making the run partial. Ownership is NEVER changed by the BFF.
 6. **`sprk_isexternal` must not be field-secured**: a masked value reads as blank, which is now INTERNAL (owner ruling).
+7. **ONE "barred on Restricted" predicate** (verifier V4): `InternalShareEndpoints.IsBarredOnRestricted(isExternal,
+   rootIsRestricted)` = a stored `true` on a Restricted (or unread, fail-closed) root — disabled or not, person or not.
+   `ClassifyEligibility` asks it after disabled / not-a-person for a NEW share (so `/share-user` keeps those refusals);
+   every component that removes, keeps away or records the absence of a share asks it directly: the remover (sharers AND
+   owner), the materializer's target (before `ClassifyEligibility`, so a disabled external user's removal is the known
+   cause `Skipped(restricted)`, never `Declined`), the inheritance's barred set (`RestrictedExternalPrincipalsOrThrowAsync`
+   now selects only `sprk_isexternal`), provisioning (creator rule, colleagues), the `/user-shares` marker and the
+   systemuser plane's composition (K1).
+8. **The owner is read on every Restricted pass** (verifier V3): before any early return, and included in the user read,
+   so an external owner who holds NO share is still reported `owner-is-external`. An owner read that fails is no longer
+   silent: the pass carries an `owner-unreadable` failure (external sharers are still removed; the pass is not complete,
+   so the job retries).
+9. **Provisioning never reports a barred person as shared to** (verifier V1/V2): `ShareEnsureResult.Barred` carries
+   "nothing is owed"; Step 4.5 no longer counts it as a proven share; after an UNVERIFIED owner move the answer is
+   `owner_assignment_unverified` with `creatorShareConfirmed: false`, `creatorShareSkippedReason:
+   principal_external_on_restricted` and text that says it was NOT shared. The last-resort unconfirmed share after an
+   unverified move is written only when a FRESH flag read (`RestrictedCreatorRule.IsBarredAsync(..., fresh: true)`)
+   answers "not barred" — barred or unreadable, nothing is written. A successful response names a barred person in
+   `skippedPrincipals` and carries `sharedToCreatorSystemUserId = Guid.Empty` (found while adding V6's tests: it used to
+   carry the barred person's id, i.e. claimed a share that was never written).
+10. **The SPA/Teams plane** (verifier K1, owner round 67): a systemuser flagged external keeps NO membership-term access to
+    a Restricted record — the Restricted veto applies to them as to a contact. `AccessibleRecordSetService` reads the flag
+    through the authoritative cached `ISystemUserIdentityResolver.IsExternalAsync` only when a membership candidate is
+    Restricted (NFR-02); a read that fails is answered external (fail closed). An internal or blank-flag systemuser is
+    unchanged; inactive-only records keep the existing survivor rule.
+11. **Known limit — Dataverse business-unit read (owner round 77, accepted, no code change):** a licensed user flagged
+    external can still READ a NON-secure Restricted record in their own business unit through Dataverse's role depth
+    (MDA, Dataverse API). The BFF removes their direct shares, refuses new ones and vetoes the record on the SPA/Teams
+    plane; it does not and will not change Dataverse role depth for them.
+12. **Deploy order** (verifier V5): the B2B guest data step runs BEFORE the BFF in an existing environment (§5).
 
 ## 4. Tests
 
@@ -138,6 +168,11 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs` | through the real filter pipeline: Restricted + external share removed and named; unconfirmed → 500 `restricted_external_incomplete` |
 | `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | a Restricted-only root's external share removed (counts); the last reader removed → `noInternalReader` 1, run ok; external owner counted, run ok; unconfirmed → failed run |
 | `tests/integration/seam/Communication/FanOutTargetingSecuritySeamTests.cs` | (h) through the real resolver |
+| `RestrictedExternalShareRemoverTests.cs` (verifier round) | an external owner with NO share (alone / beside internal sharers) is reported; a blank-flag owner is not; an unreadable owner → removals still made, `owner-unreadable`, not complete; a DISABLED external sharer is removed |
+| `AssignedAccessMaterializerTests.cs` (verifier round) | a DISABLED external user's auto share removed on Restricted → `Skipped(restricted)`, never `Declined` |
+| `SecureRootInheritanceRestrictedTests.cs` (verifier round) | a DISABLED external sharee's inherited share removed on Restricted → `Skipped(restricted)` |
+| `ProvisionNoAccessTests.cs` (verifier V6) | resume (`EnsureResumeCreatorShareAsync`) with an external / internal creator on Restricted; Make Secure resume (`ResumeMakeSecureAsync`) by an external caller (caller skipped, internal creator shared); unverified owner move with a barred creator (V2 answer); unverified owner move with an unreadable flag (V1: no last-resort share, `creator_share_failed_resumable`) |
+| `UnifiedEvaluatorSeamTests.cs` (K1) | an external-flagged systemuser loses the Restricted record (keeps an open one); an internal one keeps it; an unreadable flag removes it (fail closed); no Restricted candidate → no flag read |
 | `src/client/shared/Spaarke.UI.Components/src/__tests__/accessRibbon.restrictedShare.test.ts` (new) | `isShareAllowed` (field / saved value / failed read / unsaved), the on-change ribbon refresh, the summary lines |
 | `…/AccessGrantModal/__tests__/AccessGrantModal.userShare.test.tsx` | the "External user — no access" label, only on the marked row |
 
@@ -145,10 +180,16 @@ Unshare of a disabled external account (`Unshare_ADisabledExternalAccountsShare_
 
 ## 5. Deploy order (manual gates; none run by this task)
 
-1. **BFF** (fresh short-path master worktree, `Deploy-BffApi.ps1`). From this moment blank-flag users are internal for
+1. **Data step FIRST**, per existing environment (verifier V5): `scripts/Set-ExternalFlagForB2BGuests.ps1` dry run →
+   owner review → `-Apply` → `-Verify` (exit 0) — **before** the BFF. The BFF before this task already reads a blank flag
+   as external, so this changes nothing for it; the BFF of this task reads blank as INTERNAL, so a guest still blank when
+   it starts would be shared with on Restricted records and receive internal-only messages. If the BFF went first: run
+   the data step at once and allow **10 minutes** after `-Apply` (the identity resolver's `sprk_isexternal` cache — which
+   now also decides a licensed user's Restricted-record access on the SPA/Teams plane, K1) before relying on it.
+   ⚠️ Within 5 minutes of `-Apply` on a BFF that carries this task, the job removes each newly flagged guest's share on
+   every Restricted record. A NEW environment has no users at BFF deploy; Phase 7b follows user provisioning (H11).
+2. **BFF** (fresh short-path master worktree, `Deploy-BffApi.ps1`). From this moment blank-flag users are internal for
    sharing and messaging, and the 5-minute job converts their contacts' Assigned-To grants into shares.
-2. **Data step** per environment: `scripts/Set-ExternalFlagForB2BGuests.ps1` dry run → owner review → `-Apply` →
-   `-Verify`. ⚠️ Within 5 minutes the job removes each newly flagged guest's share on every Restricted record.
 3. **Web resources**: `sprk_/scripts/access_ribbon.js` 1.6.0, `sprk_/scripts/assignedaccess_postsave.js` 1.1.0.
 4. **Ribbon**: `Set-AccessRibbon.ps1` dry run → `-Apply` → `-Verify` (the Share command rule rides the existing Access
    group import; same `-SecureTransitionDeployed` rule as before).

@@ -185,6 +185,36 @@ public class SecureRootInheritanceRestrictedTests : IClassFixture<ProvisionProje
     }
 
     /// <summary>
+    /// Verifier V4: the inheritance's barred set is the ONE predicate (stored sprk_isexternal = true, disabled or not). A sharee
+    /// flagged external who is DISABLED when the filed record becomes Restricted, and whose inherited share the remover took,
+    /// is recorded Skipped(restricted) like any other — never Declined — and nothing is given back while it is Restricted.
+    /// </summary>
+    [Fact]
+    public async Task ADisabledExternalShareesInheritedShareRemovedOnRestricted_IsSkippedRestricted_NotDeclined()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareOnMatterAsync(matter, External);
+        _fixture.ShareMaskOf(workAssignment, External).Should().Be(Mirror);
+
+        World.Set("systemuser", External, "isdisabled", true);
+        Restricted(workAssignment, true);
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            await scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>().RevokeAccessAsync(
+                "sprk_workassignments", workAssignment, DataversePrincipalRef.User(External), CancellationToken.None);
+        }
+
+        await PassAsync(workAssignment);
+
+        var row = RowOf(workAssignment, External)!;
+        row.State.Should().Be(AssignedAccessState.Skipped, "the remover's removal is a known cause whether or not they are disabled");
+        row.Reason.Should().Be(AssignedAccessReason.Restricted);
+        _fixture.ShareMaskOf(workAssignment, External).Should().Be(0);
+    }
+
+    /// <summary>
     /// Fail closed (ADR-003): on a Restricted filed record, while who among the parent's sharees is flagged external cannot
     /// be read, nobody is passed on — not even a blank-flagged sharee; once it can be read, the next pass gives them.
     /// </summary>

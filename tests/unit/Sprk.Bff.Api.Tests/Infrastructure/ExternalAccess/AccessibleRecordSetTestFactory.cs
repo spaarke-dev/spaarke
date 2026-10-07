@@ -66,6 +66,20 @@ internal static class AccessibleRecordSetTestFactory
     }
 
     /// <summary>
+    /// An <see cref="Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver"/> answering <c>sprk_isexternal</c> for the
+    /// systemuser plane's Restricted survivor (task 114 verifier K1): every user is internal except
+    /// <paramref name="externalUsers"/> — the honest default for tests authored before the flag entered composition.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver InternalSystemUsers(params Guid[] externalUsers)
+    {
+        var resolver = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict);
+        resolver
+            .Setup(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => externalUsers.Contains(id));
+        return resolver.Object;
+    }
+
+    /// <summary>
     /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
     /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
     /// setup per test file) so the three call sites that directly construct

@@ -1294,6 +1294,7 @@ public sealed class AccessCacheFaultCachingTests
                 denyList,
                 // Batch 4 integration (task 143): the identity store the secure-record veto reads status-first.
                 Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
                 NullLogger<AccessibleRecordSetService>.Instance);
         }
     }

@@ -1039,6 +1039,7 @@ public class OrganizationMembershipReadTests
         return new AccessibleRecordSetService(
             membership.Object, participations, standing, denyList,
             Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.InternalSystemUsers(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
