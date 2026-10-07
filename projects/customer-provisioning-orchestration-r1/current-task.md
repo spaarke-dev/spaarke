@@ -8,10 +8,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T240a** — Stamp BFF starts and serves its clients: 🔴 provisioning sets no `Cors__AllowedOrigins`, so every stamp BFF throws at startup; add them (customer Dataverse origins + shared client origins); H3 SPA redirects (code pages) + pre-authorize the shared add-in client. POML `tasks/240a-…poml`; plan `notes/t240-plan.md`. 240b (live guest test) and 240c (client discovery) follow. |
-| **Step** | 0 — not started. T240 split into 240a/b/c (SESSION 42). |
-| **Status** | pending. |
-| **Next Action** | `task-execute` 240a. 2026-10-07: word-add-in-r1 replied (`notes/coordination/2026-10-07-from-word-add-in-r1.md`): the add-in already uses Spaarke's tenant; we adopt its Spaarke directory endpoint for 240c (owner OK needed for the new shared-prod service); our reply `…-to-word-add-in-r1-2.md`; Teams questions to external-access-r3 (`…-to-external-access-r3.md`). Owner: production add-in domain (recommended `addins.spaarke.com`, CNAME at Namecheap) and a work-account guest for 240b. PR #1365 open. No live action without owner approval. |
+| **Task** | **T240a** — Stamp BFF starts and serves its clients (CORS literals `addins.spaarke.com` / `external.spaarke.com`; H3 SPA redirect = customer Dataverse origin + pre-authorized shared clients; fixed: Worker never set `EntraAppRegOptions__SpaarkeTenantId` → every Model 1 run failed at H3). POML `tasks/240a-…poml`; plan `notes/t240-plan.md`. |
+| **Step** | Steps 1–4 done (WIP `b0e244c17`, pushed). Step 9.5 running: two verifier passes (code-review; adr-check + auth/tenant-isolation). H13 shared-origin probe deliberately not added (record in POML notes). |
+| **Status** | in-progress (quality gates). |
+| **Next Action** | Triage the two verifier reports (F-class → fix, re-verify fix scope, re-run ControlPlane tests); POML notes (deviations: no `.api.`/Dataverse CORS entries — suffix rule; no H13 shared-origin probe; acct claim stays with T255); close T240a (POML + index + drift check), commit, push. Live state 2026-10-07: `addins.spaarke.com` + `external.spaarke.com` Ready (owner-approved). PR #1365 open. No live action without owner approval. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — master merged again 2026-10-07 SESSION 42 (0 behind at merge). Measure with `git rev-list --count HEAD..origin/master`; merge master again before T186 and before any BFF deploy from this branch. The merge re-routed master's new task-171 app-only SPE calls through `SpeContainerOwnershipGuard` (see CLAUDE.md §6). |
 | **Order** | T254 ✅ → T232 ✅ → T233 ✅ → T240a → T240b → T240c → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145; waits on #1364) → T186. T252 also carries the Bicep "shared BFF app-reg" description fix (T233 hand-off). T242c / T241 when the owner wants them. |
 
