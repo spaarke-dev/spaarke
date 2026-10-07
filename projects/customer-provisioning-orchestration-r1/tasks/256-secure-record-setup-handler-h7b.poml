@@ -33,9 +33,8 @@
   <context>
     <background>
       DAG per the hand-off: `[H7b] = {H6}`, H13 waits on it. Five-place handler registration (provisioning.md). The Worker host
-      has no pwsh/pac (G38). The `sprk_noaccessentry` requirement has NOT arrived as a hand-off (2026-10-06) — request it from
-      UAC-r2 before step 2; until then the source is UAC-r2's DEPLOY-CHECKLIST.md / docs/data-model. The Worker host
-      has no pwsh/pac (G38) — Dataverse Web API from C#, as H5/H7 do. Until it ships the hand-off §5 interim operator runbook
+      has no pwsh/pac (G38) — Dataverse Web API from C#. The `sprk_noaccessentry` requirement has NOT arrived as a hand-off (2026-10-06) — request it from
+      UAC-r2 before step 2; until then the source is UAC-r2's DEPLOY-CHECKLIST.md / docs/data-model. H5/H7 are the C# reference. Until it ships the hand-off §5 interim operator runbook
       applies (dev only).
     </background>
     <relevant-files>
