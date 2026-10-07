@@ -4,7 +4,7 @@
     <title>Event "complete" status code and To Do reassign lookup target, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs and client .ts/.tsx write paths against live Dataverse metadata.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -50,6 +50,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-05 by the main session. Owner rule: fix found defects now, in their own PR when unrelated to ontology.</notes>
+
+  <completion>COMPLETED 2026-10-07 (recorded by main session). PR #1302 squash-merged as 87665c3da after 11 rounds and 6 independent reviews (two FAILs, four PASS-WITH-FINDINGS, every finding fixed). Outcome: the BFF events API, broken end to end on master (invented status/priority codes, bad $expand, nonexistent sprk_eventlog.sprk_description column → create/get/list/complete returned 500), works on the real routes against spaarkedev1. Reconciled in round 8 with uac-r2's #1312 route-authorization sweep: ONE mechanism (master's RecordRouteAccessAuthorizationFilter, uniform 404 for no-read), #1312's route deletions (PUT/DELETE/cancel/logs) stand, PATCH /filing is the re-file route. Owner decisions 2026-10-06: (A) Reassigned is completable — one predicate EventStatusCode.IsOpenWork (Draft, Open, On Hold, Reassigned) drives the complete gate and all To Do generation rules; (B) "my events" = owner OR assigned to caller's linked contact OR sprk_createdbyperson = caller, query runs as the caller. Also fixed: live priority values 100000000+, To Do Dismissed value + server-side exclusion, Rule 5 limited to assigned events (would otherwise create a To Do for every Draft event; 0 stale To Dos in dev), all five To Do rules paged (were silently capped at 100; 5,000/rule cap with an honest warning), cancellation propagates, regarding number read from sprk_recordtype_ref for every type (event create, inbound email resolver, analysis stager) with catalog-fault guards and one retry in event create, no caching of missing catalog rows, one shared display-name map. Publish size +5,234 B (36.14 MB both sides, 192 files each), no vulnerable packages. Final CI 41 pass / 0 fail; full BFF suite 18165/0. Owner follow-ups: 401/503 split for unresolved callers (#1312's single 403 contract); Tier 2 ADR Compliance job's 3-minute cap; three other test files still set TodoGenerationService fields by reflection (moved to task 098, which touches the service).</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
