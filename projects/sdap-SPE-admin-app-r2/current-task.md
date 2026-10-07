@@ -35,7 +35,7 @@ SPE Admin no longer uses owning-app secrets: container work runs as the BFF mana
 | # | Item | Owner | State |
 |---|---|---|---|
 | 1 | Grant the BFF MI on **Spaarke Model 1** (Consuming Apps tab) | Operator | ✅ done 2026-10-07 (app `full`, delegated none — fine, MI is app-only) |
-| 1b | UAT fixes `641fb5e72` (Permissions tab 403 → delegated read; detail "Billing: Unknown" → no `$select`; config-form labels). Page **deployed + read back**; BFF part needs PR → master → **operator BFF deploy**. Publish-size not yet measured (do at PR) | Claude → Operator | ⏳ PR not opened |
+| 1b | UAT fixes (Permissions tab 403 → delegated read; detail "Billing: Unknown" → no `$select`; config-form labels). PR **#1362 merged** (`e6218e5ba`); BFF **deployed 2026-10-07** from fresh master worktree on top of uac-r2 task 114's `d437b9738` (clobber-checked), live DLL = `e6218e5ba`, hashes + healthz OK. Publish 36.19 vs 36.19 MB | Operator | ⏳ retest Permissions tab + billing badge |
 | 2 | `SecurityEvents.Read.All` on `mi-bff-api-dev` | Operator | ✅ **done 2026-10-07 15:06Z** (verified). MI token cache may delay Secure Score up to ~24 h. Alerts will still say "not provisioned" (tenant licensing) |
 | 3 | Model 1 config Key Vault field blank | Operator | ✅ already blank (verified) |
 | 4 | **UAT** — Model 1 containers + item search on the MI (MI lacks `Files.ReadWrite.All` the owning app had — watch search); Security tab; Add Property (first must survive a second); **Add Permission** (skipped before, not passed); 9 container-type settings save; **029** billing status renders on Container Types | Operator | ⏳ |
