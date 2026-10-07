@@ -91,6 +91,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - Fix what can be fixed now, including drift and broken CI elsewhere. Implement the owner's design and absorb the follow-on work.
 - Decide a doubtful mechanism by necessity: needed → build it, otherwise remove it. Give one recommendation, not a menu of variants (2026-10-06).
 - No Microsoft support case: find the root cause (2026-10-04).
+- The Word/Outlook add-ins and the Teams tab are used only by Dataverse-licensed users, internal or B2B guest; external contacts never use them (owner 2026-10-07, T240). Coordinate add-in and Teams client changes with spaarkeai-word-add-in-r1 directly, or give the owner a message to relay.
 
 **Live actions**
 - Every live Azure/Entra/Dataverse/Exchange change and every deploy needs the owner's OK, per action. Read-only checks are fine. Record each action in the task POML notes.

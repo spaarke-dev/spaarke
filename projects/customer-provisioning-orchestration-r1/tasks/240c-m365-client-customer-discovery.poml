@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Shared add-in and Teams clients find the user's customer and call that customer's BFF (group-membership discovery); dedicated Teams client app pre-authorized by H3</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D11)</phase>
+    <gate>after 240a + 240b</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client auth flow in the shared auth library + add-in/Teams configuration + H3.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth flow change across clients owned by another project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-project (spaarkeai-word-add-in-r1) and main-session coordination.</parallel-reason>
+    <tags>auth, m365-clients, provisioning, model1-dedicated, testing</tags>
+    <deps>240a, 240b</deps>
+  </metadata>
+
+  <prompt>Implement the discovery design confirmed by 240b.</prompt>
+
+  <goal>A Dataverse-licensed user (internal or guest) opening the shared add-in or Teams tab reaches their own customer's BFF with a token for it, with no per-customer build.</goal>
+
+  <context>
+    <background>`notes/t240-plan.md` "Changed recommendation" (subject to 240b's results). Client code is owned by spaarkeai-word-add-in-r1; this task supplies the server side, the H3 pre-authorization of the Teams client and the agreed contract.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Only Dataverse-licensed users use these clients (owner 2026-10-07); no anonymous customer directory and no published customer list.</constraint>
+    <constraint source="coordination">Client changes are agreed with spaarkeai-word-add-in-r1 before code.</constraint>
+    <constraint source="live">Creating the Teams client app is a live Entra action — owner OK first.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Agree the contract with spaarkeai-word-add-in-r1 (authority, membership read, BFF address, `/api/config`, remembered choice).</step>
+    <step order="2">Server/provisioning side: Teams client app (live, owner OK) + its id in 240a's pre-authorized client list; docs.</step>
+    <step order="3">Client side as agreed (by the owning project or here with its agreement).</step>
+    <step order="4">Verify end to end on dev with the 240b guest; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">On dev, an internal user and the test guest each reach their customer's BFF from Outlook, Word and Teams without a consent prompt.</criterion>
+    <criterion testable="true">A user in no `sprk-*-users` group sees a clear "no Spaarke environment" message; a user in two picks one and is not asked again.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>

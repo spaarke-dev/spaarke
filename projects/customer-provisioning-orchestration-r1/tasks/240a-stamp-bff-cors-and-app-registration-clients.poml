@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="240a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Every stamp BFF starts and serves its clients: provisioning sets Cors__AllowedOrigins (Dataverse + shared M365 client origins); H3 gives the customer's BFF app registration the SPA redirects for its own Dataverse origin(s) and pre-authorizes the shared add-in client</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D9/D11; owner input 2026-10-07)</phase>
+    <gate>after 233 (✅)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handlers H3/H4b + settings catalog + an Entra app-registration shape; auth-adjacent (token audience, pre-authorization, redirect URIs).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/app-registration change applied to every customer; a wrong redirect or pre-authorization breaks sign-in for all of them.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/constraints/provisioning.md and the provision-environment skill (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, auth, model1-dedicated, testing</tags>
+    <deps>233</deps>
+  </metadata>
+
+  <prompt>Make a provisioned customer BFF start, accept calls from its own Dataverse code pages, and be reachable by the shared M365 clients.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Microsoft Graph application objects, settings catalog).</role>
+
+  <goal>
+    After a provisioning run: the customer's BFF starts (its `Cors:AllowedOrigins` is set); its own Dataverse code pages
+    sign in through the customer's BFF app registration (H7's default `sprk_MsalClientId`); and the shared add-in client
+    can request that BFF's scope without a consent prompt. Re-runs are idempotent.
+  </goal>
+
+  <context>
+    <background>
+      `notes/t240-plan.md` F1–F3: CorsModule throws at startup outside Development/Testing when `Cors:AllowedOrigins` is
+      empty and no provisioning step sets it; H3 registers no SPA redirect and no preAuthorizedApplications; code pages
+      use the Dataverse org origin as their redirect. The add-in client is `c1258e2d…` "Spaarke Office Add-in"
+      (single-tenant, Spaarke's tenant). Dev's BFF lists the Dataverse, Power Pages, add-in and Teams origins by hand.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CorsModule.cs (contract only — not changed)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (per_env_settings); the H4b catalog reader + its value-source resolution; HandlerRunInputs (run-context contract)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/{GraphAppRegistrationProvisioner,EntraAppRegOptions,H3EntraAppRegHandler}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs (H13 CORS probe)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (H3 row claims add-in SPA redirects); .claude/constraints/provisioning.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/t240-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/g14-shared-clients-auth-chain.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="cors">Origins are exact (scheme + host, no path, no trailing slash, https only). The customer's Dataverse origin and its `.api.` variant come from the run (H5's DataverseEnvUrl); the shared client origins are platform values (per platform environment), never per-customer intake.</constraint>
+    <constraint source="isolation">H3 changes only the customer's own BFF app registration. It never edits a shared Spaarke app (the add-in client, SDAP-PCF-CLIENT).</constraint>
+    <constraint source="live">No live Entra or App Service change in this task; tests run against hand-written fakes (never Mock&lt;HttpMessageHandler&gt;).</constraint>
+    <constraint source="scope">The Teams client app does not exist yet: its pre-authorization is wired as configuration that is empty until 240c.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">CORS: catalog entries for `Cors__AllowedOrigins__N` (customer Dataverse origin + `.api.` variant, normalized; shared client origins from a platform option), resolved by H4b; run-context contract kept; tests.</step>
+    <step order="2">H3: `spa.redirectUris` = the customer's Dataverse origin(s) (idempotent merge); `api.preAuthorizedApplications` for the configured shared client app ids on the `user_impersonation` scope (idempotent); tests.</step>
+    <step order="3">H13: the CORS probe still passes for the Dataverse origin; add a probe for one shared client origin if configured.</step>
+    <step order="4">Docs: guide H3/H4b rows, inventory, provisioning.md; the skill's settings list. Verify (ControlPlane, ArchTests, Worker/Api 0 warnings); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A run's H4b settings include `Cors__AllowedOrigins__0..N`: the customer's Dataverse origin (no trailing slash), its `.api.` variant, and every configured shared client origin; none for an unconfigured origin.</criterion>
+    <criterion testable="true">H3 PATCHes the customer's app registration with those SPA redirect URIs and pre-authorizes each configured client app id on `user_impersonation`; a second run sends no change; it never PATCHes another application.</criterion>
+    <criterion testable="true">An invalid or non-https origin is refused by the run before H4b writes it (named failure).</criterion>
+    <criterion testable="true">ControlPlane tests and ArchTests pass; Worker/Api build with 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The production add-in / Teams origins are not known yet — ask the owner rather than guess (dev values are known).</trigger>
+    <trigger>Graph refuses preAuthorizedApplications for a client in this shape — stop and report.</trigger>
+  </escalation>
+
+  <notes/>
+</task>
