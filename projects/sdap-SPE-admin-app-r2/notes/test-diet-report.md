@@ -57,6 +57,11 @@ concrete production behaviour it protects.
 
 ## Path-move commands (reviewer judgment required)
 
+> ✅ **APPLIED 2026-10-07** — moved as below, and resolution **1 (offline Dataverse double)** taken for
+> `SearchItems_WithToken_ValidConfigIdNotFound_Returns400`: the lookup goes to a `DataverseWebApiClient`
+> subclass whose `RetrieveAsync` returns null with no network call, and the assertion is now exactly 400.
+> 7/7 pass. Nothing added to the reliability registry.
+
 ```bash
 # HTTP contract tests sitting at a non-KEEP path.
 # Content is maintain-class; only the location is wrong (heuristic 1).

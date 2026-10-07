@@ -1,19 +1,26 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.SpeAdmin;
 using Xunit;
 
-namespace Sprk.Bff.Api.Tests.SpeAdmin;
+namespace Sprk.Bff.Api.Tests.Contract.SpeAdmin;
 
 /// <summary>
-/// Unit tests for the SearchItems endpoint and the SearchItemsAsync service method.
-///
-/// Tests cover:
-/// - Input validation (empty query → 400, missing configId → 400)
-/// - Acceptance criteria: scoped search, unscoped search, empty results, pagination
+/// HTTP contract for <c>POST /api/spe/search/items</c>: route, auth precedence and input validation.
 /// </summary>
-public class SearchItemsTests
+/// <remarks>
+/// Moved 2026-10-07 from <c>tests/unit/Sprk.Bff.Api.Tests/SpeAdmin/SearchItemsTests.cs</c> (not a KEEP
+/// path) to this contract path, per <c>projects/sdap-SPE-admin-app-r2/notes/test-diet-report.md</c>.
+/// The Graph search request/response shapes are pinned separately in
+/// <c>SpeAdminSearchContractTests</c>.
+/// </remarks>
+public class SpeAdminSearchItemsContractTests
 {
     // =========================================================================
     // Integration-style tests via WebApplicationFactory
@@ -161,15 +168,23 @@ public class SearchItemsTests
     }
 
     /// <summary>
-    /// Verifies that a valid request with a non-existent configId returns 400
-    /// (configId not found in Dataverse → ConfigNotFoundException → 400).
-    /// In the test environment the Dataverse client is mocked and returns null for any configId.
+    /// Verifies that a well-formed configId that does not exist returns 400
+    /// (config not found → ConfigNotFoundException → 400) — and NOT 500.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Was network-flaky; now offline (2026-10-07).</b> This test used to reach the REAL Dataverse
+    /// endpoint for the config lookup, so its outcome depended on the network: it passed on some runs and
+    /// timed out after ~100 s on others, and its assertion tolerated 400 <i>or</i> 500 — establishing
+    /// nothing. The lookup now goes to <see cref="NotFoundDataverseClient"/>, which answers "no such
+    /// record" without a network call, so the assertion can be exact.</para>
+    /// </remarks>
     [Fact]
     public async Task SearchItems_WithToken_ValidConfigIdNotFound_Returns400()
     {
-        // Arrange
-        var factory = new CustomWebAppFactory();
+        // Arrange — the config lookup answers "not found" offline (see remarks).
+        var factory = new CustomWebAppFactory().WithWebHostBuilder(builder =>
+            builder.ConfigureTestServices(services =>
+                services.AddSingleton<DataverseWebApiClient>(_ => new NotFoundDataverseClient())));
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("Authorization", "Bearer test-token");
 
@@ -185,32 +200,43 @@ public class SearchItemsTests
             "/api/spe/search/items?configId=00000000-0000-0000-0000-000000000001",
             requestBody);
 
-        // Assert — configId not found in Dataverse → 400
-        // (In test environment, Dataverse is not connected; SpeAdminGraphService will fail config resolution)
-        //
-        // AMBIGUOUS (task 042): this tolerates a 500, which may be masking a real defect rather than the
-        // documented "config not found → 400" behavior. Left as-is per task 042 instructions (assertion
-        // change needs a human call) — /test-diet at task 090 should decide whether to tighten this.
-        //
-        // 🔴 NEW EVIDENCE 2026-08-27 (task 025/042 follow-up). The problem is worse than a loose
-        // assertion: **this test makes a REAL outbound call and its result depends on network state.**
-        // It passed twice earlier the same session and then failed with
-        //
-        //     System.Threading.Tasks.TaskCanceledException : The operation was canceled.
-        //     ---- HttpRequestException : Error while copying content to a stream.
-        //
-        // after ~100 s — i.e. the Dataverse config lookup went from failing fast to hanging until the
-        // HttpClient timeout. Proven pre-existing (`git stash -u` → identical failure and duration) and
-        // therefore NOT a regression from the work in flight, but it is non-deterministic by
-        // construction: a test under `tests/unit/**` that reaches the network cannot have a stable
-        // result, and a ~2-minute timeout makes the whole suite's runtime hostage to it.
-        //
-        // For /test-diet at 090 this is no longer only "tighten the assertion" — the choice is between
-        // giving the factory an offline Dataverse double (making 400-vs-500 actually decidable) or
-        // removing the test. Tightening the assertion alone would convert an intermittent pass into an
-        // intermittent failure without establishing anything.
-        response.StatusCode.Should().BeOneOf(
-            HttpStatusCode.BadRequest,
-            HttpStatusCode.InternalServerError);
+        // Assert — exactly 400. A 500 here would be a real defect (an unknown config is a caller error),
+        // which the old network-dependent version could not distinguish from a timeout.
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    /// <summary>
+    /// Offline Dataverse client: every single-record lookup answers "not found" (null), the same thing
+    /// the real client returns on a 404, without making a network call.
+    /// </summary>
+    private sealed class NotFoundDataverseClient : DataverseWebApiClient
+    {
+        public NotFoundDataverseClient()
+            : base(
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dataverse:ServiceUrl"] = "https://offline.invalid",
+                    })
+                    .Build(),
+                NullLogger<DataverseWebApiClient>.Instance,
+                new UnusableCredential())
+        {
+        }
+
+        public override Task<T?> RetrieveAsync<T>(
+            string entitySetName, Guid id, string? select = null, CancellationToken cancellationToken = default)
+            where T : default
+            => Task.FromResult<T?>(default);
+    }
+
+    /// <summary>Throws if anything tries to acquire a token — proof no real Dataverse call is attempted.</summary>
+    private sealed class UnusableCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext r, CancellationToken c)
+            => throw new InvalidOperationException("Dataverse must not be reached from this contract test.");
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext r, CancellationToken c)
+            => throw new InvalidOperationException("Dataverse must not be reached from this contract test.");
     }
 }
