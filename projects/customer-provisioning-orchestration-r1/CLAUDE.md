@@ -92,7 +92,7 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - Decide a doubtful mechanism by necessity: needed → build it, otherwise remove it. Give one recommendation, not a menu of variants (2026-10-06).
 - No Microsoft support case: find the root cause (2026-10-04).
 - The Word/Outlook add-ins and the Teams tab are used only by Dataverse-licensed users, internal or B2B guest; external contacts never use them (owner 2026-10-07, T240). Coordinate add-in and Teams client changes with spaarkeai-word-add-in-r1 directly, or give the owner a message to relay.
-- Production client sites are Spaarke-named custom domains on shared Static Web Apps in `rg-spaarke-shared-prod`: `addins.spaarke.com` (live) and `external.spaarke.com` (External Access SPA and Teams tab). Customer BFFs serve CIAM external contacts (T240d); external contacts do not use the Teams app; the Teams tab drops its Teams-SSO fallback (owner 2026-10-07).
+- Production client sites are Spaarke-named custom domains on shared Static Web Apps in `rg-spaarke-shared-prod`: `addins.spaarke.com` (live) and `external.spaarke.com` (External Access SPA and Teams tab). Customer BFFs serve CIAM external contacts (T240d); Teams is for internal and workforce users only — external-contact Teams access is not a requirement, contacts use the browser SPA (owner 2026-10-07); the Teams tab drops its Teams-SSO fallback (owner 2026-10-07).
 
 **Live actions**
 - Every live Azure/Entra/Dataverse/Exchange change and every deploy needs the owner's OK, per action. Read-only checks are fine. Record each action in the task POML notes.

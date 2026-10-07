@@ -7,7 +7,7 @@ on 2026-10-07, the split into three tasks, and the live test plan.
 
 Decisions (later the same day, after the external-access-r3 reply): (1) the External Access SPA's production origin is
 `external.spaarke.com`; (2) drop the Teams-SSO fallback for the multi-customer build; (3) customer BFFs serve CIAM external
-contacts (task 240d). External contacts do not use the Teams app (CIAM accounts cannot sign in to Teams).
+contacts (task 240d). Teams is for internal and workforce users only; external-contact Teams access is dropped as a requirement (owner: SPA access is enough; CIAM accounts cannot sign in to Teams anyway).
 
 - The live tests may go ahead.
 - **The add-ins and the Teams tab are used only by Dataverse-licensed users, internal or B2B guest. No external contact
