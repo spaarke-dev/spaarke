@@ -70,3 +70,12 @@ Dev BFF: master `dc189faac`, which contains #1353, #1342 and #1366.
   - `retest-shape-*.txt`, unattached;
   - `admin-owned-*.txt`, an admin upload.
 - **Row d4300ad0** on fb73b08c, unattached.
+
+## Owner test round 1 on 114 (2026-10-07, TrackingFieldTrio 1.0.36) → fixed in 1.0.37 (PR #1369, `8c932a4b0`)
+
+- **Restricted banner, users only:** PASS (owner).
+- **Lookup made Manage Access vanish:** fixed. While a lookup is open, `SprkModal` `yieldToSidePane` keeps the modal visible, docked left of the pane, dimmed and `inert`. The composer has the same behaviour → #1371, awaiting the owner's call.
+- **External-flagged users offered on Restricted:** fixed. The "+ User" lookup filters `sprk_isexternal ne 1 OR null`; the server's 422 remains the backstop for recent records.
+- **Vague "1 failed. Please try again.":** fixed. `/share-user`'s person-specific refusals (external, disabled, not a person, not found, No Access, unverifiable, read fault) now name the person and their email. This also covers the Assigned-To suggestion Grant path.
+- **Owner ruling, round 78:** secure-only records may be shared with external-flagged users; the message says "Restricted records" only.
+- **Deployed:** TrackingFieldTrio 1.0.37 to SPAARKE DEV 1 (imported and published). The owner re-tests.
