@@ -33,61 +33,66 @@ public static class RagEndpoints
             .RequireAuthorization()
             .WithTags("AI RAG");
 
+        // ─── Authorization on this group (unified-access-control-r2 task 163, sweep findings #4, #5,
+        //     #6, #30; takes over GitHub #1041) ─────────────────────────────────────────────────────
+        //
+        // The group's RequireAuthorization() means only "signed in", and AddTenantAuthorizationFilter()
+        // only compares a tenant the request names with the token's `tid` (it passes through when the
+        // request names none). Neither decides anything about a RECORD. So every route below states its
+        // own decision:
+        //   - /search            per-row trim in the handler (IAiAuthorizationService, as the caller),
+        //                        plus a Read gate on Options.ParentEntityId when one is named;
+        //   - /index, /{id}      the SystemAdmin policy — they take a caller-chosen index KEY / chunk key,
+        //                        which no per-record check can scope (operator maintenance surfaces);
+        //   - /index-file        Write on the named sprk_document and AppendTo on the named parent, as
+        //                        the caller, before any download or stamp (see AddTargetedRecordAuthorizationFilter);
+        // and every route that writes or deletes takes its partition from the TOKEN, rejecting a body or
+        // query tenant that disagrees (the send-to-index precedent, task 063 / F2).
+        //
+        // DELETED by task 163 (owner round 10 item 1 — no caller in the repo, in no published API
+        // description): POST /index/batch and DELETE /source/{sourceDocumentId}. Evidence in
+        // projects/unified-access-control-r2/notes/task-163-search-rag-knowledge-insights-authorization.md §2.
+
         // POST /api/ai/rag/search - Hybrid search
         group.MapPost("/search", Search)
             .AddTenantAuthorizationFilter()
+            .AddTargetedRecordAuthorizationFilter(SearchNamesParentRecord, ResolveSearchParentTargets)
             .RequireRateLimiting("ai-batch")
             .WithName("RagSearch")
             .WithSummary("Search knowledge base using hybrid search")
-            .WithDescription("Executes hybrid search combining keyword, vector, and semantic ranking for optimal relevance.")
+            .WithDescription("Executes hybrid search combining keyword, vector, and semantic ranking for optimal relevance. Results are trimmed to documents the caller can read.")
             .Produces<RagSearchResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
             .ProducesProblem(500);
 
-        // POST /api/ai/rag/index - Index a document
+        // POST /api/ai/rag/index - Index a document chunk (operator surface: SystemAdmin)
         group.MapPost("/index", IndexDocument)
+            .RequireAuthorization("SystemAdmin")
             .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("RagIndexDocument")
             .WithSummary("Index a document chunk into the knowledge base")
-            .WithDescription("Generates embedding and indexes the document chunk for RAG retrieval.")
+            .WithDescription("Operator surface (SystemAdmin). Generates embedding and indexes the document chunk into the caller's own tenant partition.")
             .Produces<KnowledgeDocument>()
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
-        // POST /api/ai/rag/index/batch - Batch index documents
-        group.MapPost("/index/batch", IndexDocumentsBatch)
-            .AddTenantAuthorizationFilter()
-            .RequireRateLimiting("ai-batch")
-            .WithName("RagIndexDocumentsBatch")
-            .WithSummary("Batch index multiple document chunks")
-            .WithDescription("Generates embeddings and indexes multiple document chunks efficiently.")
-            .Produces<IReadOnlyList<IndexResult>>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(500);
-
-        // DELETE /api/ai/rag/{documentId} - Delete a document
+        // DELETE /api/ai/rag/{documentId} - Delete a chunk by its index key (operator surface: SystemAdmin)
         group.MapDelete("/{documentId}", DeleteDocument)
+            .RequireAuthorization("SystemAdmin")
             .AddTenantAuthorizationFilter()
             .WithName("RagDeleteDocument")
             .WithSummary("Delete a document chunk from the knowledge base")
+            .WithDescription("Operator surface (SystemAdmin). Deletes the chunk with this index key only when it is in the caller's own tenant partition.")
             .Produces<RagDeleteResult>()
             .ProducesProblem(400)
             .ProducesProblem(401)
-            .ProducesProblem(404)
-            .ProducesProblem(500);
-
-        // DELETE /api/ai/rag/source/{sourceDocumentId} - Delete all chunks for a source document
-        group.MapDelete("/source/{sourceDocumentId}", DeleteBySourceDocument)
-            .AddTenantAuthorizationFilter()
-            .WithName("RagDeleteBySourceDocument")
-            .WithSummary("Delete all chunks for a source document")
-            .Produces<RagDeleteResult>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         // GET /api/ai/rag/embedding - Generate embedding for text (utility endpoint)
@@ -104,18 +109,27 @@ public static class RagEndpoints
         // POST /api/ai/rag/index-file - Index a file via unified pipeline
         group.MapPost("/index-file", IndexFile)
             .AddTenantAuthorizationFilter()
+            .AddTargetedRecordAuthorizationFilter(IndexFileNamesRecord, ResolveIndexFileTargets)
             .RequireRateLimiting("ai-batch")
             .WithName("RagIndexFile")
             .WithSummary("Index a file into the knowledge base via unified pipeline")
-            .WithDescription("Downloads file via OBO authentication, extracts text, chunks, generates embeddings, and indexes to Azure AI Search.")
+            .WithDescription("Downloads file via OBO authentication, extracts text, chunks, generates embeddings, and indexes to Azure AI Search in the caller's own tenant partition. A named document requires Write and a named parent requires AppendTo, evaluated as the caller.")
             .Produces<FileIndexingResult>()
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(409)
             .ProducesProblem(500);
 
         // POST /api/ai/rag/send-to-index - Index documents by ID (for Dataverse ribbon button)
         // Uses user OBO authentication to access files
         // Updates Dataverse sprk_searchindexed fields after successful indexing
+        //
+        // Authorization is a PAIR (task 063, finding F2 — see the remarks on SendToIndex):
+        //   - the tenant binding is route-level, in AddTenantAuthorizationFilter (ADR-008), and
+        //   - the per-document Write check is in the handler, because this route's contract is a
+        //     per-document result list and a filter can only allow or deny the whole request.
         group.MapPost("/send-to-index", SendToIndex)
             .AddTenantAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
@@ -125,6 +139,7 @@ public static class RagEndpoints
             .Produces<SendToIndexResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(500);
 
         // POST /api/ai/rag/enqueue-indexing - Enqueue a file for background RAG indexing
@@ -181,11 +196,34 @@ public static class RagEndpoints
     /// <summary>
     /// Search knowledge base using hybrid search.
     /// </summary>
+    /// <remarks>
+    /// <para><b>Authorization (unified-access-control-r2 task 163, sweep finding #5).</b> Before this, any
+    /// signed-in caller received the indexed TEXT of every document in the tenant: the handler searched
+    /// with no caller principal, and the privilege-group filter that a principal would feed is never
+    /// populated by any indexer (finding A-21). Now:</para>
+    /// <list type="bullet">
+    ///   <item>every returned row is trimmed to documents the CALLER can Read, through ONE call to
+    ///   <see cref="IAiAuthorizationService.AuthorizeAsync"/> for the page (the same seam the analysis
+    ///   routes use). A row with no usable sprk_document id is dropped, never served; a denied or failed
+    ///   authorization keeps no rows; <see cref="RagSearchResponse.TotalCount"/> reports the rows
+    ///   actually returned, never the index count;</item>
+    ///   <item>a named <c>Options.ParentEntityId</c> is Read-gated as the caller by the route's filter;</item>
+    ///   <item>the partition is the token's tenant, and a body tenant that disagrees is rejected 403;</item>
+    ///   <item><c>Options.SessionId</c> is refused: no ownership check exists for session files here.</item>
+    /// </list>
+    /// <para><c>CallerPrincipal</c> is set so the privilege filter sees the caller once groups are stamped;
+    /// it is NOT relied on as the trim.</para>
+    /// </remarks>
     private static async Task<IResult> Search(
         RagSearchRequest request,
         IRagService ragService,
+        IAiAuthorizationService aiAuthorizationService,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+
         if (string.IsNullOrWhiteSpace(request.Query))
         {
             return Results.BadRequest(new ProblemDetails
@@ -206,24 +244,41 @@ public static class RagEndpoints
             });
         }
 
-        // multi-container-multi-index-r1 FR-BFF-07 (task 016 — final wiring): the
-        // client supplies `searchIndexName` at the top level of `RagSearchRequest`
-        // (per the DTO contract in task 011), but `IRagService.SearchAsync(query,
-        // options, ct)` consumes the value from `RagSearchOptions.SearchIndexName`
-        // (added in task 014). Bridge the two here without mutating the caller's
-        // request DTO. When the caller did NOT set `request.SearchIndexName`,
-        // pass `request.Options` verbatim — preserves byte-for-byte backward-compat
-        // (NFR-02) for existing callers and the unmodified service-level test
-        // suite. ProblemDetails 400 (ADR-019) for INDEX_NOT_ALLOWED propagates
-        // from the resolver via the generic 500 catch — see Step 9.5 notes.
-        var effectiveOptions = !string.IsNullOrWhiteSpace(request.SearchIndexName)
-            ? request.Options with { SearchIndexName = request.SearchIndexName }
-            : request.Options;
+        if (!string.IsNullOrWhiteSpace(request.Options.SessionId))
+        {
+            // No ownership check exists for session files on this route (the session-files index is
+            // filtered only by tenant + the session id the caller names), and no in-repo caller sends one.
+            return Results.Problem(
+                statusCode: 400,
+                title: "Invalid Request",
+                detail: "Options.SessionId is not accepted on this route.",
+                extensions: RagProblemExtensions("RAG_SESSION_ID_NOT_ACCEPTED", httpContext));
+        }
 
+        var tenantProblem = CheckCallerTenant(httpContext, request.Options.TenantId, logger, "search", out var callerTenantId);
+        if (tenantProblem is not null)
+        {
+            return tenantProblem;
+        }
+
+        // multi-container-multi-index-r1 FR-BFF-07 (task 016): the client supplies `searchIndexName` at the
+        // top level of `RagSearchRequest`; `IRagService.SearchAsync` consumes it from
+        // `RagSearchOptions.SearchIndexName`. A request without one keeps the options' own value (NFR-02).
+        // Task 163: the options are now ALWAYS rebuilt — the partition is the token's tenant and the
+        // caller principal is attached — so the caller's options object is never passed through verbatim.
+        var effectiveOptions = request.Options with
+        {
+            TenantId = callerTenantId,
+            CallerPrincipal = httpContext.User,
+            SearchIndexName = !string.IsNullOrWhiteSpace(request.SearchIndexName)
+                ? request.SearchIndexName
+                : request.Options.SearchIndexName,
+        };
+
+        RagSearchResponse response;
         try
         {
-            var response = await ragService.SearchAsync(request.Query, effectiveOptions, cancellationToken);
-            return Results.Ok(response);
+            response = await ragService.SearchAsync(request.Query, effectiveOptions, cancellationToken);
         }
         catch (FeatureDisabledException ex)
         {
@@ -240,23 +295,36 @@ public static class RagEndpoints
             // NFR-08 (rejected index name MUST surface as ProblemDetails 400).
             throw;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Results.Problem(
-                title: "Search Failed",
-                detail: ex.Message,
-                statusCode: 500);
+            logger.LogError(ex, "RAG search failed. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            return ServerError("Search Failed", "The search could not be completed.", httpContext);
         }
+
+        var readable = await TrimToReadableDocumentsAsync(
+            response.Results, aiAuthorizationService, httpContext, logger, cancellationToken);
+
+        return Results.Ok(response with { Results = readable, TotalCount = readable.Count });
     }
 
     /// <summary>
     /// Index a document chunk into the knowledge base.
     /// </summary>
+    /// <remarks>
+    /// Operator surface (task 163, sweep finding #6): the route requires SystemAdmin because the caller
+    /// supplies the whole chunk including its index KEY, so merge-or-upload can overwrite any chunk and no
+    /// per-record check could scope it. The partition is the token's tenant; a body tenant that disagrees
+    /// is rejected 403 (the filter checks it too — this check keeps detaching the filter from reopening it).
+    /// </remarks>
     private static async Task<IResult> IndexDocument(
         KnowledgeDocument document,
         IRagService ragService,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+
         if (string.IsNullOrWhiteSpace(document.Id))
         {
             return Results.BadRequest(new ProblemDetails
@@ -287,6 +355,16 @@ public static class RagEndpoints
             });
         }
 
+        var tenantProblem = CheckCallerTenant(httpContext, document.TenantId, logger, "index", out var callerTenantId);
+        if (tenantProblem is not null)
+        {
+            return tenantProblem;
+        }
+
+        // The partition key is the TOKEN's tenant. The body value was proven equal above and is overwritten
+        // so a caller-supplied string never reaches the partition key, even when it happens to match.
+        document.TenantId = callerTenantId;
+
         try
         {
             var indexed = await ragService.IndexDocumentAsync(document, cancellationToken);
@@ -297,81 +375,34 @@ public static class RagEndpoints
             // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
             return ex.AsFeatureDisabled503();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Results.Problem(
-                title: "Indexing Failed",
-                detail: ex.Message,
-                statusCode: 500);
+            logger.LogError(ex, "RAG chunk indexing failed. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            return ServerError("Indexing Failed", "The document chunk could not be indexed.", httpContext);
         }
     }
 
     /// <summary>
-    /// Batch index multiple document chunks.
+    /// Delete a document chunk from the knowledge base, by its index KEY.
     /// </summary>
     /// <remarks>
-    /// multi-container-multi-index-r1 indexer-routing-fix (Tier 3): the optional
-    /// <paramref name="searchIndexName"/> query parameter routes the batch to a specific
-    /// Azure AI Search index (validated against <c>AiSearchOptions.AllowedIndexes</c>; rejected
-    /// values surface as <c>400 INDEX_NOT_ALLOWED</c> per ADR-019 + NFR-08). Omit the parameter
-    /// to fall through to the tenant-default chain (NFR-02 backward-compat). The OBO contract is
-    /// preserved: rejection is a hard 400 — there is NO default-fall-back on synchronous endpoints
-    /// (that behavior is only for background jobs per the indexer-routing-fix task brief).
+    /// Operator surface (task 163, sweep finding #30): requires SystemAdmin, because the route value is a
+    /// CHUNK key, not a Dataverse record, so there is no record whose rights could decide it. The partition
+    /// is the token's tenant: a query tenant that disagrees is rejected 403, and
+    /// <see cref="IRagService.DeleteDocumentAsync"/> deletes a chunk only when the chunk with that key
+    /// carries that tenant — a chunk of another tenant and an absent chunk both report "nothing deleted",
+    /// so the response cannot tell them apart.
     /// </remarks>
-    private static async Task<IResult> IndexDocumentsBatch(
-        IEnumerable<KnowledgeDocument> documents,
-        IRagService ragService,
-        [FromQuery] string? searchIndexName,
-        CancellationToken cancellationToken)
-    {
-        var docList = documents.ToList();
-
-        if (docList.Count == 0)
-        {
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Invalid Request",
-                Detail = "At least one document is required",
-                Status = 400
-            });
-        }
-
-        try
-        {
-            var results = await ragService.IndexDocumentsBatchAsync(docList, searchIndexName, cancellationToken);
-            return Results.Ok(results);
-        }
-        catch (FeatureDisabledException ex)
-        {
-            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
-            return ex.AsFeatureDisabled503();
-        }
-        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
-        {
-            // multi-container-multi-index-r1 indexer-routing-fix (Tier 3) — rethrow so the
-            // global UseExceptionHandler middleware renders the canonical ProblemDetails
-            // (e.g., 400 INDEX_NOT_ALLOWED). Without this, the generic Exception catch below
-            // would convert it to 500 and break the NFR-08 contract.
-            throw;
-        }
-        catch (Exception ex)
-        {
-            return Results.Problem(
-                title: "Batch Indexing Failed",
-                detail: ex.Message,
-                statusCode: 500);
-        }
-    }
-
-    /// <summary>
-    /// Delete a document chunk from the knowledge base.
-    /// </summary>
     private static async Task<IResult> DeleteDocument(
         string documentId,
         [AsParameters] DeleteDocumentQuery query,
         IRagService ragService,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+
         if (string.IsNullOrWhiteSpace(query.TenantId))
         {
             return Results.BadRequest(new ProblemDetails
@@ -382,9 +413,15 @@ public static class RagEndpoints
             });
         }
 
+        var tenantProblem = CheckCallerTenant(httpContext, query.TenantId, logger, "delete", out var callerTenantId);
+        if (tenantProblem is not null)
+        {
+            return tenantProblem;
+        }
+
         try
         {
-            var deleted = await ragService.DeleteDocumentAsync(documentId, query.TenantId, cancellationToken);
+            var deleted = await ragService.DeleteDocumentAsync(documentId, callerTenantId, cancellationToken);
             return Results.Ok(new RagDeleteResult { Deleted = deleted, Count = deleted ? 1 : 0 });
         }
         catch (FeatureDisabledException ex)
@@ -392,52 +429,17 @@ public static class RagEndpoints
             // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
             return ex.AsFeatureDisabled503();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return Results.Problem(
-                title: "Delete Failed",
-                detail: ex.Message,
-                statusCode: 500);
+            logger.LogError(ex, "RAG chunk delete failed. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            return ServerError("Delete Failed", "The document chunk could not be deleted.", httpContext);
         }
     }
 
-    /// <summary>
-    /// Delete all chunks for a source document.
-    /// </summary>
-    private static async Task<IResult> DeleteBySourceDocument(
-        string sourceDocumentId,
-        [AsParameters] DeleteDocumentQuery query,
-        IRagService ragService,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(query.TenantId))
-        {
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Invalid Request",
-                Detail = "TenantId query parameter is required",
-                Status = 400
-            });
-        }
-
-        try
-        {
-            var count = await ragService.DeleteBySourceDocumentAsync(sourceDocumentId, query.TenantId, cancellationToken);
-            return Results.Ok(new RagDeleteResult { Deleted = count > 0, Count = count });
-        }
-        catch (FeatureDisabledException ex)
-        {
-            // Task 011 Phase 1b Tier 2 (D-09 §2 B7): NullRagService surfaced.
-            return ex.AsFeatureDisabled503();
-        }
-        catch (Exception ex)
-        {
-            return Results.Problem(
-                title: "Delete Failed",
-                detail: ex.Message,
-                statusCode: 500);
-        }
-    }
+    // DELETE /source/{sourceDocumentId} (handler DeleteBySourceDocument) and POST /index/batch (handler
+    // IndexDocumentsBatch) were DELETED by task 163 under owner round 10 item 1: no caller in the repo and
+    // in no published API description. IRagService.DeleteBySourceDocumentAsync / IndexDocumentsBatchAsync
+    // remain — RagIndexingPipeline and FileIndexingService call them server-side with server-built input.
 
     /// <summary>
     /// Generate embedding for text content.
@@ -485,8 +487,25 @@ public static class RagEndpoints
     /// Uses OBO authentication to access user's files.
     /// </summary>
     /// <remarks>
-    /// When DocumentId is provided, Dataverse tracking fields (sprk_searchindexed,
-    /// sprk_searchindexedon, sprk_searchindexname) are updated after successful indexing.
+    /// <para>When DocumentId is provided, Dataverse tracking fields (sprk_searchindexed,
+    /// sprk_searchindexedon, sprk_searchindexname) are updated after successful indexing.</para>
+    /// <para><b>Authorization (unified-access-control-r2 task 163, sweep finding #4; takes over GitHub
+    /// #1041).</b> The file download was always OBO, so SPE decided the caller's READ of the bytes. What
+    /// the caller also chose, unchecked, was where the chunks went and what they claimed to be:</para>
+    /// <list type="bullet">
+    ///   <item>the PARTITION — now the token's tenant; a body tenant that disagrees is rejected 403
+    ///   (TenantAuthorizationFilter's FileIndexRequest case, and again here so detaching the filter cannot
+    ///   reopen it);</item>
+    ///   <item>the DOCUMENT stamped app-only — the route filter requires Write on that sprk_document, as the
+    ///   caller, before anything runs; the row is then read and must point at the same drive item;</item>
+    ///   <item>the PARENT the chunks are attributed to — AppendTo on it, as the caller; when the row
+    ///   carries a matter/project/invoice the body parent must be one of them, and the chunks carry the
+    ///   row's value;</item>
+    ///   <item>the KNOWLEDGE SOURCE — refused: no caller sends it, and it would attribute chunks to a
+    ///   knowledge source's grounding.</item>
+    /// </list>
+    /// <para>With neither a document nor a parent named, the file is indexed with no attribution and no
+    /// Dataverse write, as before — the OBO download is then the only decision, and it is the caller's.</para>
     /// </remarks>
     private static async Task<IResult> IndexFile(
         FileIndexRequest request,
@@ -494,8 +513,11 @@ public static class RagEndpoints
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
         HttpContext httpContext,
+        ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RagEndpoints");
+
         if (string.IsNullOrWhiteSpace(request.TenantId))
         {
             return Results.BadRequest(new ProblemDetails
@@ -536,16 +558,73 @@ public static class RagEndpoints
             });
         }
 
+        if (!string.IsNullOrWhiteSpace(request.KnowledgeSourceId) || !string.IsNullOrWhiteSpace(request.KnowledgeSourceName))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Invalid Request",
+                detail: "KnowledgeSourceId and KnowledgeSourceName are not accepted on this route.",
+                extensions: RagProblemExtensions("INDEX_FILE_KNOWLEDGE_SOURCE_NOT_ACCEPTED", httpContext));
+        }
+
+        var tenantProblem = CheckCallerTenant(httpContext, request.TenantId, logger, "index-file", out var callerTenantId);
+        if (tenantProblem is not null)
+        {
+            return tenantProblem;
+        }
+
         try
         {
-            var result = await fileIndexingService.IndexFileAsync(request, httpContext, cancellationToken);
+            // The partition key is the TOKEN's tenant (task 163 / #1041), never the body's — the body value
+            // was proven equal above and is deliberately not passed on.
+            var indexRequest = request with { TenantId = callerTenantId };
+
+            if (!string.IsNullOrEmpty(request.DocumentId))
+            {
+                // The route filter has already required Write on sprk_documents(DocumentId), as the caller.
+                // Read the row (as SendToIndex Step 1) and hold the body to it.
+                var document = await dataverseService.GetDocumentAsync(request.DocumentId, cancellationToken);
+                if (document is null)
+                {
+                    // Absent between the check and now: the same answer the filter gives for an absent id.
+                    return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
+                }
+
+                var rowProblem = HoldIndexFileRequestToRow(request, document, out var rowParent);
+                if (rowProblem is not null)
+                {
+                    logger.LogWarning(
+                        "index-file refused ({Reason}): the request does not match the document row it names. "
+                        + "CorrelationId={CorrelationId}",
+                        rowProblem, httpContext.TraceIdentifier);
+
+                    return Results.Problem(
+                        statusCode: StatusCodes.Status409Conflict,
+                        title: "Conflict",
+                        detail: "The request does not match the document record it names.",
+                        extensions: RagProblemExtensions(rowProblem, httpContext));
+                }
+
+                indexRequest = indexRequest with
+                {
+                    DriveId = document.GraphDriveId!,
+                    ItemId = document.GraphItemId!,
+                    // The row's parent when the row carries one; otherwise the body parent the filter
+                    // authorized (AppendTo) — e.g. a document filed under a work assignment or event,
+                    // which DocumentEntity cannot express.
+                    ParentEntity = rowParent ?? request.ParentEntity,
+                };
+            }
+
+            var result = await fileIndexingService.IndexFileAsync(indexRequest, httpContext, cancellationToken);
 
             if (!result.Success)
             {
-                return Results.Problem(
-                    title: "Indexing Failed",
-                    detail: result.ErrorMessage,
-                    statusCode: 500);
+                // The pipeline's own message can describe the drive item; it stays in the server log.
+                logger.LogWarning(
+                    "index-file pipeline reported failure: {Error}. CorrelationId={CorrelationId}",
+                    result.ErrorMessage, httpContext.TraceIdentifier);
+                return ServerError("Indexing Failed", "The file could not be indexed.", httpContext);
             }
 
             // Update Dataverse tracking fields when DocumentId is provided.
@@ -577,13 +656,369 @@ public static class RagEndpoints
             // Task 011 Phase 1b Tier 1.5 round 4 (D-02 cluster exception): NullFileIndexingService surfaced.
             return ex.AsFeatureDisabled503();
         }
-        catch (Exception ex)
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException)
         {
-            return Results.Problem(
-                title: "Indexing Failed",
-                detail: ex.Message,
-                statusCode: 500);
+            // e.g. 400 INDEX_NOT_ALLOWED for a SearchIndexName outside the allow-list — rendered by the global
+            // ProblemDetails middleware (ADR-019), not swallowed into a 500.
+            throw;
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "index-file failed. CorrelationId={CorrelationId}", httpContext.TraceIdentifier);
+            return ServerError("Indexing Failed", "The file could not be indexed.", httpContext);
+        }
+    }
+
+    /// <summary>
+    /// Holds an index-file request that names a document to that document's ROW. Returns <c>null</c> when it
+    /// matches (and the row's parent, if the row carries one), otherwise a reason code for the 409.
+    /// </summary>
+    /// <remarks>
+    /// <list type="bullet">
+    ///   <item>The row must carry a file (GraphDriveId + GraphItemId) — otherwise there is nothing the
+    ///   request can legitimately be indexing for this row.</item>
+    ///   <item>The body DriveId/ItemId must be the row's — otherwise the caller would have the app stamp
+    ///   row A as indexed with the contents of file B.</item>
+    ///   <item>When the row carries a matter/project/invoice, the body ParentEntity (if any) must be one of
+    ///   them: type compared case-insensitively with the "sprk_" prefix ignored, ids compared as GUIDs.
+    ///   The chunks then carry the ROW's parent — the matched one, else the first of matter, project,
+    ///   invoice (SendToIndex Step 3's order).</item>
+    /// </list>
+    /// </remarks>
+    internal static string? HoldIndexFileRequestToRow(
+        FileIndexRequest request, DocumentEntity document, out ParentEntityContext? rowParent)
+    {
+        rowParent = null;
+
+        if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        {
+            return "INDEX_FILE_DOCUMENT_HAS_NO_FILE";
+        }
+
+        if (!string.Equals(request.DriveId, document.GraphDriveId, StringComparison.Ordinal)
+            || !string.Equals(request.ItemId, document.GraphItemId, StringComparison.Ordinal))
+        {
+            return "INDEX_FILE_ITEM_MISMATCH";
+        }
+
+        var rowParents = new List<ParentEntityContext>(3);
+        AddRowParent(rowParents, "matter", document.MatterId, document.MatterName ?? "Unknown Matter");
+        AddRowParent(rowParents, "project", document.ProjectId, document.ProjectName ?? "Unknown Project");
+        AddRowParent(rowParents, "invoice", document.InvoiceId, document.InvoiceName ?? "Unknown Invoice");
+
+        if (rowParents.Count == 0)
+        {
+            // The row cannot express this parent (e.g. a work assignment or event): the filter's AppendTo
+            // check on the body parent is the decision.
+            return null;
+        }
+
+        if (request.ParentEntity is null)
+        {
+            rowParent = rowParents[0];
+            return null;
+        }
+
+        var bodyType = NormalizeParentType(request.ParentEntity.EntityType);
+        var matched = Guid.TryParse(request.ParentEntity.EntityId, out var bodyId)
+            ? rowParents.FirstOrDefault(p =>
+                string.Equals(p.EntityType, bodyType, StringComparison.OrdinalIgnoreCase)
+                && Guid.TryParse(p.EntityId, out var rowId)
+                && rowId == bodyId)
+            : null;
+
+        if (matched is null)
+        {
+            return "INDEX_FILE_PARENT_MISMATCH";
+        }
+
+        rowParent = matched;
+        return null;
+
+        static void AddRowParent(List<ParentEntityContext> parents, string type, string? id, string name)
+        {
+            if (!string.IsNullOrEmpty(id))
+            {
+                parents.Add(new ParentEntityContext(EntityType: type, EntityId: id, EntityName: name));
+            }
+        }
+    }
+
+    private static string NormalizeParentType(string? entityType)
+    {
+        var trimmed = (entityType ?? string.Empty).Trim();
+        return trimmed.StartsWith("sprk_", StringComparison.OrdinalIgnoreCase) ? trimmed[5..] : trimmed;
+    }
+
+    /// <summary>The Dataverse entity set the documents on this route live in.</summary>
+    private const string DocumentEntitySetName = "sprk_documents";
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Authorization helpers (unified-access-control-r2 task 163)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Runs <see cref="FinanceAuthorizationFilter"/>'s per-route declaration check — as it is, with the
+    /// uniform 404 denial — but ONLY when the request names a Dataverse record (<paramref name="namesRecordTarget"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Why conditional: the declaration filter denies a request whose declaration yields no check, which
+    /// is right for routes that always act on a record. Two routes here act on a record only SOMETIMES:
+    /// <c>/search</c> (a named parent) and <c>/index-file</c> (a named document and/or parent). When they name
+    /// none, the per-row trim (search) or the caller's own OBO download (index-file) is the decision, and
+    /// there is no record whose rights could add anything. When they name one, the full declaration check
+    /// runs — and a target that cannot be resolved denies, exactly as on every other declaration route.</para>
+    /// <para>No second check loop: the evaluation is <see cref="FinanceAuthorizationFilter.InvokeAsync"/>
+    /// itself (task 130). A presence probe that throws is treated as "names a record", so the declaration
+    /// check runs and fails closed.</para>
+    /// </remarks>
+    private static RouteHandlerBuilder AddTargetedRecordAuthorizationFilter(
+        this RouteHandlerBuilder builder,
+        Func<EndpointFilterInvocationContext, bool> namesRecordTarget,
+        Func<EndpointFilterInvocationContext, FinanceAuthorizationTargets> resolveTargets)
+    {
+        return builder.AddEndpointFilter(async (context, next) =>
+        {
+            bool targeted;
+            try
+            {
+                targeted = namesRecordTarget(context);
+            }
+            catch (Exception)
+            {
+                targeted = true;
+            }
+
+            if (!targeted)
+            {
+                return await next(context);
+            }
+
+            var services = context.HttpContext.RequestServices;
+            var gate = new FinanceAuthorizationFilter(
+                services.GetRequiredService<Spaarke.Core.Auth.AuthorizationService>(),
+                resolveTargets,
+                FinanceDenial.UniformNotFound);
+            return await gate.InvokeAsync(context, next);
+        });
+    }
+
+    /// <summary>/search names a record when <c>Options.ParentEntityId</c> is non-empty.</summary>
+    internal static bool SearchNamesParentRecord(EndpointFilterInvocationContext context) =>
+        !string.IsNullOrWhiteSpace(
+            context.Arguments.OfType<RagSearchRequest>().FirstOrDefault()?.Options?.ParentEntityId);
+
+    /// <summary>
+    /// /search with a named parent: Read on that parent, as the caller. An unrecognized type or a non-GUID id
+    /// declares no check, which the filter denies with the uniform 404.
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveSearchParentTargets(EndpointFilterInvocationContext context)
+    {
+        var options = context.Arguments.OfType<RagSearchRequest>().FirstOrDefault()?.Options;
+
+        if (options is null
+            || !EntityAccessFilter.TryResolveEntitySet(options.ParentEntityType, out var entitySet)
+            || !Guid.TryParse(options.ParentEntityId, out var parentId)
+            || parentId == Guid.Empty)
+        {
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = entitySet,
+            RecordId = parentId,
+            Operation = "read",
+            Source = "body.options.parentEntityId",
+        });
+    }
+
+    /// <summary>/index-file names a record when it carries a DocumentId or a ParentEntity.</summary>
+    internal static bool IndexFileNamesRecord(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<FileIndexRequest>().FirstOrDefault();
+        return request is not null
+            && (!string.IsNullOrEmpty(request.DocumentId) || request.ParentEntity is not null);
+    }
+
+    /// <summary>
+    /// /index-file: Write ("write") on sprk_documents(DocumentId) — the row is stamped app-only after indexing —
+    /// and AppendTo ("entity.associate_document") on the named parent, whose id is written onto every chunk.
+    /// Both run when both are named. Any named target that cannot be resolved (non-GUID document id,
+    /// unrecognized parent type, non-GUID parent id) declares NO check at all, so the whole request is denied
+    /// with the uniform 404 rather than authorized on its other half.
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveIndexFileTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<FileIndexRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        var checks = new List<FinanceAuthorizationCheck>(2);
+
+        if (!string.IsNullOrEmpty(request.DocumentId))
+        {
+            if (!Guid.TryParse(request.DocumentId, out var documentId) || documentId == Guid.Empty)
+            {
+                return FinanceAuthorizationTargets.Authorize();
+            }
+
+            checks.Add(new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = DocumentEntitySetName,
+                RecordId = documentId,
+                Operation = "write",
+                Source = "body.documentId",
+            });
+        }
+
+        if (request.ParentEntity is not null)
+        {
+            if (!EntityAccessFilter.TryResolveEntitySet(request.ParentEntity.EntityType, out var parentSet)
+                || !Guid.TryParse(request.ParentEntity.EntityId, out var parentId)
+                || parentId == Guid.Empty)
+            {
+                return FinanceAuthorizationTargets.Authorize();
+            }
+
+            checks.Add(new FinanceAuthorizationCheck
+            {
+                Path = FinanceCheckPath.Record,
+                EntitySetName = parentSet,
+                RecordId = parentId,
+                Operation = "entity.associate_document",
+                Source = "body.parentEntity",
+            });
+        }
+
+        return FinanceAuthorizationTargets.Authorize(checks.ToArray());
+    }
+
+    /// <summary>
+    /// The tenant binding shared by every route here that reads or writes a partition: the partition is the
+    /// TOKEN's tenant (<see cref="TenantResolution.ResolveTenantId"/>), and a request value that disagrees
+    /// is REJECTED 403 — never silently corrected (task 063 / F2 precedent). The token's tenant is in the
+    /// caller's own token, so the 403 is not an existence oracle. Returns <c>null</c> when they agree.
+    /// </summary>
+    private static IResult? CheckCallerTenant(
+        HttpContext httpContext, string? requestedTenantId, ILogger logger, string route, out string callerTenantId)
+    {
+        callerTenantId = TenantResolution.ResolveTenantId(httpContext.User) ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(callerTenantId))
+        {
+            logger.LogWarning("rag/{Route} refused: the caller carries no tenant claim, so the partition cannot be established.", route);
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Tenant identity not found in authentication token.",
+                extensions: RagProblemExtensions("RAG_NO_TENANT_CLAIM", httpContext));
+        }
+
+        if (!string.Equals(requestedTenantId, callerTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning("rag/{Route} refused: the requested tenant does not match the caller's tenant claim.", route);
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "The requested tenant does not match your authenticated tenant.",
+                extensions: RagProblemExtensions("RAG_TENANT_MISMATCH", httpContext));
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The extensions of a problem task 163 added to this file: the stable <c>errorCode</c> ADR-019 requires, the
+    /// same value under this file's existing <c>code</c> key (the SendToIndex precedent its clients read), and the
+    /// correlation id.
+    /// </summary>
+    private static Dictionary<string, object?> RagProblemExtensions(string code, HttpContext httpContext) =>
+        new()
+        {
+            ["errorCode"] = code,
+            ["code"] = code,
+            ["correlationId"] = httpContext.TraceIdentifier,
+        };
+
+    /// <summary>
+    /// A 500 with a FIXED detail (ADR-019): the exception message can disclose internals and record
+    /// existence, so it goes to the server log, never the response.
+    /// </summary>
+    private static IResult ServerError(string title, string detail, HttpContext httpContext) =>
+        Results.Problem(
+            title: title,
+            detail: detail,
+            statusCode: StatusCodes.Status500InternalServerError,
+            extensions: RagProblemExtensions("RAG_INTERNAL_ERROR", httpContext));
+
+    /// <summary>
+    /// Trims a result page to the rows whose document the CALLER can Read (task 163, owner round 9 "lists
+    /// trimmed"): ONE <see cref="IAiAuthorizationService.AuthorizeAsync"/> call with the distinct parsed
+    /// sprk_document ids of the page; a row is kept only when its DocumentId parses as a non-empty GUID that
+    /// the seam returned as authorized.
+    /// </summary>
+    /// <remarks>
+    /// Fail closed per row (ADR-003): a null or non-GUID DocumentId (an orphan file, a knowledge-source chunk)
+    /// has no record to evaluate and is dropped, never served; when no row has a usable id the seam is not
+    /// called (it throws on an empty list) and nothing is returned; a denied, partial or faulted
+    /// authorization keeps only what it explicitly authorized — none on a fault. The seam's Reason text names
+    /// document ids and is never returned.
+    /// </remarks>
+    internal static async Task<IReadOnlyList<RagSearchResult>> TrimToReadableDocumentsAsync(
+        IReadOnlyList<RagSearchResult> rows,
+        IAiAuthorizationService aiAuthorizationService,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var distinctIds = new List<Guid>();
+        var seen = new HashSet<Guid>();
+        foreach (var row in rows)
+        {
+            if (Guid.TryParse(row.DocumentId, out var id) && id != Guid.Empty && seen.Add(id))
+            {
+                distinctIds.Add(id);
+            }
+        }
+
+        if (distinctIds.Count == 0)
+        {
+            return Array.Empty<RagSearchResult>();
+        }
+
+        HashSet<Guid> permitted;
+        try
+        {
+            var decision = await aiAuthorizationService.AuthorizeAsync(
+                httpContext.User, distinctIds, httpContext, cancellationToken);
+            permitted = decision.AuthorizedDocumentIds.ToHashSet();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "RAG search row authorization faulted; returning no rows (fail closed). CorrelationId={CorrelationId}",
+                httpContext.TraceIdentifier);
+            return Array.Empty<RagSearchResult>();
+        }
+
+        var kept = rows
+            .Where(r => Guid.TryParse(r.DocumentId, out var id) && permitted.Contains(id))
+            .ToList();
+
+        if (kept.Count != rows.Count)
+        {
+            logger.LogInformation(
+                "RAG search row authorization kept {Kept} of {Total} rows ({Distinct} distinct documents evaluated). "
+                + "CorrelationId={CorrelationId}",
+                kept.Count, rows.Count, distinctIds.Count, httpContext.TraceIdentifier);
+        }
+
+        return kept;
     }
 
     /// <summary>
@@ -591,16 +1026,72 @@ public static class RagEndpoints
     /// Designed for Dataverse ribbon button integration.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// - Gets document details from Dataverse (including parent entity lookups)
     /// - Indexes file via OBO authentication
     /// - Updates Dataverse with search index tracking fields (sprk_searchindexed, etc.)
     /// - Returns results for each document processed
+    /// </para>
+    /// <para>
+    /// <b>Authorization (spaarkeai-word-add-in-r1 task 063, Fable finding F2).</b> Two things are
+    /// checked here that were not checked before, and the tests that pin them are
+    /// <c>tests/integration/contract/Api/Ai/SendToIndexAuthorizationContractTests.cs</c>.
+    /// </para>
+    /// <para>
+    /// (1) <b>The tenant partition is the token's, not the body's.</b> It is resolved through
+    /// <see cref="TenantResolution.ResolveTenantId"/> — the BFF's single answer to "which tenant is
+    /// this caller in?" — and a body <c>TenantId</c> that disagrees is REJECTED with 403 rather than
+    /// silently overridden. Silently correcting it would tell a caller their chunks landed in the
+    /// partition they named when they landed somewhere else. The field is retained in the request
+    /// contract because both in-repo callers send it (the Dataverse ribbon in
+    /// <c>sprk_DocumentOperations.js</c> and the Word add-in's Find view), and both source it from
+    /// their MSAL account's tenant — i.e. the same value as <c>tid</c>, so neither breaks.
+    /// </para>
+    /// <para>
+    /// (2) <b>Every document is authorized for Write before its row is stamped</b>, evaluated AS THE
+    /// CALLER through <see cref="Spaarke.Core.Auth.AuthorizationService.GetCallerRecordAccessAsync"/>
+    /// — the entity-generic caller-evaluated evaluator the record- and semantic-search surfaces
+    /// already use, which fails closed without the caller's bearer token. <b>Write</b>, not Read:
+    /// this route MUTATES the row (<c>sprk_searchindexed</c>, <c>sprk_searchindexedon</c>,
+    /// <c>sprk_searchindexcompletedon</c>, <c>sprk_searchindexname</c>) app-only, and read access is
+    /// not consent to be written to. Before this, the effective gate was "can you read the file's SPE
+    /// container", which the row-level Dataverse rights need not agree with.
+    /// </para>
+    /// <para>
+    /// <b>Why the per-document check is here and not in a filter</b> (ADR-008's default shape). A
+    /// filter can only allow or deny the WHOLE request, and this route's contract is a per-document
+    /// result list. The partial-permission behaviour below — index the permitted, refuse the denied
+    /// in place — is only expressible in the handler. The tenant binding, which IS a whole-request
+    /// decision, does live in the filter (<see cref="TenantAuthorizationFilter"/>); the duplicate
+    /// check here is the forcing function that keeps detaching that filter from re-opening the hole.
+    /// </para>
+    /// <para>
+    /// <b>Partial permission, stated exactly.</b> Authorization for every requested id is decided
+    /// FIRST, in one pass, before any Dataverse read or file download. If the caller may write none
+    /// of them the whole request is refused with 403 and no row is read — a 200 reporting "0 of N
+    /// succeeded" is indistinguishable from an indexing outage, and both in-repo callers render that
+    /// as "try again". If the caller may write at least one, the response is 200 and each denied
+    /// document appears as its own failed result (<c>Success=false</c>, a denial message, and
+    /// <b>no</b> <c>ParentEntityType</c>/<c>ParentEntityId</c> — that parent identifier is one of the
+    /// things F2 says a caller should not learn); its row is never read, never indexed and never
+    /// stamped. One unauthorized id must not deny service to the rest of a legitimate batch.
+    /// </para>
+    /// <para>
+    /// <b>Cost.</b> One extra Dataverse round trip per DISTINCT requested id, memoized within the
+    /// request and absorbed across requests by <c>CachedAccessDataSource</c>'s 60 s key. This route
+    /// already spends, per document, one Dataverse read + an SPE download + extraction + embedding +
+    /// an index write + a Dataverse write, so the check is a small fraction of existing per-document
+    /// cost — unlike a keystroke-driven typeahead, where task 062 rejected exactly this mechanism for
+    /// exactly that reason. Sequential, because <c>DataverseAccessDataSource</c> mutates a shared
+    /// request-scoped <c>HttpClient</c>'s auth header per call.
+    /// </para>
     /// </remarks>
     private static async Task<IResult> SendToIndex(
         [FromBody] SendToIndexRequest request,
         IFileIndexingService fileIndexingService,
         IDocumentDataverseService dataverseService,
         ISearchIndexNameResolver searchIndexNameResolver,
+        Spaarke.Core.Auth.AuthorizationService authorizationService,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -628,11 +1119,118 @@ public static class RagEndpoints
             });
         }
 
-        var results = new List<SendToIndexDocumentResult>();
-        var indexName = searchIndexNameResolver.GetDefaultIndexName();
-
-        foreach (var documentId in request.DocumentIds)
+        // ── The tenant partition comes from the token (task 063 / F2). ──
+        var callerTenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(callerTenantId))
         {
+            logger.LogWarning(
+                "send-to-index refused: the caller is authenticated but carries no tenant claim, so "
+                + "the index partition cannot be established. A tenant that cannot be established is "
+                + "not one that can be guessed.");
+
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Tenant identity not found in authentication token.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_NO_TENANT_CLAIM" });
+        }
+
+        if (!string.Equals(request.TenantId, callerTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            // Rejected, never silently corrected. See the remarks on this method.
+            logger.LogWarning(
+                "send-to-index refused: body TenantId does not match the caller's tenant claim. "
+                + "DocumentCount={DocumentCount}",
+                request.DocumentIds.Count);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "The requested tenant does not match your authenticated tenant.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_TENANT_MISMATCH" });
+        }
+
+        // ── Every document is authorized for Write, as the caller, before anything is read. ──
+        var callerObjectId = CallerResolution.ResolveObjectId(httpContext.User);
+        var callerToken = Sprk.Bff.Api.Infrastructure.Auth.TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
+        if (string.IsNullOrEmpty(callerObjectId) || string.IsNullOrEmpty(callerToken))
+        {
+            // Without both, access can only be evaluated app-only — which on this surface answers
+            // "yes" for every caller. Refusing is the only alternative to reopening the finding.
+            logger.LogWarning(
+                "send-to-index refused: no caller object id or no bearer token, so per-document "
+                + "access cannot be evaluated as the caller. Refusing rather than evaluating app-only.");
+
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "A caller identity and bearer token are required to authorize this operation.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_NO_CALLER_CONTEXT" });
+        }
+
+        // One verdict per REQUESTED POSITION, memoized by the PARSED record id. Keying the memo on
+        // the parsed id rather than on the raw string means "{ABC-…}" and "abc-…" share one decision
+        // instead of costing two round trips, and it keeps a null or malformed entry out of the map
+        // entirely — such an entry is denied below without ever being used as a key.
+        var writePermitted = new bool[request.DocumentIds.Count];
+        var decisions = new Dictionary<Guid, bool>();
+
+        for (var i = 0; i < request.DocumentIds.Count; i++)
+        {
+            // An id that is not a usable record id is denied rather than probed: there is no record
+            // to evaluate, and "no answer" must not resolve to "proceed".
+            if (!Guid.TryParse(request.DocumentIds[i], out var recordId) || recordId == Guid.Empty)
+            {
+                writePermitted[i] = false;
+                continue;
+            }
+
+            if (!decisions.TryGetValue(recordId, out var permitted))
+            {
+                var snapshot = await authorizationService.GetCallerRecordAccessAsync(
+                    callerObjectId, DocumentEntitySetName, recordId, callerToken, cancellationToken);
+
+                permitted = snapshot.AccessRights.HasFlag(AccessRights.Write);
+                decisions[recordId] = permitted;
+            }
+
+            writePermitted[i] = permitted;
+        }
+
+        if (!writePermitted.Any(p => p))
+        {
+            logger.LogWarning(
+                "send-to-index refused: the caller may write none of the {DocumentCount} requested "
+                + "documents. No row was read.",
+                request.DocumentIds.Count);
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "You do not have permission to index any of the requested documents.",
+                extensions: new Dictionary<string, object?> { ["code"] = "SEND_TO_INDEX_FORBIDDEN" });
+        }
+
+        var results = new List<SendToIndexDocumentResult>();
+
+        for (var i = 0; i < request.DocumentIds.Count; i++)
+        {
+            var documentId = request.DocumentIds[i];
+
+            if (!writePermitted[i])
+            {
+                // Refused in place. The row is not read, not indexed, not stamped, and nothing about
+                // it — including its parent entity — is disclosed.
+                results.Add(new SendToIndexDocumentResult
+                {
+                    DocumentId = documentId,
+                    Success = false,
+                    ErrorMessage = "Access denied: indexing updates this document's record, which requires Write permission."
+                });
+                continue;
+            }
+
             try
             {
                 // Step 1: Get document from Dataverse
@@ -687,15 +1285,40 @@ public static class RagEndpoints
                     );
                 }
 
+                // Step 3b (task 033 fix): resolve the per-record AI Search index name BEFORE
+                // building the index request. Previously this handler called ONLY
+                // searchIndexNameResolver.GetDefaultIndexName() (the tenant default), so a document
+                // whose own sprk_searchindexname (or a parent/BU's AI Search Index lookup) named a
+                // different index was silently routed to the tenant-default index instead — the
+                // write landed in the wrong place, not just the wrong tracking stamp. Mirrors
+                // RagIndexingJobHandler's precedence exactly: resolver chain (document's own
+                // sprk_ai_search_index lookup, falling back to the legacy sprk_searchindexname text
+                // column → parent → parent's owning BU) first; GetDefaultIndexName() is now only the
+                // final fallback when the chain resolves nothing.
+                var resolvedIndexName = await searchIndexNameResolver.ResolveAsync(
+                    documentId, parentEntity?.EntityType, parentEntity?.EntityId, cancellationToken);
+
                 // Step 4: Build file index request
                 var indexRequest = new FileIndexRequest
                 {
-                    TenantId = request.TenantId,
+                    // Task 063 / F2: the partition key is the TOKEN's tenant. The body's TenantId was
+                    // proven equal to it above and is deliberately not read here — a value the caller
+                    // supplies must not reach the partition key even when it happens to be correct.
+                    TenantId = callerTenantId,
                     DriveId = document.GraphDriveId,
                     ItemId = document.GraphItemId,
                     FileName = document.FileName ?? document.Name,
                     DocumentId = documentId,
-                    ParentEntity = parentEntity
+                    ParentEntity = parentEntity,
+                    // Null/whitespace here falls through to IRagService's own tenant-default chain
+                    // (byte-for-byte backward compatible), so the ACTUAL write — not just the
+                    // Dataverse stamp below — honors the per-record index.
+                    SearchIndexName = resolvedIndexName,
+                    // Task 048 (spaarkeai-word-add-in-r1): this route re-indexes an EXISTING Dataverse
+                    // document by id ("Send to Index" / the Dataverse ribbon button) — the item may
+                    // already carry chunks from an earlier index. Trim any leftover tail after the new
+                    // chunks land; a first index (never-indexed document) finds nothing to trim.
+                    ReplaceStaleChunks = true,
                 };
 
                 // Step 5: Index via OBO authentication
@@ -707,6 +1330,11 @@ public static class RagEndpoints
                     // R3 FR-3H3.2 dual-write: set new sprk_searchindexcompletedon AND keep legacy
                     // sprk_searchindexed=true + sprk_searchindexedon for the transition window
                     // (R3 + one sprint per spec assumption line 366). Removal deferred to R4.
+                    //
+                    // Stamp the index the file actually landed in (task 033 fix, mirrors
+                    // RagIndexingJobHandler): the per-record resolved value when the chain found
+                    // one, otherwise the single canonical tenant default.
+                    var stampedIndexName = resolvedIndexName ?? searchIndexNameResolver.GetDefaultIndexName();
                     var completedAt = DateTime.UtcNow;
                     var updateRequest = new UpdateDocumentRequest
                     {
@@ -715,22 +1343,22 @@ public static class RagEndpoints
                         // Legacy dual-write (preserved during transition)
                         SearchIndexed = true,
                         SearchIndexedOn = completedAt,
-                        // Index routing (unchanged)
-                        SearchIndexName = indexName
+                        // Index routing (task 033: per-record when resolved, else tenant default)
+                        SearchIndexName = stampedIndexName
                     };
 
                     await dataverseService.UpdateDocumentAsync(documentId, updateRequest, cancellationToken);
 
                     logger.LogInformation(
                         "Document {DocumentId} indexed successfully: {ChunksIndexed} chunks to {IndexName}",
-                        documentId, indexResult.ChunksIndexed, indexName);
+                        documentId, indexResult.ChunksIndexed, stampedIndexName);
 
                     results.Add(new SendToIndexDocumentResult
                     {
                         DocumentId = documentId,
                         Success = true,
                         ChunksIndexed = indexResult.ChunksIndexed,
-                        IndexName = indexName,
+                        IndexName = stampedIndexName,
                         ParentEntityType = parentEntity?.EntityType,
                         ParentEntityId = parentEntity?.EntityId
                     });
@@ -857,7 +1485,14 @@ public static class RagEndpoints
                 Metadata = request.Metadata,
                 ParentEntity = request.ParentEntity,
                 Source = "EnqueueEndpoint",
-                EnqueuedAt = DateTimeOffset.UtcNow
+                EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): thread the caller's own value through instead of
+                // silently dropping it. FileIndexRequest.ReplaceStaleChunks has been a bindable field on
+                // this request body since task 029; before this fix a caller that set it true on the
+                // wire had that intent discarded here. This endpoint has no first-class "this is a
+                // re-index" signal of its own (unlike SendToIndex / the Knowledge Base reindex route), so
+                // the caller decides, same as the sibling IndexFile endpoint.
+                ReplaceStaleChunks = request.ReplaceStaleChunks,
             }));
 
             // Step 4: Create and submit job

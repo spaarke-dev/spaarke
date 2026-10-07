@@ -8,26 +8,24 @@ import * as React from 'react';
 import { makeStyles, tokens, Text } from '@fluentui/react-components';
 import type { IChartDefinition, IAggregatedDataPoint, DrillInteraction, VisualType, IChartData } from '../types';
 import { VisualType as VT } from '../types';
-import { MetricCard } from '../../../../shared/Spaarke.Visuals/src/components/MetricCard';
 import {
+  MetricCard,
   MetricCardMatrix,
   type MatrixJustification,
-} from '../../../../shared/Spaarke.Visuals/src/components/MetricCardMatrix';
-import { BarChart } from '../../../../shared/Spaarke.Visuals/src/components/BarChart';
-import { LineChart } from '../../../../shared/Spaarke.Visuals/src/components/LineChart';
-import { DonutChart } from '../../../../shared/Spaarke.Visuals/src/components/DonutChart';
-import { StatusDistributionBar } from '../../../../shared/Spaarke.Visuals/src/components/StatusDistributionBar';
-import { CalendarVisual, type ICalendarEvent } from './CalendarVisual';
-import {
+  BarChart,
+  LineChart,
+  DonutChart,
+  StatusDistributionBar,
   MiniTable,
   type IMiniTableItem,
   type IMiniTableColumn,
-} from '../../../../shared/Spaarke.Visuals/src/components/MiniTable';
+  GaugeVisual,
+  HorizontalStackedBar,
+  resolveCardConfig,
+} from '@spaarke/visuals';
+import { CalendarVisual, type ICalendarEvent } from './CalendarVisual';
 import { DueDateCardVisual } from './DueDateCard';
 import { DueDateCardListVisual } from './DueDateCardList';
-import { GaugeVisual } from '../../../../shared/Spaarke.Visuals/src/components/GaugeVisual';
-import { HorizontalStackedBar } from '../../../../shared/Spaarke.Visuals/src/components/HorizontalStackedBar';
-import { resolveCardConfig } from '../../../../shared/Spaarke.Visuals/src/utils/cardConfigResolver';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 
 export interface IChartRendererProps {

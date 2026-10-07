@@ -40,10 +40,12 @@ public class ImpersonationFailClosedTests
                 // any request — so the MI branch's lazily-constructed DefaultAzureCredential is never used.
                 ["Graph:ManagedIdentity:Enabled"] = "true"
             }).Build(),
-            NullLogger<DataverseWebApiService>.Instance);
+            NullLogger<DataverseWebApiService>.Instance,
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
 
     /// <summary>
-    /// The load-bearing guard (DataverseWebApiService.cs:962-965): an empty caller systemuserid MUST
+    /// The load-bearing guard (the top of DataverseWebApiService.RetrieveMultipleImpersonatedAsync): an empty caller systemuserid MUST
     /// throw rather than fall back to an app-only query. Fail-closed by construction — the whole
     /// point is that a missing impersonation identity can never silently widen the result set.
     ///

@@ -21,7 +21,7 @@ last-reviewed: 2026-05-17
 
 ## Purpose
 
-Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZIP import. This skill is **PCF-specific** — for other Dataverse operations (web resources, plugins, solution export), see `dataverse-deploy`.
+Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZIP import. This skill is **PCF-specific** — for other Dataverse operations (web resources, solution export), see `dataverse-deploy`.
 
 **When to Use**:
 - "deploy pcf", "build and deploy pcf control"
@@ -31,7 +31,7 @@ Build, version-bump, pack, and deploy a PCF control to Dataverse via solution ZI
 
 **When NOT to Use**:
 - Deploying web resources → Use Dataverse UI directly or `dataverse-deploy`
-- Deploying plugins → Use `dataverse-deploy`
+- Solutions / web resources → Use `dataverse-deploy` (Spaarke ships no plugins — ADR-002)
 - Deploying Azure infrastructure → Use `azure-deploy`
 - **Authoring/modifying the PCF's React component code** → Use `fluent-v9-component` FIRST. This skill is for build+pack+deploy mechanics, not component design.
 
@@ -113,7 +113,7 @@ useEffect(() => {
 
 **Full pattern**: See `.claude/patterns/pcf/control-initialization.md` § "Async Initialization" + `.claude/patterns/auth/spaarke-sso-binding.md` (INV-1..INV-8) + `.claude/adr/ADR-028-spaarke-auth-architecture.md`
 **Canonical implementations**: `SemanticSearchControl.tsx`, `DocumentRelationshipViewer.tsx`, `RelatedDocumentCount.tsx`
-**Pre-v2 holdout (V3 cleanup target)**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` — do NOT copy this pattern for new PCFs.
+**No pre-v2 holdouts remain**: `UniversalQuickCreate`, the last PCF with its own local `MsalAuthProvider.ts`, was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Do NOT recreate a local MSAL provider in a PCF.
 
 ---
 
@@ -121,7 +121,7 @@ useEffect(() => {
 
 **If the PCF imports from `@spaarke/ui-components/dist/...`, you MUST compile the shared library BEFORE the PCF build.** The PCF webpack bundles pre-compiled JS from the shared lib's `dist/` folder — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will contain OLD code regardless of how many times you rebuild.
 
-**Automated guard (added 2026-07-07, `spaarke-matter-ui-enhancement-r1`)**: the 9 PCFs that import deep `dist/*` subpaths (`MatterHeader`, `EmailProcessingMonitor`, `RegardingResolver`, `RelatedDocumentCount`, `AssociationResolver`, `ScopeConfigEditor`, `DocumentRelationshipViewer`, `SemanticSearchControl`, `VisualHost`) each wire `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script. It compares the newest `src/` mtime against the newest `dist/` mtime and rebuilds automatically (via `npm run build` in the shared lib) if stale — no-op when fresh. This closes the gap that let `dist/` sit ~4 weeks stale in production (missing the entire `RecordHeader` component) before it was caught. The manual Step 0 below is now a fallback for PCFs NOT yet on this convention, or for direct `tsc` invocation when you only want to compile specific changed files. **Any NEW PCF added to this deep-import list MUST add the same `prebuild`/`prebuild:prod` wiring** (see any of the 9 `package.json`s above for the exact line).
+**Automated guard (added 2026-07-07, `spaarke-matter-ui-enhancement-r1`)**: the 8 PCFs that import deep `dist/*` subpaths (`MatterHeader`, `RegardingResolver`, `RelatedDocumentCount`, `AssociationResolver`, `ScopeConfigEditor`, `DocumentRelationshipViewer`, `SemanticSearchControl`, `VisualHost`) each wire `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script. It compares the newest `src/` mtime against the newest `dist/` mtime and rebuilds automatically (via `npm run build` in the shared lib) if stale — no-op when fresh. This closes the gap that let `dist/` sit ~4 weeks stale in production (missing the entire `RecordHeader` component) before it was caught. The manual Step 0 below is now a fallback for PCFs NOT yet on this convention, or for direct `tsc` invocation when you only want to compile specific changed files. **Any NEW PCF added to this deep-import list MUST add the same `prebuild`/`prebuild:prod` wiring** (see any of the 9 `package.json`s above for the exact line).
 
 **Step 0 (fallback/manual) — Compile shared lib `dist/`:**
 
@@ -156,7 +156,8 @@ stat -c '%y' src/components/YourChangedComponent/YourChangedComponent.tsx
 ### Other MUST/NEVER Rules
 
 - ✅ **MUST** compile shared lib `dist/` before PCF build if shared components were modified
-- ✅ **MUST** rebuild fresh every deployment (`npm run build`)
+- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`, via `scripts/Invoke-PcfBuildProd.ps1`)
+- ✅ **MUST** confirm the build succeeded from its **output**, not its exit code. `pcf-scripts build` **exits 0 when webpack fails** (it logs `[build] Failed:` / `[pcf-1033]` and returns without rethrowing), so a bare `npm run build:prod` followed by "copy `bundle.js` and pack" can ship the PREVIOUS bundle. `scripts/Invoke-PcfBuildProd.ps1` applies the rule and exits 1 on failure (found 2026-10-04: CI reported 17/18 PCFs passing when 9 had failed)
 - ✅ **MUST** copy build output files from `out/` to Solution: `bundle.js`, `ControlManifest.xml`, and `styles.css` (if produced)
 - ✅ **MUST** use `pack.ps1` (not `Compress-Archive` — backslashes break import)
 - ✅ **MUST** use unmanaged solution (ADR-022)
@@ -240,21 +241,24 @@ If ANY files in `src/client/shared/Spaarke.UI.Components/src/` were modified, co
 ### Step 2: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}
-rm -rf out/ bin/
-npm run build:prod         # MUST be build:prod — see Bundle Size & Production Mode
+cd src/client/pcf/{ControlName}   # stay here for Steps 2-5
+rm -rf out/ bin/                  # a failed build must leave NO bundle behind to copy
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+# Runs `npm run build:prod` and exits 1 if the build failed. STOP on a non-zero exit:
+# do not copy, pack or import. A bare `npm run build:prod` exits 0 even when webpack fails.
 
-# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured)
-stat -c '%s bytes' out/controls/{ControlName}/bundle.js
+# Verify size (~400-600 KB field-based after build:prod; if >1 MB, build:prod is misconfigured).
+# The output folder is out/controls/control/ for most field PCFs; some use the control name (see the Path Map).
+stat -c '%s bytes' out/controls/control/bundle.js
 ```
 
 ### Step 3: Copy Build Output to Solution
 
 ```bash
-cp ../out/controls/control/bundle.js \
-   ../out/controls/control/ControlManifest.xml \
-   ../out/controls/control/styles.css \
-   ../Solution/Controls/sprk_Spaarke.Controls.{ControlName}/
+cp out/controls/control/bundle.js \
+   out/controls/control/ControlManifest.xml \
+   out/controls/control/styles.css \
+   Solution/Controls/sprk_Spaarke.Controls.{ControlName}/
 ```
 
 **Note**: Some projects use `src/WebResources/` instead of `Controls/` in the Solution folder. Copy to wherever the `pack.ps1` reads from.
@@ -262,7 +266,7 @@ cp ../out/controls/control/bundle.js \
 ### Step 4: Pack Solution ZIP
 
 ```bash
-cd ../Solution
+cd Solution
 powershell -ExecutionPolicy Bypass -File pack.ps1
 ```
 
@@ -375,7 +379,8 @@ When the user wants to deploy manually for fastest iteration:
 
 1. **Build** (from repo root):
    ```bash
-   cd src/client/pcf/SemanticSearchControl && npm run build
+   cd src/client/pcf/SemanticSearchControl && pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+   # build:prod, and STOP on a non-zero exit (a bare npm build exits 0 even when it failed)
    ```
 2. **Copy artifacts**:
    ```bash
@@ -414,7 +419,7 @@ When the user wants to deploy manually for fastest iteration:
 
 | Skill | Relationship |
 |-------|-------------|
-| **dataverse-deploy** | General Dataverse operations (plugins, web resources, solution export). This skill (`pcf-deploy`) is PCF-specific. |
+| **dataverse-deploy** | General Dataverse operations (web resources, solution export). This skill (`pcf-deploy`) is PCF-specific. |
 | **task-execute** | May invoke `pcf-deploy` when task tags include `pcf` + `deploy` |
 | **adr-aware** | ADR-006 (PCF over webresources), ADR-022 (React 16), ADR-021 (Fluent v9) |
 | **code-page-deploy** | For Code Page web resources (HTML). PCF solutions do NOT include code pages. |
@@ -448,4 +453,4 @@ When the user wants to deploy manually for fastest iteration:
 
 ---
 
-*For Claude Code: This skill handles PCF control deployment ONLY. For web resources, plugins, and other Dataverse components, use `dataverse-deploy` or deploy via Dataverse UI.*
+*For Claude Code: This skill handles PCF control deployment ONLY. For web resources and other Dataverse components, use `dataverse-deploy` or deploy via Dataverse UI.*

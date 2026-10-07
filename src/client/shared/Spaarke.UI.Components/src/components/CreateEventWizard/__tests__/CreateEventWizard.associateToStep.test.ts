@@ -64,11 +64,23 @@ describe('EVENT_REGARDING_TARGETS', () => {
     expect(EVENT_REGARDING_TARGETS).toHaveLength(9);
   });
 
-  it('preserves the "sprk_regardingorganziation" typo exactly (live column name — NOT "organization")', () => {
+  // 2026-09-04: this test previously PINNED the `sprk_regardingorganziation` misspelling, because that
+  // was the live column name and the corrected spelling would have silently failed to bind. The column
+  // has since been renamed in Dataverse to `sprk_regardingorganization` and the typo'd one deleted, so
+  // the assertion inverts. Its PURPOSE is unchanged: keep this value pinned to the real live column,
+  // whichever way it is spelled, because a wrong lookup attribute fails silently rather than loudly.
+  it('uses the corrected "sprk_regardingorganization" spelling (live column name since 2026-09-04)', () => {
     const org = EVENT_REGARDING_TARGETS.find(t => t.label === 'Organization');
     expect(org).toBeDefined();
-    expect(org?.lookupAttribute).toBe('sprk_regardingorganziation');
+    expect(org?.lookupAttribute).toBe('sprk_regardingorganization');
     expect(org?.entityType).toBe('sprk_organization');
+  });
+
+  it('no target still points at the deleted "organziation" misspelling', () => {
+    // Guards the whole list, not just Organization — a stray typo'd attribute anywhere here binds to a
+    // column that no longer exists and fails quietly at write time.
+    const typoed = EVENT_REGARDING_TARGETS.filter(t => t.lookupAttribute.includes('organziation'));
+    expect(typoed).toEqual([]);
   });
 
   it('uses the OOB "account" and "contact" logical names (not sprk_account/sprk_contact)', () => {

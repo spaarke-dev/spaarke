@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.29"
+           version="1.0.37"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.29). Combines two Yes/No toggles (Monitor, High Priority) with a single-value Access Permission pill selector (Standard/Limited/Restricted — responsive, no horizontal sprawl), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses the native advanced-lookup pane for the contact + organization pickers. Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.37). Combines two Yes/No toggles (Monitor, High Priority) with a single-value Access Permission pill selector (Standard/Limited/Restricted — responsive, no horizontal sprawl), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses the native advanced-lookup pane for the contact + organization + internal-user pickers. Designed to fit inside a 33% form column."
            control-type="standard">
     <!-- task 041 — the grant modal calls the BFF external-access endpoints via
          @spaarke/auth's authenticatedFetch (MSAL), so this control now needs
@@ -29,12 +29,16 @@
               usage="bound"
               required="true" />
 
+    <!-- v1.0.32 (unified-access-control-r2 task 138, owner Q6) — OPTIONAL. Project, matter and
+         work-assignment forms keep binding their own sprk_accesspermission exactly as before; a form
+         whose table has no such column (the retired sprk_communication.sprk_accesspermission — a
+         communication inherits its parent's permission) leaves it unbound and the pill is hidden. -->
     <property name="accessPermission"
               display-name-key="Access Permission"
-              description-key="Bound OptionSet field with three values: Standard (100000000), Limited (100000001), Restricted (100000002)"
+              description-key="Optional bound OptionSet field with three values: Standard (100000000), Limited (100000001), Restricted (100000002). Bind it on project, matter and work-assignment forms; leave it unbound where the table has no access permission (the pill is then hidden)."
               of-type="OptionSet"
               usage="bound"
-              required="true" />
+              required="false" />
 
     <!-- v1.0.23 (task 073 UAT #3) — optional control header title. When set, the
          control renders a 32px header row with this title (14px semibold) on the

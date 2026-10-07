@@ -81,9 +81,15 @@ public class OperationPolicyCharacterizationTests
     ///   "read"                       → DataverseDocumentsEndpoints.cs:443,
     ///                                  FileAccessEndpoints.cs:118 (eml-render),
     ///                                  ChatDocumentEndpoints.cs:915
-    ///   "finance.read"               → FinanceEndpoints.cs:18, :51, :65
-    ///   "finance.confirm"            → FinanceEndpoints.cs:23, :37
+    ///   "finance.read"               → FinanceEndpoints.cs (summary route, search resolver),
+    ///                                  FinanceRollupEndpoints.cs + ScorecardCalculatorEndpoints.cs
+    ///                                  (the four recalculate routes) — re-pointed by task 130
+    ///   "finance.confirm"            → FinanceEndpoints.cs confirm/reject resolvers (body DocumentId)
+    ///   "finance.attach_invoice"     → FinanceEndpoints.cs confirm resolver (body MatterId, VendorOrgId)
+    ///   "finance.link_invoice"       → FinanceEndpoints.cs confirm resolver (body DocumentId — the
+    ///                                  document HOLDS the invoice lookup; task 130, owner G5)
     ///   "entity.associate_document"  → EntityAccessFilter.cs:64 (OfficeEndpoints.cs:173)
+    ///   "event.attach_regarding"     → EventEndpoints.cs POST / (the regarding record; task 159)
     ///
     /// Before task 003 none was a policy key, so each site returned 403 for every caller regardless
     /// of rights. They now resolve. The general forcing function preventing recurrence lives in
@@ -93,6 +99,9 @@ public class OperationPolicyCharacterizationTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")]
+    [InlineData("finance.link_invoice")]
+    [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
     public void LiveOperationString_ResolvesInPolicy(string operation)
     {
@@ -115,6 +124,9 @@ public class OperationPolicyCharacterizationTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")]
+    [InlineData("finance.link_invoice")]
+    [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
     public async Task LiveOperationString_WithFullRights_IsAllowed(string operation)
     {
@@ -144,6 +156,9 @@ public class OperationPolicyCharacterizationTests
     [Theory]
     [InlineData("finance.confirm")]            // requires Write
     [InlineData("entity.associate_document")]  // requires AppendTo
+    [InlineData("finance.attach_invoice")]     // requires AppendTo
+    [InlineData("finance.link_invoice")]       // requires Write + Append
+    [InlineData("event.attach_regarding")]     // requires AppendTo (task 159)
     public async Task MutatingOperation_WithReadOnlyRights_DeniedForInsufficientRights(string operation)
     {
         var result = await Rule().EvaluateAsync(Context(operation), Snapshot(AccessRights.Read));
@@ -152,6 +167,23 @@ public class OperationPolicyCharacterizationTests
         result.ReasonCode.Should().Be("sdap.access.deny.insufficient_rights",
             "the operation is now known, so the denial must be a rights decision — a lingering " +
             "unknown_operation would mean the key never registered");
+    }
+
+    /// <summary>
+    /// <c>finance.link_invoice</c> needs BOTH halves of the owner's "Write+Append on the document" (task 130,
+    /// owner G5): the document HOLDS the invoice lookup, so Dataverse asks Append of it, and the column update
+    /// is a Write. Either right alone — including AppendTo, the right the document needed before the live
+    /// schema showed the lookup runs the other way — must be denied.
+    /// </summary>
+    [Theory]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.AppendTo, AuthorizationDecision.Deny)]
+    [InlineData(AccessRights.Read | AccessRights.Append, AuthorizationDecision.Deny)]
+    [InlineData(AccessRights.Read | AccessRights.Write | AccessRights.Append, AuthorizationDecision.Allow)]
+    public async Task LinkInvoice_RequiresWriteAndAppendOnTheDocument(AccessRights rights, AuthorizationDecision expected)
+    {
+        var result = await Rule().EvaluateAsync(Context("finance.link_invoice"), Snapshot(rights));
+
+        result.Decision.Should().Be(expected);
     }
 
     /// <summary>

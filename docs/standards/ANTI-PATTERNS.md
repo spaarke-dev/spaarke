@@ -1,6 +1,6 @@
 # Anti-Patterns
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-04 (row 17: verify route registration WITH a bearer — unified-access-control-r2 task 167 f2)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
@@ -22,18 +22,18 @@
 
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
-| 1 | **Hosting BFF endpoints in Azure Functions** — moving Minimal API endpoints (chat, documents, AI analysis) to a Function App, or using Functions to duplicate BFF auth/correlation/ProblemDetails | Duplicates BFF cross-cutting concerns across two runtimes; fragments debugging and deployment; cold-start latency on user-facing requests | Keep BFF endpoints in `Sprk.Bff.Api` (Minimal API). Azure Functions ARE permitted for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers) — see ADR-001 criteria | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) |
+| 1 | **Hosting BFF endpoints in Azure Functions** — moving Minimal API endpoints (chat, documents, AI analysis) to a Function App, or using Functions to duplicate BFF auth/correlation/ProblemDetails | Duplicates BFF cross-cutting concerns across two runtimes; fragments debugging and deployment; cold-start latency on user-facing requests | Keep BFF endpoints in `Sprk.Bff.Api` (Minimal API); BFF endpoints are never hosted in Azure Functions. Where background or event work runs is decided per workload — see [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) | [ADR-001](../../.claude/adr/ADR-001-minimal-api.md), [ADR-052](../../.claude/adr/ADR-052-workload-placement.md) |
 | 2 | **Creating a separate AI microservice** — deploying AI endpoints in a standalone service outside the BFF | Adds network hops, separate auth, deployment complexity with no isolation benefit | Extend `Sprk.Bff.Api` with AI endpoints following Minimal API patterns | [ADR-013](../../.claude/adr/ADR-013-ai-architecture.md) |
 | 3 | **Global middleware for resource authorization** — `app.UseMiddleware<DocumentSecurityMiddleware>()` | Runs before routing completes; has no access to route values like `documentId` or request body | Use endpoint filters: `.AddEndpointFilter<DocumentAuthorizationFilter>()` | [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) |
 | 4 | **Injecting GraphServiceClient directly** — `public class Controller(GraphServiceClient graph)` | Graph SDK types leak above the facade; callers depend on Microsoft.Graph internals | Route all SPE operations through `SpeFileStore` facade; expose only SDAP DTOs | [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) |
 | 5 | **Creating interfaces without a genuine seam** — `services.AddSingleton<IResourceStore, SpeFileStore>()` when only one implementation exists | Adds indirection without value; inflates DI registrations beyond the 15-line budget | Register concretes: `services.AddSingleton<SpeFileStore>()` | [ADR-010](../../.claude/adr/ADR-010-di-minimalism.md) |
 
-### Dataverse Plugins
+### Dataverse Write Path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
 
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
-| 6 | **HTTP/Graph calls from plugins** — making remote I/O calls inside `IPlugin.Execute()` | Plugins run inside the Dataverse transaction pipeline; remote calls cause timeouts, retries fail silently, and exceed the 50ms p95 budget | Defer all external work to BFF API endpoints or BackgroundService workers | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
-| 7 | **Business logic in plugins** — implementing orchestration, multi-entity coordination, or branching logic in plugin code | Plugins are not an execution runtime; complex logic is untestable, unobservable, and unrecoverable in the transaction pipeline | Keep plugins < 200 LoC; limit to validation, invariant enforcement, audit stamping | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
+| 6 | **Adding a Dataverse plugin** — any `IPlugin` type, CrmSdk package, net4x plugin project, or plugin step registration | Spaarke ships no plugins: a second (.NET Framework) runtime and packaging model in every managed solution, per-row cost on bulk import, and creep once one exists | Put the rule in the BFF server-side write path (WP-1); correct non-product writes via async fix-up + reconciliation (WP-5) | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) |
+| 7 | **Client-only invariant enforcement** — applying a stamp/default/isolation rule only in a wizard `onFinish` or other client code | Every other write path (Office add-ins, OOB forms, imports, flows) silently skips it — the root cause of the backfill scripts and reconciliation jobs across ~15 projects | One server-side owner per invariant; client may preview only; invariant-bearing tables written via BFF; security fails closed | [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) WP-1…WP-6 |
 
 ### Frontend (PCF)
 
@@ -58,7 +58,7 @@
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
 | 16 | **Publishing BFF to `/tmp` or external directory** — running `dotnet publish -o /tmp/publish` | Packages from external directories are incomplete (~22MB vs ~61MB); nested DLLs are missing, causing endpoints to silently return 404 while `/healthz` still passes | Publish from the project directory: `dotnet publish -c Release -o ./publish` from `src/server/api/Sprk.Bff.Api/`; use `Deploy-BffApi.ps1` | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
-| 17 | **Assuming deployment worked because `az webapp deploy` returned success** — skipping health check and endpoint verification | Azure CLI may report success before the deployment registers; the app may still serve old code or have missing routes | Always verify with health check and test specific endpoints (expect 401, not 404, for auth-protected routes) | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
+| 17 | **Assuming deployment worked because `az webapp deploy` returned success** — skipping health check and endpoint verification | Azure CLI may report success before the deployment registers; the app may still serve old code or have missing routes | Always verify with health check and test specific endpoints WITH a bearer token (`az account get-access-token --resource api://<BFF-API-APP-ID>`): anything but 404 means the route is registered, 404 means it is not. An ANONYMOUS 401 proves only that authentication is enforced — since unified-access-control-r2 task 167 the authorization FallbackPolicy answers 401 for a request that matches no route too ([DEPLOYMENT-VERIFICATION-GUIDE](../guides/DEPLOYMENT-VERIFICATION-GUIDE.md) Step 4) | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
 
 ### Deployment (PCF)
 
@@ -95,8 +95,8 @@
 
 ## Related
 
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API + BackgroundService as BFF runtime; Azure Functions permitted for narrow out-of-band integration
-- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- Thin Dataverse plugins (no HTTP/Graph calls)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) -- Minimal API for every BFF endpoint; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)
+- [ADR-002](../../.claude/adr/ADR-002-thin-plugins.md) -- No Dataverse plugins; invariants in the BFF server-side write path (2026-09-25)
 - [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) -- Code Pages and PCF over legacy JS
 - [ADR-007](../../.claude/adr/ADR-007-spefilestore.md) -- SpeFileStore facade (no Graph SDK leaks)
 - [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) -- Endpoint filters for authorization (no global middleware)

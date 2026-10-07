@@ -44,6 +44,10 @@ public class CreateTaskNodeExecutorTests
         _executor = new CreateTaskNodeExecutor(
             _templateEngineMock.Object,
             _entityServiceMock.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             _loggerMock.Object);
     }
 

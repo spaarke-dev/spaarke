@@ -3,7 +3,7 @@
   <metadata>
     <title>Test-integrity remediation: the four untested seams (H6) + the gate's missing mechanism (M3) + misleading legacy tests (M7)</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** -- FULL unconditionally per root CLAUDE.md §8 TEST-MODIFYING override.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -99,7 +99,33 @@
     <criterion testable="true">All 7 test projects pass.</criterion>
   </acceptance-criteria>
 
-  <notes>Review findings H6, M3, M7. This is WHY the rest of the findings could hide -- worth doing early.</notes>
+  <notes>Review findings H6, M3, M7. This is WHY the rest of the findings could hide -- worth doing early.
+
+COMPLETED 2026-09-08 (session 4). Perturbation counts, measured today not inherited:
+seam 1 FindPermissionByEmail 0 to 3 · seam 3 task-007 call sites 0 to 1 · seam 4
+ListExternalMembersAsync 0 to 1 · M3 gate 0 to 2.
+
+H6 SEAM 2 WAS ALREADY FIXED and no test was written for it. The POML says of the central
+gate "nothing else in this task matters more"; perturbing it fails NINE tests, via
+DelegationProbeFailClosedTests, written by task 045 on 2026-08-25 -- the day AFTER the
+review that filed H6. The finding was stale before this task was authored.
+
+M3 fixed both defects: the gate now scans HasRequiredRights(...) call sites (14 in
+PermissionsEndpoints.cs were invisible) and its Operation = "literal" regex is anchored so
+a const DECLARATION is no longer counted as a call site. M3s own claim that const-indirection
+matches ZERO real call sites is WRONG -- BulkDownloadAuthorizationFilter.cs:170 is one;
+corrected in the notes rather than absorbed.
+
+M7: ExternalAccessEndpointTests.cs DELETED whole (1,004 lines, 53 tests) with operator
+approval, conditional on no code impact and no CI issue -- both checked before deleting.
+No test in it invoked any endpoint; assertions were on values the tests set. Per-test triage
+was not the instrument because there was no mixture to triage. Its one genuine assertion
+(ResolveGrantRoot rejecting a rootless grant) is already owned by
+PolymorphicGrantWriteTests.ResolveGrantRoot_NoRootAtAll_FailsClosed.
+
+Verified proportionately per operator direction: full suite twice (only for the whole-suite
+perturbation baselines), then targeted -- ArchTests 196/196, access-control 788/788, build
+0 warnings. Record: notes/task-025-test-integrity.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

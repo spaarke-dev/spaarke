@@ -23,7 +23,40 @@
 
   <role>SPAARKE authorization engineer building a forcing function, attentive to the difference between a census that documents drift and one that prevents it.</role>
 
-  <goal>A new site that reads an identity claim directly FAILS the build. Every existing site is either migrated to a named primitive or grandfathered with a written reason and a classification. The four-primitive question is answered in writing — consolidate, or justify each as distinct.</goal>
+  <goal>The four-primitive question is answered in writing — consolidate, or justify each as distinct.</goal>
+
+  <!-- ⚠️ RESCOPED 2026-08-30. The RATCHET HALF OF THIS TASK IS ALREADY DELIVERED, by someone else.
+
+       PR #840 (spaarkeai-compose-r8, owner-directed after they rejected deferring it to us) shipped
+       tests/Spaarke.ArchTests/CallerIdentityGuardTests.cs with exactly what this task's original goal
+       described, and one rule more:
+
+         · Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist  — "a new direct claim read fails the build"
+         · Rule2_NoOwnershipPredicateGatedOnAGuidTryParse      — the id-space class a claim-read census
+                                                                 CANNOT see (PortfolioService /
+                                                                 WorkspaceLayoutService: an already-resolved
+                                                                 caller id misused downstream, an Entra oid
+                                                                 compared against ownerid which holds a
+                                                                 systemuserid)
+         · EveryAllowlistEntryCarriesAReason / EveryAllowlistEntryStillExists
+         · two negative controls, incl. comment-stripping vs string literals
+
+       They also completed the migration: 41 sites across 37 files, leaving ZERO direct identity-claim
+       reads outside CallerResolution. Building a second ratchet over the same population would be the
+       duplication this project exists to remove.
+
+       WHAT REMAINS OURS is the half they explicitly did not take (their §8): #832 added CallerResolution
+       and deliberately did NOT touch Spaarke.Core/Auth/CallerIdentity.cs, so the primitives still number
+       four. This task is now that DECISION, in writing.
+
+       AND RECORD THEIR WARNING while deciding: CallerIdentity.cs carries a `sub == oid` app-only
+       discriminator. Normalising it toward the house `oid ?? NameIdentifier` pattern would make that
+       comparison `sub == sub` — always true. Consolidation that ignores this breaks the app-only check.
+
+       The dependency line below is also stale: "Seed the count only AFTER #832 and the ten worktrees
+       merge". #832 and #840 have merged; there is no count left to seed.
+
+       Full reconciliation: notes/alignment-with-compose-r8-2026-08-30.md §3-§4. -->
 
   <context>
     <background>WHY A RATCHET AND NOT A COUNT.

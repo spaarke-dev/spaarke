@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Api.Office.Errors;
 
 /// <summary>
-/// Error codes for Office integration endpoints (OFFICE_001-015).
+/// Error codes for Office integration endpoints (OFFICE_001-020).
 /// Per spec.md Error Code Catalog.
 /// </summary>
 /// <remarks>
@@ -67,6 +67,73 @@ public static class OfficeErrorCodes
     /// <summary>OFFICE_015: Processing unavailable - Workers offline</summary>
     public const string ProcessingUnavailable = "OFFICE_015";
 
+    // FR-11 version save (spaarkeai-word-add-in-r1 task 023). Every one of these is a refusal that
+    // wrote NOTHING — no sprk_document row, no SPE item, no SPE version — and none of them falls back to
+    // creating a new document, which would mint exactly the duplicate row a version save exists to prevent.
+
+    /// <summary>OFFICE_016 (404): Version target not found - document.existingDocumentId resolved to no sprk_document</summary>
+    public const string VersionTargetNotFound = "OFFICE_016";
+
+    /// <summary>OFFICE_017 (409): Version target has no file - the sprk_document carries no SPE pointers, or they no longer resolve</summary>
+    public const string VersionTargetHasNoFile = "OFFICE_017";
+
+    /// <summary>OFFICE_018 (400): Version intent mismatch - existingDocumentId sent without isNewVersion=true</summary>
+    public const string VersionIntentMismatch = "OFFICE_018";
+
+    /// <summary>OFFICE_019 (423): Version target locked - SPE refused the version write because the item is locked</summary>
+    public const string VersionTargetLocked = "OFFICE_019";
+
+    /// <summary>
+    /// OFFICE_020 (409): Name collision on create - a same-named file already exists in this location.
+    /// Refused BEFORE any bytes moved (task 025, spaarkeai-word-add-in-r1): the upload call passed
+    /// ConflictBehavior.Fail, so Graph refused the PUT atomically and the existing item is untouched.
+    /// Distinct from OFFICE_011 (DocumentAlreadyExists), which is content-hash dedup, not a filename
+    /// collision — the two layers stay separate per DEDUP-AND-SAVE-BACK-IDENTITY.md §2.
+    /// </summary>
+    public const string NameCollision = "OFFICE_020";
+
+    /// <summary>
+    /// OFFICE_021 (400): the uploaded document carries a zip signature but cannot be read as an Office
+    /// package — truncated or damaged bytes. Refused BEFORE any SPE write (FR-02, task 014,
+    /// spaarkeai-word-add-in-r1), so nothing partial is stored and the save's job is marked Failed.
+    /// </summary>
+    /// <remarks>
+    /// <para>This is a deliberate BEHAVIOUR CHANGE: before FR-02 stamping, a corrupt <c>.docx</c> was stored
+    /// as-is. Refusing is the acceptance criterion ("corrupt → handled ProblemDetails, no partial bytes"), and
+    /// it is strictly better than accepting bytes no reader can open.</para>
+    /// <para>Distinct from every pass-through case: a PDF, an EML, an arbitrary binary or a readable non-Word
+    /// zip is NOT an error — those bytes are stored untouched. Only "claims to be a package, is not one" lands
+    /// here.</para>
+    /// <para>⚠️ <b>Not 020.</b> <c>OFFICE_020</c> is task 025's name-collision refusal. The task-014 design
+    /// note predates 025 landing and assigned 020 to this refusal; 021 is the next free code.</para>
+    /// </remarks>
+    public const string CorruptDocumentPackage = "OFFICE_021";
+
+    /// <summary>
+    /// OFFICE_022 (403): no owner could be determined for the record this request would create, so it was
+    /// refused BEFORE anything was written (task 080, spaarkeai-word-add-in-r1 — write-path invariant I-6).
+    /// </summary>
+    /// <remarks>
+    /// <para>Every record the Office surface creates is owned by a business unit's default owner team: the team
+    /// of the record it is filed against, or the acting user's when it is filed against nothing. This fires when
+    /// that chain breaks — a named target whose business unit cannot be read, or a caller who maps to no (or more
+    /// than one) Dataverse user, or a business unit with no default owner team.</para>
+    /// <para>Refusing is deliberate: the alternative is an app-owned row in the ROOT business unit, invisible to the
+    /// very user who saved it. A named-but-unreadable target in particular must never fall back to the caller's
+    /// own business unit — for a secure record that would place its child outside the secure business unit.</para>
+    /// <para>Same 403 as <c>RecordCreationFailureKind.OwnerUnresolved</c>, the quick-create's equivalent refusal.</para>
+    /// </remarks>
+    public const string RecordOwnerUnresolved = "OFFICE_022";
+
+    /// <summary>
+    /// The save failed in a way no other code describes: an exception the server did not expect.
+    /// </summary>
+    /// <remarks>
+    /// A server fault, so a 500, never the 400 it used to fall through to (task 075). The message on the wire is
+    /// generic; the exception is logged with the request's correlation id, and never sent to the caller.
+    /// </remarks>
+    public const string InternalError = "OFFICE_INTERNAL";
+
     /// <summary>
     /// Base URI for Office error types.
     /// </summary>
@@ -87,15 +154,23 @@ public static class OfficeErrorCodes
             AttachmentTooLarge => "validation-error",
             TotalSizeExceeded => "validation-error",
             BlockedFileType => "validation-error",
+            VersionIntentMismatch => "validation-error",
+            CorruptDocumentPackage => "validation-error",
             AssociationNotFound => "not-found",
             JobNotFound => "not-found",
+            VersionTargetNotFound => "not-found",
             AccessDenied => "forbidden",
             CannotCreateEntity => "forbidden",
+            RecordOwnerUnresolved => "forbidden",
             DocumentAlreadyExists => "conflict",
+            VersionTargetHasNoFile => "conflict",
+            NameCollision => "conflict",
+            VersionTargetLocked => "locked",
             SpeUploadFailed => "service-error",
             GraphApiError => "service-error",
             DataverseError => "service-error",
             ProcessingUnavailable => "unavailable",
+            InternalError => "internal-error",
             _ => "error"
         };
 
@@ -126,6 +201,14 @@ public static class OfficeErrorCodes
             GraphApiError => "Graph API Error",
             DataverseError => "Dataverse Error",
             ProcessingUnavailable => "Processing Unavailable",
+            VersionTargetNotFound => "Version Target Not Found",
+            VersionTargetHasNoFile => "Version Target Has No File",
+            VersionIntentMismatch => "Version Intent Mismatch",
+            VersionTargetLocked => "Version Target Locked",
+            NameCollision => "File Already Exists",
+            CorruptDocumentPackage => "Document File Unreadable",
+            RecordOwnerUnresolved => "Record Owner Unresolved",
+            InternalError => "Save Failed",
             _ => "Error"
         };
     }
@@ -145,15 +228,23 @@ public static class OfficeErrorCodes
             AttachmentTooLarge => 400,
             TotalSizeExceeded => 400,
             BlockedFileType => 400,
+            VersionIntentMismatch => 400,
+            CorruptDocumentPackage => 400,
             AssociationNotFound => 404,
             JobNotFound => 404,
+            VersionTargetNotFound => 404,
             AccessDenied => 403,
             CannotCreateEntity => 403,
+            RecordOwnerUnresolved => 403,
             DocumentAlreadyExists => 409,
+            VersionTargetHasNoFile => 409,
+            NameCollision => 409,
+            VersionTargetLocked => 423,
             SpeUploadFailed => 502,
             GraphApiError => 502,
             DataverseError => 502,
             ProcessingUnavailable => 503,
+            InternalError => 500,
             _ => 500
         };
     }

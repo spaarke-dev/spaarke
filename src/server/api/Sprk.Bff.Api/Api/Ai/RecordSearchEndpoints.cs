@@ -56,7 +56,11 @@ public static class RecordSearchEndpoints
     /// <summary>
     /// Execute hybrid record search.
     /// </summary>
-    private static async Task<IResult> PostRecordSearch(
+    // `internal`, not `private` (spaarkeai-word-add-in-r1 task 077): so a test can drive the SHIPPED
+    // handler — its fail-closed check and its per-row trim — rather than a re-implementation of them.
+    // Same reason, and same precedent, as VisualizationEndpoints.GetRelatedDocuments. Task 077 relies on
+    // this route's per-row authorization for Find's records half, and until now nothing tested it.
+    internal static async Task<IResult> PostRecordSearch(
         [FromBody] RecordSearchRequest request,
         IRecordSearchService recordSearchService,
         AuthorizationService authorizationService,

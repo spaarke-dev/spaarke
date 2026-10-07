@@ -131,5 +131,5 @@ update the `GovernedFile` reason at :106-107; fix the stale route comment at `Sp
 RESIDUAL RISK: BFF + AllDocuments Code Page must deploy TOGETHER (transient 404 on the version modal
 otherwise — outage, not disclosure). Also `VersionHistoryModal.test.tsx` cannot execute in this
 workspace (pre-existing monorepo jest wiring; verified identical on unmodified HEAD), so the client
-regression assertion added there is currently unenforced.
+regression assertion added there is currently unenforced.</notes>
 </task>

@@ -1,0 +1,334 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="unified-access-control-r2">
+  <metadata>
+    <title>No Access List for INTERNAL users on secure records: refuse Dataverse shares to a walled systemuser, remove shares that already exist, and veto on the SPA plane — so MDA and Teams/SPA agree</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C9 owner round 2, item 5(a) + Q4)</phase>
+    <gate>blocked — requires 141 (user↔contact link), 133 (C11 provisioning order; shared file) and 139 (grant model; shared files) merged; escalation triggers (a), (b), (c), (d), (e), (g) and (h) need owner answers before their branches are implemented</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Ethical-wall enforcement on the authorization write path (POA share refusal + removal); Dataverse schema change on the deny store; tags bff-api/auth/security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-critical: a wrong subject match either leaves a walled user reading a secure record (the wall fails) or silently strips a legitimate share; the removal path is destructive, and the reader change can fail closed into an org-wide outage if schema and code deploy out of order.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies InternalShareEndpoints.cs, ProvisionProjectEndpoint.cs, DelegationRuleFilter.cs, ExternalAccessEndpoints.cs, AccessibleRecordSetService.cs, NoAccessListReader.cs and ExternalAccessModule.cs. Shared with 133 (ProvisionProjectEndpoint.cs), 139 (InternalShareEndpoints.cs, ProvisionProjectEndpoint.cs, DelegationRuleFilter.cs), 149 (InternalShareEndpoints.cs, ProvisionProjectEndpoint.cs), 142 (which runs after this task) and 036 (AccessibleRecordSetService.cs, which runs after this task). Sequence: 133 and 139 first, then this task; if 149 lands before this task, its child-share fan-out is a census share site here; if after, 149 must call this task's guard.</parallel-reason>
+    <deps>141, 133, 139</deps>
+    <tags>bff-api, auth, security, dataverse, fields, webresource, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Session 26 defect C9 (notes/session26-uac-defects-and-synopsis.md §C9); owner round 2 item 5(a) and Q4 (notes/session27-owner-decisions-and-research.md:24, :33).</origin>
+  </metadata>
+
+  <prompt>Make the No Access List bind internal users on secure records, where their access comes only from explicit Dataverse shares. Refuse to create a share to a walled systemuser. Remove shares that already exist when an entry is added (or a record becomes secure, or a user↔contact link appears). Apply the same veto on the Teams/SPA systemuser plane, so the model-driven app and Teams/SPA give the same answer.</prompt>
+
+  <role>SPAARKE platform developer — BFF authorization write path, FR-23 deny store, Dataverse POA shares, ADR-036 scheduled jobs. Follow ADRs strictly; fail closed.</role>
+
+  <goal>`sprk_noaccessentry` can name a systemuser subject directly. One guard answers "is this systemuser walled off this secure record?", and every BFF share write on a secure record consults it: /share-user, secure provisioning, 142's auto-share, and any other census site. An enforcer removes existing direct POA shares that a wall covers. It is invoked when an entry is saved (MDA form post-save call; task 064's add endpoint if landed) and by a scheduled reconciliation job that also catches out-of-band MDA shares. The SPA/Teams systemuser plane vetoes walled secure records. Access the wall cannot remove per-user (team-held, role-held) is reported, never silently ignored.</goal>
+
+  <context>
+    <background>WHY THIS EXISTS. The owner, round 2 item 5: do NOT lose the No Access List. Q4: "the No Access List applies to internal users too, on secure records." Today the deny store (`sprk_noaccessentry`, `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:56-69`) is keyed on a contact or organization SUBJECT only. It reaches a systemuser only through the user's linked contact, and only on the Teams/SPA workforce plane:
+- `AccessibleRecordSetService.cs:1016-1034` resolves `grantContactId` from `principal.ContactId` or an email match;
+- `:1083-1094` feeds it to `ResolveDenyVetoAsync` (`:596-672`) and `ApplyVetoPipeline` (`:357-410`).
+Today that systemuser-plane veto removes the WHOLE record — membership term included — on ANY record, secure or not: `ApplyVetoPipeline` slot 1 does `composed.Remove(recordId)` for every denied id (`:375-378`), before Restricted's survives-set is consulted (`:391-406`). So a linked-contact wall already hides NON-secure records from an internal user on Teams/SPA while MDA shows them — see escalation (h).
+The model-driven app never consults the list. C9's fix (task 036, the flag-gated swap) makes a systemuser's Teams/SPA access equal their Dataverse access. After that the list binds an internal user nowhere, unless Dataverse itself stops granting.
+
+WHY SHARES ARE THE LEVER. On a secure record (owned by the Secure Record BU's owner team; task 144 makes it a named, memberless team), an internal user's access comes from explicit POA shares:
+- the creator share at provisioning (`ProvisionProjectEndpoint.cs:726`);
+- named colleagues (`:754`);
+- `/share-user` (`InternalShareEndpoints.cs:201-383`, write at `:344-346`);
+- task 142's auto-share for an Assigned internal user;
+- OOB MDA sharing by anyone holding ShareAccess on the record. That is the creator today, and after task 139 (C4) every Collaborate/Full holder.
+Refusing the share and revoking an existing one therefore makes Dataverse deny, and after C9 Teams/SPA follows. On NON-secure records internal access comes from role depth in the BU, which unsharing cannot remove. The owner's rule is scoped to secure records for exactly this reason. Non-secure internal enforcement is outside the owner's rule, not deferred.
+
+THE READER TODAY. `NoAccessListReader` (`Infrastructure/ExternalAccess/NoAccessListReader.cs`):
+- interface `:128-155`; select list `:180-182`;
+- subject filter `BuildSubjectFilter` `:191-205` (contact OR org);
+- object filters `:209-222`; `GetDeniedRecordsAsync` `:268`.
+It fails closed: a faulted read denies every queried candidate. A malformed row (neither or both subjects) is logged and denies nothing (schema doc Business Rule 1, :105-112).
+⚠️ Adding a column to `RowSelect` in an environment that lacks it makes every read 400 → fail-closed deny-all → a contact-plane outage (schema doc :156-176 records the same hazard for the table itself). Schema must be deployed before code.
+
+LIVE FACT (session27:40): only 1 of 8 active interactive dev systemusers has `sprk_primarycontact`, so keying internal walls on the linked contact alone would leave 7 of 8 unwallable. Task 141 builds the reliable link (`systemuser.azureactivedirectoryobjectid` ↔ `contact.sprk_externalobjectid`). A direct systemuser subject removes the dependency for entries that name a user.
+
+OTHER SHARE WRITERS (census to classify, not assume):
+- `PlaybookSharingService.cs:321` (playbooks);
+- `DirectThreadAccessService.cs:93`, `:195` (direct-message threads between two users).
+Neither targets a secure root on its face. Record the classification with evidence.
+
+WHO CAN AUTHOR A WALL. `sprk_noaccessentry` is ORGANIZATION-owned (schema doc :31-37), so any role holding its Create/Write privilege can author an entry against any subject and any object, in MDA, with no delegation check. Until now an entry only hid things at read time. This task makes an entry DESTRUCTIVE (it removes Dataverse shares), so who may author one becomes an authorization question — see escalation (g).
+
+TWO PLUMBING FACTS THAT DECIDE WHETHER THE WIRING WORKS.
+- The `/api/v1/external-access` group (`Api/ExternalAccess/ExternalAccessEndpoints.cs:123-126`) carries `DelegationRuleFilter`. The filter finds its target record by a TYPE SWITCH over the handler's arguments (`Api/ExternalAccess/DelegationRuleFilter.cs:211-281`), whose default branch DENIES; an unresolved or unknown target is a 403 by design (`:144-153`, enumeration-safe), and the rights test is caller-OBO Write (`:155-179`). An enforce request `{entryId}` has no case today, so without one the route refuses every caller.
+- Share-cache invalidation keys on the CALLER's tenant claim: `ImpersonatedRootSetSource.InvalidateAsync(cache, caller, …)` (`Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs:220-233`) uses `CacheTenantFor(caller)` (`:200-203`), which is "anonymous" for a null principal. The job has no caller, so a naive job-side invalidation removes a key nobody reads, and the walled user keeps a cached set for the cache TTL.
+
+Related open tasks: 064 builds deny-list add/remove endpoints, keyed contact|organization only (its POML :23). 067 builds the Manage Access deny-list UI. Both predate this owner decision. 149 (C10 sharees) may mirror a secure parent's shares onto each child; those child shares are share writes this task must guard and the enforcer must remove.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md (add sprk_subjectsystemuser; exactly-one-of-THREE subjects; deployment record)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs (systemuser subject in select/filter/classification; malformed-row rule over three subjects)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SecureShareNoAccessGuard.cs (the one write-time check + the enforcer; name final at implementation)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/NoAccessShareReconciliationJob.cs (IScheduledJob, L4)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/NoAccessEnforceEndpoint.cs (POST /api/v1/external-access/no-access/enforce {entryId})</file>
+      <file role="new">src/solutions/webresources/sprk_noaccessentry_postsave.js (sprk_noaccessentry main form OnPostSave → enforce)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs (ShareAsync refuses a walled user on a secure record)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (creator + named-principal shares per escalation (c))</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (systemuser-plane veto for secure records with the systemuser subject)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (map the enforce route in the adminGroup, :123-175)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs (a case for the enforce request type in the target switch, :211-281 — without it the default branch denies every caller)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ImpersonatedRootSetSource.cs (job-context invalidation keyed on the deployment's tenant, :200-233)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (registrations; AddScheduledJob)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (reader — NoAccessListReaderTests.cs, guard, enforcer, veto, job) and tests/integration/auth/UnifiedAccessControl/ + tests/integration/data-mutation/ExternalAccess/ (share refusal and enforce route through the real filter pipeline, provisioning — beside InternalUserShareTests.cs, FakeRecordShareTable.cs, SecureProjectShareTests.cs)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs</file>
+      <file role="canonical-reference">src/solutions/webresources/sprk_kpiassessment_quickcreate.js (+ sprk_bff_auth.js)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="141" status="pending">The user↔contact link. It supplies the linked contact (and through it the user's active organizations) for contact- and org-subject entries that should bind an internal user.</dependency>
+      <dependency task="133" status="pending">C11 secure-provision creator lockout. SEQUENCING: 133 reorders ProvisionProjectEndpoint (share before the owner move, compensation, resume). Escalation (c)'s pre-validation must be placed in 133's final order, not in today's.</dependency>
+      <dependency task="139" status="pending">C4 grant model. SEQUENCING: 139 rewrites InternalShareEndpoints.ShareAsync and the provisioning share levels, and adds ShareAccess to Collaborate/Full — which widens who can make an OOB MDA share and therefore what the job must catch.</dependency>
+      <dependency task="036" status="pending (downstream)">036 lists 143 as a hard dependency (036 amendment 3): the C9 flag must not be enabled until this task is complete. 036's escalation fires if the BFF deny veto and Dataverse's answer disagree for the same systemuser and record — see escalations (d) and (h).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner Q4">Scope: every enforcement point in this task. For INTERNAL users (systemusers) the wall is enforced on SECURE records (`sprk_issecure` = true via `ExternalParticipationService.GetRootRecordFlagsAsync` `:541`), and on their child records once C10 part 2 (task 146 and its client-side sibling) makes children secure. On non-secure records nothing in this task adds a wall on internal access; the one change there is the parity correction of escalation (h), applied only per the owner's answer. Contact-plane behaviour (FR-23 for contacts everywhere) is unchanged.</constraint>
+    <constraint source="subject match (per escalations (a) and (b))">Scope: the guard, the enforcer and the veto. A systemuser is walled when an ACTIVE entry's subject is:
+(i) the systemuser itself (`sprk_subjectsystemuser`);
+(ii) the user's linked contact via 141;
+(iii) an organization the linked contact is an active member of.
+The entry's object must be the secure record itself, a child record of it, or an organization the secure record references. Record-side organizations are ANY referenced org, not just registry ones — FR-23 / B-10 over-match, reusing `GetReferencedOrganizationIdsAsync` (`ExternalParticipationService.cs:710`).</constraint>
+    <constraint source="ADR-003 fail closed">Scope: guard + enforcer + veto.
+- An unreadable deny list, flag set, link or org membership at share-write time → the share is REFUSED with a message.
+- In the veto → the record is removed.
+- In the enforcer → the run is recorded failed and nothing is reported "clean".
+Never treat a fault as "not walled".</constraint>
+    <constraint source="refusal contract">Scope: InternalShareEndpoints.ShareAsync and every other guarded share site. A walled target is refused BEFORE any Dataverse write, as 403 ProblemDetails with a new stable reason code (e.g. `sdap.access.user_share.subject_no_access`) and a human message saying the person is on the No Access list for this record. The message does not reveal the entry's reason text. The refusal is logged with the entry id(s).</constraint>
+    <constraint source="enforcer">Scope: the enforce endpoint, the job and task 064's add path.
+- Removes only DIRECT POA shares to the walled systemuser on covered secure records, via `IDataverseRecordShareService.RevokeAccessAsync` with a strict read before and a read-back after (the `InternalShareEndpoints.UnshareAsync` discipline, `:395-486`: strict read `:440`, revoke `:464`, read-back `:465`, failure → message `:477-486`).
+- A removed share that was a task-142 auto share is left for 142's ledger to record as Skipped(no-access), not Declined (142 wires this; if 142 has not landed, the notes name the hook).
+- Invalidates the user's impersonated root-set cache (`ImpersonatedRootSetSource.InvalidateAsync`, as `InternalShareEndpoints.cs:358-359` / `:473-474` do) under the SAME tenant key `ImpersonatedRootSetSource.GetAsync` reads. In the job (no caller) that key comes from the deployment's tenant configuration, never `CacheTenantFor(null)` = "anonymous".
+- Never revokes a TEAM share, team ownership, or role-conferred access. Those are REPORTED as "wall not enforceable in Dataverse for user X on record Y via Z" in the endpoint response, the job result and a Warning log. The policy follows escalation (d).</constraint>
+    <constraint source="deploy order">Scope: rollout. The `sprk_subjectsystemuser` column is created live (Spaarke publisher, SpaarkeCore — the Web-API method in the schema doc :180-204) and verified with describe() BEFORE any code that selects it is deployed. Record the order in the PR description. A reader that selects a missing column fails closed into a deny-all outage.</constraint>
+    <constraint source="D-1 / ADR-002 / ADR-036 / ADR-052">Scope: triggers. No plugin, flow or service endpoint. The job is an `IScheduledJob` registered with `AddScheduledJob` in `ExternalAccessModule`, following `ExternalAccessReconciliationJob`'s A1 rules (claim → check → write → marker; paging ceiling reports TRUNCATED; failure recorded, never "nothing to reconcile"). Posture and cadence per escalation (e).</constraint>
+    <constraint source="ADR-003 / ADR-008 — enforce endpoint">Scope: `POST .../no-access/enforce`.
+- The body carries ONLY the entry id. Everything else is read server-side from the active entry; any other field is ignored.
+- It joins the `/api/v1/external-access` group, so `DelegationRuleFilter` gates it. Add a case for the enforce request type to the filter's target switch (`DelegationRuleFilter.cs:211-281`) whose target is the `sprk_noaccessentries` row itself, so the filter's existing caller-OBO Write check applies to the entry. An absent entry, or one the caller cannot write, is the filter's 403 (`:144-179`), indistinguishable from each other — not a 404 from the handler.
+- An inactive entry reaches the handler and is refused with ProblemDetails and no writes.
+- The endpoint can only REMOVE access, and only as far as an existing active entry says. It accelerates what the job would do on its next run; it never grants.
+- Which entries the enforcer honours at all follows escalation (g).</constraint>
+    <constraint source="CLAUDE.md §11 reuse">Scope: whole task. Extend `NoAccessListReader` (do not add a second deny reader). Reuse `ExternalParticipationService.GetRootRecordFlagsAsync` (`:541`), `GetReferencedOrganizationIdsAsync` (`:710`), `QueryActiveOrgIdsAsync` (`:1081`), 141's link resolver and `IDataverseRecordShareService`. Task 142 consumes the guard; it does not fork one.</constraint>
+    <constraint source="owner directives (binding)">Scope: whole task.
+- A failed revoke/unshare returns a message, never a bare 500.
+- No new `.WithClientSecret`.
+- `GrantMembershipAsync` stays at zero callers.
+- Users are not relocated between BUs.
+- No Dataverse test in CI: live proof is the MANUAL gate.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement statement against bff-extensions.md. Publish size: fresh-master vs fresh-branch worktrees at short paths, Compress-Archive, both sizes + delta + both file counts, ≤ 60 MB. No new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Scope: tests. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no ctor null-check tests. Use the reader's `QueryChunkAsync` override seam and the existing share-service test doubles.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>(1) Column: `sprk_noaccessentry` has only `sprk_subjectcontact` / `sprk_subjectorganization` (entity-schema.md:58-61). `rg "_sprk_subject" src/server` hits only `NoAccessListReader.cs:181`. (2) Guard/enforcer: `InternalShareEndpoints.ShareAsync` checks eligibility (`:251`) and caller rights (`:290-303`) but no deny list. `ResolveDenyVetoAsync` (`AccessibleRecordSetService.cs:596`) is read-time only and contact-keyed. Nothing revokes a share because of a wall. (3) Job: `ExternalAccessReconciliationJob` R1-R3 repair grant/membership row lifecycle; `GrantExpiryReminderJob` sends reminders. Neither reads POA shares. (4) Enforce endpoint: task 064's planned deny-list add endpoint (pending) is the only other trigger, and it cannot see entries authored on the MDA form. (5) Web resource: `sprk_kpiassessment_quickcreate.js` is the only OnPostSave→BFF caller, and it is KPI-specific.</existing>
+    <extension>(1) Relying on the linked contact instead of a new column: rejected as primary (see escalation (a)). 7 of 8 dev users have no link today, and a wall that depends on data hygiene fails OPEN when the link is missing. (2) The guard is a new class used by ≥4 share sites, so each site calls it rather than each re-implementing the rule. The read-time veto extends `ResolveDenyVetoAsync`. (3) Adding an R4 to `ExternalAccessReconciliationJob` was rejected: that job's contract is row lifecycle of grant/membership rows (:16-19). It ships disabled/report-only (D-2 part 3), which would leave the owner's wall un-enforced for out-of-band shares. (4) The enforce endpoint joins the existing `/api/v1/external-access` group.</extension>
+    <cost-of-doing-nothing>(1) When 036's flag turns on, a walled internal attorney who holds (or is later given, by OOB Share or /share-user) a share on a secure matter reads it in MDA AND Teams/SPA. The owner's No Access List then binds contacts only, directly contradicting Q4. (2) Without the write-time guard, /share-user and task 142's auto-share hand a walled user access that the next read-time veto only partly hides (MDA would still admit them). (3) Without the enforcer, an entry added after a share exists changes nothing in Dataverse. (4) Without the job, an OOB MDA share made after the entry stays in place indefinitely.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/webresource.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+    </files>
+    <patterns>
+      <pattern name="fail-closed deny reader" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs:268-460">Chunked OR-filters, malformed rows deny nothing, faults deny every queried candidate. Extend in place.</pattern>
+      <pattern name="strict-read share removal with read-back" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs:395-486">A failed read is a refusal, not "no share"; confirm the removal by read-back; cache invalidated.</pattern>
+      <pattern name="reconciliation job" location="src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs:15-93">Paging ceiling + TRUNCATED, claim/marker, failure recorded.</pattern>
+      <pattern name="form post-save to BFF" location="src/solutions/webresources/sprk_kpiassessment_quickcreate.js:150-215">addOnPostSave + Spaarke.BffAuth; the form never breaks when the helper is absent.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm 141 is merged and read its link resolver's contract. Confirm 133 and 139 are merged and place the provisioning guard in 133's final step order. Obtain owner answers to escalations (a), (b), (c), (d), (e), (g) and (h) before implementing those branches. Record them in notes/task-143-no-access-internal-secure.md.</step>
+    <step order="1">Census every BFF POA share writer (`GrantAccessAsync` / `ModifyAccessAsync` callers — currently `ProvisionProjectEndpoint.cs:726,754` — these lines MOVE under task 133, so locate the sites by their GrantAccessAsync calls, not by line, `InternalShareEndpoints.cs:344,346`, `PlaybookSharingService.cs:321`, `DirectThreadAccessService.cs:93,195`, plus 142's auto-share and 149's child-share fan-out if present). Classify each as a secure-record site (guard it) or not (record the evidence). Classify against secure CHILD records too, not only roots: `DirectThreadAccessService` shares `sprk_communication` threads, and a communication filed under a secure parent is a secure child once C10 part 2 (146/149) lands. Also record, from live metadata, which security roles hold Create/Write on `sprk_noaccessentry` (input to escalation (g)).</step>
+    <step order="2" name="schema (prescriptive within the step)">Create `sprk_subjectsystemuser` (Lookup → systemuser, RemoveLink) live under the Spaarke publisher in SpaarkeCore. Publish, verify with describe(), and update the schema doc: exactly one of THREE subjects; a fourth worked-example row; the deployment record.</step>
+    <step order="3">Extend `NoAccessListReader`: select + filter on the systemuser subject; the malformed-row rule over three subjects; an overload or parameter for a systemuser subject that composes with the existing contact/org subjects. Keep every fail-closed path.</step>
+    <step order="4">Build the guard (is systemuser U walled on secure record R?) and the enforcer (for an entry, or for a user, or for a record: find covered secure records × covered systemusers, revoke direct shares, report non-removable access).</step>
+    <step order="5">Wire the guard into every secure share site from the census. Provisioning follows escalation (c). /share-user returns the 403 refusal.</step>
+    <step order="6">Wire the enforcer:
+- the enforce endpoint, its `DelegationRuleFilter` case, and the sprk_noaccessentry form web resource (deploy via the dataverse-deploy skill, sprk_bff_auth.js first);
+- task 064's deny-list add endpoint if it has merged (otherwise flag it to the orchestrator — 064 must call the enforcer);
+- the reconciliation job, covering new/re-activated entries, shares created out of band after an entry, records that became secure, and 141 links that appeared.</step>
+    <step order="7">Extend the systemuser-plane read-time veto (`ResolveDenyVetoAsync` / its systemuser call at `AccessibleRecordSetService.cs:1087`) so a systemuser subject (and the 141-linked contact/orgs) removes SECURE records from that user's set. On NON-secure records apply the owner's answer to escalation (h) for every subject form — a systemuser-subject entry never removes a non-secure record, and a contact-sourced contribution (the linked contact's grants) stays vetoed there as today.</step>
+    <step order="8">Tests per the acceptance test-scope clause; build; ArchTests; publish-size and CVE per §10.</step>
+    <step order="9">MANUAL live gate on spaarkedev1 (criterion 14). Record the evidence in the notes file.</step>
+    <step order="10">Update TASK-INDEX.md: this task's cell to `✅ [done]`. Record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>(a) OPEN OWNER QUESTION — how is an internal user named on the No Access List? RECOMMENDATION: add a systemuser subject field (`sprk_subjectsystemuser`) to `sprk_noaccessentry` and match it directly. Also honour the linked-contact subject via 141, so an existing contact-keyed wall binds that person's internal identity too. Do NOT rely on the linked contact alone: only 1 of 8 dev users is linked today, and a missing link makes the wall fail OPEN. STOP before step 2 until answered.</trigger>
+    <trigger>(b) OPEN OWNER QUESTION — organization-subject entries and internal users. Should an entry whose subject is organization O bind an internal user whose linked contact is an active member of O? RECOMMENDATION: yes, for consistency with FR-23's "denies every active member". Beware an entry naming the customer's OWN firm organization: it would wall every linked internal user off every secure record referencing the object. Surface that blast radius in the enforce response and in 067's confirm dialog.</trigger>
+    <trigger>(c) OPEN OWNER QUESTION — a walled CREATOR provisioning a secure project whose referenced organizations put it behind their own wall. RECOMMENDATION: refuse provisioning BEFORE the ownership move (step 5), so nothing is moved and the creator gets a clear message. Walled named principals are skipped with a per-principal warning in the response. Coordinate with the C11 task (pre-validate before step 5).</trigger>
+    <trigger>(d) OPEN OWNER QUESTION — access the wall cannot remove per-user: a TEAM share or team ownership held by a team the user belongs to, the Secure Record Owner role, or membership in the Secure Record BU. RECOMMENDATION: never revoke a team share (it would strip every other member). Report it as "wall not enforceable in Dataverse", surface it on the Manage Access deny row (067) and in the job result, and rely on the SPA-plane veto for Teams/SPA. The residual MDA exposure is then visible rather than silent. ⚠️ This recommendation DELIBERATELY breaks the owner's C9 plane-parity rule for exactly these cases (SPA denies, MDA admits), which is the disagreement task 036's escalation trigger names. The owner must accept that deviation explicitly (§6.5 path A, recorded in the design ADR-tensions and the PR), or choose the alternative: refuse to accept a wall for a user whose access to that record is team- or role-held until an administrator removes it.</trigger>
+    <trigger>(e) Job posture and cadence. ExternalAccessReconciliationJob ships disabled/report-only for removal rules (D-2 part 3). RECOMMENDATION: ship this job ENABLED with writes ON, because it enforces a wall the owner explicitly required. The cadence bounds how long an OOB MDA share to a walled user survives; recommend every 15 minutes. Confirm both.</trigger>
+    <trigger>(f) STOP if the census finds a share writer on secure records that cannot consult the guard before writing without changing its API contract. Also STOP if C10's child-record securing introduced cascading shares that the enforcer cannot revoke through the root.</trigger>
+    <trigger>(g) OPEN OWNER QUESTION — who may author a wall that REMOVES shares? `sprk_noaccessentry` is Organization-owned, so any role with its Create/Write privilege can, in MDA, name any systemuser against any secure record — and after this task that removes the user's shares, which is a denial-of-access lever the author may not hold any rights over. RECOMMENDATION: the enforcer (endpoint, job and 064's add path) acts on an entry, for a given object record, only when the entry's last modifier (`modifiedby`, a person — not the BFF app user) holds Write on that record, checked app-only; otherwise it removes nothing for that record and reports "not enforced: author lacks Write on record". The read-time veto is unchanged. The alternative is to restrict Create/Write on the table to a named governance role; the step-1 live privilege list informs the choice. STOP before wiring the enforcer until answered.</trigger>
+    <trigger>(h) OPEN OWNER QUESTION — the systemuser-plane veto on NON-secure records. Today a linked-contact or org entry removes the WHOLE record from an internal user's Teams/SPA set on any record (ApplyVetoPipeline slot 1, `AccessibleRecordSetService.cs:375-378`), while MDA still admits them. After 036 that is a plane-parity break on every non-secure record, and Q4 scopes the internal wall to secure records. RECOMMENDATION: on a non-secure record the deny veto removes only the CONTACT-SOURCED contribution (the linked contact's grants — the contact rule still applies) and keeps the systemuser's own non-contact term (today's membership term; the Dataverse term under 036), exactly as Restricted keeps `survivesRestricted`. This loosens today's SPA behaviour for walled internal users on non-secure records, which is why it needs the owner's word, not the implementer's.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF.</tool>
+    <tool name="mcp__dataverse__describe">Verify the new column live before deploying code.</tool>
+    <tool name="dataverse-create-schema skill">Add the lookup under the Spaarke publisher.</tool>
+    <tool name="dataverse-deploy skill">Deploy the web resource and the sprk_noaccessentry form-library registration.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/NoAccessListReader.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SecureShareNoAccessGuard.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/NoAccessShareReconciliationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/NoAccessEnforceEndpoint.cs</output>
+    <output type="code">src/solutions/webresources/sprk_noaccessentry_postsave.js</output>
+    <output type="docs">src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-143-no-access-internal-secure.md</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/SecureShareNoAccessGuardTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/NoAccessShareReconciliationJobTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. `sprk_subjectsystemuser` exists live and was verified by describe() before the code deployed (order recorded). The schema doc states exactly-one-of-three subjects. The reader treats a row with zero or ≥2 subjects as malformed: it denies nothing and logs a warning.</criterion>
+    <criterion testable="true">2. Given an active entry (subject = systemuser U, object = secure project P), when a caller with Write on P calls /share-user for U, then the response is 403 ProblemDetails with the new reason code and a human message, and NO Dataverse share write occurs (asserted).</criterion>
+    <criterion testable="true">3. The same refusal holds when the entry's subject is U's 141-linked contact. It also holds when the subject is an organization U's linked contact actively belongs to (per (b)). It also holds when the object is an organization P references via ANY lookup.</criterion>
+    <criterion testable="true">4. On a NON-secure record, the same entry does NOT block /share-user for U (the owner's scope). Contact grants behave exactly as before this task.</criterion>
+    <criterion testable="true">5. Fail closed: when the deny list, P's flags, U's link or U's org memberships cannot be read at share time, /share-user refuses with a message and writes nothing.</criterion>
+    <criterion testable="true">6. Given U already holds a direct POA share on secure project P, when an entry walling U off P is saved (form post-save → enforce endpoint), then U's direct share is revoked and confirmed gone by read-back, U's impersonated root-set cache is invalidated under the key a read for U uses, and the response lists what was removed. A read-back that still finds the share → ProblemDetails with a message naming the user and record, never a bare 500 and never "removed".</criterion>
+    <criterion testable="true">7. Access held through a team share, team ownership or a role is NOT revoked. It is reported as not enforceable in Dataverse, with the user, the record and the mechanism (policy per (d)).</criterion>
+    <criterion testable="true">8. Enforce endpoint authorization, tested THROUGH the real `/api/v1/external-access` filter pipeline (not by calling the handler directly). A caller with Write on an active entry reaches the handler and the enforcement runs — this proves the new `DelegationRuleFilter` case resolves the enforce request type (without it the default branch denies everyone). Unauthenticated → 401. An entry that does not exist, and one the caller cannot write, → the filter's 403, identical to each other, no writes. An inactive entry → ProblemDetails with a message, no writes. A body with extra fields (record or user ids) is ignored in favour of the entry's own data. A revoke fault → ProblemDetails with a message, never a bare 500.</criterion>
+    <criterion testable="true">8a. Per escalation (g): with the recommendation, an entry whose last modifier lacks Write on object record R removes NOTHING on R and reports "not enforced: author lacks Write on record" for R (endpoint, job and 064 add path), while the read-time veto for R still applies. With the alternative, the notes record the live role privileges on `sprk_noaccessentry` before and after, showing only the governance role can create/write entries.</criterion>
+    <criterion testable="true">9. Provisioning follows the owner's answer to (c). With the recommendation: a walled creator is refused before the ownership move, with nothing moved. A walled named principal is skipped with a per-principal warning, and the other principals are still shared.</criterion>
+    <criterion testable="true">10. Every census share site on secure records calls the guard before writing (a test per site). Non-secure sites are recorded in the notes with evidence. Task 142's auto-share consumes the same guard, or the notes name the exact hook 142 must call if 142 has not yet landed. The same holds for task 149's child-share fan-out and for `DirectThreadAccessService` on a communication under a secure parent: guarded here if already secure-child sites when this task runs, otherwise the notes name the hook and the orchestrator is told.</criterion>
+    <criterion testable="true">11. Teams/SPA plane: a systemuser U walled off secure record P (by any subject form in criteria 2-3) does not have P in the composed set, even when a membership or grant term would otherwise add it. A non-secure record is never removed by a systemuser-subject entry. For a linked-contact or org entry on a non-secure record, the result follows the owner's answer to (h) (with the recommendation: U keeps the record at the systemuser's own non-contact term's rights, and the linked contact's grant contribution is vetoed — test both halves). A veto-read fault removes the candidate.</criterion>
+    <criterion testable="true">12. The job removes a direct share created out of band (e.g. OOB MDA Share) after an entry exists. It also enforces on records that became secure after the entry and on users whose 141 link appeared after the entry. Every share it removes invalidates U's root-set cache under the tenant key `ImpersonatedRootSetSource.GetAsync` reads (test asserts the key; "anonymous" fails the test). Paging past its ceiling reports TRUNCATED. A faulted run records Success=false. Posture and cadence per (e).</criterion>
+    <criterion testable="true">13. Test scope: cover the stated contract plus the edge cases named in criteria 1-12 (three subject forms, org object over-match, secure vs non-secure, the (h) split, fail-closed reads, team/role non-removable, provisioning creator vs named principal, endpoint negatives through the filter, entry-author authority, job transitions, job cache key). No criterion is met by a test that only asserts a mock was called with arguments the test itself supplied. Anything beyond that needs a one-line justification in the notes. No ADR-038-banned test shapes. Build, full BFF unit suite and ArchTests green. Publish size reported (fresh-master vs fresh-branch, sizes, delta, zip tool, file counts) ≤ 60 MB. No new HIGH CVE. No new `.WithClientSecret`. No plugin or flow.</criterion>
+    <criterion testable="true">14. MANUAL live gate on spaarkedev1, using the existing non-admin test users in their current BUs (no relocation), with the evidence recorded:
+(i) confirm U cannot open the secure project before any share (recorded); share it to U via Manage Access "+ User"; U opens it in MDA and Teams/SPA;
+(ii) add a No Access entry naming U (systemuser subject) on that project in MDA; after save, U can open it in neither MDA nor Teams/SPA, and the share is gone from Manage Access;
+(iii) "+ User" for U on that project now shows the refusal message;
+(iv) deactivating the entry does NOT restore the MANUAL share, which stays removed until re-granted deliberately (a task-142 auto share is restored by 142's invariant instead — not part of this gate);
+(v) with a second active entry in place, an administrator shares the project to U through the OOB MDA Share dialog; after the next job run U can open it in neither MDA nor Teams/SPA.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="+ User refusal shows the reason">
+      <steps>
+        <step>At https://{org}.crm.dynamics.com, as a non-admin test user with Write on a secure project, open Manage Access and try "+ User" for a user who is on that project's No Access list.</step>
+      </steps>
+      <expected>The modal shows the server's message ("on the No Access list for this record"), not a generic error, and the user does not appear in Current Access.</expected>
+    </test>
+    <test name="Saving a No Access entry removes the share">
+      <steps>
+        <step>Create a sprk_noaccessentry in MDA naming a systemuser who currently holds a share on a secure project; save.</step>
+        <step>Reopen the project's Manage Access.</step>
+      </steps>
+      <expected>The user's share is gone, and the form did not error during save.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Defect C9 (notes/session26-uac-defects-and-synopsis.md §C9); owner round 2 item 5(a) and Q4 (notes/session27-owner-decisions-and-research.md:24, :33); live link fact session27:40. Coordination the orchestrator must act on:
+- task 064's deny-list add/remove endpoints (POML :23) are keyed contact|organization only. They must accept the systemuser subject and call this task's enforcer on add.
+- task 067's Manage Access deny section must offer a user picker and render the "not enforceable in Dataverse" state from (d).
+- task 142 depends on this task's guard, and records a share this task's enforcer removed as Skipped(no-access), so a lifted wall restores an Assigned auto share while a manual share stays removed.
+- task 149 (C10 sharees) must call this task's guard before any child-share fan-out and let the enforcer remove walled users' child shares, if 149 lands after this task.
+- task 036 depends on this task; escalations (d) and (h) decide where the BFF veto and Dataverse may disagree, which 036's own escalation trigger checks.
+Deactivating an entry lifts the veto (schema Business Rule 2) but does not re-create removed shares. Removal is not reversible by design; restoring access is a deliberate re-grant. Say so in the schema doc.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-143" base="7128776b7">
+SERVER SIDE CODE-COMPLETE; LIVE GATES PENDING; FORM STEPS RECORDED FOR TASK 154. Full record: notes/task-143-no-access-internal-secure.md (owner answers, census, placement + justification, tests, bite proof, pending gates, residuals).
+
+OWNER ANSWERS APPLIED (no escalation fired as a stop): (a)=N1 systemuser column + linked contact; (b)=N4 organization subjects bind members (own-firm warning = 067's dialog); (c)=N6 walled creator refused before the move, walled colleagues skipped and reported, walled resume person refused; (d)=N2 team/role/BU access reported, never revoked, hidden on Teams/SPA (section 6.5 path A, recorded in design.md section 9); (e)=R4 job enabled, writes on, every 5 minutes; (g)=N5 a record is enforced only when the entry's modifiedby is an enabled person holding Write on it; (h)=N3 non-secure: user-subject entries do nothing, contact/org entries remove only the linked contact's contribution; S5 the last person is kept; O2 answered (access-administrator role) but its application is 154/064's. Trigger (f) does not fire: DirectThreadAccessService can consult the guard internally (hook recorded for 146/149).
+
+BUILT: sprk_subjectsystemuser (schema doc + scripts/Set-NoAccessSystemUserSubjectSchema.ps1, dry-run/-Apply/-Verify); NoAccessListReader three-subject overload, exactly-one-of-three rule, DenyingSubjectKinds; SecureShareNoAccessGuard (the one write-time check) wired into /share-user and secure provisioning; NoAccessEnforcementStore + NoAccessShareEnforcer (EnforceEntryAsync, EnforceForRecordAsync for 142's Update Access); POST /api/v1/external-access/no-access/enforce with its DelegationRuleFilter case (target = the entry row); NoAccessShareReconciliationJob (AddScheduledJob, ADR-036/052); systemuser-plane veto split by secure; ImpersonatedRootSetSource deployment-tenant invalidation; ExternalParticipationService reverse reads; sprk_noaccessentry_postsave.js (not registered - 154).
+
+PLACEMENT (CLAUDE.md section 10): all in the BFF - BFF domain code over BFF-owned tables, BFF identity, low volume; the job on the in-process scheduler (ADR-052 B2/B3). No new package, no AI-internal type (ADR-013), no new .WithClientSecret, no plugin (ADR-002), GrantMembershipAsync untouched.
+
+THREE-QUESTION JUSTIFICATIONS (CLAUDE.md section 11): column - only contact/org subjects exist, linked-contact-only fails OPEN for unlinked users; guard - IsGranteeDeniedOnRecordAsync covers contacts only and the evaluator's link read is not status-bearing, and 4+ sites need one rule; store - DataverseWebApiClient cannot call RetrievePrincipalAccess and CallerRecordAccessProbe is OBO-only by design, while N5 and criterion 7 need it for another principal; enforcer - nothing removes a share because of a wall; endpoint - 064 cannot see MDA-authored entries and R3 requires save-time; job - ExternalAccessReconciliationJob's reason to change is grant/membership row lifecycle and it ships disabled; reverse reads and cache-tenant helper are extensions of their owning classes. Table in notes section 3.
+
+TESTS: guard 16, enforcer 19, endpoint through the real filter pipeline with the DI-composed enforcer 8, job 8, provisioning 5, reader +9, evaluator 4 (one rewritten to the owner's N3 answer), /share-user +10. Ten guards seeded at once - 27 tests failed, each seed its own - restored and touched.
+
+PENDING MANUAL GATES (main session): G-1 schema -Apply then -Verify BEFORE any BFF deploy of this branch (the reader selects _sprk_subjectsystemuser_value; without the column every No Access read fails closed - deny-all on both planes); G-2 BFF deploy; G-3 task 154 form registration (bff_auth.js first); G-4 live gate 14 (needs O2 applied first - the O2 trigger).
+
+HOOKS FOR OTHER TASKS: 142 (call the guard before every Assigned-To share; ledger an enforcer-removed share as Skipped(no-access); Update Access calls EnforceForRecordAsync); 149 (guard with the ROOT before any child share; extend the enforcer to child shares); 146/149 (DirectThreadAccessService on a message under a secure root); 064 (accept the systemuser subject; enforce after add; create the entry AS THE CALLER or N5 sees the app user as author); 067 (user picker; own-firm warning; render not-enforceable); 036 (the N2 disagreement is bounded to NotEnforceable cases).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-143-r1" base="d248dff11" round="r1">
+ROUND r1 - ADVERSARIAL-VERIFIER FINDINGS CLOSED (server side). Full record: notes/task-143-no-access-internal-secure.md section 7. Live writes: none.
+
+ITEM 2 (MEDIUM, fail-open) FIXED, section 6.5 path C (comply, ADR-003): for every SECURE candidate the systemuser-plane veto resolves its subjects through the write-time guard's static SecureShareNoAccessGuard.ResolveSubjectsAsync over IContactIdentityStore, read status-first (systemuser + sprk_primarycontact link + every oid-bound contact + their wall organizations, plus the principal's derived contact). A faulted link, binding or membership read removes every secure candidate whole. Non-secure candidates keep the N3 rule over the derived contact only (a contact the normalizer could not derive contributed no grant, so nothing opens). Residual W4 withdrawn.
+ITEM 3 FIXED by item 2; the guard's remark rewritten to state exactly who asks what.
+ITEM 4 CLOSED: one test per untested seed, each on the PRODUCTION fault shape - S1 guard and S18 EnforceForRecordAsync with ReferencedOrganizations.Unresolved returned (never thrown); S2 flags IsUnreadable with IsSecure false (RootRecordFlags.Unreadable also sets IsSecure, which is why the verifier's seed was inert against production values); S9 membership read faulting on a non-secure record; S11 owner read throwing; S20 colleague link read failing -> skipped with principal_no_access_unverifiable.
+ITEM 5 FIXED: every referenced organization is queried, in OR-chunks of 50, answers unioned, Truncated past max.
+ITEM 6 FIXED: direct-share removal runs under a per-record lease (the existing atomic IScheduledJobLease, keyed no-access-enforce:{table}:{id}, 2 min) and re-reads the shares under it before the S5 check, revoke and read-back; held lease -> record-busy, unreachable -> record-lock-unavailable (fail closed, nothing removed). Scope: serializes the enforcer with itself (endpoint, concurrent endpoint calls, job); task 139's unshare and the MDA Share dialog do not take it.
+ITEM 7 FIXED: the scan pages every active entry id (nextLink, ceiling 50,000 -> TRUNCATED); at most 500 enforced per run, the window ROTATES from an in-instance cursor so every entry is enforced within ceil(N/500) runs (reported ROTATING, status partial).
+ITEM 8 no change: the test asserts the shipped cron/enabled VALUES (owner R4), not a registration; perturbing either reddens it.
+ITEMS 10-12 (criteria 11, 13, 9) now met and tested. ITEMS 13-14 (criteria 1, 14) NOT CLOSABLE HERE: live gates G-1 (schema -Apply then -Verify, BEFORE any BFF deploy of this branch) and gate 14 (after G-1, G-2 deploy, task 154 form registration, O2 applied) remain the main session's.
+
+PEER REPORT #1081 (owner 2026-10-02): no code change. In dev a walled root-team member's secure-record access is role-or-business-unit (reported NotEnforceable, hidden on Teams/SPA, never revoked); live gate 14 must use child-BU users.
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md sections 10/11): no new service, endpoint, DI registration, option, job, column or package. Extensions only: AccessibleRecordSetService and NoAccessShareEnforcer each take one already-registered singleton (IContactIdentityStore; IScheduledJobLease - reused, not a new lock primitive: Existing = the scheduler's atomic lease and IIdempotencyService; Extension = the lease is atomic and fails loudly, while IIdempotencyService's lock is check-then-set and fails OPEN on a cache fault, unusable for S5; Cost of doing nothing = two concurrent enforcements can remove a secure record's last two readers, violating owner S5). NoAccessEnforcementStore gains two internal wire seams (QueryActiveEntryIdsAsync, ReadActiveEntryIdPageAsync); SecureShareNoAccessGuard's subject resolution becomes a shared static.
+
+TESTS: r1 adds evaluator 4, guard 1, enforcer 5, store 5 (new NoAccessEnforcementStoreTests), job 2, provisioning 1 = 18; task-related set 537/537. Bite proof: 13 violations seeded one at a time (build + the 537 task tests each), every one reddening its own new test(s), restored and touched: B1 veto ignores a faulted link read (1); B2 veto back to the derived contact only (2); S1 (1); S18 (1); S2 (1); S9 (1); S11 (1); S20 (1); L1 removal without the record lock (3); L2 proceeding when the lease store is unreachable (1); C1 first 50 organizations only (1); P1 one scan page only (2); J1 same first window every run (1). Full suite and ArchTests: BFF build 0 errors 0 warnings; full BFF unit suite 14423 passed, 0 failed, 54 skipped, 14477 total (20m48s; the verifier's 14405 + the 18 new); Spaarke.ArchTests 346/346. Publish size not measured (main session)..
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-143-r2" base="a4ade61a8" round="r2">
+ROUND r2 - ADVERSARIAL-VERIFIER FINDINGS CLOSED (server side). Full record: notes/task-143-no-access-internal-secure.md section 8. Live writes: none.
+
+ITEM 1 (MEDIUM) CLOSED: new test AnEnforcementWhoseFirstShareReadPredatesAnotherEnforcementsRemoval_ReReadsUnderTheLock_AndKeepsTheLastReader. Enforcement B reads the shares {Walled, walledToo} BEFORE enforcement A takes the lock. A then runs start to finish and releases. B takes the free lock, re-reads, keeps walledToo's share (last-person-on-secure-record) and reports no failure, so the re-read, not the lock, decides. The verifier's exact seed (lock taken, stale pre-lock shares used) reddens this test alone. The r1 bite row L1 proves the lock only; this is corrected in the notes.
+
+ITEM 2 (LOW-MEDIUM) SURFACED, section 6.5 path A, PROPOSED and NOT YET ACCEPTED. The tension is the enforcer reusing IScheduledJobLease (the scheduler's dispatch-lease store) as a per-record mutex, which NoAccessShareReconciliationJob reaches transitively, against ADR-036 A1-7 / ADR-052 section 5. It is recorded as a new row in design.md section 9 and named in the enforcer's ctor doc. The second key site is catalogued under SystemCacheKeys.SchedulerLease (raw key {InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}); no new allow-list entry. Path C was rejected because IIdempotencyService's lock is check-then-set and fails OPEN, and a new lock type would duplicate RedisScheduledJobLease. Path B was rejected because the rule's intent holds. ESCALATION: the reviewer must accept or decline explicitly, and the task-143 PR must cite the design.md section 9 row.
+
+ITEM 3 (LOW) FIXED: the removal lease is RENEWED immediately before the revoke. A renewal answering false (expired, or held by someone else) removes nothing and reports record-lock-lost. A renewal that throws removes nothing and reports record-lock-unavailable. RecordLockDuration 2 -&gt; 5 min, so it outlasts the revoke's client bound (100 s HTTP timeout + 30 s token wait). Residual stated in notes section 6: a revoke Dataverse applies after the client gave up, later than 5 min after the renewal; not closable without fencing.
+
+ITEM 4 (LOW) CLOSED: the URL choice is extracted unchanged into internal static NoAccessEnforcementStore.ResolveRequestUrl, which GetAsync calls. Eight cases cover a relative path, two links under the root, and five refused links (another host, a look-alike host, another version, a bare-prefix root, an http downgrade). Scan-level behaviour is unchanged and documented: a refused link fails the run (status error) and never enforces a silent prefix.
+
+ITEM 5 (TRIVIAL) FIXED: NeverDeniesReader's summary moved back to its method.
+
+ITEMS 6-10: verified or accepted, no change. ITEMS 11-12 (criterion 13): the test half is now met; the publish-size report stays with the main session. ITEMS 13-14 (criteria 1, 14) NOT CLOSABLE HERE. Live gate G-1: pwsh scripts/Set-NoAccessSystemUserSubjectSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Apply, then -Verify (exit 0) and describe('tables/sprk_noaccessentry'), BEFORE any BFF deploy of this branch. Gate 14 runs after G-1, G-2 (BFF deploy), task 154's form registration (bff_auth.js before noaccessentry_postsave.js) and O2 applied. It uses child-BU users only, never root-BU or Spaarke Demo team members (#1081, round 5).
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md sections 10/11): no new service, endpoint, DI registration, option, job, column or package. Extensions only: NoAccessShareEnforcer gains a private RenewRecordLockAsync and a longer RecordLockDuration. NoAccessEnforcementStore gains internal static ResolveRequestUrl, extracted from GetAsync without changing behaviour. The SystemCacheKeys.SchedulerLease doc names its second site; the entry count is unchanged.
+
+TESTS: r2 adds enforcer 3 and store 8 = 11. The task-related set is 356/356. Bite proof: 5 violations seeded one at a time (build, then the 356 task tests), each restored from a backup and touched: L3 stale shares under the lock (1 failed), R1 no renewal (2), R2 a lost renewal treated as held (1), U1 no origin check (5), U2 a bare-prefix origin check (1). Full BFF unit suite 14434 passed / 0 failed / 54 skipped (14488 total); Spaarke.ArchTests 346/346; build 0 errors / 0 warnings. Publish size: main session.
+    </outcome>
+  </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(R4) No Access enforcement takes effect within MINUTES: saving a No Access entry calls the BFF to enforce immediately; the "Update Access" ribbon command (task 142) also re-applies No Access for that record; the job is a safety net at 5 minutes or less. (S5 invariant) A secure record must ALWAYS keep at least one person who can see it: enforcement never removes the last remaining person's access — if an entry would, refuse the entry with a message naming the record. N2/N5/N6 are re-explained to the owner and remain escalation triggers until answered.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">Owner round 3b: N2 = hide the record in Teams/SPA for a walled user whose access comes from a team/role/BU (MDA still admits; recorded section 6.5 path A exception); N5 = enforce share removal only when the entry's author has Write on the record, otherwise save as "not enforced" with a notice; N6 = refuse to provision a secure project whose referenced organizations wall off the provisioning user, with a clear message. NEW owner UX requirements (assignment to tasks pending research): a red notification banner on any record subject to a No Access restriction linking to a No Access list modal; a way to add and to view No Access entries for a record AND for an organization.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 5)">NEW DEPENDENCY: task 154.
+
+The sprk_noaccessentry main form is unusable today. Its "Information" form holds ONLY the Name field (live research, spaarkedev1), so subject, object and reason cannot be entered, and `sprk_objectrecordid` is free text (String(50), `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:69`).
+
+This task's form-based enforcement depends on that form:
+- `sprk_noaccessentry_postsave.js`, registered on that main form;
+- the "Saving a No Access entry removes the share" ui-test;
+- live gate 14 (ii) through (v): (ii) and (v) author entries in MDA, and (iii) and (iv) act on the entry (ii) authored.
+
+Task 154 delivers the usable entry form (with real views and a site map entry). This task therefore DEPENDS ON 154 for its form-registered post-save script, its ui-test and its live gate — a PARTIAL dependency. The server work (column, reader, guard, enforcer, enforce endpoint, job, veto) does not wait for 154, which is why 154 is stated here rather than as a whole-task `deps` entry that would block it; the orchestrator records it in TASK-INDEX as "154 (form steps only)".
+
+SEQUENCING WITH 154:
+- This task creates `sprk_subjectsystemuser`. Whichever of the two lands second puts that field on 154's form, as one of the exactly-one-of-three subjects. The form steps here do not start until the form carries it: gate 14 (ii) names a systemuser subject.
+- The post-save script is registered on 154's form, with `sprk_bff_auth.js` registered ahead of it.
+- The N5 "not enforced: author lacks Write on record" outcome (criterion 8a, R3b amendment) is shown as that form's post-save notification.
+- Gate 14 (ii) needs an author who can create entries (per O2's answer — under the recommendation, the access-administrator role) AND holds Write on the project; an author without Write gets "not enforced" (N5) and the gate does not pass on that author.
+
+CROSS-REFERENCE (O2). The research found that "Spaarke Core User" holds Global Read on sprk_noaccessentry, so every core user can read every entry's Reason. That undermines this task's refusal contract ("does not reveal the entry's reason text"). Who may read the table is open owner question O2, carried as an escalation trigger in 064 and 067 (recommendation: remove Read from Spaarke Core User, grant Read/Write to a dedicated access-administrator role, everyone else sees only the banner, and Write-holders see entries through Manage Access via the BFF). This task does not decide O2. ESCALATION TRIGGER: if O2 is still open when this task reaches its live gate, STOP and ask — the refusal contract cannot be signed off while every core user can read every Reason. Record O2's answer in this task's notes before the live gate.</amendment>
+  </amendments>
+</task>

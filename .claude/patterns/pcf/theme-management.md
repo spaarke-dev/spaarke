@@ -8,8 +8,11 @@
 Implementing dark mode support or theme-aware styling in PCF controls.
 
 ## Read These Files
-1. `src/client/pcf/UniversalDatasetGrid/control/providers/ThemeProvider.ts` — Theme detection and FluentProvider setup
-2. `src/client/pcf/UniversalDatasetGrid/control/index.ts` — Theme wiring in control lifecycle
+1. `src/client/pcf/VisualHost/control/providers/ThemeProvider.ts` — Theme detection and FluentProvider setup
+2. `src/client/pcf/VisualHost/control/index.ts` — Theme wiring in control lifecycle
+   <!-- Corrected 2026-09-01: both pointed at the DELETED UniversalDatasetGrid. VisualHost holds the same
+        two files at the same relative paths, so the pattern below transfers unchanged. Lighter
+        alternative if you only need detection: SemanticSearchControl/*/services/ThemeService.ts. -->
 
 ## Constraints
 - **ADR-021**: All UI must use Fluent UI v9 — no hard-coded colors; dark mode required

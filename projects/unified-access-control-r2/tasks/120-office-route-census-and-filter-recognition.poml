@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="unified-access-control-r2">
+  <metadata>
+    <title>Bring the Office route surface inside RouteAuthorizationGuardTests — classify it, teach the guard the three filter names it cannot see, and record the gaps that surfaces as Pending waivers</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; inbound handover GitHub #1015 from spaarkeai-word-add-in-r1, owner-approved)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** (TEST-MODIFYING override row, root CLAUDE.md §8, forces code-review + adr-check unconditionally) AND modifies .cs on an authorization filter. Tags include auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive. The central judgement is which of three filter names counts as a per-resource gate; crediting the wrong one produces a guard that reports green over eight ungated routes, which is strictly worse than the blind spot it replaces.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs is a single 1849-line file edited in four separate regions by this task; also edits Api/Filters/JobOwnershipFilter.cs and Api/Office/OfficeEndpoints.cs.</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, auth, bff-api, api</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>GitHub #1015, handed over by spaarkeai-word-add-in-r1 and accepted by the owner 2026-09-28. Owner decisions 2026-09-29 (session 25): ungated routes become Pending waivers + GitHub issues rather than being gated in this change; the JobOwnershipFilter fail-open and the /save-debug raw-body logging are BOTH fixed here.</origin>
+  </metadata>
+
+  <prompt>The guard that proves every document- and Dataverse-serving BFF route carries a per-resource authorization decision has never looked at the Office surface, and could not have recognised its gates even if it had. Make it look, teach it to read the three filter names in use, and be honest in the waiver list about what looking reveals.</prompt>
+
+  <role>SPAARKE platform developer — the BFF authorization guard suite and the Office add-in endpoint surface. You are widening a detector over a shipped authorization surface; a regex that is too generous is worse than the gap it closes.</role>
+
+  <goal>Api/Office/OfficeEndpoints.cs and Api/Office/CommunicationsEndpoints.cs are classified in GovernedFiles; FilterMarker credits EntityAccessFilter and JobOwnershipFilter but NOT OfficeAuthFilter; Rule B's filter discovery reaches the newly-credited filters so neither can be decorative without failing; every route the widened rule leaves ungated carries a Pending waiver naming an owning GitHub issue; each new capability has BOTH a negative and a positive control; and the two non-guard defects found by the census (JobOwnershipFilter's blank-creator fail-open, /save-debug's anonymous raw-body logging) are fixed.</goal>
+
+  <context>
+    <background>🔴 THE CENTRAL DISTINCTION, AND WHY A NAIVE WIDENING IS WORSE THAN NOTHING. The Office surface uses THREE filter names and they are not equivalent:
+  - `.AddEntityAccessFilter()` — a real per-resource gate. Reads SaveRequest.TargetEntity, resolves the type through a closed map (fail-closed 400 on a miss), then asks Dataverse AS THE CALLER over OBO what rights they hold on that specific record and 403s unless `entity.associate_document` rights pass. VERIFIED at Api/Filters/EntityAccessFilter.cs:260-266.
+  - `.AddJobOwnershipFilter()` — a real per-resource gate (creator-string equality on the job), subject to the fail-open this task fixes.
+  - `.AddOfficeAuthFilter()` — AUTHENTICATION ONLY. It checks `user.Identity?.IsAuthenticated`, resolves the Entra object id, 401s if either fails, and stashes ids into HttpContext.Items. It never looks at a route id, a body, or any Dataverse record. VERIFIED at Api/Filters/OfficeAuthFilter.cs:76-135.
+
+Crediting OfficeAuthFilter as a gate would mark /search/entities, /quickcreate, /todo, /share/links, /share/attach and /recent as authorized. That is the precise failure this guard exists to prevent — see its own Rule B commentary on SemanticSearchAuthorizationFilter, which "produced an AUDIT LOG, not a decision, while looking exactly like a gate at the call site."
+
+VERIFIED FACTS (checked 2026-09-29 against source; verify anyway — this project has 19 prior instances of premise rot per notes/task-accuracy-audit-2026-09-18.md, and the code has won every time):
+- THE BLIND SPOT. `Api/Office/*` appears ZERO times in GovernedFiles (tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:126-257). Per the census's own maintenance procedure (:1144-1155) that classifies the whole Office surface as "serves neither document nor Dataverse content" — false for /save, /search/entities, /todo, /quickcreate and all three communications routes.
+- THE FILES ARE ALREADY COUNTED. EndpointFiles() (:1806-1812) globs every *.cs containing a Map call, so the Office files ARE inside ExpectedEndpointFileCount = 120 (:687). This task changes CLASSIFICATION only; the count does not move.
+- THE REGEX. FilterMarker (:1528-1531) matches `\.Add\w*AuthorizationFilter\s*[&lt;(]` or `\.AddEndpointFilter\s*&lt;\s*\w*(?:Authorization|Access)\w*Filter\s*&gt;`. `.AddEntityAccessFilter(` matches NEITHER — it is not the `AddEndpointFilter&lt;T&gt;` form. 🔴 `AddJobOwnershipFilter` is the worst case: "Ownership" is not in the alternation at all, so a widening that only adds `Access` still misses it.
+- 🔴 RULE B CANNOT SEE THE NEW FILTERS EITHER. AuthorizationFilterFiles() (:1815-1820) globs `*AuthorizationFilter.cs`. EntityAccessFilter.cs and JobOwnershipFilter.cs do not match. Widening FilterMarker WITHOUT widening this hands gate credit to two filters that nothing checks for being decorative. The two widenings are a PAIR.
+- BASELINE. The 11 tests in this file were green at 11/11 before any edit (measured 2026-09-29). Any failure after is yours.
+- CONTROLS ARE MANDATORY AND COME IN PAIRS. tests/CLAUDE.md:51-52 requires BOTH a negative control (the detector fires on a seeded violation) and a positive control (it does NOT fire on the sanctioned shape) per rule. The file already has the idiom: Detector_NegativeControl_FiresOnEachHistoricalMiss (:1187), RuleB_NegativeControl_FiresOnADecorativeFilter (:1283), Detector_PositiveControl_DoesNotFireOnGatedRoutes (:1353). Extend these; do not invent a new idiom.
+
+THE EIGHT GAPS THE WIDENING EXPOSES (owner decision 2026-09-29: Pending waivers + GitHub issues, NOT gated here):
+  1-3. The three /api/office/communications/* routes carry ZERO endpoint filters — only the group's `.RequireAuthorization()`. All three read Dataverse keyed on a caller-supplied id through an app-only ServiceClient; `userId` is resolved and then used EXCLUSIVELY as a log argument (CommunicationsEndpoints.cs:132/257/383 assigned, every later use inside a log call). VERIFIED by grep.
+  4. GET /office/search/entities — tenant-wide enumeration of matter/project/invoice/account/contact. In-code admission at Services/Office/OfficeService.cs:804-805: "app-only read (no per-user security trimming yet) — tracked as a follow-up on #919". Its own WithDescription claims the opposite.
+  5. POST /office/todo — creates a todo against a caller-supplied `regarding` record with nothing verifying access to it. NOT the same shape as /quickcreate: the regarding record already exists.
+  6-7. POST /office/share/links and /share/attach — per-document check is a hard-coded `return Task.FromResult(true)` (OfficeService.cs:1280-1291); data is stubbed today, so the exposure is latent, not live.
+  8. GET /office/search/documents and /recent — stubs today; they need the gate when implemented.
+
+⚠️ /quickcreate/{entityType} IS THE ONE HONEST PERMANENT WAIVER — creation with no pre-existing resource, the same shape already waived on OBOEndpoints' upload trio. Do not extend that reasoning to /todo.
+
+🔴 THE WAIVER LIST HAS ITS OWN MAINTENANCE RULES AND THEY BIND (:262-282): a waiver is per-ROUTE, carries a written reason, and is enumerable — "a path pattern or a naming convention is NOT a waiver; it is a hole with better manners." Pending MUST name the owning task/issue. "Never add a Permanent waiver to make a build go green."
+
+THE TWO NON-GUARD DEFECTS (owner decision 2026-09-29: fix both here):
+- Api/Filters/JobOwnershipFilter.cs:157 — `if (!string.IsNullOrEmpty(jobStatus.CreatedBy) &amp;&amp; !string.Equals(jobStatus.CreatedBy, userId, …))`. A job with a null or empty CreatedBy is readable by any authenticated caller. Must fail CLOSED (ADR-003).
+- Api/Office/OfficeEndpoints.cs:116-160 — the dev-only anonymous /save-debug logs the ENTIRE raw request body at Information (:122-123) and echoes up to 500 characters back on a parse failure (:154). Registered only under env.IsDevelopment(), but the body is an Office SaveRequest carrying document content.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/JobOwnershipFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Office/CommunicationsEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/OfficeAuthFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="read">tests/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Do NOT credit OfficeAuthFilter, OfficeRateLimitFilter or IdempotencyFilter as a per-resource gate in FilterMarker. Authentication, throughput and replay protection are not authorization.</constraint>
+    <constraint>Widen FilterMarker and AuthorizationFilterFiles TOGETHER. Landing the first without the second grants unverified gate credit.</constraint>
+    <constraint>Do NOT make Rule A pass by omitting a file from GovernedFiles or by widening a path pattern. The guard's own text forbids it (:743-744).</constraint>
+    <constraint>Every Pending waiver names an owning GitHub issue. No Permanent waiver is added to turn the build green.</constraint>
+    <constraint>Each new detection capability gets BOTH a negative and a positive control (tests/CLAUDE.md:51-52).</constraint>
+    <constraint>ExpectedEndpointFileCount must NOT change. If it does, something else moved and you must find out what before proceeding.</constraint>
+    <constraint>JobOwnershipFilter must fail CLOSED on an absent or blank CreatedBy, per ADR-003.</constraint>
+    <constraint>Do not delete /save-debug — it is a working development affordance. Remove the raw-body disclosure, keep the endpoint.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>tests/CLAUDE.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/api/endpoint-filters.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify the baseline: the 11 guard tests green, and each VERIFIED FACT above still true at the stated line numbers.</step>
+    <step>Classify both Office files in GovernedFiles with written reasons naming the actual route surface.</step>
+    <step>Widen FilterMarker for EntityAccessFilter and JobOwnershipFilter only; widen AuthorizationFilterFiles to reach both implementations in the same edit.</step>
+    <step>Run the suite and read what Rule A now reports. The failures are the finding — record them, do not suppress them.</step>
+    <step>Add the waiver entries: Permanent for /quickcreate, Pending (with issue ids) for the rest.</step>
+    <step>Add the control pairs, including a negative control proving a route carrying ONLY OfficeAuthFilter is still reported ungated.</step>
+    <step>Fix JobOwnershipFilter's fail-open and /save-debug's body disclosure; add or extend tests covering both.</step>
+    <step>File the GitHub issues the Pending waivers name, then confirm each waiver cites a real issue number.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Rule A reports an ungated Office route that is NOT among the eight enumerated above — an unexpected finding means the census was incomplete and the scope needs owner review before it is waivered away.</trigger>
+    <trigger>Widening AuthorizationFilterFiles causes Rule B to flag a filter OUTSIDE the Office surface — that is a pre-existing decorative filter elsewhere in the BFF and is not this task's to silently absorb.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>GovernedFiles contains entries for Api/Office/OfficeEndpoints.cs and Api/Office/CommunicationsEndpoints.cs, each with a Scope and a written reason.</criterion>
+    <criterion>FilterMarker matches `.AddEntityAccessFilter(` and `.AddJobOwnershipFilter(` and does NOT match `.AddOfficeAuthFilter(`, `.AddOfficeRateLimitFilter(` or `.AddIdempotencyFilter(`.</criterion>
+    <criterion>AuthorizationFilterFiles reaches EntityAccessFilter.cs and JobOwnershipFilter.cs, and Rule B passes over both on their merits (not via KnownDecorativeFilters).</criterion>
+    <criterion>A negative control fails if FilterMarker is widened to accept OfficeAuthFilter — i.e. a route carrying only baseline authn is still reported ungated.</criterion>
+    <criterion>A positive control confirms /save and the two /jobs routes are NOT reported ungated.</criterion>
+    <criterion>Every ungated Office route carries a waiver; every Pending waiver names a real GitHub issue number; exactly one Permanent waiver (/quickcreate) is added.</criterion>
+    <criterion>ExpectedEndpointFileCount is unchanged at 120.</criterion>
+    <criterion>JobOwnershipFilter denies when CreatedBy is null or empty, with a test that fails if the condition is reverted.</criterion>
+    <criterion>/save-debug no longer logs the raw request body or echoes body content; the endpoint still functions in development.</criterion>
+    <criterion>Full Spaarke.ArchTests suite green; `dotnet build src/server/api/Sprk.Bff.Api/` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25) from the inbound #1015 handover plus a verified route census. The handover framed this as two changes (census entry + regex widening); the census found a third (Rule B discovery) and eight live gaps. The owner chose Pending-waivers-plus-issues for the gaps and a fix-here for the two side defects.</notes>
+
+  <superseded-at-merge date="2026-09-30">
+    PARTLY SUPERSEDED by the origin/master merge (spaarkeai-word-add-in-r1, ~306 commits). That project's
+    task 067 (finding F5) independently deleted the same hard-coded ownerless job on the well-known GUID and
+    closed the same JobOwnershipFilter fail-open; the merge kept 067's OfficeService.cs and
+    JobOwnershipFilter.cs wholesale, so this task's two production fixes are now 067's code. What SURVIVES
+    from this task and is load-bearing: (1) the Office route census in RouteAuthorizationGuardTests — which at
+    the merge caught TWO master routes ungated (POST /todo's TodoSourceAccessFilter was not on the credited
+    allow-list; GET /search/matter-types had neither a gate nor a waiver), because master had never governed
+    Api/Office/* at all; and (2) the /save-debug fix (no raw-body logging, no bodyPreview echo), which master
+    still carried and which survived the merge.
+  </superseded-at-merge>
+</task>

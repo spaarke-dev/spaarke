@@ -1,5 +1,1185 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-10-04 ~23:30 UTC SESSION 35 END (context-handoff) — **T242 ✅ COMPLETE** (code; commits `bc73844f9` + gate fixes, pushed). **Next: T242b** (live dev + demo Managed Redis cut-over — every step needs owner approval). T242b is extended per owner ("do not defer"): demo cache, no-outage dev cut-over, ordering gates.
+>
+> **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
+
+> **Prior sessions (preserved for context)**: SESSION 24 (2026-09-28→29) landed T215 (SPE cert retirement + App Service dead-config cleanup, owner Option A scope expansion) + T220 (STEP 1 gate 322/4 → 326/326) + task 221 filed (non-blocking baseline test failures investigation). SESSION 23 (2026-09-28) executed the 812-commit master-merge (commit `92b480500`) per INCOMING doc protocol + captured owner decisions on §9 Q1-Q3 (F-SKU deferred / M365 Copilot per-customer / Redis Standard C1 verify empirically).
+>
+> **THE BINDING SEQUENCE (per instruction, do not reorder)**:
+> ```
+> post-/compact:
+>   1. T215 hygiene (SPE cert retirement — concrete steps below)
+>   2. STEP 1 completion task (bring ArchTest 326/326)
+>   3. Item 1 (delete H3 shared-app-reg branch — D-13)
+>   4. Item 2 (one TenancyModel enum + parse-or-reject)
+>   5. Item 3 (migrate sprk_tenancymodel — do NOT relabel)
+>   6. Item 4 (retire model1-*.bicep — 6-surface atomic)
+>   7. Section 6 items (six more contradictions per incoming doc §6)
+>   8. Task 218 (managed solution flow + IAM + UPDATE audit — absorbs 217)
+>   9. Task 186 (first live E2E dispatch — Trial 1 customer)
+> ```
+>
+> **T216 formally DROPPED** (owner confirmed 2026-09-28): superseded by D-12 which retires the shared Model 1 tier entirely. One deployment package (dedicated customer stamp); only difference between models is Spaarke-hosted vs customer-tenant-hosted. Item 4 replaces T216's scope.
+>
+> **T217 formally FOLDED into T218** (owner confirmed 2026-09-28) with additional scope: owner clarified this project's OBJECTIVE includes DEFINING the complete solution package — may consolidate existing solutions or design new ones to ensure ALL required components are packaged. Not just documenting what exists.
+>
+> **Prior state (SESSION 22, 2026-09-01)**:
+>
+> **This session's arc (SESSION 20, 2026-08-28 → 2026-08-30 across pre- and post-compact)**:
+> 1. Attempted `/provision-environment trial1 --batch runs/trial1-intake.json` → HARD STOPPED at SKILL Step 0.5b constants sanity check (both `containerTypeId` + `bffMultiTenantAppId` null in spaarke-constants.yaml). Deep audit surfaced 5 gap classes.
+> 2. Task 212 filed + partially landed (commit `2e8e30e16`): ADR-028 line 229/239 terminology reconciled (`multi-tenant BFF` → `single-tenant Spaarke BFF` per topology doc §3A rows 4-6); project CLAUDE.md § MUST rule aligned; spaarke-constants.yaml `name_templates` corrected against LIVE Azure (5 corrections); `bffMultiTenantAppId` → `bffApiAppId` renamed in 4 consumer sites.
+> 3. Task 213 filed + partially landed (commit `c7b695678`, 4 of 7 items): topology doc copied to r1 with provenance; `Create-NewContainerType.ps1` DEPRECATED banner + throw; `SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` authored (8-step operator runbook); SKILL Step 0.5c topology-verify + Step 0.5b BFF search fix.
+> 4. Task 206 completed in parallel (sub-agent): 31 of 32 recipes already remediated by prior commits; only PRQ-C-03 needed edit (F10 root cause — global resource-name silent-PASS).
+> 5. Task 213.2 Option A H8 live-test executed (per owner directive): HTTP 403 accessDenied CONFIRMED for third empirical time — topology doc §R5 applies to ANY `client_credentials` grant regardless of credential shape. Also discovered KV cert drift.
+> 6. Task 214 filed (commit `f2ec7500d`): H8 full rewrite (H8-B semantics) — 8-12h xhigh scope.
+>
+> **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
+
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 36, 2026-10-06)
+
+| Field | Value |
+|-------|-------|
+| **Task** | **T242b ✅ COMPLETED 2026-10-06.** Next: **T244** — keyless resources in Bicep (D13, G16) — POML to be authored/located (plan row T244). T242c is pending an owner re-scope (D27: demo becomes the provisioning test environment). |
+| **Step** | Before T244: open the PR for this branch (T242b follow-ups, review fixes, BFF health-check fix, rotation-tooling removal, demo config, D27) — it MUST merge before 2026-10-08 06:00 UTC (master still carries the staging rotation cron; scheduled workflows run from master). |
+| **Status** | between tasks. Open owner items: SPE Model 1 grant for mi-bff-api-dev (SPE Admin UI; explained); config 68f9a952 `sprk_keyvaultsecretname="null"` (harmless, offered to clear); redeploy dev alerts with the fixed latency alert (not yet approved); W7 — deploy the L2 Api template before its next code deploy. |
+| **Next Action** | `/push-to-github` (PR to master) → CI → owner OK → merge before 2026-10-08 06:00 UTC; recheck dev redis health-check latency (fix deployed 2026-10-06 00:06 UTC as 0911515d7: first window 4/4 probes < 4 ms); then task-execute T244. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+
+### Completed (SESSIONS 30–32)
+| Item | Commit | Outcome |
+|---|---|---|
+| T245b | `5e15c128a` | L2-owned values are config/computed (artifact versions, SPE owner-credential options, L2 KV principal, vendor-key vault, H9 → BffApiUrl/BffBuildId). |
+| T245c | `81c16bd07` | Operator intake required + validated at `POST /api/runs` (H11, H14, mailbox). Owner D14 + D15. G25 CLOSED. |
+| T225a | `b9fd48bbe` | Model 1 shared-tier Bicep deleted; Model 1 fails closed at H2a until T225b + T228. ci-cd-unit-test-remediation-r1 CLOSED (owner). |
+| O1–O5 | `6240f41d8` / `c8bbc027b` | **D16** MI-FIC for the SPE owning app (no certificate, no ADR-028 amendment). **D17** registry version columns = deployed build ids. **D18** Bing + LlamaParse keys removed. **D19** `customer.bicep` the only stamp template. |
+| T225b | `a95212260` | Model 1 on the dedicated code path; intake pairing (G6); secret-free H4 default (G21); D18; `TenancyModelDagParityTests` (G13). New PRQ-E-14. |
+| **T249** (S31) | `33365edd2` | `customer.bicep` the only stamp template; `deploy-infrastructure.yml` validate-only (+ `parameters/*.bicepparam` compile); SignalR → stamp UAMI; KV diagnostics → workspace RESOURCE id (gate caught a GUID that would fail every deploy); `platformKeyVaultName` + `createdDate` tag removed; Provision-Customer.ps1 fixed. **D20** one shared `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`, ValidateOnStart) for H2a + H4. **D21** L2 Website Contributor grant on Model 1 stamps only. |
+| **T243** (S31) | `25107decf` | BFF Document Intelligence: key if configured, else the stamp UAMI; credential rejection reported plainly; `DocumentIntelligence-ApiKey` gone from catalog + customer.bicep (+ `listKeys` output). **G29**: no stamp had ever set `DocumentIntelligence__Enabled` (AI platform off on stamps) → catalog literal. **D22** T244 + T246 hard prerequisites of T186 (T186 deps updated). Publish 45.54 MB / +0.00 MB; no CVE; BFF suite 13,575 pass / 0 fail. |
+| Container type (S31) | `f4250fc0f` | `Spaarke Model 1` = `fb3817a8-…` recorded; T241 must NOT delete `rg-spaarke-shared-prod` or the Syntex billing account (billing binding permanent). |
+| D23 / T250 / PRQ-E-14 (S31) | `13cf0f2e8` | **D23** `rg-spaarke-shared-prod` = single home for shared PROD resources (Model 1 SPE billing now; prod L2 control plane from its first deploy — change `platform-controlplane.bicep`'s RG name then; group is westus2); subscription renamed "Spaarke Shared Production"; T241 also deletes the partial `rg-spaarke-trial01-prod-model1` stamp. **T250** (plan row): `SpeAdminGraphService` still signs in as each owning app with a KV client SECRET (ADR-028 E-1) → add a MI-FIC credential mode; until then NO secret-based `sprk_specontainertypeconfig` for Model 1. `sprk_credentialmode` created on spaarkedev1 (owner-approved); schema script's case-sensitive existence check fixed. |
+| **T248** (S32) | `b730d9310` (+ master merge `cc7f76aa3`) | L2 signs in as the SPE owning app with MI-FIC — no certificate (D16, G28 closed). Live probe from a throwaway ACI with the Worker UAMI: FIC token `appidacr` 2; registration (already present) + containers GET 200. H0 `SpeOwnerCredential` (3 codes, no 24 h gate); T6 lists the run's container; Worker config `{ContainerTypeId, OwnerAppId}`; dev control plane + Worker deployed (Api part blocked by a pending swap; Worker 503 because of the sidecar → T251). Master merged (`cc7f76aa3`). Gates: 0 Critical / 0 violations; tests 2121 / 6 baseline; ArchTests 346. |
+| **T251** (S33–34) | `0b67f716f` `63fddc269` `633eb5ff3` `e1b874f55` `97ba6a24c` | Exchange sidecar works on the L2 Worker (G30 ✅). Sidecar holds no credential: the Worker mints an Exchange token as `Spaarke Exchange Admin` via MI-FIC (D24); narrowed Exchange role + delegating ×4 (D25); H14a on RBAC for Applications, stamp UAMI only, group-scoped (D26); H10 no longer grants the 4 mailbox roles in Entra. Root cause of the write failures: `-Organization <tenant GUID>` → Worker now resolves the initial domain from Graph `/organization`; sidecar requires it. Scope matched on `RecipientWriteScope=Group` + `CustomResourceScope=<group Name>`. Deployed to dev (image `provisioning-sidecar:633eb5ff3`); `Verify-Sidecar-Live.ps1 -InTenant` 5 PASS / 1 WARN. Fixed at discovery: the verify script (Kudu cannot reach the sidecar on Linux) and Deploy-ControlPlane's stale Worker key check. Open for T186: W1 (group Name vs DisplayName). |
+| **T242** (S35) | `bc73844f9` + gate-fix commit | Customer-stamp Redis = Azure Managed Redis Balanced_B0 HA, access keys disabled, stamp UAMI access policy; `Redis__Endpoint` (customer.bicep + H2a→InterStepState→H4b); no Redis key/secret anywhere. BFF `CacheModule` + Worker `DispatchModule`: endpoint → managed identity (BFF via shared `ManagedIdentityCredentialFactory`, RESP3), connection string only in Development/Testing. StackExchange.Redis 2.13.17 + Microsoft.Azure.StackExchangeRedis 3.3.1 (+0.22 MB, no CVE); NullDatabase → DispatchProxy. ADR-009 amended (Path B). Deploy-RedisCache keyless. Tests: BFF 14246/14300 (0 fail), ControlPlane 2107/2114 (6 = T221 baseline), ArchTests 349. |
+
+### Live changes — T242b (SESSION 36, 2026-10-04; operator ralph.schroeder@spaarke.com)
+- **Step 1 (owner OK "Run preflight")**: `az deployment group create` of modules/redis.bicep → `sprk-t242b-preflight` (Balanced_B0, HA Disabled, rg `spe-infrastructure-westus2`, westus2; access policy = operator `c74ac1af-…`). Succeeded in 8m29s; verified Running, accessKeysAuthentication Disabled, OSSCluster, AllKeysLRU, port 10000, 1 assignment `default`. Host `sprk-t242b-preflight.westus2.redis.azure.net` (Managed Redis zone ≠ the old `*.redis.cache.windows.net`). **Deleted** (`az resource delete`); no redisEnterprise remains in the group. No westus2 capacity issue.
+- **Step 2 (owner OK "Create dev cache")**: `az deployment group create` redis-dev.bicepparam → **`spaarke-bff-redis-dev`** (Microsoft.Cache/redisEnterprise) Succeeded in 7m45s; Running, Balanced_B0, HA Disabled, accessKeysAuthentication Disabled, OSSCluster, AllKeysLRU, port 10000; access-policy assignments `default` → `9fd47efb-…` (mi-bff-api-dev) + `38f7693f-…` (sprk-controlplane-dev-uami), exactly two. Endpoint **`spaarke-bff-redis-dev.westus2.redis.azure.net:10000`**. Name reuse accepted while the old Microsoft.Cache/redis `spaarke-bff-redis-dev` still runs (untouched). Nothing reads the new cache yet.
+- **Step 3 (owner OK "Deploy Worker")**: `az deployment sub create` `t242b-platform-controlplane-dev-20261004-223306` — Worker module `controlplane-worker-app-service` **Succeeded** (Worker now has `Redis__Endpoint=spaarke-bff-redis-dev.westus2.redis.azure.net:10000`, no `ConnectionStrings__Redis`, no connection strings); Api module failed on the pending slot swap (same as S34, owner item, nothing changed there). Then `Deploy-ControlPlane.ps1 -Environment dev -Target Worker` (T242 build from `e7147eee4`; first attempt via `pwsh -File` stopped at the ConfirmImpact=High prompt before touching the site — rerun in-process with `-SkipBuild -Confirm:$false`): stop → zip-deploy → start, `/healthz` 200, queue + NFR-05 config checks pass. Worker down ~5 min between the Bicep deploy and the build (owner accepted). The Worker connects to Redis lazily (first dispatch) and does not log its Redis mode; with only `Redis__Endpoint` set the managed-identity branch is the only one that can start in Production.
+- **Worker identity probe (owner OK "ACI probe")**: throwaway ACI `sprk-t242b-redis-probe` (rg-spaarke-platform-dev, Worker UAMI, python redis + azure-identity) → token for client `965a4a01-…`, SET/GET/DEL on `spaarke-bff-redis-dev` **PASS**; container deleted.
+- **Step 4 (owner OK "Do step 4")**: (a) `Deploy-RedisCache.ps1 -Environment dev -CutoverBffSettings` → `spaarke-bff-dev` now has `Redis__Endpoint=spaarke-bff-redis-dev.westus2.redis.azure.net:10000` + `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `Redis__AllowInMemoryFallback=false`; **`ConnectionStrings__Redis` (KV ref → old cache) KEPT** for older builds. The script's post-deploy harness failed — it was dead since 2025 (checked `src/api/Spe.Bff.Api/*`); rewritten (see repo changes). (b) `Deploy-BffApi.ps1 -Environment dev` — T242 build 45.88 MB, 4 critical files SHA-verified, `/healthz` 200, CORS OK. (c) Container log 02:45:20 "Distributed cache: Redis authentication is managed identity (Microsoft Entra)"; App Insights `redis` dependencies: old cache last call 02:44:22 (old build), new cluster from 02:45:23 — 51 calls (HMGET/HMSET/UNLINK/EXPIRE), 0 failures; Redis health check Healthy. Dev has `Membership:CacheInvalidator:Enabled` unset (null invalidator) so pub/sub + SCAN are not exercised by the app → **BFF probe (owner OK "Run BFF probe")**: ACI `sprk-t242b-bff-redis-probe` (spe-infrastructure-westus2, `mi-bff-api-dev`, BFF's resolved packages, `notes/t242b-redis-probe/`) **PASS**: Protocol stays Resp3 after `ConfigureForAzureWithTokenCredentialAsync`, 2 primaries both RESP3, pub/sub round-trip received, SCAN/DEL over GetEndPoints deleted 40/40 keys across 40 slots; container deleted.
+- Observed, not caused by T242: after the 02:44 boot the BFF logs `RoutingConsumerTypeHealthCheck FAILED: AI catalog drift` (Dataverse `sprk_playbookconsumer` rows `nda-review`, `create-project`, `create-todo`, `list-tasks`, … created 2026-07 without a ConsumerTypes constant; the check file is identical on origin/master; `/healthz` still Healthy) and `Key Vault secret 'null' not found … sprk_specontainertypeconfig` (also before the deploy). Reported to owner.
+- **Step 5 (owner OK "Step 5 + start demo")**: `Deploy-RedisCache.ps1 -Environment demo -Force -SubscriptionId 2ff9ee48-… -CutoverBffSettings -RemoveBffConnectionString` → **`spaarke-bff-redis-demo`** (rg-spaarke-demo, Balanced_B0, HA Disabled, keys disabled, OSSCluster, port 10000, one assignment `eaf9591e-…` mi-bff-api-demo) created; `spaarke-bff-demo` now `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `Redis__Endpoint=spaarke-bff-redis-demo.westus2.redis.azure.net:10000`, `Redis__AllowInMemoryFallback=false`, empty `ConnectionStrings__Redis` removed; harness PASS. Then (private AZURE_CONFIG_DIR copy set to Demo — shared az context untouched; copy deleted after) `az webapp start` + `Deploy-BffApi.ps1 -Environment demo … -SkipBuild` (T242 build, hashes verified) → **/healthz never answered: container log "You must install or update .NET … Framework 10.0.0 … found 8.0.31"** — linuxFxVersion `DOTNETCORE|8.0`; demo also lacks 81 of dev's settings. Not Redis. **Owner: "Stop it; file a demo-refresh task"** → `az webapp stop` (state Stopped, as before today) + **T242c** filed. The demo app now holds the T242 build (was an older build; it was stopped either way).
+- **Step 6 (owner OK "Merge commit")**: PR **#1298** opened. First CI: Router + all Tier 1 pass; Tier 2 advisory + legacy SDAP "Build & Test (Debug)" red. Investigated: (a) LoadTests 2/5 failing since REG-07 (fixture lacked registry URL) → fixed `LoadTestFixtures.cs`; (b) the 6 `CustomerRunGuardModulePostConfigureTests` (T221 baseline) — legacy job treats them as a real regression and they would have landed RED on master → root cause: REG-02/REG-05 code (3d60b9e59) lost in master merge 9480f9c4e → restored on #847's managed-identity code; and the L2 Api module never emitted `DataverseEnvironmentRegistry__AdminEnvironmentUrl` (REG-07 requires it) or `CustomerRunGuard__Enabled` (Api acquires, Worker releases) → added, same values as the Worker. **T221 ✅.** (c) Other Tier 2 reds were CI timing flakes (`WorkerSecretFreeBootTests` / `WorkerL2OwnedOptionsBootTests` "disposed IServiceProvider"; `ScheduledJobLeaseTests`) — pass 3/3 locally, no branch change in those areas. (d) S36 cont.: root-caused the Worker boot-test flake — a WebApplicationFactory start race (Main's `app.Run()` disposes the provider while `DeferredHost.StartAsync` resolves `IHostApplicationLifetime`); fixed with `StartGatedWorkerTestFactory` (IHostLifetime gate; Host.StartAsync awaits WaitForStartAsync before validation), proven by a forced 500 ms race (fails without, 9/9 with); commit `7db22522c`. Tier 2's 30-min cancellation during BFF unit tests also occurs on master (not ours — raise with owner). Master merged in twice (conflicts: topology doc §6B — kept master's "SPE Admin uses no owning-app secret" + T248 line; `.gitignore`; `.claude/CHANGELOG.md` — both sides kept). **Master `bb8ba7251` (sdap-SPE-admin-app-r2) delivers T250's goal** (SPE Admin runs as the BFF MI, no owning-app secrets) → raise with owner.
+
+- **Step 6 ✅ (S36)**: PR **#1298 merged** 2026-10-05 20:37 UTC as `2677d48c0` (merge commit; owner: full /merge-to-master review → "wait for all checks, then merge"). Two more master syncs on the branch (`2706fccb4`, `8e6b954d2`; CHANGELOG conflict → both entries). 43/43 checks (legacy "Integration Readiness" first failed with "job was not acquired by Runner of type hosted" — GitHub runner outage, 0 steps; re-run passed). Main checkout synced. Tier 2 unit tests now 4 shards (11–15 min each).
+- **Step 6b — dev BFF redeploy (owner OK "yes … ensure master deploy won't clobber other work")**: pre-checks — worktree = master (no conflicts); deployed build read from the live DLL = `1.0.0+91a16326e` (word-add-in #1301, deployed 17:37 UTC), an ancestor of master → master adds only this project's BFF commits (T242, T243 key-if-configured-else-MI, T237, EXEC-04, 199); Deploy-BffApi direct mode changes no app settings; settings unchanged (both `Redis__Endpoint` and `ConnectionStrings__Redis`). Deployed master `2677d48c0` from fresh worktree `C:\wtT242` (removed): 45.88 MB, 4 critical files SHA-verified, `/healthz` 200, CORS OK; live DLL = `1.0.0+2677d48c0`. App Insights: old cache last call 21:16:53 (old build); from 21:17:26 all Redis traffic on the new cluster (`…westus2.redis.azure.net:10000` → node `20.83.91.235:8500`), 44 calls incl. HMGET/HMSET/GET/SET/SETEX/EXPIRE/UNLINK, 0 failures — Entra-only cluster, so this proves MI auth (startup log line not retained in the container log this time).
+
+- **Step 7 ✅ (owner OK "yes proceed")**: `Deploy-RedisCache.ps1 -Environment dev -RemoveBffConnectionString -SubscriptionId 484bc857-… -Confirm:$false` (cache exists → template skipped) removed `ConnectionStrings__Redis` from `spaarke-bff-dev` (Key Vault secret `Redis-ConnectionString` untouched); harness PASS incl. "no Redis connection-string setting". App restarted on the settings change: `/healthz` 200; App Insights since 21:36 UTC — reconnect to the new cluster at 21:38:30, 40 Redis calls on the new cluster, 0 failures, none to the old cache; 13 requests, 0 5xx. Remaining Redis settings: `Redis__Endpoint`, `Redis__Enabled`, `Redis__InstanceName`, `Redis__AllowInMemoryFallback`. **Observation (not ours, raise with owner; corrected after a read-only investigation):** `SpeDashboardSyncService` logs Graph "Access denied" every 15 min since 12:36 UTC 2026-10-05 (right after the word-add-in BFF deploy; the same config failed with "Key Vault secret 'null' not found" since 2026-10-03 16:10) — "Failed to fetch containers for configId 68f9a952-… (containerTypeId=fb3817a8-…). Skipping." — master `bb8ba7251` (SPE Admin runs as the BFF MI, `ForApp()`) exposed it: config `68f9a952` "Spaarke SPE Model 1 Owner" → container type `fb3817a8` (Spaarke Model 1, owning app bfac7f6e, `sprk_isregistered=false`, `sprk_keyvaultsecretname="null"`); likely no application permission grant for `mi-bff-api-dev` (5967251e) on that registration (grant GETs 403 for operator tokens, so not confirmed). Options: A grant the BFF MI `full` on fb3817a8 (dev BFF could then read all Model 1 customers' containers — tenant-isolation decision) or B deactivate config 68f9a952 (recommended). Side gap: BFF MI lacks SecurityEvents.Read.All (§6B Security tab).
+
+- **Step 8 ✅ (repo only)** — commits `30d692a2b` `368769ea0` `d6d6943a4` `0736d9b39` `5aa8eb93c`: dev removed from `Rotate-RedisKey.ps1` + `redis-key-rotation.yml` (job, cron, dispatch option; staging/prod unchanged); `alerts.bicep` memory alert → `Microsoft.Cache/redisEnterprise` `usedmemorypercentage` (verified on the dev cluster), missed-rotation alert staging/prod only, `demo` allowed; stale Pester assertion inverted (26/26); `Seed-PlatformKeyVault.ps1` no longer seeds `Redis-ConnectionString` (no reader in any env; -DryRun dev clean); `spaarke-resources.yaml` dev BFF `redis_endpoint`, `Redis-ConnectionString` → new `retained_unreferenced`, `Validate-Manifest.ps1` counts it; **drift fix** in the same inventory (4 soft-deleted secrets → `retired_soft_deleted`, 2 Communication KV refs + the TrackingFooter key added, `footer-hmac-key` → retained) → validator 0/0; docs: redis-cache-azure-setup.md rewritten (sub-agent, reviewed), caching-architecture, SECRET-ROTATION-PROCEDURES, ci-cd-workflow, BFF technical overview, appsettings.tokens, two code comments. Acceptance check: no script/workflow/alert reads or rotates a dev Redis key. **Raise with owner:** `redis-key-rotation.yml` has failed every scheduled run (07-01, 07-08, 07-15, 10-01) — staging fires 2026-10-08, prod 10-15, neither has a cache/SP/secrets; `Seed-PlatformKeyVault.ps1` still seeds sentinels for BFF-API-ClientSecret/Dataverse-ClientSecret when absent.
+
+- **Step 9 ✅ (owner OK "All three")**: dev alerts redeployed (memory alert scope → the redisEnterprise cluster, same action group `ag-spaarke-oncall-dev`); `redis-cache-rotation-missed-dev` deleted; old classic `spaarke-bff-redis-dev` deleted (`az redis delete`; no app referenced it, no traffic since 21:16:53). Harness 11/11 incl. exact principals + no connection string; BFF + Worker /healthz 200; Worker has only `Redis__Endpoint`. Rotation crons removed (owner "Remove the crons"), T252 filed (KV sentinels).
+- **Step 9.5 (S36)**: two code-review agents (0 Critical; 17 Warnings, 24 Suggestions) + adr-check (ArchTests 349/349). Fixed: CI shard verdicts (crash/empty/unlisted can't read green — tested locally), run guard ValidateOnStart + kill-switch skips cross-check (+2 tests), Deploy-BffApi non-dev needs explicit RG/app, Deploy-RedisCache exit codes + expected-principal check + endpoint-match guard, harness fixes, alerts.bicep (latency alert used a metric nothing emits → average of `cache.redis_call_duration_ms`; rotation alert opt-in), docs. ADR-009 amended (owner Path B): latency alert = average BFF-observed call latency per op. **Found + fixed (BFF):** the `redis` /healthz check built a new service provider every minute (leak 17–20 MB/h, 0.5–2 s stalls for 90+ days, not a T242 regression) → `RedisHealthCheck` async PING (commit `3f48f6a87`, regression test with negative control). **Open owner items:** (1) rotation tooling — recommended delete (owner asked for explanation, given); (2) SPE grant for mi-bff-api-dev on fb3817a8 — owner to do in SPE Admin UI (option A chosen) + whether to clear config 68f9a952 `sprk_keyvaultsecretname="null"`; (3) redeploy dev alerts with the fixed latency alert + deploy the BFF health-check fix to dev; (4) W7: deploy the L2 Api control-plane template BEFORE the next L2 Api code deploy (code defaults CustomerRunGuard Enabled=true; Worker has explicit False); (5) demo entries in config/environments.json + spaarke-resources.yaml name spaarke-bff-prod/rg-spaarke-platform-prod — confirm which is right; (6) review #4/#5 (rotation workflow `environment: prod` vs `production`, AZURE_CLIENT_ID collision) moot if the tooling is deleted.
+
+### Live changes made 2026-10-04, SESSION 34 (T251 close — owner-approved: deploy to dev; cleanup of spike throwaways)
+- ACR `sprkcontrolplanedevacr`: `provisioning-sidecar:latest` + `:633eb5ff3` built (run `cc2`).
+- `az deployment sub create` `t251-platform-controlplane-dev-20261004-201436`: Worker module **Succeeded** (new settings `IntegrationWiring__ExchangeAdminAppId`, `IntegrationWiring__SidecarSharedSecret*`, `ExchangeSidecar__SharedSecret`); **Api module failed on the pending swap** (owner item, unchanged).
+- Worker code deployed (`Deploy-ControlPlane.ps1 -Target Worker`): `/healthz` 200 — **the dev Worker is back up**; sidecar log "Sidecar listening, degraded:false".
+- Exchange (app-only, narrowed admin): removed assignments `sprk-t251-spike-mailread` + `sprk-t251-spike-rgs`, management scope `sprk-t251-spike-scope`, Exchange SPs of both spike apps. **KEPT**: group `sprk-t251-spike-scope` (Entra id `c709af95-0332-4ea2-a9d4-6925b1666bad`, member testuser1@) as the test group for `Verify-Sidecar-Live.ps1 -InTenant`.
+- Entra: deleted apps `sprk-t251-spike-target` (`71f94c8c-…`) + `sprk-t251-spike-target2` (`e219a52f-…`).
+- Temporary container instances (`sprk-t251-exo-spike`, `sprk-sidecar-verify-dev`) created and deleted; none remain.
+
+### Live changes made 2026-10-04 (T251 spike — owner-approved; operator ralph.schroeder@spaarke.com)
+- Entra app **`Spaarke Exchange Admin`** appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`, SP `b5d396bb-d8a7-4017-875c-d999a4692163`, single-tenant, no secret/cert; FIC `sprk-controlplane-dev-uami-assertion` (subject Worker UAMI `38f7693f-…`); Office 365 Exchange Online `Exchange.ManageAsApp` granted (appRoleAssignedTo). **KEEP.**
+- Entra app **`sprk-t251-spike-target`** appId `71f94c8c-d9b1-4bfa-b13d-00572718a20a`, SP `f85cab89-29e3-4c43-9b0c-3261d3b1c3f4`, FIC `sprk-t251-spike-uami` → Worker UAMI. ~~DELETE after spike~~ **DELETED (S34).**
+- Exchange: mail-enabled security group **`sprk-t251-spike-scope`** (member testuser1@) — **KEPT as the test group (S34, owner)**; Exchange SP for `Spaarke Exchange Admin` (keep). `Enable-OrganizationCustomization` run (owner-approved, irreversible; effective 14:37). Role **`Spaarke App RBAC Admin`** (Role Management child, 14 cmdlets) + assignments `sprk-exoadmin-{rbacadmin,viewrecipients,deleg-MailRead,-MailReadWrite,-MailSend,-MailboxSettingsRead}` on the admin app (KEEP). Management scope `sprk-t251-spike-scope` and the Exchange SPs of both spike apps — **DELETED (S34)**.
+- Entra app **`sprk-t251-spike-target2`** appId `e219a52f-7acb-4ffc-b072-c7693e3a0835`, SP `50c609e4-…` (no credentials) — **DELETED (S34)**.
+- Entra **Exchange Administrator** role assigned to `Spaarke Exchange Admin` 15:10 (owner-approved test) → **REMOVED 15:21** (made writes fail). App holds no Entra directory role.
+- Throwaway ACI `sprk-t251-exo-spike` created/deleted several times; none remains (the scheduled ~16:26 retry was cancelled).
+
+### Live changes made 2026-10-03 (operator identity `ralph.schroeder@spaarke.com`; owner-performed or owner-approved)
+- **T248 (owner-approved)**: throwaway ACI `sprk-t248-fic-probe` (rg-spaarke-platform-dev) created → probe → DELETED. `az deployment sub create` `t248-platform-controlplane-dev-20261003-205456` (Worker settings + the Exchange sidecar created; Api module failed on a pending swap; Cosmos automatic failover on→off). Worker code zip-deployed (Deploy-ControlPlane.ps1) and started; Worker 503 (sidecar). Graph Explorer's grant on the `Spaarke Model 1` registration: owner KEEP.
+- **Owner** created the SPE container type `Spaarke Model 1` (`fb3817a8-5a55-42ba-8cc9-12cf055168b8`) in the SharePoint admin center with standard billing → `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod`. The admin-center flow asked for a client secret on the owning app; none was added (MI-FIC is the path; see T248 notes).
+- Registry column `sprk_credentialmode` added to `sprk_dataverseenvironment` on `spaarkedev1` (`Extend-DataverseEnvironmentSchema-v3.3.ps1`; idempotent rerun clean).
+- Subscription `cd95fcec-6b89-49ea-8339-c2b579b12587` display name → **"Spaarke Shared Production"** (was "Spaarke Model 1 Production").
+- Owner chose NO lock and NO tags on `rg-spaarke-shared-prod` / the billing account for now.
+
+### Live changes made 2026-10-02 (operator identity `ralph.schroeder@spaarke.com`, Global Admin — owner-approved D16)
+- Entra app **`Spaarke SPE Model 1 Owner`** — appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, object `b0f01a91-7836-4949-be96-4fcab69419c2`, SP `6c1165e2-2193-4f82-ba30-e0f64d5e767e`, single-tenant, no secret, no certificate.
+- Graph Application permissions `FileStorageContainer.Selected` (`40dc41bc-…`) + `FileStorageContainerTypeReg.Selected` (`2dcc6599-…`), consented via `POST /servicePrincipals/{graph}/appRoleAssignedTo` (`az ad app permission admin-consent` → "Consent validation failed").
+- FIC **`sprk-controlplane-dev-uami-assertion`** on that app: issuer `https://login.microsoftonline.com/a221a95e-…/v2.0`, subject `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044` (principalId of `sprk-controlplane-dev-uami`), audience `api://AzureADTokenExchange`. Structure verified; token exchange **unverified** (needs the Worker — T248 live probe).
+- Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
+
+### Critical Context
+**T242b (next, live)**: the T242 code is ONLY on the branch (`659b442a4`, pushed) — deployed nowhere yet, not merged to master. Any BFF/Worker built from it REFUSES TO START in a deployed
+(Production-named) environment without `Redis__Endpoint`. Live facts (read-only, 2026-10-04): dev BFF `spaarke-bff-dev`
+(UAMI `mi-bff-api-dev`, principal 9fd47efb-…) and the L2 Worker (`sprk-controlplane-dev-uami`, 38f7693f-…) use
+`ConnectionStrings__Redis` → `spaarke-bff-redis-dev` (Basic C0, spe-infrastructure-westus2); demo BFF `spaarke-bff-demo`
+(sub 2ff9ee48-…, rg-spaarke-demo, UAMI `mi-bff-api-demo`) is STOPPED, Redis disabled, no cache. Cut-over: preflight →
+create dev Managed Redis (redis-dev.bicepparam) → Worker (add `redisEndpoint` to the worker module) → dev BFF
+(`Deploy-RedisCache.ps1 -Environment dev -CutoverBffSettings` adds `Redis__Endpoint`, keeps the old connection string)
+→ demo cache → merge to master + INDEX.md note → remove dev connection string → retire dev rotation/alert/seed → delete
+old cache. Live checks in step 4: RESP3 pub/sub round-trip, membership invalidation SCAN under OSS clustering.
+**Exchange (T251, done)**: never add a secret, certificate or Entra directory role to `Spaarke Exchange Admin`; the
+sidecar must connect with the tenant's initial domain, never the GUID. `Enable-OrganizationCustomization` was run
+(irreversible). Open owner items: **G31** (H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's
+tenant); the **Api site's pending slot swap** (every platform-controlplane deploy fails its Api module); board Status
+"Active" vs Status Reason "On hold" on Issue #438. Never delete Key Vault secrets (`Exchange-Connect-Cert` sentinel stays).
+
+## 📁 Files Modified This Session
+
+### SESSION 35 (2026-10-04) — T242 ✅ — commits `7e9fd4dda` (master merge) `bc73844f9` + gate-fix commit (pushed)
+- Bicep: `modules/redis.bicep` (Managed Redis), `customer.bicep` (+json), `parameters/redis-{dev,staging,prod}.bicepparam`.
+- Catalog: `manifest.yaml`, `Invoke-CatalogGenerator.ps1`, `generated/*`.
+- Control plane: BicepDeployOutputs, ArmDeploymentRunner, H2a, InterStepState, HandlerRunInputs, PerEnvSourceCatalog, SubscriptionReadinessOptions, DispatchModule, csproj, stale comments, IDataverseAppUserCreator + T2 probe (guard fallout); tests (H2a, ArmDeploymentRunner, H4b, FileKvSecretManifest, DispatchModule, H1, T2 probe).
+- BFF: CacheModule, RedisOptions, NullConnectionMultiplexer, RedisScheduledJobLease, StartupValidationService, csproj, appsettings.template.json; CacheModuleTests; Directory.Packages.props.
+- Scripts: Rotate-Secrets, Decommission-Customer, Deploy-RedisCache, Configure-ProductionAppSettings, Seed-ProductionKeyVault, prereqs.yaml, tests/manual/RedisValidationTests.ps1.
+- Docs/.claude: ADR-009 (both), caching-architecture, deployment guide, resource inventory, packaging strategy, configuration matrix, provisioning.md, azure-deployment.md, caching patterns, secret-catalog pattern, CHANGELOG; project design.md §17, plan T242 ✅, T242/T242b POMLs, TASK-INDEX.
+- Memory: `feedback_implement_design_absorb_followon_work.md` (owner: implement the designed solution; absorb follow-on migrations into this project).
+
+### SESSION 34 (2026-10-04) — T251 closed + T242/T242b filed — commits `1ec4b5b68` `633eb5ff3` `e1b874f55` `97ba6a24c` (pushed) + `1b0317cc2` (local, pushed at handoff)
+- T251 fix: `ExchangeAdminTokenSource.cs` (initial-domain lookup via Graph `/organization`), `ExchangePolicySidecarClient.cs` (`organization` on the wire), `SidecarCore.psm1` + `Listener.ps1` (organization required; scope on RecipientWriteScope/CustomResourceScope), `Sidecar.Tests.ps1` (16), contract + live-verification tests.
+- `scripts/provisioning/Verify-Sidecar-Live.ps1` (rewritten: log-based bind check; `-InTenant` ACI replay via ARM REST; GUID-validated params), `scripts/provisioning/Deploy-ControlPlane.ps1` (Worker required keys), `controlplane-worker-app-service.bicep` description (+ platform-controlplane.json).
+- Docs/.claude: deployment guide §4.2.1 + T4 snippet, `.claude/constraints/provisioning.md` (initial domain + scope shape), CHANGELOG, researcher memory (`exo-apponly-dc-write-error-2026-10-04.md` new), design note §7 + status, runbook rewritten, `notes/sidecar-live-verification-2026-10-04.json`.
+- Project: README portfolio pointer (Issue #438, Epic #432); T251 POML completed; TASK-INDEX 251 ✅ + 242/242b rows; plan G30 ✅; POMLs `tasks/242-stamp-redis-managed-entra-only.poml`, `tasks/242b-dev-redis-managed-recreate.poml`.
+
+
+### SESSION 33 (2026-10-04) — T251 (in progress) — committed `0b67f716f` + `63fddc269`, pushed, tree clean
+- Sidecar: `SidecarCore.psm1` (new), `Listener.ps1` (rewritten), `Sidecar.Tests.ps1` (new, Pester 12), `Dockerfile`; deleted the sidecar copy of `Set-ExchangeApplicationAccessPolicy.ps1`; CI Pester step in `.github/workflows/build-provisioning-sidecar.yml`.
+- Core: `ExchangeAdminTokenSource.cs` (new), `ExchangePolicySidecarClient.cs` (apply + read), `IExchangePolicyApplier.cs`, `IExchangePolicyReadClient.cs`, `H14aExchangePolicySubHandler.cs`, `H14IntegrationWiringHandler.cs`, `IntegrationWiringOptions/Module/RejectionCodes.cs`, `IGraphAppRolesRegistry.cs` (GetEntraGranted/GetExchangeScoped), H10 handler, `GraphAppRoleParityT3Probe.cs`, `ExchangePolicyCountT4Probe.cs`, `IE2ETrapVerifier.cs` (+ExchangeScopeGroupId), H13 handler + rejection codes, `HandlerRunInputs.cs`, Worker `Program.cs`; deleted `ExchangePolicySidecarReadClient.cs`, `ExchangePolicyScriptApplier.cs`.
+- Tests: contract / H14a / H14 / T4 / T3 / live-verification tests rewritten; read-client contract tests deleted; ArchTest FR-27 exclusion moved to `ExchangePolicySidecarClient+Headers`; nightly `GraphAppRoleParityTest` Test 1 → Entra-granted set.
+- Infra: worker module + platform bicep + dev bicepparam (`exchangeAdminAppId`), JSON recompiled (= fresh compile). Scripts: Seed-PlatformKeyVault (no Exchange cert), Verify-Sidecar-Live (new routes), root `scripts/Set-ExchangeApplicationAccessPolicy.ps1` retired (throws).
+- Docs/.claude: deployment guide §4.2.1 + H14/T3/T4, PROVISIONING-PREREQUISITES + prereqs.yaml v6 (PRQ-E-15), inventory Exchange table, `.claude/constraints/provisioning.md` (new BINDING section), skill, CHANGELOG, researcher memory moved to `.claude/agent-memory/researcher/`; plan D24–D26 + G31; `notes/t251-exchange-sidecar-design.md` (new).
+
+
+### SESSION 32 (2026-10-03) — T248 ✅ + T251 filed — ALL COMMITTED + PUSHED (`b730d9310`, tree clean)
+
+See the T248 POML `<notes>` (steps, live results, gates, follow-ups). Highlights: master merged (`cc7f76aa3`, conflicts in
+.claude/CHANGELOG.md + scripts/Register-EntraAppRegistrations.ps1 resolved); NEW `Handlers/Preflight/SpeOwnerCredentialProbe.cs`,
+`GraphContainersListAppOnlyProbe.cs` (renamed), tests `SpeOwnerCredentialProbeTests` / `GraphContainersListAppOnlyProbeTests`;
+DELETED `KeyVaultCertBootstrapProbe(.Tests)`; edited WorkerDataverseCredentialFactory, SpeConfidentialClientGraphFactory,
+SpeContainerOptions, H8 collaborators, T6 probe, H0, HandlerRunInputs, Worker Program.cs; Worker Bicep + dev bicepparam +
+platform-controlplane.json; spaarke-constants.yaml; Deploy-ControlPlane.ps1 (`--track-status false`); docs (topology runbook
+rewritten, topology doc, inventory, deployment guide, legacy script notes, retired Test-SpeCertBootstrap.ps1,
+config/spaarke-resources.yaml); `.claude` constraints/skill/ADR-028 E-1 note/CHANGELOG; spec ADR-028 + ADR-007 rows; plan G28 ✅,
+G30, T251; NEW `tasks/251-exchange-policy-sidecar-works.poml`; T186 deps += 251.
+Live (owner-approved): probe ACI created + deleted; `t248-platform-controlplane-dev-20261003-205456` deployed (Api module
+failed on the pending swap); Worker code deployed; Worker 503 (sidecar → T251).
+
+### SESSION 31 (2026-10-02 → 03) — T249, T243, container type, D23 — ALL COMMITTED + PUSHED (tree clean)
+
+See the T249 and T243 POML `<notes>` (completion, gates, deviations, follow-ups). Highlights: new
+`Handlers/ControlPlaneIdentityOptions.cs` (D20); runner/detector/H4/Worker Program.cs/Worker Bicep/tests for D20+D21;
+customer.bicep + customer.json + platform(-controlplane).json + key-vault/doc-intelligence/customer-l2-bff-rbac modules;
+`deploy-infrastructure.yml` + WORKFLOWS.md; BFF `TextExtractorService.cs` + `DocumentIntelligenceOptions.cs` +
+`appsettings.template.json` + `TextExtractorServiceTests.cs`; catalog manifest + generated/; ControlPlane manifest tests;
+`scripts/Provision-Customer.ps1`, `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`; parameter JSONs; docs (deployment
+guide, inventory, prereqs guide, CONFIGURATION-MATRIX, naming convention, packaging strategy, ci-cd docs, AI guides);
+`.claude` CHANGELOG + patterns (manifest-driven-secret-catalog, provisioning INDEX) + skills (azure-deploy, ci-cd,
+context-handoff example); plan §2 D20–D23 + G29 + T241/T244/T250 rows; spec ADR-028 tension row; T186 deps; T243 POML new.
+
+### SESSION 30 (2026-10-02) — T225a (retire Model 1 shared Bicep) — committed
+
+See the T225a POML `<notes>`. Deleted 8 Bicep files; edited bff-runtime-rbac.bicep, bicep-e2e-dry-run.ps1, both
+provisioning workflows + manifest schema, prereqs.yaml (+ context-defaults, prereqs guide), ArmDeploymentRunner (Model 1
+fails closed) + test, L2/Bicep comments, READMEs, deployment guide / inventory / CI docs, `.claude` patterns + skills +
+CHANGELOG, spec ADR-027 row (superseded), plan §3/§4/§7, projects/INDEX.md + project CLAUDE.md (ci-cd-r1 CLOSED per owner).
+
+### SESSION 30 (2026-10-01) — T245c (operator intake) — committed
+
+See the T245c POML `<notes>` and gap note §7. New `Handlers/UserProvisioning/UserProvisioningIntake.cs`; H11 handler,
+rejection codes, Graph collaborators (no PII in diagnostics/logs); `IntakeParameterCatalog`, `HandlerRunInputs`, H4
+intake map; `RunsEndpoints` (operator-intake validation + guard release) + `ControlPlaneProblems`; tests (RunsEndpoints,
+parity, H11, contract); LoadTests payloads; manifest + generated + customer.json; intake.schema.json; prereqs.yaml
+PRQ-C-08 + context-defaults; `.gitignore` runs/*-intake.json (runs/trial1-intake.json untracked); skill Step 1e-bis /
+1.0 / 4.0; run-folder templates; spec ADR-020 row; plan D14/D15; docs (guide, prereqs guide, inventory, runbook);
+`.claude` constraints / patterns / CHANGELOG.
+
+### SESSION 30 (2026-10-01) — T245b (run context part 2) — committed
+
+See the T245b POML `<notes>` and `notes/run-context-dataflow-gap.md` §6 for the full account. ~100 files: new
+`Handlers/ArtifactVersion.cs`, `AiSearchIndex/IndexSchemaSet.cs`, `BicepInfraDeploy/ArmTemplateInspector.cs`,
+`SolutionImport/ImportedSolutionSet.cs` (+ tests incl. `SpeContainerOptionsTests`, `WorkerL2OwnedOptionsBootTests`);
+H0/H2a/H2b/H4/H4b/H7/H8/H9/H13/H14 + options + DAG + intake catalog; worker + platform Bicep (+ recompiled JSON,
+customer.json); secret catalog manifest + generator + generated; preflight scripts; publish workflow trigger +
+manifest schema; deployment guide, version matrix, inventory, design/spec/plan/gap note; `.claude` provisioning
+constraints, run-context pattern, provision-environment skill, CHANGELOG.
+
+### SESSION 29 (2026-10-01) — T238 (H4b Customer__Id + trap T7)
+
+`manifest.yaml` + generated Configure script; `PerEnvSourceCatalog` (+ customer_id); generator closed set; new
+`CustomerIdentityT7Probe` + tests; `TrapKind.T7`, `H13RejectionCodes.TrapT7Failed`, H13 mapping, composite order,
+placeholder, DI registration; T1/T5/T7 apply `TrapVerifierTimeout` + caller-only OCE filter; trap-count docs
+T1–T7 (design, spec, README, plan, guide, skill, templates, stubs, root CLAUDE.md row + CHANGELOG); inventory row;
+INCOMING status line; POML 238 completed; TASK-INDEX 238 ✅; plan T238 ✅.
+
+### SESSION 29 (2026-10-01) — T245a Step 9.5 gates applied + committed
+
+Gate fixes: `Api/ControlPlaneProblems.cs` (new — ADR-019 errorCode on every L2 ProblemDetails) + RunsEndpoints /
+RunLogsEndpoints; H4 leak guard (DNS-host aware, reflects every InterStepState string); Roslyn scanner + controls in
+`RunContextContractTests` (+ `Microsoft.CodeAnalysis.CSharp` in the L2 test csproj); `HandlerRunInputs` (H4 stale
+leak-scan entries removed; H7/H13 gaps pinned); H13 literal keys → constants, `sprk_azuresubscriptionid` ← subscriptionId;
+`PerEnvSourceCatalog` trims intake; generator closed per_env set; H2a/H2b unused consts; MapOutputs/MissingOutputs
+private; H9/H12b/T6 diagnostics; H12b remarks; GraphAppRegistrationProvisioner + Worker Program comments;
+`customer.bicep` comment; skill `Model2` fix + closed-intake note + Step 5 gate note; patterns (run-context-contract,
+manifest-driven-secret-catalog); provisioning.md; CHANGELOG; spec.md ADR Tensions (ADR-020, ADR-038); design.md §6.2;
+inventory doc; gap note §5; plan G25/T245/T227; POML 245a (completed + notes) / 245b (step 4c); TASK-INDEX 245a ✅.
+
+### SESSION 28 (2026-10-01) — T245a (committed in SESSION 29)
+
+**New**: `Core/Models/{ProducedByAttribute,NoProducerAttribute,IntakeParameterCatalog}.cs`,
+`Core/Reconciler/HandlerRunInputs.cs`, `Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs`,
+`Tests/Reconciler/RunContextContractTests.cs`, `.claude/patterns/provisioning/run-context-contract.md`.
+**Core**: `Models/InterStepState.cs`; `Reconciler/DagAdvancer.cs`; H2a (`H2aBicepInfraDeployHandler`,
+`ArmDeploymentRunner`, `BicepDeployOutputs`); H2b; H3 (`H3EntraAppRegHandler`); H4 (`H4KvSecretsPopulationHandler`,
+`FileKvSecretManifest`, `IKvSecretManifest`, `IKvSecretsWriter`, `KvSecretValueResolver`); H4b (`H4bBulkAppSettingsHandler`,
+`FilePerEnvSettingsManifest`, `IPerEnvSettingsManifest`, `BulkAppSettingsRejectionCodes`); H8 (comment); H9 (+ options /
+rejection-code comments); H12b (+ rejection codes); H13 (`H13E2EAcceptanceGateHandler`, `H13RejectionCodes`,
+`IE2ETrapVerifier`, `T6SpeConfidentialClientTrapProbe`); H14 (+ rejection codes); `Preflight/KeyVaultCertBootstrapProbe` (comment).
+**Api**: `RunsEndpoints.cs` (intake catalog + environmentName). **Tests**: RunsEndpoints, ArmDeploymentRunner, H2a, H3, A42,
+H4, H4b, FileKvSecretManifest, FilePerEnvSettingsManifest, KvSecretValueResolver, H9, H12b, H13, H13BuildPromotedColumns,
+H14, T6, DagAdvancer, Model1SharedDagParity; LoadTests `EnqueueLatencyScenario` + `LongHandlerScenario`.
+**Catalog/infra**: `manifest.yaml`, `Invoke-CatalogGenerator.ps1`, `generated/*`, `infrastructure/bicep/customer.json`.
+**Docs**: `.claude/constraints/provisioning.md`, `.claude/patterns/provisioning/{INDEX,handler-registration-completeness}.md`,
+`.claude/CHANGELOG.md`, `design.md` (§4.1 DAG, §6.2 keys), plan, `notes/run-context-dataflow-gap.md` §5, POMLs 245b/245c.
+
+### SESSION 27 (2026-09-30) — T226 + T237 closed
+
+CI follow-up commit (owner "do not defer"): `.github/workflows/provisioning-prereqs-validate.yml` ajv step loads
+ajv-formats; skill Step 1.0 batch validation uses the same `npx -p ajv-cli@5 -p ajv-formats@3` invocation; coord note
+marked APPLIED; plan G23 (spaarke-demo, deferred) + G24 (CI doc stale); CHANGELOG.
+
+
+T237 commit: `CustomerIdStandard` (Core) + CreateRun 400 (standard + reserved ids); intake schema pattern/`displayName`;
+skill Step 1a/1a-bis/1f; scripts `ValidatePattern` + Deploy-Release lookup; `Add-CustomerIdColumn.ps1` MaxLength
+correction (applied live); ~45 fixture files; LoadTests compile fix; naming doc reserved ids; notes
+`t237-customerid-standard.md` + `prereqs-validate-ajv-formats-coord-pr.md`. Filing commit `c4dc3db9d`.
+
+#### T226 (same session)
+
+One commit (T226): restored `DocumentIntelligence-ApiKey` (interim, D13); review fixes from both gate rounds;
+`StaticKvSecretManifest` deleted; generator duplicate-key tie-break; H8 trims `containerTypeId`;
+`/provision-environment` Step 4.0 sends `containerTypeId` + skips retired prerequisites; PRQ-E-06 retired +
+`validate.ps1` accepts retired entries + PRQ-E-13 scope; `.claude` pattern/constraint/skill docs corrected +
+CHANGELOG; inventory + prerequisites guide; spec ADR Tensions row; plan G1 ✅ / G21 / G19 note; TASK-INDEX 226 ✅.
+Full file list: `git show --stat` on the T226 commit.
+
+### SESSION 26 (2026-09-30)
+
+**Committed + pushed**: `965514f9b` plan · `0a7186165` T236 inventory doc + T226/T225a POMLs · `d642e1343` D8–D10/Q1/Q2 ·
+`d85bec3b1` G14 auth-chain notes · `6b5661763` D11/Q4 · `e4d7a5cd9` · **`40c4b2a02` master merge (365 commits)** ·
+`6bc8ed2d6` post-merge checkpoint · `c8bab8899` / `87ea3675a` / `ca3697a6d` T226 decisions. **Local**: `278aafabd` (D12) + handoff docs.
+
+**T226 — was uncommitted at SESSION 26 end; landed in SESSION 27 (see above)**:
+- `scripts/canonical-secret-catalog/manifest.yaml` — 7 entries removed (SB, Storage, OpenAI key, DocIntel key*, AI Search key, PromptFlow ×2); Redis → from-bicep-output; Bing/LlamaParse labelled Spaarke-shared. *DocIntel key must be RESTORED (§6 item 1).
+- `scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1` — drops from-shared-service, accepts from-topology-constants; `generated/*` (4) regenerated.
+- `infrastructure/bicep/customer.bicep` + `customer.json` — key writes + key app-settings removed; `requireSecretFreeIdentity` kept (no-op, H2a passes it).
+- Deleted (8): `H4SharedKvSecretsPopulationHandler.cs`, `ISharedKvSecretAccessor.cs`, `SecretClientKvSharedSecretAccessor.cs`, `SharedKvSecretSource.cs`, `ISourceServiceKeyExtractor.cs`, `SdkSourceServiceKeyExtractor.cs`, `SharedKvSecretsPopulationRejectionCodes.cs`, `Tests/Handlers/H4SharedKvSecretsPopulationHandlerTests.cs`.
+- Core: `HandlerIds.cs`, `HandlerDispatchRegistrationModule.cs`, `Reconciler/DagAdvancer.cs` (H4b ← H4 only), `Core.csproj` (−Azure.ResourceManager.Search/.Redis), `IKvSecretManifest.cs` (−FromSharedService/ServiceRef, +FromTopologyConstants=6), `FileKvSecretManifest.cs` (reader + omit set → {BFF-API-ClientSecret}), `IKvSecretsWriter.cs` (+TopologyConstantValues), `KvSecretValueResolver.cs`, `H4KvSecretsPopulationHandler.cs` (+BuildTopologyConstantValues), `KvSecretsPopulationOptions.cs`, `BicepInfraDeploy/IBicepDeployRunner.cs` (docs).
+- Api: `RunsEndpoints.cs` (handler list text). Worker: `Program.cs` (H4-shared DI removed).
+- Tests: `FileKvSecretManifestTests.cs`, `H4KvSecretsPopulationHandlerTests.cs`, `KvSecretValueResolverTests.cs`, `Reconciler/DagAdvancerTests.cs`, `Reconciler/StateReconcilerServiceTests.cs`, `Dispatch/HandlerRegistrationCompletenessTests.cs` (21→20).
+- `.claude/agent-memory/researcher/MEMORY.md` + `redis-per-customer-stamp-amr-decision-2026-09-30.md` (researcher output — commit with the handoff docs).
+
+### Prior sessions (history)
+
+#### SESSION 25 (2026-09-29)
+
+### Task 222 (Item 1 D-13) — committed 1e586978f (11 files, +812 / -475 LOC)
+
+**Production (5)**:
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs` — deleted L272 branch + `HandleModel1Async` + `BuildSharedKvUriReference`; unified per-customer flow; W1/W2/W4 stale-doc fixes; `HandleModel2Async` name INTENTIONALLY kept for T223 rename; `Model1Shared` const INTENTIONALLY kept per POML constraint (i) for T223 enum consolidation
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegOptions.cs` — deleted `SharedBffAppRegistrationId` + `SharedPlatformKeyVaultName`; W7/W8 stale-doc fixes
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/IEntraAppRegProvisioner.cs` — deleted `VerifySharedAsync` + `EntraAppRegSharedVerifyRequest` + `EntraAppRegSharedVerifyOutcome` (Current/Drifted/Failure); W6 XML doc updates
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs` — deleted `VerifySharedAsync` method; W3 stale-doc fixes on FIC comments
+- `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs` — `MissingSharedAppRegConfig` + `SharedAppRegConfigurationDrift` marked `[Obsolete(..., error: false)]` with `<remarks>` retention rationale (external tool stability); W5 XML doc update
+
+**Tests (3)**:
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H3EntraAppRegHandlerTests.cs` — deleted 3 AC-M1-* tests; stripped FakeProvisioner shared members; removed shared constants + assertions
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs` — deleted A42e I6 regression guard (premise invalidated); stripped FakeProvisioner shared members; W9 stale comment update
+- `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/Model1SharedDagParityTests.cs` — inventory-comment update (H3 struck)
+
+**State (3)**:
+- `projects/customer-provisioning-orchestration-r1/tasks/222-item1-delete-h3-shared-app-reg-branch.poml` — NEW (T222 filing + completion notes)
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — row 222 ✅
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — pointer update
+
+### Task 223 (Item 2 D-12) — committed 1d9c49b7e (3 files, +580 / -1 LOC, filing-only)
+
+- `projects/customer-provisioning-orchestration-r1/tasks/223-item2-tenancy-model-enum-parse-or-reject.poml` — NEW (fully authored POML: 18 prescriptive steps + 21 acceptance criteria + 6 escalation triggers + all D-12-branch-inventory sites enumerated)
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — row 223 🔲
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — pointer update (this file, further refined in SESSION 25 wrap)
+
+## 🧠 Critical Context (SESSION 25)
+
+1. **BINDING sequence is on track**: Item 1 ✅ complete (T222); Item 2 🔲 filed (T223, ready for execution). Sequence: T223 → Item 3 (T224) → Item 4 (T225) → Section 6 sweep → T218 → Task 186 (first live E2E dispatch).
+2. **Task 222's key lesson (escalation trigger 1)**: preflight grep found 2 test files not in POML's explicit list (A42FicReconciliationTests, Model1SharedDagParityTests) — classified in-scope IMPLICIT co-dependency per POML constraint (e). Task 223's POML EXPLICITLY enumerates ~9 additional implicit consumers surfaced by pre-authoring grep (H0PreflightHandler, H12c*, Cosmos probe, IBicepDeployRunner, ProvisioningRun, Worker/Program.cs, RunsEndpoints, etc.) — the executor should NOT re-escalate for these; they're documented in-scope.
+3. **W1-W9 code-review stale-doc pattern**: T222's code-review found 9 mechanical stale-doc fixes (Model 2 / Model 1-only phrases contradicting the new unified flow). All applied same-session per T220 precedent. T223 will likely produce a similar W-series — plan to apply same-session for atomic PR hygiene.
+4. **drift-check script false positive** (pre-existing project-wide): `pwsh scripts/check-task-status-drift.ps1` reports 175 unpaired entries — parser expects `| <marker> <id> | ...` format; this project's TASK-INDEX uses `| <id> | <marker> | ...`. T220 landed with this state; T222 landed with this state. Not remediating in Task 223 — a §6.5 Path B script amendment or project-wide TASK-INDEX reformat, out of scope. Filed for future project hygiene.
+5. **§6.5 disposition pattern**: T222 was Path C (pivot to comply with D-13); T223 is also Path C (pivot to comply with D-12). No Path A/B expected unless a cross-project consumer of `CustomerOwnedTenancyValues` / `SpaarkeOwnedTenancyValues` public surface surfaces (unlikely; H1-private).
+6. **T222 deferred items rolled into T223**: (a) delete H3 `Model1Shared` + `Model2Dedicated` consts; (b) delete `IsRecognizedTenancyModel`; (c) rename `HandleModel2Async` → `HandleAsync`; (d) W10 GraphAdminConsentVerifier.cs stale D-13 example reference. All enumerated in T223 POML step 9 + step 12.
+7. **S3 code-review suggestion from T222 deferred to T223**: add `[Theory]` covering both Model1Shared + Model2Dedicated on AC-M2-1 happy path — MEDIUM value; exceeded T222 POML test-scope closed-set. T223's enum + TryParse tests naturally cover this via type-checking (a `[Theory]` over `TenancyModel` values); may not need explicit AC-M2-1 [Theory] if enum test coverage is complete. Reviewer discretion.
+8. **Master-merge health**: 2 new master commits since T222's HEAD (`cacf2f39b` re-actors/alls-green + `aa7426e6a` ci-cd shadow-window cutover) — both CI-only, zero overlap with T222/T223 files. Safe divergence.
+
+## 📋 SESSION 23 Owner Decisions (2026-09-28) — LOCKED IN
+
+Per owner Ralph, in this session. Do NOT re-litigate:
+
+### §9 Question 1 — Power BI shared F-SKU capacity pool → **DEFERRED**
+
+- **Decision**: No BI reporting in MVP. Per-customer F-SKU eventually, but do NOT procure license now.
+- **Actions required in Items 1-4 / Section 6 remediation**:
+  - Remove `reporting-admin.md`'s "shared F-SKU pool" assumption
+  - Add PLACEHOLDER for future per-customer F-SKU (Bicep module hook, docs note) — do NOT deploy
+  - Note in customer deployment guide: F-SKU is a future customer add-on that EXCEEDS the Model 1 marginal cost envelope when procured
+- **Task 186 dispatch impact**: unblocked — no BI = no F-SKU dependency
+
+### §9 Question 2 — M365 Copilot agent → **PER-CUSTOMER**
+
+- **Decision**: Per-customer Copilot agent (aligns with D-13 principle).
+- **Actions required in Items 1-4 / Section 6 remediation**:
+  - Add new handler (or extend existing) to create per-customer Copilot agent during provisioning
+  - Coordinate with T218's "solution package definition" scope — Copilot agent may ship inside a solution package (see T218 owner-expanded scope below)
+  - Update inventory doc (`docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`) `M365 → Add-in app registration` section — currently listed as "one shared package"; revise to per-customer
+
+### §9 Question 3 — Redis Standard C1 tier performance → **ACCEPT + VERIFY EMPIRICALLY**
+
+- **Decision**: Accept Standard C1 baseline for MVP. Verify empirically after first customer goes live (Option C).
+- **Actions required**:
+  - Confirm `customer.bicep` `modules/redis.bicep` defaults to Standard C1 (not Premium)
+  - Add post-first-customer verification task (load test / observed throughput / cache hit rate) as follow-on
+  - Document the "verify empirically after first customer" decision in design.md §7.2 disposition table
+- **Task 186 dispatch impact**: unblocked — Standard C1 is Bicep default
+
+## 📋 SESSION 23 Task Dispositions (2026-09-28) — LOCKED IN
+
+### T215 — SPE cert retirement → ✅ **COMPLETED SESSION 24 (2026-09-28) with scope expansion**
+
+Owner directive verbatim: "unless a reason to not run this now, otherwise run it now so that the issue is removed."
+
+**SESSION 24 outcome — landed with owner-approved scope expansion**:
+
+Agent work (all committed): (a) `config/spaarke-resources.yaml` — cert_secrets `_meta: partial-retirement` with history; keyvault_inventory split (`referenced:` minus 2 entries + new `retired_soft_deleted:` subsection with deleted_utc/scheduled_purge_utc from actual az command output); `_changelog` entry dated 2026-09-28. (b) `scripts/Import-And-Register.ps1` → git mv to `scripts/_archive/Import-And-Register.ps1` (Option A) + retirement header + `throw` guard. (c) FR-35 pre-check FIRED escalation — LIVE App Service refs on spaarke-bff-dev found: `Graph__CertificateSource`, `Graph__CertificateThumbprint=269691A5...`, `Graph__KeyVaultCertName=spe-app-cert`, `Graph__KeyVaultUrl`. Proven dead-config: `Graph__Credentials__Order__0=ManagedIdentityFederated` (single entry) + `RequireSecretFreeIdentity=true` + zero code consumers in src/server/**. Owner via AskUserQuestion chose **Option A: expand scope**. Yaml `_changelog` extended to record the expansion.
+
+Operator (Ralph) executed 3 az commands under own AAD identity (NFR-11):
+```
+az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev --setting-names \
+  Graph__CertificateSource Graph__CertificateThumbprint Graph__KeyVaultCertName Graph__KeyVaultUrl
+az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert
+az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass
+```
+
+Post-run verification (agent, in same session):
+- App Service `spaarke-bff-dev`: query for the 4 keys returns `[]` ✅
+- KV soft-deleted list: `spe-app-cert` (2026-09-29T03:03:06Z, scheduled_purge 2026-12-28T03:03:06Z) ✅ + `spe-app-cert-pass` (2026-09-29T03:03:07Z, scheduled_purge 2026-12-28T03:03:07Z) ✅
+- `spe-owning-app-secret` `enabled: true` — UNTOUCHED (E-1 preserved) ✅
+
+TASK-INDEX row 215 → ✅. POML `<status>` → completed.
+
+**Historical execution plan (preserved for reference)**:
+
+The POML already exists at `projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml` (filed SESSION 21, commit `1d1f6fd61`). Fresh session executes it via `task-execute 215`, which will:
+
+1. **Grep sweep** — confirm consumers are ONLY in the known 2 files:
+   ```
+   git grep -n "spe-app-cert" -- '*.cs' '*.ps1' '*.yaml' '*.yml' '*.json'
+   ```
+   Expected consumers: `config/spaarke-resources.yaml` (lines ~452-455 + ~492-493) + `scripts/Import-And-Register.ps1` (lines ~6-8). If ANY new consumer found, expand scope + document in task notes before proceeding to step 3.
+
+2. **Deprecate consumer references**:
+   - `config/spaarke-resources.yaml`:
+     - Mark `cert_secrets` block with `_meta: status: retired, retired: 2026-09-28, reason_retained: "documentation of pre-H8-B cert reference; H8-B (task 214, 2026-08-30) reads cert from SPE-OwnerCert-Pfx per topology doc §3A E-1"` per file's own convention (lines 11-19)
+     - Move `spe-app-cert` + `spe-app-cert-pass` from `keyvault_inventory.referenced:` list into new `keyvault_inventory.retired_but_present_in_kv:` subsection with retired dates
+     - Add `_changelog:` entry dated 2026-09-28
+   - `scripts/Import-And-Register.ps1`:
+     - **Recommended: Option A (archive)** — `git mv scripts/Import-And-Register.ps1 scripts/_archive/Import-And-Register.ps1` with retirement banner header
+     - Parity with task 213.3 `Create-NewContainerType.ps1` retirement pattern
+
+3. **FR-35 pre-check** — verify no live App Service reference before KV soft-delete:
+   ```
+   az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev --query "[?value=='@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=spe-app-cert)' || value=='@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=spe-app-cert-pass)']"
+   ```
+   Expected: empty array. If ANY reference found, HALT + escalate.
+
+4. **KV soft-delete** (OPERATOR command — Ralph runs these; agent stops after step 3):
+   ```
+   az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert
+   az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass
+   az keyvault secret list-deleted --vault-name spaarke-spekvcert --query "[?name=='spe-app-cert' || name=='spe-app-cert-pass']"
+   # Expected: both in list. Do NOT purge — soft-delete has 90-day recovery.
+   ```
+   **DO NOT touch `spe-owning-app-secret`** — that's E-1 exception per ADR-028, retained indefinitely.
+
+5. **Verify** the T215 acceptance criteria via `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/Spaarke.ArchTests/` (should stay at 322/4 — this task doesn't change the ArchTest failure count).
+
+6. **Commit + push** as `hygiene(provisioning): T215 SPE cert retirement — code + config landed; KV soft-delete pending operator`.
+
+### T216 — Model 1 architectural simplification → **DROPPED**
+
+Owner confirmed 2026-09-28: superseded by D-12 which retires the shared Model 1 tier entirely. Owner's understanding: "we have only one deployment package (dedicated customer) — the only difference is which environment (Spaarke hosted or customer tenant hosted)." Item 4 replaces T216 scope. Do NOT file 216 POML.
+
+### T217 — Solution ship-list confirmation → **FOLDED INTO T218 with EXPANDED SCOPE**
+
+Owner directive verbatim 2026-09-28: "as per T216 each customer needs to get the full Spaarke solution. BUT it may be more efficient to define a solution (or multiple solutions) rather than use existing solutions that may not contain all required components; that is part of the objectives of this project is to define the complete package."
+
+**Owner-expanded T218 scope** (this is IMPORTANT):
+- T218 is no longer just "audit + document the existing 9 solutions"
+- T218 becomes: **DEFINE the complete Spaarke solution package** — audit existing 9 solutions, identify gaps, potentially consolidate/redesign solutions to ensure ALL required components (entities, roles, forms, MDA, Copilot agent per §9 Q2, custom app registrations per D-13, etc.) are packaged in a clean shippable set
+- Absorbs both the original T217 (documenting what ships) + T218 (managed solution runbook + IAM + UPDATE audit)
+- Task 186 HARD BLOCKER — cannot dispatch a customer without knowing the complete solution package is correctly defined
+
+### T218 — Managed solution flow + IAM + UPDATE audit + **complete package definition** → **STILL HARD BLOCKER**
+
+New expanded scope (per T217 folding above). Sequence: AFTER Items 1-4 complete (so per-customer app-reg reality is what gets documented), BEFORE task 186 dispatch.
+| **213.4-correction — Model 2 BFF semantics** | Owner clarification 2026-08-31: Model 2 has NO shared-environment concept. Every Model 2 stamp IS a customer (1 env = 1 tenant = 1 customer). Therefore Model 2 BFF app-reg is per-stamp; `-CreateBffApp Model2` REQUIRES `-CustomerName` (hard-throw without). Also added symmetric guards: `-CreateBffApp {Trial1\|Model1}` with `-CustomerName` → hard-throw (Trial 1 / Model 1 are shared, per-customer identity meaningless); `-CreateOwningApp` with `-CustomerName` → hard-throw (owning apps are 1:1 per tier, never per-customer). Prod flow no-regression proved. Commit `2d6512c49`. |
+| **Definitive BFF app-reg naming** | Model 1 BFF: ONE shared `Spaarke BFF - Model 1` (multiple customers) · Trial 1 BFF: ONE shared `Spaarke BFF - Trial 1` (multiple customers) · Model 2 BFF: ONE `Spaarke BFF - {CustomerName}` per Model 2 stamp (every stamp = customer; no shared concept). All 3 owning apps: ONE per tier, never per-customer (topology doc §R1 permanent 1:1 container-type binding). |
+| **Inventory doc (owner-mandated)** | `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (202 lines, 45KB). 4 sections per owner-mandated structure: Dataverse (env / app user setup / solutions) · Azure (subs / RGs / resources) · SharePoint Embedded (container type / container) · M365 (add-in / Teams app). Every row cites specific H0-H14 handler / script / runbook step. Distinguishes 3 time-scales: one-time-per-tier (operator) · per-customer (H0-H14) · one-time-per-platform (L2 bootstrap). Includes 4 concrete reference AppIds. Model 1 vs Model 2 variance called out per resource. |
+| **4 UNCLEAR rows in inventory** (owner review needed before 213.7) | (1) Dataverse per-customer env naming pattern — not codified anywhere. (2) Model 2 fresh Azure subscription creation automation — none exists; intentional per ADR-027 D4 but confirm. (3) SPE Model 2 per-customer container-type registration handler — no dedicated H0-H14 handler documented; likely folds into H8. (4) Office Add-in Entra app-reg identity — manifest silent on webApplicationInfo; dedicated vs shared with BFF unclear. |
+| **Task 214 (SESSION 21 retained)** | 214 ✅ FULL rigor delivery: H8-B rewrite (container-CREATION only per topology doc §6); `Handlers/SpeContainerType/` deleted (11 files); `Handlers/SpeContainer/` created (8 files); 17 new tests; DagAdvancer + HandlerIds + DI + KV manifest all updated; 1919 pass / 0 fail / 1 skip; commit `a26e30dd2`. Also filed task 215 (cert retirement follow-on — not blocking). |
+| **H8 live-test finding (SESSION 20 END-2)** | Option A probe run 2026-08-30: HTTP 403 accessDenied CONFIRMED for third empirical time — topology doc §R5 applies to any `client_credentials` grant regardless of credential shape. H8 must be rewritten as container-CREATION only (per topology doc §6 — app-only-OK for container creation, unlike container-TYPE creation which is delegated-only). Incidental: `spaarke-spekvcert/spe-app-cert` KV cert drifted from any Spaarke app-reg's registered certs — retire in task 214 alongside handler rewrite. |
+| **Task 212 landing (retained context)** | Landed 2026-08-30: ADR-028 line 229/239 terminology `multi-tenant BFF` → `single-tenant Spaarke BFF` + RESOLVED note; project CLAUDE.md § MUST rule aligned; spaarke-constants.yaml name_templates corrected against LIVE Azure (`sprk-controlplane-{env}-kv`, `bffAppServiceRg`, `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`); rename `bffMultiTenantAppId` → `bffApiAppId` in 4 consumer sites (SKILL Step 0.5b/5a + context-defaults.dev.json + context-defaults.prod.json). NOT populated (deferred to 213): `containerTypeId` + `bffApiAppId` values. |
+| **Owner alignment 2026-08-30** | Q1: topology doc is authoritative for r1 ✅. Q2: neither `Spaarke Trial 1` container-type nor `Spaarke SPE Trial 1 Owner` app-reg exist yet — expected as one-time provisioning process setup ✅. Q3: H8-B (rework as container-creation, delegated to my technical call) ✅. Q4: create NEW `Spaarke BFF — Trial 1` app-reg (do NOT reuse `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`) ✅. Q5: scope-split — 212 small + 213 substantive ✅. |
+| **MED#10 landing (retained context)** | Commit `e426191eb` (SESSION 19). H13 handler now writes Cosmos-Completed FIRST, then attempts registry PATCHes best-effort. On Cosmos Conflict → return Failure Resumable with NO registry mutation attempted. On registry PATCH failure → REGISTRY-STALE warning log + Success; operator SKILL Step 6a recovery includes sprk_setupstatus. |
+
+### Files Modified This Session (SESSION 20 END + SESSION 21)
+
+**All commits pushed to `origin/work/customer-provisioning-orchestration-r1`. Working tree: CLEAN.**
+
+| Commit | Files | Scope |
+|---|---|---|
+| `0e2d0df22` | 17 | MDA-GAP fix — SpaarkeCorporateCounselApp added to H6 canonical catalog (C# + PS mirror + tests + spec/design refresh) |
+| `2e8e30e16` | 12 | Task 212 partial + Task 213 POML filed. ADR-028 lines 229/239 terminology reconciliation (`multi-tenant BFF` → `single-tenant`), project CLAUDE.md § MUST rule aligned, spaarke-constants.yaml `name_templates` corrected against LIVE Azure state (5 corrections: `sprk-controlplane-{env}-kv`, `bffAppServiceRg`, `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`, `l2WorkerAppServiceName`), `bffMultiTenantAppId` → `bffApiAppId` renamed in 4 consumer sites. runs/pre-dispatch-*.md audit artifacts. |
+| `c7b695678` | 6 | Task 213 partial (4 of 7 items) + Task 206 completion (sub-agent). Topology doc copied to `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` (verbatim from sdap-SPE-admin-app-r2 SHA b7dcc72b7) + provenance marker. `Create-NewContainerType.ps1` DEPRECATED banner + throw + runbook redirect. `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` authored (8-step operator runbook). SKILL Step 0.5c topology-verify added + Step 0.5b BFF App Service search fix. PRQ-C-03 recipe exit-1 hardening (F10 root cause). |
+| `f2ec7500d` | 4 | Task 214 filed after H8 live-test. `runs/h8-live-test-2026-08-30.md` (probe methodology + evidence + interpretation). POML 214 (H8 full rewrite, 8-12h xhigh, 7 sub-items). TASK-INDEX 213 row updated to 🟡 partial + 214 row added. |
+| `f6f2cb7ea` | 1 | SESSION 20 END-3 handoff checkpoint (current-task.md pre-compact refresh). |
+| `a26e30dd2` (SESSION 21) | 34 | **Task 213.4 + Task 214 combined delivery** — 213.4 script extension (+544 lines to Register-EntraAppRegistrations.ps1) + 214 H8-B rewrite (`Handlers/SpeContainerType/` deleted 11 files → `Handlers/SpeContainer/` created 8 files; DI + HandlerIds + DagAdvancer + 2 E2EAcceptance probes + tests updated; KV manifest SPE-ContainerTypeId slot semantics rewritten to `from-topology-constants`). Build 0/0; test suite 1919/0/1. |
+| `1d1f6fd61` (SESSION 21) | 2 | **Task 215 filed** — SPE cert retirement follow-on POML (spe-app-cert + spe-app-cert-pass have live consumers in config/spaarke-resources.yaml + scripts/Import-And-Register.ps1). Non-blocking hygiene. |
+| `2d6512c49` (SESSION 22) | 1 | **Task 213.4-correction** — Model 2 BFF gate hardened per owner architectural framing (2026-08-31). Hard-throw on `-CreateBffApp Model2` without `-CustomerName`. Symmetric guards for `-CustomerName` on Trial1/Model1/OwningApp. Removed shared-placeholder fallback in Get-SpeTopologyBffDisplayName. Verification: 3 gate hardenings + 4 test cases + prod-flow regression PASS. |
+| `54e6e9e1c` (SESSION 22) | 3 | **Inventory doc landed** — `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (202 lines, 45KB) authored by sub-agent per owner-mandated 4-section structure (Dataverse / Azure / SPE / M365). Plus `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §H6 corrected 8→9 solutions (SESSION 19 MDA-GAP reconciliation). Plus root `CLAUDE.md` §17 pointer added. |
+| `0b799b592` (SESSION 22) | 1 | SESSION 22 handoff checkpoint. |
+| `92b480500` (SESSION 23) | 2163 | **Master merge — D-12/D-13 remediation prep** — merged 812 master commits into our branch per INCOMING-D12-D13-REMEDIATION.md protocol. 11 conflicts resolved (8 took MASTER per shared-tier-retirement rule; 1 took OURS for current-task.md rolling log; 2 surgical SKILL.md edits keeping master's D-12 hard-stop). Plus 1 auto-merge compile cascade fixed (`CustomerRunGuardModule.cs` — took master). Build 0/0. ArchTest 322/4 (STEP 1 gate NOT green — see SESSION 23 handoff for the 4 failures + concrete fix plan in "STEP 1 completion task"). |
+| SESSION 23 handoff (this commit) | 1 | This comprehensive handoff — owner Q1/Q2/Q3 answers locked in + T215/T216/T217/T218 dispositions + post-compact execution sequence + T215 concrete steps. |
+
+### Critical Context (must-know for fresh session)
+
+#### SESSION 22 architectural realizations (owner conversation 2026-09-01)
+
+- **Model 1 architecture may be overengineered** vs. owner intent. Owner clarified: "one Dataverse environment and all customers using the model 1 environment share resources." Current `infrastructure/bicep/stacks/model1-shared.bicep` (836 lines, lines 41-55 header) has THREE lifecycle scopes: 🔴 always-dedicated per-customer (UAMI, KV secrets, Storage, Cosmos, App Insights); 🟢 safely-shareable (Service Bus, App Insights shared, Content Safety, Doc Intelligence, Log Analytics); 🔵 per-environment (Redis, App Service Plan, OpenAI, AI Search, BFF App Service, BFF App Reg, Dataverse). Under owner's "shared everything" intent, Model 1 collapses from 3 RGs → 2 RGs (shared platform + per-customer KV+Storage only) with logical isolation for everything else. **This is the scope of proposed task 216.**
+
+- **"Tenant" vs "Customer" terminology needs codebase cleanup**. The Bicep code uses "per-tenant" to mean "per-customer" (a customer organization). Spaarke has ONE Entra tenant. Every "per-tenant" in `model1-shared.bicep` + inventory doc + wherever = per-customer. Confusing. Should be renamed as part of task 216. **Preserve "tenant" ONLY when referring to Entra tenant (identity directory); everywhere else say "customer."**
+
+- **AI Search / Cosmos / OpenAI logical isolation IS SAFE** with proper guardrails (ArchTests per §4D I2/I3/I5). Owner confirmed this is acceptable for shared Model 1. **KV + Storage recommend physical per-customer** — RBAC granularity is coarser, blast-radius argument favors dedication. Recommended Model 1 shape per owner conversation:
+  - Shared: Dataverse env, BFF App Service, BFF App Reg, AI Search, Cosmos, OpenAI, Redis, Service Bus, App Insights + Log Analytics
+  - Per-customer: Key Vault, Storage
+  - Isolation mechanism: `tenantId` (= customerId) filter on every AI Search query (I2 ArchTest-enforced); `/customerId` partition key on Cosmos (I3 ArchTest-enforced); ephemeral prompts on OpenAI
+
+- **Solutions creation flow correction**: H6 does NOT create solutions from scratch. Solutions are pre-built .zip artifacts (per design.md line 116: "solution ZIPs are versioned build artifacts in the publish payload"). Engineering authors solutions in a Spaarke internal publisher env → exports as MANAGED .zip → ships as build artifact → H6 imports the .zips into customer env via Package Deployer / ImportSolution API. **UNKNOWNS worth investigating**: WHERE the source-of-truth publisher env lives (likely `spaarkedev1`); WHERE the .zip artifacts get stored; WHETHER all 9 are exported managed today; the CI/CD pipeline for solution export. **This is part of proposed task 218's scope.**
+
+- **Managed solution operational runbook does NOT exist**. Design.md D1 accepted managed solutions foundationally; design.md §116/§201 named the upgrade API (`StageAndUpgrade` + `ImportJob` polling); design.md line 1675 flagged version-compat risk. But NO documentation exists for: custom security role catalog, H10 Application User coordination, upgrade behavior details, environment variable persistence, component override rules, rollback runbook, `sprk_bffversion` compat gate. **This is a HARD BLOCKER before ANY customer dispatch** — silent failure risk. **Proposed task 218 covers this comprehensively.**
+
+- **Owner decisions this session (2026-09-01)**:
+  - All 9 solutions ship to every customer (per owner directive — full deployment, no core/optional split)
+  - VNet is optional feature; not needed for MVP; leave Bicep flag off
+  - L2 Control Plane: no web UI needed; REST API + `/provision-environment` slash command only; future fleet-mgmt web app is r2
+  - Model 2 BFF app-reg: per-stamp (per-customer), never shared; corrected in 213.4-correction
+
+#### 3 tasks DRAFTED-BUT-NOT-FILED (awaiting owner "file 216/217/218 now" go-ahead)
+
+| Task | Scope | Priority |
+|---|---|---|
+| **216** | Model 1 architecture simplification — reduce to 2 RGs (shared platform + per-customer KV+Storage); adopt logical isolation for AI Search / Cosmos / OpenAI / Redis / Service Bus / App Insights per §4D I1-I5; strike "tenant" language in favor of "customer" throughout Spaarke internal docs + Bicep + code comments; refactor `model1-shared.bicep`; update design.md §7.2 disposition table + spec.md as needed | **HIGH — blocks Model 1 provisioning + relates to 213.7's constants** |
+| **217** | Solution ship-list confirmation — document per owner directive that all 9 solutions ship to every customer; write rationale per solution + which customer segments each serves; update SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §H6 with the confirmed set + notes | **MEDIUM — should land before task 186 dispatches to a real customer** |
+| **218** | Managed-solution flow + IAM + UPDATE audit (expanded scope) — (a) inventory each of 9 solutions' actual contents (entities, forms, roles, plugins, JS); (b) document custom security role catalog; (c) verify export-as-managed vs unmanaged for each; (d) locate source publisher env + .zip storage + build process; (e) coordinate H10 Application User with managed roles; (f) document initial-deploy flow; (g) document UPDATE flow (StageAndUpgrade + version compat + env-var persistence + deleted-component rules); (h) produce "Managed Solution IAM + Upgrade Runbook" doc; (i) build the compat gate (H6 refuses upgrade if `sprk_bffversion` below minimum) | **HIGH — silent-fail risk if not understood before ANY customer dispatch** |
+
+#### Historical context preserved
+
+- **Task 214-cert-retirement (task 215) FILED but NOT BLOCKING** — cert retirement is hygiene, does NOT block task 186. Awaiting execution when convenient.
+- **H8-B design decisions preserved from SESSION 21 214 sub-agent**:
+  - H8→H3 DAG dep RETAINED — H8 uses `InterStepState.BffAppRegId` as clientId for the ClientCertificateCredential; H3 must still complete first.
+  - `SpeConfidentialClientGraphFactory` kept intact (namespace moved only) — 3 external consumers (T6 probe + Graph app-only probe + T6ProbeTests) depend on it.
+  - `SpeContainerGates.T6Verified` gate-key literal preserved as `"h8-t6-verified"` for backward-compat with external tooling grepping GateStates by name.
+  - `keyVaultName` + `owningAppId` parameter guards RETAINED — H8-B still uses these for the cert bootstrap path per topology doc §3A + ADR-028 E-1.
+
+#### Standing binding rules (UNCHANGED)
+
+- `BFF-API-ClientSecret` is GONE (auth-v4 task 033 deletion 2026-08-24) — do NOT re-introduce under any name (CredentialGuardTests fails build on any new `.WithClientSecret` site).
+- `Dataverse-ClientSecret` never-delete before 2026-11-23 (auth-v4's rollback copy).
+- Operator uses OWN AAD identity (never SP) per NFR-11.
+- Task 186 dispatch MUST invoke `/provision-environment` L3 skill (per root CLAUDE.md §4) — never bypass with direct L2 REST calls.
+- SPE container-type owning app-reg binding is PERMANENT + 1:1 (topology doc §R1) — do NOT merge owning app with BFF app.
+- SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md is AUTHORITATIVE for r1 (owner Q1 answer 2026-08-30).
+- Never touch claude.ai Gmail / Calendar / Drive MCPs (memory `reference_unused_mcp_connectors` — Spaarke doesn't use these).
+- Canonical Spaarke regional strategy: westus2 platform + westus3 OpenAI (memory `reference_azure_fresh_sub_regional_gotchas`).
+
+### To resume in fresh session (SESSION 23 END + post-compact)
+
+- **"where was I"** → read this Quick Recovery + the SESSION 23 Owner Decisions block above
+- **"continue"** or **"proceed"** or **"start T215"** → **FIRST action: execute T215 SPE cert retirement** per the "T215 Concrete Execution Plan" section above. Invoke: `task-execute projects/customer-provisioning-orchestration-r1/tasks/215-cert-retirement-spe-app-cert.poml`. Owner already directed this ("run it now so that the issue is removed"). Agent stops after step 3 (code + config edits) — operator (Ralph) runs step 4 (`az keyvault secret delete` commands) manually. Commit + push after agent portion done.
+- **After T215 lands**: **file STEP 1 completion task** via `task-create` — bring ArchTest to 326/326. The 4 failures with root cause + fix plan are documented in the previous session's response (or run `dotnet test tests/Spaarke.ArchTests/` to see current failures). FULL rigor per `tests/CLAUDE.md` structural-fitness-function KEEP path. Then task-execute it.
+- **After STEP 1 gate green (326/326)**: **file + execute Items 1-4** from `projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` §5, IN ORDER, each as its own `task-create` + `task-execute` at FULL rigor. Do NOT reorder. Do NOT collapse.
+  - Item 1: delete H3 shared-app-registration branch (D-13)
+  - Item 2: one shared TenancyModel enum (BEFORE any renaming; `AiSearchTenantFilterInvariantProbeTests` must be REWRITTEN not mechanically updated)
+  - Item 3: migrate `sprk_tenancymodel` (fan value `1` by Profile; do NOT relabel)
+  - Item 4: retire `model1-*.bicep` (6 surfaces atomic; note surface 6 has INVERTED polarity, surface 7 = `.github/workflows/publish-provisioning-arm-artifacts.yml` + its schema require-key)
+- **After Items 1-4**: address INCOMING doc §6 six-item contradiction sweep (prereqs.yaml lingering shared-BFF entries, canonical-secret-catalog manifest SOURCE fix, `Seed-PlatformKeyVault.ps1:402-403`, `controlplane-worker-app-service.bicep`, `bff-runtime-rbac.bicep`, `controlplane-subscription-rbac.bicep`).
+- **After §6 sweep**: **execute T218** (managed solution flow + IAM + UPDATE audit + **complete package definition** per SESSION 23 owner-expanded scope). File via `task-create`, run via `task-execute` at FULL rigor. This is the HARD BLOCKER before task 186.
+- **After T218 lands**: **task 186 dispatch** — `/provision-environment {customerId}` for first live E2E Trial 1 customer.
+- **Owner Q1/Q2/Q3 decisions**: locked in SESSION 23 (see block above). Do NOT re-litigate. Items 1-4 + §6 sweep + T218 all incorporate these decisions.
+- **Verify SESSION 23 merge**: `git log --oneline -3` should show SESSION 23 handoff commit + `92b480500` merge + `5a2332ff6` master's incoming state. Divergence: 100 ahead / 0 behind master. `dotnet build src/server/api/Sprk.Bff.Api/` should be 0/0. `dotnet test tests/Spaarke.ArchTests/` should be 322/4 pre-STEP-1-completion.
+- **INCOMING doc**: `projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md` — BINDING. READ IT before doing anything else per owner directive.
+- **Referenced UAC-r2 notes on master** (read as needed): `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` (the decision) · `D-13-per-customer-bff-app-registration.md` (mechanism + rejected counter-arguments) · `D-12-code-branch-inventory.md` (the work-list with file:line) · `D-12-resource-sharing-analysis.md` (per-resource shared-vs-dedicated criteria) · `coordination-cpo-r1-2026-09-28.md` (overlap analysis).
+- **Old artifacts still relevant**: `runs/h8-live-test-2026-08-30.md` (§R5 empirical evidence) · `runs/pre-dispatch-readiness-gap-report.md` (SESSION 20 5-gap audit) · `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` (SESSION 22 inventory — sections need REVISION post-D-12/D-13 per §9 Q2 per-customer Copilot decision + Q1 F-SKU deferral).
+- **Constraints to respect throughout** (per owner instruction verbatim):
+  - Do NOT re-open D-13
+  - §9 open questions have OWNER answers now (SESSION 23) — do NOT re-ask
+  - §8 items belong to unified-access-control-r2 — leave alone (Secure Project→Secure Record rename + 3 Redis subject-discrimination keys)
+  - Definition of done is §7 — report against it line by line when Items 1-4 complete
+
+### SESSION 22 conversation reference (owner questions + Claude answers)
+
+The SESSION 22 conversation covered 15+ substantive architectural questions. Key clarifications recorded for future sessions:
+
+1. **Azure subscription strategy**: 1 sub per solution platform (dev + Trial 1 + Model 1 + Model 2-per-customer) — strongest cost/isolation boundary; tags + Cost Management as secondary tools.
+2. **Azure tenants**: ONE Spaarke Entra tenant for everything (never per-solution). Multi-tenant Entra applies to Model 2 owning app only (customer admin consent surface).
+3. **Resource Groups**: current Model 1 uses 3 RGs (shared platform + per-tenant + BFF App Service host). Owner intent = simpler (1-2 RGs). Task 216 covers the refactor.
+4. **App Service vs App Registration**: two entirely different objects — App Service = compute; App Registration = Entra identity. Linked via App Service app-settings pointing at App Reg ClientId. One-to-many relationships allowed.
+5. **VNet**: optional, off by default, only for enterprise customers with compliance needs.
+6. **Website Contributor RBAC**: L2 UAMI needs it on each customer's BFF App Service to deploy code + fetch Kudu logs (H4b + H9).
+7. **L2 Control Plane**: `Sprk.Provisioning.ControlPlane.*` REST API + Worker; no UI; slash command entry point; one-time-per-Spaarke-environment.
+8. **Subscription RBAC**: L2 UAMI needs Contributor + User Access Administrator on customer subscriptions to create RGs, deploy Bicep, and assign RBAC.
+9. **Azure Container Registry**: hosts EXO PowerShell sidecar image for Exchange Online mailbox policy operations during customer provisioning.
+10. **Logical isolation safety**: AI Search + Cosmos + OpenAI = safe with ArchTest guardrails (I2/I3/I5); KV + Storage = recommend physical per-customer.
+11. **Solutions creation**: H6 IMPORTS pre-built .zip artifacts, does NOT create them. Engineering builds solutions in publisher env → exports managed → ships as versioned build artifact.
+12. **Managed solution operational runbook**: does not exist; D1 accepted concept but IAM specifics + upgrade behavior + rollback semantics need documentation (task 218).
+
+### Historical arc
+
+- **SESSION 20 (2026-08-28 → 2026-08-30 pre- and post-compact)**: Task 186 dispatch attempt HARD-STOPPED at constants sanity check. Filed tasks 212, 213, 214. Executed H8 live-test proving §R5 for third time. Task 212 partial + 213 partial (4/7) landed.
+- **SESSION 21 (2026-08-30)**: Parallel sub-agent execution of 213.4 (Register-EntraAppRegistrations extension) + 214 (H8-B rewrite). Both landed in commit `a26e30dd2`. Task 215 filed as cert-retirement follow-on.
+- **SESSION 22 (2026-08-31 → 2026-09-01)**: 213.4-correction (Model 2 BFF gate hardening) + inventory doc (owner-mandated). Multi-turn architectural conversation surfaced tasks 216/217/218 (drafted, pending file go-ahead).
+- **214 sub-agent full report**: retained in this session's transcript (agent id aed503e06c3c7a6c0)
+- **213.4 sub-agent full report**: retained in this session's transcript (agent id a58314fe5b134e5f9)
+
+---
+
+## 📚 Historical (SESSION 16 END — kept for context)
+
+> **Prior state**: 12 of ~15 remaining SKILL.md-touching items landed; 109 of 127 findings landed cumulative — ~86% of pre-dispatch remediation complete. SESSION 16 executed the entire deferred SKILL.md main-session pass: COMP-14 (env fail-fast) + ISH-10 (Step 0c operator role probe rewrite) + Step 4.0 body construction (subscriptionId + openAiRegion→openAiLocation) + BAT-01..10 batch-mode wiring (Steps 0d/1a/1g/2/3/4b/5/7b). SKILL.md grew 1658 → ~2106 lines (+448 lines). Remaining (per SESSION 16 handoff): 3 code partial-fix closeouts + ISH-12 deferred + end-to-end verify + task 186 dispatch. SESSION 17 landed COMP-03/06/10; SESSION 18 landed ISH-12 + full adversarial verify workflow + 29-of-30 findings closure. Only MED#10 remains.
+
+## 🎯 SESSION 16 END — HANDOFF (SUPERSEDED BY SESSION 18 QUICK RECOVERY ABOVE)
+
+### SESSION 16 landed (12 items, 1 commit expected)
+
+| Finding | Where | Summary |
+|---|---|---|
+| **COMP-14** | SKILL.md Step 0.5a | Batch-mode fail-fast on null/empty `$env`; interactive-mode INFO passthrough (Step 1d assigns later). Prevents silent `{env}`→"" substitution + `spaarke-prov--kv` false-fails. |
+| **ISH-10** | SKILL.md Step 0c | Read-only GET role probe (random-GUID + valid customerId query param) replacing the mutating POST with invalid `profile:"dev"`. 404→Reader-verified; 403→no role assignment HARD STOP. |
+| **Step 4.0 body** | SKILL.md Step 4.0 | Intake top-level `subscriptionId` → `nonSecretParameters['subscriptionId']` (Model2 required per schema `allOf`; Model1 auto-defaults to `az account show`). Intake `openAiRegion` → `nonSecretParameters['openAiLocation']` (Bicep param name is `openAiLocation`). |
+| **BAT-01/BAT-03** | Step 1.0 | `confirmationAcknowledgment` const-string validation moved from prompt-only-at-Step-3 to schema+Step-1.0-fail-fast + Step-4.0 SHA-256 audit. |
+| **BAT-02** | Step 1g | Skip interactive "Proceed to preflight?" Read-Host prompt in batch mode (would block unattended dispatch indefinitely). |
+| **BAT-04** | Step 0d | `mcpDisconnectPolicy` — `failFast` (default; writes runs/pre-dispatch-mcp-disconnect.json + exit 1) OR `proceedWithFallback` (sets `$script:McpFallbackActive=$true`, uses Fallback F1 for registry ops). |
+| **BAT-05** | Step 1a | `acknowledgeUpgradeMode` — HARD STOP if prior successful run exists AND flag is false (writes runs/pre-dispatch-upgrade-required.json + exit 1). |
+| **BAT-07** | Step 4b | `onFailedPolicy` — `autoResumeOnce` (single POST /resume attempt) OR `abandon` (default; writes runs/{runId}-failed.json + exit 2). `onQuarantinedPolicy` — `failFast` only (writes runs/{runId}-quarantine.json + exit 3; never auto-clears). |
+| **BAT-08** | Step 5 dispatch | `onManualGatePolicy` — `waitAndExit` (default; writes runs/{runId}-WAITING.md + gate.json + exit 4) OR `pollUntilTimeout` (10s cadence, 30-min hard cap) OR `failFast` (immediate exit 4). Short-circuits interactive sub-flows 5a-5d in batch mode. |
+| **BAT-09** | Step 7b | `postmortemFile` — validated required sections ('What went right' / 'What went wrong' / 'Recommendations for next run' / 'Sign-off'); copy-verbatim + append auto-metadata OR auto-generate minimum lessons-learned.md when omitted. |
+| **BAT-10** | Step 2 preflight | `costEnvelopePolicy` — `abortOnOverrun` (default; writes runs/pre-dispatch-cost-overrun.json + exit 1) OR `warnAndProceed` (Model 1 shared-trial only per schema description; rejected for Model 2 at Step 1.0). Client-side check per tier cap. |
+| **`$env` alias** | Step 1.0 | Bound `$env = $environment` at Step 1.0 so Step 0.5a fail-fast + Step 0c URL selector both see it. |
+
+### What remains for next session
+
+**Code partial-fix closeouts (L2 codebase — no more SKILL.md touches needed for dispatch):**
+
+1. **COMP-03 [MEDIUM]** — L2 code: `KnownProfiles` const + endpoint validation + ArchTest (design decision needed: reject unknown profile with 400 vs warn+accept). Wave 7 flagged as partial pending design call. Est: 1h + design call.
+2. **COMP-06 / ROLLBACK-1 [HIGH]** — L2 code: fix `sprk_currentrunid` lock-leak in `QuarantineClearService.ClearAsync` (couples to REG-04 credential seam per Wave 0 Decision 9 — should land alongside or immediately after any REG-04-adjacent work). Est: 1h.
+3. **COMP-10 [MEDIUM]** — L2 code: `H0Options.CostEnvelopeAbortsPreflight` field + intake schema addition + red-path test. Wave 7 flagged as partial. Est: 1h.
+
+**Deferred (not blocking task 186 dispatch):**
+
+4. **ISH-12 [MEDIUM]** — `intake.schema.json.environment` → `controlPlaneEnv` rename. Touches intake schema + prereqs.yaml `{env}` token + spaarke-constants.yaml + SKILL.md references. Mechanical but wide; better as its own task after task 186 succeeds. Est: 30m.
+
+### Post-remediation sequencing
+
+Once above 3 code closeouts land + full L2 test suite still green:
+
+5. **End-to-end verify workflow** — adversarial dry-run of the fixed state: 3-5 skeptic verifiers pressure-test the full skill flow against actual L2 code, actual prereqs.yaml, actual intake schema. Confirm no cross-fix regression.
+6. **Task 186 dispatch re-attempt** — `/provision-environment trial1 --batch runs/trial1-intake.json`.
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery
+- **"continue partial-fix closeouts"** — starts on item 1 (COMP-03), proceeds sequentially
+- **"start End-to-end verify"** — skips partial-fix items; runs verify workflow against current state (acceptable — the 3 remaining are L2 code, not skill flow)
+
+### SESSION 15 handoff (superseded — kept for context)
+
+> Prior update: SESSION 15 END (97 of 127 findings landed across ~50 commits — 76% of pre-dispatch remediation complete). Waves 2/2.5/3/4/5/6/7/8 all COMPLETE at the subagent-safe layer + Wave 4 SKILL.md rewrite complete for all 40 findings the punchlist scoped to it. Remaining: ~15 SKILL.md-touching items in Waves 5/6/7 deferred to next-session main-session pass (per Sub-Agent Write Boundary §3 — SKILL.md main-session-only) + a handful of code partial-fix closeouts + end-to-end verify + task 186 dispatch. All work pushed to origin @ `9e9dfdbc1`. L2 test suite: 1889/1890 (was 1792 baseline, +97 net new tests).
+
+## 🎯 SESSION 15 END — HANDOFF FOR NEXT SESSION (READ THIS FIRST)
+
+### What landed (97 findings, ~50 commits)
+
+| Wave | Scope | Findings | Landed |
+|---|---|---|---|
+| Wave 2 | L2 code (DagAdvancer, RunsEndpoints, registry write path) | 22 + 1 test-regression fix | ✅ (20 subagent + 1 main-session commits, `7b1f398cd`→`05e3f6c80`+`fb4ef3289`) |
+| Wave 2.5 | Scaffold fills (HANDLER-03/07/08/09/13 → live Azure/pac impls) | 5 | ✅ (5 commits) |
+| Wave 3 | prereqs.yaml + task POML hardening | 11 | ✅ (11 commits, `75537850a`..`21e5f27f1`) |
+| Wave 4 | SKILL.md aggregate rewrite (7 batches A-G) | 40 | ✅ (7 main-session commits, `5bea26de6`..`866b1c885`) |
+| Wave 5 | intake.schema.json + code (ISH-02/07/08/09/11) | 5 | ✅ (5 commits) |
+| Wave 6 | Batch-mode intake schema additions (BAT-10) | 1 subagent-safe | ✅ (1 commit, `dc77381f8`) |
+| Wave 7 | Missing-dimension code + procedures runbook | 10 (7 fixed + 3 partial) | ✅ (partial fixes acknowledged; runbook at `docs/procedures/provisioning-completeness-sweeps-2026-08-27.md`) |
+| Wave 8 | EXEC-09 Model1Shared vs Model2Dedicated DAG parity | 1 partial | ✅ (test-net-only in commit `0079ae55d`) |
+
+### What remains for NEXT-SESSION main-session pass (~15 items)
+
+**SKILL.md-touching (main-session-only per §3 Sub-Agent Write Boundary):**
+
+1. **ISH-10 [HIGH]** — SKILL.md Step 0c: rewrite Operator-role probe. Currently sends `profile:"dev"` which is NOT in intake schema enum (spaarke-hosted-model1-trial | spaarke-hosted-model2 | customer-owned-model2). Replace with Reader-scoped `GET /api/runs?customerId=__probe__` OR dedicated `/api/whoami`. Est: 45m.
+2. **ISH-12 [MEDIUM]** — SKILL.md + prereqs.yaml + spaarke-constants.yaml rename: `intake.schema.json.environment` → `controlPlaneEnv` (disambiguates from H2a stamp `environmentName`). Est: 30m.
+3. **COMP-14 [HIGH]** — SKILL.md Step 0.5a: fail-fast if `intake.environment` empty/null BEFORE Step 0.5b substitution (currently substitutes empty `{env}` → prereqs.yaml recipes hit `spaarke-prov--kv`). Est: 20m.
+4. **BAT-01 through BAT-09 [CRITICAL/HIGH]** — SKILL.md batch-mode wiring. intake.schema.json ALREADY carries 8 batch-policy fields (added Wave 6 subagent commit `dc77381f8`: `mcpDisconnectPolicy`, `acknowledgeUpgradeMode`, `confirmationAcknowledgment`, `skipDataverseMcp`, `postmortemFile`, `abandonOnFailure`, etc.). SKILL Steps 0d, 1a, 1g, 2, 4b, 5a-d, 7b prompts need `if ($script:SkipInteractiveIntake) { <use batch source or fail-fast> } else { <existing prompt> }` wraps + `$script:SkipInteractiveIntake` plumbing. Est: 2-4h (9 findings but mechanical once pattern established).
+5. **Step 2 body-construction (nice-to-have)** — SKILL Step 2 code block should map intake top-level `subscriptionId` → `nonSecretParameters['subscriptionId']` AND intake `openAiRegion` → `nonSecretParameters['openAiLocation']` (per ISH-02 + ISH-08 code work — the seams are proven, operator-facing wiring TBD). Est: 15m.
+
+**Code partial-fix closeouts:**
+
+6. **COMP-03 [MEDIUM]** — L2 code: `KnownProfiles` const + endpoint validation + ArchTest. Design decision needed: reject unknown profile with 400 vs warn+accept. Wave 7 flagged as partial pending design call. Est: 1h + design call.
+7. **COMP-06 / ROLLBACK-1 [HIGH]** — L2 code: fix `sprk_currentrunid` lock-leak in `QuarantineClearService.ClearAsync` (couples to REG-04 credential seam per Wave 0 Decision 9 — should land alongside or immediately after any REG-04-adjacent work). Est: 1h.
+8. **COMP-10 [MEDIUM]** — L2 code: `H0Options.CostEnvelopeAbortsPreflight` field + intake schema addition + red-path test. Wave 7 flagged as partial. Est: 1h.
+
+### Post-remediation sequencing
+
+Once above 8 items land + full L2 test suite still green:
+
+9. **End-to-end verify workflow** — adversarial dry-run of the fixed state: 3-5 skeptic verifiers pressure-test the full skill flow against actual L2 code, actual prereqs.yaml, actual intake schema. Confirm no cross-fix regression.
+10. **Task 186 dispatch re-attempt** — `/provision-environment trial1 --batch runs/trial1-intake.json`.
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery
+- **"continue SESSION 15 remainder"** — starts on item 1 (ISH-10) above, proceeds sequentially
+- **"start End-to-end verify"** — skips remaining items; runs verify workflow against current state (NOT recommended — SKILL.md batch-mode wiring is critical for task 186 dispatch)
+
+### Locked decisions carried forward (Wave 0 ADR-note @ `notes/wave-0-adr-note-2026-08-27.md`)
+
+1. tenantId: nonSecretParameters-only
+2. Step 1a probe: Dataverse MCP alt-key
+3. Batch confirmation: `confirmationAcknowledgment` const-string + SHA-256 audit
+4. Step 2/3/4: client-side dry-run + gate BEFORE POST
+5-8. See ADR-note
+9. REG-04 credential seam: Path X (Wave 2 REG-02 landed the migration)
+10. auth-v4 rotation coord: cross-worktree ops-note (not blocking)
+
+### SESSION 15 verifier findings (non-blocking, all `safe_to_advance: true`)
+
+- Bash-4 associative array assumption in PRQ-E-06 (Windows Git Bash + Linux CI satisfy; macOS default bash 3.2 would not — not a current operator profile)
+- Commit-message hygiene drift from shared-index races (3 commits during Wave 2.5+3; substance correct, subject lines misleading in `git log`)
+- 1 over-scope commit in Wave 2 (accepted atomic-green)
+- Various partial-fix items promoted to next-session main-session pass (enumerated above)
+
+### Branch state
+
+`work/customer-provisioning-orchestration-r1` @ `9e9dfdbc1`. Pushed to origin. Ahead of master by ~50 commits (SESSION 12 baseline + all SESSION 13/14/15 work).
+
+---
+
+> **Prior update (superseded above)**: 2026-08-27 SESSION 15 (pre-dispatch comprehensive audit + Wave 0 decisions COMPLETE; Wave 2 IN-FLIGHT). Comprehensive 10-agent audit workflow (`wf_aef5ac94-9dd`, 1.3M subagent tokens) surfaced 127 findings across 7 layers; adversarial-verified with 0 refuted. Synthesized into 172KB master punch list (`notes/pre-dispatch-audit-punchlist-2026-08-27.md`) with 9-wave remediation plan. Wave 0's 10 architectural decisions applied per operator directive "don't wait for me / every issue is a priority" — decisions documented in `notes/wave-0-adr-note-2026-08-27.md` (auditable, revertable). Wave 2 remediation workflow (`wf_5aad7c53-c8f`) launched: 3 parallel implementation lanes (B1 DagAdvancer + B3 handler bodies + B24 endpoints/registry) totaling 25 code-only findings + 3 adversarial verifiers. Task 186 batch dispatch BLOCKED until Waves 0-8 complete + end-to-end verify passes.
+
+## 🎯 SESSION 15 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 14 below)
+
+| Field | Value |
+|-------|-------|
+| **Session premise** | User called out whack-a-mole pattern of SESSION 13 + SESSION 14: each dispatch attempt discovers new latent gaps, mid-run fixes, re-dispatch, discover more. Directive: "we need this process to work, full stop ... every issue is a priority ... don't wait for me." Comprehensive pre-dispatch audit + fix EVERYTHING before another dispatch attempt. |
+| **Landed** | (1) 10-agent audit workflow `wf_aef5ac94-9dd` — 127 findings, 0 refuted; (2) synthesis subagent `af940cbd5e820de11` — 172KB master punch list with 9-wave plan; (3) Wave 0 ADR-note — 10 architectural decisions applied unilaterally with reversibility documented. Commits `e06be0267` (punch list) + `57ad7fc1f` (ADR-note), both pushed. |
+| **Wave 2 landed** | Workflow `wf_5aad7c53-c8f` complete (2h 31min, 1.48M tokens). 22 findings + 1 test regression fix. All L2 tests green. |
+| **Wave 2.5+3 landed** | Workflow `wf_994d9a02-f0f` complete (29min, 1.56M tokens). 5 scaffold fills (HANDLER-03/07/08/09/13 real impls) + 11 prereqs.yaml findings. L2 tests: 1857/1858 (was 1792, +65 new tests all passing). Verifier notes non-blocking: commit-message hygiene from index races, bash-4 dependency for PRQ-E-06 loops (Windows Git Bash + Linux CI satisfy), minor deferred items. |
+| **Wave 4 landed** | Main-session 7 batches (A-G, commits 5bea26de6 → 866b1c885). 40 SKILL.md findings including: SKILL-01/09 (tenant ID + URI), Steps 2/4/5/6 state machine + gate/poll (SKILL-04/05/06/07/10/11/12 + EXEC-05/06 + PLX-11), Step 2/3/4 architectural rewrite (EXEC-02 + SKILL-03 + ISH-03 + SKILL-13), Step 6a registry hardening (REG-04 + SKILL-14 + EXEC-08 + COMP-08), Step 1a Dataverse MCP alt-key probe (SKILL-02) + Step 1f post-create verify (PRQ-05), Step 0.5b substitution chain extension + new spaarke-constants.yaml + PLX-14 sanity check + PRQ-06 removal (SKILL-08 + PLX-01..14), Step 0f L2 deployment probe (COMP-04) + Step 0a batch-mode contract test (COMP-15) + Step 6b handoff-report substitution (PLX-12). NEW FILE: scripts/provisioning-prereqs/spaarke-constants.yaml. |
+| **Running background** | Wave 5-8 workflow `wf_034cf466-1b4` — 3 subagent-safe lanes (Wave 5 intake schema + code; Wave 7 missing-dimension code+docs; Wave 6+8 subagent-safe) + 1 adversarial verifier. 4 high-effort agents. SKILL.md-touching Wave 5/6/7 remainder deferred to next-session main-session pass. Notification when done. |
+| **Remaining waves after Wave 2** | Wave 3 (prereqs.yaml — 18 findings, subagent-safe) → Wave 4 (SKILL.md aggregate rewrite — 33 findings, MAIN-SESSION-ONLY) → Wave 5 (intake.schema.json — 8 findings) → Wave 6 (batch-mode — 15 findings) → Wave 7 (missing-dimension sweeps — 11 findings) → Wave 8 (runtime resilience — 1 finding). Then end-to-end verify. Then task 186 dispatch. |
+| **Task 186 status** | BLOCKED — do NOT attempt dispatch until Waves 0-8 land + verify passes. |
+| **Locked decisions (SESSION 15 Wave 0 ADR-note)** | 1. tenantId: nonSecretParameters-only (not top-level); 2. Step 1a probe: Dataverse MCP alt-key; 3. Batch confirmation: intake const-string + SHA-256 audit; 4. Step 2/3/4: client-side dry-run + gate BEFORE POST; 5. combined with 3; 6. intake shape: mechanical prune; 7. Drifted: strike from SKILL.md; 8. umbrella; 9. REG-04 credential seam: defer to Wave 2 B24 in-context; 10. auth-v4 coord: ops-note. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `57ad7fc1f` pushed to origin. Wave 2 subagent commits will land on this branch. |
+| **Working tree** | CLEAN at handoff point. Wave 2 subagents will add commits during their run. |
+| **Committed SESSION 15 files** | `notes/pre-dispatch-audit-punchlist-2026-08-27.md` (172KB), `notes/wave-0-adr-note-2026-08-27.md` (180 lines). |
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery + resumes
+- **"continue Wave N"** — resumes at the named wave (check TASK-INDEX + this file for current wave)
+- **Do NOT** — attempt task 186 dispatch. Blocked until Waves 0-8 + end-to-end verify complete.
+
+### Critical Context (2-3 sentences)
+
+**This session is a full pre-dispatch remediation project.** 127 findings across 9 waves; ~168h of aggregate work being executed in parallel where safe (subagent lanes) and serialized where necessary (SKILL.md main-session per §3 Sub-Agent Write Boundary). Task 186 dispatch is the acceptance ceremony that fires AFTER this whole remediation lands + adversarially verifies clean.
+
+### SESSION 15 file inventory (committed to date)
+
+- `projects/customer-provisioning-orchestration-r1/notes/pre-dispatch-audit-punchlist-2026-08-27.md` (new, 172KB) — commit `e06be0267`
+- `projects/customer-provisioning-orchestration-r1/notes/wave-0-adr-note-2026-08-27.md` (new, 180 lines) — commit `57ad7fc1f`
+- (this file) `projects/customer-provisioning-orchestration-r1/current-task.md` — SESSION 15 Quick Recovery block
+
+Wave 2 subagent commits will accumulate below as they land (each with finding-ID commit prefix).
+
+---
+
+> **Last Updated**: 2026-08-27 SESSION 14 (prereqs.yaml comprehensive fix + forcing function COMPLETE) — Second-live batch dispatch of task 186 attempted. Step 0 passed cleanly. Step 0.5 iteration failed to parse `scripts/provisioning-prereqs/prereqs.yaml`. Ultracode workflow `wf_75aa08a8-13e` (3 audit + 3 adversarial verify, 499K tokens) surfaced 3 orthogonal defect classes: (A) 18 YAML syntax defects, (B) 32 recipe-contract violations, (C) 31 placeholder-substitution defects. Class A fixed atomically + forcing function landed (`validate.ps1` parser-parity validator + always-on-PR workflow + lint-staged glob) — end-to-end empirically verified (PASS on fix / FAIL exit-1 on regression / PASS on restore). Class B + C + arch gaps filed as tasks 206 + 207 + 208 + 209 (each with acceptance criteria + audit-source ref). Task 186 UNBLOCKED for Class-A parseability; B + C are pre-existing debt not this dispatch's regression.
+
+## 🎯 SESSION 14 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 13 below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | (1) Fixed 18 YAML defects in `scripts/provisioning-prereqs/prereqs.yaml` (15 backtick-start + 3 embedded `: ` colon-space traps + 1 scope-enum defect on line 359); (2) Authored `scripts/provisioning-prereqs/validate.ps1` (parser-parity validator using powershell-yaml — SAME parser skill Step 0.5a uses at runtime — plus top-level shape + per-prereq required-field + scope enum + unique-id + SPE never_delete PRQ-T-01 guard + intake.schema.json JSON validity); (3) Authored `.github/workflows/provisioning-prereqs-validate.yml` (always-on-PR gate; mirrors workflows-validate.yml pattern); (4) Extended `.lintstagedrc.mjs` with new glob invoking validator on git-commit; (5) Empirically verified forcing function end-to-end (PASS on fix / FAIL exit-1 on deliberately-broken / PASS on restore); (6) Wrote comprehensive audit note `notes/prereqs-yaml-audit-2026-08-27.md`; (7) Filed 4 follow-on POMLs 206/207/208/209 with acceptance criteria + audit-source refs; (8) Updated TASK-INDEX header + row-count 161→165 + appended 4 SESSION-14 rows. |
+| **Next actionable** | **Re-dispatch task 186 batch mode**. In fresh session (or same after commit): `/provision-environment trial1 --batch runs/trial1-intake.json`. Skill Steps 0 + 0.5 + 1.0 will now flow cleanly through the fixed manifest. Then Step 1f placeholder create (spaarkedev1 registry, schema deployed SESSION 13) → Step 1g intake summary → Step 2 preflight (L2 H0) → Step 3 confirmation gate (`proceed with provisioning`) → Step 4 execute loop H1-H14. 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **Class-A blockers cleared** | Manifest parseable under both powershell-yaml AND pyyaml (verified). Round-trip OK. validate.ps1 exit 0 on fixed manifest. |
+| **Class-B + C pre-existing debt filed** | Task 206 (recipe-contract silent-PASS remediation — 32 recipes across 27 prereqs). Task 207 (placeholder-substitution — 31 tokens across 19 prereqs + PRQ-E-07 bash-expansion + PRQ-E-13 scope-placement). Task 208 (integrate validator into ci-router.yml single-gate per FR-A01). Task 209 (restore master branch protection — HTTP 404 DISABLED per adversarial-verify discovery). |
+| **Locked decisions (SESSION 14)** | (1) Fix pattern for backtick-start values: double-quote wrap (or single-quote if value contains double-quotes); (2) `scope:` field is bare enum only — annotations use YAML comments (`scope: once_per_env  # note`); (3) Forcing function architecture: parser-parity (powershell-yaml everywhere), always-on-PR (mirrors workflows-validate.yml), shape-contract validation beyond parse; (4) SPE never_delete guard scoped to PRQ-T-01 only (the container-type itself; PRQ-T-02 permissions grant is re-grantable). |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — pending SESSION 14 commit at HEAD |
+| **Working tree pending** | Modified: `scripts/provisioning-prereqs/prereqs.yaml`, `.lintstagedrc.mjs`, `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`, `projects/customer-provisioning-orchestration-r1/current-task.md`. New: `scripts/provisioning-prereqs/validate.ps1`, `.github/workflows/provisioning-prereqs-validate.yml`, `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md`, `projects/customer-provisioning-orchestration-r1/tasks/206-prereqs-yaml-recipe-contract-remediation.poml`, `projects/customer-provisioning-orchestration-r1/tasks/207-prereqs-yaml-placeholder-substitution-remediation.poml`, `projects/customer-provisioning-orchestration-r1/tasks/208-integrate-prereqs-validator-into-ci-router.poml`, `projects/customer-provisioning-orchestration-r1/tasks/209-restore-master-branch-protection.poml`. Committing as one atomic SESSION 14 fix + follow-on-filing. |
+
+### To resume in fresh session — say ONE of these
+
+- **"dispatch task 186 batch"** — main session runs `/provision-environment trial1 --batch runs/trial1-intake.json`; skill now flows through 0 → 0.5 → 1.0 → 1f → 1g → 2 → 3 → 4
+- **"start task 206"** — remediate 32 recipe-contract violations (recipes must `exit 1` per SKILL Step 0.5b — SESSION 12 contract never applied beyond PRQ-E-14)
+- **"start task 207"** — remediate 31 placeholder-substitution defects (skill Step 0.5b substitution block extension + PRQ-E-07 bash-expansion + PRQ-E-13 scope-placement)
+- **"where was I"** — reads this Quick Recovery + resumes
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is unblocked at the parseability layer.** SESSION 14 chose to apply the comprehensive syntax fix + forcing function atomically (per owner directive "comprehensive actual fix, not one-time get-around") while filing the 32 recipe-contract + 31 placeholder defects as follow-ons — those are pre-existing debt in the manifest, not new discoveries from this dispatch, and they require systematic per-recipe work + skill Step 0.5b extension that shouldn't happen mid-dispatch. The forcing function ensures the class-A defect can never regress: validate.ps1 (parser-parity with powershell-yaml) runs on every PR + author-time git-commit.
+
+### SESSION 14 file inventory (pending commit)
+
+- `scripts/provisioning-prereqs/prereqs.yaml` — 19 defect lines corrected (18 syntax + 1 scope enum)
+- `scripts/provisioning-prereqs/validate.ps1` (new) — parser-parity + shape-contract validator
+- `.github/workflows/provisioning-prereqs-validate.yml` (new) — always-on-PR CI gate
+- `.lintstagedrc.mjs` — new glob for provisioning-prereqs manifest → validate.ps1 at author-time
+- `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md` (new) — comprehensive audit findings + follow-on scope
+- `projects/customer-provisioning-orchestration-r1/tasks/206-prereqs-yaml-recipe-contract-remediation.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/207-prereqs-yaml-placeholder-substitution-remediation.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/208-integrate-prereqs-validator-into-ci-router.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/209-restore-master-branch-protection.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — header rewrite + 4 new rows
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — this SESSION 14 Quick Recovery block
+
+---
+
+> **Last Updated**: 2026-08-27 SESSION 13 (task 199 reconciliation COMPLETE) — First live batch dispatch of task 186 attempted, HALTED pre-Step-0.5 via §6.5 escalation on 3 discoveries: (1) task 023 registry-schema script never deployed to any env despite ✅ status; (2) L2 code's `sprk_customerid` alt-key column missing entirely (never authored anywhere); (3) SKILL.md Step 1f/6a referenced 3 fictional fields (`sprk_profile`, `sprk_upgrademode`, wrong `sprk_setupstatus` int). All three fixed in-session as task 199 (see notes/task-199 outputs). spaarkedev1 now has all 12 task-023 columns + `sprk_customerid` (30 sprk_ columns total) + `sprk_customerid_key` alt-key registered. SKILL.md Step 1f rewritten with correct required NOT-NULL fields + enum-int setupstatus. Task 186 UNBLOCKED for next-session re-dispatch.
+
+## 🎯 SESSION 13 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 12 FINAL below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 199 reconciliation: (1) deployed task 023 script against spaarkedev1 — 12 columns added; (2) authored + ran `scripts/Add-CustomerIdColumn.ps1` — added missing 13th column + alt-key; (3) rewrote SKILL.md Step 1f payload (drop `sprk_profile`/`sprk_upgrademode`, add 5 required NOT-NULL fields, enum-int setupstatus, tenancymodel option-set int); (4) fixed Step 6a (setupstatus=2, alt-key lookup, immutable-tenantId note); (5) fixed Fallback Matrix (correct setupstatus int, registry-env pointer). Saved operator memory `feedback_no_central_managing_env_yet`. Filed task 199 POML + updated TASK-INDEX (186 dep→199, new row 199). |
+| **Next actionable** | **Re-dispatch task 186 batch mode**. In fresh session: `/provision-environment trial1 --batch runs/trial1-intake.json`. Intake JSON already authored (SESSION 12) + schema-validated. Skill fixes will now flow cleanly through Step 1f placeholder create. Then Step 2 preflight (H0), Step 3 confirmation gate (`proceed with provisioning`), Step 4 execute loop H1-H14. 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **All blockers cleared** | Task 199 ✅ complete (schema deployed + skill fixed + POML filed). spaarkedev1 schema verified via raw Web API: 30 sprk_ columns + `sprk_customerid_key` alt-key present. Previous SESSION 12 blockers also all clear (see below). |
+| **Locked decisions (SESSION 13)** | (1) spaarkedev1 IS the registry env for `environment=dev` (owner directive — no separate central-managing env exists yet; filed as future r2 evaluation); (2) `sprk_customerid` = String(64), Recommended, ALT-KEY on `sprk_customerid_key`; (3) placeholder-create payload uses `sprk_setupstatus=1` (InProgress), completion updates to `2` (Ready); (4) `sprk_tenancymodel` option-set integer values Model1Shared=0, Model2Dedicated=1; (5) `sprk_tenantid` is IMMUTABLE post-placeholder-create (never re-write in Step 6a per §4D I1). |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — pending SESSION 13 commit at HEAD |
+| **Working tree pending** | Modified: `.claude/skills/provision-environment/SKILL.md`, `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`, `projects/customer-provisioning-orchestration-r1/current-task.md`. New: `scripts/Add-CustomerIdColumn.ps1`, `projects/customer-provisioning-orchestration-r1/tasks/199-reconcile-registry-schema-and-skill-alignment.poml`. Committing as one atomic SESSION 13 reconciliation. |
+| **Filed follow-on (deferred, non-blocking)** | (1) Extend `DataverseEnvironmentRecord.cs::AllColumns` to include the 13 new columns — per task 023's original "consumers land in later tasks" constraint. Not blocking 186. (2) Update SKILL.md line 63 + 1337 KV credential-lifecycle language — E-3 CLOSED 2026-08-24 (auth-v4 task 033 deleted both KV copies of `BFF-API-ClientSecret`) so the "never purge soft-deleted rollback copies" language is stale. Not blocking anything. (3) Design central-managing Dataverse env for r2 — owner-flagged as "good idea to evaluate". |
+
+### To resume in fresh session — say ONE of these
+
+- **"dispatch task 186 batch"** — main session runs `/provision-environment trial1 --batch runs/trial1-intake.json`; skill flows through Steps 0 → 0.5 → 1 (batch loads + 1f now works with fixed payload) → 2 preflight H0 → Step 3 gate (`proceed with provisioning`) → Step 4 execute loop
+- **"dispatch task 186 interactive"** — same skill without `--batch`; operator types intake values live at 1a-1e prompts
+- **"continue provisioning-orchestration-r1"** — `/project-continue` full context load
+- **"where was I"** — reads this Quick Recovery + resumes
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is now GENUINELY ready.** The SESSION 13 halt was the exact kind of discovery pre-flight is supposed to catch — 3 latent misalignments (task 023 script never deployed + missing 13th column + skill drift) all surfaced at Step 0 pre-Step-0.5, all fixed atomically as task 199, all verified live on spaarkedev1 (schema query shows 30 sprk_ columns + alt-key). Next dispatch will flow through the same skill invocation cleanly.
+
+### SESSION 13 file inventory (pending commit)
+
+- `.claude/skills/provision-environment/SKILL.md` — Step 1f + Step 6a + Fallback Matrix corrections
+- `scripts/Add-CustomerIdColumn.ps1` (new) — companion to `Extend-DataverseEnvironmentSchema-v3.3.ps1`; adds 13th column + alt-key; idempotent
+- `projects/customer-provisioning-orchestration-r1/tasks/199-reconcile-registry-schema-and-skill-alignment.poml` (new) — post-hoc POML documenting reconciliation
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — row 199 added; 186 dep updated to include 199
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — this SESSION 13 Quick Recovery block
+- (memory) `feedback_no_central_managing_env_yet.md` — persisted mid-session
+
+---
+
+> **Last Updated**: 2026-08-26 SESSION 12 FINAL (context-handoff — user ending session for fresh context) — Task 186 is FULLY UNBLOCKED. All prerequisites cleared including the OpenAI region gap caught + fixed this session. Branch @ `f9962816d` = origin, 15 ahead of master (12 behind — master moved via other projects, non-blocking; merge at project close per §14A upgrade model). Working tree CLEAN. All work pushed. Next actionable is task 186 dispatch via `/provision-environment trial1` (interactive) or `/provision-environment trial1 --batch runs/trial1-intake.json` (batch — needs main-session to author the intake JSON first from SESSION 11 locked values). No pending main-session work.
+
+## 🎯 SESSION 12 FINAL QUICK RECOVERY — 2026-08-26 (READ THIS FIRST — supersedes SESSION 12 END below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | (1) Prerequisite wave (204b + 204c I4 REPLACE + 204d + 10 H13 probes verified already-applied); (2) 203c SKILL.md wiring (A02 Step 0.5 + A03 --batch + A04 Step 7 postmortem + intake.schema.json); (3) A26 queue-recreate ceremony (operator executed; verified); (4) Bicep what-if dry-run + operator-review report (265 lines); (5) OpenAI region gap DIAGNOSED (westus2 empty for OpenAI in sub 484bc857) + FIXED via 4-agent bundle wf_d7ec4624-584 (customer.bicep openAiLocation param + openai.bicep pin bump + PRQ-E-14 preflight + intake schema + Step 0.5 classifier tightened to exit-code-first + bash -c wrapper). |
+| **Next actionable** | **Task 186 dispatch**. Two modes: (A) `/provision-environment trial1` interactive — skill walks 7 steps live, operator handles manual gates. (B) `/provision-environment trial1 --batch runs/trial1-intake.json` batch — needs main-session to author the intake JSON first from SESSION 11 locked values (customerId=trial1, tenantId=a221a95e-6abc-4434-aecc-e48338a1b2f2, tenancyModel=Model2Dedicated, environment=dev, profile=spaarke-hosted-model2, region=westus2, openAiRegion=westus3, tier=shared-trial). Task 186 is 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **All blockers cleared** | 203c/204b/204c/204d all ✅ · A26 queue verified (`requiresSession=true, requiresDuplicateDetection=true, PT1H`) · Bicep what-if clean · OpenAI region gap FIXED · PRQ-E-14 preflight PASSES against westus3 today (`gpt-4o:2024-11-20=Legacy, gpt-4o-mini:2024-07-18=Deprecating, text-embedding-3-large:1=GA`) |
+| **Locked owner decisions** | Q1-Q7 SESSION 11 (customerId=trial1, KEEP PERMANENT, Model 1 shared BFF pattern, canonical §7.9 R1 naming); I4 REPLACE SESSION 12 (retire task 176 probe on-disk-with-banner, register new independent-ARM-read probe); OpenAI region westus3 SESSION 12 (canonical split-region strategy per user memory) |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `f9962816d`; 15 ahead of master, 12 behind (non-blocking — other projects moved master; merge at project close) |
+| **Working tree** | CLEAN — all 6 SESSION 12 commits pushed |
+| **Filed follow-on (post-186 or parallel r2)** | gpt-5 migration path — gpt-5 + gpt-5-mini + gpt-5-nano all GA in westus3 for this sub with quota granted (`gpt-5: 3000 TPM globalstandard, 10 in-use`; `gpt-5-mini: 2000 TPM`; `gpt-5-nano: 16000 TPM`). Current pins ship trial1 today; migration is future-proofing (est 1-2 days validation for chat/tool/JPS-schema behavior). |
+
+### SESSION 12 commits (6 total, all pushed)
+
+- `0185a7071` — SESSION 12 prerequisite wave (I4 REPLACE + 204b/c/d, 10 files +1706/-14)
+- `abe16465a` — 203c SKILL.md wiring (A02/A03/A04 landed, 4 files +351/-7)
+- `056db7828` — SESSION 12 END checkpoint (before A26)
+- `445286de7` — A26 queue-recreate executed
+- `37c0e4bad` — OpenAI region gap fix bundle (6 files +366/-38)
+- `f9962816d` — SESSION 12.5 addendum in current-task.md
+
+### To resume fresh session — say ONE of these
+
+- **"dispatch task 186 interactive"** — invoke `/provision-environment trial1` in Claude Code; operator walks each step + confirms `proceed with provisioning`
+- **"prepare batch intake for trial1"** — main-session generates `runs/trial1-intake.json` per updated `scripts/provisioning-prereqs/intake.schema.json` from SESSION 11 locked values; then paste `/provision-environment trial1 --batch runs/trial1-intake.json`
+- **"file gpt-5 migration project"** — spin up a small POML/spec for the gpt-5 family migration (est 1-2 days; scope: 3 model pin changes + code retest + cost recalc; can run parallel to task 186 or post-186)
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended dispatch
+- **DO NOT** run task 186 without running the /provision-environment skill (Step 0.5 will pre-check PRQ-E-14 + PRQ-* prereqs; Step 3 confirmation gate protects against slip)
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is truly ready.** The prerequisite wave was mostly a discovery exercise (9 of 10 H13 probes + 204d topology already landed by prior Wave G tasks; punch-list carried stale OPEN markers). The one real code addition was the OpenAI region gap catch — sub 484bc857 has no OpenAI models in westus2 despite the template originally binding to it — and the fix bundle (37c0e4bad) closed that with a proper split-region param + preflight + classifier tightening so the gap can never re-appear silently. Everything is committed, pushed, and verified live.
+
+---
+
+> **Last Updated**: 2026-08-26 SESSION 12 END — **🎯 SESSION 12 accomplishments** (all pushed to origin, branch @ `abe16465a` = master + 11 ahead; working tree CLEAN): (1) **Prerequisite wave dispatched** (`wf_5d833b87-331`, 12 background agents, 1.74M tokens, ~21min) landing 204b Path A + 204c 10 H13 probes + 204d topology decision. **MASSIVE FINDING**: 9 of 10 H13 real probes for 204c B07 were ALREADY APPLIED by prior Wave G tasks (170/172/173/174/175/177/178/179/180 + composite wiring by 185); task 204d Path SPLIT was ALREADY DONE by Wave G-1 tasks 100/101/102 (2026-08-19); punch-list carried STALE "OPEN" markers. The 15-20h prerequisite estimate was illusory. (2) **I4 REPLACE** (owner directive SESSION 12): swapped I4 registration in `E2EAcceptanceModule.cs` from task-176 `SpeContainerResolverInvariantProbe` (BFF-diagnostic trust-me pattern; retained on disk with Wave G-6 retirement banner) → new `SpeContainerTenantDerivationInvariantProbe` (task 204c B07, INDEPENDENT ARM app-settings direct re-verification per 204c dispatch principle). Composition-root test I4 mapping updated. Tests 148/148 pass. (3) **204d regression guard**: `ApiHostShadowWorkerGuardTests.cs` (191 LOC) asserts `.Api` never registers hosted services (protects Path-SPLIT topology). Quality gates PASSED (0 Critical / 0 Warning / 1 non-blocking Suggestion). (4) **204b Path A landed**: spec.md §ADR Tensions row + design.md §17 Placement Justification + punch-list B04 annotated. NO code change to `DataverseServiceClientImpl.cs`. (5) **Task 203c SKILL.md wiring COMPLETE**: A15 + A16 verified ALREADY APPLIED (tasks 005 + 111 + 144); A02/A03/A04 landed as advisory quality-of-life additions to `/provision-environment` skill — Step 0.5 external-prereqs iteration (line 174, HARD STOP), Step 1.0 batch mode + `intake.schema.json` (Draft 2020-12 + conditional invariant + 2 examples), Step 7 postmortem (line 909, MANDATORY per template). Actual effort ~3h vs 15-20h estimate. (6) **TASK-INDEX**: 203c/204b/204c/204d all flipped to ✅. **CRITICAL OUTCOME — task 186 blocker status DRAMATICALLY REDUCED**: essentially unblocked pending A26 queue-recreate (30min human authorization per runbook §7). Owner directive still stands: DO NOT run 186 until A26 is executed by human operator.
+
+## 🎯 SESSION 12 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Prerequisite wave for task 186. 204b/204c/204d all flipped ✅ (mostly via already-applied discovery). 203c SKILL.md wiring COMPLETE (A02/A03/A04 landed as new SKILL sections + `intake.schema.json` authored). I4 REPLACED per owner directive. Punch-list + TASK-INDEX updated to reflect SESSION 12 outcomes. |
+| **Next actionable** | **A26 queue-recreate ceremony** — human executes `az servicebus queue delete sprk-provisioning-jobs -g <rg> --namespace-name spaarke-servicebus-dev` + Bicep re-provision per `notes/queue-recreate-runbook-2026-08.md` §7. WARNING: creation-time-only settings (`requiresSession=true` + `requiresDuplicateDetection=true` PT1H); existing messages LOST. 30min. Then task 186 dispatch (16-24h with 24h SPE gate). |
+| **Locked owner decision (SESSION 12)** | **I4 = REPLACE** — retire task 176's BFF-diagnostic-endpoint probe (kept on disk with retirement banner; may be re-registered under a distinct `InvariantKind` post-186 if operator approves complementary coverage), register task 204c's INDEPENDENT ARM app-settings-read probe. Composite disallows both under same Kind. Applied via `E2EAcceptanceModule.cs` swap + `E2EAcceptanceCompositionRootTests.cs` CR9 mapping update. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `abe16465a` = origin/master + 11 ahead; working tree CLEAN |
+| **Test suite** | 148/148 pass (E2EAcceptance + SpeContainer + ApiHostShadowWorker filter, post I4 swap). Full L2 test suite unchanged. |
+
+### SESSION 12 commits (ALL PUSHED)
+
+- `0185a7071` — feat(provisioning): SESSION 12 prerequisite wave — I4 REPLACE + 204b/c/d results (10 files, +1706/-14)
+- `abe16465a` — feat(provisioning): task 203c SKILL.md wiring — A02/A03/A04 applied + A15/A16 confirmed already-done (4 files, +351/-7)
+- `445286de7` — docs(provisioning): A26 queue-recreate ceremony executed 2026-08-26 SESSION 12 (1 file, +2/-2)
+- `37c0e4bad` — feat(provisioning): OpenAI region gap fix bundle — customer.bicep openAiLocation param + openai.bicep pin bump + PRQ-E-14 preflight + intake schema + Step 0.5 classifier tighten (6 files, +366/-38)
+
+### 🎯 SESSION 12.5 addendum — OpenAI region gap catch + bundle fix
+
+**What surfaced**: Bicep what-if for trial1 validated cleanly, but the operator's own pre-check rule (`az cognitiveservices model list` per user memory `reference_openai_model_pins_stale_fast`) revealed that **sub 484bc857 has ZERO OpenAI models available in westus2**. customer.bicep bound OpenAI to top-level `location=westus2` → H2a would have aborted mid-run with model-not-available.
+
+**Root cause**: the process gap. PRQ-C-02 (existing OpenAI model check) is scoped `once_per_customer` (fires at Step 2 preflight, AFTER operator confirms run). It also had a silent-pass classification defect — empty query result was interpreted as pass.
+
+**Bundle-fix landed** (`37c0e4bad`):
+- customer.bicep: new `openAiLocation` param (default `westus3` per canonical Spaarke strategy); openAi module invocation swapped from `location: location` to `location: openAiLocation`
+- openai.bicep: version pin bumps — gpt-4o `2024-08-06 → 2024-11-20 (Legacy)`; gpt-4o-mini `2024-07-18` RETAINED (no newer version in westus3 for this sub); text-embedding-3-large `1 (GA)` unchanged. TPM budgets preserved byte-for-byte (150/200/30/350).
+- prereqs.yaml: new PRQ-E-14 preflight (scope=`once_per_env`, fires at Step 0.5 BEFORE confirmation). Recipe iterates openai.bicep-pinned pairs + `az cognitiveservices model list` + exits 1 on Deprecated or NOT_AVAILABLE. Id-collision handled (E-13 already occupied → E-14 assigned to preserve cross-refs).
+- intake.schema.json: new `openAiRegion` field (default westus3) + examples updated.
+- SKILL.md Step 0.5 classifier: exit-code-first pass/fail (not output-shape); recipe execution via `bash -c` (handles for/if/exit shell syntax); defense-in-depth expect-pattern match; `{openAiRegion}` placeholder substitution; recipe-author contract added.
+- notes/bicep-whatif-trial1-2026-08-26.md — 265-line operator-review report authored by workflow wf_e3c35ea9-c9e.
+
+**Verification**: PRQ-E-14 recipe manually run against westus3 → EXIT 0 PASS. Bicep compile clean on both files. What-if is stale; would benefit from a re-run against updated template but the delta is param default + module invocation string (structure identical).
+
+**Task 186 blocker status**: REGION GAP FIXED. Task 186 can dispatch with `openAiLocation=westus3` (or default). PRQ-E-14 will pre-verify pins before every run.
+
+### Deferred follow-on discovery — gpt-5 migration path
+
+Broader `az cognitiveservices model list` scan revealed:
+- **gpt-5** (2025-08-07, GenerallyAvailable) + **gpt-5-mini** (2025-08-07, GA) + **gpt-5-nano** (GA) all in westus3
+- **TPM quota already granted** in sub 484bc857: `gpt-5: 3000 GlobalStandard TPM (10 in-use)`, `gpt-5-mini: 2000 TPM`, `gpt-5-nano: 16000 TPM`
+- Someone in this sub is ALREADY consuming gpt-5 (10 TPM active) — infrastructure warm
+- **gpt-4.1** family (Legacy) also available
+
+**Follow-on to file (post-186 or parallel r2 scope)**: migrate customer.bicep model pins from gpt-4o family (Legacy + Deprecating) to gpt-5 family (GA). Estimated 1-2 days for validation — chat prompts, tool calls, JPS schemas, cost recalculation. Trial1 works fine with current pins for months; not urgent, but the trial1 env is KEEP-PERMANENT (SESSION 11 Q4) so eventually needed.
+
+### Critical Context (2-3 sentences)
+
+**Task 186 prerequisite wave essentially self-resolved** — the vast majority of what looked like open blocker work had already been landed in prior Wave G iterations; the punch-list markers were stale. Real remaining work reduced to: (a) I4 REPLACE swap + composition-root test update, (b) 204d regression guard test (191 LOC preventing future silent regression to shadow-worker topology), (c) 204b Path A doc-only formalization, (d) 203c SKILL.md advisory wiring (Step 0.5 dynamic prereqs.yaml iteration + Step 1 --batch mode + Step 7 postmortem). All committed + pushed. **Task 186 is essentially unblocked pending A26 queue-recreate (human authorization, 30min).**
+
+### Deferred / follow-on (post-186)
+
+1. **Owner sign-off on re-registering task 176 `SpeContainerResolverInvariantProbe` under distinct `InvariantKind`** — if operator determines both BFF-diagnostic AND ARM app-settings probes should run in parallel (belt-and-suspenders), a new `InvariantKind.I4SpeContainerRuntimeAssertion` (or similar) enum value would need to be added + the retired probe's Kind property updated + composite would then dispatch to BOTH. Currently: only I4 = ARM app-settings direct read.
+2. **A26 queue-recreate ceremony** — human executes per runbook §7 (destructive, authorized SESSION 11 Q7).
+3. **203d POST-186 nice-to-have** — A32/A33/A34 (~5h; gate `deferred-post-186` still holds).
+4. **204e regression ArchTests + IOptions checklist** — ~11h; not blocking 186.
+5. **Customer-onboarding workflow (Stage 2)** — per SESSION 11 two-stage E2E model, this is future r2 scope.
+6. **/audit-provisioning-lessons slash command** — cross-run audit roll-up planned per task 203-followup (consumes lessons-learned.md files that Step 7 now writes).
+
+### To resume next session — say ONE of these
+
+- **"execute A26 queue-recreate"** — assumes human has executed the destructive az delete + Bicep re-provision; Claude verifies queue state (`requiresSession=true` + `requiresDuplicateDetection=true`) via `az servicebus queue show`.
+- **"dispatch task 186"** — RECOMMENDED after A26 verified. Task 186 is the full E2E acceptance rerun (16-24h with 24h SPE gate; `customerId=trial1` per SESSION 11 Q3).
+- **"Bicep what-if dry-run"** — proves the trial1 create plan against sub `484bc857` before task 186 fires (~1h; optional but recommended).
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended action.
+- **DO NOT** run task 186 until A26 is verified (owner directive SESSION 11 Q7 + still standing).
+
+---
+
+> **Last Updated**: 2026-08-26 SESSION 11 END — **🎯 SESSION 11 accomplishments** (all pushed to origin, branch @ `edc3a94ad` = master + 8 ahead; working tree clean): (1) **Task 205 c/d/e/f wave COMPLETE** (`8ca5a056f`) — 3 parallel task-execute background agents (205c/d/e Sonnet-mix, ~1.13M tokens, ~41min) + main-session 205f landed; 205c caught + fixed pre-existing YamlDotNet naming-convention bug (ALL 15 per_env_settings entries had silently returned Failure since task 201 — undetected because no prior test exercised the real embedded manifest); 205d closed §10.4 objectid trap not addressed by task 053; 205e landed 3-branch gate in Deploy-AllIndexes.ps1; 205f DROPPED sub-scope (a) as scope-drift + owner Path C (H4b/H9 do NOT iterate appsettings.template.json — live-code verified), APPLIED §6.5 EDIT package verbatim + companion sweep (6 of 7 sites; Site F was already cured) + doc sweep (mirror 280→642 lines + copy.md delete + rotation-cadence + 3 SF-1 UAMI sites); 1668/0/1 test suite green; +0.11 MB publish delta. **Task 205 FULLY COMPLETE — 9 of 9 sub-phases landed** (a/b/c/d/e/f/g/h/i). (2) **Master merge** (`edc3a94ad`) — 5 SPE-admin-app-r2 fix commits (PR #824) merged clean, 0 conflicts, no overlap with 205 changes. (3) **Housekeeping check** — git state verified clean, Azure identity confirmed as owner AAD `ralph.schroeder@spaarke.com` (NFR-11), 5 subs enumerated (default = `484bc857` Spaarke Devlopment Environment), L2 platform verified LIVE (`spaarke-provisioning-controlplane-dev` Running), Dataverse admin env identified (`spaarkedev1`), Q1-Q7 owner Q&A resolved + two-stage E2E model clarified. (4) **CRITICAL FINDING — task 186 NOT clear to fire despite 205 completion**: punch-list audit revealed 4 prerequisite waves + A26 queue-recreate ceremony still needed. Task 204c (H13 real probes) is explicitly labeled "HARD-BLOCKS TASK 186" in TASK-INDEX. Owner directive: **complete ALL prerequisites** before task 186 fires. (5) **Owner Q&A locked customerId=`trial1`** (matches §7.9 R1 naming convention) + two-stage E2E model + resource reuse plan + destructive A26 authorization + KEEP trial1 env permanently as production SMB shared-trial infrastructure.
+
+## 🎯 SESSION 11 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 205 FULLY COMPLETE (9 of 9 sub-phases: a/b/c/d/e/f/g/h/i). Master merged. Housekeeping done. Owner Q&A resolved 7 open questions locking customerId=`trial1` + two-stage E2E model + full resource reuse plan. Punch-list gate audit revealed 4 more prerequisite waves + A26 ceremony required before task 186 can fire. |
+| **Next actionable** | **Dispatch prerequisite wave** (Ultracode/Workflow): 203c (skill wiring — A02/A03/A04/A15/A16, MAIN-SESSION-ONLY per `.claude/skills/**` write boundary) + 204b (§6.5 Path A formalization, ~2h) + 204c (H13 real probes — 10 sub-tasks, **HARD-BLOCKS 186**, dispatched as nested workflow) + 204d (staging-slot topology, ~16h). Then A26 queue delete/recreate (30min human authorization). Then Bicep what-if verify. Then task 186 (16-24h with 24h SPE gate). |
+| **Rigor** | ALL prerequisites are FULL rigor (auth-tagged OR code-modifying OR test-modifying). 203c MAIN-SESSION-ONLY; 204c/204d parallel-safe background; 204b parallel-safe (small formalization). |
+| **Model / Effort** | 204c sub-probes: Sonnet/high (mechanical port per probe); 203c: Sonnet/high MAIN-SESSION; 204b: Sonnet/high; 204d: Sonnet/high (structural — could escalate to Opus/Fable for higher-risk refactor). |
+| **Parallel-safe** | 203c: NO (MAIN-SESSION-ONLY per `.claude/**` boundary); 204b/c/d: YES (background). Recommended dispatch: nested Workflow with 204c(10 sub-probes) + 204b + 204d as 12 background agents; 203c concurrent in main session. |
+| **Estimated remaining effort** | ~15-20h wall-clock parallelized to task 186 dispatch (bottleneck = 203c ~13h main-session + 204c ~4-6h with 10 parallel sub-probes); then A26 30min + Bicep what-if 1h + task 186 16-24h. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `edc3a94ad` = origin/master + 8 ahead; working tree CLEAN. |
+| **Next action for fresh session** | **"dispatch prerequisite wave"** (recommended, Ultracode-native) OR **"execute task 204c"** (HARD-BLOCKER focus) OR **"execute task 203c"** (main-session skill wiring only). **DO NOT** run task 186 yet. |
+
+### SESSION 11 commits (ALL PUSHED)
+
+- `8ca5a056f` — feat(provisioning): task 205 sub-phases c/d/e/f complete (auth-v4 integration finalized) — 38 files (34 mod + 3 new + 1 del), +2134/-669
+- `edc3a94ad` — Merge remote-tracking branch 'origin/master' into work/customer-provisioning-orchestration-r1 — 10 files from SPE-admin-app-r2 fix bundle (PR #824), clean merge
+- `[this SESSION 11 END checkpoint commit]` — checkpoint: owner Q&A locked + prerequisite wave prep
+
+### Critical Context (1-3 sentences)
+
+**Task 205 fully closed the auth-v4 integration cascade** — the platform now has the correct auth contract end-to-end (MI-FIC secret-free + `RequireSecretFreeIdentity=true` boot assertion + no sentinel patterns + updated never-delete rules per §6.5 resolution). **Owner Q&A locked the FIRST E2E's scope**: customerId=`trial1` drives §7.9 R1 naming, tenancyModel=`spaarke-hosted-model2` (full stack create for one env), new Dataverse env "Spaarke Trial Environment 1" (type=Production, PERMANENT — becomes the SMB shared-trial production infrastructure; future SMB customers like Contoso1 added later via customer-onboarding workflow NOT in r1 scope). **Punch-list audit revealed the completion trap**: 205 landing did NOT unblock 186 — Class-A A15/A16 (203c) + Class-B B04/B07/B11 (204b/c/d) + A26 queue-recreate remain hard prerequisites. Task 204c H13 real probes explicitly HARD-BLOCKS 186.
+
+### Terminology reconciliation (fixed drift, BINDING for future sessions)
+
+Prior sessions conflated AAD tenant with Dataverse env with customer. Correct definitions:
+- **AAD tenant** = ONE for all Spaarke (`a221a95e-6abc-4434-aecc-e48338a1b2f2`). Customer AAD tenants (Contoso, etc.) are EXTERNAL orgs.
+- **Azure subscription** = 5 in Spaarke's tenant; E2E targets `484bc857-3802-427f-9ea5-ca47b43db0f0` (Spaarke Devlopment Environment).
+- **Dataverse environment** = 1 today (`spaarkedev1`) → 2 after E2E (new: **"Spaarke Trial Environment 1"**, permanent).
+- **BFF app-reg** = 1 per Dataverse env (new env gets its own multitenant BFF app-reg).
+- **Customer** = many per shared trial env in Model 1 pattern; contoso1 is FUTURE user record in trial1 env post-186.
+
+When ADR-028 / spec.md say "cross-tenant" / "multitenant", they mean CUSTOMER AAD tenants (external orgs sending users into Spaarke's ONE tenant via B2B/CIAM), NOT Spaarke's tenant being multiple.
+
+### Locked owner decisions (SESSION 11 Q&A, 2026-08-26 — BINDING)
+
+**Q1 (B04 ADR-tension)**: **§6.5 Path A** — Model 1 uses ONE shared Dataverse env per shared BFF app-reg per env. `DataverseServiceClientImpl.cs:39` single-URL shape is correct-by-design. Task 204b formalizes as decision doc.
+
+**Q2 (E2E tenancy for task 186)**: Full stack create — tenancyModel = `spaarke-hosted-model2`. All 19 handlers run (no skips). Creates NEW Dataverse env "Spaarke Trial Environment 1" + full infrastructure stack.
+
+**Q3 (customerId + tenant)**: **customerId = `trial1`** (drives §7.9 R1 naming across ALL resources: `rg-spaarke-trial1`, `sprk-trial1-kv`, `spaarke-bff-trial1`, etc.). TenantId = `a221a95e-6abc-4434-aecc-e48338a1b2f2` (Spaarke's one AAD tenant). Contoso1 = FIRST customer USER added to trial1 env in a FUTURE customer-onboarding workflow (post-186, NOT r1 scope).
+
+**Q4 (teardown)**: KEEP trial1 env PERMANENTLY. Becomes the SMB shared-trial production infrastructure. NO teardown after E2E. Treat all naming/costs/security as production-quality.
+
+**Q5 (spaarke-bff-prod)**: LEAVE in place (Stopped, tagged `deploymentModel=model1 environment=prod`). May reuse in future.
+
+**Q6 (spaarke-dms-dev1-func)**: LEAVE in place (legacy). May reuse in future.
+
+**Q7 (A26 queue-recreate)**: OWNER AUTHORIZED destructive `az servicebus queue delete sprk-provisioning-jobs` + Bicep re-provision per `notes/queue-recreate-runbook-2026-08.md` §7. ORDER: schedule AFTER 204c code lands + BEFORE task 186 fires. CustomerId=`trial1` does NOT affect A26 (queue is L2-scoped, not customer-scoped).
+
+### Two-stage E2E model (owner clarification 2026-08-26 — BINDING for all future planning)
+
+- **Stage 1: Create the E2E platform** — task 186 does this: full infrastructure stack + Dataverse env for trial1 (customerId=trial1).
+- **Stage 2: Create customer-specific resources** — per-customer segregation for each SMB customer added to the platform post-186 (SPE containers, search index params/settings, Dataverse business units, etc.). This is a FUTURE flow NOT YET BUILT — file as follow-on r2 scope (customer-onboarding workflow).
+- **Model 1 vs Model 2 difference**: Model 2 has effectively ONE customer per env (dedicated); Model 1 has MULTIPLE customers per env requiring per-customer segregation for data isolation. Both use SAME provisioning platform for Stage 1; only the Stage-2 customer-add flow differs.
+
+### Resource reuse plan for task 186 (locked SESSION 11)
+
+**REUSE** (platform L2 + shared identity — DO NOT recreate):
+- `spaarke-provisioning-controlplane-dev` (L2 REST API — this IS what task 186 calls)
+- `spaarke-provisioning-controlplane-worker-dev` (L2 Worker)
+- `sprk-controlplane-dev-kv` (L2 KV)
+- L2 Cosmos DB (for ProvisioningRun state)
+- `spaarke-servicebus-dev` (SB namespace; `sprk-provisioning-jobs` queue recreated per A26)
+- `spaarkedev1` (admin Dataverse env — where L2 writes `sprk_dataverseenvironment` row for trial1)
+- Shared BFF app-reg for `spaarkedev1` (existing, unchanged)
+- `sprk-{env}-shared-bff-uami` (existing, unchanged)
+- `spaarke-spekvcert` (SPE cert KV, DO-NOT-RENAME §7.9 R4)
+- `GraphAppRoles.cs` 14 role GUIDs (11 populated fresh by 203c A16 live `az` enumeration)
+- `spaarke-bff-prod` + `spaarke-dms-dev1-func` (leave in place; may reuse — Q5/Q6)
+
+**CREATE FRESH for trial1 E2E** (all named per §7.9 R1 with `trial1` identifier):
+- New Azure RG `rg-spaarke-trial1` (westus2 per canonical Spaarke strategy — user memory: westus2 platform + westus3 OpenAI)
+- New per-env UAMI, KV `sprk-trial1-kv`, App Service Plan, BFF App Service `spaarke-bff-trial1`
+- New Cosmos, Service Bus, Redis (Model 2 shape per FR-12 v3.6 = per-customer Redis)
+- New AI Search + 7 canonical indexes (per H2b)
+- New OpenAI (with pinned model version per ADR-020; westus3 per regional strategy; ALWAYS `az cognitiveservices model list` check before greenfield Bicep deploy per user memory — model pins deprecate ~4-6 months after GA)
+- New Storage, App Insights
+- New Dataverse env "Spaarke Trial Environment 1" (type=Production, PERMANENT)
+- New Entra multitenant BFF app-reg for trial1 env (per user Q1: each env has its own BFF app-reg)
+- New SPE container (24h Microsoft gate — near-instant in practice per user memory)
+- New Graph app-role assignments to trial1 UAMI (per completed GraphAppRoles.cs 14 GUIDs)
+- New Dataverse solutions imported (8 solutions per §11.1a)
+- New AI Search indexes (7 canonical per H2b)
+
+### Pending prerequisites for task 186 (per owner directive: complete ALL)
+
+| Task | Scope | Effort | Status | Blocks 186? |
+|---|---|---|---|---|
+| **203c** | Skill wiring (A02 Step-0.5 external prereqs + A03 --batch flag + A04 Step-7 postmortem + A15 `Grant-ControlPlaneIdentity.ps1` + A16 live `az` enumerate 11 null `AppRoleId` GUIDs in `GraphAppRoles.cs`) | ~13h | not-started | **YES** (A15+A16 hard-block per spec.md MUST) |
+| **204b** | B04 §6.5 Path A formalization decision doc (unblocked SESSION 11) | ~2h | ⏸ was blocked (owner-decision-gate — **RESOLVED SESSION 11 as Path A**) | YES (adr-check gate) |
+| **204c** | B07 H13 real probes (T1/T2/T3/T4/T5/T6 traps + I2/I3/I4/I5 invariants — 10 sub-probes) | ~40h serial → ~4-6h parallel (dispatch as nested workflow) | not-started | **HARD BLOCKS 186** per TASK-INDEX label |
+| **204d** | B11 staging-slot topology split (`.Core` + `.Api` + `.Worker` refactor already partial per verification matrix) | ~16h | not-started | Structural — load-bearing but may not block execution |
+| **204e** | B01/B02/B15 regression ArchTests + IOptions checklist | ~17h | not-started | Not blocking 186 — hygiene; can defer to post-186 |
+| **A26** | Human `az servicebus queue delete sprk-provisioning-jobs` + Bicep re-provision per runbook §7 | 30min | not-scheduled | **YES** (H0.5 dispatch depends on `requiresSession=true` + `requiresDuplicateDetection=true` — creation-time-only) |
+
+### Ultracode dispatch plan (recommended for fresh session)
+
+Single Workflow launching prerequisites in parallel:
+- **Nested Workflow — 204c H13 real probes** (10 parallel sub-agents, Sonnet/high each; one per probe: T1, T2, T3, T4, T5, T6, I2, I3, I4, I5; ~4-6h wall-clock compressed from ~40h serial)
+- **Background agent — 204b** (§6.5 Path A decision doc; ~2h; Sonnet/high)
+- **Background agent — 204d** (staging-slot topology split; ~16h; Sonnet/high — may escalate to Opus/Fable if refactor risk high)
+- **Main session — 203c** (skill wiring MAIN-SESSION-ONLY per `.claude/**` write boundary; ~13h)
+
+Wall-clock: ~13-16h (main session 203c) + parallel background ~4-16h; total ~15-20h. Then:
+- A26 queue-recreate (30min human authorization)
+- Bicep `what-if` dry-run against `484bc857` sub with trial1 params (proves clean create plan; ~1h)
+- Task 186 fires (16-24h with 24h SPE gate)
+
+### Deferred follow-ups (queued for post-186 or long-term)
+
+1. **Customer-onboarding workflow (Stage 2)** — build per-customer resource creation flow (SPE containers, search index params, DV business units per customer). NOT r1 scope; file as follow-on r2 project. This is what enables adding contoso1/contoso2/etc. to trial1 env.
+2. **A22 Path A architectural row** — Model 1 uses H4-shared runtime pattern; Model 2 already applied via `customer.bicep:655`; documented per §6.5 (no code change).
+3. **A26 queue-recreate ceremony** — human execution scheduled after 204c code lands.
+4. **spaarke-bff-prod / spaarke-dms-dev1-func** — leave in place; investigate provenance separately if reuse plans firm up.
+5. **B22 refined scope** — original punch row said ~30 endpoints; actual 121 methods + 28 files; residual work is OpenAPI docs (14 files) + policy decisions on 9 non-rate-limited endpoints — 4-6h follow-on, not the mechanical 8h wiring the row assumed.
+6. **Task 162 sidecar live-verify** — happens naturally during task 186's H14a execution; standalone verify optional.
+7. **204e** — regression-prevention ArchTests + IOptions checklist; ~17h; can defer to post-186.
+
+### To resume next session — say ONE of these
+
+- **"dispatch prerequisite wave"** — launches 203c (main-session) + 204b + 204c (nested workflow for 10 sub-probes) + 204d (background workflow) — the RECOMMENDED path
+- **"execute task 204c"** — HARD-BLOCKS 186; multi-agent workflow of 10 sub-probes
+- **"execute task 203c"** — MAIN-SESSION-ONLY skill wiring; 5 rows (A02/A03/A04/A15/A16)
+- **"dispatch 203c and 204c"** — just the two blocking items, defer 204b + 204d
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended dispatch
+- **DO NOT** run task 186 (owner directive 2026-08-26 SESSION 11 — complete ALL prerequisites first)
+
+---
+
+> **Last Updated**: 2026-08-26 SESSION 10 END — **🎯 SESSION 10 accomplishments** (3 clean commits pushed to origin `f280de764` = branch HEAD): (1) **Initial 205 sub-phase authored** (`7b82f60eb`) — 6 POMLs (205a-f) via 6 parallel background agents covering auth-v4 §10 addendum Δ1-Δ5 + traps + DELIVERED consumption. (2) **Peer 205a A38 ESCALATED cleanly** (`partial-omit-set-discovered` trigger fired at Step-2 grep-verify — 5 upsert sites verified beyond `StaticKvSecretManifest`) → owner APPROVED full re-scope split → **4 revised/new POMLs authored** (205a=A38a + 205g=A38b + 205h=A38c + 205i=A44.5). (3) **S1∥ mini-wave landed** (`cc6ecb6e4`) — 205b (A42) COMPLETE path (b) contract-parity (Fable/xhigh; 26 parity tests; `AssertFicTenancy` ported; `FicExchangeOutcomeClassifier` + `CrossTenantFicRefusedException` + typed exit codes; task-130 I6 preserved). (4) **S2∥ execution wave complete** (`f280de764`) — 4 parallel agents landed A38a+A38b+A38c+A44.5 (~1.5M tokens, 78min wall-clock, ALL green: build 0/0/0/0, `dotnet test` 1646/0/1). (5) **Peer A38a fired site-inventory-drifted on 6th site** (`Setup-OfficeServiceBus.ps1:172`) → owner-directed live `az` diagnosis confirmed script is 80% dead (Step-5 App Service ResourceNotFound, Step-4 KV secret SecretNotFound, SB namespace LIVE via canonical Bicep + MI auth per auth-v4 task 051; 3 `office-*` queues hardcoded + actively polled by Workers/Office/*.cs) → owner chose retain + A38c gate + deprecation banner → **main-session fold-in landed** (helper dot-source + gate + ~50-line banner naming canonical replacements). All 5 executed sub-phases pass Step 9.5 code-review + adr-check UNCONDITIONAL (auth-tagged); 0 ADR violations across the wave.
+
+## 🎯 SESSION 10 QUICK RECOVERY — 2026-08-26 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 205 execution: **5 of 9 sub-phases LANDED** (205a A38a ✅ + 205b A42 ✅ + 205g A38b ✅ + 205h A38c ✅ + 205i A44.5 ✅). Setup-OfficeServiceBus.ps1 escalation resolved (retain + gate + banner). 3 SESSION 10 commits pushed. |
+| **Next actionable** | **Dispatch 205c (A39 H4b per_env_settings) — ORDERING GUARD unblocked** (A38+A42 both landed). Then 205d (A41 H10 dual DV) + 205e (A43 Deploy-AllIndexes gate) in parallel — Sonnet/high. Then MAIN-SESSION 205f (A44 §6.5 EDIT package + doc sweep) — touches `.claude/**` + root CLAUDE.md, cannot delegate. |
+| **Rigor** | 205c FULL Sonnet/xhigh (ORDERING GUARD critical-path to 186); 205d/e/f FULL Sonnet/high (auth-tagged → code-review + adr-check unconditional). |
+| **Model / Effort** | 205c: sonnet/xhigh (§10.2 fail-fast + FIC-flap tolerance). 205d/e: sonnet/high. 205f: sonnet/high MAIN-SESSION. |
+| **Parallel-safe** | 205c: NO (ORDERING GUARD dep on A38+A42 = landed; can dispatch NOW). 205d + 205e: YES (disjoint code + PS). 205f: NO (MAIN-SESSION per `.claude/**` write boundary). |
+| **Estimated remaining effort** | ~10h across 4 sub-phases (205c 4h + 205d 3.5h + 205e 2h + 205f 2.5h); parallel lanes compress to ~5h wall-clock. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `f280de764` = origin |
+| **Working tree** | CLEAN |
+| **Next action for fresh session** | (recommended): `task-execute projects/customer-provisioning-orchestration-r1/tasks/205c-a39-h4b-per-env-settings.poml` — critical-path to 186. Then dispatch 205d + 205e in parallel. Then 205f in main session. |
+
+### SESSION 10 commits (ALL PUSHED)
+
+- `7b82f60eb` — docs(provisioning): author task 205 sub-phase (6 initial POMLs 205a-f)
+- `cc6ecb6e4` — feat(provisioning): task 205 A38 re-scope + A42 landed (S1∥ mini-wave bundle) — includes revised 205a-a38a + new 205g/h/i POMLs + peer 205b's A42 code + old 205a POML deletion
+- `f280de764` — feat(provisioning): task 205 A38 split + A44.5 execution wave complete (S2∥ bundle) — 52 files (5 new + 37 modified), +4150/-184; includes Setup-OfficeServiceBus fold-in
+
+### Critical Context (1-3 sentences)
+
+**Task 205 is 5 of 9 sub-phases complete — all A38 split + A42 + A44.5 landed, task 186 critical-path unblocked pending 205c A39.** ORDERING GUARD (§10.2 BINDING) is now satisfied because A38 split (manifest omit + customer.bicep gate + operator script gates + L2 Worker credential seam) landed together AND A42 FIC creation landed — so 205c can dispatch A39 (Graph__Credentials__Order__0=ManagedIdentityFederated + RequireSecretFreeIdentity=true fail-fast + 6 other §10.2 entries) without boot-looping fresh stamps. Remaining sub-phases (205d/e/f) are smaller and non-critical to 186 (quality gates + doc sweep) but 205f cannot delegate (touches `.claude/**` + root CLAUDE.md).
+
+### Task 205 dispatch prep (next actionable)
+
+**Sub-phase 205c A39** (Sonnet @ xhigh, FULL, ordering-guard-satisfied):
+- POML: `projects/customer-provisioning-orchestration-r1/tasks/205c-a39-h4b-per-env-settings.poml` (143 lines)
+- Scope: extend H4b `per_env_settings` manifest with 8 §10.2 live-contract entries: `Graph__Credentials__Order__0=ManagedIdentityFederated` (sole entry), `Graph__Credentials__RequireSecretFreeIdentity=true` (fail-fast), `ManagedIdentity__ClientId` (FromHandlerOutput), 3 SB `FullyQualifiedNamespace` (`<ns>.servicebus.windows.net`, NOT conn string), `AiSearch__ManagedIdentity__Enabled=true`, `AiSafety__ContentSafety__ManagedIdentity__Enabled=true`
+- Tolerate FIC propagation flap (~130s AADSTS70025 window) — verified-exchange gate OR H4b boot-retry allowance (POML has documented-choice pattern)
+- No load-bearing key `required=false` (H4b:286 silent-skip trap avoidance per §5 SF-18)
+- Deps: A36/A37 (landed 1bc049e4c), A38a (landed f280de764), A42 (landed cc6ecb6e4)
+- ~4h POML estimate; Sonnet/xhigh; single background agent
+
+**Sub-phase 205d A41** — ✅ **APPLIED 2026-08-26 (Sonnet @ high, FULL rigor)**:
+- POML: `205d-a41-h10-uami-dual-app-user.poml` (status flipped to `completed`)
+- H10 dual DV app-user + Q8 D3 wording fix + Naming Standards Model 1 UAMI row — ALL LANDED
+- Dedupe verdict: task 053 landed the two rows; §10.4 objectid trap uncovered by either dedupe source — NO scope-collapse
+- Actual effort ~3h vs 3.5h estimate; full record in `notes/auth-v4-integration-draft-punch-rows.md`
+
+**Sub-phase 205e A43** (Sonnet @ high, parallel-safe with 205d):
+- POML: `205e-a43-deploy-allindexes-gate.poml` (120 lines)
+- Deploy-AllIndexes.ps1 silent-fallback gate; marker convention aligned with A38a landed (`spaarke-secret-free-identity=true` KV tag)
+- ~2h POML estimate
+
+**Sub-phase 205f A44** (Sonnet @ high, MAIN-SESSION ONLY):
+- POML: `205f-a44-template-guard-and-doc-align.poml` (205 lines)
+- Consumer guard for `appsettings.template.json` ServiceBus-ConnectionString KV ref + apply §6.5 EDIT package (Q3 signed 2026-08-25) to `.claude/constraints/provisioning.md` + `spec.md:259/:275` + root CLAUDE.md §17 + doc sweep (replace stale 280-line mirror with 626-line canonical + delete `PROVISIONING-CHANGE-REQUEST copy.md` + fix name-based UAMI resolution in 2 script help-texts)
+- Cannot delegate (`.claude/**` + root CLAUDE.md sub-agent write boundary)
+- ~2.5h POML estimate
+
+**Recommended sequencing**: (a) dispatch 205c immediately (critical-path); (b) parallel-dispatch 205d + 205e as background wave; (c) execute 205f in main session (may run in parallel with 205d/e background dispatch since disjoint file surfaces + main-session-only write boundary).
+
+### Deferred follow-ups (queued for post-186 or ongoing)
+
+1. **`SecretFreeMarkerConsistencyDetector` fleet enumeration** — detector class landed via A38a but runtime fleet enumeration deferred to T8-probe / H13-aggregation family (task 186 acceptance).
+2. **`sprk_credentialmode` column creation** on admin Dataverse env — schema prerequisite before any env enables `RequireSecretFreeIdentity=true` (documented in A38a follow-up rows).
+3. **Optional `sharedKeyVaultResourceGroupName` H4-shared parameter** — Model 1 shared-vault marker RG assumption per A38a.
+4. **A38c `-CredentialMode` pass-through live-read wiring** — 205h's TODO(A38a-followup); unblocked since A38a landed `UpdateCredentialModeAsync`/`sprk_credentialmode` contract.
+5. **CustomerRunGuard factory-unification row** — its Bicep KV-ref gated in A44.5 (partial-omit-trap avoidance) but its C# seam (`DataverseRegistryConcurrencyStore.cs:298` ClientSecretCredential) out of A44.5 scope; on secret-free envs `customerRunGuardEnabled` MUST stay false until MI-FIC seam lands.
+6. **Task-010 idempotency re-port** to `Register-EntraAppRegistrations.ps1` — from A35 master merge deferral.
+7. **Task 186 E2E live-fire** — blocked by 205c/d/f landing + owner disposition on any residual escalations.
+
+### To resume next session — say ONE of these
+
+- **"execute task 205c"** — dispatch A39 (Sonnet/xhigh) as background agent; critical-path to 186
+- **"execute task 205c and dispatch 205d + 205e in parallel"** — one background workflow with 3 agents
+- **"execute task 205f"** — main-session §6.5 EDIT package + doc sweep (safe to run alongside a background 205c/d/e dispatch)
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context, points at 205c per priority
+- **"execute task 186"** — do NOT do this yet; blocked by 205c/d/f landing
+
+---
+
+> **Last Updated**: 2026-08-25 SESSION 9 END — **🎯 SESSION 9 accomplishments** (all pushed to origin, master `28c2c1b38` = branch HEAD): (1) Task **203a foundation COMPLETE** (`45e14556a`) — 7 rows applied + 2 already-applied via verify-first. (2) **Fable-level deep review** of auth-v4 change request (`5bde2c750`, workflow `wl5blw993`) — 20 agents, 156 claims, 4 deliverables (remediation plan 304 lines / §6.5 decision doc 187 / draft punch rows 70 / open questions 119). (3) **All 11 owner decisions Q1-Q11 RESOLVED** (`c3e5b7d58`) — critical discovery: this branch was 281 behind master (auth-v4 A4+E-3+MI-migration missing here). (4) **S1∥ mini-wave DISPATCHED + LANDED** (A36+A37 `1bc049e4c`; A40 in `c3e5b7d58`) — 3 parallel background agents; `bff-runtime-rbac.bicep` (comprehensive) + `ArmAppServiceIdentityPatcher.cs` VERIFIED PASS + task 186 acceptance criterion + runbook §12.5/12.6. (5) **A35 master merge** (`28c2c1b38`) — 276 commits from master merged INTO branch; 15 conflicts resolved. (6) **/merge-to-master** completed — pushed `5532fc714..28c2c1b38` to origin/master; main repo local master fast-forward synced. Branch AND master now identical.
+
+## 🎯 SESSION 9 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 203a foundation (✅) + Fable deep review (4 deliverables) + all 11 owner decisions (Q1-Q11) + S1∥ mini-wave (A36+A37+A40) + A35 master merge (both directions) |
+| **Next actionable** | **Task 205 dispatch** (auth-v4 runtime-contract integration — A38 ∥ A42 → A39; A41 extended per Q8; A43/A44). Critical-path to task 186 = **11h serial**. |
+| **Alternate next** | Task 203c (skill wiring — A02/A03/A04/A15/A16) — was queued from prior session, now firing on merged baseline |
+| **Rigor** | FULL (per punch row landing-spot mix: bicep + code + skill-directive) |
+| **Model / Effort** | Sonnet-5 @ high (A36/A37/A40 pattern) OR **Fable/Opus @ xhigh for A38 + A42** (credential-logic + cross-worktree consumption; auth-tagged → code-review + adr-check unconditional per project CLAUDE.md §8.5) |
+| **Parallel-safe** | Mixed: A38 ∥ A42 (parallel-safe if scoped correctly); A39 serial after both; A41/A43/A44 parallelizable after A35 (now landed) |
+| **Estimated effort** | ~23h remaining critical-path (A38 4h ∥ A42 4h → A39 4h serial; A41 3.5h; A43 2h; A44 2.5h) = 16h across parallel lanes |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `28c2c1b38` (identical to master) |
+| **Working tree** | CLEAN |
+| **Next action for fresh session** | (option A) `task-execute projects/customer-provisioning-orchestration-r1/tasks/205-...poml` — need to CREATE task 205 POML first via `task-create` skill OR spec 6 sub-POMLs 205a-f. (option B) `task-execute projects/customer-provisioning-orchestration-r1/tasks/203c-apply-classA-punchlist-skill-wiring.poml` — already exists |
+
+### SESSION 9 Files Modified (ALL PUSHED, no uncommitted work)
+
+**Commits (in order)**:
+- `45e14556a` — feat(provisioning): apply task 203a Class-A punch list foundation (7 applied + 2 already-applied)
+- `5bde2c750` — docs(provisioning): Fable-level review of auth-v4 change request — 4 deliverables
+- `c3e5b7d58` — docs(provisioning): auth-v4 integration — 11 owner decisions resolved + A40 kv-ref-identity assertions
+- `1bc049e4c` — feat(provisioning-bicep): apply auth-v4 §10.1 Δ1+Δ2 — BFF UAMI SB + AI Search data-plane RBAC (rows A36 + A37)
+- `28c2c1b38` — Merge origin/master into work/customer-provisioning-orchestration-r1
+- `5532fc714..28c2c1b38` — pushed to origin/master via /merge-to-master (Path B fast-forward)
+
+**Master state**: `28c2c1b38` (fast-forwarded from `5532fc714`; main repo local master synced)
+
+### Critical Context (1-3 sentences)
+
+**Task 203a foundation LANDED + auth-v4 change request FULLY INTEGRATED into master via deep-review-guided workflow.** All 11 owner decisions recorded in `notes/auth-v4-integration-open-questions.md` resolution table (Q2 = reading (a), Q3 = §6.5 signed sunset 2026-11-23, Q4-Q11 all disposed). §6.5 conflict resolution APPROVED (`notes/decisions/adr-028-a4-integration-conflict-resolution.md`) — BFF-API-ClientSecret Path C + Dataverse-ClientSecret time-boxed Path A. Punch list §203a EXECUTION RESULTS annotated. Task 186 E2E remains gated on A38/A39/A41/A42 landing (task 205 scope).
+
+### Deferred follow-ups queued for post-merge (documented in merge commit `28c2c1b38`)
+
+1. **Task-010 idempotency layer re-port** to `Register-EntraAppRegistrations.ps1` — `Get-MissingPermissions` / `Add-MissingPermissions` / `Reconcile-IdentifierUri` / `$SecretExpiryMonths` param. Small, focused, testable PR (auth-v4 comprehensive version was taken during merge to reduce correctness risk).
+2. **Q4 doc port** (part of A44b): master's MI environment contract (§1 prereqs / §5.1 UAMI RBAC / §6 Dataverse app user from `docs/guides/auth-deployment-setup.md` master version) → `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. Verify master's 🔴 secret-free banner text isn't lost.
+3. **Cert-path re-add** to `scripts/Create-NewContainerType.ps1` + `scripts/Register-BffApiWithContainerType.ps1` if any active task still needs it (verify vs E-1 client-secret-preserved path first).
+4. **§6.5 EDIT package** application — Q3 signed 2026-08-25; text drafted in decision doc; apply to `.claude/constraints/provisioning.md` + `spec.md:259/:275` + root CLAUDE.md §17. A38/A44 scope.
+5. **Task 205 dispatch** (see below).
+6. **Q11 obligation** (BFF startup credential self-proof) — post-186 Phase-F planning; §10 obligations (Placement Justification + publish-size + BFF test update) tracked.
+
+### Task 205 dispatch prep (recommended next action)
+
+**Purpose**: auth-v4 runtime-contract integration. Fires the residual work from the Fable deep review's punch rows A38-A44 (excluding A35+A36+A37+A40 which already landed).
+
+**Sub-phases** (per remediation plan §7):
+- **205a A38** (Fable/Opus @ xhigh, FULL): H4/H4-shared credential-type seam — on secret-free envs, OMIT (never sentinel per §9.1) BFF-API-ClientSecret + ServiceBus-ConnectionString + AiSearch--AdminKey manifest entries. `StaticKvSecretManifest.cs:74` fix. Partially closes A30's sentinel contract (H4 half). Model 1 vs Model 2 KV behavior explicit. 4h.
+- **205b A42** (Fable/Opus @ xhigh, FULL): task 130 C# provisioner reconciliation per FR-C4 — contract-parity with `-FicOnly` script (Q5 disposition); port `Assert-SpaarkeFicTenancy` cross-tenant refusal guard into `CreateFic`; AADSTS70025 exact-match retry; exit-2 reporting. Task 130 already implements per-profile issuer (`GraphAppRegistrationProvisioner.cs:547-557` reading-(a)-consistent per Q2). 4h.
+- **205c A39** (Sonnet @ xhigh, FULL): H4b `per_env_settings` manifest extension — 8 §10.2 live-contract entries (`Graph__Credentials__Order__0=ManagedIdentityFederated`, `RequireSecretFreeIdentity=true` FAIL-FAST, etc.). **ORDERING GUARD**: depends on A42 (never set `RequireSecretFreeIdentity=true` before FIC exists — boot-loops fresh stamps). 4h.
+- **205d A41** (Sonnet @ high, STANDARD): H10/T2 dual Dataverse app-user rows per §10.4; **EXTENDED per Q8** to include design.md D3 wording fix + Naming Standards Model 1 UAMI row. 3.5h (+0.5h per Q8).
+- **205e A43** (Sonnet @ high, STANDARD): Gate `Deploy-AllIndexes.ps1` silent-fallback (§10.5 trap 2). 2h.
+- **205f A44** (Sonnet @ high, STANDARD): Consumer guard for `appsettings.template.json` ServiceBus KV-ref (§10.5 trap 1) + doc sweep (§6.5 EDIT package application, stale mirror deletion). 2.5h.
+
+**Sequencing**: A38 ∥ A42 → A39 (11h serial); A41/A43/A44 parallel after A35 (already landed). 205a + 205b can dispatch as parallel background agents (both Fable/xhigh). 205d + 205e + 205f can parallel-batch as Sonnet @ high.
+
+**Dispatch pattern**: either (a) `task-create` to author 6 sub-POMLs, then `task-execute` each; OR (b) ONE 205 POML that batches all 6 rows with Step 0.3 parallel execution detection.
+
+### To resume next session — say ONE of these
+
+- **"execute task 205"** — dispatch task 205 authoring + fan-out per above; blocks task 186 E2E completion
+- **"execute task 203c"** — skill wiring (A02/A03/A04/A15/A16); was queued from SESSION 7
+- **"apply §6.5 EDIT package"** — Q3-signed constraint file + spec edits; small main-session job (~30min)
+- **"start task-010 re-port"** — small focused PR to restore idempotency layer in Register-EntraAppRegistrations.ps1
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context; will point at task 205 per priority ranking
+- Do NOT invoke task 186 yet — blocked by A38/A39/A41/A42 (task 205 sub-phases)
+
+---
+
 > **Last Updated**: 2026-08-25 SESSION 8 END — **🎯 SESSION 8 accomplishments**: Task **203a COMPLETE** in a single main session (~3h actual vs 15h estimate). All 9 in-scope Class-A rows resolved via verify-first pattern (7 applied + 2 already-applied). Sub-Agent Write Boundary honored: all `.claude/**` writes from main session. Build sanity: ControlPlane.Core succeeded 0 warnings / 0 errors. See "SESSION 8 Quick Recovery" block below. Prior session block (SESSION 7) retained below for reference.
 
 ## 🎯 SESSION 8 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
@@ -2276,7 +3456,7 @@ Wired `modules/uami.bicep` (task 028) + `modules/app-service-plan.bicep` + `modu
 
 **Remaining customer.bicep gaps** (per task 123/126 discovery, Path 1 plan): task 128 (OpenAI + AI Search modules — task 123's Gap 1 part 2/2) and task 129 (`kv-secrets.generated.bicep` wiring — task 126's Gap 2) are NOT done yet. Task 128 dispatches next (serial after 127 to avoid customer.bicep merge race). Wave G-3 (130/131/132) stays blocked on 127+128+129 landing per the owner's Path 1 sequencing decision.
 
-## Quick Recovery (READ THIS FIRST)
+## HISTORICAL snapshot 2026-08-19 — SUPERSEDED (current state: the Quick Recovery at the top of this file)
 
 | Field | Value |
 |-------|-------|

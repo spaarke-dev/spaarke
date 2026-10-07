@@ -7,20 +7,25 @@
 
 | Field | Value | Source | Notes |
 |---|---|---|---|
-| `customerId` | `{customerId}` | operator | slug; matches `sprk_dataverseenvironment.sprk_customerid` |
+| `customerId` | `{customerId}` | operator | **The customerId standard** `^[a-z][a-z0-9]{2,7}$` — 3-8 lowercase letters and digits, starting with a letter, no hyphens ([`AZURE-RESOURCE-NAMING-CONVENTION.md`](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md) § "The customerId standard"). Abbreviate a longer name once, here (`northwind` → `nwind`). Stored in `sprk_dataverseenvironment.sprk_customerid`; enforced by skill Step 1a, `intake.schema.json` and `POST /api/runs`. |
 | `tenantId` | `{tenantId}` | operator | **explicit per NFR-11 (I1)** — never inferred |
 | `environmentId` | `{environmentId}` | operator | `sprk_dataverseenvironment` GUID placeholder created in skill Step 1 pre-POST |
-| `tenancyModel` | `Model1 \| Model2` | operator | drives H4-per-tenant vs H4-shared handler branching |
-| `profile` | `spaarke-hosted-model1-trial \| spaarke-hosted-model2 \| customer-owned-model2` | operator | L2 enum-validated (drift → 400) |
+| `tenancyModel` | `Model1 \| Model2` | operator | drives the **Lighthouse-delegation + admin-consent** requirement (Model 2 only). *Amended 2026-09-28 (D-12): was "H4-per-tenant vs H4-shared handler branching" — there is no shared handler surface.* |
+| `identityPreset` | `B2BGuest \| NativeAccount` | operator | H11 (design.md D6). Exact case. T245c. |
+| `users` | **`{userCount}` entries — count only** | operator | H11. 🔒 Names and emails are personal data: they live in the L2 run document (owner decision 2026-10-01) and are **never** written here — this folder is committed to git. |
+| `exchangePolicyScopeGroupId` | `{exchangePolicyScopeGroupId}` | operator (group created by the stamp tenant's Exchange admin — PRQ-C-08) | H14a ApplicationAccessPolicy scope. T245c. |
+| `communicationGraphResource` / `emailGraphResource` | `{communicationGraphResource}` / `{emailGraphResource}` | operator | H14b; at least one. T245c. |
+| `communicationDefaultMailbox` | `{communicationDefaultMailbox}` | operator | H4 → KV `Communication-DefaultMailbox`. T245c. Use a shared/service mailbox — this file is committed, so a personal mailbox (here or in the Graph resources above) would put an individual's address in git. |
+| `profile` | `spaarke-hosted-model2 \| customer-owned-model2` | operator | Follows from `tenancyModel`: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`. `POST /api/runs` refuses any other value or pair (`tenancy-profile-invalid`). The names predate the D-12 renumbering; `spaarke-hosted-model1-trial` is retired. |
 
 ## Optional inputs
 
 | Field | Value | Default | Notes |
 |---|---|---|---|
-| `displayName` | `{displayName}` | (customerId) | for handoff-report + CLAUDE.md |
+| `displayName` | `{displayName}` | (customerId) | The customer's full name (e.g. `Northwind Traders`). Written to `sprk_dataverseenvironment.sprk_name` next to the id, so the abbreviation is recorded once on the registry row. Also used in the handoff report. |
 | `region` | `{region}` | westus2 | for platform resources; H2a OpenAI may override to westus3 per F4 |
 | `upgradeMode` | `{upgradeMode}` | Auto | matches `sprk_dataverseenvironment.sprk_upgrademode` |
-| `subscriptionId` | `{subscriptionId}` | (platform default) | override for Model 2 dedicated stamp |
+| `subscriptionId` | `{subscriptionId}` | **required — no default** | 🔴 **One Azure subscription per customer in BOTH models** (ADR-027 amended 2026-09-28). There is no platform-default subscription to fall back to. |
 | `operatorUpn` | `{operatorUpn}` | (session identity) | logged in handler-log.md per NFR-11 |
 
 ## Operator decisions

@@ -40,6 +40,7 @@ using Azure.Core;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Dispatch;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
@@ -47,6 +48,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
@@ -56,7 +58,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -159,6 +161,14 @@ builder.Services.AddSingleton<ISubscriptionReadinessProbe>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSubscriptionReadinessProbe>>();
     return new ArmSubscriptionReadinessProbe(armClient, logger);
 });
+// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27): bind
+// SubscriptionReadinessOptions with the canonical required-provider list
+// H1 registers + polls before H2a's Bicep deploy. Sensible defaults ship
+// in the options class; operators override via config section
+// `SubscriptionReadiness:RequiredResourceProviders` if the platform
+// composition changes.
+builder.Services.Configure<SubscriptionReadinessOptions>(
+    builder.Configuration.GetSection("SubscriptionReadiness"));
 builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 
 // Task 044 / task 123: H2a Bicep infra-deploy handler + four collaborator
@@ -171,10 +181,10 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 // the CI-precompiled ARM JSON artifact task 117 publishes),
 // ArmKeyVaultRefProbe (WebSiteResource/WebSiteSlotResource.Data.KeyVaultReferenceIdentity),
 // and ArmWhatIfDriftDetector (ArmDeploymentResource.WhatIfAsync() — typed
-// WhatIfChange[] results, not stdout-parsed JSON). IBicepTemplateInspector
-// (on-disk infrastructure/bicep/ structural pre-flight) is UNCHANGED —
-// out of task 123's scope (it does not shell out; it reads local files
-// shipped in the publish output). All registrations UNCONDITIONAL per
+// WhatIfChange[] results, not stdout-parsed JSON). ArmTemplateInspector
+// (task 245b, concrete — pure, no seam): it checks the resolved ARM template
+// JSON H2a deploys — the earlier on-disk .bicep inspector read a directory the
+// publish output never contained. All registrations UNCONDITIONAL per
 // ADR-032 — SignalR is the feature-gated resource, not the handler; the
 // handler passes through the SignalREnabled parameter to the runner
 // unconditionally (Null-Object kill-switch applies to the RESOURCE, not the
@@ -197,9 +207,9 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 // timebomb; handler adds ARM read post-condition).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
-//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
-//     TenancyModel drives stack selection (Model1Shared → stacks/model1-shared.bicep;
-//     Model2Dedicated → customer.bicep). Full rationale: project spec.md § ADR Tensions.
+//   - ADR-027: no longer an exception (amended 2026-09-28 — one subscription per customer
+//     in both models). Model 2 deploys customer.bicep; Model 1 fails closed at H2a until
+//     tasks 225b + 228 (task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
 //   - ADR-028 UAMI outbound: ArmDeploymentRunner / ArmKeyVaultRefProbe /
 //     ArmWhatIfDriftDetector all use DefaultAzureCredential pinned to the L2
 //     UAMI (via the shared TokenCredential singleton) — no account keys, no
@@ -208,9 +218,27 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 //   - §4C rollback: partial Bicep deploys are QuarantineRequired (orphaned
 //     resources per design.md §4C example); §4C classification is inline in
 //     H2aBicepInfraDeployHandler file header + the FailAsync helper.
-builder.Services.Configure<BicepInfraDeployOptions>(
-    builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)));
-builder.Services.PostConfigure<BicepInfraDeployOptions>(o => o.Validate());
+// Task 249: the L2 control plane's own identity — ONE validated Worker option shared by H2a (sent as
+// customer.bicep's controlPlaneUamiPrincipalId, Model 1 stamps) and H4 (Key Vault Secrets Officer on each
+// customer vault). An L2-owned value (run-context contract): validated when the host starts.
+builder.Services.AddOptions<ControlPlaneIdentityOptions>()
+    .Bind(builder.Configuration.GetSection(ControlPlaneIdentityOptions.SectionName))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "ControlPlaneIdentityOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
+// Task 249: H2a's options are validated when the host starts too — a missing artifacts URI or manifest
+// name must not wait for the first customer's H2a (NFR-05; ADR-010 ValidateOnStart).
+builder.Services.AddOptions<BicepInfraDeployOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "BicepInfraDeployOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IBicepDeployRunner>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
@@ -218,8 +246,9 @@ builder.Services.AddSingleton<IBicepDeployRunner>(sp =>
     var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
     var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<ArmDeploymentRunner>>();
-    return new ArmDeploymentRunner(armClient, artifactsContainer, options, logger);
+    return new ArmDeploymentRunner(armClient, artifactsContainer, options, identity, logger);
 });
 builder.Services.AddSingleton<IArmKeyVaultRefProbe>(sp =>
 {
@@ -232,71 +261,79 @@ builder.Services.AddSingleton<IUpgradeDriftDetector>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var armClient = new Azure.ResourceManager.ArmClient(credential);
-    var options = sp.GetRequiredService<IOptions<BicepInfraDeployOptions>>();
-    var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
-        new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<ArmWhatIfDriftDetector>>();
-    return new ArmWhatIfDriftDetector(armClient, artifactsContainer, options, logger);
+    return new ArmWhatIfDriftDetector(armClient, identity, logger);
 });
-builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
+// Task 245b: inspects the resolved ARM template JSON (the bytes H2a deploys), not .bicep source
+// on disk — the L2 publish never shipped infrastructure/bicep, so the file inspector failed every run.
+builder.Services.AddSingleton<ArmTemplateInspector>();
+// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): resource-name
+// availability probe wired into H2a's precondition chain (after inspector,
+// before runner). Reuses the shared platform ArmClient singleton — no
+// second credential chain.
+builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmResourceNameAvailabilityProbe>>();
+    return new ArmResourceNameAvailabilityProbe(armClient, logger);
+});
+// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): OpenAI
+// deployment-set auto-recompose seam. Invoked only when
+// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose. LIVE
+// production impl (2026-08-27 follow-on to scaffold commit 74197c02e) —
+// reads Azure.ResourceManager.CognitiveServices regional usage via the
+// shared UAMI-pinned TokenCredential singleton, drops zero-TPM pinned
+// models, and returns a preserved-set + operator-visible note. Factory
+// lambda parity with the sibling ARM collaborator registrations above
+// (HANDLER-05 name-availability, upgrade-drift-detector) — one per-
+// registration probe-local ArmClient, no shared ArmClient DI singleton.
+builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmOpenAiDeploymentSetRecomposer>>();
+    return new ArmOpenAiDeploymentSetRecomposer(armClient, logger);
+});
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
 // (ICanonicalIndexCatalog is the retired-lineage guard; IAiSearchIndexProvisioner
 // = SearchIndexClientProvisioner (task 124, Wave G-2 — Azure.Search.Documents.
-// Indexes.SearchIndexClient under UAMI RBAC for Model 2, REPLACING the retired
-// script-shelling DeployAllIndexesScriptProvisioner); IAiSearchIndexVerifier
-// calls the AI Search REST API for presence + invariants on both branches;
-// ITenantFilterTemplateStore + IAiSearchTenantFilterTemplateProvisioner
-// (task 124 — Cosmos-backed AiSearchTenantFilterTemplateProvisioner, REPLACING
-// the wave-C4 logging-only StubAiSearchTenantFilterTemplateProvisioner) enforce
-// §4D I2 / FR-29 at Model 1 onboarding for REAL. All registrations
-// UNCONDITIONAL per ADR-032 — no feature-gate branches. The verifier is
-// registered via AddHttpClient (typed) so DefaultAzureCredential's token
-// cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
+// Indexes.SearchIndexClient under UAMI RBAC); IAiSearchIndexVerifier calls the
+// AI Search REST API for presence + invariants. Task 225b (D-12): one path for
+// both tenancy models on the stamp's own AI Search service — the Model 1
+// shared-platform branch, its Cosmos tenant-filter template store and
+// provisioner are deleted. All registrations UNCONDITIONAL per ADR-032. The
+// verifier is registered via AddHttpClient (typed) so DefaultAzureCredential's
+// token cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
 // rule); SearchIndexClientProvisioner reuses the SAME shared TokenCredential
 // singleton (registered by AddCosmosModule above) via constructor injection
-// — zero admin-key handling anywhere in H2b's collaborator graph. The
-// tenant-filter template store reuses the SAME shared CosmosClient singleton
-// against a NEW, TTL-less `tenantFilterTemplates` container (see
-// AiSearchTenantFilterTemplateProvisioner.cs's header for the container
-// design rationale).
+// — zero admin-key handling anywhere in H2b's collaborator graph.
 //
 // Placement Justification (CLAUDE.md §10): H2b lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013
 // forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
-// IPlaybookService injection). H2b owns the §4D I2 (FR-29) enforcement at
-// Model 1 tenant onboarding time — the per-tenant filter template is the
-// PROVISIONING-time half of the tenantId eq filter invariant; the runtime
-// half is enforced by BFF services + the Wave-C6 ArchTest (task 173's I2
-// acceptance probe closes the loop with a live sample-query check).
+// IPlaybookService injection). The §4D I2 (FR-29) `tenantId eq` filter is
+// enforced at query time by BFF services + the Wave-C6 ArchTest; H13's I2
+// acceptance probe checks it with a live sample query.
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-039 (compliance path C — pivot): retired `spaarke-playbook-embeddings`
 //     is rejected structurally by ICanonicalIndexCatalog.RetiredIndexNames +
 //     H2b's pre-check guard. Full retired lineage per task 002 audit § 2.
-//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
-//     TenancyModel drives branch selection (Model1Shared → verifier +
-//     template; Model2Dedicated → provisioner + verifier). Full rationale:
-//     project spec.md § ADR Tensions.
-//   - ADR-028 UAMI outbound: REST verifier + SearchIndexClientProvisioner +
-//     the Cosmos-backed template store ALL use the shared UAMI-pinned
-//     TokenCredential/CosmosClient — zero admin-key, zero operator `az`
-//     chain anywhere in H2b's collaborator graph (task 124, Wave G-2).
+//   - ADR-028 UAMI outbound: REST verifier + SearchIndexClientProvisioner use
+//     the shared UAMI-pinned TokenCredential — zero admin-key, zero operator
+//     `az` chain anywhere in H2b's collaborator graph (task 124, Wave G-2).
 //   - §4C rollback: retired-index / provisioner-failure / invariant-violation
-//     / shared-index-missing are QuarantineRequired; parameter-missing /
-//     endpoint-missing / template-provisioner-failure are Resumable. Full
-//     mapping inline in H2bAiSearchIndexHandler file header.
+//     are QuarantineRequired; parameter-missing / endpoint-missing are
+//     Resumable. Full mapping inline in H2bAiSearchIndexHandler file header.
 builder.Services.Configure<AiSearchIndexOptions>(
     builder.Configuration.GetSection(nameof(AiSearchIndexOptions)));
 builder.Services.AddSingleton<ICanonicalIndexCatalog, CanonicalIndexCatalog>();
 builder.Services.AddSingleton<IAiSearchIndexProvisioner, SearchIndexClientProvisioner>();
 builder.Services.AddHttpClient<IAiSearchIndexVerifier, RestApiAiSearchIndexVerifier>();
-builder.Services.AddSingleton<ITenantFilterTemplateStore>(sp => new CosmosTenantFilterTemplateStore(
-    sp.GetRequiredService<Microsoft.Azure.Cosmos.CosmosClient>(),
-    builder.Configuration[$"{CosmosModule.ConfigSection}:DatabaseName"] ?? CosmosModule.DefaultDatabaseName,
-    sp.GetRequiredService<ILogger<CosmosTenantFilterTemplateStore>>()));
-builder.Services.AddSingleton<IAiSearchTenantFilterTemplateProvisioner, AiSearchTenantFilterTemplateProvisioner>();
 builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 
 // Task 046 / task 130: H3 Entra app-registration handler + two collaborator
@@ -325,11 +362,11 @@ builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 // Placement Justification (CLAUDE.md §10): H3 lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H3
 // uses IProvisioningRunRepository (task 037) + two dedicated seams; no BFF-
-// facade dependencies. Downstream H4 (task 047, Batch 3D) reads bffAppRegId
-// from interStepState AND the BFF-API-ClientId/Audience/ClientSecret KV
-// references H3 now writes to RunParameters.Secrets (task 129's manifest.yaml
-// reclassification of the first two entries to from-run-parameter, owner E3);
-// H3 does NOT enqueue H4 directly — the reconciler owns fan-out.
+// facade dependencies. H3 writes BFF-API-ClientId / BFF-API-Audience straight
+// into the customer vault and records bffAppRegId in InterStepState (H4b, H6,
+// H7, H8, H10, H13, H14 read it); H4 runs BEFORE H3 and skips those two
+// `written-by-h3` manifest entries (task 245a). H3 does NOT enqueue anything
+// directly — the reconciler owns fan-out.
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-028 UAMI-outbound + KV-secret-ref: client secret stored in KV as
@@ -420,8 +457,7 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // AddCosmosModule (ADR-028 MI-outbound) — NO shared ArmClient DI singleton
 // registration, parity with task 121/123's registration-comment precedent.
 // SecretClientKvWriter additionally takes the raw TokenCredential (SecretClient
-// is constructed per-vault-per-call, matching KeyVaultCertBootstrapProbe's
-// posture from task 120).
+// is constructed per-vault-per-call).
 //
 // spec.md MUST rule (BINDING pre-check per r3 handoff): H4
 // BindingNeverDeleteSecrets = { Dataverse-ClientSecret, BFF-API-ClientSecret };
@@ -444,8 +480,12 @@ builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 // manifest.yaml). H4 handler + tests are UNCHANGED by this swap (parity with
 // H1's Null-probe -> real-ARM-probe transition) — only the DI registration
 // target changed.
-builder.Services.Configure<KvSecretsPopulationOptions>(
-    builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
+// The principal H4 grants Key Vault Secrets Officer on each customer vault (task 245b) is
+// ControlPlaneIdentityOptions (registered above with H2a's options; task 249). Nothing left here needs
+// startup validation. (The platform-vault option — the source of the Spaarke-shared vendor keys — was
+// removed with those keys by task 225b, owner D18 2026-10-02.)
+builder.Services.AddOptions<KvSecretsPopulationOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
 builder.Services.AddSingleton<IKvSecretManifest, FileKvSecretManifest>();
 builder.Services.AddSingleton<IKvSecretValueResolver>(sp =>
 {
@@ -476,28 +516,39 @@ builder.Services.AddSingleton<ISlotIdentityRoleGranter>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSlotIdentityRoleGranter>>();
     return new ArmSlotIdentityRoleGranter(armClient, logger);
 });
-builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
-// Task 200: H4-shared handler + two new collaborator seams (source-service
-// key extractor + shared-KV per-secret accessor). Reuses H4's IKvSecretManifest
-// (from-shared-service entries filtered in the handler), IArmKeyVaultRefProbe
-// (T1 post-condition), and KvSecretsPopulationOptions (no divergent knobs
-// required today). ArmClient instance reuses the shared UAMI-pinned
-// TokenCredential singleton via the same factory-lambda pattern as the H4
-// collaborators above.
-builder.Services.AddSingleton<ISourceServiceKeyExtractor>(sp =>
+// Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
+// applier — KV resource tag (spaarke-secret-free-identity=true, via ArmClient
+// GenericResource — no new package) + sprk_dataverseenvironment.
+// sprk_credentialmode (via the task-112 registry client's A38a
+// UpdateCredentialModeAsync extension). Consumed by H4 (per-customer
+// vault; dispatch fan-out = once per vault). Driven by
+// KvSecretsPopulationOptions.RequireSecretFreeIdentity
+// (default true since task 225b / G21). ADR-032: registered
+// UNCONDITIONALLY — no feature-gate branch; the option gates behavior inside
+// the handlers, not the DI graph.
+builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var armClient = new Azure.ResourceManager.ArmClient(credential);
-    return new SdkSourceServiceKeyExtractor(armClient);
+    var registryClient = sp.GetRequiredService<Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient>();
+    var logger = sp.GetRequiredService<ILogger<ArmSecretFreeMarkerApplier>>();
+    return new ArmSecretFreeMarkerApplier(armClient, registryClient, logger);
 });
-builder.Services.AddSingleton<ISharedKvSecretAccessor>(sp =>
+// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl Wave 2.5
+// 2026-08-27): operator KV RBAC bootstrapper — singleton consumed by H4
+// (H4-shared, its second consumer, retired T226). Real Azure.ResourceManager.Authorization
+// RoleAssignmentCollection PUT (replaced the Wave-2 log-and-return-Success
+// scaffold). ArmClient factory-lambda-constructed with the shared UAMI-pinned
+// TokenCredential (parity with sibling H4 collaborators above).
+builder.Services.AddSingleton<IOperatorKvRbacBootstrapper>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
-    var logger = sp.GetRequiredService<ILogger<SecretClientKvSharedSecretAccessor>>();
-    return new SecretClientKvSharedSecretAccessor(credential, logger);
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmOperatorKvRbacBootstrapper>>();
+    return new ArmOperatorKvRbacBootstrapper(armClient, logger);
 });
-builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
+builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
 // Task 201: H4b BulkAppSettings handler + three collaborator seams
 // (IPerEnvSettingsManifest — reads the same embedded manifest.yaml as
@@ -517,8 +568,8 @@ builder.Services.AddScoped<H4SharedKvSecretsPopulationHandler>();
 // Placement Justification (CLAUDE.md §10): H4b lives in L2 (not BFF) per
 // spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H4b
 // uses IProvisioningRunRepository (task 037) + the three dedicated seams;
-// no BFF-facade dependencies. Runs AFTER H4 (task 047) + H4-shared (task
-// 200) — KV must be seeded so the KV-ref settings resolve when the batched
+// no BFF-facade dependencies. Runs AFTER H4 (task 047) — KV must be
+// seeded so the KV-ref settings resolve when the batched
 // Configure script writes them — and BEFORE H9 (BFF deploy).
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
@@ -606,6 +657,15 @@ builder.Services.Configure<SolutionImportOptions>(
 builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
 builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
 builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName);
+// A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
+// OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
+// H6's importer/verifier. Mirrors master's DataverseServiceClientImpl
+// ordered-credential migration (auth-v4 task 022, brought in via A35):
+// MI-FIC first on secret-free envs (EnvVarValues__Credentials__Order__0 /
+// SolutionImportOptions__Credentials__Order__0 = ManagedIdentityFederated),
+// ClientSecret only for prong-3 unmigrated envs. Singleton — stateless over
+// IConfiguration; performs no I/O at selection time.
+builder.Services.AddSingleton<WorkerDataverseCredentialFactory>();
 builder.Services.AddSingleton<ISolutionImporter>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
@@ -614,8 +674,9 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiSolutionImporter.HttpClientName);
     var catalog = sp.GetRequiredService<ISolutionCatalog>();
+    var workerCredentialFactory = sp.GetRequiredService<WorkerDataverseCredentialFactory>();
     var logger = sp.GetRequiredService<ILogger<DataverseWebApiSolutionImporter>>();
-    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, logger);
+    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, workerCredentialFactory, logger);
 });
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the
@@ -623,6 +684,15 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 // AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>()) applies
 // directly, no manual factory lambda / named client required.
 builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>();
+// HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
+// required-applications installer + org-settings applier + their canonical
+// manifests. Wave 2 ships scaffolds (log + return Success); the incremental
+// change to real `pac application install` / `pac org update-settings`
+// shell-outs lands without touching H6.
+builder.Services.AddSingleton<IRequiredApplicationsInstaller, PacRequiredApplicationsInstaller>();
+builder.Services.AddSingleton<IRequiredApplicationsManifest, StaticRequiredApplicationsManifest>();
+builder.Services.AddSingleton<IOrgSettingsContractApplier, PacOrgSettingsContractApplier>();
+builder.Services.AddSingleton<IOrgSettingsContractManifest, StaticOrgSettingsContractManifest>();
 builder.Services.AddScoped<H6SolutionImportHandler>();
 
 // Task 050: H7 Dataverse env-var values handler + 1 collaborator seam
@@ -645,8 +715,8 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // requires an HttpClient ctor param for typed clients), so H7DataverseEnvVarValuesHandler
 // was NOT actually resolvable — surfaced by task 103's HandlerRegistrationCompletenessTests.
 //
-// Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret is now UNCONDITIONALLY
-// wired via modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
+// Task 142 (Wave G-4): EnvVarValuesOptions.ClientSecret wired via
+// modules/controlplane-worker-app-service.bicep's EnvVarValues__ClientSecret
 // KV-reference app setting (sourced from the platform KV's canonical
 // BFF-API-ClientSecret, the shared multitenant BFF app-reg secret — same
 // identity H7 authenticates to customer Dataverse envs with). AddOptions +
@@ -656,6 +726,17 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // Configure<T>() call so a config-gap fails loud at startup instead of only
 // surfacing on H7's first dispatch (the handler's own runtime
 // MissingClientSecret guard stays as defense-in-depth).
+//
+// A44.5 (task 205i, 2026-08-25 — closes the H7/task-142 half of A30's
+// sentinel contract): the KV-ref is NO LONGER unconditional — the Bicep
+// module omits it when requireSecretFreeIdentity=true and instead emits the
+// FR-39 chain settings (EnvVarValues__Credentials__Order__0=
+// ManagedIdentityFederated + __RequireSecretFreeIdentity=true, mirror of the
+// BFF's Graph__Credentials__* contract). EnvVarValuesOptions.Validate()
+// accepts an EMPTY ClientSecret under an MI-FIC-first chain (empty is the
+// SIGNAL on secret-free envs — auth-v4 §9.1; never a sentinel) and still
+// fail-fasts on (a) empty secret under the legacy/secret-first chain and
+// (b) any invalid provider-chain configuration.
 builder.Services.AddOptions<EnvVarValuesOptions>()
     .Bind(builder.Configuration.GetSection(EnvVarValuesOptions.SectionName))
     .Validate(o =>
@@ -668,47 +749,60 @@ builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName)
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 
-// Task 051 (Batch 3E) -> task 131 (Wave G-3) Graph SDK port: H8 SPE
-// container-type + root-container handler + THREE collaborator seams, now
-// Microsoft.Graph 6.5.0 under ClientCertificateCredential (T6) instead of the
-// retired shell-out scripts (CreateNewContainerTypeScriptProvisioner.cs /
-// SpeContainerAppOnlyVerifier.cs / AzCliSpeContainerIdKvWriter.cs — kept on
-// disk, UNREGISTERED, per this project's retirement pattern):
-//   - ISpeContainerTypeProvisioner -> GraphContainerTypeProvisioner: POST
-//     /storage/fileStorage/containerTypes (v1.0 GA) + POST
-//     /storage/fileStorage/containerTypeRegistrations (owning-app FULL
-//     permission grant — replaces the retired script's separate SharePoint
-//     REST applicationPermissions PUT under a different token audience) +
-//     POST /storage/fileStorage/containers (root container).
+// Task 214 (H8-B rewrite, 2026-08-30): H8 SPE-container-CREATION handler
+// (H8-B semantics — container-TYPE creation retired to operator prereq per
+// topology doc §R5 verified 403 accessDenied 2026-08-30, see
+// runs/h8-live-test-2026-08-30.md + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).
+// Two collaborator seams:
+//   - ISpeContainerProvisioner -> GraphContainerProvisioner: POST
+//     /storage/fileStorage/containers (CREATE) + POST /storage/fileStorage/
+//     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0, app-only
+//     as the container type's owning app.
+//     Container CREATION is app-only-capable per topology doc §6 (unlike
+//     container-TYPE creation per §R5 which requires delegated).
 //   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET
-//     /storage/fileStorage/containers/{id} — dramatically simplified vs the
-//     retired script's "123 lines of token ceremony around ONE GET"
-//     (Azure.Identity.ClientCertificateCredential owns the JWT client-
-//     assertion ceremony the script hand-rolled). Also owns the NEW 24h
+//     /storage/fileStorage/containers/{id} via app-only. Owns the 24h
 //     SPE-replication-lag classification (404 -> ReplicationPending ->
 //     handler sets RunStatus.WaitingOnGate, never Resumable/QuarantineRequired
 //     — DS-4 §2 / this project's CLAUDE.md MUST rules).
-//   - ISpeContainerIdKvWriter -> SecretClientSpeContainerIdKvWriter: reuses
-//     task 125's SecretClient idiom (single-secret, narrower than H4's
-//     manifest-driven writer — see that file's header for the justification).
-// Both Graph collaborators load the T6 cert from KV via SecretClient (NOT
-// CertificateClient — see SpeConfidentialClientGraphFactory.cs's header for
-// why: the private key is only obtainable via the paired Secret, never via
-// CertificateClient's public-cert-only DownloadCertificateAsync).
+// Task 248 (G28, owner D16): both collaborators — and H0's SpeOwnerCredentialProbe and H13's T6
+// probe — sign in as the owning app through SpeConfidentialClientGraphFactory: a client assertion
+// minted by the Worker UAMI (WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential)
+// for the owning app's federated identity credential. No certificate, no secret (ADR-028 A4).
 //
-// spec.md MUST rule (T6, FR-33): confidential-client (app-only) cert-based
-// token is the ONLY auth path (ClientCertificateCredential, NEVER
-// ClientSecretCredential) — enforced in BOTH the provisioner (creation) and
-// the verifier (post-condition GET), each independently detecting a
-// delegated-token trap signature ("public client not allowed") and
-// classifying QuarantineRequired + TrapT6DelegatedTokenDetected rather than a
-// routine Resumable failure.
-builder.Services.Configure<SpeContainerTypeOptions>(
-    builder.Configuration.GetSection(nameof(SpeContainerTypeOptions)));
-builder.Services.AddSingleton<ISpeContainerTypeProvisioner, GraphContainerTypeProvisioner>();
+// REMOVED FROM H8-A (pre-214-rewrite):
+//   - GraphContainerTypeProvisioner (container-TYPE creation retired)
+//   - SecretClientSpeContainerIdKvWriter + ISpeContainerIdKvWriter (per-customer
+//     SPE-ContainerTypeId KV write retired; containerTypeId now sourced from
+//     spaarke-constants.yaml, not per-customer KV)
+//   - SpeContainerAppOnlyVerifier (retired PS-script version deleted)
+//
+// spec.md MUST rule (T6, FR-33): H8-B does NOT participate in T6-trap
+// detection (per task 214.4 Option A). H13's T6SpeConfidentialClientTrapProbe
+// owns the T6 acceptance gate. SpeConfidentialClientGraphFactory.
+// IsDelegatedTokenTrapError is retained ONLY for H13's use.
+// Task 245b: SpeContainerOptions.ContainerTypeOwners — {ContainerTypeId, OwnerAppId} per SPE container
+// type (task 248), read by H0's SpeOwnerCredential probe, H8 and H13's T6 probe — is validated at startup.
+builder.Services.AddOptions<SpeContainerOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(SpeContainerOptions)))
+    .Validate(o =>
+    {
+        o.Validate();
+        return true;
+    }, "SpeContainerOptions failed validation — see inner exception (Validate throws).")
+    .ValidateOnStart();
+builder.Services.AddSingleton<SpeConfidentialClientGraphFactory>();
+
+// Task 251 (owner D24): the Exchange Online token the Worker sends to the H14a sidecar — signed in as
+// 'Spaarke Exchange Admin' through the same managed-identity federated credential mechanism (no
+// certificate, no secret; the sidecar holds no credential). Consumed by ExchangePolicySidecarClient.
+builder.Services.AddSingleton<ExchangeAdminTokenSource>();
+builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
-builder.Services.AddSingleton<ISpeContainerIdKvWriter, SecretClientSpeContainerIdKvWriter>();
-builder.Services.AddScoped<H8SpeContainerTypeHandler>();
+// unified-access-control-r2 task 165, owner round 35 item 1: H8 binds the container it creates to the customer environment's
+// root business unit — read through this typed-HttpClient seam (same idiom as H10's Dataverse collaborators).
+builder.Services.AddHttpClient<IDataverseRootBusinessUnitReader, DataverseWebApiRootBusinessUnitReader>();
+builder.Services.AddScoped<H8SpeContainerHandler>();
 
 // Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler
 // (T2 + T3 silent-fail trap owner) + FIVE collaborator seams
@@ -769,7 +863,9 @@ builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
 
 // Task 052 (Batch 4B) / task 132 (Wave G-3, Option D hybrid, DS-4 §5
-// re-scope): H9 BFF-deploy handler + SIX collaborator seams. Task 132
+// re-scope): H9 BFF-deploy handler + SEVEN collaborator seams (the seventh,
+// ISlotStickyAppSettingWriter = ArmSlotStickyAppSettingWriter, is the
+// scheduled-jobs slot guard added for GitHub #987 — registered below). Task 132
 // replaced the two shell-out collaborators (DotnetR3GateVerifier /
 // DeployBffApiScriptRunner — both RETIRED, kept on disk unregistered per
 // their retirement banners) AND the ARM-adjacent-but-CLI AzCliAppServiceSlotSwapper
@@ -831,6 +927,17 @@ builder.Services.AddSingleton<IAppServiceSlotSwapper>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSlotSwapper>>();
     return new ArmSlotSwapper(armClient, options, logger);
 });
+// GitHub #987 (ADR-036 A1 rule 2): the scheduled-jobs slot guard H9 sets on the
+// staging slot before its zip-deploy — same ArmClient-from-shared-TokenCredential
+// path as the swapper above (ADR-028 MI-outbound, no stored key).
+builder.Services.AddSingleton<ISlotStickyAppSettingWriter>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var options = sp.GetRequiredService<IOptions<BffDeployOptions>>();
+    var logger = sp.GetRequiredService<ILogger<ArmSlotStickyAppSettingWriter>>();
+    return new ArmSlotStickyAppSettingWriter(armClient, options, logger);
+});
 builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
@@ -843,8 +950,8 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 // 2026-08-20) with live BFF /healthz + /ping + CORS effect probes + explicit
 // ChecksSkipped list for the Dataverse-auth-gated + Phase-B extended set
 // (Phase F rerun task 186 closes); IE2ETrapVerifier = CompositeTrapVerifier
-// dispatching per-TrapKind to the 6 registered real ITrapProbe implementations
-// (T1–T6, tasks 171/177/178/180/172/175); IE2EInvariantVerifier =
+// dispatching per-TrapKind to the 7 registered real ITrapProbe implementations
+// (T1–T7, tasks 171/177/178/180/172/175/238); IE2EInvariantVerifier =
 // CompositeInvariantVerifier dispatching to the 5 registered real
 // IInvariantProbe implementations (I1–I5, tasks 170/173/174/176/179);
 // INamingConformanceChecker = NamingConformanceChecker — pure-C# port of r3

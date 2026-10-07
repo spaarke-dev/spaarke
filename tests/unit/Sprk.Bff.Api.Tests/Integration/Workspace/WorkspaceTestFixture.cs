@@ -302,6 +302,65 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
             services.RemoveAll<ISystemUserIdentityResolver>();
             services.AddSingleton<ISystemUserIdentityResolver>(
                 new FixtureSystemUserIdentityResolver(WorkspaceTestConstants.TestSystemUserId));
+
+            // unified-access-control-r2 task 152 (verifier round 1 item 5): PortfolioService selects the matters FOR the
+            // caller through the people-targeting surface and reads them AS THE CALLER (IImpersonatedCommunicationQuery)
+            // — no app-only query any more. The same three matters the IDataverseService mock above describes are served
+            // through those two seams, for the fixture's systemuserid only.
+            var matters = new[]
+            {
+                (Id: Guid.NewGuid(), Name: "Matter A", Spend: 125_000m, Budget: 150_000m, Overdue: 0),
+                (Id: Guid.NewGuid(), Name: "Matter B (at risk)", Spend: 92_000m, Budget: 80_000m, Overdue: 2),
+                (Id: Guid.NewGuid(), Name: "Matter C", Spend: 40_000m, Budget: 60_000m, Overdue: 0),
+            };
+            var systemUserId = Guid.Parse(WorkspaceTestConstants.TestSystemUserId);
+            var resolverMock = new Mock<Sprk.Bff.Api.Services.Ai.Membership.IMembershipResolverService>();
+            resolverMock
+                .Setup(r => r.ResolveAsync(
+                    It.IsAny<Guid>(), It.IsAny<string>(),
+                    It.IsAny<Sprk.Bff.Api.Services.Ai.Membership.MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid user, string entity, Sprk.Bff.Api.Services.Ai.Membership.MembershipResolveOptions? _, CancellationToken _) =>
+                {
+                    var ids = user == systemUserId && entity == "sprk_matter"
+                        ? matters.Select(m => m.Id).ToArray()
+                        : Array.Empty<Guid>();
+                    return new Sprk.Bff.Api.Services.Ai.Membership.Models.MembershipResponse(
+                        EntityType: entity,
+                        PersonIdentity: new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(user),
+                        Ids: ids,
+                        ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+                        Count: ids.Length,
+                        CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5));
+                });
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Membership.IMembershipResolverService>();
+            services.AddSingleton(resolverMock.Object);
+
+            var callerQueryMock = new Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
+            callerQueryMock
+                .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), systemUserId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string set, string? query, Guid _, CancellationToken _) =>
+                {
+                    var named = matters.Where(m => (query ?? string.Empty).Contains(m.Id.ToString("D"), StringComparison.OrdinalIgnoreCase));
+                    IEnumerable<Dictionary<string, object?>> rows = set == "sprk_matters"
+                        ? named.Select(m => new Dictionary<string, object?>
+                        {
+                            ["sprk_matterid"] = m.Id.ToString("D"),
+                            ["sprk_mattername"] = m.Name,
+                            ["sprk_totalspendtodate"] = m.Spend,
+                            ["sprk_totalbudget"] = m.Budget,
+                        })
+                        : named.SelectMany(m => Enumerable.Range(0, m.Overdue).Select(_ => new Dictionary<string, object?>
+                        {
+                            ["sprk_eventid"] = Guid.NewGuid().ToString("D"),
+                            ["_sprk_regardingmatter_value"] = m.Id.ToString("D"),
+                        }));
+                    return (IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>)rows
+                        .Select(r => System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+                            System.Text.Json.JsonSerializer.Serialize(r))!)
+                        .ToList();
+                });
+            services.RemoveAll<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
+            services.AddSingleton(callerQueryMock.Object);
         });
     }
 

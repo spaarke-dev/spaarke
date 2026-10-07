@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -15,7 +17,7 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// Authorization: Inherited from SpeAdminEndpoints route group (RequireAuthorization + SpeAdminAuthorizationFilter).
 /// </summary>
 /// <remarks>
-/// ADR-001: BackgroundService for long-running processing — no Azure Functions.
+/// Long-running processing runs in the BFF on a BackgroundService, governed by ADR-052.
 /// ADR-007: No Graph SDK types in public API surface — endpoints return domain records only.
 /// ADR-008: Authorization inherited from parent route group (no global middleware).
 /// ADR-019: All errors return ProblemDetails (RFC 7807).
@@ -102,11 +104,13 @@ public static class BulkOperationEndpoints
     /// Validates the request and enqueues a background soft-delete job via <see cref="BulkOperationService"/>.
     /// Returns 202 Accepted with the operation ID immediately — processing happens in the background.
     /// </summary>
-    private static IResult EnqueueBulkDelete(
+    private static async Task<IResult> EnqueueBulkDelete(
         [FromBody] BulkDeleteRequest request,
         BulkOperationService bulkOperationService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
-        HttpContext context)
+        HttpContext context,
+        CancellationToken ct)
     {
         // Validate container IDs
         if (request.ContainerIds is null || request.ContainerIds.Count == 0)
@@ -137,7 +141,15 @@ public static class BulkOperationEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
 
-        var operationId = bulkOperationService.EnqueueDelete(request);
+        // Task 165, owner round 20 item 2: the job authorizes PER CONTAINER against the caller's reach, captured now —
+        // it runs later with no caller context. Unreadable → nothing is enqueued.
+        var scope = await TryGetCallerScopeAsync(tenantScope, logger, context, ct);
+        if (scope is null)
+        {
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+        }
+
+        var operationId = bulkOperationService.EnqueueDelete(request, scope, CallerResolution.ResolveObjectId(context.User));
 
         logger.LogInformation(
             "BulkDelete: enqueued {Count} containers for configId={ConfigId}, operationId={OperationId}, TraceId={TraceId}",
@@ -156,11 +168,13 @@ public static class BulkOperationEndpoints
     /// Validates the request and enqueues a background permission assignment job.
     /// Returns 202 Accepted with the operation ID immediately — processing happens in the background.
     /// </summary>
-    private static IResult EnqueueBulkPermissions(
+    private static async Task<IResult> EnqueueBulkPermissions(
         [FromBody] BulkPermissionsRequest request,
         BulkOperationService bulkOperationService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
-        HttpContext context)
+        HttpContext context,
+        CancellationToken ct)
     {
         // Validate container IDs
         if (request.ContainerIds is null || request.ContainerIds.Count == 0)
@@ -223,7 +237,14 @@ public static class BulkOperationEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
 
-        var operationId = bulkOperationService.EnqueuePermissions(request);
+        // Task 165, owner round 20 item 2 — see EnqueueBulkDelete.
+        var scope = await TryGetCallerScopeAsync(tenantScope, logger, context, ct);
+        if (scope is null)
+        {
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+        }
+
+        var operationId = bulkOperationService.EnqueuePermissions(request, scope, CallerResolution.ResolveObjectId(context.User));
 
         logger.LogInformation(
             "BulkPermissions: enqueued {Count} containers for configId={ConfigId}, role={Role}, operationId={OperationId}, TraceId={TraceId}",
@@ -257,7 +278,8 @@ public static class BulkOperationEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
 
-        var status = bulkOperationService.GetStatus(operationGuid);
+        // Task 165: only the caller who started the operation reads it; anyone else gets the same 404 as an unknown id.
+        var status = bulkOperationService.GetStatus(operationGuid, CallerResolution.ResolveObjectId(context.User));
 
         if (status is null)
         {
@@ -277,5 +299,25 @@ public static class BulkOperationEndpoints
             operationGuid, status.Completed, status.Total, status.Failed, status.IsFinished, context.TraceIdentifier);
 
         return TypedResults.Ok(status);
+    }
+
+    /// <summary>The caller's reach for the job, or null when it cannot be read (refuse; enqueue nothing).</summary>
+    private static async Task<SpeAdminCallerScope?> TryGetCallerScopeAsync(
+        SpeAdminTenantScope tenantScope,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await tenantScope.GetCallerScopeAsync(context.User, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "Bulk operation: the caller's business-unit scope could not be read — nothing enqueued. TraceId={TraceId}",
+                context.TraceIdentifier);
+            return null;
+        }
     }
 }

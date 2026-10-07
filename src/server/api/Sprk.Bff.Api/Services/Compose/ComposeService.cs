@@ -7,7 +7,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai;
@@ -18,7 +25,6 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Jobs;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -47,55 +53,53 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </remarks>
 public class ComposeService : IComposeService
 {
-    private const string DocumentLogicalName = "sprk_document";
-    private const string DocumentIdAttribute = "sprk_documentid";
-    private const string GraphItemIdAttribute = "sprk_graphitemid";
-    private const string DisplayNameAttribute = "sprk_documentname";
-    private const string FileNameAttribute = "sprk_filename";
+    internal const string DocumentLogicalName = "sprk_document";
+    internal const string DocumentIdAttribute = "sprk_documentid";
+    internal const string GraphItemIdAttribute = "sprk_graphitemid";
+    internal const string DisplayNameAttribute = "sprk_documentname";
+    internal const string FileNameAttribute = "sprk_filename";
     // SPE-pointer + file-metadata columns — logical names mirrored from the canonical
     // OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write (Services/Office),
     // which maps through Spaarke.Dataverse UpdateDocumentRequest → DataverseWebApiService.
     // WITHOUT these, every downstream reader (open-links, preview) validates the SPE pointer,
     // finds drive-id empty + sprk_hasfile false, and 409s "No file is attached to this document".
-    private const string GraphDriveIdAttribute = "sprk_graphdriveid";
-    private const string HasFileAttribute = "sprk_hasfile";
-    private const string FileSizeAttribute = "sprk_filesize";
-    private const string MimeTypeAttribute = "sprk_mimetype";
-    private const string FilePathAttribute = "sprk_filepath";
+    internal const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    internal const string HasFileAttribute = "sprk_hasfile";
+    internal const string FileSizeAttribute = "sprk_filesize";
+    internal const string MimeTypeAttribute = "sprk_mimetype";
+    internal const string FilePathAttribute = "sprk_filepath";
     // G1 (FR-01, task 020): the durable cross-session authored-vs-imported origin marker (owner-created
     // choice field; notes/g1-origin-field-asbuilt.md). Written ONLY at create-on-save
     // (PromoteIfEphemeralAsync) and read on Path A loads (LoadAsync) — see ComposeOrigin remarks for the
     // AS-BUILT integer values + BINDING null-handling contract.
-    private const string ComposeOriginAttribute = "sprk_composeorigin";
+    internal const string ComposeOriginAttribute = "sprk_composeorigin";
     // G7 (FR-06, task 022): the client-minted transient dedup key (owner-created Single-line-text column +
     // single-column alt-key sprk_composetransientkey_uk; notes/g7-transient-key-schema.md). Stamped ONLY at
     // create-on-save (PromoteIfEphemeralAsync). Resolved via the alt-key in TryFindDocumentByTransientKeyAsync
     // BEFORE minting a transient SPE item, so repeated create-on-save calls with the same key replace one
     // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
     // content (I-7/NFR-02).
-    private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
+    internal const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
     // FR-C3 (email-communication-intelligence-r2, graduate-on-divergence): the SPE content identity
     // (quickXorHash, task 023 indexed column) + the self-referential canonical link. A create-on-save
     // stamps sprk_canonicalhash; on a byte-identical hit it also LINKS via sprk_canonicaldocument (this
     // editable copy is byte-identical NOW). The link is CLEARED the moment content diverges (first edit),
     // graduating the copy to its own canonical — see the create + idempotent branches of
     // PromoteIfEphemeralAsync. Distinct from sprk_parentdocument (attachment→parent-email).
-    private const string CanonicalHashAttribute = "sprk_canonicalhash";
-    private const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
+    internal const string CanonicalHashAttribute = "sprk_canonicalhash";
+    internal const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
-    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary (ADR-024 — the
-    // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
-    // PDF-sourced create-on-save copies every non-empty lookup from the source PDF's record onto the
-    // new Word document's record so the two file side-by-side under the same matter/project/….
-    private static readonly string[] DocumentAssociationLookupAttributes =
-    {
-        "sprk_matter",
-        "sprk_relatedmatter",
-        "sprk_project",
-        "sprk_relatedproject",
-        "sprk_invoice",
-        "sprk_workassignment",
-    };
+    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary. HOISTED to
+    // Spaarke.Dataverse.DocumentLinkFields (unified-access-control-r2, 2026-09-05) — this was one of
+    // TWO independently-drifting copies of the same closed set AttachmentDocumentAssociationRung
+    // follows (root CLAUDE.md §11 forbade a third). Both prior copies were INCOMPLETE — missing
+    // sprk_relatedinvoice / sprk_relatedworkassignment and six further columns; see the shared type
+    // for the full column table + the schema-name casing trap (the sprk_related* schema names are
+    // NOT uniformly cased — never derive one by convention). A PDF-sourced create-on-save copies
+    // every non-empty lookup from the source PDF's record onto the new Word document's record so the
+    // two file side-by-side under the same matter/project/….
+    internal static readonly string[] DocumentAssociationLookupAttributes =
+        DocumentLinkFields.LogicalNames.ToArray();
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -111,8 +115,8 @@ public class ComposeService : IComposeService
     internal const string StepProfileAnalysis = "profile-analysis";
     internal const string StepIndexing = "indexing";
 
-    private const string ComposeCreateOnSaveJobType = "compose-create-on-save";
-    private const string DocxContentType =
+    internal const string ComposeCreateOnSaveJobType = "compose-create-on-save";
+    internal const string DocxContentType =
         "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
     private readonly ISpeFileOperations _spe;
@@ -120,6 +124,18 @@ public class ComposeService : IComposeService
     private readonly IGenericEntityService _dataverse;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+
+    /// <summary>
+    /// Task 076/085's container resolver — the ONE place a storage container is chosen (issue #858).
+    /// </summary>
+    private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>
+    /// Per-record caller rights, OBO, fail-closed (issue #858). The create-on-save path had no
+    /// per-resource authorization at all: the Compose route group carries a bare
+    /// <c>RequireAuthorization()</c>, which asks only "are you anyone?".
+    /// </summary>
+    private readonly CallerRecordAccessProbe _accessProbe;
     // FR-C3 (email-communication-intelligence-r2): SPE content-dedup detector for the create-on-save
     // graduate-on-divergence hook. Optional + defaults null so the single bare test constructor
     // (ComposeServiceCreateOnSaveTests) + any legacy construction keep compiling; DI resolves the real
@@ -162,6 +178,9 @@ public class ComposeService : IComposeService
 
     /// <summary>Cluster 5b (task 070): background profile dispatch + the step signals, extracted.</summary>
     private readonly ComposeProfileDispatcher _profileDispatcher;
+
+    /// <summary>Task 070 cluster 5a — the G10 re-profiling policy (storm guard + manual leg).</summary>
+    private readonly ComposeProfileRetriggerGuard _profileRetrigger;
     // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
     // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
     // null so existing test constructors compile; DI always resolves it in every non-test host.
@@ -240,6 +259,12 @@ public class ComposeService : IComposeService
     // Task 070 cluster 3: the storage boundary of a save — which bytes it starts from, under what
     // precondition it writes, and the version stamp that makes the NEXT save's staleness detectable.
     private readonly ComposeSaveStorageCoordinator _saveStorage;
+
+    /// <summary>Task 070 cluster 2b — which `sprk_document` row an external identifier denotes.</summary>
+    private readonly ComposeRecordResolution _recordResolution;
+
+    /// <summary>Task 070 cluster 2a — draft-to-record promotion + create-on-save outcome shaping.</summary>
+    private readonly ComposeCreateOnSavePromoter _createOnSave;
     // Task 070 cluster 4: how a PDF becomes an editable document, and how that origin is remembered.
     private readonly ComposePdfIntakeCoordinator _pdfIntake;
 
@@ -249,6 +274,11 @@ public class ComposeService : IComposeService
         IGenericEntityService dataverse,
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
+        RecordContainerResolver containerResolver,
+        CallerRecordAccessProbe accessProbe,
+        // Task 146: who owns a promoted sprk_document (required — the resolver is registered unconditionally, and a
+        // missing one must fail at startup rather than quietly re-open app ownership).
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IDistributedCache? cache = null,
         IDocumentProfileAi? documentProfileAi = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -272,6 +302,8 @@ public class ComposeService : IComposeService
         _dataverse = dataverse;
         _indexing = indexing;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
+        _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
@@ -294,9 +326,15 @@ public class ComposeService : IComposeService
         _memoryCapturer = new ComposeMemoryCapturer(memoryCapture, _sessions, _logger);
         _annotations = new ComposeAnnotationStore(_sessions, _logger);
         _profileDispatcher = new ComposeProfileDispatcher(_scopeFactory, _documentProfileAi, _appLifetime, _logger);
+        // Cluster 5a wraps 5b: the guard decides WHETHER to re-profile, the dispatcher does it.
+        _profileRetrigger = new ComposeProfileRetriggerGuard(cache, _profileDispatcher, _logger);
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
         // the real scoped detector in every non-test host.
         _dedupDetector = dedupDetector;
+        // Task 070 cluster 2b — record RESOLUTION. Constructed after _dedupDetector because it takes it.
+        _recordResolution = new ComposeRecordResolution(_sessions, _dataverse, _logger, _dedupDetector);
+        // Cluster 2a takes 2b: the promotion path resolves an existing row before creating one.
+        _createOnSave = new ComposeCreateOnSavePromoter(_dataverse, _logger, _dedupDetector, _recordResolution, ownership);
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
         // re-anchor) in a bare test constructor.
         _cache = cache;
@@ -407,6 +445,77 @@ public class ComposeService : IComposeService
         };
     }
 
+    /// <summary>
+    /// DRIVE PROVENANCE (#858 family, 2026-09-01): resolves the drive a write into an EXISTING drive item
+    /// must target — the drive RECORDED on the <c>sprk_document</c> row, not the one the caller named.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What was wrong.</b> Both write paths into an existing item (<c>ApplyTemplateAsync</c>'s route
+    /// parameter and <c>SaveAsync</c>'s <c>request.DriveId</c>) took the drive from the CALLER while the
+    /// authorized row already held <c>sprk_graphdriveid</c>. The server never consulted it, so the record
+    /// could claim one location while the bytes went to another.</para>
+    /// <para><b>What this is NOT.</b> Not the app-only container hole this codebase's other
+    /// <c>ClientSupplied</c> sinks describe. Compose writes are OBO — SPE authorizes them as the acting
+    /// user, so no caller reaches a drive they could not already reach. The defect is that the record and
+    /// the bytes could DIVERGE; the audit trail, not the ACL, is what was unsound.</para>
+    /// <para><b>The fallback is deliberate, and it is not a half-measure.</b> When the row has no drive id
+    /// the caller's value is used, logged. Legacy rows predating the full-SPE-pointer stamp exist — see
+    /// <c>PromoteIfEphemeralAsync</c>, which documents that a row without the pointer makes downstream
+    /// readers 409 "No file is attached" — so a hard fail-closed here would break saves on real documents
+    /// to close a hole that OBO already closes. An attacker cannot make a row's drive id DISAPPEAR, so the
+    /// fallback covers legacy data, not an attack path. When the row DOES have a drive id it wins
+    /// unconditionally and a divergence is logged at Warning: that divergence is the signal this method
+    /// exists to produce.</para>
+    /// <para><b>Cost.</b> One keyed Dataverse retrieve per replace-path write, on a path that already does a
+    /// Graph metadata read and a cache read. The save's promote step resolves the same row AFTER the write;
+    /// this is not folded into that call because the value is needed BEFORE it — the point is to write to
+    /// the right place, which is a decision that cannot be made after the write.</para>
+    /// </remarks>
+    private async Task<string?> ResolveAuthoritativeDriveIdAsync(
+        string documentSpeId,
+        string? requestedDriveId,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        string? recorded;
+        try
+        {
+            recorded = await _recordResolution.TryResolveRecordedDriveIdAsync(documentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: a provenance READ must never be the reason a user's save fails. Degrading to
+            // the caller's value reproduces the pre-fix behaviour exactly, loudly.
+            _logger.LogWarning(ex,
+                "Compose {Operation}: drive-provenance lookup failed for driveItem={DocumentSpeId}; " +
+                "falling back to the caller-supplied drive={RequestedDriveId}.",
+                operation, documentSpeId, requestedDriveId);
+            return requestedDriveId;
+        }
+
+        if (string.IsNullOrWhiteSpace(recorded))
+        {
+            _logger.LogDebug(
+                "Compose {Operation}: no sprk_document row records a drive for driveItem={DocumentSpeId}; " +
+                "using the caller-supplied drive={RequestedDriveId}.",
+                operation, documentSpeId, requestedDriveId);
+            return requestedDriveId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedDriveId)
+            && !string.Equals(recorded, requestedDriveId, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Compose {Operation}: the caller named drive={RequestedDriveId} for driveItem={DocumentSpeId} " +
+                "but sprk_document records drive={RecordedDriveId}. Writing to the RECORDED drive — the " +
+                "record is the authority on where its own bytes live.",
+                operation, requestedDriveId, documentSpeId, recorded);
+        }
+
+        return recorded;
+    }
+
     /// <inheritdoc />
     // Task 032 (spaarkeai-compose-r6, FR-05) — the apply-template orchestration: download the PERSISTED
     // bytes (mirror LoadAsync's fetch idiom), merge via the ONE 030 engine (never re-implemented),
@@ -417,27 +526,58 @@ public class ComposeService : IComposeService
     // PublicContracts facade call); no AI dispatch (ADR-039).
     public async Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
         HttpContext httpContext,
-        string driveId,
+        string requestedDriveId,
         string documentSpeId,
         byte[] resolvedTemplateBytes,
         string templateName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(driveId))
-            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(requestedDriveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(requestedDriveId));
         if (string.IsNullOrWhiteSpace(documentSpeId))
             throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(documentSpeId));
         ArgumentNullException.ThrowIfNull(resolvedTemplateBytes);
         if (resolvedTemplateBytes.Length == 0)
             throw new ArgumentException("Resolved template bytes must not be empty.", nameof(resolvedTemplateBytes));
 
+        // DRIVE PROVENANCE (#858 family): the route names a drive; the sprk_document row KNOWS one. From
+        // here down `driveId` is the authoritative value, so the read (metadata + download) and the write
+        // (the preconditioned replace) all address the same drive the record claims — apply-template is a
+        // read-merge-write, and reading from one drive while writing to another is the sharpest form of
+        // the divergence this closes. The parameter is renamed rather than shadowed so no later edit can
+        // reach the caller's claim by accident.
+        var driveId = await ResolveAuthoritativeDriveIdAsync(
+                documentSpeId, requestedDriveId, "apply-template", cancellationToken)
+            .ConfigureAwait(false) ?? requestedDriveId;
+
         _logger.LogInformation(
             "Compose apply-template: drive={DriveId} driveItem={DocumentSpeId} template={TemplateName}",
             driveId, documentSpeId, templateName);
 
-        // 1) Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
-        //    guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
-        var stream = await _spe.DownloadFileAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+        // 1) Read the CURRENT version stamp BEFORE the download — this is T1, the version the merge
+        //    below is computed against, and it is what the write at step 4 asserts (#776).
+        //
+        //    WHY IT IS CAPTURED HERE AND NOT JUST BEFORE THE WRITE. Apply-template is a
+        //    read-merge-write over bytes we downloaded: if another writer lands a version between T1 and
+        //    T2, our merged output was computed WITHOUT their change and writing it would erase them at
+        //    the head version. Reading the eTag immediately before the write would assert against that
+        //    NEWER version and succeed — clobbering silently, which is exactly the defect. The
+        //    precondition is only meaningful as of the bytes we actually merged.
+        //
+        //    This is NOT the client's load-time eTag. Sending that would refuse on every stale mount and
+        //    re-create the 422 treadmill R4 removed (see the SaveAsync note on `preWriteETag`). The
+        //    window asserted here is OUR OWN read→write span, so a refusal means a genuine concurrent
+        //    writer, not a stale client.
+        //
+        //    A null stamp (metadata unavailable) degrades to the pre-#776 blind PUT rather than blocking
+        //    the merge — best-effort, same convention as the save path.
+        var preMergeMetadata = await _spe.GetMetadataForComposeAsync(httpContext, driveId, documentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        var preMergeETag = preMergeMetadata?.ETag;
+
+        // Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
+        // guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
+        var stream = await _spe.DownloadForComposeAsync(httpContext, driveId, documentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
         {
@@ -479,15 +619,25 @@ public class ComposeService : IComposeService
         var stamp = _baselineParaIdStamper.MintAndPersist(merged);
         var finalBytes = stamp.Mutated ? stamp.Bytes : merged;
 
-        // 4) Persist as a NEW SPE version via the existing replace idiom (the prior version remains
-        //    retrievable through SPE version history — FR-07 safety net).
-        FileHandleDto? replaced;
-        using (var replaceStream = new MemoryStream(finalBytes, writable: false))
-        {
-            replaced = await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, driveId, documentSpeId, replaceStream, cancellationToken)
-                .ConfigureAwait(false);
-        }
+        // 4) Persist as a NEW SPE version, ASSERTING the T1 version captured at step 1 (#776). The prior
+        //    version remains retrievable through SPE version history (FR-07 safety net).
+        //
+        //    Reuses the save path's `ReplaceWithPreconditionAsync` rather than adding a second
+        //    precondition idiom (root §11): it already maps a Graph 412 to the typed
+        //    EtagPreconditionFailedException, so the Graph type never crosses the facade (ADR-007), and
+        //    it already degrades to a blind PUT on a null stamp. A 412 here means a sibling tab saved
+        //    while this merge was in flight — the caller is told to re-apply, which is honest and
+        //    actionable. The alternative was writing anyway and discarding their save with no way to
+        //    reconcile it, since the merged bytes never contained their change.
+        //    `rebaseOnConflict: false` is load-bearing, not a stylistic choice. The default retries once
+        //    against the fresh version (last-writer-wins), which is sound on the SAVE path only because
+        //    the edits were rebased onto those bytes first. Nothing rebases the merge here, so retrying
+        //    would write a payload that never contained the other writer's change — the If-Match would
+        //    be decorative and the defect would survive the fix.
+        var replaced = await _saveStorage.ReplaceWithPreconditionAsync(
+                httpContext, driveId, documentSpeId, finalBytes, preMergeETag, cancellationToken,
+                rebaseOnConflict: false)
+            .ConfigureAwait(false);
 
         if (replaced is null || string.IsNullOrEmpty(replaced.Id))
         {
@@ -556,8 +706,10 @@ public class ComposeService : IComposeService
             "Compose load: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} record={DocumentRecordId}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.DocumentRecordId);
 
-        // 1) Fetch metadata (name/size/etag). Missing → NotFound.
-        var metadata = await _spe.GetFileMetadataAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+        // 1) Fetch metadata (name/size/etag). Missing → NotFound. Task 171: APP-ONLY when ComposeDocumentAuthorizationFilter
+        //    authorized this item's sprk_document row (the decision); for a row-less item (Path B) the caller's OBO read
+        //    below remains the decision.
+        var metadata = await _spe.GetMetadataForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (metadata is null)
         {
@@ -565,9 +717,21 @@ public class ComposeService : IComposeService
                 $"SPE drive-item not found: drive={request.DriveId} item={request.DocumentSpeId}");
         }
 
+        // Task 166 r1: the caller is now authorized on THIS item (the route filter's row decision, or — Path B — the OBO
+        // read above). The client-supplied record
+        // id is honoured only when it is the row OF this item — bound here, before the session binding, the origin
+        // read and the G10 profile re-trigger below all consume it. One read serves the binding and the origin.
+        var (boundRecordId, boundOrigin) = await ReadBoundDocumentRowAsync(
+                request.DocumentRecordId, request.DocumentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        if (boundRecordId != request.DocumentRecordId)
+        {
+            request = request with { DocumentRecordId = boundRecordId };
+        }
+
         // 2) Fetch content stream. Graph returns non-seekable HttpBaseStream → buffer to
         //    MemoryStream so Length/Seek work for downstream consumers.
-        var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+        var stream = await _spe.DownloadForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
         {
@@ -814,7 +978,7 @@ public class ComposeService : IComposeService
         {
             try
             {
-                versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                versionId = await _spe.GetCurrentVersionIdForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -912,7 +1076,14 @@ public class ComposeService : IComposeService
         // w14:paraId stable across edits; new/split paragraphs simply appear as new map entries
         // (R4 re-anchor — this task does not reconcile or diff the two snapshots).
         var referenceMap = ComposeReferenceMapping.BuildReferenceMap(paraIdMap);
-        session = session with { ReferenceMap = referenceMap };
+        // unified-access-control-r2 task 164 (owner round 16 item 2): a Path B session's DocumentId is the SPE drive-item
+        // id, and its chat turns are authorized by the caller's own SPE read of that item — which needs the drive too.
+        // Recorded on EVERY load (new or resumed), so a session that pre-dates the field gains it on the next open.
+        session = session with
+        {
+            ReferenceMap = referenceMap,
+            DocumentDriveId = request.DocumentRecordId.HasValue ? null : request.DriveId,
+        };
         await _sessions.UpdateSessionCacheAsync(session, cancellationToken).ConfigureAwait(false);
 
         // FR-A08/FR-A09 (task 044): carry the SERVER-DETERMINED "this was a PDF" fact forward on the
@@ -955,16 +1126,15 @@ public class ComposeService : IComposeService
         // value degrades to Origin=null — NEVER fails Load. The BINDING null-handling contract (see
         // ComposeOrigin remarks) is the CALLER's obligation: null MUST be treated as Imported, never
         // strict-equal to Authored.
-        ComposeOrigin? origin = request.DocumentRecordId.HasValue
-            ? await ReadPersistedOriginAsync(request.DocumentRecordId.Value, cancellationToken).ConfigureAwait(false)
-            : null;
+        // Task 166 r1: read together with the record-id binding above (the origin of the BOUND row only).
+        ComposeOrigin? origin = request.DocumentRecordId.HasValue ? boundOrigin : null;
 
         // G10 (FR-09, task 040): reload/onload re-trigger of the Document Profile — storm-safe (fires only
         // when the doc changed since Compose last profiled it). Path A only (an existing sprk_document to
         // profile). Best-effort — never blocks or fails Load.
         if (request.DocumentRecordId is { } reloadRecordId && !string.IsNullOrWhiteSpace(metadata.ETag))
         {
-            await MaybeRetriggerProfileOnLoadAsync(
+            await _profileRetrigger.MaybeRetriggerProfileOnLoadAsync(
                 reloadRecordId, request.DocumentSpeId, metadata.ETag!, httpContext, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -1004,6 +1174,76 @@ public class ComposeService : IComposeService
     /// to <see cref="ComposeOrigin.Authored"/>). Consumed by <see cref="LoadAsync"/> (returns it to the
     /// client) and <see cref="SaveAsync"/> (selects the engine's clean-vs-tracked apply mode).
     /// </summary>
+    /// <summary>
+    /// unified-access-control-r2 task 166 r1 (route-authorization sweep, Compose Load / Save): binds a CLIENT-SUPPLIED
+    /// <c>sprk_document</c> id to the SPE item the caller was just authorized against (OBO). The id is honoured only
+    /// when that row's <c>sprk_graphitemid</c> IS <paramref name="documentSpeId"/> (ordinal); otherwise — a different
+    /// row, a missing row, or a read fault — it is DROPPED (<see langword="null"/>) and the request proceeds as Path B
+    /// (no record): no session binding to that row, no origin read from it, and no profile re-dispatch against it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The defect.</b> Load and Save accepted <c>documentRecordId</c> from the query/body and used it
+    /// app-only: <see cref="ReadPersistedOriginAsync"/> read an ARBITRARY row's <c>sprk_composeorigin</c> (which then
+    /// decided the save's clean-vs-tracked apply mode), Load bound the session to it, and Load's G10 reload leg
+    /// dispatched a Document Profile — written app-only — against it. Only the SPE item was ever authorized (OBO), so
+    /// "authorize exactly the id the handler consumes" was not met for the record id.</para>
+    /// <para><b>Why bind rather than probe.</b> The record a Compose document IS is a server fact — the row whose
+    /// pointer names this item — so the server derives the answer from the item the caller proved access to, and
+    /// needs no second authorization question. One read returns both the binding and the origin.</para>
+    /// <para>Fail closed: an unverifiable id is not bound. A transient read fault therefore degrades exactly like an
+    /// unknown id (Path B for this request), never to "trust the client".</para>
+    /// </remarks>
+    internal async Task<(Guid? BoundRecordId, ComposeOrigin? Origin)> ReadBoundDocumentRowAsync(
+        Guid? documentRecordId, string documentSpeId, CancellationToken cancellationToken)
+    {
+        if (documentRecordId is not { } recordId || recordId == Guid.Empty || string.IsNullOrWhiteSpace(documentSpeId))
+        {
+            return (null, null);
+        }
+
+        try
+        {
+            var documentEntity = await _dataverse.RetrieveAsync(
+                    DocumentLogicalName,
+                    recordId,
+                    new[] { ComposeOriginAttribute, GraphItemIdAttribute },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            var rowItemId = documentEntity is not null && documentEntity.Contains(GraphItemIdAttribute)
+                ? documentEntity[GraphItemIdAttribute] as string
+                : null;
+
+            if (!string.Equals(rowItemId, documentSpeId, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Compose: documentRecordId={DocumentRecordId} is not the record of driveItem={DocumentSpeId} (row "
+                    + "found: {RowFound}) — the record id is NOT bound; proceeding as Path B (task 166).",
+                    recordId, documentSpeId, documentEntity is not null);
+                return (null, null);
+            }
+
+            ComposeOrigin? origin = documentEntity!.Contains(ComposeOriginAttribute)
+                && documentEntity[ComposeOriginAttribute] is OptionSetValue originOptionSet
+                    ? (ComposeOrigin)originOptionSet.Value
+                    : null;
+
+            return (recordId, origin);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose: could not verify documentRecordId={DocumentRecordId} against driveItem={DocumentSpeId} — the "
+                + "record id is NOT bound (fail closed; task 166).",
+                recordId, documentSpeId);
+            return (null, null);
+        }
+    }
+
     private async Task<ComposeOrigin?> ReadPersistedOriginAsync(Guid documentRecordId, CancellationToken cancellationToken)
     {
         try
@@ -1043,6 +1283,269 @@ public class ComposeService : IComposeService
         string.IsNullOrWhiteSpace(matterId)
             ? null
             : new ChatHostContext(EntityType: ParentEntityContext.EntityTypes.Matter, EntityId: matterId);
+
+    /// <summary>
+    /// The Dataverse LOGICAL name of the only entity a Compose session can be bound to.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BuildMatterHostContext"/> is the ONLY producer of a Compose session's
+    /// <see cref="ChatHostContext"/> and it hard-codes
+    /// <c>ParentEntityContext.EntityTypes.Matter</c> ("matter"), so the reachable set is exactly one
+    /// entity. That is why <see cref="ResolveCreateOnSaveContainerAsync"/> maps the short name to a
+    /// logical name with a single constant instead of a lookup table: the codebase already carries three
+    /// short/logical → entity-set maps and CLAUDE.md §11 puts a fourth over the line. A table of one row
+    /// for types that cannot occur would be that fourth map. A host context of any OTHER type is refused
+    /// rather than guessed, which is what makes a future project-bound session visible instead of silent.
+    /// </remarks>
+    private const string ComposeHostEntityLogicalName = "sprk_matter";
+
+    /// <summary>
+    /// Issue #858 — choose the storage container for a create-on-save draft, SERVER-SIDE, and authorize
+    /// the caller against the record that choice comes from.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What this replaces.</b> The transient-create branch used
+    /// <c>request.ContainerId</c> — an SPE container id supplied in the request BODY. The server wrote
+    /// bytes into whatever container the caller named, having authorized the caller against nothing at
+    /// all: the <c>/api/compose</c> group carries a bare <c>RequireAuthorization()</c>, which asks only
+    /// "are you anyone?". Same defect class as task 073 (deleted), 076 (converted) and 085 (Office
+    /// save).</para>
+    ///
+    /// <para><b>Why the session and not the request.</b> Threading the owning record through the SAVE
+    /// request — which is what issue #858 proposed — would have relocated the defect rather than removed
+    /// it: the caller would name a matter instead of a container and the server would resolve it. The
+    /// record identity is taken from SERVER-SIDE session state instead, and then authorized, so the
+    /// authorization key and the write destination are one value by construction.</para>
+    ///
+    /// <para><b>Session ownership is checked first</b>, mirroring <see cref="LoadAsync"/>'s issue #863
+    /// test. Without it, supplying someone else's <c>SessionId</c> would let a caller borrow their
+    /// matter binding — and the whole point of reading identity from the session is that the session is
+    /// trustworthy.</para>
+    ///
+    /// <para><b>No host context → the acting user's business unit</b>, server-derived (task 2a). A
+    /// matter-less draft is a DESIGNED flow, not an edge case: <c>composeEditor.registration.ts</c>
+    /// opens the workspace on its empty state when no document context is supplied. Refusing it would
+    /// break a shipped capability, and keeping <c>ContainerId</c> "just for that path" is option (B)
+    /// through the back door — the client decides whether a matter is bound, so "omit the matter" would
+    /// have become a supported route to naming your own container.</para>
+    ///
+    /// <para>🔴 <b>Residual, unchanged by this patch</b>: a draft that starts matter-less lands in a
+    /// business-unit container, and if it is LATER associated to a secure record the bytes are already
+    /// there — SPE permissions are additive-only. See
+    /// <c>notes/finding-secure-transition-container-migration.md</c>.</para>
+    /// </remarks>
+    /// <returns>
+    /// The resolved container id, or <see langword="null"/> when no container is CONFIGURED for the
+    /// caller / record.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>Null vs throw is a deliberate split.</b> A missing container is a CONFIGURATION state
+    /// (a business unit with no <c>sprk_containerid</c>, which is common — three of six verified live),
+    /// and the caller turns it into <c>BuildContainerFailedResult</c> so the client keeps the per-step
+    /// projection it already renders. An authorization DENIAL, an unsupported host entity, or an
+    /// unattributable caller throw instead: those are answers about the caller, not about
+    /// configuration, and they must reach the client as 403/409 rather than as a save step that
+    /// "didn't work". Both outcomes write nothing.</para>
+    /// </remarks>
+    /// <summary>
+    /// Task 171: before a create-on-save transient-key HIT replaces the matched document's file, the caller must hold
+    /// WRITE on that <c>sprk_document</c> (Dataverse's answer, asked as the caller — the same question every other Compose
+    /// write is now authorized by). A refusal is the 403 a denied OBO write produced before
+    /// (<see cref="UnauthorizedAccessException"/>), so the endpoint's mapping is unchanged. Returns whether the replace
+    /// may run APP-ONLY: only when the row's storage pointer also verifies — otherwise it keeps the caller's own (OBO)
+    /// identity, the same rule <c>ComposeDocumentAuthorizationFilter</c> applies to every other Compose route.
+    /// </summary>
+    private async Task<bool> AuthorizeTransientKeyReplaceAsync(
+        ComposeRecordResolution.TransientKeyMatch match, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        var rights = await _accessProbe
+            .GetCallerRightsAsync(TokenHelper.ExtractBearerTokenOrNull(httpContext), "sprk_documents", match.RecordId, cancellationToken)
+            .ConfigureAwait(false);
+        if (!OperationAccessPolicy.HasRequiredRights(rights, "write"))
+        {
+            _logger.LogWarning(
+                "Compose create-on-save DENIED: the transient key matched sprk_document {DocumentRecordId}, which the caller "
+                + "may not write (holds {Rights}).", match.RecordId, rights);
+            throw new UnauthorizedAccessException("The caller may not write the document this draft key belongs to.");
+        }
+
+        return await _containerResolver
+            .IsDocumentPointerContainerAllowedAsync(match.RecordId, match.DriveId, match.SpeId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private async Task<string?> ResolveCreateOnSaveContainerAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+
+        if (string.IsNullOrWhiteSpace(callerOid))
+        {
+            // Mirrors LoadAsync: a caller with no Entra oid cannot be attributed, and an unattributable
+            // caller must not pick storage.
+            throw new UnauthorizedAccessException(
+                "Compose create-on-save: the caller carries no Entra oid, so the storage container cannot "
+                + "be attributed to a principal.");
+        }
+
+        // SessionId is OPTIONAL on the create-on-save path (task 110): a Browse/local-file first Save
+        // has no chat session and the endpoint forwards SessionId = "". The session store's id guard
+        // (TenantCache) throws ArgumentException("Id must be a non-empty string") on an empty id, which
+        // the save route maps to a 400 — i.e. an unconditional lookup here turned the DESIGNED
+        // session-less flow into a request rejection. Verified on the wire 2026-09-01 (8 seam/contract
+        // tests, e.g. CreateOnSave_WithEmptySessionId_Returns200AndPersistsDocumentWithoutRebind). No
+        // session means no host context, so the acting-user branch below is the correct — and only —
+        // derivation for it.
+        var session = string.IsNullOrWhiteSpace(request.SessionId)
+            ? null
+            : await _sessions
+                .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+
+        // Issue #863's ownership test, applied here for the same reason: an unowned or foreign session is
+        // not a trustworthy source of the record identity this method is about to authorize against.
+        var sessionIsOwnedByCaller =
+            session is not null
+            && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal);
+
+        var hostContext = sessionIsOwnedByCaller ? session!.HostContext : null;
+
+        if (session is not null && !sessionIsOwnedByCaller)
+        {
+            _logger.LogWarning(
+                "Compose create-on-save: session {SessionId} (tenant={TenantId}) is not owned by the "
+                + "caller — its host context is IGNORED for container selection, falling back to the "
+                + "caller's own business unit.",
+                request.SessionId, request.TenantId);
+        }
+
+        if (hostContext is null || string.IsNullOrWhiteSpace(hostContext.EntityId))
+        {
+            // Matter-less draft — the designed empty-state flow. Server-derived from the caller.
+            var actingUserDecision = await _containerResolver
+                .ResolveForActingUserAsync(callerOid, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(actingUserDecision.ContainerId))
+            {
+                _logger.LogWarning(
+                    "Compose create-on-save: no matter bound to session {SessionId} and the acting user's "
+                    + "business unit has no container stamped — failing the '{Step}' step honestly.",
+                    request.SessionId, StepContainer);
+                return null;
+            }
+
+            _logger.LogInformation(
+                "Compose create-on-save: no matter bound to session {SessionId}; container derived from "
+                + "the acting user's business unit (outcome={Outcome}).",
+                request.SessionId, actingUserDecision.Outcome);
+
+            return actingUserDecision.ContainerId!;
+        }
+
+        // A host context of an unexpected type is refused, not guessed — see
+        // ComposeHostEntityLogicalName's remarks.
+        if (!string.Equals(
+                hostContext.EntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError(
+                "Compose create-on-save: session {SessionId} is bound to host entity type "
+                + "'{EntityType}', which this path cannot authorize. Refusing.",
+                request.SessionId, hostContext.EntityType);
+
+            throw new SdapProblemException(
+                code: "compose_host_entity_unsupported",
+                title: "Cannot determine where to save this document",
+                detail: $"This draft is bound to a '{hostContext.EntityType}', which is not a supported "
+                        + "save target. Refusing rather than choosing a storage location that has not been "
+                        + "authorized.",
+                statusCode: 409);
+        }
+
+        if (!Guid.TryParse(hostContext.EntityId, out var recordId) || recordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "compose_host_record_invalid",
+                title: "Cannot determine where to save this document",
+                detail: "The matter this draft is bound to could not be identified, so its storage "
+                        + "location cannot be resolved. Refusing rather than using a shared container.",
+                statusCode: 409);
+        }
+
+        // ── AUTHORIZE the record the container will come from ──────────────────────────────────────
+        // Without this the patch would only MOVE the primitive: the matter id reaches the session from
+        // LoadComposeDocumentRequest.MatterId, which is client-supplied and never authorized, so a caller
+        // could bind their own session to any matter and receive that matter's container.
+        if (!EntityAccessFilter.TryResolveEntitySet(ComposeHostEntityLogicalName, out var entitySet))
+        {
+            throw new SdapProblemException(
+                code: "compose_host_entity_unsupported",
+                title: "Cannot determine where to save this document",
+                detail: "This draft's owning record type cannot be authorized, so the save is refused.",
+                statusCode: 409);
+        }
+
+        var rights = await _accessProbe
+            .GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), entitySet, recordId, cancellationToken)
+            .ConfigureAwait(false);
+
+        // The SAME operation key the Office save path uses for the same act — attaching a document to a
+        // record. One policy decides what that costs (Dataverse AppendTo); this adds no second vocabulary.
+        if (!OperationAccessPolicy.HasRequiredRights(rights, "entity.associate_document"))
+        {
+            _logger.LogWarning(
+                "Compose create-on-save DENIED: caller cannot attach documents to {EntitySet}({RecordId}). "
+                + "Holds {Rights}; requires {Required}. (session={SessionId})",
+                entitySet, recordId, rights,
+                OperationAccessPolicy.GetRequiredRights("entity.associate_document"), request.SessionId);
+
+            throw new SdapProblemException(
+                code: "compose_record_access_denied",
+                title: "You cannot save a document to this matter",
+                detail: "You do not have permission to file documents against this matter. Filing a "
+                        + "document to a record requires the \"Append To\" permission on it, and your "
+                        + "security role does not currently grant that. Ask an administrator to grant "
+                        + "Append To for this record type, or ask the matter's owner to share it with you.",
+                statusCode: 403);
+        }
+
+        var decision = await _containerResolver
+            .ResolveForRecordAsync(ComposeHostEntityLogicalName, recordId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+        {
+            // The resolver already threw for this case; kept as a defensive branch so a future resolver
+            // change that RETURNS FailClosed cannot silently fall through to a shared container.
+            throw new SdapProblemException(
+                code: "secure_record_container_missing",
+                title: "Secure matter has no storage container",
+                detail: "This matter is marked secure but has no container of its own, so its content "
+                        + "cannot be stored in a shared container. Provision the matter's container first.",
+                statusCode: 409);
+        }
+
+        if (string.IsNullOrWhiteSpace(decision.ContainerId))
+        {
+            // Configuration, not authorization — the caller HAS access to the matter; the matter's
+            // business unit simply has no container. Structured step failure, same as above.
+            _logger.LogWarning(
+                "Compose create-on-save: matter {RecordId} resolved to no container (outcome={Outcome}) "
+                + "— failing the '{Step}' step honestly.",
+                recordId, decision.Outcome, StepContainer);
+            return null;
+        }
+
+        _logger.LogInformation(
+            "Compose create-on-save: container derived from the AUTHORIZED matter {RecordId} "
+            + "(outcome={Outcome}, session={SessionId}).",
+            recordId, decision.Outcome, request.SessionId);
+
+        return decision.ContainerId!;
+    }
 
     /// <inheritdoc />
     public async Task<SaveComposeDocumentResult> SaveAsync(
@@ -1086,6 +1589,46 @@ public class ComposeService : IComposeService
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // DRIVE PROVENANCE (#858 family, 2026-09-01) — resolved ONCE, HERE, and folded back onto the
+        // request so every downstream consumer inherits it: the baseline re-fetch below, the pre-write
+        // metadata read + PDF guard, the stale-base re-anchor's own download, and the preconditioned
+        // replace. Rewriting the request rather than threading a second drive parameter through five
+        // collaborators is deliberate — a threaded parameter is a site a future edit can forget, and the
+        // one property that has to hold is that NO site on this path can still reach the caller's claim.
+        //
+        // The transient-create branch is untouched by design: it has no drive item yet and its drive comes
+        // from the SERVER-derived container (#858), which is already provenance-correct.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (!isTransientCreate)
+        {
+            var authoritativeDriveId = await ResolveAuthoritativeDriveIdAsync(
+                    request.DocumentSpeId!, request.DriveId, "save", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!string.Equals(authoritativeDriveId, request.DriveId, StringComparison.Ordinal))
+            {
+                request = request with { DriveId = authoritativeDriveId };
+            }
+        }
+
+        // Task 166 r1 (route-authorization sweep, Compose Save): the body's DocumentRecordId is honoured only when it
+        // is the row OF the item being replaced (see ReadBoundDocumentRowAsync) — folded back onto the request, like
+        // the drive above, so the origin read (clean-vs-tracked apply) and the warning-suppression read below can
+        // only ever consult the document's OWN row. A transient create carries no record id.
+        ComposeOrigin? boundPersistedOrigin = null;
+        if (!isTransientCreate && request.DocumentRecordId is { } claimedRecordId)
+        {
+            var (boundRecordId, persistedOriginOfBoundRow) = await ReadBoundDocumentRowAsync(
+                    claimedRecordId, request.DocumentSpeId!, cancellationToken)
+                .ConfigureAwait(false);
+            boundPersistedOrigin = persistedOriginOfBoundRow;
+            if (boundRecordId != claimedRecordId)
+            {
+                request = request with { DocumentRecordId = boundRecordId };
+            }
+        }
 
         (byte[] contentToPersist, var renderDegradationWarnings) = await _saveStorage.ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
@@ -1178,9 +1721,10 @@ public class ComposeService : IComposeService
         var originToPersist = pdfSource is not null ? ComposeOrigin.Authored : origin;
 
         var cleanApply = false;
-        if (request.ContentModel is null && request.DocumentRecordId is { } originRecordId)
+        if (request.ContentModel is null && request.DocumentRecordId is not null)
         {
-            var persistedOrigin = await ReadPersistedOriginAsync(originRecordId, cancellationToken).ConfigureAwait(false);
+            // Task 166 r1: the origin of the BOUND row, read with the binding above (no second read).
+            var persistedOrigin = boundPersistedOrigin;
             if (persistedOrigin == ComposeOrigin.Authored)
             {
                 origin = ComposeOrigin.Authored;
@@ -1207,7 +1751,7 @@ public class ComposeService : IComposeService
 
         if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
         {
-            var currentMetadata = await _spe.GetFileMetadataAsUserAsync(
+            var currentMetadata = await _spe.GetMetadataForComposeAsync(
                     httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
             preWriteETag = currentMetadata?.ETag;
@@ -1414,6 +1958,34 @@ public class ComposeService : IComposeService
                 request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
         }
 
+        // spaarkeai-compose-r8 (UAT item 8): the "Include document revision report" appendix — the
+        // plain-language "we made these edits, here is what they do" memo, appended as real body content
+        // so it prints and survives to PDF (metadata would not). Same shipped AppendSection path as the
+        // Summary Page above and placed immediately after it, so when a save carries both, the ordering is
+        // deterministic rather than incidental. Pure + deterministic, no second LLM call.
+        //
+        // The generator returns EMPTY when there is nothing to report, and appending then would leave a
+        // heading with nothing under it — the document-shaped version of the phantom change the client
+        // producer refuses to dispatch. So the emptiness is checked here, not assumed away.
+        if (request.RevisionReport is not null)
+        {
+            var reportBlocks = ComposeRevisionReportGenerator.Build(request.RevisionReport);
+            if (reportBlocks.Count > 0)
+            {
+                contentToPersist = _documentRenderer.AppendSection(contentToPersist, reportBlocks);
+
+                _logger.LogInformation(
+                    "Compose save: appended Document Revision Report ({ChangeCount} itemised change(s)) to the document (session={SessionId}).",
+                    request.RevisionReport.Changes?.Count ?? 0, request.SessionId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Compose save: Document Revision Report requested but the ledgered result carried nothing to report — nothing appended (session={SessionId}).",
+                    request.SessionId);
+            }
+        }
+
         // Task 012 (the client cutover): on a render-path save, project the FINAL persisted bytes back
         // into the canonical model and return it — the client adopts it as its new retained loaded model
         // and re-baselines its edit snapshot, so the NEXT dirty save merges against the just-persisted
@@ -1431,22 +2003,27 @@ public class ComposeService : IComposeService
         }
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
-            request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
+            // container= dropped with SaveComposeDocumentRequest.ContainerId (issue #858). The container
+            // is no longer an INPUT to log; the chosen one is logged by ResolveCreateOnSaveContainerAsync
+            // at the point of the decision, alongside which record it was derived from.
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            request.TenantId, request.DriveId, request.DocumentSpeId,
             isTransientCreate, request.ContentModel is not null, request.Comments?.Count ?? 0,
             request.SessionId, request.DocumentRecordId, request.Content.Length);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 1 — container (FR-05, Fork A + Fork B).
-        //   Transient draft (no DocumentSpeId): the container id is CLIENT-SUPPLIED (Fork A —
-        //   no server-side BU→container resolver); create the SPE drive-item in it under OBO
-        //   (Fork B). A missing container FAILS the container step honestly — never a success.
+        //   Transient draft (no DocumentSpeId): the container id is SERVER-DERIVED by
+        //   ResolveCreateOnSaveContainerAsync (#858 — the caller cannot name it; the session-bound
+        //   matter is authorized first, else the acting user's BU supplies it); create the SPE
+        //   drive-item in it under OBO (Fork B). An UNRESOLVABLE container FAILS the container step
+        //   honestly — never a success, and never a guessed container.
         //   Existing item (DocumentSpeId present): replace the drive-item's content (R1 behavior).
         // ────────────────────────────────────────────────────────────────────────────
         string effectiveSpeId;
         string? effectiveDriveId;
         FileHandleDto saved;
-        var fileName = ResolveFileName(request.DisplayName);
+        var fileName = ComposeCreateOnSavePromoter.ResolveFileName(request.DisplayName);
 
         if (isTransientCreate)
         {
@@ -1458,10 +2035,10 @@ public class ComposeService : IComposeService
             // against the durable sprk_composetransientkey_uk alt-key. A hit REUSES the existing record's SPE
             // item (replace in place, no new mint, no new row). Save-New (ForkNew) deliberately SKIPS the
             // dedup to fork a fresh record. Resolves by KEY, never by content (I-7/NFR-02).
-            TransientKeyMatch? dedupMatch = null;
+            ComposeRecordResolution.TransientKeyMatch? dedupMatch = null;
             if (!request.ForkNew && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                dedupMatch = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                dedupMatch = await _recordResolution.TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -1472,10 +2049,20 @@ public class ComposeService : IComposeService
                 // Dedup hit: the transient key already resolved to a record with a live SPE item — replace
                 // that item's content in place. No new mint, no new row (the promote step below finds the
                 // existing record by sprk_graphitemid → idempotent no-op).
+                //
+                // Task 171 (owner round 69, broker-only): the replace is APP-ONLY, so the key alone — a client
+                // value, stored on the row where any reader can see it — must not decide it. The caller must hold
+                // WRITE on the matched sprk_document (Dataverse, as the caller) and the row's pointer must verify.
+                // Under OBO, SPE's own write check on the item stood here; it held only for a caller with a container
+                // role, which every secure container's users lack.
+                var brokered = await AuthorizeTransientKeyReplaceAsync(match, httpContext, cancellationToken).ConfigureAwait(false);
+
                 using var replaceStream = new MemoryStream(contentToPersist, writable: false);
-                var replaced = await _spe.ReplaceFileContentAsUserAsync(
-                        httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
-                    .ConfigureAwait(false);
+                var replaced = brokered
+                    ? await _spe.ReplaceFileContentAsync(match.DriveId!, match.SpeId!, replaceStream, ifMatch: null, cancellationToken)
+                        .ConfigureAwait(false)
+                    : await _spe.ReplaceFileContentAsUserAsync(httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                        .ConfigureAwait(false);
 
                 if (replaced is null || string.IsNullOrEmpty(replaced.Id))
                 {
@@ -1494,31 +2081,65 @@ public class ComposeService : IComposeService
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(request.ContainerId))
+                // ══ SERVER-DERIVED CONTAINER (issue #858) ═══════════════════════════════════════════
+                // Was: `request.ContainerId`, an SPE container id supplied in the request BODY, written
+                // into with no per-resource authorization of any kind. Now the container comes from the
+                // matter bound to this session — SERVER-SIDE state — and only after the caller has been
+                // authorized against that matter. The authorization key and the write destination are one
+                // value by construction.
+                //
+                // The old guard here logged "No server-side BU→container resolver (multi-container
+                // INV-7)" and failed the container step. BOTH halves of that were false by the time it
+                // was read: RecordContainerResolver exists (task 075/076) with nine consumers, and INV-7
+                // PRESCRIBES server-side resolution (record's own field → parent's BU → tenant default)
+                // rather than forbidding it — the citation was inverted, and this project corrected the
+                // same misreading in its own design.md. A matter-less draft is now resolved from the
+                // acting user's business unit, server-side, instead of being refused.
+                var resolvedContainerId = await ResolveCreateOnSaveContainerAsync(
+                    request, httpContext, cancellationToken).ConfigureAwait(false);
+
+                // Null means NO CONTAINER IS CONFIGURED (not "access denied" — that threw). Same honest
+                // container-step failure the old client-supplied-ContainerId guard produced, so the
+                // client's per-step projection is unchanged and nothing is ever written speculatively.
+                if (string.IsNullOrWhiteSpace(resolvedContainerId))
                 {
-                    _logger.LogWarning(
-                        "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
-                        StepContainer, request.SessionId);
-                    return BuildContainerFailedResult(request, observedAt);
+                    // #858 (unified-access-control-r2): the "no client-supplied ContainerId" warning that
+                    // stood here is GONE with the premise — the client no longer supplies a container at
+                    // all, so there is nothing about the request to report. The honest step failure below
+                    // is the whole signal. Callee moved by task 070 cluster 2a.
+                    return _createOnSave.BuildContainerFailedResult(request, observedAt);
                 }
 
-                // Fork B: mint the SPE drive-item in the supplied container under the user's OBO identity
-                // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
+                // Fork B: mint the SPE drive-item in the RESOLVED container APP-ONLY (task 171, owner round 69). The
+                // container was derived server-side behind a Dataverse decision (Append To on the matter, or the
+                // acting user's own business unit — the record-less rule every surface shares), so the BFF writes as
+                // itself; the OBO mint failed for every user with no role on the container (every secure matter).
+                // Rename, not Replace: under the app identity a same-named file in a shared container must never be
+                // overwritten by someone else's first save — a collision becomes a NEW, distinctly named item.
                 // First save of this transient key (or a deliberate Save-New fork): once created, the record
                 // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
                 // same key takes the dedup replace path above — never a double mint.
-                var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+                var driveId = await _spe.ResolveDriveIdAsync(resolvedContainerId, cancellationToken).ConfigureAwait(false);
                 using var createStream = new MemoryStream(contentToPersist, writable: false);
-                var created = await _spe.UploadSmallAsUserAsync(
-                        httpContext, driveId, fileName, createStream, cancellationToken)
+
+                // The value handed to the sink is named as what it IS — the whole upload path — and is
+                // sanitized AT the call rather than only in ResolveFileName far above. Redundant on today's
+                // control flow and deliberately so: `fileName` is reassigned three times in this method
+                // (from replaced.Name / created.Name), so "it was sanitized when it was created" is not a
+                // property a future edit preserves. Sanitizing is idempotent. Enforced by
+                // tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs.
+                var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
+
+                var created = await _spe.UploadSmallAsync(
+                        driveId, uploadPath, createStream, ConflictBehavior.Rename, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (created is null || string.IsNullOrEmpty(created.Id))
                 {
                     _logger.LogError(
                         "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
-                        request.ContainerId, StepContainer, request.SessionId);
-                    return BuildContainerFailedResult(request, observedAt);
+                        resolvedContainerId, StepContainer, request.SessionId);
+                    return _createOnSave.BuildContainerFailedResult(request, observedAt);
                 }
 
                 saved = created;
@@ -1620,7 +2241,7 @@ public class ComposeService : IComposeService
             promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (InvalidOperationException ex) when (IsDataverseIdentityKeyFault(ex))
+        catch (InvalidOperationException ex) when (ComposeCreateOnSavePromoter.IsDataverseIdentityKeyFault(ex))
         {
             throw;
         }
@@ -1632,7 +2253,7 @@ public class ComposeService : IComposeService
                 "identity record is not. Reporting partially-recorded.",
                 effectiveSpeId, request.SessionId);
 
-            return BuildRecordFailedResult(
+            return ComposeCreateOnSavePromoter.BuildRecordFailedResult(
                 request, effectiveSpeId, effectiveDriveId, saved, origin, observedAt,
                 detail: $"record step failed: {ex.GetType().Name}: {ex.Message}");
         }
@@ -1726,18 +2347,18 @@ public class ComposeService : IComposeService
         // "dispatched"/Running signal, so the synchronous aggregate reads Partial (record + index exist,
         // profile pending) and never demotes to Failed on a best-effort profile (Fork C, compose-r2).
         // ────────────────────────────────────────────────────────────────────────────
-        var completion = ProjectCreateOnSaveState(
+        var completion = ComposeCreateOnSavePromoter.ProjectCreateOnSaveState(
             subjectId: effectiveSpeId,
             correlationId: httpContext.TraceIdentifier,
-            containerSignal: CompletedSignal(StepContainer),
+            containerSignal: ComposeCreateOnSavePromoter.CompletedSignal(StepContainer),
             // FR-S09 item 5(a) (r8 task 016): derived, not asserted. This was a hardcoded
             // CompletedSignal — the record step reported success even when promotion resolved no record
             // id at all, which is the same class of claim-without-evidence as a 200 that means nothing
             // was written. The very next statement already branches on `DocumentRecordId.HasValue` for
             // the profile step, so the two lines used to contradict each other three lines apart.
             recordSignal: promotion.DocumentRecordId.HasValue
-                ? CompletedSignal(StepRecord)
-                : RecordNotResolvedSignal(),
+                ? ComposeCreateOnSavePromoter.CompletedSignal(StepRecord)
+                : ComposeCreateOnSavePromoter.RecordNotResolvedSignal(),
             profileSignal: profileSignal,
             indexingSignal: ComposeProfileDispatcher.Indexing(indexingResult),
             observedAt: observedAt);
@@ -1855,104 +2476,17 @@ public class ComposeService : IComposeService
     // unchanged reopen matches the stamp → skip (no profiling storm on repeated reopens).
     // =========================================================================
 
-    private const string ProfiledETagKeyPrefix = "sdap:compose:profiled-etag:";
-
-    private async Task<string?> GetProfiledETagAsync(string documentSpeId, CancellationToken ct)
-    {
-        if (_cache is null)
-        {
-            return null;
-        }
-        try
-        {
-            return await _cache.GetStringAsync(ProfiledETagKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose profile (G10): failed to read the profiled-eTag stamp for driveItem={DocumentSpeId} — treating as never-profiled (may re-trigger once).",
-                documentSpeId);
-            return null;
-        }
-    }
-
-    private async Task SetProfiledETagAsync(string documentSpeId, string eTag, CancellationToken ct)
-    {
-        if (_cache is null || string.IsNullOrEmpty(eTag))
-        {
-            return;
-        }
-        try
-        {
-            await _cache.SetStringAsync(ProfiledETagKeyPrefix + documentSpeId, eTag, ct).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose profile (G10): failed to persist the profiled-eTag stamp for driveItem={DocumentSpeId} — a future reopen may re-trigger once more (best-effort, never a storm).",
-                documentSpeId);
-        }
-    }
-
-    /// <summary>
-    /// G10 (FR-09, task 040): the reload/onload re-trigger. On a Path A reopen (an existing
-    /// <c>sprk_document</c>), re-dispatch the fire-and-forget Document Profile ONLY when the doc CHANGED
-    /// since Compose last profiled it (live eTag ≠ the profiled-eTag stamp) — then stamp the current eTag so
-    /// a subsequent unchanged reopen skips (the storm guard closes the loop). Best-effort: never blocks or
-    /// fails Load; a null <c>_documentProfileAi</c>/cache simply no-ops.
-    /// </summary>
-    private async Task MaybeRetriggerProfileOnLoadAsync(
-        Guid documentRecordId, string documentSpeId, string liveETag, HttpContext httpContext, CancellationToken ct)
-    {
-        try
-        {
-            var profiledETag = await GetProfiledETagAsync(documentSpeId, ct).ConfigureAwait(false);
-            if (string.Equals(profiledETag, liveETag, StringComparison.Ordinal))
-            {
-                return; // unchanged since the last profile — skip (no storm)
-            }
-
-            _profileDispatcher.Dispatch(documentRecordId, httpContext);
-            await SetProfiledETagAsync(documentSpeId, liveETag, ct).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Compose reload profile re-trigger (G10): document {DocumentRecordId} (driveItem={DocumentSpeId}) changed since last profile (profiledETag={ProfiledETag}, liveETag={LiveETag}) — profile re-dispatched fire-and-forget.",
-                documentRecordId, documentSpeId, profiledETag, liveETag);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose reload profile re-trigger (G10): failed for document {DocumentRecordId} — best-effort, Load unaffected.",
-                documentRecordId);
-        }
-    }
-
     /// <inheritdoc />
-    public async Task<bool> RefreshProfileAsync(
+    /// <remarks>
+    /// The interface member stays here and the implementation lives in
+    /// <see cref="ComposeProfileRetriggerGuard"/> (task 070 cluster 5a): the CONTRACT is the service's
+    /// to keep, only the re-profiling policy moves.
+    /// </remarks>
+    public Task<bool> RefreshProfileAsync(
         RefreshComposeProfileRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (request.DocumentRecordId == Guid.Empty)
-        {
-            throw new ArgumentException("A DocumentRecordId is required to refresh a Compose document's profile.", nameof(request));
-        }
-
-        // G10 manual leg: a user-initiated on-demand re-run. UNCONDITIONAL (unlike the reload guard) — the
-        // user explicitly asked to refresh — but still fire-and-forget + best-effort. Stamp the current eTag
-        // (when known) so an immediately-following reopen does not redundantly re-trigger.
-        _profileDispatcher.Dispatch(request.DocumentRecordId, httpContext);
-        if (!string.IsNullOrWhiteSpace(request.DocumentSpeId) && !string.IsNullOrWhiteSpace(request.ETag))
-        {
-            await SetProfiledETagAsync(request.DocumentSpeId!, request.ETag!, cancellationToken).ConfigureAwait(false);
-        }
-
-        _logger.LogInformation(
-            "Compose manual profile refresh (G10): document {DocumentRecordId} — profile re-dispatched fire-and-forget on user request.",
-            request.DocumentRecordId);
-        return true;
-    }
+        => _profileRetrigger.RefreshProfileAsync(request, httpContext, cancellationToken);
 
     /// <summary>
     /// Resolves the tracked-change revision AUTHOR for a synthesized redline (task 022) from the caller's
@@ -1978,560 +2512,17 @@ public class ComposeService : IComposeService
         return string.IsNullOrWhiteSpace(name) ? "Spaarke Compose" : name!.Trim();
     }
 
-    /// <summary>
-    /// STEP 5 (FR-30, compose-r2, #629) — best-effort durable memory CAPTURE. Distils the bound session's
-    /// durable insights (defined terms today) into Record-scope memory keyed by the saved
-    /// <c>sprk_document</c>, via the ADR-013 <see cref="IComposeMemoryCapture"/> facade. The whole body is
-    /// guarded so a memory-capture failure NEVER throws — a Save must never be blocked or failed by it. A
-    /// no-op when the facade is unregistered (null gate) or no session is bound.
-    /// </summary>
     /// <inheritdoc />
-    public async Task<PromoteComposeDocumentResult> PromoteIfEphemeralAsync(
+    /// <remarks>
+    /// The interface member stays here and the implementation lives in
+    /// <see cref="ComposeCreateOnSavePromoter"/> (task 070 cluster 2a): the CONTRACT is the service's
+    /// to keep, only the promotion policy moves. Same split as cluster 6's annotation store.
+    /// </remarks>
+    public Task<PromoteComposeDocumentResult> PromoteIfEphemeralAsync(
         PromoteComposeDocumentRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(request.DocumentSpeId))
-            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(request));
-        // SessionId is OPTIONAL (task 110): the ephemeral→promoted rebind is skipped when no
-        // session is bound (transient Browse/local-file first Save). See the conditional rebinds below.
-        if (string.IsNullOrWhiteSpace(request.TenantId))
-            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-
-        // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk). The lookup also carries the
-        //    FR-C3 dedup columns so graduate-on-divergence needs no extra round-trip.
-        var existingRow = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (existingRow is not null)
-        {
-            var existingId = existingRow.Id;
-            _logger.LogDebug(
-                "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
-                existingId, request.DocumentSpeId);
-
-            // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
-            // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
-            // null-tolerant, but skipping avoids an empty-session lookup + a misleading warn.
-            if (!string.IsNullOrWhiteSpace(request.SessionId))
-            {
-                await RebindSessionDocumentIdAsync(
-                        tenantId: request.TenantId,
-                        sessionId: request.SessionId,
-                        currentDocumentId: request.DocumentSpeId,
-                        newDocumentId: existingId.ToString(),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-
-            // FR-C3 graduate-on-divergence: if this existing row is a hash-linked COPY whose content has now
-            // diverged from the canonical it was linked at, sever the link so it becomes its own canonical.
-            await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
-                .ConfigureAwait(false);
-
-            // FR-S09 item 7 (r8 task 016): refresh the file metadata this save just changed.
-            //
-            // This branch is the REPLACE path — every save after the first lands here. It wrote a new
-            // version to SPE (new byte length, and a new web URL whenever the file was renamed or moved)
-            // and then returned without touching the row, so `sprk_filesize` and `sprk_filepath` kept
-            // describing the FIRST version forever. Downstream readers trust those columns: the
-            // Documents grid shows the size, "Open in SharePoint" follows the path. Both quietly drifted.
-            //
-            // Only these two columns, and only when the caller supplied them: the create branch owns the
-            // fields that define IDENTITY (origin, transient key, canonical link) and those must never be
-            // mutated by a later save — the existing-row branch's whole contract is idempotence.
-            var metadataRefreshFailed = false;
-            var refreshFields = new Dictionary<string, object>();
-            if (request.FileSize.HasValue)
-            {
-                // Whole Number (int) column — same cast the create branch uses; the OrganizationService
-                // write path is strict about CLR type.
-                refreshFields[FileSizeAttribute] = (int)request.FileSize.Value;
-            }
-            if (!string.IsNullOrWhiteSpace(request.FilePath))
-            {
-                refreshFields[FilePathAttribute] = request.FilePath!;
-            }
-            if (refreshFields.Count > 0)
-            {
-                try
-                {
-                    await _dataverse.UpdateAsync(DocumentLogicalName, existingId, refreshFields, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    // Never fails the save — the document IS stored. But it is not silent either: the
-                    // flag rides back to SaveAsync, which turns it into a `document-metadata-stale`
-                    // degradation warning on a `persisted-with-warnings` outcome.
-                    metadataRefreshFailed = true;
-                    _logger.LogWarning(ex,
-                        "Compose promote: file-metadata refresh failed for sprk_document {DocumentRecordId} " +
-                        "(driveItem={DocumentSpeId}). The save itself is unaffected; sprk_filesize/sprk_filepath " +
-                        "are now stale for this row.",
-                        existingId, request.DocumentSpeId);
-                }
-            }
-
-            return new PromoteComposeDocumentResult
-            {
-                DocumentSpeId = request.DocumentSpeId,
-                SessionId = request.SessionId,
-                DocumentRecordId = existingId,
-                WasCreated = false,
-                MetadataRefreshFailed = metadataRefreshFailed,
-            };
-        }
-
-        // 2) Create the sprk_document row.
-        //    The record MUST carry the full SPE pointer + file metadata (drive-id + has-file +
-        //    size/mime/filepath), NOT just the item-id — otherwise downstream readers (open-links,
-        //    preview) validate the pointer, find drive-id empty + sprk_hasfile false, and 409
-        //    "No file is attached to this document yet." Field set mirrors the canonical
-        //    OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync write.
-        var entity = new Entity(DocumentLogicalName);
-        entity[GraphItemIdAttribute] = request.DocumentSpeId;
-        var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
-            ? request.DisplayName!
-            : $"Compose document ({request.DocumentSpeId})";
-        entity[DisplayNameAttribute] = effectiveDisplayName;
-
-        // Prefer the resolved file name (carries the .docx extension); fall back to the display
-        // name for standalone promote callers that supply neither.
-        var effectiveFileName = !string.IsNullOrWhiteSpace(request.FileName)
-            ? request.FileName!
-            : request.DisplayName;
-        if (!string.IsNullOrWhiteSpace(effectiveFileName))
-        {
-            entity[FileNameAttribute] = effectiveFileName!;
-        }
-
-        // SPE drive pointer — the field whose absence is the root cause of the 409s.
-        if (!string.IsNullOrWhiteSpace(request.GraphDriveId))
-        {
-            entity[GraphDriveIdAttribute] = request.GraphDriveId!;
-        }
-
-        // A promoted Compose document always has an SPE file behind it (the drive-item id is a
-        // hard precondition of this method). Mark it so downstream readers stop rejecting it.
-        entity[HasFileAttribute] = true;
-
-        // G1 (FR-01, task 020): persist the durable origin marker ONLY at create-on-save (this branch —
-        // the idempotent existing-row branch above never reaches here, so a subsequent replace-path save
-        // never mutates an already-persisted origin). Defaults to Imported (the Dataverse field's own
-        // default) when the caller supplies none (e.g. a standalone /promote call that predates G1) —
-        // never left unset, so a fresh row is never silently null-origin.
-        entity[ComposeOriginAttribute] = new OptionSetValue((int)(request.Origin ?? ComposeOrigin.Imported));
-
-        // G7 (FR-06, task 022): stamp the client-minted transient dedup key ONLY at create (this branch;
-        // the idempotent existing-row branch above never reaches here). The single-column alt-key
-        // sprk_composetransientkey_uk makes this the durable dedup identity for repeated create-on-save
-        // calls (see TryFindDocumentByTransientKeyAsync + the SaveAsync transient branch). Omitted for a
-        // replace-path save or an older client that predates G7 (nulls are not enforced-unique).
-        if (!string.IsNullOrWhiteSpace(request.TransientKey))
-        {
-            entity[ComposeTransientKeyAttribute] = request.TransientKey!;
-        }
-
-        if (request.FileSize.HasValue)
-        {
-            // sprk_filesize is a Whole Number (int) column; the OrganizationService write path is
-            // strict about CLR type, so cast (same as OfficeDocumentPersistence / DataverseServiceClientImpl).
-            entity[FileSizeAttribute] = (int)request.FileSize.Value;
-        }
-        if (!string.IsNullOrWhiteSpace(request.MimeType))
-        {
-            entity[MimeTypeAttribute] = request.MimeType!;
-        }
-        if (!string.IsNullOrWhiteSpace(request.FilePath))
-        {
-            entity[FilePathAttribute] = request.FilePath!;
-        }
-
-        // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
-        // INHERITS the source PDF record's link lookups so the new Word document files ALONGSIDE the
-        // PDF (same matter/project/… — containers are BU-level, so placement is already shared; the
-        // RECORD association is what was missing). The copied set is the ADR-024 sprk_document link
-        // vocabulary (mirrors AttachmentDocumentAssociationRung's map). Best-effort: a failed source
-        // read logs LOUDLY and the create proceeds unassociated (mirrors the source having no links —
-        // never fails the save); the idempotent existing-row branch above never reaches here, so an
-        // existing record's links are never mutated.
-        if (request.SourceDocumentRecordId is { } sourceRecordId)
-        {
-            try
-            {
-                var sourceEntity = await _dataverse.RetrieveAsync(
-                        DocumentLogicalName,
-                        sourceRecordId,
-                        DocumentAssociationLookupAttributes,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-
-                var inherited = 0;
-                if (sourceEntity is not null)
-                {
-                    foreach (var lookup in DocumentAssociationLookupAttributes)
-                    {
-                        var reference = sourceEntity.GetAttributeValue<EntityReference>(lookup);
-                        if (reference is null || reference.Id == Guid.Empty)
-                        {
-                            continue;
-                        }
-
-                        entity[lookup] = new EntityReference(reference.LogicalName, reference.Id);
-                        inherited++;
-                    }
-                }
-
-                if (inherited > 0)
-                {
-                    _logger.LogInformation(
-                        "Compose promote: inherited {Count} record link(s) from source document {SourceRecordId} (PDF-sourced create — filed alongside the source).",
-                        inherited, sourceRecordId);
-                }
-                else
-                {
-                    _logger.LogInformation(
-                        "Compose promote: source document {SourceRecordId} carries no record links to inherit — the new document is created unassociated (mirrors the source).",
-                        sourceRecordId);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose promote: link inheritance from source document {SourceRecordId} failed — creating the new document UNASSOCIATED (the save itself is not affected). Associate manually or re-file from the Documents surface.",
-                    sourceRecordId);
-            }
-        }
-
-        // ── FR-C3 content-dedup, graduate-on-divergence (CREATE branch) ─────────────────────────────
-        // (email-communication-intelligence-r2, merged from master 2026-08-07 — runs AFTER the B-MED-3
-        // link inheritance above; the two blocks stamp disjoint attribute sets on the same new entity.)
-        // Read the just-uploaded item's content identity (quickXorHash) and record it. On a byte-identical
-        // hit against an existing CANONICAL, LINK this editable copy (sprk_canonicaldocument) rather than
-        // suppressing it: a Compose document is a living document that diverges on first edit — the idempotent
-        // branch above graduates it then. NOTIFY (never silent). Best-effort/non-fatal (NFR-04): any failure →
-        // create proceeds unstamped. No-op when the detector is absent (bare test ctor) or the drive id is
-        // unknown. Suppression is deliberately NOT used here (that is the immutable email-attachment path's
-        // behavior; suppressing an editable copy would cross-wire the session onto a foreign drive-item).
-        if (_dedupDetector is not null && !string.IsNullOrWhiteSpace(request.GraphDriveId))
-        {
-            try
-            {
-                var (contentHash, canonicalId) = await _dedupDetector
-                    .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
-                    .ConfigureAwait(false);
-                if (!string.IsNullOrWhiteSpace(contentHash))
-                    entity[CanonicalHashAttribute] = contentHash!;
-                if (canonicalId is { } canonical)
-                {
-                    entity[CanonicalDocumentAttribute] = new EntityReference(DocumentLogicalName, canonical);
-                    // Was `FindFirst("oid")` with no schema form: under inbound claim mapping the short
-                    // claim does not exist, so this resolved NULL and NotifyLinkedCopyAsync bailed with
-                    // "no resolvable uploader oid" — the linked-copy notification was never delivered.
-                    var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
-                    await _dedupDetector
-                        .NotifyLinkedCopyAsync(ownerOid, canonical, effectiveFileName, cancellationToken)
-                        .ConfigureAwait(false);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose content-dedup (create) failed (non-fatal) for driveItem={DocumentSpeId}; creating without dedup stamp.",
-                    request.DocumentSpeId);
-            }
-        }
-
-        // FR-07(d) (task 013): atomic UPSERT on the sprk_graphitemid_uk alternate key — replaces the
-        // read-then-CreateAsync sequence so two concurrent first-saves of the SAME minted SPE item can
-        // never each insert a row (Dataverse resolves the target server-side; the second UPDATES the
-        // first's row → exactly one sprk_document, no TOCTOU window). The key uses the RAW DocumentSpeId
-        // string, identical to the read above (TryFindDocumentByGraphItemIdAsync): sprk_graphitemid is an
-        // opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID
-        // canonicalization does NOT apply (verified — the alt-key lookup keys on the raw string).
-        entity.KeyAttributes[GraphItemIdAttribute] = request.DocumentSpeId;
-
-        Guid newId;
-        bool rowCreatedThisCall;
-        try
-        {
-            (newId, rowCreatedThisCall) = await _dataverse.UpsertAsync(entity, cancellationToken).ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Compose promote: upserted sprk_document {DocumentRecordId} for driveItem={DocumentSpeId} (created={Created})",
-                newId, request.DocumentSpeId, rowCreatedThisCall);
-        }
-        catch (InvalidOperationException ex)
-        {
-            // The graphItemId upsert is atomic, so the classic same-SPE-item race is already closed. This
-            // catch now handles the SECONDARY race the upsert CANNOT: two truly-concurrent FIRST saves of
-            // the same transient draft each mint their OWN SPE item (DIFFERENT graphitemid) but carry the
-            // SAME transient key — the loser's upsert-create then fails the sprk_composetransientkey_uk
-            // unique constraint. Re-resolve by graphItemId (defensive) then transientKey to land the loser
-            // on the winner's record → ONE record (the loser's minted item is orphaned, an acceptable rare
-            // edge — never a duplicate ROW).
-            _logger.LogWarning(ex,
-                "Compose promote: upsert failed for driveItem={DocumentSpeId} — likely a concurrent same-transientKey first-save. Re-resolving via alternate key (graphItemId, then transientKey).",
-                request.DocumentSpeId);
-
-            Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false))?.Id;
-
-            if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
-            {
-                var transientKeyWinner = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
-                    .ConfigureAwait(false);
-                raceWinnerId = transientKeyWinner?.RecordId;
-            }
-
-            if (!raceWinnerId.HasValue)
-            {
-                throw;
-            }
-
-            newId = raceWinnerId.Value;
-            rowCreatedThisCall = false; // the winner created the row; this call resolved onto it
-        }
-
-        // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
-        //    OPTIONAL (task 110): skip when no session is bound (transient Browse/local-file
-        //    first Save). The sprk_document create above already completed without a session.
-        if (!string.IsNullOrWhiteSpace(request.SessionId))
-        {
-            await RebindSessionDocumentIdAsync(
-                    tenantId: request.TenantId,
-                    sessionId: request.SessionId,
-                    currentDocumentId: request.DocumentSpeId,
-                    newDocumentId: newId.ToString(),
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        return new PromoteComposeDocumentResult
-        {
-            DocumentSpeId = request.DocumentSpeId,
-            SessionId = request.SessionId,
-            DocumentRecordId = newId,
-            // FR-07(d) (task 013): honest create-vs-update signal from the atomic upsert (false when a
-            // concurrent winner created the row and this call updated/resolved onto it).
-            WasCreated = rowCreatedThisCall,
-        };
-    }
-
-    // =========================================================================
-    // FR-05 create-on-save backbone — helpers (per-step job-aware projection).
-    //
-    // The four steps container → record → profile-analysis → indexing are projected through the
-    // shared JobAwareCompletionStateProjector (store-before-render, ADR-040). profile-analysis is
-    // DISPATCHED FIRE-AND-FORGET under OBO via the ADR-013-safe IDocumentProfileAi facade (compose-r2) —
-    // captured OBO token + fresh DI scope, because a background MI job 403s on the user-OBO-written file.
-    // In the synchronous response the profile step is a non-terminal "dispatched" (Running) signal, so
-    // the aggregate reads Partial (record + index exist, profile pending) and never reads Failed on a
-    // best-effort profile miss (which happens off-thread and is only logged).
-    // =========================================================================
-
-    /// <summary>
-    /// The interim R5-E success bar for FR-05 create-on-save (documented exception, 2026-07-09):
-    /// a record is interim-successful when the <c>container</c>, <c>record</c>, AND <c>indexing</c>
-    /// steps all reached terminal success — a record with no SPE file OR no index is NEVER a success.
-    /// <c>profile-analysis</c> is intentionally EXCLUDED from this bar so a best-effort profile miss
-    /// never demotes an otherwise-good save. Since the profile now runs FIRE-AND-FORGET in the
-    /// background (<see cref="DispatchBackgroundProfile"/>), the synchronous create-on-save response
-    /// carries a non-terminal "dispatched" profile step — so the interim bar (container + record +
-    /// indexing) is the operative success bar for the returned aggregate; the profile fields land
-    /// shortly after, off the response path.
-    /// </summary>
-    public static bool IsInterimCreateOnSaveSuccess(JobAwareCompletionState state)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        bool Completed(string stepName) =>
-            state.Steps.Any(s => string.Equals(s.StepName, stepName, StringComparison.Ordinal)
-                && s.State == JobAwareState.Completed);
-        return Completed(StepContainer) && Completed(StepRecord) && Completed(StepIndexing);
-    }
-
-    /// <summary>Resolves the created drive-item's file name from the caller display name,
-    /// defaulting to a unique <c>compose-draft-…docx</c> and ensuring a <c>.docx</c> extension.</summary>
-    private static string ResolveFileName(string? displayName)
-    {
-        if (string.IsNullOrWhiteSpace(displayName))
-            return $"compose-draft-{Guid.NewGuid():N}.docx";
-        return displayName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
-            ? displayName
-            : displayName + ".docx";
-    }
-
-    /// <summary>A stored terminal-success signal for a step that this request completed inline.</summary>
-    private static StoredStepSignal CompletedSignal(string stepName) => new()
-    {
-        StepName = stepName,
-        StoredStatus = JobStatus.Completed,
-        Started = true,
-    };
-
-    /// <summary>
-    /// FR-S09 item 5 (r8 task 016): the record step ran and resolved no <c>sprk_document</c> id.
-    /// Terminal Failed (there is no retry budget on this path), so the aggregate can never read a
-    /// success for a save that produced no identity record.
-    /// </summary>
-    private static StoredStepSignal RecordNotResolvedSignal() => new()
-    {
-        StepName = StepRecord,
-        StoredStatus = JobStatus.Failed,
-        Started = true,
-        Attempt = 1,
-        MaxAttempts = 1,
-        Detail = "record step resolved no sprk_document id",
-    };
-
-    /// <summary>
-    /// FR-S09 item 5 (r8 task 016): does this <see cref="InvalidOperationException"/> describe one of the
-    /// two Dataverse identity-key faults that <c>ComposeEndpoints.ExecuteSaveAsync</c> maps to an honest,
-    /// administrator-actionable 409/503?
-    /// </summary>
-    /// <remarks>
-    /// The predicate is duplicated from that catch filter ON PURPOSE, and the duplication is the point:
-    /// the promote guard must let exactly those exceptions through so the endpoint handler stays live.
-    /// If either side changes, the other must change with it — a single shared helper would be tidier
-    /// but would hide that coupling behind an abstraction, and an endpoint handler that quietly stops
-    /// being reachable is the defect this whole task exists to remove. Keep them in step.
-    /// </remarks>
-    private static bool IsDataverseIdentityKeyFault(InvalidOperationException ex) =>
-        ex.Message.Contains("Found multiple records", StringComparison.OrdinalIgnoreCase)
-        || ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
-        || (ex.Message.Contains("sprk_graphitemid", StringComparison.OrdinalIgnoreCase)
-            && ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase));
-
-    /// <summary>
-    /// FR-S09 item 5 (r8 task 016): the terminal result for "the bytes are durable, the record is not".
-    /// </summary>
-    /// <remarks>
-    /// Mirrors <c>BuildContainerFailedResult</c>'s shape — a RETURNED non-success outcome rather than a
-    /// throw — because the two are the same kind of event: a save that reached a defined, reportable end
-    /// state that is not success. <c>partially-recorded</c> rather than <c>storage-failed</c>: storage
-    /// succeeded. Telling the user their document is gone when it is provably stored would be its own
-    /// dishonest outcome, and it would invite them to retype work that already exists.
-    /// </remarks>
-    private static SaveComposeDocumentResult BuildRecordFailedResult(
-        SaveComposeDocumentRequest request,
-        string effectiveSpeId,
-        string? effectiveDriveId,
-        FileHandleDto saved,
-        ComposeOrigin origin,
-        DateTimeOffset observedAt,
-        string detail)
-    {
-        var completion = ProjectCreateOnSaveState(
-            subjectId: effectiveSpeId,
-            correlationId: request.SessionId,
-            containerSignal: CompletedSignal(StepContainer),
-            recordSignal: new StoredStepSignal
-            {
-                StepName = StepRecord,
-                StoredStatus = JobStatus.Failed,
-                Started = true,
-                Attempt = 1,
-                MaxAttempts = 1,
-                Detail = detail,
-            },
-            profileSignal: ComposeProfileDispatcher.ProfileNotAttempted("profile not attempted: record step failed"),
-            indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
-            observedAt: observedAt);
-
-        return new SaveComposeDocumentResult
-        {
-            Outcome = ComposeSaveOutcome.PartiallyRecorded,
-            DocumentSpeId = effectiveSpeId,
-            DriveId = effectiveDriveId,
-            SessionId = request.SessionId,
-            DocumentRecordId = null,
-            VersionId = saved.Id,
-            ETag = saved.ETag,
-            Size = saved.Size,
-            WasPromotedThisSave = false,
-            CompletionState = completion,
-            Origin = origin,
-        };
-    }
-
-    /// <summary>Projects the four create-on-save steps (with profile-analysis deferred) through the
-    /// shared <see cref="JobAwareCompletionStateProjector"/>.</summary>
-    private static JobAwareCompletionState ProjectCreateOnSaveState(
-        string subjectId,
-        string correlationId,
-        StoredStepSignal containerSignal,
-        StoredStepSignal recordSignal,
-        StoredStepSignal profileSignal,
-        StoredStepSignal indexingSignal,
-        DateTimeOffset observedAt)
-    {
-        var job = new JobContract
-        {
-            JobType = ComposeCreateOnSaveJobType,
-            SubjectId = subjectId,
-            CorrelationId = correlationId,
-            IdempotencyKey = $"compose-create-on-save-{subjectId}",
-        };
-
-        var steps = new List<StoredStepSignal>
-        {
-            containerSignal,
-            recordSignal,
-            profileSignal,
-            indexingSignal,
-        };
-
-        return JobAwareCompletionStateProjector.Project(job, steps, observedAt);
-    }
-
-    /// <summary>Builds the create-on-save result for a FAILED container step (missing client-supplied
-    /// container, or SPE creation returned null): no record, no version, aggregate Failed — never a
-    /// success. record/indexing project as non-terminal since they never ran.</summary>
-    private SaveComposeDocumentResult BuildContainerFailedResult(
-        SaveComposeDocumentRequest request,
-        DateTimeOffset observedAt)
-    {
-        var containerFailed = new StoredStepSignal
-        {
-            StepName = StepContainer,
-            StoredStatus = JobStatus.Failed,
-            Started = true,
-            Attempt = 1,
-            MaxAttempts = 1,
-            Detail = "container step failed: no client-supplied ContainerId for a transient draft, or SPE drive-item creation failed",
-        };
-
-        var completion = ProjectCreateOnSaveState(
-            subjectId: request.DocumentSpeId ?? string.Empty,
-            correlationId: request.SessionId,
-            containerSignal: containerFailed,
-            recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
-            // Container failed → no record → nothing to profile. Non-terminal so the aggregate stays
-            // Failed (driven by the container step), not double-counted.
-            profileSignal: ComposeProfileDispatcher.ProfileNotAttempted("profile not attempted: container step failed"),
-            indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
-            observedAt: observedAt);
-
-        return new SaveComposeDocumentResult
-        {
-            // FR-S06 (task 013): THE defect this contract exists to remove. This path RETURNS (it does
-            // not throw), so the endpoint wraps it in Results.Ok — a save that wrote nothing at all
-            // presented as HTTP 200, which the client rendered as "Saved ✓". The status stays 200 (the
-            // create-on-save step-projection contract rides on this body), but the body now says plainly
-            // that nothing was stored, and the client keys off THIS field rather than the status.
-            Outcome = ComposeSaveOutcome.StorageFailed,
-            DocumentSpeId = request.DocumentSpeId ?? string.Empty,
-            DriveId = request.DriveId,
-            SessionId = request.SessionId,
-            DocumentRecordId = null,
-            VersionId = string.Empty,
-            ETag = null,
-            Size = null,
-            WasPromotedThisSave = false,
-            CompletionState = completion,
-        };
-    }
+        => _createOnSave.PromoteIfEphemeralAsync(request, httpContext, cancellationToken);
 
     // =========================================================================
     // FR-29 anchored annotations (task 060). See design.md §8 + ChatSession.cs
@@ -2558,205 +2549,6 @@ public class ComposeService : IComposeService
         CancellationToken cancellationToken = default)
         => _annotations.SaveAsync(request, cancellationToken);
 
-    /// <summary>
-    /// FR-07 idempotent rebind of a ChatSession's DocumentId. Handles three cases:
-    /// (a) current==new (no-op), (b) session missing (returns null), (c) stored already at
-    /// target (no-op), (d) rebind applied via ChatSessionManager's cache-write path.
-    /// </summary>
-    private async Task<ChatSession?> RebindSessionDocumentIdAsync(
-        string tenantId,
-        string sessionId,
-        string currentDocumentId,
-        string newDocumentId,
-        CancellationToken ct)
-    {
-        // (a) Caller asked for a no-op.
-        if (string.Equals(currentDocumentId, newDocumentId, StringComparison.Ordinal))
-        {
-            return await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-        }
-
-        var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-        if (session is null)
-        {
-            _logger.LogWarning(
-                "Compose: rebind called for non-existent session {SessionId} (tenant={TenantId})",
-                sessionId, tenantId);
-            return null;
-        }
-
-        // (c) Stored binding already at target.
-        if (string.Equals(session.DocumentId, newDocumentId, StringComparison.Ordinal))
-        {
-            return session;
-        }
-
-        // Out-of-order race: caller-asserted currentDocumentId differs from stored.
-        // Proceed with new-value-wins semantics but emit a Warning for operator visibility.
-        if (!string.IsNullOrWhiteSpace(currentDocumentId) &&
-            !string.Equals(session.DocumentId, currentDocumentId, StringComparison.Ordinal))
-        {
-            _logger.LogWarning(
-                "Compose rebind: caller-asserted currentDocumentId ({CallerCurrent}) differs from stored DocumentId ({StoredCurrent}) for session {SessionId} (tenant={TenantId}); proceeding with rebind to {NewDocumentId} (new-value-wins).",
-                currentDocumentId, session.DocumentId, sessionId, tenantId, newDocumentId);
-        }
-
-        _logger.LogInformation(
-            "Compose: rebinding session {SessionId} DocumentId {From} -> {To} (tenant={TenantId})",
-            sessionId, session.DocumentId, newDocumentId, tenantId);
-
-        var rebound = session with
-        {
-            DocumentId = newDocumentId,
-            LastActivity = DateTimeOffset.UtcNow,
-        };
-
-        await _sessions.UpdateSessionCacheAsync(rebound, ct).ConfigureAwait(false);
-        return rebound;
-    }
-
-    /// <summary>
-    /// Looks up an existing <c>sprk_document</c> row by SPE drive-item id via the
-    /// <c>sprk_graphitemid_uk</c> alternate key. Returns the <c>sprk_documentid</c> or
-    /// <c>null</c> when no row exists.
-    /// </summary>
-    /// <summary>
-    /// FR-C3 graduate-on-divergence (email-communication-intelligence-r2): when a subsequent Compose save
-    /// routes through <see cref="PromoteIfEphemeralAsync"/>'s idempotent existing-row branch, check whether the
-    /// row is a hash-linked COPY (<c>sprk_canonicaldocument</c> set) whose LIVE content has diverged from the
-    /// hash it was linked at (<c>sprk_canonicalhash</c>). If so, sever the link (clear
-    /// <c>sprk_canonicaldocument</c> via the <see cref="DBNull"/> clear-sentinel) and stamp the new content hash
-    /// — the copy graduates to its own canonical. The row's dedup columns are already in hand from the idempotent
-    /// alt-key lookup (no extra retrieve). Best-effort / non-fatal (NFR-04): every failure logs and leaves the
-    /// row unchanged (re-evaluated on the next save); never fails the save. No-op when the detector is absent
-    /// (bare test ctor), the drive id is unknown, or the row is a true canonical (no link to sever).
-    /// </summary>
-    private async Task GraduateLinkedCopyIfDivergedAsync(
-        Entity existingRow,
-        PromoteComposeDocumentRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (_dedupDetector is null || string.IsNullOrWhiteSpace(request.GraphDriveId))
-            return;
-
-        // Only a hash-linked COPY can graduate — a true canonical has no sprk_canonicaldocument link.
-        if (existingRow.GetAttributeValue<EntityReference>(CanonicalDocumentAttribute) is null)
-            return;
-
-        try
-        {
-            var linkedHash = existingRow.GetAttributeValue<string>(CanonicalHashAttribute);
-            var (liveHash, _) = await _dedupDetector
-                .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
-
-            // No live hash (unavailable) OR still identical → not diverged; leave the link intact.
-            if (string.IsNullOrWhiteSpace(liveHash) || string.Equals(liveHash, linkedHash, StringComparison.Ordinal))
-                return;
-
-            await _dataverse.UpdateAsync(
-                    DocumentLogicalName,
-                    existingRow.Id,
-                    new Dictionary<string, object>
-                    {
-                        [CanonicalDocumentAttribute] = DBNull.Value, // sever the link (DBNull clear-sentinel)
-                        [CanonicalHashAttribute] = liveHash!,        // stamp the diverged content's own identity
-                    },
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Compose content-dedup: sprk_document {DocumentId} diverged from its linked canonical; graduated to its own document.",
-                existingRow.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose content-dedup (graduate) failed (non-fatal) for document {DocumentId}; leaving link intact.",
-                existingRow.Id);
-        }
-    }
-
-    private async Task<Entity?> TryFindDocumentByGraphItemIdAsync(
-        string driveItemId,
-        CancellationToken cancellationToken)
-    {
-        var key = new KeyAttributeCollection
-        {
-            { GraphItemIdAttribute, driveItemId },
-        };
-
-        try
-        {
-            // Fetch the FR-C3 dedup columns alongside the id so the idempotent branch can evaluate
-            // graduate-on-divergence WITHOUT a second Dataverse round-trip on the save hot path.
-            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
-                DocumentLogicalName,
-                key,
-                new[] { DocumentIdAttribute, CanonicalDocumentAttribute, CanonicalHashAttribute },
-                cancellationToken).ConfigureAwait(false);
-
-            return entity;
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogDebug(ex,
-                "Compose promote alt-key lookup threw InvalidOperationException for driveItem={DocumentSpeId} — treating as not-found",
-                driveItemId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// G7 (FR-06, task 022): the resolved dedup identity for a transient key — the <c>sprk_document</c> row id
-    /// plus the SPE pointer (<c>sprk_graphitemid</c> + <c>sprk_graphdriveid</c>) needed to REPLACE its content
-    /// in place instead of minting a duplicate. <see cref="SpeId"/>/<see cref="DriveId"/> are <c>null</c> only
-    /// for a row that somehow carries a transient key but no SPE pointer (a G7-created row always has both) —
-    /// the caller then falls back to minting.
-    /// </summary>
-    private sealed record TransientKeyMatch(Guid RecordId, string? SpeId, string? DriveId);
-
-    /// <summary>
-    /// G7 (FR-06, task 022): looks up an existing <c>sprk_document</c> row by the client-minted transient key
-    /// via the <c>sprk_composetransientkey_uk</c> alternate key, returning its id + SPE pointer (so the caller
-    /// can replace in place). Returns <c>null</c> when no row carries the key (the first save of this draft,
-    /// or a Save-New fork). Resolves by KEY, never by content (I-7/NFR-02). Mirrors
-    /// <see cref="TryFindDocumentByGraphItemIdAsync"/> exactly (same best-effort not-found on a thrown
-    /// InvalidOperationException).
-    /// </summary>
-    private async Task<TransientKeyMatch?> TryFindDocumentByTransientKeyAsync(
-        string transientKey,
-        CancellationToken cancellationToken)
-    {
-        var key = new KeyAttributeCollection
-        {
-            { ComposeTransientKeyAttribute, transientKey },
-        };
-
-        try
-        {
-            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
-                DocumentLogicalName,
-                key,
-                new[] { DocumentIdAttribute, GraphItemIdAttribute, GraphDriveIdAttribute },
-                cancellationToken).ConfigureAwait(false);
-
-            if (entity is null)
-            {
-                return null;
-            }
-
-            var speId = entity.Contains(GraphItemIdAttribute) ? entity[GraphItemIdAttribute] as string : null;
-            var driveId = entity.Contains(GraphDriveIdAttribute) ? entity[GraphDriveIdAttribute] as string : null;
-            return new TransientKeyMatch(entity.Id, speId, driveId);
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogDebug(ex,
-                "Compose transient-key alt-key lookup threw InvalidOperationException for transientKey — treating as not-found");
-            return null;
-        }
-    }
 
     // =========================================================================
     // FR-31 action history — READ-ONLY ledger query (task 061). See design.md §8:

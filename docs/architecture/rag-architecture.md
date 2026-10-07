@@ -12,7 +12,23 @@
 
 The RAG subsystem provides document-grounded AI responses by indexing document content into Azure AI Search and retrieving relevant chunks at query time. The platform now operates a **canonical 7-index landscape** (see [AI-SEARCH-INDEX-CATALOG.md](AI-SEARCH-INDEX-CATALOG.md) for per-index purpose, vector configuration, and consumers) including `spaarke-files-index` (primary file RAG), `spaarke-rag-references` (golden references), `spaarke-records-index`, `spaarke-session-files`, `spaarke-invoices-index`, `spaarke-playbook-embeddings`, and `spaarke-insights-index`. Retrieval uses **hybrid search** combining keyword, vector, and semantic ranking, and a **Redis-based embedding cache** to reduce Azure OpenAI API costs.
 
-The key design decision is **idempotent re-indexing** (per general handler-idempotency principle in ADR-004 *Async Job Contract*): re-indexing the same document always replaces previous chunks rather than accumulating duplicates. All index documents carry a `tenantId` field for query-time multi-tenant isolation. *(Note: ADR-014 was previously cited here for tenant isolation but is scoped to AI caching key conventions, not index-document tenancy — citation removed per FR-06; see [pending owner decision](#fr-06-pending-owner-decision-on-adr-pointer-drift) below.)*
+The key design decision is **idempotent re-indexing** (per general handler-idempotency principle in ADR-004 *Async Job Contract*): re-indexing the same document always replaces previous chunks rather than accumulating duplicates. All index documents carry a `tenantId` field, which scopes queries to an **Entra tenant**. *(Note: ADR-014 was previously cited here for tenant isolation but is scoped to AI caching key conventions, not index-document tenancy — citation removed per FR-06; see [pending owner decision](#fr-06-pending-owner-decision-on-adr-pointer-drift) below.)*
+
+> 🔴 **CORRECTED 2026-09-28 for owner decision D-12** ([note](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)).
+> This document previously argued that the `tenantId` field gave *"query-time multi-tenant isolation
+> **without separate indexes per tenant**"*. **That is backwards.** Under D-12 **Model 1**, every customer's
+> environment is hosted in **Spaarke's** Azure tenant, so `tenantId` holds the **same GUID for every Model 1
+> customer** — a `tenantId eq '…'` filter separates Entra tenants and **cannot separate customers**, while
+> its tests pass.
+>
+> **The AI Search service is dedicated per customer, in that customer's own Azure subscription** — precisely
+> *because* the filter cannot do this job. This index holds document text and embeddings, the
+> highest-value segregation case after Dataverse itself: a shared service means one filter defect exposes
+> another firm's privileged material. Isolation here is a **resource boundary**, not a query filter; a
+> filter must be written correctly in every query, forever, by everyone, and a boundary cannot be forgotten.
+>
+> The `tenantId` field and its always-applied filter **stay in place as belt-and-braces**. They are simply
+> not what the guarantee rests on.
 
 ### FR-06 pending owner decision on ADR pointer drift
 
@@ -111,13 +127,15 @@ The tenant-isolation principle (every index document carries `tenantId`) and the
 | Idempotent re-indexing | Delete-then-upload per documentId | Same document always produces consistent index state | ADR-004 (general idempotency principle) |
 | SHA256 content hashing for cache | Base64-encoded SHA256 | Consistent key length, safe for any content, deterministic | ADR-009 |
 | Hybrid search (keyword + vector + semantic) | Three-way combination | Best relevance: keyword for exact matches, vector for semantic similarity, semantic ranking for re-ordering | -- |
-| Tenant-scoped index documents | tenantId field on every document | Query-time multi-tenant isolation without separate indexes per tenant | -- (no ADR; see FR-06 pending decision) |
+| **Customer-dedicated AI Search service** | One AI Search service per customer, in the customer's own Azure subscription | Holds document text + embeddings. Isolation is a resource boundary, not a query filter — under Model 1 a `tenantId` filter cannot separate customers (D-12 §3) | D-12 §3 / ADR-027 (amended 2026-09-28) |
+| Tenant-scoped index documents | tenantId field on every document | Query-time scoping **by Entra tenant**, retained as belt-and-braces on top of the dedicated service. ⚠️ **Not** a customer boundary — see the D-12 callout at the top of this doc | -- (no ADR; see FR-06 pending decision) |
 | Embedding cache not used during indexing | Direct-to-index, no Redis for chunk embeddings | Indexing is write-once; caching benefits queries not writes | ADR-009 |
 | Bounded concurrency for AI calls | SemaphoreSlim limits | Prevents rate-limit errors and Azure AI Search overload | ADR-013 |
 
 ## Constraints
 
-- **MUST**: Every AI Search document carries `tenantId` for query-time isolation *(principle stands on its own; ADR-014 citation removed per FR-06 — see top of doc)*
+- **MUST**: Every AI Search document carries `tenantId`, and every query filters on it *(principle stands on its own; ADR-014 citation removed per FR-06 — see top of doc)*. ⚠️ This is **defence in depth by Entra tenant**, not the customer boundary
+- **MUST NOT**: Rely on the `tenantId` filter to separate **customers** — under Model 1 the value is identical for every customer. The customer boundary is the **dedicated per-customer AI Search service** (D-12 §3)
 - **MUST**: Re-indexing deletes stale chunks before uploading new ones (handler-idempotency per ADR-004)
 - **MUST**: Concurrency for embedding generation is bounded to 16 (pipeline) and 5 (search) to avoid rate limits
 - **MUST**: Indexing is triggered via Service Bus jobs, not inline in API requests (ADR-001)

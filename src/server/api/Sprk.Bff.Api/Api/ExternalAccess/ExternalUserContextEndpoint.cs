@@ -28,10 +28,10 @@ public static class ExternalUserContextEndpoint
     /// contact or workforce user) and stored the resolved CallerPrincipal on HttpContext.Items before
     /// this handler runs.
     /// </summary>
-    /// <param name="httpContext">The current HTTP context (used to retrieve ExternalCallerContext).</param>
+    /// <param name="httpContext">The current HTTP context (used to retrieve the CallerPrincipal).</param>
     /// <param name="logger">Logger for request tracing.</param>
     /// <returns>
-    /// 200 OK with ExternalUserContextResponse containing the Contact's project access list.
+    /// 200 OK with ExternalUserContextResponse containing the projects the caller can READ.
     /// 401 Unauthorized if the portal token is missing or invalid (returned by filter).
     /// 403 Forbidden if the Contact has no active participation records (returned by filter).
     /// </returns>
@@ -59,15 +59,29 @@ public static class ExternalUserContextEndpoint
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
 
-        logger.LogInformation(
-            "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} accessible projects. TraceId={TraceId}",
-            caller.ContactId, caller.Plane, caller.ProjectAccess.Count, httpContext.TraceIdentifier);
+        // ONLY projects the caller can READ (unified-access-control-r2 task 136 · defect C2).
+        //
+        // This used to project every ProjectAccess entry and emit the level string "None" for an entry with
+        // no rights. That told the client the GUID of a record the caller holds nothing on — a Secure project
+        // reached only through an organization grant, for instance — which is a disclosure in itself. The
+        // principal no longer carries such entries (both strategies prune them), and ReadableProjects filters
+        // again here, so no level below can be null and "None" is never emitted.
+        //
+        // The /me contract is a level STRING, so this is the one place the lossy rights→level display
+        // projection is used (task 033 — CallerProjectAccess stores AccessRights and derives the level;
+        // see ExternalAccessLevels.ToDisplayLevel). Read alone projects to ViewOnly.
+        var projects = new List<ProjectAccessEntry>();
+        foreach (var project in caller.ReadableProjects)
+        {
+            if (project.AccessLevel is { } level)
+            {
+                projects.Add(new ProjectAccessEntry(project.ProjectId, level.ToString()));
+            }
+        }
 
-        var projects = caller.ProjectAccess
-            .Select(p => new ProjectAccessEntry(
-                p.ProjectId,
-                p.AccessLevel.ToString()))
-            .ToList();
+        logger.LogInformation(
+            "[EXT-ME] Caller {ContactId} ({Plane}) requested context: {Count} readable projects. TraceId={TraceId}",
+            caller.ContactId, caller.Plane, projects.Count, httpContext.TraceIdentifier);
 
         var response = new ExternalUserContextResponse(
             caller.ContactId,

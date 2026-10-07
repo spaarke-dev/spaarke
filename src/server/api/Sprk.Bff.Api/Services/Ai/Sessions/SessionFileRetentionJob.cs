@@ -87,8 +87,8 @@ public sealed record SessionFileRetentionPassResult(
 /// <para>
 /// <b>Placement (root CLAUDE.md §10).</b> In the BFF, under <c>Services/Ai/Sessions/</c>, beside the
 /// store it sweeps and inside the AI boundary (ADR-013) — no CRUD code touches it, so no
-/// <c>PublicContracts/</c> facade is needed. ADR-001: <see cref="BackgroundService"/> +
-/// <see cref="PeriodicTimer"/>, mirroring <see cref="Chat.SessionFilesCleanupJob"/> — no Azure
+/// <c>PublicContracts/</c> facade is needed. A hand-rolled timer <see cref="BackgroundService"/> +
+/// <see cref="PeriodicTimer"/> (existing debt, ADR-052 §1), mirroring <see cref="Chat.SessionFilesCleanupJob"/> — no Azure
 /// Function, no Hangfire/Quartz, no new job framework. No new package, no new Azure resource.
 /// </para>
 /// <para>

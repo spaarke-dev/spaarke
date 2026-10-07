@@ -1,0 +1,859 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="133" project="unified-access-control-r2">
+  <metadata>
+    <title>C11 — secure provisioning can no longer lock the creator out: share before the owner move, verify the share survived, compensate on failure, and make a partially-provisioned record resumable instead of 409 — while a genuinely provisioned record still gets 409 already_provisioned</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C11)</phase>
+    <gate>after-144 (task 144 rewrites Step 3 of the same endpoint to a named non-default owner team and generalizes provisioning to sprk_matter and sprk_workassignment; this task's fix must cover every root type provisioning handles once 144 lands)</gate>
+    <status>completed</status>
+    <status-note>**Round c1, 2026-10-03.** Escalation trigger 4 (Assign cascade under compensation) is ANSWERED by owner round 10 item 4 ((c) then (a)) and implemented: ONE reusable primitive, AssignCascadeChildOwners, snapshots each cascaded child's own owner before any write and restores it after a verified undo (task 148 reuses it). Owner round 10 item 5 decided the kept-container question (note 14.3): as shipped. No escalation trigger is open. NOT closed by this executor (main session): the manual live gate (a)-(j) and the sprk_createdbyperson schema apply before master (both approved by owner round 11 for the main session at integration); publish size; and whether round 11's blanket approval of the batch-4 live steps covers REPLAY as the (e) method (raised verifier round 1 item 9) - if the main session reads it as not covered, it asks the owner before running (e). Full record: notes/task-133-provision-creator-lockout.md section 16. **Round c1-r1, 2026-10-03 (verifier on c1).** The two child-restore outcomes c1 left untested - a child whose owner cannot be read before its restore (Unreadable) or read back after it (Unverified) - are pinned as cascade_children_not_restored with the outcome, nextCall and CRITICAL line (owner round 10 item 4); seeds S19-S22 bite. Comment wording: the kept-container decision (round 10 item 5) and what Gone means. Recorded for the live gate and task 148: the sharepointdocument behaviour in an integration-on org is unproven (fails closed either way). The NOT-closed list above is unchanged. Note section 17. **Round c1-r2, 2026-10-03 (verifier on c1-r1; owner round 13).** The last unpinned child-restore failure is pinned: a child PATCH Dataverse accepts but does not apply (NotApplied) is named in cascade_children_not_restored, never counted restored (seed V3 bites). Also pinned: the snapshot refuses a row read without an id (V18), and a resume or a work assignment reads no cascaded rows (V17, R1). A 401/403 on the snapshot read is now Refused (deterministic: an administrator checks the BFF application user's Read privilege), not a retry that fails every time. OWNER ROUND 13 ITEM 2 (BINDING) answers the (e) question above: gate (e), the compensation replay on a throwaway TEST project, is COVERED by round 11's approval; it stays a main-session live step, run with the rest of the live gate at integration. Owner round 13 item 1 (for task 148: unsecure re-owns the location rows by the task-146 non-secure-child rule) is recorded in note 16.2. Still NOT closed (main session): publish size; the manual live gate (a)-(j) and the sprk_createdbyperson schema dry run / -Apply / -Verify before master (owner round 11). Note section 18. **Round c1-r3, 2026-10-03 (verifier on c1-r2; branch task/uac-r2-133-c1-r3 - the instructed name task/uac-r2-133-c1-r1 already exists as round c1-r1).** The verifier found no executor code fix remaining. Its one minor item is closed: the wizard's copy for cascade_children_unreadable with cascadeChildState refused now names "the service's permission to read them" beside the records, as the server detail and guide 7a do since 401/403 became refused (seed CL5 bites). No C# changed. Still NOT closed (main session): publish size (the measurement before merge, note 19.4); the manual live gate (a)-(j) and the sprk_createdbyperson schema dry run / -Apply / -Verify (owner round 11; (e) by replay covered by owner round 13 item 2); Step 9 (TASK-INDEX.md status cell). Note section 19. **Round c1-r4, 2026-10-03 (verifier on c1-r3; branch task/uac-r2-133-c1-r3.-r2, the instructed name).** The last unpinned restore rule is pinned: a cascaded child whose row no longer reads back after its owner bind is named in cascade_children_not_restored as NotApplied (bind accepted) or Refused (bind refused), never counted restored (fixture RemoveChildOnBindFor; seeds S13 and S16, fail-open survivors, now bite). OWNER ROUND 14 ITEM 3 (BINDING; relayed mid-round by the main session, corroborated on the work branch at 9d88da386) is implemented: container_ownership_unreadable (new extension containerOwnershipState) and resume_creator_unavailable (new creatorState refused) classify a read Dataverse refuses (401/403, and a 400, by the cascade reads' one rule AssignCascadeChildOwners.IsRefusedRead) as an administrator's job, not a retry; 503/429 stay retryable; the wizard's copy for each is non-retryable; guide 7a updated (note 20.7; seeds K1-K10 and CL6-CL10 bite). Publish size: the c1-r3 verifier's measurement is now recorded (note 20.3): 45.66 MB to 45.69 MB, +0.04 MB, Compress-Archive Optimal, 212 = 212 files, against the work-branch merge base 6b243f092, for 3062d960f; round 14's small C# change is not re-measured (the main session measures the final head); no package changed. Recorded for the main session and task 148, not changed: the child bind's PATCH has no If-Match, so it can upsert a row deleted mid-restore (LOW, note 20.2). Still NOT closed (main session): the manual live gate (a)-(j) and the sprk_createdbyperson schema dry run / -Apply / -Verify (owner round 11; (e) by replay covered by owner round 13 item 2); Step 9 (TASK-INDEX.md status cell). Note section 20.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) that reorders mutations on the secure-record isolation path and changes the idempotency contract of a live endpoint.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security isolation boundary: the fix trades between "locked box" (fail closed, unusable) and "back in the creator's BU" (usable, not isolated) on every failure branch, and must keep the 409 idempotency guarantee intact for completed provisions. Requires judgment on Dataverse share/assign semantics that must be proven live.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ProvisionProjectEndpoint.cs, which six other register tasks also edit: 144 (C10 part 1 — rewrites Step 3, generalizes roots; hard dep), 139 (C4 — CreatorAccessRights / CollaboratorAccessRights values and the :158-181 rationale), 143 (No Access guard on the creator/colleague share sites :726/:754), 148 (backfill at provision), 149 (sharee sync from the provisioning shares) and 150 (sprk_issecure set as provisioning's FIRST mutation). Also edits the shared provisioning test fixture, provisioningService.ts (also edited by 150) and CreateProjectWizard.tsx (also edited by 150). Sequencing: 144 → 133, then 148/149 (which already dep on 146) build on 133's resume/ensure structure; 139, 143 and 150 may land on either side of 133 — whichever lands second rebases and re-runs ProvisionProjectIdempotencyTests + SecureProjectShareTests + provisioningService.test.ts.</parallel-reason>
+    <deps>144</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <origin>Session 26 defect C11 (MEDIUM, availability/integrity, no disclosure; 3/3 skeptics confirmed). Task 068 found it and mitigated with client copy only; task 061 closed while claiming a share failure "orphans nothing". No issue existed at authoring.</origin>
+  </metadata>
+
+  <prompt>Provisioning a secure record moves ownership to a memberless team and only THEN shares the record back to the person who created it. If that share fails, the creator is locked out, the endpoint says "retry", and a retry is impossible: the creator now fails the Write gate (403) and anyone else hits 409 already_provisioned. Re-order and harden the flow so no single failure strands the creator, make every partial state honestly resumable, correct every false comment and message, and keep the 409 for records that really are fully provisioned.</prompt>
+
+  <role>SPAARKE platform developer on the Dataverse row-security isolation boundary — Dataverse ownership (AssignRequest via ownerid bind), principalobjectaccess sharing (GrantAccess / RetrieveSharedPrincipalsAndAccess), and the BFF ExternalAccess endpoints. Fail closed (ADR-003); verify every write by read-back.</role>
+
+  <goal>After this task, for every root type `/provision-project` handles after task 144: (1) the creator's identity is resolved before any mutation; (2) the creator's POA share is established before or verified immediately after the owner move, so the owner move never completes while the creator has no share; (3) a creator-share failure leaves the record in its exact pre-call ownership, and the response says so truthfully, so the same caller can retry and succeed; (4) a record owned by the secure owner team but with no container recorded is RESUMED (creator share ensured, container created and recorded), not refused; (5) a record owned by the secure owner team WITH a container recorded still returns 409 already_provisioned and writes nothing; (6) every comment, ProblemDetails detail and client message on this path describes what actually happened; (7) every state the server calls retryable can actually be retried from the wizard; (8) the behaviour is proven live in dev.</goal>
+
+  <context>
+    <background>Verified against the working tree 2026-09-30 (anchors are pre-task-144; re-derive them after 144 merges).
+
+THE DEFECT. `src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs` runs, in order: Step 4 idempotency marker `IsOwnedBy(ownerTeamId)` → 409 (`:445-472`, marker at `:1017-1018`); Step 5 owner move to the Secure Record owner team, verified by read-back (`:485-508`, `AssignOwnerToSecureTeamAsync` `:597-663`); Step 5.5 WhoAmI + app-only `GrantAccessAsync` of `CreatorAccessRights` to the CALLER (`:517-521`, `ShareToCreatorAndPrincipalsAsync` `:696-779`); Step 6 container; Step 7 record container. If Step 5.5 fails, the handler returns 403 `creator_unresolved` (`:707-722`) or 500 `creator_share_failed` (`:724-745`) with ownership already moved and deliberately not rolled back (`:29-31`, `:785-788`). The owner team is memberless by design, so the creator can no longer open the record.
+
+THE CLAIMED RETRY IS IMPOSSIBLE — three independent reasons.
+  1. The creator's retry is refused 403 `delegation_write_required`: the whole `/api/v1/external-access` group is gated by `DelegationRuleFilter` (`ExternalAccessEndpoints.cs:123-126`, route at `:172`), which requires the CALLER's OBO Write on the project (`DelegationRuleFilter.cs:86`, `:170-179`; project target at `:239-241`). The creator no longer has Write.
+  2. Any caller who does pass the filter hits Step 4's marker: 409 `already_provisioned`.
+  3. Even without both, Step 5.5 shares to the CURRENT caller (WhoAmI, `:705-707`), not the original creator — an admin's retry would share the record to the admin.
+Recovery today is manual only: share in Dataverse, or reassign the owner and re-run.
+
+FALSE STATEMENTS ON THIS PATH (all must be corrected):
+  • `:512-516` "a share failure leaves NOTHING orphaned … the state it fails into is 'not provisioned', which a retry resolves cleanly" — false: ownership has moved.
+  • `:742-743` detail "retry once the share path is healthy" — false for the reasons above.
+  • `:716-721` creator_unresolved detail "Provisioning was stopped rather than leaving a secure project that nobody can open" — false: it runs after the move, so it DOES leave one.
+  • `:500-503` detail "Nothing has been provisioned" on `OwnerAssignmentOutcome.Failed` — false when the PATCH committed and only the read-back threw (`:648-656`).
+  • `:463-466` 409 detail "Reassign the project's owner and retry" — true only for an administrator; the creator cannot act on it.
+  • `:996-1009` `ProjectRow` remarks: the wizard "writes sprk_containerid at CREATE time" — no longer true since task 076 (`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts:319-334`: "sprk_containerid is now written by exactly one authority: the server"). The same stale claim also sits in the class remarks at `:61-64` and in `RecordContainerOnProjectAsync`'s remarks and log line (`:860-864`, `:876-880`: "Any value already here … came from the wizard's business-unit cascade").
+  • `:962-967` `sprk_containerid` "is NOT a reliable sign of provisioning … must never be used as the marker" and `:1011-1015` (residual-edge remark) — both become false the moment this task makes "team-owned AND container recorded" the 409 marker; rewrite them to state the new marker and WHY it is now sound (task 076 made Step 7 the sole writer).
+  • `:29-31` "There is deliberately no rollback path" — false once compensation exists; narrow it to container failures (see adr-tensions).
+  • `provisioningService.ts:161-167` says owner_assignment_failed / _not_applied fall through to copy asserting the endpoint's "Nothing has been provisioned" — must follow the corrected `:500-503` detail.
+  • `CreateProjectWizard/SecureProjectSection.tsx:173-214` lists what provisioning does "in the order the server does it" and maps each item to endpoint step numbers ("Endpoint steps 2, 3 and 5", "Endpoint step 5.5", "steps 6 and 7"); it pins itself to "code wins" (`:177-178`), so it must follow the reorder (and any user-visible copy that implies an order must stay true).
+  • `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx:708-709` "a refusal means nothing was moved" — false for the share-failure refusals.
+  • `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs:250-254` tells the operator to "Provision … (POST /api/external/projects/provision)" — that route does not exist; the endpoint is `POST /api/v1/external-access/provision-project`.
+Client copy that encodes today's broken behaviour and must be re-aligned with the fixed server states: `provisioningService.ts:176-192` (the "never advise try again once ownership may have moved" rule), `:205-216` (hedged already-provisioned copy), `:234-240` (share-failed copy "you may not be able to open it yet").
+
+WHY "RESUME" IS NOW SAFE TO KEY ON AN EMPTY CONTAINER. Step 7 is the only writer of `sprk_containerid` (task 076, above). So "owned by the secure owner team AND `sprk_containerid` non-empty" means Step 7 completed = genuinely provisioned → keep the 409. "Owned by the team AND `sprk_containerid` empty" means Steps 5.5/6/7 did not all complete → resumable. A container created by a Step 6 that was followed by a failed Step 7 is unrecorded and therefore cannot receive content: uploads to a secure record with no own container fail closed (`RecordContainerResolver.cs:244-266`), so a resumed run that creates a fresh container orphans at most an EMPTY container, which the failed Step-7 response already named (`:551-559`).
+
+WHO "THE CREATOR" IS ON RESUME. The normal path keeps today's contract: the share target is the caller, identified from their own token via WhoAmI, never from the request body (`:676-679`). On resume the original caller's id is not stored anywhere today. The persisted identity used on resume is the record's `createdby` (`_createdby_value`) — stamped by Dataverse, unforgeable, and requiring no new column — PROVIDED every host of the Create Project wizard creates the row as the human user (the wizard creates via `IDataService.createRecord`, `CreateProjectWizard/projectService.ts:395`; verify per host that this is host-context `Xrm.WebApi`, not a BFF app-only create).
+
+REUSABLE PIECES. `IDataverseRecordShareService.GetPrincipalAccessOrThrowAsync` (`Services/Access/IDataverseRecordShareService.cs:62-66`) is the complete-answer-or-throw POA read (task 063) — use it for the post-move share read-back, never the fail-soft `GetPrincipalAccessAsync`. `AssignOwnerToSecureTeamAsync`'s bind-then-read-back discipline (`:597-663`) is the pattern for the compensating reassignment. Test harness: `tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs` (seeded projects, `FailShareForPrincipal`, `CallerSystemUserIdResolves`, recorded `Grants`/`Updates`/`CreatedContainerDisplayNames`); existing contract tests at `SecureProjectShareTests.cs:126-157` and `ProvisionProjectIdempotencyTests.cs:399-442`, `:508-535` (select pin).
+
+DATAVERSE BEHAVIOUR THAT MUST BE PROVEN LIVE, NOT ASSUMED: (a) whether GrantAccess to the record's CURRENT owner succeeds; (b) whether that POA row survives the ownerid reassignment with its rights mask intact; (c) the value of `organization.sharetopreviousowneronassign` (task 144 also reads it and STOPs if true), which would add a second, platform-issued share to the previous owner on every assign; (d) the Assign cascade behaviour of each provisionable root's 1:N relationships (`CascadeConfiguration.Assign`) — if an assign cascades, the forward move AND the compensating move re-own children, and compensation would then move every child to the ROOT's pre-call owner rather than back to each child's own previous owner.
+
+INTERACTION WITH SIBLING TASKS (reviewer-verified 2026-09-30):
+  • Task 150 (`sprk_issecure` locked): provisioning will SET `sprk_issecure = true` as its first mutation, read-back verified (task 150 — its constraint that provisioning sets sprk_issecure as the first mutation; its step 3), instead of requiring it already true (`:279-284`). So "pre-call state" is NOT fully restorable after 150: the flag stays set. Leaving it set is the fail-CLOSED choice — a secure-flagged record with no own container refuses uploads (`RecordContainerResolver.cs:244-266`), whereas clearing it would let content land in a shared container that cannot be retracted. 150 also adds a record-level secure surface on project/matter/work assignment that calls the provisioning endpoint — which, once it exists, is a real self-service retry path.
+  • Task 143 (No Access list for internal users on secure records) guards the POA share writers, naming this endpoint's creator/colleague sites (`:726`, `:754`). Every share this task adds or moves (pre-move, post-move, resume) is such a site.
+  • Task 139 (C4) owns `CreatorAccessRights` / `CollaboratorAccessRights` and their rationale.
+  • Tasks 148/149 add backfill and sharee-sync steps to provisioning; 148 already carries a trigger about "the C11 resumable-provisioning change". The resume path this task builds is where those steps must re-run.
+  • Only the Create Project wizard calls this endpoint today (`CreateProjectWizard.tsx:691`, via `provisioningService.ts:293`); it calls once and has NO retry affordance (`:707-713`). The precedent for an in-dialog retry is `CreateProjectWizard/CloseProjectDialog.tsx:347`, `:394`. `SummarizeFilesWizard/SummarizeFilesDialog.tsx` also creates projects through the same ProjectService (task 150 POML, its line 36).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectResponse.cs (only if the response must report a resumed run — see acceptance)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs (log/detail route text only)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx (the false comment at :708-709, and the retry affordance for the retryable failure states — see constraint)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CloseProjectDialog.tsx (in-dialog retry precedent, :347, :394)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx (step-order comments :173-214)</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/CreateProjectWizard.provisioningRetry.test.tsx (or an extension of an existing wizard test, if one covers the finish flow)</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummarizeFilesDialog.tsx (second project-creating host)</file>
+      <file role="read">projects/unified-access-control-r2/tasks/139-grant-model-grantor-level-cap.poml</file>
+      <file role="read">projects/unified-access-control-r2/tasks/143-no-access-internal-secure-shares.poml</file>
+      <file role="read">projects/unified-access-control-r2/tasks/148-secure-child-backfill-and-transitions.poml</file>
+      <file role="read">projects/unified-access-control-r2/tasks/149-secure-child-sharee-access.poml</file>
+      <file role="read">projects/unified-access-control-r2/tasks/150-lock-issecure-field-level-security.poml</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/provisioningService.test.ts</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs</file>
+      <file role="modify">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md (add a "provisioning failure states and recovery" section)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file role="read">projects/unified-access-control-r2/tasks/144-secure-named-owner-team.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="144" status="pending">Named non-default owner team + provisioning for all three root types. Land first; this task then applies to whatever roots and owner team Step 3 resolves. If 144 is re-scoped so provisioning stays project-only, this task still ships for projects.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ordering of mutations in the provisioning handler. Resolve the caller's systemuserid (WhoAmI) BEFORE the owner move; if it cannot be resolved, return 403 `creator_unresolved` with nothing written. Issue the creator's POA share BEFORE the owner move while the caller still holds the record (share-first) — only if the live check proves (a) and (b) in the background; after the move, read the shares back with `GetPrincipalAccessOrThrowAsync` and confirm the creator holds exactly `CreatorAccessRights`. If the live check disproves (a) or (b), drop the pre-move grant and grant immediately after the move instead; the post-move read-back and the compensation below apply in both designs.</constraint>
+    <constraint source="project">Scope: creator-share failure AFTER the owner move (post-move grant or read-back fails, including a read-back that throws). Compensate: reassign ownership back to the owner read in Step 1 (the pre-call owning user or team — add `_owninguser_value` / `_ownerid_value` to the Step-1 select and update the select-pin tests), and verify by read-back exactly as `AssignOwnerToSecureTeamAsync` does. Compensation also REMOVES any POA share this call issued that the pre-call share set did not contain (the pre-call set is read with `GetPrincipalAccessOrThrowAsync` before the first mutation; an unreadable pre-call set means share-first is not used for this call — grant post-move instead), so a share-first grant can never outlive a compensated run and widen the creator beyond what they held before (e.g. ShareAccess on a record that was owned by a team, not by them). If compensation is verified: return `creator_share_failed` with a detail stating the record's OWNERSHIP and SHARES are back to their pre-call state and the same caller may retry. If compensation fails or cannot be verified: return a DISTINCT reasonCode (e.g. `sdap.provision.creator_share_failed_resumable`) whose detail states the record is owned by the secure team without a creator share and names the resume path. Never report "nothing moved" unless a read-back proved it.</constraint>
+    <constraint source="project">Scope: the Step-4 idempotency marker. Owned by the resolved secure owner team AND `sprk_containerid` non-empty → 409 `already_provisioned`, zero writes, exactly as today (the genuinely-provisioned guarantee MUST NOT weaken). Owned by the team AND `sprk_containerid` empty → RESUME: ensure the creator share (re-grant only if the complete POA read shows it missing), then Steps 6-7. Every resume step is an idempotent "ensure" keyed on observed state, never on a step number, so task 144's and C10 part 2's added steps slot in without re-breaking resumability. The legacy per-project-BU refusal (`:425-443`) is unchanged.</constraint>
+    <constraint source="project">Scope: the share target on resume. Ensure the share for the record's `createdby` systemuser (enabled, non-application user). If the resume caller is that same user, that is the same share. Do NOT add a share for a resume caller who is not the creator (an administrator reaches the record through their role; widening the explicit access list is a C4 decision, not a recovery side effect). If `createdby` is disabled, is an application user, or cannot be read, the resume refuses with its own reasonCode and names the state — it never shares to the caller as a substitute.</constraint>
+    <constraint source="project">Scope: `DelegationRuleFilter`. Do NOT relax it for this route. With share-first plus compensation the creator keeps Write in every single-failure path, so self-service retry works through the existing gate; the only state needing an administrator is the double failure (share AND compensation), and an administrator holds Write.</constraint>
+    <constraint source="project">Scope: rights masks. `CreatorAccessRights` and `CollaboratorAccessRights` (`:169`, `:181`) and their meaning are owned by task 139 (C4 grant model). This task does not change either value; it may only move where the grant happens. Tests reference the constants, never a literal mask, so they survive 139 landing on either side.</constraint>
+    <constraint source="project">Scope: every POA share this task issues, moves or re-issues (pre-move, post-move, resume). Each is a share-writer site under task 143's No Access guard: if 143 has landed, route through its guard; if not, list the new sites in this task's note so 143's step-1 census picks them up (its census cites `:726`/`:754`, which this task moves). On RESUME, a `createdby` user who is on the record's No Access list is refused with its own reasonCode and no share — never shared to anyway.</constraint>
+    <constraint source="project">Scope: resume ordering with tasks 148/149. The resume path runs every "ensure" step the forward path runs — including any backfill (148) and sharee-sync (149) step present when this task executes — keyed on observed state. Do not build a resume path that skips a step the forward path performs.</constraint>
+    <constraint source="project">Scope: the "same caller may retry" promise must be ACTIONABLE. Client copy advises a retry only through an affordance that exists in the product at that moment. The wizard's provisioning-failure state offers a "Try securing again" action for the retryable outcomes (verified-compensation `creator_share_failed`, the resume-eligible states) that re-calls `provisionSecureProject` for the same project id, following the CloseProjectDialog retry precedent; if task 150's record-level secure surface has landed, the copy may also name it. Copy that says "you can retry" with nothing to click is the FR-31 defect class (a sentence that renders and is untrue) that task 068's rules exist to prevent.</constraint>
+    <constraint source="ADR-003">Scope: every new branch. Fail closed with a stable `sdap.provision.*` reasonCode in ProblemDetails (ADR-019). An unreadable POA list is a failure, not "share present". An unverifiable compensation is a failure, not "reverted".</constraint>
+    <constraint source="project">Scope: named colleagues (`SharePrincipalIds`). Their shares stay best-effort (task 061 semantics); they are issued only after the creator's share is proven and must not change the outcome of any branch above.</constraint>
+    <constraint source="ADR-038">Scope: tests. Extend `ProvisionProjectTestFixture` (substituted seams); no Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor null-check tests. No live Dataverse in CI — live proof is the manual gate. Existing tests whose contract this task deliberately changes (`ProvisionProjectIdempotencyTests.ProvisionProject_WhenOwnershipWasClaimedButNoContainerRecorded_IsRefusedAndSaysSo` `:427`, `SecureProjectShareTests.Provisioning_WhenTheCallersIdentityCannotBeEstablished_FailsRatherThanLeavingALockedBox` `:127`, `SecureProjectShareTests.Provisioning_WhenTheCreatorsShareFails_FailsAndCreatesNoContainer` `:145`, and any other test the new contract touches) are REWRITTEN to the new contract with a one-line reason in the task note, never deleted to make the suite pass.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement: stays in the existing endpoint (no new service, no new column). Publish size measured against a fresh origin/master build from a short path, both sides Compress-Archive, equal file counts, both absolute sizes + delta reported, ≤60 MB; no new HIGH CVE.</constraint>
+    <constraint source="owner 2026-09-30 (binding)">Scope: whole task. No scope cuts and nothing deferred — scope found during execution is added here. No Dataverse test in CI; the live gate is manual, run with the existing non-admin test users in their current BU (do not relocate users). `sprk_issecure` is locked and endpoint-managed (owner round 2 item 2; field lock is task 150). Compensation and resume NEVER clear `sprk_issecure`: a secure-requested record that failed provisioning stays flagged so its uploads fail closed (`RecordContainerResolver.cs:244-266`). This task adds no other write of the flag; if task 150 has landed, provisioning's first-mutation flag write is 150's and is left as 150 specifies (so "pre-call state" in this task means pre-call OWNERSHIP and SHARES, never the flag).</constraint>
+  </constraints>
+
+  <adr-tensions>
+    <tension adr="ADR-003" rule="MUST fail closed on every error path">
+      <conflict>Compensation moves a secure-flagged record back from the memberless secure team to its pre-call owner, i.e. back into an ordinary BU where Deep-read roles can see it. Read narrowly, "fail closed" could argue for leaving the record locked (isolated, unusable) instead.</conflict>
+      <proposed-path>C (comply)</proposed-path>
+      <rationale>Compensation restores the record's pre-call OWNERSHIP and SHARE SET — the same access state every earlier failure (Steps 1-4, the pre-move share, creator_unresolved) already leaves it in, and the state it has held since the wizard created it — while leaving `sprk_issecure` set, so uploads to it still fail closed until it is provisioned. No access decision fails open: no caller gains access they lacked before the request (any share the call added is removed). The locked alternative is the current defect. The file's own "no rollback" principle (`:29-31`, `:785-788`) is about CONTAINER failures after a successful share and remains true for them; this task rewrites those comments to state the narrower rule.</rationale>
+      <reviewer-action>Code review confirms path C explicitly in the PR description; if the reviewer judges this a deviation, it escalates to path A per CLAUDE.md §6.5 before merge.</reviewer-action>
+    </tension>
+  </adr-tensions>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md (§ C11)</file>
+      <file>projects/unified-access-control-r2/notes/task-068-secure-step-copy.md</file>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+    </files>
+    <patterns>
+      <pattern name="bind then read back" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs:597-663">An owner write is not trusted until a read shows it; an unverifiable write is a failed write.</pattern>
+      <pattern name="complete-or-throw share read before a write decision" location="src/server/api/Sprk.Bff.Api/Services/Access/IDataverseRecordShareService.cs:25-29">Use GetPrincipalAccessOrThrowAsync whenever a write depends on the current shares.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm task 144 has merged into this branch; re-derive every anchor above against the post-144 code.</step>
+    <step order="1">Live read-only checks in dev (record in notes/task-133-provision-creator-lockout.md): the value of `organization.sharetopreviousowneronassign`; the Assign cascade configuration of every 1:N relationship on each provisionable root (background (d)); for every creation path of every provisionable root after 144 (CreateProjectWizard, SummarizeFilesDialog, the matter and work-assignment wizards, and any BFF/Office/Assistant server-side create), whether `createdby` is the human user; every active `sprk_fieldmappingrule` (or other create-time default) whose target field is `sprk_containerid` on a provisionable root (a create-time writer would break the "Step 7 is the sole writer" premise); census of rows with `sprk_issecure eq true` owned by the secure owner team, split by empty vs non-empty `sprk_containerid` (the empty ones are today's stranded rows the resume path will serve; each non-empty one must be matched to a container provisioning created).</step>
+    <step order="2">Live proof of share-first on a throwaway secure project with an existing non-admin test user: grant the owner a POA share, reassign to the secure owner team, read the shares back. Choose share-first or post-move grant from the evidence.</step>
+    <step order="3">Implement: pre-mutation WhoAmI; share (share-first or post-move per step 2); post-move complete read-back; verified compensation; the resume branch of the Step-4 marker; named colleagues after the creator is proven.</step>
+    <step order="4">Correct every false statement listed in the background (server comments incl. `:29-31`, `:61-64`, `:860-864`/`:876-880`, `:962-967`, `:996-1015`; ProblemDetails details; the RecordContainerResolver route text; the wizard comment) and re-align the client copy in provisioningService.ts (incl. `:161-167`) to the new reason codes and states; add the wizard's "Try securing again" action for the retryable states.</step>
+    <step order="5">Tests per the acceptance criteria.</step>
+    <step order="6">Add the failure-states-and-recovery section to SECURE-PROJECT-ENVIRONMENT-SETUP.md: each reasonCode, the record's state after it, and who can recover how (self-service retry vs administrator).</step>
+    <step order="7">Build, BFF unit + integration + arch suites, Spaarke.UI.Components jest for the provisioning client, publish-size and CVE checks per CLAUDE.md §10.</step>
+    <step order="8">Run the manual live gate and record results (ids truncated to 8 chars) in notes/task-133-provision-creator-lockout.md.</step>
+    <step order="9">Update TASK-INDEX.md: this task's status cell to `✅ [done]`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>`organization.sharetopreviousowneronassign` is true in dev: STOP. Every assign (including compensation) would then add a platform-issued share, and the post-move read-back would see a share this code did not grant. Present the setting and its effect per CLAUDE.md §6 (task 144 carries the same stop).</trigger>
+    <trigger>Any creation path of a provisionable root (wizard host, SummarizeFilesDialog, or a BFF/Office/Assistant server-side create after task 144 widens provisioning to matters and work assignments) creates the row through an application identity (so `createdby` is an application user): `createdby` cannot be the persisted creator for those rows. STOP and bring the choice (a new server-stamped creator column with a CLAUDE.md §11 justification, `createdonbehalfby`, or another existing column) to the owner, with a recommendation, rather than sharing on resume to whoever calls. Recommendation to carry: the existing `createdby` for human-created rows plus refusal (own reasonCode) for app-created rows, until the owner decides.</trigger>
+    <trigger>The live census finds a secure-team-owned row whose `sprk_containerid` is non-empty but is NOT a container provisioning created (e.g. a pre-task-076 business-unit cascade value), OR finds any create-time writer of `sprk_containerid` on a provisionable root (e.g. an active field-mapping rule): the "team-owned + container recorded = provisioned" marker would 409 such a row forever. STOP and list the rows/rules; do not widen the resume condition on a guess.</trigger>
+    <trigger>Any provisionable root's 1:N relationship cascades Assign (background (d)): the forward move and the compensating move would re-own children, and compensation cannot restore each child's own previous owner. STOP and present per CLAUDE.md §6 — options: (a) snapshot and restore each re-owned child's owner in compensation; (b) no compensation for that root type (resume only); (c) coordinate with task 148, which owns child ownership at provisioning. Recommendation: (c) then (a). ANSWERED 2026-10-03 (owner round 10 item 4, BINDING): "coordinate with task 148's child-ownership logic, then snapshot and restore each re-owned child's own owner (options (c) then (a))" - implemented in round c1 (note section 16).</trigger>
+    <trigger>The live proof shows neither share-first nor an immediate post-move grant can be made reliable (e.g. GrantAccess on a team-owned secure record is refused for the app user): the design premise fails — STOP and escalate with the evidence.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>New surface in this task: (1) up to two new `sdap.provision.*` reason codes (creator_share_failed_resumable; resume refused for an unusable createdby) beside the eleven at `ProvisionProjectEndpoint.cs:141-156`; (2) a "Try securing again" action in the wizard's provisioning-failure state. Overlap checked: the only in-product retry of a BFF mutation in this wizard folder is `CloseProjectDialog.tsx:347` (`handleRetry`, close-project); grep of src for `provisionSecureProject` / `provision-project` callers finds only `CreateProjectWizard.tsx:691` (via `provisioningService.ts:293`) — no existing retry of provisioning anywhere. Task 150 adds a record-level secure surface later, which is a different moment (on the record form), not the wizard's failure state. No new column: the resume creator is `createdby`.</existing>
+    <extension>Reason codes: extend the existing `sdap.provision.*` set — an existing code cannot be reused because `creator_share_failed` will mean "ownership and shares are back, retry" and the double-failure state means the opposite, and the client must tell them apart. Retry: extend the existing wizard failure state with one action following the CloseProjectDialog pattern and the existing `provisionSecureProject` call; no new service or component.</extension>
+    <cost-of-doing-nothing>Without the distinct code, the client cannot tell "you can retry now" from "an administrator must finish this" and must show one message for both — one of them false. Without the retry action, the server's "the same caller may retry" is unactionable: the wizard calls provisioning once (`CreateProjectWizard.tsx:707-713`), so the user is left with a secure-flagged project that refuses uploads (`RecordContainerResolver.cs:244-266`) and no way to finish securing it.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/CreateProjectWizard.provisioningRetry.test.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/__tests__/provisioningService.test.ts</output>
+    <output type="docs">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-133-provision-creator-lockout.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Caller identity unresolvable: 403 `creator_unresolved`, and the fixture records zero owner updates, zero grants and zero containers (nothing moved).</criterion>
+    <criterion testable="true">Creator share fails BEFORE the owner move (share-first design) or the post-move grant fails and compensation is verified: the response carries `creator_share_failed`, the record's owner equals its pre-call owner (read back), its POA share set equals the pre-call share set (no share issued by this call survives), `sprk_issecure` was not cleared, no container was created, and an immediate second call by the same caller — whose Write is intact — completes provisioning (200).</criterion>
+    <criterion testable="true">Compensation when the pre-call owner is NOT the creator (e.g. a team): the creator holds no share after the failed call that they did not hold before it.</criterion>
+    <criterion testable="true">Pre-call share set cannot be read: share-first is not attempted for that call; the post-move grant path runs instead (asserted: no grant recorded before the owner update).</criterion>
+    <criterion testable="true">Post-move share read-back throws: treated as a share failure (compensation path), never as "share present".</criterion>
+    <criterion testable="true">Share fails AND compensation fails (or cannot be verified): the response carries the distinct resumable reasonCode, its detail states the record is secure-team-owned without a creator share, and it does NOT say "nothing moved" or "retry" to the creator.</criterion>
+    <criterion testable="true">Resume: a record owned by the secure owner team with an empty `sprk_containerid` and no creator share → a call by a Write holder issues the share to the record's `createdby` user (exactly `CreatorAccessRights`), creates and records a container, returns 200; the resume caller receives no share unless they are the creator.</criterion>
+    <criterion testable="true">Resume when the creator share already exists: no second grant is issued; container created and recorded; 200.</criterion>
+    <criterion testable="true">Resume when `createdby` is disabled, an application user, unreadable, or (once task 143 has landed) on the record's No Access list: refused with its own reasonCode, zero grants, zero containers.</criterion>
+    <criterion testable="true">Resume runs every ensure step the forward path runs (asserted by the same fixture recordings as the forward happy path, apart from the owner move and any already-present share).</criterion>
+    <criterion testable="true">Self-service resume after a container failure: a record left team-owned with the creator's share and no container (Step 6 failed) is completed by the CREATOR's own call (their Write comes from the share), 200, with no second creator grant.</criterion>
+    <criterion testable="true">Genuinely provisioned (owned by the secure owner team AND `sprk_containerid` non-empty): 409 `already_provisioned`, zero updates, zero grants, zero containers — the existing `ProvisionProject_WhenAlreadyOwnedBySecureTeam_IsRefusedAndWritesNothing` stays green unmodified.</criterion>
+    <criterion testable="true">Owner move read-back throws after the PATCH committed: the response no longer says "Nothing has been provisioned"; it states the ownership outcome is unverified, and a subsequent call behaves per the resume or 409 rules above according to the observed state.</criterion>
+    <criterion testable="true">Named colleagues: shared only after the creator's share is proven; a colleague share failure still leaves a 200 with the count reported (task 061 behaviour unchanged).</criterion>
+    <criterion testable="true">Authorization unchanged: a caller without Write on the record is still refused by DelegationRuleFilter before the handler runs (existing delegation tests green; no new bypass).</criterion>
+    <criterion testable="true">Every false statement enumerated in the background is corrected (grep for "retry once the share path is healthy", "a retry resolves cleanly", "a refusal means nothing was moved", "/api/external/projects/provision", "at CREATE time, cascaded from the creating user", "must never be used as the marker" and "There is deliberately no rollback path" returns 0 hits in src), and each rewritten comment states the current contract rather than being deleted.</criterion>
+    <criterion testable="true">provisioningService.ts classifies every reasonCode the endpoint can now return (including the new ones) to copy that matches the server state; jest tests pin each mapping, including that no copy advises the creator to retry when the server says they cannot, and that every copy which DOES advise a retry corresponds to a state for which the wizard renders the "Try securing again" action.</criterion>
+    <criterion testable="true">Wizard retry: for a retryable failure state the wizard renders "Try securing again", which re-calls the endpoint for the same project id and, on 200, shows the success state; for a non-retryable state (e.g. the double-failure resumable code, which only an administrator can act on) the action is absent. Covered by a component test.</criterion>
+    <criterion testable="true">The Step-1 select pin tests (`ProvisionProjectIdempotencyTests.cs:508-535`) are updated for the added owner columns and still assert only live column names.</criterion>
+    <criterion testable="true">SECURE-PROJECT-ENVIRONMENT-SETUP.md has a failure-states section listing each `sdap.provision.*` reasonCode, the record state it leaves, and the recovery (who, how).</criterion>
+    <criterion testable="true">Test scope: cover exactly the behaviours above plus the fail-closed branches named in the constraints; anything beyond needs a one-line justification in the task note.</criterion>
+    <criterion testable="true">BFF build green; BFF unit, integration and NetArchTest suites green; Spaarke.UI.Components jest green for the provisioning client; publish size reported per CLAUDE.md §10 (both absolute sizes, delta, zip tool, equal file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE (dev, existing non-admin test user in their current BU): (a) the share-first/post-move choice is backed by a recorded live proof of GrantAccess-to-owner and POA survival across the reassign (or its refutation); (b) a fresh secure project provisioned by the test user ends team-owned, with the test user holding exactly `CreatorAccessRights` (read via RetrievePrincipalAccess as that user) and its own container recorded; (c) a stranded state produced by hand (admin reassigns a secure project to the secure owner team, no share, empty container) is resumed by an administrator call: the test user (createdby) regains access and the container is recorded; (d) calling provision again on the completed project returns 409 `already_provisioned` and the project's modifiedon and share list are unchanged; (e) the compensating reassignment is proven live on a throwaway secure project: owned by the test user → secure owner team → back to the test user by the compensation code path, each step read back, the final share list equal to the pre-call snapshot and `sprk_issecure` still true — driven WITHOUT adding any fault-injection switch to production code (the method is recorded in the note); (f) the wizard's "Try securing again" on a record left in a retryable state completes provisioning for the test user. Results in notes/task-133-provision-creator-lockout.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C11 — projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md § "[MEDIUM] C11" (scenario, precise claim, evidence, fix direction: "resolve and pre-validate before step 5 and compensate, and/or make the endpoint resumable with a persisted creator id" — this task does both, with share-first as the primary guard). Owner directives: notes/session27-owner-decisions-and-research.md (round 2 binding; `sprk_issecure` locked and endpoint-managed; no deferral; manual live gate). Prior partial work: task 061 (share step; its POML :107-109 claim that a share failure "orphans nothing" is what this task corrects) and task 068 (client copy mitigation, notes/task-068-secure-step-copy.md:161-163). Sequencing: task 144 first (named owner team, three root types); task 139 (C4) owns the rights masks and the "no re-share" rationale at `:158-181` — this task must not edit their meaning; see parallel-reason for 143/148/149/150. Failure mode is availability/integrity, not disclosure: no branch here grants anyone access they did not hold before the request (compensation removes any share the call added). Reviewer amendments 2026-09-30 (adversarial review, finance-provisioning group): added the missed stale statements (`:29-31`, `:61-64`, `:860-880`, `:962-967`, `:1011-1015`, `provisioningService.ts:161-167`, `SecureProjectSection.tsx:173-214`); reconciled with task 150 (flag set as the first mutation; compensation never clears it — fail closed); named the sibling tasks sharing this endpoint (139/143/148/149/150) with ordering; compensation now restores the pre-call SHARE set, not only ownership; added the Assign-cascade and create-time-containerid live checks with escalation triggers; widened the createdby trigger to server-side creates of matters/work assignments; made the "retry" promise actionable (wizard retry action + §11 justification); added the third test to be rewritten (`SecureProjectShareTests.cs:145`).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL). The PR description states the ADR-003 path-C reasoning from the adr-tensions block.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-133">
+      COMPLETED-WITH-ESCALATION: code, tests, client, guide and the live-gate script are done. The live proof (steps 2 and
+      8) is a PENDING MANUAL GATE: this run was read-only against Dataverse by instruction, and the gate needs task 144's
+      live cutover first (the named team "Secure Record Owners" does not exist in dev yet). One owner decision is open
+      (F8 follow-up, below). Full record: notes/task-133-provision-creator-lockout.md.
+
+      CODE (ProvisionProjectEndpoint, all three roots).
+      (1) Before any write: WhoAmI (403 creator_unresolved, nothing written), the record's owner (owninguser or
+          owningteam; unreadable = 500 record_owner_unreadable), the creator's current share via the complete-or-throw
+          read, and SharePointEmbedded:ContainerTypeId (500 container_type_not_configured).
+      (2) SHARE-FIRST: the creator gets exactly CreatorAccessRights before the owner move (Grant, or Modify for an
+          existing share with other rights; read back). If the pre-call share set is unreadable, share-first is skipped
+          and the grant happens after the move. If the share to a creator who OWNS the record fails, it falls back to the
+          post-move grant (live gate (a) unproven) - otherwise it stops with nothing moved (creator_share_failed).
+      (3) Owner move, ALWAYS read back (even when the PATCH threw): moved / not moved (share-first grant taken back;
+          owner_assignment_failed|not_applied, "read back and is unchanged") / unverified (creator share kept or issued;
+          owner_assignment_unverified; if no share can be issued: creator_share_failed_resumable + CRITICAL log).
+      (4) Step 5.5 PROVES the creator holds exactly the creator mask on the moved record (re-issues it if the move dropped
+          it - live gate (b) unproven). If it cannot: COMPENSATE - owner back to the pre-call owner, read back, and the
+          creator's share restored to its pre-call mask (revoked if none, Modify back otherwise), read back -
+          creator_share_failed, "the same caller may retry". If the move back fails: creator_share_failed_resumable,
+          CRITICAL, administrator resume.
+      (5) Marker: owned by the named team AND sprk_containerid set = 409 already_provisioned, zero writes (existing test
+          unmodified). Owned with NO container = RESUME: share to the record's createdby (enabled, non-application user;
+          otherwise 409/500 resume_creator_unavailable with creatorState, nothing written, never the caller instead),
+          colleagues, container, record; response Resumed=true.
+      (6) Container failures: container_creation_failed (resumable by the same caller); container_not_recorded now
+          resumable (the named container is empty). sprk_issecure is never written on any path.
+      (7) Every false statement listed in the background corrected (7 named phrases: 0 hits in src), plus the
+          SummarizeFilesDialog "documents would go to the shared container" warning, projectService's container-cascade
+          comments and secure-project-fields-schema.md, found during execution.
+      (8) Client: provisioningService classifies all 22 codes to a state + `retryable`; messages describe state and never
+          advise retrying. New SecureProvisioningOutcome renders the advice and the "Try securing again" button only
+          when retryable, re-calls for the same project id, shows success; used by CreateProjectWizard and
+          SummarizeFilesDialog. SecureProjectSection reordered (sharing first). Guide SECURE-PROJECT-ENVIRONMENT-SETUP.md
+          section 7a: every reasonCode, the state it leaves, who recovers and how.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11). All server code in the existing endpoint; no new endpoint, service,
+      DI registration, option, job, package, column or interface. New surface: 6 reason codes (each a distinct recovery
+      the client must tell apart); RecordShareLevels.MaskForRightsCsv/RightsCsvForMask (extends the ONE mask table with
+      Share/Assign/Create - needed to confirm and restore the creator share exactly); ProvisionProjectResponse.Resumed
+      (additive; tells a resume from a forward run); SecureProvisioningOutcome.tsx (deviation from "no new component":
+      the wizard success config is static, so the stateful retry action needs a component; grep found no provisioning
+      retry anywhere; without it the server's "same caller may retry" is unactionable). Publish size: not measured (main
+      session).
+
+      ESCALATIONS. sharetopreviousowneronassign = False (did not fire). App-created roots: fires literally (1 matter
+      created by # mi-bff-api-dev) - answered by owner F8 (interim default shipped: refuse with its own code); verified
+      live that createdonbehalfby is EMPTY, so OWNER DECISION OPEN: option (a), a server-stamped creator column, is the
+      remaining persisted source. Team-owned non-provisioning container / create-time writer: did not fire (0 rows, 0
+      field-mapping rules, no code writer). Assign cascade (project/matter -> team, sharepointdocumentlocation,
+      sharepointdocument): fires literally; treated as answered by owner round 4 item 3; residual flagged. Share
+      reliability: not evaluable read-only; design does not depend on it.
+
+      TESTS. See the note section 8 (rewritten tests, each with its reason) and 8a (perturbation sweep 19/19 bite).
+      Final runs: BFF unit suite 13,586 passed / 0 failed / 54 skipped (13,640); NetArchTest 341/341; affected classes 126/126; Spaarke.UI.Components jest for the wizard folders 76/76 (CreateProjectWizard + SummarizeFilesWizard); package build (tsc) clean. Full package jest: 16 failures in 11 suites, all pre-existing and unrelated (none imports a changed file: surfaceLaunchRegistry drift, todoScoring sha256, AccessGrantModal, RecordHeader, ...).
+
+      PENDING MANUAL GATES (main session; after 144's cutover + a BFF deploy): notes/task-133-live-gate.ps1
+      -Step ShareFirstProof (a)(b)(e); wizard-created secure project + -Step Inspect (b); -Step StrandForResume + admin
+      provision call + Inspect (c); second provision call -> 409 with modifiedon/shares unchanged (d); the retry call on a
+      container-less stranded record (f). Task 143: the four share-writer sites are listed in note section 7.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-r1" round="verifier-1">
+      COMPLETED-WITH-ESCALATION (unchanged): all nine verifier findings closed in code/tests/docs; the live gate and two
+      owner decisions remain open. Full record: notes/task-133-provision-creator-lockout.md section 11.
+
+      (1) RESUME colleagues: a resume request naming colleagues (other than createdby) is accepted only when the caller
+          (WhoAmI) IS createdby; otherwise 403 sdap.provision.resume_colleagues_not_permitted before any write (refused,
+          not silently dropped). Closes "the resume caller receives no share unless they are the creator".
+      (2) resume_creator_unavailable recovery made TRUE: with createdby unusable, the resume completes only when an
+          enabled, non-application person already holds a Read share (an administrator's Manage Access share) and then
+          shares to nobody (S5 + F8); response creatorUnavailable=true (additive), sharedToCreatorSystemUserId = that
+          person. Disabled/application sharees do not count. Detail + guide 7a rewritten.
+      (3) Compensation with an unreadable pre-call set: sharesRestored=false, creatorShareRemoved=true, detail names the
+          removed pre-existing share; "wrote no share" told apart. Behaviour (narrowing) unchanged, claim corrected.
+      (4) Host wiring tests: CreateProjectWizard.provisioningHost.test.tsx + SummarizeFilesDialog.provisioningHost.test.tsx.
+      (5) Unverified owner move: the creator share is ENSURED by the complete read (not assumed from share-first); a
+          share issued without a read is reported as NOT confirmed (creatorShareConfirmed=false); client copy no longer
+          asserts access.
+      (6) RecordShareRightsMaskTests pins every Dataverse bit as a literal (sweep S8b: only these tests catch a moved bit).
+      (7) record_owner_unreadable: client retryable=false; server detail and guide name the administrator.
+      (8) SecureContainerDecision.cs stale cascade comment rewritten.
+      (9) Live-gate script: replay caveat for (e) stated (owner must accept replay explicitly); CreatorAccessRights
+          derived from source at run time, stops if its shape changes (task 139 not landed).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11): all in the existing endpoint. New: reason code
+      resume_colleagues_not_permitted (no existing code means "only the creator may ask this"); additive response member
+      CreatorUnavailable (+ TS mirror; Resumed alone cannot say the reported person is not the creator); ProblemDetails
+      extensions creatorShareRemoved / creatorShareConfirmed (same convention as sharesRestored); private helpers only.
+      No new endpoint, service, DI registration, option, job, package or column.
+
+      TESTS: affected BFF classes 153/153 (ProvisionProjectIdempotency + SecureProjectShare + RecordShareRightsMask +
+      InternalUserShare); full BFF unit suite 13,606 passed / 0 failed / 54 skipped (13,660); NetArchTest 341/341;
+      Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 81/81 (8 suites); tsc --noEmit clean; eslint
+      0 errors on changed files; dotnet format whitespace clean. Perturbation sweep 13/13 bite. CVE: dotnet list package
+      --vulnerable --include-transitive on Sprk.Bff.Api reports no vulnerable packages (no package changed).
+
+      NOT CLOSED: publish size (main session measures by instruction); manual live gate (a)-(f) pending (144 cutover +
+      deploy; (e) needs the owner's explicit acceptance of replay); OWNER DECISIONS: F8 follow-up (persisted human
+      creator column for app-created rows, before task 150) and whether the round-4 Assign-cascade acceptance extends to
+      COMPENSATION (POML trigger options a/b/c) - recorded, not decided here.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-r1-r2" round="verifier-2">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier-2 code/test item closed; the Assign-cascade-under-compensation
+      confirmation, the F8 creator-column decision, the (e) replay acceptance, the live gate and publish size remain open.
+      Full record: notes/task-133-provision-creator-lockout.md section 12.
+
+      (3) Resume creator-share failure branch now tested: creator_share_failed, resumed=true, no container created or
+          recorded, SomeoneCanOpen unchanged, next call finishes (seed V6 bites).
+      (4/14) Round-1 holder path WITHDRAWN (path C - comply): an unusable createdby (absent/disabled/application-user =
+          409, unreadable = 500) is refused with resume_creator_unavailable, zero grants, zero containers, even when
+          another person holds a Read share - the closed AC and F8's interim default. FindPersonHoldingAShareAsync,
+          ReadMask, ProvisionProjectResponse.CreatorUnavailable and its TS mirror removed (DTO back to its pre-round-1
+          bytes). Recovery text rewritten to paths that work, each tested: retry once the read works (unreadable);
+          re-enable the creator (disabled); an administrator assigns the record to the intended person, whose own call
+          runs from the start. If the owner wants the holder path, it is an AC amendment (code in fb4b70fdf).
+      (5) V5 null isdisabled = disabled, and V11 createdby-not-a-colleague on resume, now tested (both bite); V1/V2
+          guarded removed code.
+      (6) shareIssued |= creatorShareProven (V3) and the colleague skip-existing branch (V4) now tested (both bite).
+      (7) "No branch widens" narrowed to "no compensated branch"; the unverified-move widening named in the code remarks
+          and note section 4.
+      (8) Client reads creatorShareConfirmed: confirmed copy asserts the share was read back; unconfirmed/absent copy
+          names the administrator. classifyProvisioningFailure gains an optional extensions parameter.
+      (9) Closed by (4): unreadable createdby is refused before any colleague share (tested).
+      (10/16) additionalPrincipalsShared asserted (two colleagues, one failing: count 1).
+      Perturbation sweep round 2: 11/11 bite (V6, V3, V4, V5, V11, R1, R2, R3, C11, C12, C13).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11): server surface REMOVED, none added. Client: exported type
+      IProvisioningFailureExtensions + optional parameter on the existing classifyProvisioningFailure (extends the
+      existing function; without it the wizard asserts access the server says is unconfirmed). No new endpoint,
+      service, DI registration, option, job, package or column.
+
+      TESTS: full BFF unit suite 13,613 passed / 0 failed / 54 skipped (13,667); NetArchTest 341/341; affected classes
+      153/153; Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 84/84 (8 suites); package build
+      (tsc) clean; prettier/eslint clean on changed TS; dotnet format whitespace clean on changed C#.
+
+      NOT CLOSED: (11/17) Assign cascade under COMPENSATION - owner round 4 item 3 accepted the cascade for 144's
+      migration and forward assignment; whether it covers compensation's reverse assign needs the owner's explicit
+      confirmation or a choice of (a) snapshot+restore children / (b) no compensation for project and matter /
+      (c) coordinate with 148 - STOP item, no code changed. (12) Owner items: F8 creator column (urgent before 150),
+      acceptance of the (e) replay method. (13/19) Manual live gate (a)-(f): pending 144 cutover + BFF deploy.
+      (18) Publish size: main session.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2" round="b2 (owner round 7 item 2; live orphan defect; verifier round 3)">
+      COMPLETED-WITH-ESCALATION (unchanged): owner round 7 item 2 implemented, the live orphaned-container defect closed,
+      every verifier-3 code/test item closed. Still open: the Assign-cascade-under-COMPENSATION owner decision (STOP),
+      the live gate (schema apply first), the (e) replay acceptance, publish size. Full record:
+      notes/task-133-provision-creator-lockout.md section 13.
+
+      BASE. task/uac-r2-133-b1 (WIP b38756ba6, unverified, did not compile) + work/unified-access-control-r2 merged
+      (baseSha 43bcd3abe). Conflict RecordShareLevels.cs: both sides added members, both kept. Task 139 made Collaborate
+      exactly the creator rights: one test seed (View Only now) and the live-gate script's CreatorAccessRights derivation
+      updated. b1's Assign-cascade child-owner snapshot/restore REMOVED (an unanswered escalation, see below).
+
+      (1) OWNER ROUND 7 ITEM 2 (option a). NEW column sprk_createdbyperson (lookup systemuser) on sprk_project, sprk_matter,
+          sprk_workassignment; FIELD-SECURED (writers = BFF application user(s); readers = every BU default team).
+          scripts/Set-RecordCreatorPersonSchema.ps1 (dry run / -Apply / -Verify; NOT run - no live writes) + schema doc
+          src/solutions/SpaarkeCore/entities/sprk_project/created-by-person-schema.md + guide 7b + customer deployment
+          guide 6.5.2. Stamped on EVERY BFF create path: Office quick-create matter/project (the Office caller, app-only
+          payload, set last, protected from field mapping); POST /api/v1/work-assignments (the caller by WhoAmI; an
+          unresolvable caller is refused 403 sdap.workassignment.creator_unresolved before the create);
+          dataverse.create_record (an app-only update with the row's own createdby, non-fatal). An AI item naming the
+          column is refused. RESUME: createdby when a usable person, else the column's person when usable, else
+          resume_creator_unavailable (never the caller - F8); an unreadable createdby stops there (500); an unreadable
+          column is 500 naming it. DEPLOY ORDER: schema BEFORE a BFF carrying this round (creates fail otherwise).
+      (2) ORPHANED CONTAINER (live 2026-10-02, 65a3fab2). Before any write a container already recorded on a record not
+          owned by the team is classified: a business unit's or a configured shared container is replaced; one another
+          root also records is refused 409 sdap.provision.container_shared_with_another_record; an unreadable check is
+          refused 500 sdap.provision.container_ownership_unreadable; otherwise it is the record's own and is KEPT (no
+          container created, sprk_containerid never rewritten). Both outcomes tested for all three roots.
+      (3) VERIFIER 3. S19 (unverifiable compensation), S10 (unverified move + no share) and S22b (restore reads back
+          wrong) each have a test and their seeds bite; client reads creatorState (unreadable = retryable, transient
+          copy; the wizard renders "Try securing again" for it); the resume-colleague refusal with an unidentifiable
+          caller is pinned as creator_unresolved.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11). No new endpoint, service, interface, option, job, package or DI
+      registration (the two handlers' new parameters are already registered unconditionally). New: the owner-mandated
+      column + relationship on three tables (existing createdby = the app user, createdonbehalfby empty live,
+      sprk_assignedtointernal is an editable contact "for" column - none records the person; without it an app-created
+      stranded secure record can only be refused); FLS profiles "Spaarke BFF-Managed Field Readers/Writers" (task 141's
+      identity-link pair has the same members but is named and described for the identity binding; this pair is generic
+      and task 150 reuses it for sprk_issecure; without FLS any Write holder could name another person as creator and
+      the resume would share to them); RecordCreatorPerson static holder (one name, five call sites); reason codes
+      container_shared_with_another_record, container_ownership_unreadable (distinct recoveries), and
+      sdap.workassignment.creator_unresolved; SharedContainerConfigKeys (reads four existing config keys). Publish size:
+      not measured (main session). No package changed.
+
+      TESTS. Full BFF unit suite 14,309 passed / 0 failed / 54 skipped (14,363); NetArchTest 345/345;
+      affected classes 350/350; Spaarke.UI.Components jest (CreateProjectWizard + SummarizeFilesWizard) 94/94, tsc
+      clean. Perturbation sweep 30/31 bite; the survivor (O2, mapping protection alone) is a deliberately redundant guard
+      and O2b (both halves removed) bites. Tests whose setup changed (never deleted): the cascaded-container test (its
+      value now recorded on a business unit) and the no-pre-call-read compensation test (View Only seed: task 139 made
+      Collaborate exact).
+
+      NOT CLOSED. (1) STOP - Assign cascade under COMPENSATION: owner round 4 item 3 accepted the cascade for task 144's
+      migration and forward assignment; rounds 5-7 do not cover compensation's reverse assign. Options (a) snapshot and
+      restore each re-owned child / (b) no compensation for project and matter / (c) coordinate with task 148;
+      recommendation (c) then (a). No option implemented. (2) PENDING MANUAL GATES: schema apply in dev BEFORE this
+      round reaches master (peers deploy master); live gate (a)-(f) after a deploy; (g) Office-created record resumes to
+      its recorded person; (h) a record's own container kept. (3) Owner acceptance of the (e) replay method.
+      (4) Publish size (main session).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2-r1" round="r1 (verifier round 4)" baseSha="d10db4252">
+      COMPLETED-WITH-ESCALATION (unchanged): the BLOCKING kept-container finding and every other code/doc item closed WITHOUT
+      changing the idempotency marker; one new owner question (14.3) and the earlier open items remain. Full record:
+      notes/task-133-provision-creator-lockout.md section 14.
+
+      BASE. task/uac-r2-133-b2 + work/unified-access-control-r2 merged (8531711d6 integration fixtures, ea6484102 hard
+      gate); baseSha d10db4252, clean.
+
+      (1) BLOCKING, kept container. Proven first: 10 new/rewritten tests failed on the b2 logic (both probes reproduced).
+          Root cause is wider: ANY record entering the owner move with sprk_containerid set (a KEPT own container, and
+          also a REPLACED shared container, recorded from the move until Step 7) is 409'd forever by the marker if a step
+          after the move fails - for the shared case while its uploads go to the business unit's shared container. The
+          marker was NOT changed: the AC pins ProvisionProject_WhenAlreadyOwnedBySecureTeam_IsRefusedAndWritesNothing
+          unmodified, and its seed (team-owned, container, no share) is identical to a stranded kept record; a
+          provisioning-complete signal is a new column. Either is the owner's call (POML trigger 3: no widening on a
+          guess). Done instead (verifier option c and its shared-container counterpart):
+          (a) Step 4.2: a shared container is UNLINKED before the move (first write, after every read); every failure
+              after the move leaves "owned, no container" = resumed (tested). A failed unlink: new code
+              sdap.provision.shared_container_not_cleared (500, retryable, nothing moved). Later details say "unlinked".
+          (b) A kept record moves only when share-first is possible: an unreadable pre-call share set refuses before any
+              write (creator_share_failed, containerKept true) - closes probe 2. The live-gate-(a) post-move-grant
+              fallback for a creator who owns the record is kept (refusing would refuse every re-securing if (a) fails).
+          (c) Every failure after a kept record's move tells the truth: extension containerKept; the detail says the next
+              call answers already_provisioned and does not resume, and names the recovery that works - an administrator's
+              Manage Access share (or Share in the model-driven app); CRITICAL logs say it; the double failure says when
+              the creator's share was confirmed before the move and still stands. Tested for every failure after the move
+              (probe 1: someone can open it and the next 409 is TRUE - creator share exact).
+          Residual (stated, 14.1): nobody can open a kept record only if live gate (b) or (a) is disproved AND two more
+          writes/reads fail after the move; CRITICAL, recovery named.
+      (2) Trigger 3 surfaced (14.4): fired by code, resolved by prevention, resume condition unchanged.
+      (4) Hard gate: both integration suites run in full on this branch (counts below); PR text prepared (14.7).
+      (7) Schema script: writer-profile members other than the BFF application users (humans, other app users, any
+          team) are FAIL in every mode (-Verify exits 1), never removed; the informational count pages past 5,000.
+      (9) Chat handler remarks: the interim app-only stamp stated as a section 6.5 path-B exception (owner round 7 items
+          2+3; neither names this shape explicitly); PR citation text in 14.7.
+      (10) A 400 on the sprk_createdbyperson read = creatorState column-missing (500, deterministic; the detail names the
+           schema script and says calling again repeats the refusal); client maps it to needs-administrator, not
+           retryable. Other failed reads stay the transient unreadable (new test).
+      (11-14) Closed by (1): no detail promises an unreachable resume; every stale comment/detail rewritten, incl.
+           already_provisioned's and owned_by_other_secure_team's "second container" reasons, guide 4.3/7a, schema doc.
+      (3,5,6,8) Confirmations - no action. (15) publish size and (16) live gate: NOT closed (main session / no live writes).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; 14.6): all in ProvisionProjectEndpoint. New: reason code
+      shared_container_not_cleared (no code means "a pre-move write failed, nothing moved, retry"); ProblemDetails extension
+      containerKept (same convention as sharesRestored; without it a client cannot tell a provisioning-call recovery from
+      a Manage Access one); creatorState value column-missing (without it the wizard offers a retry that always fails);
+      Step 4.2 (one clear of the column provisioning already owns); private helpers. Removed: RecordContainerAsync's
+      previousContainerId and its overwrite warning (dead after the unlink). No new endpoint, service, interface, DI
+      registration, option, job, package or column.
+
+      TESTS: full BFF unit suite 14,319 passed / 0 failed / 54 skipped (14,373); NetArchTest 345/345;
+      HARD GATE (ea6484102), both run in full on this branch: Sprk.Bff.Api.IntegrationTests 104/104, Spe.Integration.Tests
+      403 passed / 0 failed / 25 skipped (428); affected classes (the verifier's set) 452 passed / 0 failed / 3 skipped;
+      Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 96/96 (8 suites), package build (tsc) clean,
+      prettier + eslint clean on the changed TS; dotnet build 0 warnings; dotnet format whitespace clean on the changed C#.
+      Perturbation sweep 14/14 bite (R1-R12 server, C1-C2 client). New: 9 kept/shared-container tests (each makes the
+      next call), 1 transient column-read test; rewritten: the absent-column test (now column-missing, not a retry);
+      strengthened: the S19 test (+2 assertions). No package changed (no CVE delta). Publish size: not measured (main
+      session).
+
+      NOT CLOSED. (1) OWNER QUESTION 14.3 - should a kept-container record be resumable (A: marker reads "nobody holds a
+      share" + AC test amendment; B: provisioning-state column; C: as shipped). Recommendation: C now, A for one recovery
+      path. (2) STOP still open: Assign cascade under COMPENSATION (13.6). (3) PENDING MANUAL GATES: schema dry run /
+      -Apply / -Verify in dev BEFORE master; live gate (a)-(h) after a deploy; NEW (i) a record recording a business
+      unit's container is provisioned with its own container and the business unit's left unchanged. (4) Owner acceptance
+      of the (e) replay method. (5) Publish size (main session).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-133-b2-r2" round="r2 (verifier round 5)">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier-round-5 code/doc item closed; the open owner items, the
+      section 6.5 path-B sign-off, the live gates and publish size remain. Full record:
+      notes/task-133-provision-creator-lockout.md section 15. Base task/uac-r2-133-b2-r1 (b26efd090), not re-merged (the
+      verifier confirmed the moved work branch still merges cleanly). ProvisionProjectEndpoint.cs is UNCHANGED from r1:
+      this round changes tests, the test fixture and the client.
+
+      (5) Seed P5 closed: new test - kept container, share to the current owner refused (live gate (a)) so the
+          post-move fallback ran with nothing proven, move verified, proof fails, undo refused: creator_share_failed_resumable,
+          containerKept true, ownershipRestored false, detail WITHOUT "confirmed before the move", SomeoneCanOpen false,
+          CRITICAL, next call 409. P5 bites.
+      (6) Seeds P7/P8 closed at EVERY site: unlinkedNote appears in six failure details after the unlink; r1 pinned two,
+          four new tests pin the rest (refused move; unverified + share confirmed = P8; unverified + no share; verified
+          undo = P7), each making the next call its detail names. Each site's removal fails exactly its test.
+      (7) Seed P14 closed: fixture switch CreatorPersonReadFailsWith (HttpStatusCode) raises HttpRequestException with
+          the status, the real DataverseWebApiClient shape; the transient test is a theory over 503/429/500. P14 bites (3).
+      (8) containerKept consumer BUILT: provisioningService.ts reads it; with containerKept true,
+          creator_share_failed_resumable and an unconfirmed owner_assignment_unverified name the Manage Access share
+          instead of "an administrator needs to finish securing it" (a securing call answers already_provisioned for such
+          a project). Kinds and retryable unchanged. Note 14.6 carries a correction (r1 overstated what was built).
+      (9) Note section 10 lists the r1 kept-container refusal as a deviation from the closed share-unreadable criterion.
+      (10) Path-B item (DataverseCreateRecordHandler interim app-only stamp): correctly surfaced, still needs the owner's
+           or PR reviewer's explicit sign-off before merge (PR text note 14.7). Not closable here.
+      (11) Publish size: not measured (main session). No package and no production server code changed this round.
+      (12) Live gates: not run (read-only). Read-only fact: sprk_createdbyperson is NOT on sprk_project in the connected
+           dev environment (Dataverse MCP query, 2026-10-02), so the schema must be applied before master. #1081 (root
+           team now holds Basic User, org-wide read incl. Secure Record; dev-only per round 5): live access proofs must
+           read the record's shares or use a user outside the root business unit (note 2 addendum, 15.5).
+      (13) Closed by (5)-(7).
+      (1-4) Confirmations - no action.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 15.4): no new server surface. Client: one optional member
+      (containerKept) on the existing IProvisioningFailureExtensions plus two private copy constants; without it a
+      kept-container project's failure names a recovery that finishes nothing. Fixture switch replaced, not added.
+
+      TESTS: full BFF unit suite 14,326 passed / 0 failed / 54 skipped (14,380); NetArchTest 345/345; HARD GATE
+      (ea6484102), both in full on this branch: Sprk.Bff.Api.IntegrationTests 104/104, Spe.Integration.Tests 403 passed /
+      0 failed / 25 skipped (428); the verifier's provisioning class set 251/251 (r1 244 + 7); Spaarke.UI.Components jest
+      CreateProjectWizard + SummarizeFilesWizard 103/103 (8 suites), package build (tsc) clean, prettier + eslint clean on
+      the changed TS; dotnet build 0 warnings; dotnet format whitespace clean on the changed C#. No package changed (no
+      CVE delta). Publish size: not measured (main session).
+      Perturbation sweep 9/9 bite (P5, P7, P8, U1, U2, P14 server; C3-C5 client).
+
+      NOT CLOSED. (1) OWNER QUESTION 14.3 (kept-container resume). (2) STOP: Assign cascade under COMPENSATION (13.6).
+      (3) Section 6.5 path-B sign-off for the chat handler's interim stamp (14.7). (4) PENDING MANUAL GATES: schema dry
+      run / -Apply / -Verify in dev BEFORE master (column confirmed absent); live gate (a)-(i) after a deploy, with access
+      proofs that do not rely on a root-team member (#1081). (5) Owner acceptance of the (e) replay method. (6) Publish
+      size (main session).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1" round="c1 (owner round 10 items 4 and 5)" baseSha="bb0e989ab">
+      COMPLETED: owner round 10 item 4 implemented, item 5 recorded, the round-10 record on the interim stamp kept accurate,
+      escalation trigger 4 marked answered. Full record: notes/task-133-provision-creator-lockout.md section 16.
+
+      BASE. task/uac-r2-133-b2-r2 (5a8b66c15) + work/unified-access-control-r2 merged, no conflicts, none of this task's
+      files touched; baseSha bb0e989ab.
+
+      (1) OWNER ROUND 10 ITEM 4 ((c) then (a)). ONE reusable primitive, Infrastructure/Dataverse/AssignCascadeChildOwners
+          (static, no registration, keyed by the root's logical name so task 148's Services/Access code reuses it):
+          SnapshotAsync reads every owner-bearing child an Assign of the root cascades to, with its OWN owner, complete or
+          refused (Unreadable = transient; Refused = a 400, a full 5,000-row page, or a row without id/owner); RestoreAsync
+          puts each back keyed on observed state (already on its owner = nothing written; else ownerid bind, its own
+          operation, then read back; Gone is not a failure). Live metadata (read-only, 2026-10-03): project and matter
+          cascade Assign to team, sharepointdocumentlocation, sharepointdocument; work assignment to nothing. team is
+          BusinessOwned (no ownerid/owninguser/owningteam): an Assign cannot re-own it, nothing to snapshot, never read.
+          LIVE FINDING: dev REFUSES a filtered sharepointdocuments read (400 0x80071017, SharePoint S2S integration off), so
+          documents are read only under a document location - otherwise the fail-closed snapshot would have refused every
+          project and matter provisioning in dev. Provisioning: snapshot before any write (refused:
+          sdap.provision.cascade_children_unreadable, childTable, cascadeChildState unreadable|refused); verified undo
+          restores (childOwnersRestored true; a child that cannot be put back = sdap.provision.cascade_children_not_restored,
+          named in the response - table, id, ownerType, ownerId, outcome, nextCall - and in a CRITICAL line, "before
+          provisioning is called again", never retry); unverified undo restores nothing and names the children it would
+          leave on the wrong owner (childOwnersAtRisk + detail + CRITICAL); undo not applied, success, resume: unchanged (on
+          success the children stay with the team - owner round 4 item 3). Client classifies both codes, reads
+          cascadeChildState. Guide 7a: paragraph + two rows. For 148: note 16.2 (how to reuse; one open design point for
+          148 named, not decided here).
+      (2) OWNER ROUND 10 ITEM 5: the kept-container resume stays AS SHIPPED (note 14.3 option C). No code change; recorded
+          in the note, here (amendment R10) and the guide 7a sentence that had called it an open question.
+      (3) Interim app-only sprk_createdbyperson stamp in DataverseCreateRecordHandler: superseded at integration by task
+          146's create-as-the-app (round 7 item 3; round 10 main-session record). Handler untouched (146 not pre-empted);
+          note 13.8 now states round 10's record and that 146 stamps the OBO caller's own systemuserid (WhoAmI).
+      (4) Escalation trigger 4 annotated ANSWERED; status completed with a status-note; amendment R10.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 16.6). New: AssignCascadeChildOwners and its result
+      records/enums (static helper beside SecureRecordOwnerTeam - no code reads or restores cascaded children today;
+      MoveOwnerAsync is private and root-shaped; the owner asked for ONE primitive 148 reuses; without it compensation
+      silently re-owns every child whose own owner differed); reason codes cascade_children_unreadable and
+      cascade_children_not_restored (each a distinct recovery the client must tell apart); ProblemDetails extensions
+      childTable, cascadeChildState, childOwnersRestored, childOwnersNotRestored, childOwnersAtRisk (the owner's "named in
+      the response with the next call"); client: one optional extension member, two state entries, one copy constant;
+      fixture switches. No new endpoint, DI registration, interface, option, job, package or Dataverse column.
+
+      TESTS. New ProvisionAssignCascadeChildOwnerTests, 8 methods / 12 cases, incl. the owner-mandated one (every child
+      back on its own pre-call owner, incl. one whose owner differed from the root's; seed C1 "restore skipped" fails it).
+      Client +5 (EMITTED 26 to 28; cascadeChildState x3). No existing test changed. Perturbation sweep 20/20 bite
+      (C1-C16 server, CL1-CL4 client). Full BFF unit suite 14,338 passed / 1 failed / 54 skipped (14,393) - the one failure
+      (OfficeVersionSaveRevertTests.EmailSave_ResentWithNoClientKey_IsStillAnsweredDuplicate_AndReadsNoFile, unrelated)
+      passed on an isolated re-run (class 9/9): contention. NetArchTest 346/346. HARD GATE, both in full on this branch:
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0 failed / 25 skipped (428). Provisioning
+      class set 263/263. Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 108/108 (8 suites); package
+      build (tsc) clean; prettier + eslint clean on changed TS; dotnet build 0 warnings; dotnet format whitespace clean on
+      changed C#. No package changed (no CVE delta).
+
+      NOT CLOSED (main session): manual live gate (a)-(i) plus NEW optional (j) (a document-location probe on a TEST record
+      proves the dev refusal shape; command in note 16.8) and the schema apply before master - approved by owner round
+      11 for the main session at integration; whether round 11 covers REPLAY as the (e) method (verifier round 1 item 9);
+      publish size. Observation routed to 145/146/148 (note 16.8): the secure owner role holds no sharepointdocumentlocation
+      privilege, so a forward move of a root that HAS a document location may be refused (existing fail-closed
+      owner_assignment_failed; 0 such roots in dev; unproven).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1-r1" round="c1-r1 (verifier on round c1)" baseSha="27d14cbcf">
+      COMPLETED: every verifier item closed or routed. Full record: notes/task-133-provision-creator-lockout.md section 17.
+
+      (1/14) MEDIUM / criterion "a child whose restore fails is named" (owner round 10 item 4, amendment R10): Unreadable
+          and Unverified were untested - seeds S19 (the read before a child's restore fails -> AlreadyOwned) and S20 (the
+          read-back after its PATCH fails -> Restored) survived every test. Fixture: FailChildOwnerReadFor (a by-id read of
+          the named child throws 503 - before its PATCH; the snapshot's by-regarding read unaffected) and
+          FailChildOwnerReadBackAfterBindFor (its by-id read throws once its owner bind is applied - the read-back), both in
+          the real client's HttpRequestException shape. New theory
+          Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored (Unreadable, Unverified):
+          cascade_children_not_restored, ownershipRestored true, childOwnersRestored false, the named child with table, id,
+          ownerType, ownerId, outcome and nextCall, the detail ("before provisioning is called again", no retry), the
+          CRITICAL line naming the child, its outcome and the call; the other child put back; no write to an Unreadable
+          child, one bind (its own owner) to an Unverified one. Seeds S19-S22 (S21/S22: Unreadable / Unverified counted
+          IsBack): each SURVIVES the 202-test DataMutation.ExternalAccess set without the new theory and BITES exactly its
+          case with it. Sweep 24/24 with round c1's 20.
+      (2-10) VERIFIED by the verifier; nothing to change.
+      (11) Comment: the kept-container remarks (class remarks and RootRow.IsProvisioned) now say "decided as shipped by
+          owner round 10 item 5 (task 133 note 14.3)".
+      (12) Recorded, no code: sharepointdocument in an integration-on org (owner? cascade? PATCH accepted?) is unproven -
+          note 16.8 (live-gate notes, beside the forward-move privilege observation) and 16.2 (task 148 handoff). Both
+          failure shapes fail closed. Gate (e) proves only the no-children path in dev.
+      (13) Wording: only the read BEFORE a restore decides Gone; a row that disappears after its PATCH is Refused or
+          NotApplied (fail closed) - primitive remarks, member docs, IsBack. Behaviour unchanged; Gone stays untested (no
+          fail-open seed exists on it). Guide 7a's not-restored row now explains each outcome.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 17.5). No new production surface (the BFF change is comments). New
+      test surface only: the two fixture switches (no existing switch fails a child's by-id read; without them S19/S20
+      stay unseen) and the theory (the existing child test pins only Refused).
+
+      QUALITY GATES (TEST-MODIFYING): code-review no findings; adr-check compliant, 0 violations (ADR-003 now pinned;
+      ADR-038 KEEP path, no banned test shapes). Note 17.6.
+
+      TESTS. Affected: the cascade class 14/14; the provisioning class set 265/265; DataMutation.ExternalAccess 204/204.
+      Once on the final code: full BFF unit suite 14,205 passed / 136 failed / 54 skipped (14,395) under ten concurrent
+      full suites from other worktrees (CPU 83-99 percent, free memory 1-42 MB) - 135 TaskCanceledException timeouts plus
+      one cancellation-timing test, none in a class this round touches; the 53 classes with a failure re-run in
+      isolation: 499 passed / 0 failed / 10 skipped (509) - contention, both reported. NetArchTest 346/346. HARD GATE,
+      both in full: Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0 failed / 25 skipped
+      (428). Build 0 warnings / 0 errors; dotnet format leaves the changed C# byte-identical. No client or package change.
+
+      NOT CLOSED (main session): publish size (by instruction); manual live gate (a)-(j) and the sprk_createdbyperson
+      schema dry run / -Apply / -Verify before master (approved by owner round 11); whether round 11 covers REPLAY as the
+      (e) method (verifier round 1 item 9); Step 9 (TASK-INDEX.md status cell). If 148's POML is amended from note 16.2,
+      the new sharepointdocument bullet goes with it.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1-r2" round="c1-r2 (verifier on round c1-r1; owner round 13)" baseSha="fde7441f7">
+      COMPLETED: every verifier item closed, verified or routed; owner round 13 items 1 and 2 recorded. Full record:
+      notes/task-133-provision-creator-lockout.md section 18.
+
+      (1/10) MEDIUM / criterion "a child whose restore fails is named" (owner round 10 item 4, amendment R10): NotApplied
+          (PATCH accepted, read back on another owner) was untested and seed V3 (NotApplied counted IsBack - fail-open:
+          creator_share_failed, childOwnersRestored true, "may retry") survived all 204 tests. Fixture
+          IgnoreChildOwnerBindFor (the PATCH is recorded, no error, owner unchanged - the child twin of
+          OwnershipPatchIsApplied); NotApplied case on Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored
+          (outcome NotApplied, exactly one bind with the child's own owner, the child still on the owner the undo's
+          cascade left, nextCall, CRITICAL line, no retry). V3 BITES; R5 (NotApplied reported Refused) BITES.
+      (2) LOW: the snapshot's id-less-row refusal is pinned. Fixture ChildRowReadWithoutIdFor (the row comes back without
+          its id column); idless-row case on Provisioning_WhenTheCascadedRowsAreReadIncompletely_RefusesBeforeAnyWrite
+          (cascade_children_unreadable, refused, nothing written). V18 (recorded under Guid.Empty) and R6 (skipped) BITE.
+      (3) LOW: new theory Provisioning_WhenNoOwnerMoveCascades_ReadsNoCascadedRows (work-assignment move; project and
+          matter resume): 200, resumed as expected, no sharepointdocumentlocations / sharepointdocuments query. V17 and R1
+          (a resume that snapshots) BITE.
+      (4) LOW: CLASSIFIED, not just recorded. AssignCascadeChildOwners.FailureOf: 400, 401 and 403 are Refused
+          (deterministic - the client token is renewed 5 minutes before expiry, so a 401/403 is the BFF's credential or
+          its Read privilege on the table being refused); 5xx, 429 and the rest stay Unreadable. The refused detail of
+          cascade_children_unreadable names the service's Read privilege; reason-code doc and guide 7a row updated; client
+          unchanged (cascadeChildState refused is already non-retryable). 401 and 403 cases added. R2, R3, R4 BITE.
+          Observation for the main session (not changed, outside the primitive): the endpoint's other read refusals
+          (container_ownership_unreadable; resume_creator_unavailable with creatorState unreadable) still treat a
+          401/403 as the same caller's retry - fail closed, misleading recovery (note 18.4).
+      (5-9) VERIFIED by the verifier; nothing to change.
+      (11) Publish size NOT closed (main session, by instruction; no package changed, no CVE delta). Full BFF unit suite
+          run once on the final code (below).
+      (12) Manual live gate (a)-(j) and the sprk_createdbyperson schema dry run / -Apply / -Verify: NOT closed - main
+          session at integration (owner round 11). In dev, (e) proves only the no-children path.
+      (13) OWNER ROUND 13 ITEM 2 (BINDING): gate (e), the compensation replay on a throwaway TEST project, is COVERED by
+          round 11. Recorded in the status-note, note 16.8 and 18.5, and the task-133-live-gate.ps1 header (comment
+          only). Stays a main-session live step.
+      (14) OWNER ROUND 13 ITEM 1 (BINDING, for task 148): note 16.2's open design point is DECIDED - when a record is
+          unsecured, its sharepointdocumentlocation / sharepointdocument rows are re-owned by the same rule task 146
+          applies to any non-secure child, not left with the new root owner by the cascade. Recorded in 16.2 with how
+          148 uses the primitive under it (snapshot before the move; RestoreAsync is the undo, not the placement).
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 18.7). No new production surface: no endpoint, service,
+      registration, interface, option, job, package, column or reason code; the production change is one predicate
+      (FailureOf) plus doc and response text. New test surface: fixture switches IgnoreChildOwnerBindFor (no switch
+      models a child bind accepted and ignored; without it V3 stays unseen) and ChildRowReadWithoutIdFor (nothing omits
+      the id column; without it V18 stays unseen); the no-cascade theory (the existing no-document-location test covers
+      only a project/matter forward move; without it V17 and R1 survive).
+
+      QUALITY GATES (FULL - a .cs change - and TEST-MODIFYING): code-review no blocking findings (one suggestion and one
+      observation, both dispositioned in note 18.8); adr-check compliant, 0 violations (ADR-003, ADR-019, ADR-038).
+
+      TESTS. Affected: the cascade class 21/21 (14 + 7); the provisioning class set 272/272 (265 + 7);
+      DataMutation.ExternalAccess 211/211 (204 + 7). Perturbation sweep 9/9 bite (V3, V17, V18, R1-R6), each failing
+      exactly its case; sources MD5-identical after; 33/33 with rounds c1 and c1-r1. Once on the final code: full BFF
+      unit suite 14,348 passed / 0 failed / 54 skipped (14,402) in ONE clean run (closes item 11's suite half);
+      NetArchTest 346/346; HARD GATE, both in full: Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403
+      passed / 0 failed / 25 skipped (428). Build 0 warnings / 0 errors; dotnet format (and the pre-commit hook's
+      command) leave the changed C# byte-identical. No client or package change (no jest, no CVE delta).
+
+      NOT CLOSED (main session): publish size (by instruction); manual live gate (a)-(j), (e) now covered by owner
+      round 13 item 2, and the sprk_createdbyperson schema dry run / -Apply / -Verify before master (owner round 11);
+      Step 9 (TASK-INDEX.md status cell). For the main session to decide: the endpoint's other read refusals' 401/403
+      classification (note 18.4).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1-r3" round="c1-r3 (verifier on round c1-r2)" baseSha="02710b6bb">
+      COMPLETED (executor scope): the verifier found no executor code fix remaining; its one minor item is closed. Full
+      record: notes/task-133-provision-creator-lockout.md section 19.
+
+      BRANCH. Instructed: git switch -c task/uac-r2-133-c1-r1 task/uac-r2-133-c1-r2. That name already exists (round
+      c1-r1, fde7441f7, an ancestor of c1-r2, checked out in another worktree), so git refused it; re-pointing it would
+      rewrite an existing round's branch. This round is task/uac-r2-133-c1-r3, branched from c1-r2 as instructed.
+
+      (1/11) Publish size: NOT closed - the main session's measurement before merge, by instruction (procedure in note
+          19.4: fresh origin/master and branch worktrees at short paths, Compress-Archive Optimal on both sides, equal
+          file counts, both absolute sizes + delta). No package changed (no CVE delta). The rest of the build criterion
+          is met on this branch (TESTS below).
+      (2-9) VERIFIED by the verifier (seeds A1-A12, its runs, hygiene, owner decisions); nothing to change. Re-checked:
+          DataverseWebApiClient.GetAccessTokenAsync (:121-149) renews 5 minutes before expiry; the client's refused
+          state is non-retryable.
+      (10) MINOR, CLOSED. CASCADE_CHILDREN_REFUSED copy: "... an administrator needs to look at those records, and the
+          service's permission to read them, first." - the two checks the server's refused detail and guide 7a name for
+          every refused cause (the client cannot tell a 401/403 from a 400 or an incomplete read, so the copy names what
+          to look at, not the cause). Doc comments on the constant and on cascadeChildState updated. The refused case of
+          "reads cascadeChildState=%s ..." now asserts the permission phrase. Seed CL5 (round c1's copy back) BITES
+          exactly that case (107/108); restored MD5-identical, touched. Sweep 34/34 with rounds c1, c1-r1, c1-r2.
+      (12) Manual live gate (a)-(j) and the sprk_createdbyperson dry run / -Apply / -Verify: NOT closed - main session at
+          integration (owner round 11; (e) by replay covered by owner round 13 item 2). In dev (e) proves only the
+          no-children path.
+      (13) Step 9 (TASK-INDEX.md status cell): NOT closed - main session.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 19.2). No new surface: no endpoint, service, registration,
+      interface, option, job, package, column, reason code, extension, component or copy constant - one existing
+      constant's text and two doc comments. No C# changed (the BFF is round c1-r2's, byte-identical).
+
+      QUALITY GATES (FULL inherited; TEST-MODIFYING): code-review no blocking findings (two observations, note 19.3);
+      adr-check compliant, 0 violations (ADR-003, ADR-019, ADR-038).
+
+      TESTS. Affected: Spaarke.UI.Components jest CreateProjectWizard + SummarizeFilesWizard 108/108 (8 suites) on the
+      final source; prettier + eslint clean on the two changed TS files; package build (tsc) clean. Once, by
+      instruction (no C# changed): dotnet build of the unit test project 0 warnings / 0 errors; full BFF unit suite
+      14,348 passed / 0 failed / 54 skipped (14,402) in one clean run; NetArchTest 346/346; HARD GATE, both in full:
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0 failed / 25 skipped (428). No package
+      changed (the npm install side effects were reverted before commit). No live call of any kind.
+
+      NOT CLOSED (main session): publish size (note 19.4); the manual live gate (a)-(j) and the sprk_createdbyperson
+      schema dry run / -Apply / -Verify before master; Step 9. Still for the main session to decide (carried from c1-r2):
+      the endpoint's other read refusals' 401/403 classification (note 18.4).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-133-c1-r3.-r2" round="c1-r4 (verifier on round c1-r3; owner round 14 item 3)" baseSha="3062d960f">
+      COMPLETED (executor scope): every verifier item closed, verified, recorded or routed; owner round 14 item 3
+      implemented. Full record: notes/task-133-provision-creator-lockout.md section 20.
+
+      BRANCH. Instructed: git switch -c task/uac-r2-133-c1-r3.-r2 task/uac-r2-133-c1-r3. The start point with its
+      trailing period is not a ref (a ref name cannot end in a period), so it was read as task/uac-r2-133-c1-r3
+      (3062d960f). The new branch carries the instructed name exactly. Earlier rounds' branches are untouched.
+
+      (3/12) LOW, fail-open in principle, CLOSED. The rule "a child that disappears after its PATCH is Refused or
+          NotApplied" (AssignCascadeChildOwners.cs:47-49, enum docs, note 17.4) was untested. Seeds S13 (no row after the
+          PATCH counted Restored) and S16 (only a refused PATCH then no row counted Restored) survived all 211 tests.
+          Production code was already correct (:227) and is unchanged for this item.
+          - Fixture RemoveChildOnBindFor: once the child's owner bind is sent and recorded, its row no longer reads.
+            With FailChildOwnerBindFor the PATCH is also refused.
+          - Compensation_WhenAChildsRestoreCannotBeConfirmed_NamesItAsNotRestored now takes (shape, outcome). The three
+            existing cases are renamed by shape; two are new: row-gone-after-accepted-bind = NotApplied and
+            row-gone-after-refused-bind = Refused. They assert cascade_children_not_restored, childOwnersRestored
+            false, the nextCall, a CRITICAL line, no retry, one bind with the child's own owner, and the row no
+            longer reading.
+          - Seeds S13, S16, D1 (accepted-then-gone counted Restored), D2 (gone after the PATCH reported Gone) and D3
+            (refused-then-gone reported NotApplied) all BITE, each failing exactly its case(s) and no other test. The
+            source was MD5-identical afterwards.
+          - Note 17.4's "no seed on it is fail-open" is corrected: it was true only for the read before the restore.
+      (R14.3) OWNER ROUND 14 ITEM 3 (BINDING, 2026-10-03), IMPLEMENTED. The main session relayed it mid-round in
+          NOTE-FROM-MAIN.md (not committed, by its own instruction); it is corroborated by the work branch's decisions
+          file (commit 9d88da386).
+          - container_ownership_unreadable and resume_creator_unavailable classify a read Dataverse REFUSES as an
+            administrator's job, as the cascade reads already do. They use the ONE rule
+            AssignCascadeChildOwners.IsRefusedRead: HttpRequestException with 400/401/403. That was the private
+            FailureOf's body, which now calls it. 503/429 stay retryable.
+          - Container check: a new extension containerOwnershipState (unreadable / refused). The refused detail says
+            calling again repeats the refusal and an administrator checks the service's Read privilege on business
+            units and the three root tables.
+          - Resume: a new creatorState value refused (HTTP 500) on the createdby read, the sprk_createdbyperson column
+            read (a 400 there stays column-missing, checked first) and the recorded person's read. The recovery names
+            the Read privilege and never says "the same caller may".
+          - Client: RESUME_CREATOR_REFUSED (needs-administrator, not retryable) and CONTAINER_OWNERSHIP_REFUSED
+            (not-started, not retryable). Both copies name the service's permission, with no code, table, status or
+            "try again". provisionSecureProject reads containerOwnershipState.
+          - Docs: guide 7a rows and created-by-person-schema.md updated. No new reason code (the 28-code inventory is
+            unchanged).
+          - Tests: server +15; client +6. Seeds K1-K10 (server, run twice: before and after dotnet format, with
+            identical results) and CL6-CL10 (client) all BITE; sources MD5-identical after.
+          - Sweep across task 133's c1 series: 54/54.
+          - Interpretation (owner-reversible): a 400 on these reads is refused too, because "as the cascade reads
+            already do" names a rule that includes 400.
+      (5/11) Publish size: RECORDED, the c1-r3 verifier's own measurement (not re-measured here, by instruction; note
+          20.3 and the PR text in 20.6).
+          - Method: fresh detached worktrees at short paths; dotnet publish -c Release; Compress-Archive
+            -CompressionLevel Optimal over deploy/api-publish/*, PDBs included.
+          - Base 6b243f092 (the work-branch merge base; origin/master 62277d50a is not an ancestor): 45.66 MB
+            (47,874,537 bytes). Branch 3062d960f: 45.69 MB (47,913,382 bytes). Delta +0.04 MB (+38,845 bytes).
+            212 = 212 files. Well under 60 MB.
+          - Round 14's change adds response strings and one predicate to two existing BFF files, with no new type, file
+            or package. It is not re-measured; the main session measures the final head at integration.
+          - No csproj, Directory.Packages.props, package.json or lock file changed in the whole task (re-checked), so
+            there is no CVE delta.
+      (1, 2, 4, 6-10) VERIFIED by the verifier; nothing to change. S13 and S16 of item 4 are closed by item 3.
+      (13) Manual live gate (a)-(j) and the sprk_createdbyperson dry run / -Apply / -Verify: NOT closed. Main session at
+          integration (owner round 11; (e) by replay covered by owner round 13 item 2). In dev (e) proves only the
+          no-children path.
+      (14) Step 9 (TASK-INDEX.md status cell): NOT closed. Main session.
+      OBSERVATION, NOT changed (outside the items; note 20.2). RestoreOneAsync's child bind is a PATCH with no If-Match
+          (DataverseWebApiClient.UpdateAsync), so Dataverse upserts. A child deleted between the restore's read and its
+          PATCH can be re-created as an orphan row carrying only its id and owner, then read back as Restored. LOW: not
+          fail-open on access. Fix for task 148 or a follow-up: send the bind with If-Match: * (the task-130 pattern),
+          so the outcome becomes Refused; the new row-gone-after-refused-bind case already pins that outcome.
+
+      PLACEMENT / JUSTIFICATION (CLAUDE.md 10/11; note 20.4). No new endpoint, service, registration, interface,
+      option, job, package, column, reason code or file. Each new piece of surface:
+      - AssignCascadeChildOwners.IsRefusedRead (internal). Existing: the private FailureOf held the rule. Extension:
+        exposed rather than copied. Cost of doing nothing: two copies of the 400/401/403 rule drift.
+      - Extension containerOwnershipState on an existing code. Existing: cascadeChildState is the same pattern.
+        Cost of doing nothing: the client keeps offering a retry that fails every time.
+      - creatorState value refused on an existing extension. Same reasoning.
+      - Two client copy constants, following the CASCADE_CHILDREN_REFUSED pattern.
+      - Fixture switches RemoveChildOnBindFor, ContainerOwnershipReadFailsWith and SystemUserReadFailsWith. Existing:
+        the current switches leave the row readable or throw non-HTTP faults. Cost of doing nothing: S13, S16 and
+        K1-K10 stay unseen.
+
+      QUALITY GATES (FULL: .cs and .ts production changes; and TEST-MODIFYING), note 20.5.
+      - code-review: no blocking findings. Recorded: one LOW pre-existing production observation (If-Match); one
+        owner-reversible interpretation (400); dotnet format's re-indentation of the braced case; the theory's renamed
+        cases.
+      - adr-check: compliant, 0 violations (ADR-003, ADR-019, ADR-038, ADR-010; ADR-002/052 untouched).
+
+      TESTS.
+      - Affected, verifier part: the cascade class 23/23; DataMutation.ExternalAccess 213/213.
+      - Affected, round-14 part: the three provisioning classes 78/78; DataMutation.ExternalAccess 228/228 (213 + 15);
+        Spaarke.UI.Components jest, CreateProjectWizard + SummarizeFilesWizard, 114/114 in 8 suites (108 + 6).
+        Prettier and eslint are clean on the changed TS; the package tsc build is clean.
+      - Builds: 0 errors; the BFF and the unit-test project have 0 warnings. Spe.Integration.Tests shows 5 pre-existing
+        CA2024 warnings in an untouched file.
+      - A first full pass on the verifier-part code read 14,250 / 100 / 54 under heavy contention (99 timeouts; the
+        58 failing classes passed in isolation). It is superseded by the final runs.
+      - Once on the final code:
+        - full BFF unit suite 14,365 passed / 0 failed / 54 skipped (14,419), 24 m, in ONE clean run;
+        - NetArchTest 346/346;
+        - HARD GATE, both in full: Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 0
+          failed / 25 skipped (428).
+      - No package changed, so there is no CVE delta. No live call of any kind.
+
+      NOT CLOSED (main session):
+      - the manual live gate (a)-(j) and the sprk_createdbyperson schema dry run / -Apply / -Verify before master
+        (owner round 11);
+      - Step 9 (TASK-INDEX.md status cell);
+      - publish size of the final head, measured at integration;
+      - for the main session to decide: the child bind's If-Match (note 20.2, for task 148 or a follow-up).
+      The endpoint's other read refusals' 401/403 classification (carried from c1-r2) is now DECIDED and done (owner
+      round 14 item 3).
+    </outcome>
+  </execution>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it — provisioning must never leave a secure record with nobody able to open it; this is the invariant this task's share-first + verified compensation + resume design exists to guarantee. Add an explicit acceptance check that after every outcome (success, compensated failure, resume) at least one human holds access.</amendment>
+    <amendment n="R10" date="2026-10-03" source="owner round 10 items 4 and 5 (session27 note) — BINDING">(Item 4) Compensation's reverse Assign cascade: snapshot each child the Assign cascade re-owns (team, sharepointdocumentlocation, sharepointdocument) with its own current owner before the forward move, and after a compensating reverse move restore each child to its snapshotted owner; fail closed and report — a child whose restore fails is named in the response and in a CRITICAL log, with the next call to make; ONE reusable primitive that task 148 reuses for transitions (implemented as AssignCascadeChildOwners, round c1). Acceptance added: the restore after compensation puts every child back on its own pre-call owner, including a child whose owner differed from the root's; a seed that skips the restore fails. (Item 5) A record that keeps its own container and fails after its move stays AS SHIPPED: no automatic resume; the response names the Manage Access recovery (note 14.3, option C).</amendment>
+    <amendment n="R14" date="2026-10-03" source="owner round 14 item 3 (session27 note) — BINDING">container_ownership_unreadable and resume_creator_unavailable (creatorState unreadable) classify 401/403 as Refused (an administrator must act), as the cascade reads already do; 503/429 stay retryable. Implemented in round c1-r4 (note 20.7): one rule (AssignCascadeChildOwners.IsRefusedRead, 400/401/403), containerOwnershipState and creatorState refused, non-retryable client copy, guide 7a; acceptance: 401 and 403 each Refused and not offered as a retry, 503/429 still retryable, each pinned by tests that seeds K1-K10 and CL6-CL10 prove bite.</amendment>
+  </amendments>
+</task>

@@ -1,10 +1,19 @@
-# Change Request → `customer-provisioning-orchestration-r1`
+> **Canonical source**: `c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI/projects/spaarke-auth-v4-dataverse-MI/notes/PROVISIONING-CHANGE-REQUEST.md`
+>
+> **This file is a MIRROR** per `notes/auth-v4-integration-remediation-plan.md` §6 canonical-copy rule.
+> Refresh before reading — the canonical is authoritative. Last refreshed by `customer-provisioning-orchestration-r1` task 205f on 2026-08-26 (replaced the 280-line stale mirror; auth-v4 §10 addendum + 2026-08-25 CORRECTION captured).
+>
+> **Do not edit this mirror in place** — edit the canonical, then re-run the mirror refresh (currently manual `cp`; automated refresh is a follow-on).
 
-> **APPLIED 2026-08-19 — see [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](AUTH-V4-CHANGE-REQUEST-RESPONSE.md).** Owner sign-off landed the SPLIT resolution: Model 1 = Reading 1 (shared multitenant app-reg, no per-customer creation); Model 2 = Reading 2 (per-customer app-reg + FIC). Invariant I6 adopted (Model 1 only). R23 closed. §5.2 doc fix applied. §5.3 pluggability contract accepted as spec.md FR-39. Applied to spec.md (v3.5), design.md (v3.4→v3.5), and tasks 125/126/130/142.
+---
+
+# Change Request → `customer-provisioning-orchestration-r1`
 
 ## The BFF confidential credential is moving off client secrets
 
-> **From**: `spaarke-auth-v4-dataverse-MI` · **Date**: 2026-08-19 · **Status**: FOR REVIEW BY PROVISIONING
+> **From**: `spaarke-auth-v4-dataverse-MI` · **Date**: 2026-08-19 · **Status**: ✅ **ACCEPTED + APPLIED by
+> provisioning 2026-08-19** — see [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](AUTH-V4-CHANGE-REQUEST-RESPONSE.md).
+> **auth-v4's replies to their open items are in §9 below.**
 > **Type**: change request against **shipped** handlers on PR #779 (~68% executed), not input to a design
 > **Decision authority**: ADR-028 **Amendment A4** + exception **E-3**, applied 2026-08-17
 > **Evidence**: [`PHASE-0-LIVE-VERIFICATION.md`](PHASE-0-LIVE-VERIFICATION.md) ·
@@ -175,6 +184,38 @@ Live headroom on the dev app registration: **2 of 20 used**.
 
 ### 5.1 DECISION — which app registration does the shared Model 1 BFF act as?
 
+> ## ✅ DECIDED 2026-08-25 (owner): **Reading 1 — ONE shared multitenant app registration for Model 1.**
+>
+> **What this means for you concretely:**
+>
+> - **One FIC, created once.** Customer onboarding creates **no** federated credential at all — the
+>   per-customer FIC step described in §3.2 does **not** apply to Model 1.
+> - The BFF does **not** select an app registration per request and does **not** validate 20+ audiences.
+> - **`spec.md:236` and `design.md:57`** ("per-customer app registrations in both models") are hereby
+>   **scoped to Model 2 only**. They read as written for Model 2 and generalised without re-testing against
+>   Model 1's single shared BFF App Service. Please make that edit on your side — it is the one place the
+>   estate still contradicts this decision.
+> - §5.4's proposed invariant **I6 stands** (Model 1 only), consistent with this.
+>
+> **Why Reading 1** — three facts, all verifiable today:
+>
+> 1. The live app registration is **already `AzureADMultipleOrgs`** (verified 2026-08-19). That *is* the
+>    multitenant shape; nothing needs to change to adopt it.
+> 2. Model 1 deploys **one shared BFF App Service**. Under Reading 2 that single app would have to resolve
+>    the correct app registration per request and accept 20+ audiences — substantial BFF complexity bought
+>    for no capability.
+> 3. Onboarding gets **simpler, not harder**: no per-customer credential object to create, rotate, or leak.
+>
+> **What this does NOT decide**: Model 2 (customer-owned tenants) keeps per-customer app registrations —
+> credentials attach to the *application object*, so a customer-tenant UAMI can only be trusted by an app
+> registration that lives in that tenant. §9.2's raised question about Model 2's FIC issuer tenancy is
+> **still open** and unaffected by this.
+>
+> **If you disagree**, say so before wiring it — reversing later means adding per-request app-registration
+> selection to a shared BFF, which is the expensive direction.
+
+*(Original framing retained below for the reasoning trail.)*
+
 This is yours to make. It is not a feasibility or scaling question; **MI-FIC works either way**. It is an
 identity-design question, and it decides whether onboarding gains a per-customer step.
 
@@ -278,3 +319,324 @@ and `Configure-ProductionAppSettings.ps1`. Let's agree who edits those and when.
 | 4 | `stacks/dev.bicepparam:12` declares `B1`; live is **P1v3**. IaC drift — and it is the difference between "slots impossible" and "slots available". | shared |
 | 5 | A duplicate lowercase KV alias **`bff-api-client-secret`** is used by the Office add-in deploy. Any removal ignoring it breaks the add-in. | auth-v4 |
 | 6 | Master IaC creates a **system-assigned** identity while live uses a UAMI; the UAMI Bicep lives on *your* branch. | provisioning |
+
+---
+
+## 9. auth-v4 replies to provisioning's response (2026-08-19)
+
+Answering [`AUTH-V4-CHANGE-REQUEST-RESPONSE.md`](AUTH-V4-CHANGE-REQUEST-RESPONSE.md). Their split (Model 1 =
+Reading 1, Model 2 = Reading 2), invariant **I6** adoption, **R23** closure, **FR-39** pluggability contract and
+the §5.2 doc fix are all accepted as applied — no further ask from us on any of those.
+
+### 9.1 Answer to their judgment call #3 — the "already-migrated-to-FIC" KV sentinel contract
+
+**Omit the secret entirely. Do not write a sentinel value.**
+
+The BFF-side provider (spec FR-B2) performs **ordered credential selection** — MI-FIC → Key Vault certificate →
+dev secret — and falls through when a higher-priority credential is absent. That makes absence the well-defined,
+already-implemented signal:
+
+- **Omit** → the selector finds no secret at the lowest tier and uses the FIC. Clean, and it is the same code path
+  local development and post-Phase-5 production take.
+- **Sentinel** → strictly worse. The selector cannot distinguish a sentinel string from a real secret, so if MI-FIC
+  ever fails to resolve, it will attempt a token acquisition **with the sentinel** and fail at Entra with an opaque
+  `AADSTS7000215` (invalid client secret) instead of falling through or failing fast with an actionable message.
+  A sentinel converts a clean fallback into a confusing runtime error.
+
+So: **H4 should skip secret creation for a FIC-migrated customer rather than writing a placeholder.** If you need a
+positive marker that migration happened, put it somewhere that is not the credential slot — a provisioning-state
+field or a KV tag — never a value in the secret the credential selector reads.
+
+### 9.2 ⚠️ Raised back — Model 2's FIC issuer may break the same-tenant rule
+
+Your TL;DR states Model 2 uses a per-customer BFF app registration **"+ a FIC trusting the shared BFF UAMI."**
+
+For **Model 2 in the Spaarke tenant** that is intra-tenant and correct. For **Model 2 in a customer's tenant** it
+is not: the app registration is customer-side while the shared BFF UAMI is in the Spaarke tenant, and **Entra
+requires the app registration and the UAMI to be in the same tenant** — it is the single hard platform constraint
+(ADR-028 A4; [`TENANCY-AND-CREDENTIALS.md`](TENANCY-AND-CREDENTIALS.md) §1). Cross-tenant *resource* access is
+supported; a cross-tenant *FIC issuer* is not.
+
+`TENANCY-AND-CREDENTIALS.md` §3 row 3 assumed the customer-tenant stamp issues from **its own stamp UAMI**, which
+is what makes all three shapes intra-tenant. Either:
+
+- **(a)** the customer-tenant shape uses its **own stamp UAMI** as the FIC issuer — our assumption, and the only
+  reading under which MI-FIC covers every shape; or
+- **(b)** it genuinely must trust the shared Spaarke UAMI, in which case **MI-FIC is structurally impossible for
+  that shape** and it needs the ADR-028 A4 sanctioned alternative — a Key Vault certificate. That would reopen the
+  certificate-provisioning work we recorded as *dropped, not deferred*.
+
+We believe (a) is what you mean and the sentence is just compressed. **Please confirm before Wave G-3 task 130
+executes**, because the failure mode is silent: a cross-tenant FIC **creates successfully** and fails only at
+token exchange.
+
+### 9.3 `Register-EntraAppRegistrations.ps1` FIC extension — accepted, with a caveat
+
+Accepted as ours. It is now **spec FR-C4** with acceptance criteria covering idempotency, `AADSTS70021` retry, and
+**verification by performing an actual token exchange** rather than trusting a successful create.
+
+Caveat on timing: auth-v4's own rollout is scoped **dev-only**, so FR-C4 is the one item in our spec that exists
+purely to serve your Wave G-3 dependency. We will sequence it early, but if your Wave G-3 dispatches first, take
+the task-130 fallback path and we will reconcile — do not block on us. Please give us as much notice of the G-3
+dispatch date as you can.
+
+### 9.4 Accepted with no action
+
+- **Your item 2** (Bicep phantom-name cross-check in Wave G-1 wrap-up) — agreed. Note our own finding softened on
+  review: `config/spaarke-resources.yaml` correctly records the 2026-05-24 migration and marks the old app
+  `status: legacy`. The genuine residue is one line — `STAGING_APP_NAME: spe-api-dev-67e2xz` (`:558`), a live
+  GitHub Actions repo-secret mapping to a decommissioned resource. That is CI estate, not yours or ours.
+- **Your item 6** — accepted: r1 Phase C is authoritative for UAMI Bicep and supersedes master IaC. We have
+  removed it from our follow-up list.
+- **Your judgment calls #1, #2, #4** (doc-location drift, FR renumbering, §9A consistency sweep) — all fine, no
+  objection.
+- **Your MI-FIC cap-inversion note** — appreciated. For the record the same inversion is what made "OBO requires a
+  secret" survive three prior audits here; the failure mode is a plausible mechanism reasoned about from the wrong
+  end, not missing evidence.
+
+---
+
+## 10. DELIVERED — `Register-EntraAppRegistrations.ps1` FIC extension has landed (2026-08-21)
+
+Task 030 / spec **FR-C4** is complete and on `work/spaarke-auth-v4-dataverse-MI`. This is the item §9.3
+committed to sequencing early for your **Wave G-3 task 130** — it landed first, so **do not build the
+duplicate**. Your branch currently contains zero federated-credential code, so nothing needs unwinding.
+
+### Invocation contract
+
+Two entry points, both on the existing script (no new file):
+
+```powershell
+# 1. Standalone — app-registration/Key Vault/consent steps are skipped
+.\Register-EntraAppRegistrations.ps1 -FicOnly `
+  -FederatedCredentialAppId <app-reg-id> `
+  -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>" `
+  -TenantId <tenant>
+
+# 2. Preview without changing anything
+.\Register-EntraAppRegistrations.ps1 -DryRun -CreateFederatedCredential `
+  -FederatedCredentialAppId <app-reg-id> -UamiResourceId <arm-id> -TenantId <tenant>
+```
+
+⚠️ **Invoke it; do not dot-source it.** An earlier draft of this notice offered a
+`-ExportFunctionsOnly` dot-source mode for `Provision-Customer.ps1`. **That has been removed** — our
+code-review gate proved it silently overwrote the *caller's* `$TenantId` with this script's
+hard-coded production default (dot-sourcing executes `param()` in your scope), flipped your
+`$ErrorActionPreference` to `Stop`, and replaced any same-named `Write-*` helpers you had, dropping
+surplus arguments without erroring. For FIC work a wrong tenant is a wrong issuer — a credential that
+creates cleanly and never works, which is the failure class this whole project exists to remove. If
+you need an in-process contract rather than a subprocess call, tell us and we will extract a proper
+`.psm1` module; the output helpers would have to move with it, which is why we did not do it inline.
+
+`-UamiResourceId` is an **ARM resource ID, not a name** — five UAMIs exist in dev and
+`spaarke-bff-identity` is a decoy that is not attached to the BFF.
+
+### Exit codes — please branch on these
+
+| Exit | Meaning | Your action |
+|---|---|---|
+| `0` | Verified by a real token exchange | Proceed |
+| `1` | Fault — create failed, drift refused, structurally invalid, or exchange rejected | Stop; the message carries Azure CLI's verbatim error |
+| `2` | Structurally correct but **not exchange-provable from this host** | Not a failure. See below |
+
+**Exit `2` will be your normal result** if you run provisioning from an agent that does not carry the
+target UAMI: a managed-identity assertion can only be minted from inside Azure on compute holding the
+identity. Either pass `-AssertionToken` (minted on that compute), or pass `-AllowUnverified` and
+schedule verification for after the App Service exists. We deliberately did **not** make "created" imply
+"working" — a misconfigured FIC creates cleanly and fails only at exchange.
+
+### Two things worth knowing
+
+1. **Idempotency is keyed on `(issuer, subject, audience)`, not the credential name.** Entra enforces
+   that triple's uniqueness per application itself and *rejects* a second credential carrying it. A
+   name-only check therefore does not produce a duplicate — it produces a **failed run against a
+   credential that was already correct**. We hit exactly that on the first live run and fixed it; if
+   task 130 had been written against name-matching, it would have hit it too.
+2. **Cross-tenant pairs are refused at runtime**, with a message citing §9.2 — see below.
+
+### ⚠️ §9.2 is still unanswered, and it now has a runtime consequence
+
+Our §9.2 question — whether Model 2's customer-tenant stamp trusts its **own stamp UAMI** (reading a) or
+the **shared Spaarke UAMI** (reading b) — has not been answered. The script now **refuses** a
+cross-tenant (app-registration, UAMI) pair rather than attempting it, because Entra requires both in the
+same tenant and a cross-tenant FIC **creates successfully and fails only at token exchange**.
+
+Practically: under reading (a) you are unaffected. Under reading (b), MI-FIC is structurally impossible
+for that shape and it needs the ADR-028 A4 certificate alternative — which would reopen the
+certificate-provisioning work recorded as *dropped, not deferred*.
+
+**Please answer before Wave G-3 task 130 executes.** The failure mode is loud now instead of silent,
+which is an improvement, but the underlying question is unchanged.
+
+### Merge coordination
+
+Your PR **#779** rewrites this same script (+707 / −257, the idempotency-contract rewrite). We simulated
+the three-way merge: **one conflict hunk**, where both sides append to `param()` — resolution is keep
+both (your `$SecretExpiryMonths` plus our FIC parameters). Everything else merges cleanly, and we
+specifically checked that our `-FicOnly` Key Vault skip lands correctly on your restructured pre-flight.
+Whoever merges second resolves that one hunk.
+
+Full rationale + verification evidence:
+[`notes/decisions/030-fic-automation.md`](decisions/030-fic-automation.md).
+
+---
+
+## 11. 🔔 ONE THING WE ARE HANDING YOU — your first FIC creation is the live test for two invariants
+
+**Added 2026-08-24 by auth-v4 task 031.** Short version: two safety invariants in the script we gave you
+are proven *structurally* but never *live*, and **Wave G-3 task 130 is the first thing that will exercise
+them for real**. Nothing is broken and nothing is asked of you up front — but if task 130's FIC step
+behaves oddly, read this before debugging.
+
+### The two invariants
+
+| # | Invariant | Proven | Not proven |
+|---|---|---|---|
+| 1 | A FIC whose `subject` is the UAMI's **clientId** instead of its **principalId** must be **DETECTED by the exchange verification**, not reported as success | The script's detection logic, at task 030 | The end-to-end run, against a real assertion |
+| 2 | **AADSTS70021** immediately after FIC creation must be **retried**, not surfaced as a failure | The retry logic, at task 030. The flap itself is measured: ~8 failures over ~130 s as replicas converge | The retry firing against a genuinely fresh FIC |
+
+### Why auth-v4 could not close them
+
+Both need a **real managed-identity assertion**, and that can only be minted by code running inside the
+App Service **app container**. Measured 2026-08-24: Kudu `/api/command` executes shell fine, but
+`IDENTITY_ENDPOINT` / `IDENTITY_HEADER` are **absent** from the Kudu sidecar, and no visible
+`/proc/*/environ` exposes them. The BFF itself has no endpoint that emits its assertion and must never
+have one, and extracting an assertion to a workstation was refused — it is a live credential capable of
+authenticating as the BFF app.
+
+auth-v4 also has **no remaining task that creates or changes a FIC** (032, 033 and 090 were checked). The
+dev FIC already exists and is proven working. So auth-v4's own UAT will never touch this path — which is
+exactly why it is being handed to you rather than left to be "caught in testing".
+
+### What this means for task 130 — practical, not procedural
+
+1. **Your first `-FicOnly` run against a new environment IS the live test.** It costs you nothing extra.
+2. **If the FIC appears to create successfully but token exchange later fails**, suspect invariant 1
+   first: check that the FIC `subject` is the UAMI's **principalId** (the managed identity's
+   service-principal objectId), **not** its clientId. This is the single commonest silent error in
+   MI-FIC setup, and the two ids look interchangeable.
+3. **If you see AADSTS70021 right after creating a FIC, do not treat it as a failure** — it is the
+   convergence flap. The script retries; give it the ~2 minutes. Note it is **70025**, not 70021, that
+   auth-v4 measured on *changes* to an existing FIC.
+4. **Please tell auth-v4 (or whoever owns the script by then) what you observed** — a one-line "FIC
+   created, exchange verified first try" closes both invariants live, permanently, for free.
+
+### Not an ask, and not a defect
+
+There is no Pester harness in the repo, so neither invariant is re-executed by anything today; a one-shot
+live run by auth-v4 would not have protected you either. Handing it to the first real consumer is
+strictly better than a synthetic run against throwaway infrastructure, because it tests the path that
+actually matters, in the environment that actually matters.
+
+Full reasoning: [`notes/decisions/031-obo-verification-dev.md`](decisions/031-obo-verification-dev.md) §6.1.
+
+
+---
+
+# 10. ADDENDUM (2026-08-25) — what §1–§9 did NOT tell you
+
+> **Read this if you read anything.** Everything above was written **2026-08-19** and scoped to the *app
+> registration credential* (the FIC). Tasks **051** and **053** cut over on **2026-08-24** and changed two
+> more credentials, and the live app settings contract moved with them. **Sections 1–9 are incomplete, not
+> wrong.** This addendum is the delta.
+>
+> **Short answer to "does provisioning need to change what it packages?" — yes, in five places.**
+
+> ### ✏️ CORRECTION (2026-08-25, same day) — two of the five were already handled
+>
+> After writing §10 we checked [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md)
+> rather than assuming. Task 033's doc sweep had **already** folded in two of the five:
+>
+> - **Delta 4 (`keyVaultReferenceIdentity`)** — covered in §1 Prerequisites.
+> - **Delta 5 (Dataverse application user for the UAMI)** — covered by its own §6, including the exact
+>   403 / `0x80072560` symptom.
+> - Deltas **1–3** (Service Bus, AI Search, the credential app settings) were the genuine gaps. The
+>   credential settings were partly covered; the **Group-2 RBAC was not covered at all**.
+>
+> **Genuinely new work is therefore 2 of 5, not 5 of 5.** Overstating the delta is its own failure — it
+> invites a reader to discount the whole list.
+>
+> **This contract has since been PROMOTED** into `auth-deployment-setup.md` **§5.1 — Azure data-plane RBAC
+> for the UAMI**, and the retired Key Vault secrets are struck through in its §4 table with the
+> `Deploy-AllIndexes.ps1 -CutoverBffSettings` warning attached. **Use the guide as the operational source.**
+> §10 below stays as the origin/reasoning record.
+
+## 10.1 The five deltas
+
+| # | What provisioning does today | What the BFF now needs | Where |
+|---|---|---|---|
+| 1 | Mints a **Service Bus SAS** and writes `ServiceBus-ConnectionString` to the customer Key Vault | **Nothing.** The BFF authenticates with the UAMI. Set `ServiceBus__FullyQualifiedNamespace` instead and grant the UAMI a Service Bus data role | [`Provision-Customer.ps1:520`](../../../scripts/Provision-Customer.ps1), [`Configure-ProductionAppSettings.ps1:94`](../../../scripts/Configure-ProductionAppSettings.ps1) |
+| 2 | Writes `AiSearch--AdminKey` and sets `AiSearch__AdminKey` / `AzureAISearchApiKey` as KV refs | **Nothing.** Set `AiSearch__ManagedIdentity__Enabled=true` and grant the UAMI Search data roles | [`scripts/ai-search/Deploy-AllIndexes.ps1`](../../../scripts/ai-search/Deploy-AllIndexes.ps1) |
+| 3 | Does not set the credential-selection settings | **Four new app settings are now load-bearing** (§10.2). Without them a fresh environment falls back to the code-side default and will look for a secret | — |
+| 4 | Does not set `keyVaultReferenceIdentity` | **Mandatory.** Without it every `@Microsoft.KeyVault(...)` app setting fails to resolve and the site aborts with **exit 134 (SIGABRT)** | task 001 finding **A** |
+| 5 | Registers the **app registration** as a Dataverse application user | The **UAMI** must ALSO be a Dataverse application user, or every app-only Dataverse call 401s | §10.4 |
+
+## 10.2 The exact live contract (copied from `spaarke-bff-dev`, 2026-08-25)
+
+```
+Graph__Credentials__Order__0                       = ManagedIdentityFederated   # the ONLY entry
+Graph__Credentials__RequireSecretFreeIdentity      = true                       # refuses to BOOT otherwise
+ManagedIdentity__ClientId                          = <UAMI clientId>
+Graph__ManagedIdentity__ClientId                   = <UAMI clientId>
+Graph__ManagedIdentity__Enabled                    = true
+ServiceBus__FullyQualifiedNamespace                = <ns>.servicebus.windows.net   # NOT a connection string
+Membership__EventPublisher__ServiceBusNamespace    = <ns>.servicebus.windows.net
+Membership__JunctionUpdater__ServiceBusNamespace   = <ns>.servicebus.windows.net
+AiSearch__ManagedIdentity__Enabled                 = true
+AiSafety__ContentSafety__ManagedIdentity__Enabled  = true
+```
+
+Site property (**not** an app setting, and **not** copied by `az webapp deployment slot create
+--configuration-source`):
+
+```
+keyVaultReferenceIdentity = /subscriptions/<sub>/resourcegroups/<rg>/providers/
+                            Microsoft.ManagedIdentity/userAssignedIdentities/<uami>
+```
+
+⚠️ **`RequireSecretFreeIdentity=true` is fail-fast by design.** A fresh environment that sets it without a
+working UAMI + FIC **will not start**. Provision the identity first, then the setting — never the reverse.
+
+## 10.3 Azure RBAC the UAMI now needs (beyond Graph app roles)
+
+Previously carried by the SAS / admin key, so it is new work:
+
+| Resource | Role |
+|---|---|
+| Service Bus namespace | `Azure Service Bus Data Sender` + `Azure Service Bus Data Receiver` (or Data Owner) |
+| Azure AI Search | `Search Index Data Contributor` + `Search Service Contributor` |
+| Key Vault | `Key Vault Secrets User` — required for `keyVaultReferenceIdentity` to resolve |
+| Content Safety / OpenAI | `Cognitive Services User` |
+
+## 10.4 Dataverse application user — for the UAMI, not just the app registration
+
+`spaarkedev1` carries **two** application users, and both are load-bearing:
+
+| `fullname` | `applicationid` | Why |
+|---|---|---|
+| `SDAP-BFF-SPE-API` | app registration | OBO — the token's `appid` stays the app registration even under MI-FIC |
+| `# mi-bff-api-dev` | **UAMI clientId** | app-only Dataverse — the MI is the principal here |
+
+Its `azureactivedirectoryobjectid` must equal the UAMI's **principalId** (not clientId). Evidence that this is
+the live path — every UAT row is stamped `# mi-bff-api-dev` — is in
+[`notes/decisions/mi-proof-dataverse-side.md`](decisions/mi-proof-dataverse-side.md).
+
+**This is the one most likely to be missed**, because §1–§9 only ever discussed the app registration.
+
+## 10.5 Two traps worth naming
+
+- **`appsettings.template.json` still declares** `"ServiceBus": "@Microsoft.KeyVault(SecretUri=#{KEY_VAULT_URL}#secrets/ServiceBus-ConnectionString)"`. If you deploy from that template you re-introduce the SAS contract on a BFF that no longer reads it. Tracked as auth-v4 obligation **051-E** (deliberately deferred while the KV rollback copy lives, to 2026-11-23).
+- **`Deploy-AllIndexes.ps1 -CutoverBffSettings` re-introduces the key.** ⚠️ *Corrected 2026-08-25 — an earlier
+  revision of this bullet claimed the script "silently re-mints a key". **That was wrong.** Its key-resolution
+  fallback calls `az search admin-key show`, which **reads** the existing key (`renew` would regenerate), and it
+  uses it for **index management** — a legitimate admin-key operation unrelated to the BFF's runtime auth.*
+  The actual trap is `-CutoverBffSettings` (script line ~610): it sets `AzureAISearchApiKey` and
+  `AiSearch__AdminKey` on the BFF as Key Vault references to `AiSearch--AdminKey` — **a secret that no longer
+  exists** — re-introducing the key-based configuration task 053 removed. Do not run that switch against a
+  migrated environment; gate it on the secret's existence.
+
+## 10.6 What did NOT change
+
+`Register-EntraAppRegistrations.ps1 -SkipClientSecret` (task 030) is still correct and still the contract for
+the app-registration half. §5.1's open decision (one shared multitenant app registration vs one per customer)
+is **still open and still yours** — MI-FIC works either way, so it does not block this addendum.

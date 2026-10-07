@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// Automatically creates, renews, and recreates subscriptions for all receive-enabled
 /// communication accounts. No human in loop -- fully automated lifecycle.
 ///
-/// Implements ADR-001 BackgroundService pattern with PeriodicTimer (30-minute interval).
+/// A hand-rolled timer BackgroundService with PeriodicTimer (30-minute interval) — existing debt, ADR-052 §1.
 /// Graph mail subscriptions have a maximum lifetime of 3 days; this service renews them
 /// when expiry is less than 24 hours away.
 ///

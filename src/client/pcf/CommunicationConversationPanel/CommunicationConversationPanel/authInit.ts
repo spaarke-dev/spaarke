@@ -13,6 +13,7 @@
 
 import { initAuth } from '@spaarke/auth';
 import type { IAuthConfig } from '@spaarke/auth';
+import { getXrm } from '@spaarke/ui-components';
 
 export async function initializeAuth(
   clientAppId: string,
@@ -35,9 +36,8 @@ export async function initializeAuth(
 /** Resolve the Dataverse org URL for the MSAL redirect URI (frame-walk to Xrm). */
 export function resolveDataverseUrl(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    const xrm = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl');
     const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (typeof url === 'string' && url.length > 0) return url;
   } catch {

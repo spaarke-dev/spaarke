@@ -438,76 +438,14 @@ export function useEventsPageContext(): EventsPageContextValue {
 }
 
 // ---------------------------------------------------------------------------
-// Selector Hooks (Performance Optimization)
+// Selector Hooks (Performance Optimization) — DELETED (task 087, C-25, 2026-10-03)
 // ---------------------------------------------------------------------------
-
-/**
- * useCalendarFilter
- *
- * Selector hook for calendar filter only.
- * Use this when component only needs calendar filter to minimize re-renders.
- */
-export function useCalendarFilter() {
-  const { filters, setCalendarFilter } = useEventsPageContext();
-  return {
-    calendarFilter: filters.calendarFilter,
-    setCalendarFilter,
-  };
-}
-
-/**
- * useAssignedToFilter
- *
- * Selector hook for assigned-to filter only.
- */
-export function useAssignedToFilter() {
-  const { filters, setAssignedToFilter } = useEventsPageContext();
-  return {
-    assignedToUserIds: filters.assignedToUserIds,
-    setAssignedToFilter,
-  };
-}
-
-/**
- * useStatusFilter
- *
- * Selector hook for status filter only.
- */
-export function useStatusFilter() {
-  const { filters, setStatusFilter } = useEventsPageContext();
-  return {
-    statusCodes: filters.statusCodes,
-    setStatusFilter,
-  };
-}
-
-/**
- * useActiveEvent
- *
- * Selector hook for active event state and actions.
- */
-export function useActiveEvent() {
-  const { activeEventId, activeEventTypeId, openEvent, closeEvent } = useEventsPageContext();
-  return {
-    activeEventId,
-    activeEventTypeId,
-    openEvent,
-    closeEvent,
-  };
-}
-
-/**
- * useGridRefresh
- *
- * Selector hook for grid refresh trigger and action.
- */
-export function useGridRefresh() {
-  const { refreshTrigger, refreshGrid } = useEventsPageContext();
-  return {
-    refreshTrigger,
-    refreshGrid,
-  };
-}
+//
+// `useCalendarFilter`, `useAssignedToFilter`, `useStatusFilter`, `useActiveEvent`,
+// `useGridRefresh` had zero consumers outside this file's own barrel export —
+// EventsPage-migration fallout per
+// projects/spaarke-ontology-platform-r1/notes/reuse-verification-2026-10-02.md §8.8 X21.
+// `useEventsPageContext()` (above) remains the live, consumed hook.
 
 // ---------------------------------------------------------------------------
 // Export index file contents

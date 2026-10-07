@@ -2,12 +2,125 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | Accepted (amended 2026-06-02) |
+| **Status** | Accepted (amended 2026-06-02, 2026-09-28) |
 | **Date** | 2026-03-13 |
-| **Amended** | 2026-06-02 — managed-solution prescriptions softened to "future direction" (see amendment block below) |
+| **Amended** | 2026-06-02 — managed-solution prescriptions softened to "future direction" (see amendment block below)<br>2026-09-28 — **Decision 1 replaced**: subscriptions are now separated **per customer**, not per environment. Answers this ADR's own open Context question 4. See the amendment block below. |
 | **Decision Makers** | Ralph Schroeder |
 | **Supersedes** | None |
 | **Related** | ADR-001 (Minimal API), ADR-006 (PCF over webresources), ADR-026 (Full-Page Custom Page) |
+
+---
+
+## 🟡 AMENDMENT 2026-09-28 — Subscription strategy is now PER-CUSTOMER (supersedes Decision 1)
+
+> **Path**: CLAUDE.md §6.5 **path B** (ADR amendment — context changed; the prior decision is no longer
+> correct as written).
+> **Source decision**: D-12, `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`
+> §3a, decided by the owner 2026-09-28.
+> **Scope**: Decision 1 only. Decisions 2, 3 and 4 are unaffected except where Decision 2's resource-group
+> table is re-read under the new subscription boundary (see "What Decision 2 now means", below).
+
+### The amendment
+
+**Every customer gets their own Azure subscription, containing their own resource group.** This replaces
+"one production subscription holding all production shared and customer resources."
+
+| | Before (2026-03-13) | After (2026-09-28) |
+|---|---|---|
+| Separation axis | **environment** (dev / prod) | **customer** (one subscription each) |
+| Production customers | all in one production subscription | one subscription per customer |
+| Per-customer subscriptions | *"**MAY** add … for enterprise customers … but this is NOT required"* | **MUST**, for every customer |
+
+Applies to both tenancy models as redefined by D-12 — Model 1 (customer's Dataverse environment in
+**Spaarke's** Azure tenant) and Model 2 (in the **customer's own** tenant). Under Model 1 the per-customer
+subscription lives inside Spaarke's tenant; under Model 2, inside the customer's.
+
+### Why the prior decision is no longer correct
+
+**This ADR raised the question and never answered it.** §Context item 4 asks *"**Customer isolation**:
+Whether customers need their own subscriptions"* — Decision 4 turned out to be about Dataverse CI/CD, so
+item 4 was left open, and Decision 1's *"All production shared and customer resources"* became the de facto
+answer by omission rather than by decision. This amendment answers it explicitly.
+
+Three things changed since 2026-03-13 that make the answer "yes":
+
+1. **Billing segregation became a requirement, not a preference.** The owner's stated need is to segregate
+   and bill usage per customer. A subscription is Azure's billing boundary; resource-group tags are a
+   reporting convenience layered on top of a shared invoice.
+2. **Model 1 collapsed the `tenantId` isolation controls.** Under D-12, every Model 1 customer presents the
+   **same** Entra `tenantId` (Spaarke's). Controls keyed on `tenantId` — the AI Search filter, the Cosmos
+   partition key, the SPE container resolver, and the `tenant:{tenantId}:…` Redis cache key — therefore
+   cannot separate customers, **and report success while failing**. Moving isolation from a query filter to
+   a resource boundary is the fix; a subscription is the outermost such boundary.
+3. **Azure OpenAI TPM quota is per-subscription-per-region.** Separate OpenAI *resources* inside one
+   subscription still share one quota pool, so one customer's load throttles another's. Only subscription
+   separation gives genuine quota isolation. This was not a consideration in March 2026 — the AI workload
+   did not exist in its current form.
+
+### Amended constraints (Decision 1)
+
+- **MUST** provision one Azure subscription per customer, containing that customer's resource group.
+- **MUST** parameterize subscription ID in all deployment scripts (unchanged, now load-bearing per customer
+  rather than per environment).
+- **MUST** use separate service principals per subscription (unchanged).
+- **MUST** use Azure Management Groups to apply common policy across the now-many customer subscriptions.
+  This was **SHOULD** before; with a subscription per customer, policy drift is no longer a theoretical risk
+  and hand-application does not scale.
+- **MUST NOT** place two customers' resources in one subscription.
+- The former *"**MAY** add customer-specific subscriptions … but this is NOT required for initial
+  customers"* is **withdrawn** — it is now the required model.
+- Dev/test resources remain separated from production. Environment separation is not abandoned; it is now
+  **subordinate** to customer separation rather than the top-level axis.
+
+### What Decision 2 now means
+
+Decision 2's per-customer pattern `rg-spaarke-{customerId}-{env}` is **unchanged and still correct** — but
+that resource group now sits in the customer's **own** subscription rather than sharing one with every other
+customer. `targetScope = 'subscription'` templates therefore run against a different subscription per
+customer; the templates do not change, the target does.
+
+⚠️ The `rg-spaarke-platform-{env}` **shared-platform** resource group in Decision 2 is a survivor of the
+retired shared-tier model. D-12 §3 dedicates every Azure resource per customer, so the shared-platform group
+is expected to shrink to genuinely cross-customer infrastructure or disappear entirely. That inventory is
+tracked in D-12 §6 and `COMPONENT-INVENTORY.md` §7 — **not resolved by this amendment**.
+
+### 🔴 Consequence: a dedicated App Service Plan per customer is FORCED
+
+An App Service **app cannot use an App Service Plan in a different subscription**. With one subscription per
+customer, a plan shared across customers would sit in one subscription while the apps sat in others — which
+Azure does not support. The "shared plan, dedicated app per customer" shape is therefore **unavailable**,
+not merely rejected on preference.
+
+**Verification (2026-09-28)**: Microsoft's canonical pages do not state the subscription rule as a single
+quotable sentence, so it was verified from two directions, and the result is **stricter** than "same
+subscription":
+
+- [Manage an App Service plan](https://learn.microsoft.com/en-us/azure/app-service/app-service-plan-manage#move-an-app-to-another-app-service-plan)
+  — *"You can move an app to another App Service plan, as long as the source plan and the target plan are in
+  the same resource group and geographical region and of the same OS type."* Plus a *webspace* constraint:
+  *"your app can only move between plans that are created in the same webspace,"* where webspace is
+  determined by resource group + region + OS. Same-subscription is implied by same-resource-group.
+- [Microsoft Q&A — Share App Service plan across different subscriptions](https://learn.microsoft.com/en-us/answers/questions/1048743/share-app-service-plan-across-different-subscripti)
+  — a single plan cannot be used across different subscriptions.
+
+⚠️ **Note the asymmetry, so nobody re-derives a wrong conclusion from these sources.** The *move* restriction
+(same **resource group**) is tighter than the *create*-time rule: at create time, apps in **different**
+resource groups of the **same** subscription can share a plan. Both readings kill cross-**subscription**
+sharing, which is the only thing this amendment depends on — but the resource-group clause is about moving
+an existing app and must not be cited as the general rule.
+
+**Cost impact**: a genuine App Service Plan floor per customer — the largest single fixed per-customer cost
+in the stack. Accepted as the price of billing segregation and boundary-based isolation.
+
+### Consequences of the amendment
+
+**Positive**: billing separation is native, not reconstructed from tags · blast radius is one customer ·
+per-customer RBAC · OpenAI quota isolation · customer-specific policy and compliance scoping · offboarding
+is a subscription deletion.
+
+**Negative**: an App Service Plan floor per customer · N subscriptions to create, govern and monitor ·
+Management Groups become mandatory rather than advisory · cross-customer operational tooling must iterate
+subscriptions · Azure subscription-count limits become a real ceiling to track as the customer base grows.
 
 ---
 
@@ -37,11 +150,16 @@ Spaarke deploys a hybrid architecture with shared platform resources (BFF API, A
 1. **Subscription strategy**: Should dev and production use separate Azure subscriptions?
 2. **Resource group model**: How resource groups are created and named
 3. **Dataverse solution management**: Managed vs unmanaged solutions, and the dev-to-production deployment pipeline
-4. **Customer isolation**: Whether customers need their own subscriptions
+4. **Customer isolation**: Whether customers need their own subscriptions — ✅ **ANSWERED 2026-09-28: yes.**
+   Left open in the original ADR (Decision 4 addressed Dataverse CI/CD instead). See the 2026-09-28
+   amendment block above.
 
 ---
 
 ## Decision 1: Subscription Isolation
+
+> 🔴 **SUPERSEDED 2026-09-28 by the amendment block above — subscriptions are separated per CUSTOMER, not
+> per environment.** The text below is retained for history. Do not implement from it.
 
 ### Decision
 

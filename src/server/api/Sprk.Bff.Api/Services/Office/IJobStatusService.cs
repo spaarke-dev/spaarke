@@ -53,25 +53,27 @@ public interface IJobStatusService
     /// Returns an async enumerable of updates as they arrive.
     /// </summary>
     /// <param name="jobId">The job ID to subscribe to.</param>
+    /// <param name="onSubscribed">Called once the subscription is live, before any update is yielded. Not called when
+    /// Redis is unavailable (the sequence then ends at once).</param>
     /// <param name="cancellationToken">Cancellation token to stop subscription.</param>
     /// <returns>Async enumerable of job status updates.</returns>
     /// <remarks>
     /// <para>
     /// This method:
-    /// - Subscribes to Redis channel: "job:{jobId}:status"
+    /// - Subscribes to Redis channel: "sdap:job:{jobId}:status"
     /// - Yields updates as they arrive
     /// - Completes when cancellation is requested or job reaches terminal state
     /// - Handles Redis reconnection automatically
     /// </para>
     /// <para>
-    /// The SSE endpoint should:
-    /// - Query current status before subscribing (for initial state)
-    /// - Subscribe using this method for real-time updates
-    /// - Handle reconnection via Last-Event-ID
+    /// The SSE stream must subscribe BEFORE it reads the job's current state, and wait for
+    /// <paramref name="onSubscribed"/>: pub/sub keeps no history, so an update published between the read and the
+    /// subscription is never delivered (task 068, #1086).
     /// </para>
     /// </remarks>
     IAsyncEnumerable<JobStatusUpdate> SubscribeToJobAsync(
         Guid jobId,
+        Action? onSubscribed = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

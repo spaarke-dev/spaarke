@@ -1,449 +1,215 @@
-# CLAUDE.md — Spaarke Repository Instructions
+<!--
+MAINTAINER NOTES (block-level HTML comments are stripped before Claude Code injects this file, so these cost no context).
 
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-procedure-quality-r1 Phase 3b (rewrite from 1190 → ~225 lines; OLD version archived at `.claude/archive/2026-05-17/CLAUDE.md`)
-> **Purpose**: Repository-wide operational rules for Claude Code. Loads every session.
+Last reviewed: 2026-10-07 — cleanup 66 KB / 499 lines → see the PR relocation table; previous version archived at .claude/archive/2026-10-07/CLAUDE.md.
 
----
+WHAT BELONGS HERE: only what an agent must apply on a turn where it would not otherwise open another document —
+binding rules, safety guards, naming rules, and "Before you X → read Y" triggers (§17). Keep a one-clause reason
+when the reason prevents misapplication (literal executors need the intent, not just the rule).
+
+WHAT DOES NOT: evidence, history, incident write-ups, worked examples, measured numbers that age, detail of a
+document a trigger already points to, rules that only apply when editing certain files (use .claude/rules/*.md
+with paths: frontmatter), procedure (use the skill). Put them in the target doc, .claude/FAILURE-MODES.md or the
+owning constraint file.
+
+BUDGET: Anthropic guidance is < 200 lines per CLAUDE.md ("longer files consume more context and reduce
+adherence"). Hard ceiling 30 KB. A PR exceeding either removes an equivalent amount or carries the owner's
+explicit OK. Every PR touching this file adds a .claude/CHANGELOG.md entry stating the byte delta.
+
+STYLE: state rules plainly. Avoid emphasis inflation (🚨, ABSOLUTE, CRITICAL, MUST in caps on every line) — newer
+models over-apply emphatic instructions. Use backticked paths, not markdown links (links are not followed; the
+duplicate target only costs tokens).
+
+SECTION NUMBERS ARE EXTERNAL API: skills and docs cite §6.5, §10, §11, §17 … Never renumber; retire a section by
+leaving its number with a pointer.
+
+PROCEDURE: .claude/skills/ai-procedure-maintenance/SKILL.md (Checklist F) governs changes to this file.
+
+AFTER EDITING: run /doctor prompt-audit (Claude Code ≥ 2.1.283) to catch conflicts and dead references.
+-->
+
+# CLAUDE.md — Spaarke repository instructions
 
 ## 1. What is Spaarke?
 
-Spaarke is an **enterprise AI-directed legal operations intelligence platform** built on Power Apps/Dataverse, SharePoint Embedded, and Azure AI services; backend in **.NET 10 Minimal API**; frontend in **custom React Code Pages and PCF components**; the AI layer combines an internal **JPS (JSON Prompt Schema)** playbook system with Azure OpenAI deployments and a retrieval layer over SharePoint Embedded documents.
+An enterprise AI-directed legal operations platform on Power Apps/Dataverse, SharePoint Embedded and Azure AI. Backend: the .NET 10 Minimal API BFF (`src/server/api/Sprk.Bff.Api`). Frontend: React Code Pages and PCF controls. AI: the JPS (JSON Prompt Schema) playbook system over Azure OpenAI, with retrieval over SharePoint Embedded documents.
 
----
+### 1.1 Product names — read before "fixing" a name
 
-## 2. Source of Truth: Code, then `.claude/`, then `docs/`
-
-**Code wins. Docs lag.** When code and docs disagree, fix the docs. Loading priority for the agent:
-
-1. **Code** — `.cs`, `.ts`, `.tsx` files in `src/` are the ground truth
-2. **`.claude/patterns/`** — 25-line pointer files telling you WHICH code to read
-3. **`.claude/adr/`** — concise ADR constraints (MUST / MUST NOT)
-4. **`.claude/constraints/`** — topic-based summaries
-5. **`docs/architecture/`** — design decisions + rationale (no implementation detail)
-6. **`docs/guides/`** — operational procedures (deploy, configure)
-7. **`docs/procedures/`** — development workflow (test, CI/CD, code review)
-
----
-
-## 3. Sub-Agent Write Boundary (IMPORTANT)
-
-**Sub-agents launched via the Agent tool CANNOT write to `.claude/` paths** (skills, patterns, constraints, catalogs, agents, settings). This is intentional — it protects skill definitions from accidental modification by parallel agents.
-
-**Canonical pattern** (proven across this project's 31 Phase 2a audits):
-1. Sub-agents READ + AUDIT `.claude/` files in parallel; return findings as structured text
-2. The MAIN SESSION applies fixes using Edit/Write tools
-
-When an agent reports "Edit denied on `.claude/...`" — that's the boundary working correctly, not a bug.
-
----
-
-## 4. 🚨 MANDATORY: Task Execution Protocol
-
-**ABSOLUTE RULE**: When executing project tasks, Claude Code MUST invoke the `task-execute` skill. DO NOT read POML files directly and implement manually.
-
-### Why this matters
-
-The `task-execute` skill ensures:
-- ✅ Knowledge files loaded (ADRs, constraints, patterns)
-- ✅ Context tracked in `current-task.md`
-- ✅ Proactive checkpointing every 3 steps
-- ✅ Quality gates run (code-review + adr-check at Step 9.5)
-- ✅ Progress recoverable after compaction
-- ✅ PCF version bumping + deployment skills invoked correctly
-
-**Bypassing leads to**: missing ADR constraints, lost progress after compaction, skipped quality gates, manual errors.
-
-### Auto-Detection Rules (Trigger Phrases)
-
-When you detect these phrases, you MUST invoke `task-execute`:
-
-| User Says | Required Action |
-|---|---|
-| "work on task X" | Invoke task-execute with task X POML |
-| "continue" / "keep going" / "next task" | Read `TASK-INDEX.md`, find first 🔲, invoke task-execute |
-| "continue with task X" / "resume task X" | Invoke task-execute with task X POML |
-| "pick up where we left off" | Load `current-task.md`, invoke task-execute |
-
-### Parallel Task Execution
-
-When tasks can run in parallel (no inter-task dependencies), each task STILL uses `task-execute`. Pattern: ONE message with MULTIPLE Skill tool invocations (one per task). Sequential invocations waste parallelism.
-
-For details, see [`.claude/skills/task-execute/SKILL.md`](.claude/skills/task-execute/SKILL.md).
-
----
-
-## 5. Context Management & Checkpointing
-
-### Usage thresholds
-
-| Context usage | Action |
-|---|---|
-| < 60% | Proceed normally |
-| 60–70% | Run `/checkpoint` (proactive save), then continue |
-| > 70% | STOP. Run `/checkpoint`, request `/compact` |
-| > 85% | EMERGENCY. Run `/checkpoint`, stop immediately |
-
-**Commands**: `/context` (check) · `/checkpoint` (save) · `/compact` (compress) · `/clear` (wipe)
-
-### Proactive Checkpointing (MANDATORY)
-
-Claude MUST checkpoint frequently. These rules are NOT optional:
-
-| Condition | Action |
-|---|---|
-| After every 3 completed task steps | Run `context-handoff` (silent: "✅ Checkpoint.") |
-| After modifying 5+ files | Run `context-handoff` |
-| After any deployment | Run `context-handoff` |
-| Before a complex step | Run `context-handoff` |
-| Context > 60% | Run `context-handoff` (verbose report) |
-| Context > 70% | Run `context-handoff` + STOP + request `/compact` |
-
-All work state must be recoverable from files alone: `projects/{name}/current-task.md`, `projects/{name}/tasks/TASK-INDEX.md`, `projects/{name}/CLAUDE.md`. See `.claude/skills/context-handoff/SKILL.md`.
-
----
-
-## 6. Human Escalation Triggers
-
-**MUST request human input for**:
-- Ambiguous or conflicting requirements
-- Security-sensitive code (auth, secrets, encryption)
-- ADR conflicts or violations (see §6.5 for the resolution protocol)
-- Breaking changes (API contracts, DB schema)
-- Scope expansion beyond task boundaries
-
-Format: 🔔 **Human Input Required** with situation, options, recommendation.
-
----
-
-## 6.5. ADR Conflict Resolution Protocol (BINDING — added 2026-06-29 by `spaarkeai-compose-r1`)
-
-**Principle**: ADRs are codified prior decisions, not immutable laws. They exist as guardrails to keep us out of known failure modes — not to force sub-optimal solutions when a legitimate technical need conflicts with them. When such a conflict surfaces, agents and humans MUST explicitly surface it and resolve it through one of three paths. Silent compliance with an ADR rule that produces a sub-optimal outcome is itself a failure mode.
-
-### The three resolution paths
-
-When code, design, or implementation legitimately conflicts with an ADR rule:
-
-| Path | When to choose | Owner action |
+| Product name | What it is | Engineering identifiers (do not rename) |
 |---|---|---|
-| **(A) Project-scoped exception** | The ADR remains correct in general; this project has a narrow, documented reason to deviate | Document the deviation + rationale in the project's `design.md` and/or `spec.md` ADR Tensions section; cite in PR description; code-review approves explicitly |
-| **(B) ADR amendment** | Context has changed; the ADR's prior decision is no longer correct as written | Propose an ADR amendment (concise + full versions); link from the proposing project; merge ADR change before or alongside the dependent code |
-| **(C) Pivot to comply** | On further inspection, an ADR-compliant approach meets the requirement equally well or better | Document the pivot reasoning; proceed under existing ADR |
+| Spaarke Console | The three-pane user app; the code calls it "SpaarkeAi" | `sprk_spaarkeai`, `src/solutions/SpaarkeAi/`, `scripts/Deploy-SpaarkeAi.ps1`, `deploy-spaarke-ai.yml` |
+| Spaarke Matter Management | The model-driven app | — |
+| Spaarke External Access | The external SPA | — |
+| Spaarke Connect (SKU) / Connection Engine | Third-party data binding | `Sprk.Connect.*` |
+| Decision Record | The append-only record of decisions | "ledger" stays correct in engineering docs |
 
-**No fourth path.** Silent violation, "we'll fix it later" tech debt, or hand-waving past an ADR rule without surfacing the conflict are all forbidden.
+Product names and engineering identifiers deliberately differ. Read "SpaarkeAi" in code and older docs as the Console, and do not sweep-rename it (tracked as #1095). Terminology changes originate only in `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
 
-### When this protocol fires
+## 2. Source of truth
 
-Trigger conditions:
-- An agent (you) recognizes that strict compliance with an ADR will produce a worse technical outcome than a documented exception or amendment would
-- `adr-check` or `code-review` flags a violation that the implementer believes is justified
-- During spec authoring, the design surfaces a requirement that conflicts with an existing ADR's MUST/MUST NOT rule
-- During task execution, an ADR constraint blocks a legitimate implementation need
+Code wins; docs lag. When they disagree, the code is right and the doc gets fixed. Load order: §14.
 
-### Required output format when invoking this protocol
+## 3. Sub-agent write boundary
 
-🔔 **ADR Conflict — Resolution Required**
+Sub-agents launched with the Agent tool cannot write to `.claude/`. They read and audit; the main session applies edits. "Edit denied on `.claude/...`" is this boundary working.
 
-- **ADR in question**: ADR-XXX [title]
-- **Specific rule**: [quote the MUST / MUST NOT being challenged]
-- **Conflict**: [explain the technical need and why the rule produces a sub-optimal outcome]
-- **Proposed path**: A (exception) / B (amendment) / C (pivot to comply)
-- **Rationale**: [why this path is correct]
-- **Impact if path A or B is accepted**: [scope of the deviation/amendment]
-- **Alternative considered (and rejected)**: [show that the other paths were genuinely considered]
+## 4. Task execution
 
-The human reviewer chooses or refines the path. Do NOT proceed silently if escalation is warranted.
+Project tasks always run through the `task-execute` skill — never by reading a POML and implementing it directly. That skill owns context loading, rigor level, checkpoints, quality gates and completion.
 
-### Where this protocol is enforced
-
-- **At design time** — `design-to-spec` and `project-pipeline` surface anticipated ADR tensions in a dedicated **ADR Tensions** section of `spec.md`
-- **At code-review time** — `code-review` Step 6 (ADR Compliance Check) accepts a reasoned exception (path A) cited in the PR description; otherwise flags as Critical
-- **At task-execute Step 9.5** — `adr-check` violations either are fixed (path C), formalized as exceptions (path A), or trigger amendment workflow (path B); silent retry-until-clean is not the loop
-- **At ADR-check** — the skill output includes a "Challenge Path" section alongside violations, prompting the human to choose a resolution rather than just accepting the violation list as final
-
-### What this protocol is NOT
-
-- Not a license to ignore ADRs casually — the bar for path A/B is "documented + rationale + reviewer approval"
-- Not an excuse to bypass auth, security, or compliance ADRs without explicit human sign-off
-- Not retroactive — code that violated an ADR silently before this protocol existed is still in violation; this protocol applies to new decisions going forward
-
-### Anti-patterns this catches
-
-- ❌ "ADR says no, so I'll write worse code to comply" — surface as path B candidate
-- ❌ "I violated the ADR but it's fine, the reviewer won't notice" — silent violation, forbidden
-- ❌ "The ADR is wrong but I don't want to amend it" — surface as path B; the cost of amendment is part of the work
-- ❌ "I'll comply now and document the exception later" — exception MUST be documented at the point of decision, not deferred
-
-**Binding for ≥6 months from 2026-06-29.** Reviewed by next major procedure-quality audit.
-
----
-
-## 7. Task Completion & Transition
-
-After completing any task:
-1. Update task `.poml` status to "completed"
-2. Update `TASK-INDEX.md`: 🔲 → ✅
-3. **Reset `current-task.md`** for next task (clears steps, files, decisions)
-4. Set `current-task.md` to next pending task (or "none" if project complete)
-5. Report completion; ask if ready for next task
-
-`current-task.md` tracks only the **active task** — history is in `TASK-INDEX.md` and per-task `.poml` files.
-
-### Project-close test diet gate (BINDING, added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-081 per spec FR-B09)
-
-When the just-completed task is a `090-wrapup-*` task (i.e., the project is closing), `task-execute` Step 11 invokes `/test-diet` BEFORE marking the project complete. `/test-diet` reconciles tests added/modified during the project against the 17-ban build-vs-maintain classifier ([ADR-038 §7](docs/adr/ADR-038-testing-strategy.md#7-build-vs-maintain-criteria-scaffolding-test-bans--added-2026-06-26-per-spec-fr-b08)): MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS tests require reviewer judgment. The skill is read-only — it emits `git rm` / `git mv` commands for the reviewer; it does not auto-execute. Output: `projects/{name}/notes/test-diet-report.md`. Skipping this gate is a HARD WARNING; wrap-up PR description MUST cite the report or document the skip rationale. Binding for ≥6 months from 2026-06-26.
-
----
-
-## 8. Task Execution Rigor Levels
-
-Every task is executed via `task-execute` at one of three rigor levels, auto-detected per task.
-
-| Level | When applied | Quality gates |
-|---|---|---|
-| **FULL** | Code implementation, architecture changes, post-compaction recovery, tags include `bff-api`/`pcf`/`plugin`/`auth`, modifying `.cs`/`.ts`/`.tsx`, 6+ steps, deps on 3+ tasks | ✅ code-review + adr-check at Step 9.5 |
-| **STANDARD** | New file creation, tasks with constraints, Phase 2.x+ tasks | ⏭️ Skipped |
-| **MINIMAL** | Documentation, inventory, simple updates | ⏭️ Skipped |
-| **TEST-MODIFYING (override row, added 2026-06-26 by ci-cd-unit-test-remediation-r1 spec FR-B07 + ADR-038)** | **Any task that modifies `tests/**` OR has tags including `testing` / `test-reset` / `deletion` / `integration-test`** | ✅ code-review + adr-check at Step 9.5 **UNCONDITIONALLY** (overrides default STANDARD skip; binding ≥6 months from 2026-06-26) |
-
-### Mandatory Rigor Level Declaration
-
-At task start, Claude Code MUST output:
-
-```
-🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
-📋 REASON: [Why this level was chosen]
-📖 PROTOCOL STEPS TO EXECUTE: ...
-Proceeding with Step 0...
-```
-
-This declaration is non-negotiable and makes protocol shortcuts visible. **Override**: "Execute with FULL protocol" / "Execute with MINIMAL protocol" — use sparingly.
-
-For the full decision tree, see `.claude/skills/task-execute/SKILL.md` Step 0.5.
-
-### 8.5. Execution Model, Effort & Wave Loops — Sonnet-5 (added 2026-07-08)
-
-The task pipeline is tuned for **Sonnet 5 execution** (planning stays on Opus 4.8 / Fable 5). Rules are enforced in the skills; this is the pointer:
-
-- **Model tier + effort per task.** Execution defaults to **Sonnet 5 @ effort `high`**; each POML carries `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security work) and `<effort>` (`xhigh` only for brownfield/root-cause or complex-but-fully-specified work — blanket `xhigh` approaches Opus cost). Assigned by `task-create` Step 3.5.5b, dispatched by `project-pipeline` Step 5, declared + escalated by `task-execute` Step 0.5.
-- **Author for literal execution.** Sonnet 5 follows instructions literally and does not infer intent: scope every `<constraint>`, make `<acceptance-criteria>` a **closed set** (incl. negative/authorization cases), name exact files + the reference impl to copy, and request any "above and beyond" explicitly. Do **not** add anti-laziness scaffolding — Sonnet 5 over-triggers on it.
-- **Step modes.** `<steps mode="directional">` (default: goal+criteria+constraints bind, sequence adaptable) vs `mode="prescriptive"` (exact sequence binds — migrations/deploys/irreversible).
-- **Escalation triggers.** Tasks with a known judgment boundary carry `<escalation><trigger>`; firing it is a legitimate stop (root §6 / §6.5), not improvisation.
-- **Coverage-first review.** `code-review` + `adr-check` maximize recall at the finding stage (report all, annotate severity + confidence); the orchestrator (task-execute Step 9.5) is the downstream filter.
-- **`/goal` wave loop (optional).** For `goal-eligible` waves only (machine-verifiable end-state, ≥3 well-specified low-ambiguity tasks, not security/deploy/irreversible), the operator may run the wave under `/goal` to remove per-task "continue". The Haiku evaluator is transcript-only and a **stopping-condition check, not a quality gate** — Step 9.5 + orchestrator authority are unchanged; tasks are never auto-completed on goal achievement. Eligibility assigned by `task-create` Step 3.85.
-
-> **Note (2026-07-08):** the legacy `.claude/protocols/AIP-00x` layer was **removed**. It had been dropped from this file in the 2026-05-17 rewrite and frozen (drifted, stale thresholds). Execution/behavioral rules live in exactly two places now: binding-every-turn rules here in root CLAUDE.md, and on-demand procedure in the `.claude/skills/*` files. There is no separate "protocol" layer.
-
----
-
-## 9. Security Rules
-
-- **NEVER** commit secrets (`.env`, `appsettings.local.json`, credentials, API keys)
-- Use `config/*.local.json` for local secrets (gitignored)
-- Use Azure Key Vault for production secrets
-- All API endpoints require auth (except `/healthz`, `/ping`)
-
----
-
-## 10. BFF Hygiene — Binding Governance (READ BEFORE ADDING TO `Sprk.Bff.Api`)
-
-**The BFF is the single backend for every Spaarke client surface.** Past projects (R1, R2, R3, Insights Engine, others) each added features without holistic consideration of overall BFF quality. The 2026-05-19 publish-size jump (65 → 75+ MB) and the 20 inbound CRUD→AI direct dependencies are downstream consequences. This stops here.
-
-When a task adds NEW endpoints, services, DI registrations, packages, or background work to `src/server/api/Sprk.Bff.Api/` (or to `Spaarke.Core` / `Spaarke.Dataverse` consumed by BFF), you MUST:
-
-1. **Load [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md)** before designing the addition. It is the binding pre-merge checklist + decision criteria.
-2. **State the placement decision explicitly** — even if the answer is "in BFF" — in the PR description or design doc. Cite the decision criteria from `bff-extensions.md`.
-3. **Use the `Services/Ai/PublicContracts/` facade** for any CRUD code that needs AI capability. Do NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly into CRUD code (per refined ADR-013, 2026-05-20).
-4. **Verify publish-size impact** on EVERY BFF-touching task (not just NuGet adds — per R4 NFR-01 / F-3, strengthened 2026-05-26). Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, measure compressed output, and report absolute size + diff vs prior baseline in task notes / PR description. Binding **ceiling: ≤60 MB compressed** (spec NFR-01). Current baseline as of 2026-08-13: **~44.96 MB incl. PDBs** (`dotnet-10-upgrade-r1` task 031, on the .NET 10 framework-dependent linux-x64 publish; 44.05 MB excl. PDBs — state the PDB convention when reporting). Prior net8 baseline was 49.63 MB incl. PDBs (2026-07-08 task 055); the net10 retarget SHRANK the publish (−4.67 MB) via FR-04 inbox pin removals + FR-06 classic-AppInsights-SDK removal + net10 shared-framework pruning. Threshold for escalation: ≥+5 MB single-task delta → explicit justification required; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP. Full rule in [`.claude/constraints/azure-deployment.md`](.claude/constraints/azure-deployment.md) "BFF Publish-Size Per-Task Verification Rule (NFR-01)" section.
-5. **Verify no new HIGH-severity CVE** from `dotnet list package --vulnerable --include-transitive`.
-6. **Update corresponding tests** per the [Test update obligation](.claude/constraints/bff-extensions.md#f-test-update-obligation-binding-per-fr-22--d-05) section in `bff-extensions.md`. PRs modifying `src/server/api/Sprk.Bff.Api/Services/` MUST add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally must have unconditional service registration (per RB-T028-03/04/05/06, filed 2026-05-31 by `sdap-bff.api-test-suite-repair`, fixed by `sdap.bff.api-test-suite-repair-r2` task 011 via 18-service Null-Object migration). Exceptions require explicit code review sign-off with reason. Enforcement is PR template (`.github/pull_request_template.md`) + code review checklist (`docs/procedures/testing-and-code-quality.md`) + reviewer judgment — **NOT a CI script** per design.md §5.5.
-
-**The asymmetric-registration rule has 3 binding sub-mechanisms (added 2026-06-01)**. When a PR modifies a `*Module.cs` DI file inside an `if (flag) { ... }` block, the PR reviewer applies (in order):
-
-- **§ F.1 Asymmetric-Registration Tier 1.5 Anti-Pattern** — [`.claude/constraints/bff-extensions.md` § F.1](.claude/constraints/bff-extensions.md#f1-asymmetric-registration-tier-15-anti-pattern-binding-per-r2-task-081--d-13). For every new conditional service, run the static-scan recipe + apply [ADR-032 Null-Object Kill-Switch Pattern](.claude/adr/ADR-032-bff-nullobject-kill-switch.md) (P1/P2/P3 per service).
-- **§ F.2 Fixture-Config-FIRST Inspection Protocol** — [`.claude/constraints/bff-extensions.md` § F.2](.claude/constraints/bff-extensions.md#f2-fixture-config-first-inspection-protocol-binding-per-r2-task-081--d-13). When a test is Skip'd suspecting DI issue, FIRST inspect fixture config / claims / mocks for non-contract values per [`docs/procedures/test-fixture-contracts.md`](docs/procedures/test-fixture-contracts.md).
-- **§ F.3 Empirical-Reproduction-FIRST Protocol** — [`.claude/constraints/bff-extensions.md` § F.3](.claude/constraints/bff-extensions.md#f3-empirical-reproduction-first-protocol-binding-per-r2-task-081--d-13). Before applying a ledger entry's recommended fix, hand-trace + reproduce empirically; file a path-b decision record if root cause differs.
-
-Full procedure-doc reference: [`docs/procedures/testing-and-code-quality.md`](docs/procedures/testing-and-code-quality.md) §§18.1–18.4. ADR-030 is the canonical mechanism implementing §10 bullet 6 when a service must remain feature-gated.
-
-**Project-level imperative**: every project that adds code to the BFF MUST have a `design.md` section titled **Placement Justification** answering the decision criteria for each major component. Projects skipping this section will be flagged in code review.
-
-**Hot-Path Declaration (added 2026-06-26 by `ci-cd-unit-test-remediation-r1` task CICD-062 per spec FR-C04)**: any project that touches BFF (or the parallel SpaarkeAi code page at `src/solutions/SpaarkeAi/**`) MUST include a `<hot-path-declaration>` XML block in its `design.md`. Block enumerates: BFF Y/N, SpaarkeAi Y/N, ci-workflows Y/N, skill-directives Y/N, root-CLAUDE.md Y/N. See [`.claude/constraints/bff-extensions.md` § G](.claude/constraints/bff-extensions.md#g-hot-path-declaration-binding-per-ci-cd-unit-test-remediation-r1-fr-c04-added-2026-06-26) for the full rule + evidence base. `project-pipeline` Step 3 emits HARD WARNING if missing. Active-project registry: [`projects/INDEX.md`](projects/INDEX.md). 2026-06-26 sweep found 13 of 17 active worktrees touch BFF, 8 of 17 touch SpaarkeAi.
-
-**Evidence base**: [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) — the 2026-05-20 BFF AI extraction assessment found the codebase structurally AI-dominant (69% of `Services/` LOC) but operationally justified to keep unified. It also surfaced the process debt this section addresses.
-
-This is **not advisory**. It is a binding workflow rule for every BFF-touching task.
-
----
-
-## 11. Component Justification — Default to Reuse (BINDING)
-
-**Principle**: Every new component must justify its existence. Prefer extending an existing service over introducing a new one. Prefer one component that works exceptionally well over five that partially overlap.
-
-Applies at EVERY scope boundary: spec authoring, plan WBS, task creation, code review. §10 BFF Hygiene is the BFF-specific instance; this is the universal rule.
-
-### The three-question template
-
-For every NEW service / abstraction / interface / endpoint / DI registration / package / Dataverse column / file surface, answer one sentence each:
-
-1. **Existing** — What does this overlap with? (Verify by `Grep` / `Glob` before claiming "none".)
-2. **Extension** — Can I extend the existing instead? (If yes → extend. If no → say why in ≤2 sentences.)
-3. **Cost-of-doing-nothing** — Name a concrete behavior or contract that fails without this. (NOT "scalability" / "abstraction layer" / "future flexibility.")
-
-A justification that cannot articulate concrete failure modes for question 3 = scope creep. Demote the task to "extend existing X" or drop it.
-
-### Enforcement points
-
-| Stage | Mechanism |
+| User says | Do |
 |---|---|
-| Spec authoring | `project-pipeline` validates spec scope against existing components during Step 2 resource discovery |
-| Plan WBS | `task-create` Step 3.5.6 requires `<justification>` element in each new-component POML |
-| Code review | `code-review` Step 6.6 verifies justification is concrete + cites grep evidence |
+| "work on task X", "continue with task X", "resume task X" | Invoke task-execute with task X |
+| "continue", "keep going", "next task" | Find the first 🔲 in `TASK-INDEX.md`, invoke task-execute |
+| "pick up where we left off" | Read `current-task.md`, invoke task-execute |
 
-### Anti-patterns this catches (real examples from chat-routing-redesign-r1)
+Independent tasks run in parallel as one message with several task-execute invocations.
 
-- ❌ "Delete LegalWorkspace `CreateRecordStep.tsx` as dead code per OC-R4-05" — retirement doc actually preserves it as library; cost-of-doing-nothing was assumed wrongly
-- ❌ "Add new `sprk_playbookcode` lookup keys" — `sprk_playbookid` already exists as the immutable opaque ID; existing-question unanswered
-- ❌ "Build 8 retrieval tool handlers" — 7 of 8 fail extension test for the MVP use case; one excellent handler beats five that partially overlap
+## 5. Context and checkpoints
 
-Tasks that ONLY modify existing files (edit, refactor, fix bug, add tests for existing surface) do NOT require justification — the rule applies to NEW surface, not modification.
+- **Checkpoint** (`context-handoff`): during task work, at the points `task-execute` Step 8.5 sets; at any time, after a deployment or live change, before a risky step, and before ending a session. Claude cannot see its own context usage; when the user or the harness reports it is high, checkpoint and then compact.
+- **`current-task.md` is state, not history.** Each checkpoint rewrites it to describe the present (target ≤ 10 KB); never prepend a new block above old ones. Standing directives and gotchas go to the project `CLAUDE.md`, decisions to notes, narrative to the commit message.
+- **When compacting, preserve:** the active task id and step, uncommitted files, open owner questions, and the exact next action. After compaction a `SessionStart` hook re-injects the project's `current-task.md` and its standing-directive and gotcha sections when it can identify the project (§16); otherwise re-read them yourself.
 
-Cost-of-rule: one paragraph per new component. Cost-of-rule-absence: shipped scope creep.
+## 6. Escalation
 
-### 11.5. Component complexity (evaluate complexity, not line count)
+Ask the human for: ambiguous or conflicting requirements; security-sensitive code (auth, secrets, encryption); ADR conflicts (§6.5); breaking changes to API contracts or schema; scope beyond the task. Format: 🔔 **Human Input Required** — situation, options, recommendation.
 
-When authoring a task or writing code that creates a new component **or materially grows an existing one**, evaluate **complexity/cohesion — never line count alone**. File size is a *symptom*; the concern is whether a single component is doing too much (multiple reasons-to-change, low cohesion, many ctor deps, high branching, mixed abstraction levels). **A large file is sometimes the right answer** — a cohesive, single-responsibility component (state machine, exhaustive mapping, generated code) is legitimate; note it in the PR. **Decompose when responsibilities diverge, not when a number is crossed** — extract the cluster with its own reason-to-change; prefer extending a *cohesive* component over manufacturing thin ones to hit a size target. There is **no hard LOC gate** (the God-class ratchet was retired 2026-08-20): this is enforced by human judgment at `task-create` §3.5.6 + `code-review`, backed by a **non-blocking observation report** (`scripts/report-large-server-files.ps1`). Full standard: [`docs/standards/COMPONENT-COMPLEXITY.md`](docs/standards/COMPONENT-COMPLEXITY.md).
+### 6.5 ADR conflicts
 
----
+ADRs are guardrails, not immutable laws. When a legitimate need conflicts with an ADR rule, surface it and resolve it through exactly one path; silently complying when that produces a worse outcome is itself a failure:
 
-## 12. Build Commands
+| Path | When | Action |
+|---|---|---|
+| A — project exception | The ADR stays right in general; this project has a narrow reason to deviate | Document deviation + rationale in the project's `design.md`/`spec.md` ADR Tensions; cite it in the PR; code-review approves explicitly |
+| B — amendment | The ADR is no longer right as written | Propose the amendment (concise + full); merge it before or with the code |
+| C — comply | A compliant approach meets the need as well or better | Record the reasoning; proceed under the ADR |
+
+There is no fourth path: no silent violation, no "fix it later". This is not a licence to bypass auth, security or compliance ADRs without explicit human sign-off. When invoking it, output 🔔 **ADR Conflict — Resolution Required** with: the ADR, the quoted rule, the conflict, the proposed path, the rationale, the impact, and the alternatives rejected. The human chooses the path. Enforcement points and examples: `adr-check` skill.
+
+## 7. Task completion
+
+`task-execute` Steps 10–11 own completion (POML status, `TASK-INDEX.md`, resetting `current-task.md`) and the project-close `/test-diet` gate for `090-wrapup-*` tasks.
+
+## 8. Rigor levels
+
+`task-execute` Step 0.5 assigns FULL / STANDARD / MINIMAL per task and declares it before Step 0. Any task that modifies `tests/**` or is tagged `testing`, `test-reset`, `deletion` or `integration-test` runs code-review + adr-check regardless of level.
+
+### 8.5 Execution and review
+
+- Planning (`design-to-spec`, `project-pipeline`) runs on the top tier (Opus / Fable). Execution defaults to Sonnet 5 at effort `high`; each POML's `<model-tier>` and `<effort>` can raise it (`task-create` Step 3.5.5b). Write POMLs for literal execution: scoped constraints, closed-set acceptance criteria including negative cases, exact files and the reference implementation to copy (`task-create`).
+- **Review limits ceremony, never fixing.** Findings are classified fix-now (F1–F4) or known-limit (K1–K4); a known-limit class never holds a confirmed defect on a real path. Re-checks cover the fix diff and its direct callers and callees; one full adversarial-verifier pass per task (two for `auth`, `security`, `tenant-isolation`). Fixing continues until no F-class finding remains.
+- **Every defect found is fixed in scope, or filed and reported to the operator** — whether the work caused it or only uncovered it (pre-existing code, another project's code, config, data). Escalate when fixes are not converging, not on a round count. This applies to task-execute Step 9.5 and to verifier loops in workflow scripts sessions write themselves.
+
+## 9. Security
+
+- Never commit secrets (`.env`, `appsettings.local.json`, credentials, keys). Local secrets go in `config/*.local.json` (gitignored); production secrets in Azure Key Vault.
+- Every API endpoint requires auth except `/healthz` and `/ping`.
+- Before creating, seeding, rotating, deleting or purging any Key Vault secret, or changing an identity's credential order, read `.claude/constraints/provisioning.md` "KV credential lifecycle" and ADR-028 (A4, E-1–E-3). The rule is time-boxed and environment-specific; apply its current text, not a summary.
+
+## 10. BFF hygiene (binding)
+
+The BFF is the single backend for every client surface. Any task that adds endpoints, services, DI registrations, packages or background work to `Sprk.Bff.Api` (or to `Spaarke.Core` / `Spaarke.Dataverse`) follows `.claude/constraints/bff-extensions.md`. Its obligations — stated placement decision, the AI `PublicContracts` facade, publish-size delta measured against a fresh master build on every BFF-touching task, no new HIGH CVE, updated tests — load automatically from `.claude/rules/bff-hygiene.md` when you edit those folders (its items 1–6 keep the numbering cited elsewhere as "§10 bullet N"). Publish-size thresholds: ≥ +5 MB in one task needs explicit justification; ≥ 55 MB total triggers an architecture review; ≥ 60 MB is a hard stop. At design time, read `.claude/constraints/bff-extensions.md` first. Projects adding to the BFF include a Placement Justification section in `design.md`; projects touching the BFF **or `src/solutions/SpaarkeAi/**`** include a `<hot-path-declaration>` there (registry: `projects/INDEX.md`).
+
+## 11. Component justification — default to reuse (binding)
+
+Every new service, abstraction, interface, endpoint, DI registration, package, Dataverse column or file surface answers three questions, one sentence each:
+
+1. **Existing** — what does it overlap with? (Check with Grep/Glob before saying "none".)
+2. **Extension** — can an existing component be extended instead? If not, why (≤ 2 sentences)?
+3. **Cost of doing nothing** — what concrete behaviour or contract fails without it? ("Scalability" or "flexibility" is not an answer.)
+
+No concrete answer to 3 means scope creep: extend or drop it. Enforced at `project-pipeline` Step 2, `task-create` Step 3.5.6 and `code-review` Step 6.6. The rule applies to new surface **even when it is added inside an existing file** (a new endpoint in an existing `*Endpoints.cs`, a new registration in an existing `*Module.cs`); only pure modification of existing surface needs no justification.
+
+### 11.5 Component complexity
+
+Judge cohesion, not line count. A large, cohesive, single-responsibility file is fine (say so in the PR); decompose when responsibilities diverge. No LOC gate. Standard: `docs/standards/COMPONENT-COMPLEXITY.md`.
+
+## 12. Build commands
 
 | Action | Command |
 |---|---|
-| Build BFF API | `dotnet build src/server/api/Sprk.Bff.Api/` |
+| Build the BFF | `dotnet build src/server/api/Sprk.Bff.Api/` |
 | Run tests | `dotnet test` |
 | Format C# | `dotnet format` |
-| PCF prod build | `npm run build:prod` (**NOT** `npm run build` — see [`FAILURE-MODES.md#AP-1`](.claude/FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong)) |
+| PCF production build | `npm run build:prod` (not `npm run build` — FAILURE-MODES AP-1) |
+| Node install in `src/solutions/*` | `npm install --legacy-peer-deps --no-audit --no-fund` (not `npm ci`; most lock files are stale) |
 
-For full build/test reference, see [`docs/procedures/testing-and-code-quality.md`](docs/procedures/testing-and-code-quality.md).
+Full reference: `docs/procedures/testing-and-code-quality.md`.
 
-### Node Installs — Avoid `npm ci` for Vite Solutions
+## 13. Entry points
 
-Many `src/solutions/*` Vite projects have stale `package-lock.json` files; `npm ci` fails on ~14 of 16 solutions. Use `npm install --legacy-peer-deps --no-audit --no-fund` instead. The build scripts handle this automatically; don't add raw `npm ci` to new scripts.
-
----
-
-## 13. System Entry Points (where to start reading)
-
-| Subsystem | Start here | Shows |
-|---|---|---|
-| BFF API | `src/server/api/Sprk.Bff.Api/Program.cs` | Endpoint registration, DI, middleware |
-| PCF Controls | `src/client/pcf/{Control}/control/index.ts` | Control lifecycle (init, updateView, destroy) |
-| Code Pages | `src/solutions/{Page}/src/main.tsx` | React 18 SPA entry with auth bootstrap |
-| Dataverse Plugins | `src/dataverse/plugins/.../BaseProxyPlugin.cs` | Plugin base class + lifecycle |
-| AI Pipeline | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | AI tool orchestration |
-| Shared UI | `src/client/shared/Spaarke.UI.Components/src/index.ts` | Component library exports |
-| Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | OBO + app-only Graph auth |
-| Background Jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` | Service Bus job processing |
-
-## 14. Context Layer Hierarchy
-
-| Layer | Contains | When to load |
-|---|---|---|
-| **Code** | Implementation (source of truth) | Always — read before implementing |
-| **`.claude/patterns/`** | 25-line pointer files → code entry points | Per-task — tells you what to read |
-| **`.claude/adr/`** | Concise ADR constraints (MUST / MUST NOT) | Per-task — rules to follow |
-| **`.claude/constraints/`** | Topic-based constraint summaries | Per-task — quick rule reference |
-| **`.claude/catalogs/`** | AI scope + model catalog (JSON) | JPS playbook authoring/auditing |
-| **`docs/architecture/`** | Decisions + rationale only | When you need WHY behind a decision |
-| **`docs/standards/`** | Cross-cutting coding standards | Before implementing new code |
-| **`docs/guides/`** | Operational procedures | When deploying, configuring, troubleshooting |
-| **`docs/procedures/`** | Development workflow | During development process |
-| **`docs/data-model/`** | Dataverse entity schemas, ERD | When touching Dataverse data |
-| **`docs/adr/`** | Full ADR history | Rarely — deep architectural context only |
-
----
-
-## 15. Knowledge Repository for Rapidly-Evolving Topics
-
-Claude's training data has a knowledge cutoff. For rapidly-evolving Microsoft/AI platform topics where Claude's context may be stale (Azure AI Foundry, Power Platform updates, Dataverse MCP, Office Add-ins SDK, SharePoint Embedded), use the **`researcher` subagent**:
-
-- **Mechanism**: `.claude/agents/researcher.md` (Opus, effort: high, project memory enabled)
-- **Trigger**: Invoke when external/current technical knowledge is needed that's not in skills, ADRs, or patterns
-- **Behavior**: Consults curated knowledge at [`knowledge/`](knowledge/) FIRST → falls back to Microsoft Learn, official Microsoft GitHub repos, then generic web search
-- **Accumulation**: Findings stored in the subagent's `MEMORY.md` (project-scoped) — accumulates Microsoft-platform knowledge across sessions
-
-**Knowledge repo location**: [`knowledge/`](knowledge/) at repo root — populated by parallel project `coding-knowledge-base-setup-r1` (merged to master before this rewrite). Currently includes `agent-framework/`, `azure-ai-search/`, refresh procedures, and a refresh log. The researcher consults this BEFORE external search and memoizes findings in its `MEMORY.md`.
-
----
-
-## 16. Hooks — Current Guidance
-
-Hooks are **NOT configured** in `.claude/settings.json` beyond what exists. Quality enforcement runs via (1) skill-level checks (`task-execute`, `adr-check`, `code-review`), (2) CI/CD (`.github/workflows/sdap-ci.yml`), and (3) the `doc-drift-audit` skill at project transitions. Reconsider hooks only for narrow, high-frequency automations that run in <5s with zero false positives.
-
----
-
-## 17. Pointers — Where to find everything
-
-| Topic | Pointer |
+| Subsystem | Start here |
 |---|---|
-| Skills + trigger phrases + slash commands | [`.claude/skills/INDEX.md`](.claude/skills/INDEX.md) |
-| ADRs (concise) | [`.claude/adr/INDEX.md`](.claude/adr/INDEX.md) |
-| ADRs (full history) | [`docs/adr/`](docs/adr/) |
-| Code patterns (25-line pointer files) | [`.claude/patterns/`](.claude/patterns/) |
-| Cross-cutting constraints | [`.claude/constraints/`](.claude/constraints/) |
-| **BFF additions governance (binding)** | [`.claude/constraints/bff-extensions.md`](.claude/constraints/bff-extensions.md) — load before adding to `Sprk.Bff.Api`. §G Config Boundary rewritten 2026-06-29 for R7 single-hop dispatch (FR-29). |
-| **BFF AI extraction assessment (evidence base)** | [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) |
-| **Wiring a new capability (Action + Binding — maker tutorial)** | [`docs/guides/ai-guide-consumer-wiring.md`](docs/guides/ai-guide-consumer-wiring.md) — Action + Binding authoring, mirror-first input schemas, all three entry paths, gate/resume, eval-case obligation, create-task worked example (REWRITTEN 2026-07-07 by ai-architecture-redesign-r1 task 052; supersedes the R7 consumer-triangle content) |
-| **Playbook-driven LLM Output Pattern (architecture)** | [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — Wave 11 two-layer architecture (Layer 1 orchestrator template resolution + Layer 2 PromptSchemaRenderer `## Input` section). The canonical pattern for narrative-output consumers (Daily Briefing shipped reference; Insight Engine matter-summary worked example). Required reading before authoring new AI executors or playbooks. R7 task 111a / operator-binding 2026-06-29. |
-| **Build a new narrative-output consumer (maker tutorial)** | [`docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md) — step-by-step authoring guide for Action JPS + playbook + destination (UpdateRecord / ReturnResponse / SendEmail / CreateNotification). Two worked examples (Daily Briefing shipped; Insight Engine future). R7 task 111a. |
-| Cross-cutting failure modes (anti-patterns + gotchas) | [`.claude/FAILURE-MODES.md`](.claude/FAILURE-MODES.md) |
-| Procedure-surface changelog | [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md) |
-| Architecture (subsystems, design) | [`docs/architecture/`](docs/architecture/) — includes `AI-ARCHITECTURE.md`, `auth-azure-resources.md` |
-| **SpaarkeAi workspace architecture (end-to-end pipeline)** | [`docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md`](docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md) — cold-load → widget render, storage, BFF surface, 6 system layouts (incl. Calendar), pane-width fracs + all-panes-collapsed overlay. Refreshed through R13 (task 123). |
-| **Assistant surface-launch mechanism (how the Assistant deterministically opens follow-on surfaces)** | [`docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`](docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md) — `consumerType` → `surfaceLaunchRegistry` static lookup → `handleSurfaceLaunch` branches on `kind` (wizard/oob-form via sessionStorage hand-off; workspace-tab/layout via PaneEventBus `widget_load`). Two entry paths (SSE text-path + click/chip), the hand-off envelope, BFF-thin (no surface identity server-side), invariants, and the **extension recipe** (new surface = Action+Binding data + ONE registry entry in code). Surface identity stays in CODE by design (ADR-039 / BFF §10). REQUIRED reading before adding any capability that opens a surface. spaarkeai-assistant-enhancements-r1 (2026-07-22). |
-| **Assistant UI element criteria (bubble vs chip vs card vs tab)** | [`docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md`](docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md) — the four-question decision (dialogue→bubble · throwaway turn-follow-on→chip · persistent act-on item→card · rich output/tool→tab); do/don't rules (no code in chip/card labels; keyword-heuristic chips must not mis-fire; collapse proactive-card stacks behind one disclosure header; hover only on clickable regions). Sibling of [`MODAL-DECISION-CRITERIA.md`](docs/standards/MODAL-DECISION-CRITERIA.md) + [`ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`](docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md). spaarkeai-assistant-enhancements-r1 (2026-07-22). |
-| **SpaarkeAi dashboard + widget model (two-wrapper architecture — authoritative)** | [`docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`](docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md) — three surfaces, Dashboard wrapper (`LegalWorkspaceApp`) vs Direct widget wrapper (`WorkspaceWidgetRegistry`) with intentional-retention rationale (OC-R4-06), four mount sources, dual-use pattern (Calendar canonical), LegalWorkspace-as-dashboard-engine framing (OC-R4-05). Required reading for any new widget design. R4 DR-01 / W-1. |
-| **SpaarkeAi component model (inventory)** | [`docs/architecture/SPAARKEAI-COMPONENT-MODEL.md`](docs/architecture/SPAARKEAI-COMPONENT-MODEL.md) — `@spaarke/ui-components`, `@spaarke/ai-widgets`, `@spaarke/auth`, `@spaarke/legal-workspace`, `@spaarke/events-components`, PaneEventBus contract. Refreshed through R13 (task 123). |
-| **SpaarkeAi componentization audit (honest reuse assessment)** | [`docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md`](docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md) — coupling gaps + prioritized remediation backlog; Calendar widget (§2A) is the proven canonical "shared-lib widget + thin LW shim" pattern. Refreshed through R13 (task 123). |
-| **Build a new workspace widget (tutorial)** | [`docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) — five archetypes with decision tree (composable section, sophisticated single-purpose direct, dual-use Pattern D, Context-pane, modal-launcher); Calendar Pattern D worked example. Rewritten in R4 W-2 (2026-05-26). |
-| **Compose (AI legal drafting — write/save + read/reference fidelity)** | [`.claude/adr/ADR-049-compose-shadow-document.md`](.claude/adr/ADR-049-compose-shadow-document.md) — the canonical Compose ADR, **amended 3×**. **Write/save — current contract (R8, 2026-08-21, Path B)**: OOXML server-authoritative, TipTap a lossy view, ONE body author (`ComposeDocumentRenderer`, I-5), **no text-search in the write path** (I-7). The save **renders from the content model AND preserves untouched content**: re-project the retained baseline server-side, pair blocks by **document order** (`paraId` corroborates, never keys — duplicates are spec-legal in `mc:AlternateContent`), then **clone unchanged blocks verbatim** / render changed ones with property inheritance / thin-render+warn the unmergeable — **never a content refusal**. **Invariants (1) every-save-terminates-in-a-defined-outcome and (2) untouched-blocks-are-preserved are a PAIR; no amendment may trade one for the other** — R4 (surgical `(paraId,runIndex,offset)` byte-patch → the HTTP 422 treadmill) and R6 (whole-body rebuild → silent fidelity loss) each did, which is why both are superseded on the save path. Extended record: [`docs/adr/ADR-049-compose-shadow-document.md`](docs/adr/ADR-049-compose-shadow-document.md). **Read/reference** (R4.5, F-1..F-5, merged 2026-07-28): **one reader** everywhere (client `mammoth` deleted; stateless `POST /api/compose/project` for browse), **deterministic numbering** identical to Word (`NumberingComputationEngine`, `numId`-scoped, non-editable number-atom), **`paraId → legal-number` reference layer + `CitationResolver`** (Section 4.2 / 4.2(b)(iii) / ranges), honest page/line (WS-5 deferred). **Write-side residual loss (what a save does NOT preserve — published + owner-signed): [`docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`](docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md)** — the scope rule (loss is per-EDITED-BLOCK, never per-document), the eight degradation codes, what is carried, and a parity TEST that fails if the document and the renderer disagree in either direction (R8 task 045). Read/reference architecture (narrative): [`docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`](docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md) — one reader · text exactness · numbering engine · reference/citation layer · honest page/line + code inventory + extension recipes. Code: `src/server/api/Sprk.Bff.Api/Services/Compose/**` + `src/client/shared/Spaarke.Compose.Components`. Full reasoning: `projects/spaarkeai-compose-r4/` (R4 write) + `projects/spaarkeai-compose-fidelity-r4.5/` (read/reference) + `projects/spaarkeai-compose-r6/` (R6 render-on-save) + `projects/spaarkeai-compose-r8/notes/gate-decision.md` (R8 evidence — the gate measures **untouched** blocks; the edited block's own formatting is owned by R8 task 041). |
-| **LegalWorkspaceApp embedded-mode host contract (binding before embedding)** | [`docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md`](docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md) — six host-requirement categories (config init, theme ownership, sessionStorage sentinels, webApi shim, mount semantics, lifecycle hooks) with 21 testable MUSTs; SpaarkeAi reference impl. R4 DR-07 / C-2. |
-| **LegalWorkspace standalone code-page retirement** | [`docs/architecture/LEGALWORKSPACE-RETIREMENT.md`](docs/architecture/LEGALWORKSPACE-RETIREMENT.md) — retirement decision (OC-R4-05), consumer audit, components-as-library boundary; supersedes R3 FR-25 / NFR-10. R4 DR-03 / W-6. |
-| **Spaarke DataGrid Framework (architecture)** | [`docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md) — `<DataGrid configId=… />` framework: shared lib component + `sprk_gridconfiguration` Dataverse contract + `IDataverseClient` adapter (MDA / BFF). Supersedes `universal-dataset-grid-architecture.md` (PCF, retires in Phase F). |
-| **Spaarke To Do (architecture)** | [`docs/architecture/spaarke-todo-architecture.md`](docs/architecture/spaarke-todo-architecture.md) — `sprk_todo` first-class entity with 11-entity regarding (ADR-024), SmartTodo Code Page, parent-form subgrids, Outlook ribbon + LinkedTodosBanner, BFF Office endpoints, feature-gated MS To Do sync scaffolding (ADR-032). Supersedes `event-to-do-architecture.md`. R3 (PR #373). |
-| **Side-Pane Navigation ("Navigator") (architecture)** | [`docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`](docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md) — the docked always-available Navigator pane (Recent/Bookmarks/Monitored/Views + search) on `sprk_navitem` (per-user, host-context `Xrm.WebApi`, **no BFF/plugin**). **Read before adding the Navigator to a new entity or code page** — the two-insertion auto-load model (silent entity-ribbon `EnableRule` + the `ensureNavigatorSidePane()` code-page registrar, a **standard code-page build step**), access-based Monitored (Dataverse security trim, no owner filter), `sprk_communication`→Email-code-page routing, and modern-UCI caveats (no global load hook; `navigateTo viewType` STRING; outline pane-icons must be filled evenodd rings, not strokes). spaarke-side-pane-navigation-history-r1. |
-| **Field Mapping Framework (architecture)** | [`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md) — full **code + PCF component inventory**, two Dataverse tables, additive BFF contract, context-agnostic client engine (`FieldMappingService.ts`), four mapping types (Copy/Default/Concat/Template), `sprk_expression` extensibility seam, config enum reference, creation-time-vs-update-time boundary, same-entity/recursion note, UAT-hardening notes. Wired into all 7 `Create*Wizard` services; creation-time assigned-resource inheritance. Includes the **set-regarding / RegardingResolver** relationship (the PCF that supplies the source parent; **AssociationResolver is retired**). Maker guide (incl. Web-API seeding recipe + option-set integers): [`docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md`](docs/guides/FIELD-MAPPING-ADMIN-GUIDE.md). Deprecated Feb-2026 guide stubbed at `docs/product-documentation/field-mapping-admin-guide.md`. set-regarding-and-field-mapping-resolver-r2. |
-| **DataGrid Framework configuration guide** | [`docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md) — maker + dev recipe: author a `sprk_gridconfiguration` record, host shell wiring, worked example, troubleshooting. |
-| Coding standards (cross-cutting conventions) | [`docs/standards/`](docs/standards/) — `CODING-STANDARDS.md`, `INTEGRATION-CONTRACTS.md`, `ANTI-PATTERNS.md` |
-| **Data access decision criteria (`Xrm.WebApi` vs BFF)** | [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](docs/standards/DATA-ACCESS-DECISION-CRITERIA.md) — when to use host-context `Xrm.WebApi` vs BFF for Dataverse access; 7 criteria + worked examples; load alongside `.claude/constraints/bff-extensions.md` for BFF-side decisions |
-| **Modal decision criteria (OOB `navigateTo` vs proprietary Fluent v9 vs browse-shell)** | [`docs/standards/MODAL-DECISION-CRITERIA.md`](docs/standards/MODAL-DECISION-CRITERIA.md) — when to open a record/document/form/picker via OOB `Xrm.Navigation.navigateTo` vs proprietary Fluent v9 Dialog vs proprietary + [`RecordNavigationModalShell`](src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md) (browse "1 of N" pattern). Load alongside [`.claude/patterns/ui/record-modal-selection.md`](.claude/patterns/ui/record-modal-selection.md) whenever a task opens a modal. Includes hybrid pattern (proprietary browse + OOB escalation) and iframe-embedding anti-pattern. Created 2026-07-01. |
-| **Modal design system (component layer — the `SprkModal` shell + 6 presets)** | [`docs/standards/MODAL-DESIGN-SYSTEM.md`](docs/standards/MODAL-DESIGN-SYSTEM.md) — the COMPONENT layer beneath [`MODAL-DECISION-CRITERIA.md`](docs/standards/MODAL-DECISION-CRITERIA.md)'s decision layer: the 7-size scale (exact numbers; `md`/`lg` height caps are load-bearing — hold landscape aspect at 4K), header/footer contracts (Cancel always left), `light`/`explicit`/`alert` dismiss, `--sprk-ui-scale` via a scaled Fluent theme (NOT CSS `zoom`), and the wiring recipe for `SprkModal` + `ConfirmModal`/`ChoiceModal`/`FormModal`/`PreviewModal`/`BrowseModal`/`WizardModal` (all `@spaarke/ui-components`). Governed by [`ADR-050`](.claude/adr/ADR-050-canonical-modal-shell.md); pattern pointer [`.claude/patterns/ui/modal-shell.md`](.claude/patterns/ui/modal-shell.md). spaarke-modal-system (2026-08-01). |
-| **Chat attachment policy (binary cap, MIME, total-text, PDF pages, upgrade path)** | [`docs/standards/CHAT-ATTACHMENT-POLICY.md`](docs/standards/CHAT-ATTACHMENT-POLICY.md) — single source of truth for chat attachment sizing; 25 MB binary cap (client-only; server enforces text-char caps, not binary); MIME allow-list; single-LLM-call invariant. R4 A-4 / FR-04 (2026-05-26). |
-| **Calendar shared components (two intentional variants)** | `@spaarke/events-components` — **`CalendarSection`** (workspace widget; click-day filter, controlled mode, stateless; existing) + **`CalendarFilterPane`** (side-pane filter builder; Calendar + From/To + date-field dropdown + Apply; session-storage; R4 task 055 / B-6 hoist 2026-05-26). Same lib, different intents per `notes/b6-pre-change-diff.md`. |
-| Operational guides (deploy, configure, troubleshoot) | [`docs/guides/`](docs/guides/) — 40+ guides incl. `PCF-DEPLOYMENT-GUIDE.md`, `DATAVERSE-MCP-INTEGRATION-GUIDE.md` |
-| **SPE container-type topology (READ BEFORE CREATING ONE — permanent + capped)** | [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) — the five binding rules (1:1 owning-app↔type **permanently** · 25 per tenant · standard types **cannot be deleted** · one type registers into many consuming tenants · create is **delegated-only**, app-only gets 403), the billing-classification decision (`standard` = we pay / `directToCustomer` = customer pays; the retired name for `standard` was **PAYGO**; `trial` is a 5-container 30-day sandbox, NOT a customer-trial mechanism), Spaarke's four-type topology for dev/trials/Model 1/Model 2, and the create + consuming-tenant-registration procedures. Also records a 🔴 defect: `scripts/Create-NewContainerType.ps1` uses `client_credentials` against a delegated-only endpoint and cannot work. `sdap-SPE-admin-app-r2` (2026-08-28). |
-| **Customer provisioning + deployment (authoritative, single source)** | [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — the single authoritative operator guide for standing up a new Spaarke customer environment end-to-end. Covers Model 1 (shared trial/SMB) + Model 2 (dedicated stamp) tenancy, full handler catalog H0–H14, tenant-isolation invariants I1–I5, silent-fail traps T1–T6, upgrade model, and the interim operator runbook (§12) until `/provision-environment` L3 skill lands. Supersedes (as stubs) `CUSTOMER-DEPLOYMENT-GUIDE.md`, `CUSTOMER-ONBOARDING-RUNBOOK.md`, `ENVIRONMENT-DEPLOYMENT-GUIDE.md`, `auth-deployment-setup.md`, `SPAARKE-DEPLOYMENT-GUIDE.md`, `PRODUCTION-DEPLOYMENT-GUIDE.md`. customer-provisioning-orchestration-r1 task 001 (2026-08-17). |
-| **`/provision-environment` L3 operator skill (thin driver for L2 control-plane)** | [`.claude/skills/provision-environment/SKILL.md`](.claude/skills/provision-environment/SKILL.md) — the operator's single entry point to the customer-provisioning platform. Wraps the L2 REST API (`api://spaarke-provisioning-controlplane-{env}`) into a guided flow: Step 0 prereqs (pwsh/az/pac/git + operator AAD identity + L2 reachability + Operator role probe + MCP status) · Step 1 interactive intake (customerId/tenantId/tenancyModel/profile with explicit tenantId per I1) · Step 2 preflight (H0 quota/DNS/reachability) · Step 3 confirmation gate (literal phrase `proceed with provisioning`; bare "y" INSUFFICIENT per §4.3a.4) · Step 4 execute loop (enqueue → poll `GET /api/runs/{id}` at 10s → advance) · Step 5 manual gate handling (H0.5 admin consent · H1 quota bump · H8 SPE 24h; NEVER auto-advance; always re-verify via L2) · Step 6 completion handoff (`runs/{runId}.md` + `sprk_dataverseenvironment` registry update via Dataverse MCP) · Fallback Matrix (F1 MCP disconnect → `pac data` or raw Web API PS; F2 az token expiry → auto-refresh; F3 L2 unreachable → escalate + resume-from-Cosmos-state via I6). Operator's OWN AAD identity per NFR-11 (NEVER a service principal). BINDING: never delete `Dataverse-ClientSecret` / `BFF-API-ClientSecret`. customer-provisioning-orchestration-r1 tasks 075 + 076 (2026-08-18). |
-| Development procedures (test, CI/CD, code review) | [`docs/procedures/`](docs/procedures/) — `testing-and-code-quality.md`, `ci-cd-workflow.md`, `context-recovery.md` |
-| **Testing strategy ADR (standalone)** | [`docs/adr/ADR-038-testing-strategy.md`](docs/adr/ADR-038-testing-strategy.md) — integration-heavy pyramid; 7 KEEP path categories as MUST rules (the `tests/integration/seam/**` vertical-slice-seam category added 2026-07-09 by E-40 — DoD for dispatch-spine changes); coverage = observation never gate (binding ≥6 months from 2026-06-26); ban `Mock<HttpMessageHandler>` + DI-registration + ctor null-check tests. **STANDALONE — does NOT supersede ADR-022 (PCF Platform Libraries)**. ci-cd-unit-test-remediation-r1 Phase 1. |
-| **Test architecture standard (operational)** | [`docs/standards/TEST-ARCHITECTURE.md`](docs/standards/TEST-ARCHITECTURE.md) — test pyramid, 7 KEEP categories with examples, `TimeProvider` over `Stopwatch`, mock-boundary rules, forcing-function enforcement. Cross-referenced by `tests/CLAUDE.md` + `.claude/constraints/testing.md`. |
-| **Component complexity (evaluate complexity, not LOC)** | [`docs/standards/COMPONENT-COMPLEXITY.md`](docs/standards/COMPONENT-COMPLEXITY.md) — the standard behind CLAUDE.md §11.5. **The God-class LOC ratchet (`GodClassGuardTests`) was RETIRED 2026-08-20** — it gated on line count (the wrong instrument) and blocked normal feature work on active files. Replaced by: complexity/cohesion evaluated at `task-create` §3.5.6 + `code-review` (human judgment; a large *cohesive* file is legitimate; decompose when responsibilities diverge) + a **non-blocking observation report** (`scripts/report-large-server-files.ps1`). Deliberate decomposition seeds: `projects/code-quality-and-assurance-r3/notes/red-item-analyses/RED-1,2,4`. |
-| **Active-project registry (hot-path coordination)** | [`projects/INDEX.md`](projects/INDEX.md) — every active worktree (last-30-day-active) with hot-path declarations (BFF / SpaarkeAi / ci-workflows / skill-directives / root-CLAUDE Y/N). Maintained atomically by `project-pipeline` (new project) + `task-execute` Step 0.5 (hot-path touch). No cron. Consumed by `/conflict-check` auto-invoke. 2026-06-26 sweep: 17 active, 13 touch BFF, 8 touch SpaarkeAi. |
-| Dataverse data model (entity schemas, ERD) | [`docs/data-model/`](docs/data-model/) |
-| Azure resources (endpoints, names, conventions) | [`docs/architecture/auth-azure-resources.md`](docs/architecture/auth-azure-resources.md) |
-| Project initialization workflow | [`/design-to-spec`](.claude/skills/design-to-spec/) → [`/project-pipeline`](.claude/skills/project-pipeline/) |
-| **Portfolio tracking + DevOps procedures** | [`docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md`](docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md) (initiation + portfolio integration) · [`docs/procedures/AI-CODING-PROCEDURES-GUIDE.md`](docs/procedures/AI-CODING-PROCEDURES-GUIDE.md) (lifecycle scenarios) · [project #2](https://github.com/users/spaarke-dev/projects/2) (board) — 9 `/devops-*` skills, 9 hooked existing skills; spec: `projects/spaarke-devops-project-tracking-r1/` |
-| Active project state | `projects/{name}/current-task.md` |
-| Auth architecture (Spaarke Auth v2 — canonical) | [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](.claude/adr/ADR-028-spaarke-auth-architecture.md), [`docs/guides/auth-deployment-setup.md`](docs/guides/auth-deployment-setup.md), [`.claude/patterns/auth/spaarke-sso-binding.md`](.claude/patterns/auth/spaarke-sso-binding.md) (design rationale archive: [`.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md`](.claude/AUDIT-FINDINGS-AUTH-SYSTEM.md)) |
-| Active skill audit + sign-off | [`.claude/AUDIT-FINDINGS-SKILLS.md`](.claude/AUDIT-FINDINGS-SKILLS.md), [`.claude/AUDIT-FINDINGS-CLAUDEMD.md`](.claude/AUDIT-FINDINGS-CLAUDEMD.md) |
-| Researcher subagent (deep-dive Microsoft platform topics) | [`.claude/agents/researcher.md`](.claude/agents/researcher.md) |
-| Reversibility archive (removed content preserved by date) | [`.claude/archive/`](.claude/archive/) |
-| Module-specific CLAUDE.md | [`src/server/api/Sprk.Bff.Api/CLAUDE.md`](src/server/api/Sprk.Bff.Api/CLAUDE.md), [`src/client/pcf/CLAUDE.md`](src/client/pcf/CLAUDE.md), [`src/server/shared/CLAUDE.md`](src/server/shared/CLAUDE.md) |
-| Repository structure (top-level overview) | [`README.md`](README.md) |
+| BFF API | `src/server/api/Sprk.Bff.Api/Program.cs` |
+| PCF controls | `src/client/pcf/{Control}/control/index.ts` |
+| Code pages | `src/solutions/{Page}/src/main.tsx` |
+| Dataverse write path (no plugins) | `src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs` |
+| AI pipeline | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` |
+| Shared UI | `src/client/shared/Spaarke.UI.Components/src/index.ts` |
+| Auth | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` |
+| Background jobs | `src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs` |
 
----
+## 14. Context layers (load order)
 
-## 18. Footer
+| Layer | Contains | Load |
+|---|---|---|
+| `src/**` | Implementation — the source of truth | Always, before implementing |
+| `.claude/patterns/` | Pointer files to code entry points | Per task |
+| `.claude/adr/` | Concise ADR rules | Per task |
+| `.claude/constraints/` | Topic constraint summaries | Per task |
+| `.claude/rules/` | Path-scoped rules | Automatically, when editing matching files |
+| `.claude/catalogs/` | AI scope + model catalog | JPS playbook work |
+| `docs/architecture/` | Decisions and rationale | When you need the why |
+| `docs/standards/` | Cross-cutting coding standards | Before implementing new code |
+| `docs/guides/`, `docs/procedures/` | Operations; development workflow | Deploying, configuring, testing |
+| `docs/data-model/` | Dataverse schemas | When touching Dataverse data |
+| `docs/adr/` | Full ADR history | Rarely |
 
-**Maintained by** the project owner. To extend this file: follow the rules in `.claude/skills/ai-procedure-maintenance/SKILL.md`. When in doubt about whether content belongs here vs in `docs/`: if it's a binding rule the agent must apply every turn → here; if it's reference/tutorial → `docs/`. Every PR touching this file MUST add an entry to [`.claude/CHANGELOG.md`](.claude/CHANGELOG.md).
+## 15. Rapidly changing platform topics
+
+For Microsoft and AI platform topics where training data may be stale (Azure AI Foundry, Power Platform, Dataverse MCP, Office add-ins, SharePoint Embedded), use the `researcher` subagent (`.claude/agents/researcher.md`). It checks `knowledge/` first, then Microsoft Learn and official repos.
+
+## 16. Hooks and permissions
+
+Configured in `.claude/settings.json`:
+- `PostToolUse` on Edit runs `scripts/quality/post-edit-lint.sh`; `Stop` runs `scripts/quality/task-quality-gate.sh`.
+- `SessionStart` with the `compact` matcher runs `.claude/hooks/reinject-project-state.ps1`, which re-injects the current project's `current-task.md` and its standing-directive and gotcha sections after compaction. It finds the project from the `work/<project>` branch or the `spaarke-wt-<project>` worktree folder.
+- `permissions.ask` makes the human confirm Key Vault secret delete/purge/recover/restore and client-secret writes (§9).
+
+Other enforcement runs in skills (`task-execute`, `code-review`, `adr-check`), CI (`.github/workflows/`) and `doc-drift-audit` at project transitions.
+
+Add a hook or permission rule only for a narrow, high-frequency check that runs in under 5 seconds with no false positives. Prefer an `ask` rule (the human confirms) over `deny` for policies that change over time.
+
+## 17. Before you … read … (triggers)
+
+When about to do the thing on the left, read the document on the right first. 🔒 marks a guard that holds even if the document is not opened. Full catalogue: `docs/INDEX.md`.
+
+| Before you… | Read first |
+|---|---|
+| Add anything to `Sprk.Bff.Api` | `.claude/constraints/bff-extensions.md` (§10) |
+| Add background work | `.claude/adr/ADR-052-workload-placement.md`. In the BFF: queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob`; no new hand-rolled timer `BackgroundService` |
+| Add a create/update path or a rule a record must satisfy on save | `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`, `.claude/adr/ADR-002-thin-plugins.md`. 🔒 No Dataverse plugins; one server-side owner per invariant; wizards preview only; security fails closed |
+| Change the document create → profile → index pipeline | `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` |
+| Wire a new AI capability or narrative-output consumer, or author an AI executor or playbook | `docs/guides/ai-guide-consumer-wiring.md`, `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`, `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` |
+| Add a capability that opens an Assistant surface; choose bubble/chip/card/tab | `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`, `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` |
+| Build a workspace widget; embed `LegalWorkspaceApp` | `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md`, `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`; embedding: `docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md` |
+| Change Compose save or read/reference | `.claude/adr/ADR-049-compose-shadow-document.md`, `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`, `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md`. 🔒 "Every save ends in a defined outcome" and "untouched blocks are preserved" are a pair — never trade one for the other; no text search in the write path. A new citation shape needs a case in `tests/fixtures/compose-citation-parity/cases.json` |
+| Open a modal | `docs/standards/MODAL-DECISION-CRITERIA.md`, `docs/standards/MODAL-DESIGN-SYSTEM.md`, `.claude/patterns/ui/record-modal-selection.md` (ADR-050) |
+| Choose `Xrm.WebApi` vs the BFF | `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md` |
+| Create an SPE container type | `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`. 🔒 Types are permanent, capped at 25 per tenant and cannot be deleted; creation is delegated-only |
+| Provision or deploy a customer environment | `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`, `/provision-environment`, and §9's Key Vault rule |
+| Create a new code page, or add the Navigator side pane to an entity | `docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`. Registering the Navigator (`ensureNavigatorSidePane()`) is a standard code-page build step |
+| Touch field mapping or set-regarding | `docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md` |
+| Build or configure a data grid | `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` |
+| Touch Calendar components | `src/client/shared/Spaarke.Events.Components/README.md`. 🔒 Keep `src/solutions/CalendarSidePane/` working (unused now, may return) |
+| Change chat attachment limits | `docs/standards/CHAT-ATTACHMENT-POLICY.md` |
+| Write, change or delete tests | `docs/adr/ADR-038-testing-strategy.md`, `docs/standards/TEST-ARCHITECTURE.md` |
+| Touch auth | `.claude/adr/ADR-028-spaarke-auth-architecture.md`, `.claude/constraints/auth.md`, `.claude/patterns/auth/spaarke-sso-binding.md` |
+| Start a project | `/design-to-spec` → `/project-pipeline`; `docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md`; active projects: `projects/INDEX.md` |
+| Find anything else | `docs/INDEX.md`, `.claude/skills/INDEX.md`, `.claude/adr/INDEX.md`, `.claude/FAILURE-MODES.md` |
+
+## 18. Maintaining this file
+
+Read the maintainer notes in the HTML comment at the top of this file's source before editing it.

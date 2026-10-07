@@ -18,7 +18,6 @@
 ```
 tests/
 ├── unit/Sprk.Bff.Api.Tests/          # BFF API unit tests
-├── unit/Spaarke.Plugins.Tests/        # Plugin unit tests
 ├── integration/Spe.Integration.Tests/ # E2E API tests
 └── Spaarke.ArchTests/                 # ADR compliance tests (NetArchTest)
 ```

@@ -5,13 +5,17 @@
  * FR-14). Thin composition over the entity-agnostic `TrackingFieldTrio` core
  * lifted to `@spaarke/ui-components` in task 023 — this file adds a section
  * header + inline error surface, nothing else. It bakes in NO
- * `sprk_communication`-specific option integers or Dataverse field names
- * (task 023's design decision applies here verbatim): the host (task 040
- * assembly) supplies current values, `accessPermissionOptions`, and the
- * write callbacks — exactly the same "values in, onChange callbacks out"
+ * `sprk_communication`-specific Dataverse field names (task 023's design
+ * decision applies here verbatim): the host (task 040 assembly) supplies
+ * current values and the write callbacks — exactly the same "values in,
+ * onChange callbacks out"
  * contract `TrackingFieldTrio` itself already has. This keeps the actual
  * Dataverse field mapping in exactly one place in the tree (the eventual
  * host wiring), per FR-14's entity-agnostic requirement.
+ *
+ * No Access Permission (unified-access-control-r2 task 138, owner Q6): a
+ * communication inherits its parent's permission and its own column is
+ * retired, so the trio renders WITHOUT the pill (`showAccessPermission={false}`).
  *
  * Fluent v9 tokens only (ADR-021, dark-mode correct). No `as
  * React.ComponentType` cast (NFR-05) — `TrackingFieldTrio` is consumed via
@@ -34,18 +38,18 @@ const useStyles = makeStyles({
   disabled: { opacity: 0.6, pointerEvents: 'none' },
 });
 
+/** The trio's pill props are required by its contract; with the pill hidden they carry nothing (task 138). */
+const NO_ACCESS_PERMISSION_OPTIONS: never[] = [];
+const IGNORE_ACCESS_PERMISSION_CHANGE = (): void => undefined;
+
 export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactElement {
   const {
     monitor,
     highPriority,
-    accessPermission,
-    accessPermissionOptions,
     onMonitorChange,
     onHighPriorityChange,
-    onAccessPermissionChange,
     monitorLabel = 'Monitor',
     highPriorityLabel = 'High priority',
-    accessPermissionLabel = 'Access',
     readOnly = false,
     compact = false,
   } = props;
@@ -73,12 +77,6 @@ export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactE
     },
     [runChange, onHighPriorityChange]
   );
-  const handleAccessPermissionChange = React.useCallback(
-    (value: number) => {
-      void runChange(() => onAccessPermissionChange(value));
-    },
-    [runChange, onAccessPermissionChange]
-  );
 
   return (
     <div className={mergeClasses(s.root, compact && s.rootCompact)} data-testid="email-tracking-panel">
@@ -92,15 +90,18 @@ export function EmailTrackingPanel(props: EmailTrackingPanelProps): React.ReactE
         <TrackingFieldTrio
           monitor={monitor}
           highPriority={highPriority}
-          accessPermission={accessPermission}
-          accessPermissionOptions={accessPermissionOptions}
           showTitle={!compact}
           monitorLabel={monitorLabel}
           highPriorityLabel={highPriorityLabel}
-          accessPermissionLabel={accessPermissionLabel}
           onMonitorChange={handleMonitorChange}
           onHighPriorityChange={handleHighPriorityChange}
-          onAccessPermissionChange={handleAccessPermissionChange}
+          disabled={readOnly}
+          // Task 138 (owner Q6): a communication has no Access Permission of its own.
+          showAccessPermission={false}
+          accessPermission={null}
+          accessPermissionOptions={NO_ACCESS_PERMISSION_OPTIONS}
+          accessPermissionLabel=""
+          onAccessPermissionChange={IGNORE_ACCESS_PERMISSION_CHANGE}
         />
       </div>
     </div>

@@ -2,12 +2,18 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted** |
+| Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
+| Updated | 2026-09-12 (Amendment A1) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 2 |
 | Supersedes | n/a |
-| Cross-references | extends ADR-001 (in-process workers); reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
+| Cross-references | **Where** scheduled work runs → [ADR-052](ADR-052-workload-placement.md); this ADR governs **how** it runs inside the BFF (A1 §1 withdraws the original <!-- adr052-drift:allow reason="quotes the withdrawn cross-reference" -->"extends ADR-001 (in-process workers)"<!-- /adr052-drift:allow --> reference). Reinforces ADR-010 (DI minimalism); reuses ADR-012 (shared library); aligns with CLAUDE.md §10 (BFF hygiene). |
+
+> ⚠️ **READ [Amendment A1](#amendment-a1-2026-09-12-placement-runtime-as-built-and-one-dispatch-per-schedule) FIRST.**
+> It corrects this ADR's statement of ADR-001, records how the scheduler actually runs today, and adds the dispatch,
+> idempotency, retry, heartbeat and registration rules. Statements below about Dataverse-persisted job definitions,
+> run history and operator-tuned cron describe the **target state** (A1 §2) — the only store today is in-memory.
 
 ---
 
@@ -61,7 +67,8 @@ public record JobRunContext(
     Guid RunId,
     string CorrelationId,
     JobRunTrigger Trigger,                  // Scheduled | ManualAdmin | OnStartup
-    IDictionary<string, object> Parameters);
+    IDictionary<string, object> Parameters,
+    int Attempt = 1);                       // set by the host per retry of the same run (A1 rule 5; task 100, 2026-09-15)
 
 public record JobRunResult(
     bool Success,
@@ -93,7 +100,7 @@ R3 ships `InMemoryBackgroundJobStore` (default registration). A `DataverseBackgr
 
 - Reads `sprk_backgroundjob` rows on startup + refreshes hourly (or on-demand via `RefreshDefinitionsAsync` after admin enable/disable)
 - For each enabled job, parses cron via Cronos → computes next-fire → dispatches `IScheduledJob.ExecuteAsync` at the right time
-- Wraps each invocation in `JobRetryPolicy` (default 3 attempts, 5s base, 2min cap, exponential 2^(attempt-1))
+- Wraps each invocation in `JobRetryPolicy` (default 3 attempts; no delay before attempt 1, then `BaseDelay·2^(attempt-2)` — 5s, 10s — capped at 2min; corrected 2026-09-13 against `JobRetryPolicy.cs`)
 - Persists `sprk_backgroundjobrun` row per invocation; idempotency probe via `HasRunForScheduledTimeAsync` prevents duplicate execution on restart mid-tick
 - Honors `CancellationToken` end-to-end; `StopAsync` drains in-flight jobs within 30s (NFR-07)
 
@@ -228,4 +235,129 @@ See spec.md AC-2.1 through AC-2.ADR. Highlights:
 - Data model: [`docs/data-model/sprk_backgroundjob.md`](../data-model/sprk_backgroundjob.md), [`docs/data-model/sprk_backgroundjobrun.md`](../data-model/sprk_backgroundjobrun.md)
 - Code: `src/server/shared/Spaarke.Scheduling/`, `src/server/api/Sprk.Bff.Api/Api/Admin/JobsEndpoints.cs`, `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSchedulerJob.cs`
 - Constraints: [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) §§A, F.1
-- Related ADRs: ADR-001 (in-process), ADR-008 (endpoint filters), ADR-009 (Redis), ADR-010 (DI minimalism), ADR-012 (shared library), ADR-029 (BFF publish hygiene), ADR-032 (Null-Object Kill-Switch — applies if any IScheduledJob is feature-gated), ADR-034 (User-record membership — provides `MembershipReconciliationJob` as second reference consumer).
+- Related ADRs: ADR-052 (where scheduled work runs — A1), ADR-004 (queue-driven work), ADR-008 (endpoint filters), ADR-009 (Redis), ADR-010 (DI minimalism), ADR-012 (shared library), ADR-029 (BFF publish hygiene), ADR-032 (Null-Object Kill-Switch — applies if any IScheduledJob is feature-gated), ADR-034 (User-record membership — provides `MembershipReconciliationJob` as second reference consumer).
+
+---
+
+## Amendment A1 (2026-09-12): placement, runtime as built, and one dispatch per schedule
+
+> **Status**: Accepted (path **B**, root CLAUDE.md §6.5; owner decision 2026-09-12). **Driver**:
+> `unified-access-control-r2` task 102 (this text); task 103 implements the lease, slot guard and helper.
+> **Evidence**: [`workload-placement-policy-evaluation.md`](../../projects/unified-access-control-r2/notes/decisions/workload-placement-policy-evaluation.md).
+
+### 1. Placement
+
+Where scheduled work runs is decided by **[ADR-052](ADR-052-workload-placement.md)** — the BFF, a Functions timer,
+or a Container Apps job. This ADR governs **how scheduled work runs inside the BFF**. The earlier cross-reference
+<!-- adr052-drift:allow reason="quotes the withdrawn cross-reference" -->"ADR-001: in-process workers; no Azure Functions"<!-- /adr052-drift:allow -->
+misstated ADR-001 and is withdrawn.
+
+### 2. Runtime as built (verified in code, 2026-09-12)
+
+- The only store is `InMemoryBackgroundJobStore`; no `DataverseBackgroundJobStore` exists, although the
+  `sprk_backgroundjob*` tables are deployed. Durable run history, and cron tuned in Dataverse, are the **target**
+  state. Until that store exists, cron and enablement are set in code at registration.
+- `ScheduledJobHost` starts on **every App Service instance and every deployment slot**, with no lease — each tick
+  is dispatched once **per instance**.
+- `HasRunForScheduledTimeAsync` is **inert** for its stated purpose: memory is lost on restart, and within a
+  process `AdvanceNextFire` already prevents a re-fire.
+- Admin `disable` changes the store on the one instance that served the request; a restart re-seeds the job to its
+  registration default. It is neither durable nor fleet-wide.
+
+### 3. Rules added
+
+1. **One dispatch per schedule (MUST, for jobs that must not run concurrently).** Before dispatch, the host takes
+   a distributed lease that (a) outlives the whole run **including every retry attempt and backoff**, and (b)
+   makes a manual trigger and a scheduled tick of the same job mutually exclusive. A host that does not obtain the
+   lease records the tick as **skipped**, not failed. When **no lease store is configured** (single-instance
+   development), the host dispatches and logs a warning once. When a lease store **is configured but
+   unavailable**, the host retries the acquire with the job backoff, then does **not** dispatch and records the
+   tick as failed (A1.1, owner decision 2026-09-14). Execution remains at-least-once under retry.
+2. **Slots (MUST).** Deployment slots other than production do not run scheduled jobs (a slot-sticky setting the
+   host honours).
+3. **Idempotency (MUST).** Each unit of work takes an **atomic claim** before its side effect and writes a
+   **completion marker** after it; a failed unit releases its claim. A retry never re-applies a unit already
+   marked complete.
+4. **Retry (MUST for new jobs; existing jobs when next touched, as ADR-052 §1 defines it).** Throw from
+   `ExecuteAsync` when a retry could complete work this tick would otherwise lose: the run cannot make progress
+   (its query or a shared dependency is unreachable), or units failed transiently and no later tick will revisit
+   them. Otherwise count failures and complete; the next tick retries. `Success:false` without throwing means a
+   retry cannot help.
+5. **Heartbeat (MUST).** Every attempt emits one structured heartbeat carrying its counts and attempt number,
+   including an attempt with nothing to do, so a missed run is detectable while run history is process-local.
+6. **Registration (MUST).** `services.AddScheduledJob<TJob>(cron, enabled)` — no per-job bootstrap class. (As
+   built by task 103, there is no bootstrap at all; see §5.)
+7. **Host-neutrality (MUST).** Jobs do not depend on `ScheduledJobHost`, `IBackgroundJobStore`,
+   `ScheduledJobRegistry` or the dispatch lease (ADR-052 §5).
+
+### 4. Corrections
+
+- `MembershipReconciliationJob` **shipped** (registered in `MembershipModule`); it is not deferred.
+- Third consumer: `GrantExpiryReminderJob` (`unified-access-control-r2` task 100).
+- §6 above calls the other services' migration "opportunistic". ADR-052 §1 now makes it **when next touched**, held
+  by an ArchTest ratchet.
+
+### 5. Implemented — `unified-access-control-r2` task 103 (2026-09-14)
+
+§2's "no lease — each tick dispatched once per instance" is no longer true:
+
+- **Rule 1.** `IScheduledJobLease` (Spaarke.Scheduling):
+  - **The two implementations.** In the BFF, `RedisScheduledJobLease` runs over the existing Redis connection. It
+    takes the lease with `SET NX PX` (`LockTakeAsync`), and only the holder can extend or release it.
+    `ProcessLocalScheduledJobLease` applies when Redis is off, which is only in Development and Testing: deployed
+    environments cannot start without Redis.
+  - **Renewal.** The lease is renewed every third of `ScheduledJobHostOptions.LeaseDuration` (2 minutes) for the
+    whole run, so the duration bounds only how long a dead holder can block the job.
+  - **Occurrence marker.** A lease alone lets a short run finish and release before a slower instance wakes for the
+    same occurrence. So the lease also records the last dispatched occurrence and refuses any occurrence earlier
+    than or equal to it — the same device the Functions timer trigger uses (its schedule status).
+  - **Lost lease.** A run whose lease another holder takes is cancelled.
+  - **Renewal failing.** A run whose renewals cannot reach Redis continues while its lease is still live. Once renewal
+    has failed for a full `LeaseDuration`, the lease has expired and another instance may take it — only this instance
+    may have lost Redis — so the run is cancelled.
+  - **Maximum run time.** Past `ScheduledJobHostOptions.MaxRunDuration` (default 2 h) the run is cancelled and its lease
+    is no longer renewed, so a hung run (one that ignores cancellation) blocks the job for at most that plus one
+    `LeaseDuration`, never indefinitely.
+  - **Host shutdown** cancels manual runs as well as scheduled ones, so a run and its lease do not outlive the drain.
+  - **The remaining overlap window.** A cancelled run that ignores its cancellation token keeps running. And if Redis
+    loses the key (a failover without persistence) while a run continues, another instance can take the lease for a
+    **later** occurrence until the first holder's next renewal finds it held and cancels — at most a third of
+    `LeaseDuration`, about 40 s. Execution stays at-least-once; per-unit idempotency (rule 3) is the backstop.
+  - **At most one dispatch per occurrence.** The occurrence marker is written when the lease is taken, before the
+    run. An instance that dies between the two loses that occurrence; the next one runs normally.
+  - **Manual trigger.** Triggering a job that is already running gets 409.
+- **Rule 2.** `ScheduledJobHostOptions.RunScheduledJobs` reads `Scheduling:RunScheduledJobs`. Every path that
+  deploys to a staging slot sets `Scheduling__RunScheduledJobs=false` on the slot as a slot setting, before the
+  deploy, so it never swaps into production: `scripts/Deploy-BffApi.ps1 -UseSlotDeploy`,
+  `.github/workflows/deploy-bff-api.yml`, and the L2 control plane's H9 provisioning deploy
+  (`H9BffDeployHandler`, #987). `infrastructure/bicep/modules/deployment-slot.bicep` sets it when it creates a slot.
+- **Rule 6.** Jobs register with `AddScheduledJob<TJob>(cron, enabled)`, and `ScheduledJobRegistry` and
+  `InMemoryBackgroundJobStore` read the registrations in their constructors. The three per-job bootstrap hosted
+  services are deleted, and `WorkloadPlacementGuardTests.ScheduledJobsRegisterThroughAddScheduledJobOnly` keeps them
+  from coming back.
+
+### 6. Still deferred
+
+`DataverseBackgroundJobStore` — durable history, fleet-wide enable/disable (#983). Migrating the 14 hand-rolled timer
+services is tracked in #976.
+
+### A1.1 (2026-09-14): a lease store that is configured but unavailable
+
+**Owner decision** (the task 103 escalation). When the lease store is configured but cannot be reached, the host:
+
+1. retries the acquire with the job retry policy's backoff (by default no delay, then 5 s, then 10 s);
+2. then does **not** dispatch the tick;
+3. records the tick as **failed** and logs an error.
+
+The tick is recorded as failed rather than skipped because every instance loses the store at the same time, so nobody
+runs the tick; "skipped" would make a fleet-wide miss look healthy. A manual trigger fails at once with 503: the admin
+is waiting on the request and can retry.
+
+**Rejected alternatives:**
+- **Dispatch anyway.** Every instance runs the tick. Per-unit idempotency also lives in Redis and fails open (#984),
+  so notifications would duplicate.
+- **Record the tick as skipped.** It hides a fleet-wide miss.
+
+**Cost accepted:** a tick missed during an outage. A job that must not lose one catches up on its next run:
+`PlaybookSchedulerJob` already does (`sprk_lastrundate`), and `GrantExpiryReminderJob` will send the most urgent
+unsent threshold (owner decision, same date; task 100).

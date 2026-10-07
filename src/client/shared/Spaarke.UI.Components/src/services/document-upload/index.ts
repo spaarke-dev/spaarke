@@ -16,10 +16,7 @@ export type {
   ILogger,
   SpeFileMetadata,
   ServiceResult,
-  FileUploadApiRequest,
-  FileDownloadRequest,
-  FileDeleteRequest,
-  FileReplaceRequest,
+  UploadTarget,
   FileUploadRequest,
   UploadFilesRequest,
   UploadProgress,
@@ -33,9 +30,17 @@ export type {
 
 export { consoleLogger } from './types';
 
-// SDAP API Client (SPE file operations)
-export { SdapApiClient } from './SdapApiClient';
-export type { SdapApiClientOptions, OnUnauthorizedCallback } from './SdapApiClient';
+// SDAP API Client — NOT re-exported from here any more (2026-09-03).
+//
+// `./SdapApiClient.ts` was this package's own parallel upload client, one of three in the repo. It
+// is deleted; `FileUploadService` now takes `@spaarke/sdap-client`'s client. Import it from there:
+//
+//     import { SdapApiClient } from '@spaarke/sdap-client';
+//
+// Its `SdapApiClientOptions` / `OnUnauthorizedCallback` types went with it. The replacement config
+// is `{ baseUrl, authenticatedFetch }` (ADR-028) — there is no `getAccessToken` / `onUnauthorized`
+// pair, because `authenticatedFetch` already owns the 401-retry-and-clear-cache behaviour those
+// two existed to provide.
 
 // File Upload Services
 export { FileUploadService } from './FileUploadService';
@@ -47,9 +52,12 @@ export type { NavMapClientOptions, EntitySetNameResponse, CollectionNavigationRe
 
 // Document Record Service (Dataverse CRUD)
 export { DocumentRecordService } from './DocumentRecordService';
-export type { DocumentRecordServiceOptions, EntityConfigResolver } from './DocumentRecordService';
+export type { DocumentRecordServiceOptions, EntityConfigResolver, DocumentFileAttacher } from './DocumentRecordService';
 
-// IDataverseClient implementations
-export { PcfDataverseClient } from './PcfDataverseClient';
+// IDataverseClient implementation (Code Pages). The PCF-side PcfDataverseClient
+// was DELETED 2026-10-03 (reuse audit C-26): zero instantiation sites.
 export { ODataDataverseClient } from './ODataDataverseClient';
+
+// UAC-r2 task 147 r1 (owner round 28 item 1): the upload pipeline's document creates go through the BFF (G5).
+export { withBffChildCreates } from './BffChildRecordDataverseClient';
 export type { ODataDataverseClientOptions } from './ODataDataverseClient';

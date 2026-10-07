@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -20,22 +21,54 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 ///   - POST .../share      — create sharing link
 /// </summary>
 /// <remarks>
-/// Follows ADR-001: Minimal API — no controllers.
-/// Follows ADR-007: No Graph SDK types in the public response.
-/// Follows ADR-008: RequireAuthorization() applied to the route.
+/// <para>Follows ADR-001: Minimal API — no controllers.</para>
+/// <para>Follows ADR-007: No Graph SDK types in the public response.</para>
+/// <para>
+/// ADR-008 — <b>authorization is inherited from the <c>/api/spe</c> group</b>
+/// (<see cref="SpeAdminEndpoints"/>): <c>RequireAuthorization()</c> + <c>SpeAdminAuthorizationFilter</c>
+/// (is the caller an SPE admin at all) + <c>SpeAdminTenantScopeFilter</c> (whose data may that admin
+/// reach). Register every route here on that group. Do NOT re-add a per-route
+/// <c>.RequireAuthorization()</c>.
+/// </para>
+/// <para>
+/// ⚠️ <b>This remark used to read "Follows ADR-008: RequireAuthorization() applied to the route", and
+/// that sentence was the defect.</b> Until task 091 these nine routes were registered on the ROOT app
+/// (<c>EndpointMappingExtensions</c>) while spelling out absolute <c>/api/spe/...</c> paths — so they
+/// sat at admin URLs, looked like admin routes, and carried neither filter. A bare
+/// <c>RequireAuthorization()</c> means <i>authenticated</i>, and neither the <c>DefaultPolicy</c> nor the
+/// <c>FallbackPolicy</c> (an authenticated user since UAC-r2 task 167) raises that bar. Any signed-in caller could enumerate,
+/// download, preview, mint a sharing link for, delete, and upload into any container id they named,
+/// with the client-supplied <c>configId</c> unchecked across tenants. Proven empirically before the
+/// fix — the nine routes answered 500/400 from inside the handler, never 403. The lesson is in the
+/// wording: <b>authentication is not authorization</b>, and a remark asserting compliance is not
+/// compliance.
+/// </para>
+/// <para>Guarded by <c>tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs</c>,
+/// which requests every route in this file as a non-admin and requires 403.</para>
+/// <para>
+/// <b>Per container</b> (unified-access-control-r2 task 165, owner round 20 item 2). The container route value is
+/// named <c>{containerId}</c> (it was <c>{id}</c>; the URLs are unchanged) because that is the value
+/// <c>SpeAdminTenantScopeFilter</c> reads to authorize the request against the CONTAINER's business-unit binding, not
+/// only the config's. A route here spelling the container as anything else would carry only the config check —
+/// <c>SpeAdminPerContainerScopeTests</c> drives every route in this file through that rule.
+/// </para>
 /// </remarks>
 public static class ContainerItemEndpoints
 {
     /// <summary>
-    /// Registers all container item endpoints on the provided route builder.
+    /// Registers all container item endpoints on the <c>/api/spe</c> admin group.
     /// </summary>
-    public static IEndpointRouteBuilder MapContainerItemEndpoints(this IEndpointRouteBuilder app)
+    /// <param name="group">
+    /// The <c>/api/spe</c> group from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/>, which
+    /// carries both authorization layers. Taking <see cref="RouteGroupBuilder"/> rather than
+    /// <see cref="IEndpointRouteBuilder"/> is deliberate: it makes registering these routes on the
+    /// bare application — the original defect — a compile error rather than a silent hole.
+    /// </param>
+    public static void MapContainerItemEndpoints(RouteGroupBuilder group)
     {
-        // GET /api/spe/containers/{id}/items?configId={guid}&folderId={itemId}
+        // GET /api/spe/containers/{containerId}/items?configId={guid}&folderId={itemId}
         // Lists files and folders at the container root or within a specified subfolder.
-        app.MapGet("/api/spe/containers/{id}/items", ListContainerItems)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapGet("/containers/{containerId}/items", ListContainerItems)
             .WithName("ListContainerItems")
             .WithSummary("List files and folders in an SPE container or subfolder")
             .Produces<IReadOnlyList<SpeAdminGraphService.SpeContainerItemSummary>>(StatusCodes.Status200OK)
@@ -46,11 +79,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /api/spe/containers/{id}/items/{itemId}/versions?configId={guid}
+        // GET /api/spe/containers/{containerId}/items/{itemId}/versions?configId={guid}
         // Returns chronological version history for a DriveItem.
-        app.MapGet("/api/spe/containers/{id}/items/{itemId}/versions", GetFileVersions)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapGet("/containers/{containerId}/items/{itemId}/versions", GetFileVersions)
             .WithName("GetFileVersions")
             .WithSummary("Get version history for a file in an SPE container")
             .Produces<IReadOnlyList<SpeAdminGraphService.SpeFileVersionSummary>>(StatusCodes.Status200OK)
@@ -61,11 +92,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /api/spe/containers/{id}/items/{itemId}/thumbnails?configId={guid}
+        // GET /api/spe/containers/{containerId}/items/{itemId}/thumbnails?configId={guid}
         // Returns thumbnail URLs for a DriveItem.
-        app.MapGet("/api/spe/containers/{id}/items/{itemId}/thumbnails", GetFileThumbnails)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapGet("/containers/{containerId}/items/{itemId}/thumbnails", GetFileThumbnails)
             .WithName("GetFileThumbnails")
             .WithSummary("Get thumbnail URLs for a file in an SPE container")
             .Produces<IReadOnlyList<SpeAdminGraphService.SpeThumbnailSet>>(StatusCodes.Status200OK)
@@ -76,11 +105,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // POST /api/spe/containers/{id}/items/{itemId}/share?configId={guid}
+        // POST /api/spe/containers/{containerId}/items/{itemId}/share?configId={guid}
         // Creates a sharing link for a DriveItem.
-        app.MapPost("/api/spe/containers/{id}/items/{itemId}/share", CreateSharingLink)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapPost("/containers/{containerId}/items/{itemId}/share", CreateSharingLink)
             .WithName("CreateSharingLink")
             .WithSummary("Create a sharing link for a file in an SPE container")
             .Accepts<CreateSharingLinkRequest>("application/json")
@@ -92,11 +119,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /api/spe/containers/{id}/items/{itemId}/content?configId={guid}
+        // GET /api/spe/containers/{containerId}/items/{itemId}/content?configId={guid}
         // Streams file content from Graph with correct Content-Type and Content-Disposition headers.
-        app.MapGet("/api/spe/containers/{id}/items/{itemId}/content", DownloadItem)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapGet("/containers/{containerId}/items/{itemId}/content", DownloadItem)
             .WithName("DownloadContainerItem")
             .WithSummary("Download a file from an SPE container")
             .Produces(StatusCodes.Status200OK, contentType: "application/octet-stream")
@@ -107,11 +132,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // GET /api/spe/containers/{id}/items/{itemId}/preview?configId={guid}
+        // GET /api/spe/containers/{containerId}/items/{itemId}/preview?configId={guid}
         // Returns a temporary preview URL for browser-based document viewing.
-        app.MapGet("/api/spe/containers/{id}/items/{itemId}/preview", PreviewItem)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapGet("/containers/{containerId}/items/{itemId}/preview", PreviewItem)
             .WithName("PreviewContainerItem")
             .WithSummary("Get a temporary preview URL for a file in an SPE container")
             .Produces<PreviewUrlResponse>(StatusCodes.Status200OK)
@@ -122,11 +145,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // DELETE /api/spe/containers/{id}/items/{itemId}?configId={guid}
+        // DELETE /api/spe/containers/{containerId}/items/{itemId}?configId={guid}
         // Deletes the item via Graph and writes an audit log entry.
-        app.MapDelete("/api/spe/containers/{id}/items/{itemId}", DeleteItem)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapDelete("/containers/{containerId}/items/{itemId}", DeleteItem)
             .WithName("DeleteContainerItem")
             .WithSummary("Delete a file or folder from an SPE container")
             .Produces(StatusCodes.Status204NoContent)
@@ -137,11 +158,9 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // POST /api/spe/containers/{id}/folders?configId={guid}
+        // POST /api/spe/containers/{containerId}/folders?configId={guid}
         // Creates a new folder at the container root or within a specified parent folder.
-        app.MapPost("/api/spe/containers/{id}/folders", CreateFolder)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapPost("/containers/{containerId}/folders", CreateFolder)
             .WithName("CreateFolder")
             .WithSummary("Create a new folder in an SPE container")
             .Accepts<CreateFolderRequest>("application/json")
@@ -154,12 +173,10 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        // POST /api/spe/containers/{id}/items/upload?configId={guid}&folderId={itemId}
+        // POST /api/spe/containers/{containerId}/items/upload?configId={guid}&folderId={itemId}
         // Uploads a file into an SPE container. Accepts multipart/form-data with a "file" field.
         // Routes to direct PUT (< 4 MB) or resumable upload session (>= 4 MB) automatically.
-        app.MapPost("/api/spe/containers/{id}/items/upload", UploadContainerItem)
-            .RequireAuthorization()
-            .WithTags("SpeAdmin")
+        group.MapPost("/containers/{containerId}/items/upload", UploadContainerItem)
             .WithName("UploadContainerItem")
             .WithSummary("Upload a file into an SPE container or subfolder")
             .Produces<SpeAdminGraphService.SpeContainerItemSummary>(StatusCodes.Status201Created)
@@ -170,8 +187,6 @@ public static class ContainerItemEndpoints
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError)
             .DisableAntiforgery(); // multipart form uploads require antiforgery to be disabled (or handled separately)
-
-        return app;
     }
 
     // -------------------------------------------------------------------------
@@ -241,7 +256,7 @@ public static class ContainerItemEndpoints
     /// <paramref name="folderId"/> — optional DriveItem ID; when omitted root children are returned.
     /// </summary>
     private static async Task<IResult> ListContainerItems(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         Guid configId,
         string? folderId,
         SpeAdminGraphService graphService,
@@ -298,7 +313,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution fails in GetClientForConfigAsync
+            // Surfaced by GetClientForConfigAsync: config not in the BFF's tenant, or no Graph client factory
             logger.LogError(ex,
                 "Configuration error listing items — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",
@@ -312,7 +327,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // GET /api/spe/containers/{id}/items/{itemId}/versions
+    // GET /api/spe/containers/{containerId}/items/{itemId}/versions
     // =========================================================================
 
     /// <summary>
@@ -322,7 +337,7 @@ public static class ContainerItemEndpoints
     /// Versions are ordered oldest-first (v1.0 at index 0).
     /// </summary>
     private static async Task<IResult> GetFileVersions(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         SpeAdminGraphService graphService,
@@ -390,7 +405,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // GET /api/spe/containers/{id}/items/{itemId}/thumbnails
+    // GET /api/spe/containers/{containerId}/items/{itemId}/thumbnails
     // =========================================================================
 
     /// <summary>
@@ -400,7 +415,7 @@ public static class ContainerItemEndpoints
     /// Returns an empty array for folders or items that do not support thumbnails.
     /// </summary>
     private static async Task<IResult> GetFileThumbnails(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         SpeAdminGraphService graphService,
@@ -468,7 +483,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // POST /api/spe/containers/{id}/items/{itemId}/share
+    // POST /api/spe/containers/{containerId}/items/{itemId}/share
     // =========================================================================
 
     /// <summary>
@@ -479,7 +494,7 @@ public static class ContainerItemEndpoints
     /// and an optional expiration date.
     /// </summary>
     private static async Task<IResult> CreateSharingLink(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         CreateSharingLinkRequest request,
@@ -562,7 +577,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // POST /api/spe/containers/{id}/folders
+    // POST /api/spe/containers/{containerId}/folders
     // =========================================================================
 
     /// <summary>
@@ -582,7 +597,7 @@ public static class ContainerItemEndpoints
     /// Returns 201 Created with the created folder's metadata including ID, name, and timestamps.
     /// </summary>
     private static async Task<IResult> CreateFolder(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         Guid configId,
         CreateFolderRequest request,
         SpeAdminGraphService graphService,
@@ -666,7 +681,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution or drive ID resolution fails.
+            // Surfaced by GetClientForConfigAsync's tenant guard, or when drive ID resolution fails.
             logger.LogError(ex,
                 "Configuration error creating folder — Container: {ContainerId}, FolderName: {FolderName}, " +
                 "ConfigId: {ConfigId}, TraceId: {TraceId}",
@@ -680,7 +695,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // GET /api/spe/containers/{id}/items/{itemId}/content
+    // GET /api/spe/containers/{containerId}/items/{itemId}/content
     // =========================================================================
 
     /// <summary>
@@ -693,7 +708,7 @@ public static class ContainerItemEndpoints
     /// Returns 404 when the item does not exist.
     /// </summary>
     private static async Task<IResult> DownloadItem(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         SpeAdminGraphService graphService,
@@ -781,7 +796,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // GET /api/spe/containers/{id}/items/{itemId}/preview
+    // GET /api/spe/containers/{containerId}/items/{itemId}/preview
     // =========================================================================
 
     /// <summary>
@@ -793,7 +808,7 @@ public static class ContainerItemEndpoints
     /// Returns 404 when the item does not exist.
     /// </summary>
     private static async Task<IResult> PreviewItem(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         SpeAdminGraphService graphService,
@@ -872,7 +887,7 @@ public static class ContainerItemEndpoints
     }
 
     // =========================================================================
-    // DELETE /api/spe/containers/{id}/items/{itemId}
+    // DELETE /api/spe/containers/{containerId}/items/{itemId}
     // =========================================================================
 
     /// <summary>
@@ -886,7 +901,7 @@ public static class ContainerItemEndpoints
     /// Returns 404 when the item does not exist.
     /// </summary>
     private static async Task<IResult> DeleteItem(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         string itemId,
         Guid configId,
         SpeAdminGraphService graphService,
@@ -992,7 +1007,7 @@ public static class ContainerItemEndpoints
     /// Audit log: writes "FileUploaded" category entry to sprk_speauditlog (fire-and-forget).
     /// </summary>
     private static async Task<IResult> UploadContainerItem(
-        string id,
+        [FromRoute(Name = "containerId")] string id,
         Guid configId,
         string? folderId,
         HttpRequest request,
@@ -1101,7 +1116,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced when Key Vault secret resolution or upload session creation fails.
+            // Surfaced by GetClientForConfigAsync's tenant guard, or when upload session creation fails.
             logger.LogError(ex,
                 "Configuration error uploading file — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",

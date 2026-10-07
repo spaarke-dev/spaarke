@@ -4,6 +4,7 @@ using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
@@ -37,10 +38,22 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// it executes. (Never gate by tool-name lists — ADR-039.)
 /// </para>
 /// <para>
-/// <b>User-OBO ONLY (spec MUST rule)</b>: the record is created through
+/// <b>User-OBO (spec MUST rule)</b>: the record is created through
 /// <see cref="IDataverseUserClient"/> under the CALLING USER's exchanged token — a user who
-/// cannot create communications fails with their own access error; no app-only path is
-/// reachable from this class (same posture as the task-009 dataverse.* write handlers).
+/// cannot create communications fails with their own access error (same posture as the task-009
+/// dataverse.* write handlers).
+/// </para>
+/// <para>
+/// <b>The User-OBO rule is AMENDED for this create — owner round 7 item 3 (2026-10-02), CLAUDE.md §6.5 path B</b>
+/// (unified-access-control-r2 task 146; it supersedes the r2 path-A exception and is recorded in
+/// spaarke-ai-architecture-redesign-r1's spec and the task 146 note §13): the G5 pattern. A draft FILED under a project,
+/// matter or work assignment (its regarding, or the FR-26 stamp of one) is checked AS THE CALLER (Create/Append, AppendTo
+/// on every record named), then created by the APPLICATION owned by the team
+/// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> names — the named Secure team for a secure
+/// one — with the drafting user recorded in the "for" column, the sender (<c>sprk_sentby</c>; Created By is then the
+/// application). See <see cref="OwnedChildWrite"/>. An UNFILED draft keeps its creator — the resolver's own answer for
+/// an unfiled communication (escalation E1: the per-user master thread keys on the owning user, and a team-owned draft
+/// would show one person's unsent email to their whole business unit), so it is still created as the user.
 /// </para>
 /// <para>
 /// <b>Ledger grounding (ADR-039/ADR-040)</b>: <c>source_refs</c> carries the addressable
@@ -136,19 +149,38 @@ public sealed class EmailDraftToolHandler : IToolHandler
 
     private readonly IDataverseUserClient _dataverse;
     private readonly IEmailDraftAi _emailDraftAi;
+
+    /// <summary>FR-26 core-ancestor derivation for the drafted communication (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
     private readonly ILogger<EmailDraftToolHandler> _logger;
+
+    /// <summary>Task 146 r2 (S1 / G5): the owner of a FILED draft.</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
+    /// <summary>Task 146 r2 (S1 / G5): the app-only create of a FILED draft, after the as-the-caller check.</summary>
+    private readonly Spaarke.Dataverse.IFieldMappingDataverseService _appOnly;
 
     public EmailDraftToolHandler(
         IDataverseUserClient dataverse,
         IEmailDraftAi emailDraftAi,
-        ILogger<EmailDraftToolHandler> logger)
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        ILogger<EmailDraftToolHandler> logger,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Spaarke.Dataverse.IFieldMappingDataverseService appOnly)
     {
+        // Both unconditionally registered (MetadataServiceExtensions / GraphModule): no asymmetric registration (§10 F.1).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _appOnly = appOnly ?? throw new ArgumentNullException(nameof(appOnly));
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         // ADR-013 / BFF §10: AI text generation is consumed through the PublicContracts facade
         // (never IChatClient/IOpenAiClient injected into this handler). Always resolvable — a
         // NullEmailDraftAi mirror is registered when the AzureOpenAI gate is off (ADR-032; AiModule),
         // so adding this dependency does NOT create an asymmetric-registration risk (§10 F.1).
         _emailDraftAi = emailDraftAi ?? throw new ArgumentNullException(nameof(emailDraftAi));
+        // FR-26 (task 052). Registered by AddToolFramework alongside the handler assembly scan, so
+        // this dependency is resolvable wherever the handler is - no asymmetric registration (§10 F.1).
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -298,9 +330,50 @@ public sealed class EmailDraftToolHandler : IToolHandler
                     stopwatch);
             }
 
+            // FR-26 core-ancestor derivation (task 052) BEFORE the item is built, so a failure aborts
+            // before any payload exists and cannot become a partially-built write. Two of the eight
+            // regarding tables this tool accepts are child-class (sprk_analysis, sprk_invoice), so a draft
+            // filed against an invoice would otherwise carry no matter stamp and be invisible to everyone
+            // whose access comes from that matter.
+            IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps = [];
+            if (args.RegardingTable is not null && args.RegardingRecordId is { } ancestorTargetId)
+            {
+                var ancestors = await _coreAncestors
+                    .DeriveForHostAsync(CommunicationTable, args.RegardingTable, ancestorTargetId, cancellationToken)
+                    .ConfigureAwait(false);
+
+                if (!ancestors.Succeeded)
+                {
+                    // NFR-01 fail-closed, in this handler's existing error contract (a ToolResult error the
+                    // model surfaces to the user), NOT a silent unstamped draft.
+                    return LogOutcome(context, args,
+                        Error(tool,
+                            "The regarding record's access ancestry could not be resolved, so the draft was not created.",
+                            ToolErrorCodes.InternalError, startedAt),
+                        stopwatch);
+                }
+
+                ancestorStamps = ancestors.Stamps;
+            }
+
+            // Task 146 r2 (S1 / G5): a draft FILED under a project, matter or work assignment — its regarding, or the
+            // FR-26 stamp of one — is created by the application owned by that record's team, so the drafting user is
+            // recorded as its sender (S1's "for" person; Created By is then the application).
+            Guid? sender = null;
+            if (IsFiledUnderAnOwnershipParent(args, ancestorStamps))
+            {
+                var me = await OwnedChildWrite.WhoAmIAsync(_dataverse, cancellationToken).ConfigureAwait(false);
+                if (me.Failure is { } whoAmIFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, whoAmIFailure, startedAt), stopwatch);
+                }
+
+                sender = me.SystemUserId;
+            }
+
             // Build the record ITEM server-side (Communication-service column contract).
             // DRAFT-ONLY: statuscode/statecode are pinned constants — never model-supplied.
-            var item = BuildCommunicationItem(args, context);
+            var item = BuildCommunicationItem(args, context, ancestorStamps, sender);
 
             // Reuse the task-009 write mapper: metadata-driven lookup navigation-property
             // resolution for the regarding association, OData-annotation smuggling blocked.
@@ -314,31 +387,67 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 return LogOutcome(context, args, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
-            var response = await _dataverse.PostAsync(
-                $"/api/data/v9.2/{entitySetName}",
-                mapped.Item!.JsonBody,
-                preferRepresentation: true,
-                cancellationToken).ConfigureAwait(false);
-            if (!response.IsSuccess)
-            {
-                // Privilege-denied create surfaces the USER's own access error — never escalates.
-                return LogOutcome(context, args, MapClientError(tool, response, startedAt), stopwatch);
-            }
-
             var warnings = new List<string>();
             Guid? communicationId = null;
-            if (response.Body is { } body &&
-                body.ValueKind == JsonValueKind.Object &&
-                body.TryGetProperty(primaryIdAttribute, out var idProp) &&
-                idProp.ValueKind == JsonValueKind.String &&
-                Guid.TryParse(idProp.GetString(), out var parsedId))
+
+            if (OwnedChildWrite.AppliesTo(CommunicationTable, mapped.Item!))
             {
-                communicationId = parsedId;
+                // S1 / G5 (task 146 r2): as the caller → owner from the one resolver → the application creates it owned
+                // by that team. Refusals write nothing; a Dataverse fault propagates to the catch below.
+                var owned = await OwnedChildWrite.CreateAsync(
+                    _dataverse, _ownership, _appOnly, CommunicationTable, mapped.Item!,
+                    serverSetLookupColumns: new HashSet<string>(StringComparer.OrdinalIgnoreCase) { SenderLookupColumn },
+                    Guid.TryParse(context.UserId, out var oid) && oid != Guid.Empty ? oid : null,
+                    cancellationToken).ConfigureAwait(false);
+
+                if (owned.ClientFailure is { } ownedFailure)
+                {
+                    return LogOutcome(context, args, MapClientError(tool, ownedFailure, startedAt), stopwatch);
+                }
+
+                if (owned.Denied is { } denied)
+                {
+                    return LogOutcome(context, args, Error(tool, denied, DataverseUserClientErrorCodes.AccessDenied, startedAt), stopwatch);
+                }
+
+                if (owned.CreatedId is not { } ownedId)
+                {
+                    var refusal = owned.OwnerRefusal;
+                    return LogOutcome(context, args,
+                        Error(tool,
+                            $"The draft was NOT created: its owner could not be decided — {refusal?.Reason} ({refusal?.RefusalCode}).",
+                            refusal?.RefusalCode ?? ToolErrorCodes.InternalError, startedAt),
+                        stopwatch);
+                }
+
+                communicationId = ownedId;
             }
             else
             {
-                warnings.Add("The draft record was created but Dataverse did not echo the created row; the record id " +
-                             "could not be determined. The user can locate the draft in the Communication service.");
+                var response = await _dataverse.PostAsync(
+                    $"/api/data/v9.2/{entitySetName}",
+                    mapped.Item!.JsonBody,
+                    preferRepresentation: true,
+                    cancellationToken).ConfigureAwait(false);
+                if (!response.IsSuccess)
+                {
+                    // Privilege-denied create surfaces the USER's own access error — never escalates.
+                    return LogOutcome(context, args, MapClientError(tool, response, startedAt), stopwatch);
+                }
+
+                if (response.Body is { } body &&
+                    body.ValueKind == JsonValueKind.Object &&
+                    body.TryGetProperty(primaryIdAttribute, out var idProp) &&
+                    idProp.ValueKind == JsonValueKind.String &&
+                    Guid.TryParse(idProp.GetString(), out var parsedId))
+                {
+                    communicationId = parsedId;
+                }
+                else
+                {
+                    warnings.Add("The draft record was created but Dataverse did not echo the created row; the record id " +
+                                 "could not be determined. The user can locate the draft in the Communication service.");
+                }
             }
 
             var citationPath = communicationId.HasValue
@@ -802,7 +911,21 @@ public sealed class EmailDraftToolHandler : IToolHandler
     /// outgoing-email discriminators are CONSTANTS here — the parsed args carry no status,
     /// direction, or type vocabulary, so no model/prompt content can alter them.
     /// </summary>
-    private static JsonElement BuildCommunicationItem(EmailDraftArgs args, ChatInvocationContext context)
+    /// <summary>The draft's sender lookup — the "for" person of a draft the application creates (task 146 r2, S1).</summary>
+    internal const string SenderLookupColumn = "sprk_sentby";
+
+    /// <summary>True when the draft's regarding, or an FR-26 stamp of it, is a record the resolver files children under.</summary>
+    private static bool IsFiledUnderAnOwnershipParent(
+        EmailDraftArgs args, IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps) =>
+        (args.RegardingTable is { } table && args.RegardingRecordId is not null
+            && Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(table))
+        || ancestorStamps.Any(s => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(s.EntityType));
+
+    private static JsonElement BuildCommunicationItem(
+        EmailDraftArgs args,
+        ChatInvocationContext context,
+        IReadOnlyList<Sprk.Bff.Api.Services.Dataverse.CoreAncestorStamp> ancestorStamps,
+        Guid? sender = null)
     {
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
@@ -823,6 +946,16 @@ public sealed class EmailDraftToolHandler : IToolHandler
             writer.WriteString("sprk_body", args.Body);
             writer.WriteString("sprk_correlationid", context.DecisionId.ToString("N"));
 
+            if (sender is { } senderId)
+            {
+                // Task 146 r2 (S1): the drafting user, for a draft the application creates on their behalf.
+                writer.WritePropertyName(SenderLookupColumn);
+                writer.WriteStartObject();
+                writer.WriteString("relatedTable", "systemuser");
+                writer.WriteString("recordId", senderId.ToString("D"));
+                writer.WriteEndObject();
+            }
+
             if (args.RegardingTable is not null && args.RegardingRecordId is { } regardingId)
             {
                 // Communication-service association contract (regarding lookup + denormalized
@@ -838,6 +971,19 @@ public sealed class EmailDraftToolHandler : IToolHandler
                 if (!string.IsNullOrWhiteSpace(args.RegardingName))
                 {
                     writer.WriteString("sprk_regardingrecordname", Truncate(args.RegardingName!, 100));
+                }
+
+                // FR-26 core-ancestor stamps (task 052) — emitted in the SAME mapper object shape as the
+                // regarding lookup above, so navigation properties stay metadata-resolved. Written last so
+                // nothing above can overwrite them; the directly-bound target is already excluded upstream
+                // by DeriveForHostAsync.
+                foreach (var stamp in ancestorStamps)
+                {
+                    writer.WritePropertyName(stamp.LookupAttribute);
+                    writer.WriteStartObject();
+                    writer.WriteString("relatedTable", stamp.EntityType);
+                    writer.WriteString("recordId", stamp.RecordId.ToString("D"));
+                    writer.WriteEndObject();
                 }
             }
 

@@ -118,12 +118,41 @@ public sealed record CreateTaskRequest
     public required string Subject { get; init; }
     public string? Description { get; init; }
 
-    /// <summary>Due date; converted to UTC (matching the node's <c>ToUniversalTime()</c>).</summary>
+    /// <summary>Due date (<c>sprk_duedate</c>); converted to UTC (matching the node's <c>ToUniversalTime()</c>).</summary>
     public DateTime? DueDate { get; init; }
+
+    /// <summary>
+    /// Final/outer due date (<c>sprk_event.sprk_finalduedate</c>) — the later "must be done by" bound where
+    /// <see cref="DueDate"/> is the target. Optional; null leaves the column unset.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-29 (<c>spaarke-ontology-platform-r1</c>). <c>DailyBriefingCollector</c>'s task channels
+    /// read <c>sprk_finalduedate</c> FIRST and fall back to <c>sprk_duedate</c>, and they filter by date — so a
+    /// task with neither set cannot appear in the briefing at all, however correctly it was created.
+    /// </remarks>
+    public DateTime? FinalDueDate { get; init; }
 
     public Guid? RegardingObjectId { get; init; }
     public string? RegardingObjectType { get; init; }
     public Guid? OwnerId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 152: the systemuser the task is FOR (the assignee the confirming user chose, else
+    /// the confirming user; the recipient a signal is for). Their linked contact becomes <c>sprk_event.sprk_assignedto</c> when no
+    /// <see cref="AssignedToContactId"/> is supplied. Null → the regarding parent's responsible internal contact.
+    /// </summary>
+    public Guid? ActingUserId { get; init; }
+
+    /// <summary>A supplied assignee (contact) for <c>sprk_event.sprk_assignedto</c>. Never overwritten.</summary>
+    public Guid? AssignedToContactId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 146 c1-r1 (owner round 13 item 9): the systemuser who ASKED for the task (the user
+    /// confirming a proposal), recorded as the app-created task's creator person (<c>sprk_createdbyperson</c>) so F3's
+    /// "or the creator" branch can admit them. Null when nobody asked. Distinct from <see cref="ActingUserId"/>, the
+    /// person the task is FOR.
+    /// </summary>
+    public Guid? RequestedBySystemUserId { get; init; }
 }
 
 /// <summary>Result of a <see cref="IActionSeam.CreateTaskAsync"/> call. <see cref="TaskId"/> is
@@ -175,8 +204,10 @@ public sealed record UpdateRecordRequest
     /// <summary>
     /// OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH AS, via <c>MSCRMCallerID</c> impersonation
     /// (effective privileges = intersection of the BFF app user and this user; honest <c>modifiedby</c>).
-    /// Null/empty = app-only — the default for every playbook/node-executor and Phase 4/5 caller, so their write
-    /// is byte-unchanged. Supplied only by the Job B apply endpoint (task 031) with the confirming user's id, so
+    /// Null = app-only: the default for every playbook/node-executor and Phase 4/5 caller, so their write is
+    /// byte-unchanged. <see cref="Guid.Empty"/> is refused with an <see cref="ArgumentException"/> before the PATCH
+    /// is sent (unified-access-control-r2 task 104, fail closed); it is not turned into a failed
+    /// <c>UpdateRecordResult</c>. Supplied only by the Job B apply endpoint (task 031) with the confirming user's id, so
     /// the human-approved field update is attributed to and gated by them at the Dataverse layer.
     /// </summary>
     public Guid? ImpersonateSystemUserId { get; init; }

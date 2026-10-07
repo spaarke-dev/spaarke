@@ -19,7 +19,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// Ignored when <paramref name="RecordType"/> is supplied.
 /// </param>
 /// <param name="AccessLevel">The access level to grant (ViewOnly, Collaborate, or FullAccess).</param>
-/// <param name="ExpiryDate">Optional expiry date for the access grant.</param>
+/// <param name="ExpiryDate">
+/// Optional in the REQUEST, never absent from a grant this API writes (spec FR-33, task 097). A date before today
+/// is rejected (400 <c>sdap.access.grant.expiry_in_past</c>); today is valid. When omitted, the grant keeps
+/// its existing expiry, or — for a new or unbounded grant — gets today + 90 days.
+/// </param>
 /// <param name="OrganizationId">
 /// Optional grantee firm/organization — a <c>sprk_organization</c> id (NOT the OOB <c>account</c>).
 /// When supplied it is written to the grant's <c>sprk_Organization</c> lookup for firm-level scoping.

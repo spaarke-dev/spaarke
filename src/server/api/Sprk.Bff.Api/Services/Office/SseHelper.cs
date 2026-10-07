@@ -126,9 +126,9 @@ public static class SseHelper
     /// Formats a connected event sent on initial connection.
     /// </summary>
     /// <param name="jobId">The job ID being streamed.</param>
-    /// <param name="eventId">Initial event ID.</param>
+    /// <param name="eventId">Normally none: the connection is not a published event, so it must not move the client's Last-Event-ID (task 068).</param>
     /// <returns>Formatted connected event bytes.</returns>
-    public static byte[] FormatConnected(Guid jobId, string eventId)
+    public static byte[] FormatConnected(Guid jobId, string? eventId = null)
     {
         return FormatEvent(EventTypes.Connected, new ConnectedPayload
         {
@@ -146,7 +146,7 @@ public static class SseHelper
     /// <param name="timestamp">When the update occurred.</param>
     /// <param name="eventId">Event ID for reconnection support.</param>
     /// <returns>Formatted stage update event bytes.</returns>
-    public static byte[] FormatStageUpdate(string stage, string status, DateTimeOffset timestamp, string eventId)
+    public static byte[] FormatStageUpdate(string stage, string status, DateTimeOffset timestamp, string? eventId)
     {
         return FormatEvent(EventTypes.StageUpdate, new StageUpdatePayload
         {
@@ -163,7 +163,7 @@ public static class SseHelper
     /// <param name="currentPhase">Current processing phase.</param>
     /// <param name="eventId">Event ID for reconnection support.</param>
     /// <returns>Formatted progress event bytes.</returns>
-    public static byte[] FormatProgress(int progress, string? currentPhase, string eventId)
+    public static byte[] FormatProgress(int progress, string? currentPhase, string? eventId)
     {
         return FormatEvent(EventTypes.Progress, new ProgressPayload
         {
@@ -181,7 +181,7 @@ public static class SseHelper
     /// <param name="documentUrl">URL to the created document.</param>
     /// <param name="eventId">Event ID for reconnection support.</param>
     /// <returns>Formatted job complete event bytes.</returns>
-    public static byte[] FormatJobComplete(Guid jobId, Guid? documentId, string? documentUrl, string eventId)
+    public static byte[] FormatJobComplete(Guid jobId, Guid? documentId, string? documentUrl, string? eventId)
     {
         return FormatEvent(EventTypes.JobComplete, new JobCompletePayload
         {
@@ -202,7 +202,7 @@ public static class SseHelper
     /// <param name="retryable">Whether the job can be retried.</param>
     /// <param name="eventId">Event ID for reconnection support.</param>
     /// <returns>Formatted job failed event bytes.</returns>
-    public static byte[] FormatJobFailed(Guid jobId, string errorCode, string errorMessage, bool retryable, string eventId)
+    public static byte[] FormatJobFailed(Guid jobId, string errorCode, string errorMessage, bool retryable, string? eventId)
     {
         return FormatEvent(EventTypes.JobFailed, new JobFailedPayload
         {

@@ -30,9 +30,9 @@
 The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retrieval capabilities for AI Document Intelligence features. It enables:
 
 - **Hybrid Search**: Combines keyword, vector, and semantic ranking for optimal relevance
-- **Multi-Tenant Isolation**: Three deployment models (Shared, Dedicated, CustomerOwned)
+- **Per-Customer Isolation**: a dedicated AI Search service and index per customer (`Dedicated`, the default), or the customer's own AI Search under BYOK (`CustomerOwned`). The former `Shared` model is **retired** — see [Deployment Models](#deployment-models).
 - **High Performance**: Redis-cached embeddings, P95 < 500ms target latency
-- **Scalability**: Per-customer indexes for enterprise customers
+- **Scalability**: Per-customer indexes for every customer
 
 ### Key Design Decisions
 
@@ -52,11 +52,10 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │                        BFF API Layer                            │
 ├─────────────────────────────────────────────────────────────────┤
 │  RagEndpoints.cs                                                │
-│  ├── POST /api/ai/rag/search      → Hybrid search               │
-│  ├── POST /api/ai/rag/index       → Index document              │
-│  ├── POST /api/ai/rag/index/batch → Batch index                 │
-│  ├── DELETE /api/ai/rag/{id}      → Delete document             │
-│  ├── DELETE /api/ai/rag/source/{id} → Delete by source          │
+│  ├── POST /api/ai/rag/search      → Hybrid search (rows trimmed │
+│  │                                 to documents caller can Read)│
+│  ├── POST /api/ai/rag/index       → Index chunk (SystemAdmin)   │
+│  ├── DELETE /api/ai/rag/{id}      → Delete chunk (SystemAdmin)  │
 │  └── POST /api/ai/rag/embedding   → Generate embedding          │
 └─────────────────────────────────────────────────────────────────┘
                               │
@@ -87,10 +86,9 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 │  ├── GetEmbeddingAsync()        → Retrieve cached embedding     │
 │  └── SetEmbeddingAsync()        → Store embedding with TTL      │
 │                                                                 │
-│  ReferenceIndexingService (ReferenceIndexingService.cs)            │
-│  ├── IndexKnowledgeSourceAsync()   → Index single knowledge source │
-│  ├── DeleteKnowledgeSourceAsync()  → Delete source chunks          │
-│  └── IndexAllReferencesAsync()     → Batch index all sources       │
+│  (golden reference WRITES: operator scripts only —                 │
+│   scripts/ai-search/Add-ReferenceToIndex.ps1 / Index-AllReferences │
+│   .ps1; ReferenceIndexingService was removed by uac-r2 task 163)   │
 │                                                                    │
 │  ReferenceRetrievalService (ReferenceRetrievalService.cs)          │
 │  └── SearchReferencesAsync()  → Hybrid search against references   │
@@ -125,8 +123,12 @@ The Spaarke RAG (Retrieval-Augmented Generation) system provides knowledge retri
 | `IOpenAiClient` | Azure OpenAI API calls (embeddings + chat) | Singleton |
 | `RagIndexingJobHandler` | Async job processing with idempotency | Scoped |
 | `IIdempotencyService` | Duplicate detection and processing locks | Singleton |
-| `ReferenceIndexingService` | Index knowledge sources into golden reference index | Singleton |
 | `ReferenceRetrievalService` | Query golden reference index (L1 knowledge) | Singleton |
+
+The golden reference index is WRITTEN only by the operator scripts `scripts/ai-search/Add-ReferenceToIndex.ps1` /
+`Index-AllReferences.ps1`. The BFF writer (`ReferenceIndexingService`, with `ISchemaMapper` /
+`KnowledgeDocumentSchemaMapper`) and its `/api/admin/knowledge/*` routes were removed by unified-access-control-r2
+task 163 (owner round 10 item 1: no caller, in no published API description).
 
 ---
 
@@ -232,50 +234,59 @@ The RAG indexing pipeline provides end-to-end file indexing with three entry poi
 
 ## Deployment Models
 
-The RAG system supports three deployment models to accommodate different customer requirements:
+> **Rewritten 2026-09-28 (D-12)**: this section previously named a triad **Shared / Dedicated /
+> CustomerOwned** and marked **Shared** as the **default**, isolated by a `tenantId` filter. 🔴 **`Shared` is
+> RETIRED — never provision it.** **`Dedicated` is now the default.** See the retirement note below for why
+> the `tenantId` filter never delivered *customer* isolation.
 
-### Shared Model (Default)
+The `RagDeploymentModel` enum still carries three values, but only two are provisionable:
 
-```
-┌─────────────────────────────────────────┐
-│      spaarke-knowledge-index            │
-├─────────────────────────────────────────┤
-│  tenantId: "tenant-a" │ document data   │
-│  tenantId: "tenant-b" │ document data   │
-│  tenantId: "tenant-c" │ document data   │
-└─────────────────────────────────────────┘
-              │
-              ▼ Filter: tenantId == "tenant-a"
-┌─────────────────────────────────────────┐
-│  Results for tenant-a only              │
-└─────────────────────────────────────────┘
-```
+| Value | Status | When |
+|---|---|---|
+| **`Dedicated`** | ✅ **DEFAULT** | Model 1 and Model 2 — a dedicated AI Search service and index per customer |
+| **`CustomerOwned`** | ✅ supported | Model 2 + BYOK — AI Search in the customer's own Azure subscription |
+| ~~`Shared`~~ | 🔴 **RETIRED — never provision** | — |
 
-| Aspect | Details |
-|--------|---------|
-| **Index Name** | `spaarke-knowledge-index-v2` |
-| **Isolation** | Logical (tenantId filter on all queries) |
-| **Cost** | Lowest (shared infrastructure) |
-| **Use Case** | SMB customers, default deployment |
-| **Configuration** | None required (auto-detected) |
+### Dedicated Model (Default)
 
-### Dedicated Model
+Every customer gets their own AI Search service and index, in their own Azure subscription — Spaarke's
+Azure tenant under Model 1, the customer's own tenant under Model 2.
 
 ```
+  Customer A subscription        Customer B subscription
 ┌──────────────────────┐  ┌──────────────────────┐
-│ tenant-a-knowledge   │  │ tenant-b-knowledge   │
+│ customer-a-knowledge │  │ customer-b-knowledge │
 ├──────────────────────┤  ├──────────────────────┤
-│  Tenant A docs only  │  │  Tenant B docs only  │
+│  Customer A docs only│  │  Customer B docs only│
 └──────────────────────┘  └──────────────────────┘
 ```
 
 | Aspect | Details |
 |--------|---------|
-| **Index Name** | `{sanitizedTenantId}-knowledge` |
-| **Isolation** | Physical (separate index per customer) |
-| **Cost** | Higher (dedicated resources) |
-| **Use Case** | Enterprise, compliance requirements |
-| **Configuration** | Set `Model = Dedicated` in deployment config |
+| **Index Name** | `{sanitizedTenantId}-knowledge` — see the naming note below |
+| **Isolation** | Physical — a separate AI Search **service** per customer, not merely a separate index |
+| **Cost** | A real per-customer AI Search floor. Pay it; this is the highest-value segregation case. |
+| **Use Case** | **All customers**, both models — the default |
+| **Configuration** | `Model = Dedicated` in deployment config |
+
+⚠️ **Naming note.** The index name is derived from the *tenant* ID today. Under Model 1 every customer
+presents **Spaarke's** tenant GUID, so the derived *name* does not distinguish customers. That is harmless
+here **only because the AI Search service itself is per-customer** — the resource boundary, not the name,
+is what isolates. Do not rely on the name as a customer discriminator, and do not reintroduce a design in
+which two customers' documents can land in one service under differently-derived index names.
+
+### 🔴 Retired: the Shared model
+
+The `Shared` model placed **every customer's document text and embeddings in one AI Search index**
+(`spaarke-knowledge-index-v2`) and isolated them with a per-query `tenantId eq '…'` filter.
+
+It is retired for one decisive reason: **under Model 1 every customer presents the same `tenantId`**
+(Spaarke's), so the filter separates **Entra tenants** only — never **customers** — while every test and
+health signal keyed on it reports success. A filter must also be written correctly in every query, forever,
+by everyone; a resource boundary cannot be forgotten. For a product holding privileged legal material, that
+difference is the whole argument.
+
+**Do not provision `Shared`, and do not add new code paths that depend on it.**
 
 **Index Name Sanitization**:
 - Converted to lowercase
@@ -330,14 +341,14 @@ new KnowledgeDeploymentConfig
 
 ### Model Comparison
 
-| Feature | Shared | Dedicated | CustomerOwned |
-|---------|--------|-----------|---------------|
-| Physical Isolation | No | Yes | Yes |
-| Index Location | Spaarke | Spaarke | Customer |
-| Cost to Customer | Included | Premium | Customer pays |
-| Setup Complexity | None | Low | Medium |
-| Data Sovereignty | No | Partial | Full |
-| Compliance (SOC2, etc.) | Shared | Dedicated | Customer-managed |
+| Feature | Dedicated (default) | CustomerOwned | ~~Shared~~ (retired) |
+|---------|---------------------|---------------|----------------------|
+| Physical Isolation | Yes | Yes | ~~No~~ |
+| Index Location | The customer's own subscription (Spaarke's Azure tenant under Model 1, the customer's under Model 2) | Customer's own tenant | ~~One Spaarke index for everyone~~ |
+| Cost to Customer | Directly attributable — their own subscription | Customer pays Azure directly | ~~Included~~ |
+| Setup Complexity | Low | Medium | ~~None~~ |
+| Data Sovereignty | Partial (full under Model 2) | Full | ~~No~~ |
+| Compliance (SOC2, etc.) | Dedicated | Customer-managed | ~~Shared~~ |
 
 ---
 
@@ -349,8 +360,8 @@ The `spaarke-rag-references` index stores curated domain knowledge separate from
 
 | Index | Content | Scale | Access |
 |-------|---------|-------|--------|
-| `spaarke-knowledge-index-v2` | Customer documents (tenant-scoped) | 100K+ chunks | Per-tenant filter |
-| `spaarke-rag-references` | Curated domain knowledge (KNW-001–010) | ~100 chunks | Shared across tenants |
+| `{customer}-knowledge` | That customer's documents | 100K+ chunks | Dedicated AI Search service per customer |
+| `spaarke-rag-references` | Curated domain knowledge (KNW-001–010) | ~100 chunks | Spaarke-curated reference content — carries no customer data |
 
 Separating references from customer documents ensures:
 - **Guaranteed retrieval**: Small index = high recall for domain terms
@@ -367,13 +378,8 @@ Key fields beyond standard `KnowledgeDocument`:
 | `knowledgeSourceName` | Human-readable source name (e.g., "Contract Clause Library") |
 | `documentType` | Domain tag (e.g., "contract-law", "financial-analysis") |
 
-### Admin Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/admin/knowledge/index-references` | Bulk-index all knowledge sources |
-| POST | `/api/admin/knowledge/index-reference/{id}` | Index single source |
-| DELETE | `/api/admin/knowledge/index-reference/{id}` | Delete source chunks |
+### Indexing the reference index
+ reference index is populated by the operator scripts `scripts/ai-search/Add-ReferenceToIndex.ps1` and `scripts/ai-search/Index-AllReferences.ps1` (see the `add-reference-to-index` skill). The BFF admin routes that used to do this (`/api/admin/knowledge/index-references`, `POST`/`DELETE /api/admin/knowledge/index-reference/{id}`) were **deleted** by unified-access-control-r2 task 163: they had no caller and let any signed-in user re-embed, overwrite or wipe the shared grounding index.
 
 ### Knowledge-Augmented Execution
 
@@ -749,7 +755,8 @@ public interface IKnowledgeDeploymentService
 
 **Key Behaviors**:
 - Caches SearchClient instances per tenant
-- Creates default Shared config if none exists
+- Creates a default config if none exists — ⚠️ **the code default is still `Shared`, which is RETIRED.**
+  Set `Model = Dedicated` explicitly on every deployment; do not rely on the fallback.
 - Validates CustomerOwned configs before activation
 - Sanitizes tenant IDs for index naming
 
@@ -821,7 +828,7 @@ The RAG pipeline supports async job processing via a single `sdap-jobs` Azure Se
 ┌─────────────────────────────────────────────────────────────────┐
 │  RagIndexingJobHandler                                           │
 ├─────────────────────────────────────────────────────────────────┤
-│  Implements: IJobHandler<RagIndexingJobPayload>                  │
+│  Implements: IJobHandler (non-generic)                           │
 │  Job Type: "RagIndexing"                                         │
 │                                                                  │
 │  Processing Flow:                                                │
@@ -957,17 +964,17 @@ catch (Exception ex)
 
 ## Security and Isolation
 
-### Tenant Isolation
+### Customer Isolation
 
 | Model | Isolation Method | Security Level |
 |-------|-----------------|----------------|
-| Shared | tenantId filter on all queries | Logical |
-| Dedicated | Separate index per tenant | Physical |
-| CustomerOwned | Customer's Azure subscription | Complete |
+| **Dedicated** (default) | A separate AI Search **service** per customer, in that customer's own subscription | Physical — a resource boundary |
+| **CustomerOwned** | The customer's own Azure subscription and tenant | Complete |
+| ~~Shared~~ (retired) | ~~`tenantId` filter on all queries~~ | 🔴 **None between customers** — see below |
 
-### Query Isolation
+### Query filter — what it does and does not enforce
 
-All searches include tenant filter:
+All searches still include the tenant filter, and the mechanism is unchanged:
 
 ```csharp
 var filter = $"tenantId eq '{tenantId}'";
@@ -977,6 +984,12 @@ var searchOptions = new SearchOptions
     // ... other options
 };
 ```
+
+⚠️ **This filter separates Entra tenants, not customers.** Under Model 1 every customer presents
+**Spaarke's** tenant GUID, so the filter is a no-op between customers — and it reports success while doing
+nothing. It is retained as belt-and-braces (it is correct and cheap, and it is load-bearing under Model 2
+where tenants really do differ), but **the isolation that matters comes from the dedicated AI Search
+service**, not from this predicate. Never cite a `tenantId` filter as evidence of *customer* isolation.
 
 ### CustomerOwned Security
 
@@ -1020,9 +1033,9 @@ group.MapPost("/search", Search)
 | Scenario | Recommendation |
 |----------|----------------|
 | High query volume | Increase AI Search replicas |
-| Large document corpus | Consider Dedicated model |
-| Many concurrent users | Scale Redis cluster |
-| Enterprise customer | Dedicated or CustomerOwned |
+| Large document corpus | Scale that customer's own AI Search SKU — every customer is already on `Dedicated` |
+| Many concurrent users | Scale that customer's Redis (dedicated, Standard tier) |
+| Customer requires data sovereignty / BYOK | `CustomerOwned` under Model 2 |
 
 ---
 

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Finance;
 
@@ -16,6 +17,17 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///     (sprk_subgrid_parent_rollup.js) acquires a token via @spaarke/auth (MSAL silent SSO).
 ///   - RequireRateLimiting("dataverse-query") for additional abuse protection
 ///   - ProblemDetails for error responses (ADR-019)
+///
+/// <para><b>Per-record authorization (unified-access-control-r2 task 130, defect C8).</b>
+/// RequireAuthorization() alone only asks "are you anyone?" — neither the default policy nor the authorization
+/// FallbackPolicy (an authenticated user, UAC-r2 task 167) asks anything more.
+/// The service reads invoices/budgets APP-ONLY and writes the rollup APP-ONLY, so before this task any
+/// signed-in user could read a walled-off matter's spend, budget and 12-month timeline and force a write to
+/// it. Each route now carries a FinanceAuthorizationFilter requiring Read on the parent record AS THE
+/// CALLER, before any Dataverse read or write. A record the caller cannot read and a record that does not
+/// exist return the SAME 404 (<see cref="FinanceAuthorizationFilter.UniformRecordNotFound"/>), and so does a
+/// record deleted between the check and the compute. The check is deliberately at the ENDPOINT, never in
+/// <see cref="FinanceRollupService"/>, which SpendSnapshotGenerationJobHandler calls with no caller.</para>
 /// </remarks>
 public static class FinanceRollupEndpoints
 {
@@ -31,6 +43,9 @@ public static class FinanceRollupEndpoints
             .RequireAuthorization();
 
         matterGroup.MapPost("/{matterId:guid}/recalculate", RecalculateMatterAsync)
+            .AddFinanceAuthorizationFilter(
+                "finance.read", FinanceAuthorizationFilter.MatterEntitySet, routeKey: "matterId",
+                FinanceDenial.UniformNotFound)
             .WithName("RecalculateMatterFinance")
             .WithSummary("Recalculate financial rollup fields for a matter")
             .WithDescription(
@@ -50,6 +65,9 @@ public static class FinanceRollupEndpoints
             .RequireAuthorization();
 
         projectGroup.MapPost("/{projectId:guid}/recalculate", RecalculateProjectAsync)
+            .AddFinanceAuthorizationFilter(
+                "finance.read", FinanceAuthorizationFilter.ProjectEntitySet, routeKey: "projectId",
+                FinanceDenial.UniformNotFound)
             .WithName("RecalculateProjectFinance")
             .WithSummary("Recalculate financial rollup fields for a project")
             .WithDescription(
@@ -117,12 +135,10 @@ public static class FinanceRollupEndpoints
         }
         catch (KeyNotFoundException)
         {
-            return Results.Problem(
-                detail: $"{entityLabel} with ID '{entityId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                title: $"{entityLabel} Not Found",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = traceId });
+            // The record vanished between the authorization check and the compute (the no-create write
+            // refused to recreate it). Same response as "absent" and "unreadable" — see
+            // FinanceAuthorizationFilter.UniformRecordNotFound. Neither the id nor the entity label is echoed.
+            return FinanceAuthorizationFilter.UniformRecordNotFound(context);
         }
         catch (Exception ex)
         {

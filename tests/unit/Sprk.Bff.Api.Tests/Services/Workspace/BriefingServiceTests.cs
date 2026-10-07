@@ -1,15 +1,15 @@
 // Wave 28 / GitHub #229 closeout (2026-06-22): Unit tests for the
 // ADR-034 wiring of BriefingService.GetTopPriorityMatterAsync.
 //
-// Prior to this change the method returned hardcoded mock data (STUB). The
-// replacement routes through IMembershipResolverService (canonical user-record
-// membership per ADR-034) and IDataverseService (AAD-oid → systemuserid
-// cross-reference per ADR-028 + matter detail retrieval).
+// unified-access-control-r2 task 152 (2026-10-02): the candidates now come from the PEOPLE-TARGETING surface
+// (MembershipResolveOptions.People — the matters FOR the user, never every team/BU-owned matter), and the detail rows
+// + overdue-task counts are read AS THE CALLER through IImpersonatedCommunicationQuery, so a matter the user cannot
+// open is absent. A failed people resolution or caller read surfaces as TopPriorityMatterUnavailable — never an
+// app-only answer.
 //
-// Reference: docs/architecture/membership-resolution-pattern.md "Wiring +
-// Consumer Inventory (AS-BUILT)" — Daily Briefing has moved from GAPS to
-// Confirmed Consumers.
+// Reference: docs/architecture/membership-resolution-pattern.md "Wiring + Consumer Inventory (AS-BUILT)".
 
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
@@ -21,6 +21,7 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
 using Sprk.Bff.Api.Services.Identity;
@@ -28,11 +29,8 @@ using Sprk.Bff.Api.Services.Identity;
 namespace Sprk.Bff.Api.Tests.Services.Workspace;
 
 /// <summary>
-/// Unit tests for <see cref="BriefingService"/> covering the membership-driven
-/// top-priority-matter resolution introduced as the closeout for GitHub #229
-/// (Wave 28). Validates the happy path, empty memberships, non-Guid oid degrade
-/// case, AAD-oid cross-reference miss, resolver-failure failure-soft path, and
-/// cancellation propagation.
+/// Unit tests for <see cref="BriefingService"/>'s top-priority matter: people-targeted candidates, caller-context
+/// reads, the deterministic heuristic, and the failure semantics.
 /// </summary>
 public class BriefingServiceTests
 {
@@ -46,346 +44,343 @@ public class BriefingServiceTests
 
     private readonly Mock<IDataverseService> _dataverseMock = new(MockBehavior.Strict);
     private readonly Mock<IMembershipResolverService> _resolverMock = new(MockBehavior.Strict);
+    private readonly Mock<IImpersonatedCommunicationQuery> _callerQueryMock = new(MockBehavior.Strict);
+    private readonly List<(string EntitySet, string Query, Guid Caller)> _callerReads = new();
     private readonly IDistributedCache _cache = new MemoryDistributedCache(
         Options.Create(new MemoryDistributedCacheOptions()));
     private readonly Mock<IDistributedCache> _portfolioCacheMock = new(MockBehavior.Loose);
-    private readonly Mock<IGenericEntityService> _portfolioEntityServiceMock = new(MockBehavior.Loose);
 
     // -------------------------------------------------------------------------
-    // Happy path — full membership resolution + heuristic application
+    // Happy path — people-targeted candidates, read as the caller, heuristic applied
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetBriefing_HappyPath_SelectsMatterWithMostOverdueEvents()
+    public async Task GetBriefing_HappyPath_SelectsMatterWithMostOverdueTasks_ReadAsTheCaller()
     {
-        // Arrange — AAD-oid lookup returns the systemuser row.
         SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(MatterIdHighOverdue, MatterIdLowOverdue, MatterIdMidOverdue);
+        SetupCallerReads(
+            matters: new[]
+            {
+                MatterRow(MatterIdHighOverdue, "Matter Alpha", spend: 80_000m, budget: 100_000m),
+                MatterRow(MatterIdLowOverdue, "Matter Bravo", spend: 30_000m, budget: 50_000m),
+                MatterRow(MatterIdMidOverdue, "Matter Charlie", spend: 95_000m, budget: 100_000m),
+            },
+            overdueTasks: Overdue(MatterIdHighOverdue, 5).Concat(Overdue(MatterIdMidOverdue, 2)).ToArray());
 
-        // Resolver returns 3 matter IDs.
-        var memberships = new MembershipResponse(
-            EntityType: "sprk_matter",
-            PersonIdentity: new PersonIdentity(TestSystemUserId, null, null, null, null, null, null),
-            Ids: new[] { MatterIdHighOverdue, MatterIdLowOverdue, MatterIdMidOverdue },
-            ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
-            Count: 3,
-            CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5));
-        _resolverMock
-            .Setup(r => r.ResolveAsync(
-                TestSystemUserId,
-                "sprk_matter",
-                It.IsAny<MembershipResolveOptions?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(memberships);
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        // Matter-detail query — 3 matters with varying overdue counts.
-        var matterCollection = new EntityCollection(new List<Entity>
-        {
-            BuildMatterEntity(MatterIdHighOverdue, "Matter Alpha", overdue: 5, spend: 80_000m, budget: 100_000m, deadline: new DateTime(2026, 7, 1, 0, 0, 0, DateTimeKind.Utc)),
-            BuildMatterEntity(MatterIdLowOverdue, "Matter Bravo", overdue: 0, spend: 30_000m, budget: 50_000m, deadline: null),
-            BuildMatterEntity(MatterIdMidOverdue, "Matter Charlie", overdue: 2, spend: 95_000m, budget: 100_000m, deadline: new DateTime(2026, 9, 15, 0, 0, 0, DateTimeKind.Utc))
-        });
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(matterCollection);
-
-        var sut = CreateSut();
-
-        // Act
-        var result = await sut.GetBriefingAsync(TestAadOidString, CancellationToken.None);
-
-        // Assert — top matter is the one with highest overdue count (Matter Alpha = 5).
-        result.TopPriorityMatter.Should().NotBeNull("happy path returns a top-priority matter");
+        result.TopPriorityMatter.Should().NotBeNull();
         result.TopPriorityMatter!.MatterId.Should().Be(MatterIdHighOverdue);
         result.TopPriorityMatter.Name.Should().Be("Matter Alpha");
-        result.TopPriorityMatter.Reason.Should().Contain("5", "reason cites the overdue event count");
-        result.TopPriorityMatter.Deadline.Should().Be(new DateTimeOffset(2026, 7, 1, 0, 0, 0, TimeSpan.Zero));
+        result.TopPriorityMatter.Reason.Should().Contain("5", "the reason cites the overdue task count");
+        result.TopPriorityMatter.Deadline.Should().BeNull("sprk_matter has no deadline column");
+        result.TopPriorityMatterUnavailable.Should().BeFalse();
 
-        _resolverMock.VerifyAll();
-        // No specific call-count assertion on dataverseMock — strict mock would have
-        // thrown on any unexpected call already.
+        // Every detail read runs as the caller; the app-only client is used for the oid lookup only.
+        _callerReads.Should().NotBeEmpty();
+        _callerReads.Should().OnlyContain(r => r.Caller == TestSystemUserId);
+        _dataverseMock.Verify(
+            d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName != "systemuser"), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no matter or event row is ever read app-only");
     }
 
-    // -------------------------------------------------------------------------
-    // Tie-break — equal overdue counts → highest utilization wins
-    // -------------------------------------------------------------------------
+    [Fact]
+    public async Task GetBriefing_ResolvesCandidatesThroughThePeopleTargetingSurface()
+    {
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(MatterIdHighOverdue);
+        SetupCallerReads(new[] { MatterRow(MatterIdHighOverdue, "Matter Alpha", 0m, 0m) }, Array.Empty<Dictionary<string, JsonElement>>());
+
+        await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
+
+        _resolverMock.Verify(r => r.ResolveAsync(
+            TestSystemUserId, "sprk_matter",
+            It.Is<MembershipResolveOptions?>(o => o != null && o.PeopleTargeting && !o.AccessConferringOnly),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
 
     [Fact]
     public async Task GetBriefing_TieOnOverdue_SelectsHighestUtilization()
     {
-        // Arrange — both matters have overdue=2; differ only by utilization.
         SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(MatterIdHighOverdue, MatterIdMidOverdue);
+        SetupCallerReads(
+            matters: new[]
+            {
+                MatterRow(MatterIdHighOverdue, "Matter Alpha", spend: 30_000m, budget: 100_000m),   // 30%
+                MatterRow(MatterIdMidOverdue, "Matter Charlie", spend: 95_000m, budget: 100_000m), // 95%
+            },
+            overdueTasks: Overdue(MatterIdHighOverdue, 2).Concat(Overdue(MatterIdMidOverdue, 2)).ToArray());
 
-        var memberships = new MembershipResponse(
-            EntityType: "sprk_matter",
-            PersonIdentity: new PersonIdentity(TestSystemUserId, null, null, null, null, null, null),
-            Ids: new[] { MatterIdHighOverdue, MatterIdMidOverdue },
-            ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
-            Count: 2,
-            CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5));
-        _resolverMock
-            .Setup(r => r.ResolveAsync(
-                TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(memberships);
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        var matterCollection = new EntityCollection(new List<Entity>
-        {
-            BuildMatterEntity(MatterIdHighOverdue, "Matter Alpha", overdue: 2, spend: 30_000m, budget: 100_000m, deadline: null),   // 30% util
-            BuildMatterEntity(MatterIdMidOverdue,  "Matter Charlie", overdue: 2, spend: 95_000m, budget: 100_000m, deadline: null), // 95% util
-        });
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(matterCollection);
-
-        var sut = CreateSut();
-
-        // Act
-        var result = await sut.GetBriefingAsync(TestAadOidString, CancellationToken.None);
-
-        // Assert — Matter Charlie wins on the utilization tie-break.
-        result.TopPriorityMatter.Should().NotBeNull();
         result.TopPriorityMatter!.MatterId.Should().Be(MatterIdMidOverdue);
     }
 
     // -------------------------------------------------------------------------
-    // Empty memberships — returns null TopMatterSummary gracefully
+    // Readability (criterion 10): a candidate Dataverse denies the caller is absent
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetBriefing_EmptyMemberships_ReturnsNullTopMatter()
+    public async Task GetBriefing_CandidateTheCallerCannotRead_IsNeverTheTopMatter()
     {
-        // Arrange
         SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(MatterIdHighOverdue, MatterIdLowOverdue);
+        // Dataverse trims MatterIdHighOverdue from the impersonated read (the caller cannot open it), even though
+        // its overdue tasks would have made it the winner.
+        SetupCallerReads(
+            matters: new[] { MatterRow(MatterIdLowOverdue, "Matter Bravo", 0m, 0m) },
+            overdueTasks: Overdue(MatterIdHighOverdue, 9).ToArray());
 
-        var emptyMemberships = new MembershipResponse(
-            EntityType: "sprk_matter",
-            PersonIdentity: new PersonIdentity(TestSystemUserId, null, null, null, null, null, null),
-            Ids: Array.Empty<Guid>(),
-            ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
-            Count: 0,
-            CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5));
-        _resolverMock
-            .Setup(r => r.ResolveAsync(
-                TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(emptyMemberships);
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        // The matter-detail query MUST NOT be invoked when memberships are empty.
-        // (Strict mock will throw on any unexpected RetrieveMultipleAsync call beyond
-        // the one configured by SetupAadOidLookup for the systemuser query.)
+        result.TopPriorityMatter!.MatterId.Should().Be(MatterIdLowOverdue);
+    }
 
-        var sut = CreateSut();
+    [Fact]
+    public async Task GetBriefing_LargeCandidateSet_IsChunked_EveryChunkReadAsTheCaller()
+    {
+        var ids = Enumerable.Range(1, PortfolioService.MaxIdsPerImpersonatedRequest + 10)
+            .Select(i => Guid.Parse($"55555555-5555-5555-5555-{i:D12}"))
+            .ToArray();
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(ids);
+        SetupCallerReads(new[] { MatterRow(ids[^1], "Last Matter", 0m, 0m) }, Array.Empty<Dictionary<string, JsonElement>>());
 
-        // Act
-        var result = await sut.GetBriefingAsync(TestAadOidString, CancellationToken.None);
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        // Assert
-        result.Should().NotBeNull("the briefing response is always populated");
-        result.TopPriorityMatter.Should().BeNull("zero memberships → null top-priority matter");
-        result.Narrative.Should().NotBeNullOrWhiteSpace("template narrative is always generated");
-        result.IsAiEnhanced.Should().BeFalse("no AI facade in this test fixture");
+        _callerReads.Count(r => r.EntitySet == "sprk_matters").Should().Be(2);
+        _callerReads.Count(r => r.EntitySet == "sprk_events").Should().Be(2);
+        _callerReads.Where(r => r.EntitySet == "sprk_matters")
+            .Should().OnlyContain(r => CountOf(r.Query, "sprk_matterid eq") <= PortfolioService.MaxIdsPerImpersonatedRequest);
+        result.TopPriorityMatter!.MatterId.Should().Be(ids[^1]);
     }
 
     // -------------------------------------------------------------------------
-    // Non-Guid AAD oid — degrades to null (no crash; test-fixture compatible)
+    // Empty / degrade paths
     // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task GetBriefing_NoMattersForTheUser_ReturnsNullTopMatter_NotUnavailable()
+    {
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters();
+
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
+
+        result.TopPriorityMatter.Should().BeNull();
+        result.TopPriorityMatterUnavailable.Should().BeFalse("no matters for you is not a failure");
+        _callerReads.Should().BeEmpty();
+    }
 
     [Fact]
     public async Task GetBriefing_NonGuidUserId_ReturnsNullTopMatterWithoutCrashing()
     {
-        // Arrange — the strict mocks would throw if either was invoked. The Guid
-        // pre-check inside GetTopPriorityMatterAsync MUST short-circuit before
-        // reaching Dataverse or the resolver.
         const string nonGuidUserId = "test-user-00000000-0000-0000-0000-000000000001";
 
-        var sut = CreateSut();
+        var result = await CreateSut().GetBriefingAsync(nonGuidUserId, CancellationToken.None);
 
-        // Act
-        var result = await sut.GetBriefingAsync(nonGuidUserId, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.TopPriorityMatter.Should().BeNull("non-Guid oid → null top-priority matter (failure-soft)");
-
-        // Strict mocks would have thrown if invoked — verify they were not.
-        _dataverseMock.Verify(
-            d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "non-Guid oid must short-circuit before any Dataverse call");
+        result.TopPriorityMatter.Should().BeNull();
         _resolverMock.Verify(
-            r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(),
-                It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "non-Guid oid must short-circuit before the resolver call");
+            r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
-
-    // -------------------------------------------------------------------------
-    // AAD-oid cross-reference miss — user not provisioned → null gracefully
-    // -------------------------------------------------------------------------
 
     [Fact]
     public async Task GetBriefing_AadOidNotProvisioned_ReturnsNullTopMatter()
     {
-        // Arrange — systemuser query returns an empty collection.
         SetupAadOidLookup(returnUserId: null);
 
-        // Resolver MUST NOT be invoked when systemuserid resolution fails.
-        var sut = CreateSut();
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        // Act
-        var result = await sut.GetBriefingAsync(TestAadOidString, CancellationToken.None);
-
-        // Assert
-        result.TopPriorityMatter.Should().BeNull("unprovisioned user → null top-priority matter");
+        result.TopPriorityMatter.Should().BeNull();
         _resolverMock.Verify(
-            r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(),
-                It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "missing systemuser → no resolver call");
+            r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     // -------------------------------------------------------------------------
-    // Resolver throws — failure-soft (return null TopMatter, full briefing still served)
+    // Fail closed (criterion 11): failures are UNAVAILABLE, never answered app-only
     // -------------------------------------------------------------------------
 
     [Fact]
-    public async Task GetBriefing_ResolverThrows_ReturnsNullTopMatterWithFullBriefing()
+    public async Task GetBriefing_ResolverThrows_TopMatterUnavailable_FullBriefingStillServed()
     {
-        // Arrange
         SetupAadOidLookup(returnUserId: TestSystemUserId);
-
         _resolverMock
-            .Setup(r => r.ResolveAsync(
-                TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Simulated resolver failure"));
 
-        var sut = CreateSut();
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
 
-        // Act
-        var result = await sut.GetBriefingAsync(TestAadOidString, CancellationToken.None);
-
-        // Assert — full briefing response still served; only TopPriorityMatter is null.
-        result.Should().NotBeNull();
-        result.TopPriorityMatter.Should().BeNull("resolver failure must be swallowed");
-        result.Narrative.Should().NotBeNullOrWhiteSpace("template narrative is always generated");
+        result.TopPriorityMatter.Should().BeNull();
+        result.TopPriorityMatterUnavailable.Should().BeTrue();
+        result.Narrative.Should().NotBeNullOrWhiteSpace();
     }
 
-    // -------------------------------------------------------------------------
-    // Cancellation — OperationCanceledException must propagate (never swallowed)
-    // -------------------------------------------------------------------------
+    [Fact]
+    public async Task GetBriefing_CallerContextReadFails_TopMatterUnavailable_NoAppOnlyFallback()
+    {
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        SetupPeopleMatters(MatterIdHighOverdue);
+        _callerQueryMock
+            .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("403 — prvActOnBehalfOfAnotherUser missing"));
+
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
+
+        result.TopPriorityMatter.Should().BeNull();
+        result.TopPriorityMatterUnavailable.Should().BeTrue("a failed caller read is 'could not be determined', not 'no matters'");
+        _dataverseMock.Verify(
+            d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task GetBriefing_PeopleSetLargerThanTheResolverCeiling_TopMatterUnavailable_NeverAnArbitrarySubset()
+    {
+        // Verifier round 1 item 4: the candidate set is read to completion; a first FULL page (continuation token)
+        // whose follow-up still names new matters is "could not be determined", never the GUID-ordered first page.
+        SetupAadOidLookup(returnUserId: TestSystemUserId);
+        _resolverMock
+            .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, string _, MembershipResolveOptions? o, CancellationToken _) =>
+            {
+                var ids = o?.ContinuationToken == "page-2" ? new[] { MatterIdLowOverdue } : new[] { MatterIdHighOverdue };
+                return new MembershipResponse(
+                    EntityType: "sprk_matter",
+                    PersonIdentity: new PersonIdentity(TestSystemUserId),
+                    Ids: ids,
+                    ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+                    Count: ids.Length,
+                    CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
+                    ContinuationToken: o?.ContinuationToken == "page-2" ? null : "page-2");
+            });
+
+        var result = await CreateSut().GetBriefingAsync(TestAadOidString, CancellationToken.None);
+
+        result.TopPriorityMatter.Should().BeNull();
+        result.TopPriorityMatterUnavailable.Should().BeTrue();
+        _callerReads.Should().BeEmpty("an incomplete candidate set is never read or ranked");
+    }
 
     [Fact]
     public async Task GetBriefing_CancellationDuringResolver_PropagatesCancellation()
     {
-        // Arrange
         SetupAadOidLookup(returnUserId: TestSystemUserId);
 
         using var cts = new CancellationTokenSource();
         _resolverMock
-            .Setup(r => r.ResolveAsync(
-                TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .Callback<Guid, string, MembershipResolveOptions?, CancellationToken>((_, _, _, _) => cts.Cancel())
             .ThrowsAsync(new OperationCanceledException(cts.Token));
 
-        var sut = CreateSut();
-
-        // Act + Assert
-        await sut.Invoking(s => s.GetBriefingAsync(TestAadOidString, cts.Token))
-            .Should()
-            .ThrowAsync<OperationCanceledException>("cancellation MUST propagate, never be swallowed");
+        await CreateSut().Invoking(s => s.GetBriefingAsync(TestAadOidString, cts.Token))
+            .Should().ThrowAsync<OperationCanceledException>();
     }
 
     // =========================================================================
     // ── Helpers ──────────────────────────────────────────────────────────────
     // =========================================================================
 
-    /// <summary>
-    /// Builds the SUT with the strict IDataverseService + IMembershipResolverService
-    /// mocks, a real <see cref="MemoryDistributedCache"/> for the AAD-oid cache, and
-    /// a loose <see cref="PortfolioService"/> wired to return an empty matter set
-    /// (the portfolio fields are exercised by other tests; this fixture focuses on
-    /// the membership-driven TopMatter logic).
-    /// </summary>
     private BriefingService CreateSut()
     {
-        // Portfolio service with loose mocks — returns empty portfolio (0 matters).
-        // The class-under-test still aggregates and serializes a response; only the
-        // TopPriorityMatter slot is the focus of these tests.
+        // The portfolio METRICS are a cache hit here, so these tests observe only the top-priority-matter read. That
+        // read is PortfolioService.ReadMattersForSystemUserAsync (task 152 verifier round 1 item 5: one shared,
+        // people-targeted, caller-context read for the metrics and the top matter), driven by the resolver and
+        // caller-query fakes below. PortfolioServiceTests pins the metrics side.
         _portfolioCacheMock
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-        _portfolioCacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(),
-                It.IsAny<byte[]>(),
-                It.IsAny<DistributedCacheEntryOptions>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _portfolioEntityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(
-                It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new PortfolioSummaryResponse(
+                TotalSpend: 0m, TotalBudget: 0m, UtilizationPercent: 0m, MattersAtRisk: 0, OverdueEvents: 0,
+                ActiveMatters: 0, CachedAt: DateTimeOffset.UtcNow))));
 
         var portfolio = new PortfolioService(
             _portfolioCacheMock.Object,
-            _portfolioEntityServiceMock.Object,
+            _resolverMock.Object,
+            _callerQueryMock.Object,
             StubSystemUserIdentityResolver.Instance,
             NullLogger<PortfolioService>.Instance);
 
         return new BriefingService(
             portfolioService: portfolio,
             cache: _cache,
-            membershipResolver: _resolverMock.Object,
             dataverse: _dataverseMock.Object,
             logger: NullLogger<BriefingService>.Instance,
             briefingAi: null);
     }
 
-    /// <summary>
-    /// Configures the strict IDataverseService mock to satisfy the AAD-oid → systemuserid
-    /// cross-reference call. Pass <c>null</c> to simulate "user not provisioned" (empty
-    /// EntityCollection).
-    /// </summary>
     private void SetupAadOidLookup(Guid? returnUserId)
     {
         var systemUserCollection = returnUserId.HasValue
-            ? new EntityCollection(new List<Entity>
-            {
-                new Entity("systemuser", returnUserId.Value)
-            })
+            ? new EntityCollection(new List<Entity> { new Entity("systemuser", returnUserId.Value) })
             : new EntityCollection();
 
         _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(
-                It.Is<QueryExpression>(q => q.EntityName == "systemuser"),
-                It.IsAny<CancellationToken>()))
+            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "systemuser"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(systemUserCollection);
     }
 
-    /// <summary>
-    /// Builds a Dataverse <see cref="Entity"/> shaped like a sprk_matter row with the
-    /// columns BriefingService.QueryMatterDetailsAsync reads.
-    /// </summary>
-    private static Entity BuildMatterEntity(
-        Guid id,
-        string name,
-        int overdue,
-        decimal spend,
-        decimal budget,
-        DateTime? deadline)
+    private void SetupPeopleMatters(params Guid[] ids)
     {
-        var entity = new Entity("sprk_matter", id);
-        entity["sprk_name"] = name;
-        entity["sprk_overdueeventcount"] = overdue;
-        entity["sprk_totalspend"] = new Money(spend);
-        entity["sprk_totalbudget"] = new Money(budget);
-        entity["statecode"] = new OptionSetValue(0);
-        if (deadline.HasValue)
+        _resolverMock
+            .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MembershipResponse(
+                EntityType: "sprk_matter",
+                PersonIdentity: new PersonIdentity(TestSystemUserId),
+                Ids: ids,
+                ByRole: new Dictionary<string, IReadOnlyList<Guid>>(),
+                Count: ids.Length,
+                CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5)));
+    }
+
+    /// <summary>
+    /// The caller-context read fake: returns only the rows whose id the query actually names, so chunking and
+    /// trimming are both observable.
+    /// </summary>
+    private void SetupCallerReads(
+        IReadOnlyList<Dictionary<string, JsonElement>> matters,
+        IReadOnlyList<Dictionary<string, JsonElement>> overdueTasks)
+    {
+        _callerQueryMock
+            .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string set, string? query, Guid caller, CancellationToken _) =>
+            {
+                _callerReads.Add((set, query ?? string.Empty, caller));
+                IReadOnlyList<Dictionary<string, JsonElement>> source = set == "sprk_matters" ? matters : overdueTasks;
+                var key = set == "sprk_matters" ? "sprk_matterid" : "_sprk_regardingmatter_value";
+                return source.Where(r => (query ?? string.Empty).Contains(r[key].GetString()!, StringComparison.OrdinalIgnoreCase)).ToList();
+            });
+    }
+
+    private static Dictionary<string, JsonElement> MatterRow(Guid id, string name, decimal spend, decimal budget) =>
+        Row(new Dictionary<string, object?>
         {
-            entity["sprk_duedate"] = deadline.Value;
+            ["sprk_matterid"] = id.ToString("D"),
+            ["sprk_mattername"] = name,
+            ["sprk_totalspendtodate"] = spend,
+            ["sprk_totalbudget"] = budget,
+        });
+
+    private static IEnumerable<Dictionary<string, JsonElement>> Overdue(Guid matterId, int count) =>
+        Enumerable.Range(0, count).Select(_ => Row(new Dictionary<string, object?>
+        {
+            ["sprk_eventid"] = Guid.NewGuid().ToString("D"),
+            ["_sprk_regardingmatter_value"] = matterId.ToString("D"),
+        }));
+
+    private static Dictionary<string, JsonElement> Row(Dictionary<string, object?> values) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(values))!;
+
+    private static int CountOf(string haystack, string needle)
+    {
+        var count = 0;
+        for (var i = haystack.IndexOf(needle, StringComparison.Ordinal); i >= 0; i = haystack.IndexOf(needle, i + 1, StringComparison.Ordinal))
+        {
+            count++;
         }
-        return entity;
+        return count;
     }
 }

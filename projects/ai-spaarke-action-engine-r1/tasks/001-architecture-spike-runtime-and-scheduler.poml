@@ -38,7 +38,7 @@
 
       Existing canonical patterns to study:
       - Insights Engine Track B uses Azure-native Functions timer + BFF dispatch (same Hybrid D shape we're considering)
-      - `ServiceBusJobProcessor.cs` already routes job messages to `IJobHandler&lt;T&gt;` implementations; the question is whether the scheduler should publish to Service Bus (uniform path) or call BFF directly (one fewer hop, but bypasses the existing job machinery)
+      - `ServiceBusJobProcessor.cs` already routes job messages (by `JobType`) to non-generic `IJobHandler` implementations; the question is whether the scheduler should publish to Service Bus (uniform path) or call BFF directly (one fewer hop, but bypasses the existing job machinery)
       - `AnalysisOrchestrationService.cs` is the pattern reference for `ActionOrchestrationService` (next phase)
       - `SprkChatAgent.cs` + `UseFunctionInvocation` is the existing probabilistic agent runtime — Microsoft Agent Framework would be the alternative if multi-step + tool-use + branching exceed what `UseFunctionInvocation` can handle reliably
 
@@ -59,8 +59,9 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">.NET 8 Minimal API + BackgroundService. No Azure Functions for in-proc Action execution. Scheduler MAY be Azure-native (Logic Apps timer / Service Bus scheduled / Functions timer / Container Apps Jobs) — choose with rationale.</constraint>
-    <constraint source="ADR-004">Background work uses `IJobHandler&lt;T&gt;` contract; consumed by `ServiceBusJobProcessor`. Scheduler output MUST be compatible (or route through SB if not native SB).</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API; no Azure Functions inside the BFF assembly.</constraint>
+    <constraint source="ADR-052">Where the scheduler and Action execution run is decided per workload under ADR-052 and recorded, with its signals and costs, in the Placement Justification. Inside the BFF, queue → ADR-004 `IJobHandler`, schedule → ADR-036 `IScheduledJob` (no new hand-rolled timer `BackgroundService`). Scheduler MAY be Azure-native (Logic Apps timer / Service Bus scheduled / Functions timer / Container Apps Jobs) — choose with rationale.</constraint>
+    <constraint source="ADR-004">Queue-driven work in the BFF uses the non-generic `IJobHandler` contract (`JobType` + `ProcessAsync(JobContract, ct)`); consumed by `ServiceBusJobProcessor`. Scheduler output MUST be compatible (or route through SB if not native SB).</constraint>
     <constraint source="ADR-010">DI minimalism: `AddActionEngineModule()` extension. ≤15 non-framework DI registrations.</constraint>
     <constraint source="ADR-013">AI Architecture (refined 2026-05-20). BFF placement is the default but MUST be justified per decision criteria. CRUD-side consumers reach AE via `PublicContracts/` facade.</constraint>
     <constraint source="ADR-029">BFF publish-size delta MUST be ≤ 5 MB compressed (NFR-10). Framework-dependent linux-x64. Sourcemap exclusion.</constraint>
@@ -71,7 +72,8 @@
 
   <knowledge>
     <files>
-      <file>.claude/adr/ADR-001-no-azure-functions.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
       <file>.claude/adr/ADR-004-job-contract.md</file>
       <file>.claude/adr/ADR-010-di-minimalism.md</file>
       <file>.claude/adr/ADR-013-ai-architecture.md</file>
@@ -89,7 +91,7 @@
       <file>projects/ai-spaarke-action-engine-r1/coordination-assessment-with-insights-engine.md</file>
     </files>
     <patterns>
-      <pattern name="Job Contract pattern" location=".claude/patterns/api/background-workers.md">Existing `IJobHandler&lt;T&gt;` + `ServiceBusJobProcessor` consumption pattern; scheduler output MUST be SB-compatible or route through SB.</pattern>
+      <pattern name="Job Contract pattern" location=".claude/patterns/api/background-workers.md">Existing non-generic `IJobHandler` + `ServiceBusJobProcessor` consumption pattern; scheduler output MUST be SB-compatible or route through SB.</pattern>
       <pattern name="Feature-module DI" location=".claude/patterns/api/service-registration.md">`AddActionEngineModule()` extension; ≤15 non-framework registrations per ADR-010.</pattern>
       <pattern name="Insights Engine Track B Hybrid D" location="docs/architecture/AI-ARCHITECTURE.md">Same pattern shape; document why it transfers to Action Engine or why it doesn't.</pattern>
     </patterns>
@@ -99,7 +101,7 @@
     <step order="0">Context check: confirm working tree clean, branch is `work/ai-spaarke-action-engine-r1`, baseline build passes. (task-execute Step 0)</step>
     <step order="1">Read all files in `&lt;knowledge&gt;&lt;files&gt;` — especially spec.md §15 (open questions), design.md §6 (Runtime and Hosting), and `bff-extensions.md` (binding governance).</step>
     <step order="2">Build comparison matrix for scheduler options (Logic Apps timer / Service Bus scheduled message / Functions timer / Container Apps Jobs). Columns: cost at expected volume (assume 100–1000 scheduled Actions/day per tenant); operational complexity (deployment, monitoring, alerting); integration cost with existing `ServiceBusJobProcessor`; max cron resolution; multi-tenant isolation; observability via App Insights; failure-mode handling. Save to `notes/spikes/scheduler-comparison.md`.</step>
-    <step order="3">Recommend a scheduler choice with explicit rationale. If recommendation is anything other than the default (Service Bus scheduled message, which integrates seamlessly with `ServiceBusJobProcessor`), justify the deviation against ADR-001 + ADR-004 + the bff-extensions.md pre-merge checklist.</step>
+    <step order="3">Recommend a scheduler choice with explicit rationale. If recommendation is anything other than the default (Service Bus scheduled message, which integrates seamlessly with `ServiceBusJobProcessor`), justify the deviation against ADR-052 + ADR-004 + the bff-extensions.md pre-merge checklist.</step>
     <step order="4">Build Action Engine module skeleton in a scratch branch or local-only path: create `Services/Ai/ActionEngine/` folder with placeholder `ActionOrchestrationService.cs` (just the class shell + DI registration), `PublicContracts/IActionEngineFacade.cs` (interface only), `Models/ActionDefinition.cs` (data class), and `AddActionEngineModule()` extension. Add Azure AI Search client NuGet reference (`Azure.Search.Documents`). Add `Microsoft.SemanticKernel` references ONLY if not already transitively present (check with `dotnet list package --include-transitive | grep SemanticKernel`).</step>
     <step order="5">Measure publish-size delta: run `dotnet publish src/server/api/Sprk.Bff.Api/ --configuration Release --runtime linux-x64 --self-contained false` BEFORE and AFTER the skeleton additions. Capture compressed delta (zip the publish output, compare). Record measurements in `notes/spikes/publish-size-measurement.md`. Verify delta ≤ 5 MB compressed. If delta exceeds budget, identify which package is the bloat source and propose mitigations (e.g., use existing AI Search client if already loaded; consume Semantic Kernel only via existing surface).</step>
     <step order="6">**Hybrid D runtime confirmation**: enumerate the multi-step probabilistic Action scenarios in MVP scope (from spec.md and the three starter Templates in design.md). For each, validate whether `SprkChatAgent` + `UseFunctionInvocation` handles: multi-step tool-call chains, conditional branching, parameter elicitation, error recovery. Document scenario-by-scenario in `notes/spikes/hybrid-d-validation.md`. If any scenario requires Microsoft Agent Framework, scope it OUT of MVP (defer to R2) — do not introduce a new runtime in MVP.</step>

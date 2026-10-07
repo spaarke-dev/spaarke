@@ -1,6 +1,6 @@
 import * as React from "react";
 import { tokens, Spinner } from "@fluentui/react-components";
-import { WorkspaceShell } from "@spaarke/ui-components";
+import { WorkspaceShell, cleanGuid, getXrm } from "@spaarke/ui-components";
 import type {
   SectionFactoryContext,
   NavigateTarget,
@@ -52,8 +52,20 @@ const LazyQuickSummaryDashboardDialog = React.lazy(() =>
   }))
 );
 
+// Repointed to the SHARED copy 2026-09-04 (unified-access-control-r2, owner directive "work from
+// shared components where efficient"). This used to import a LegalWorkspace twin that was "kept in
+// lockstep" with the shared component BY A COMMENT — a maintenance tax with an obvious failure mode.
+// The twin is deleted; the shared component is strictly better, taking `authenticatedFetch` and
+// `bffBaseUrl` as injected props instead of importing solution-specific modules.
+// The shared file carries a default export specifically so React.lazy() keeps working here.
+// NOTE the path shape: the vite alias (vite.config.ts:134) already resolves
+// "@spaarke/ui-components" TO the package's `src` directory, so the subpath must NOT repeat it.
+// "@spaarke/ui-components/src/components/..." typechecks (tsconfig paths resolve it) but fails the
+// BUNDLE with a doubled `src/src/`. Deep-imported rather than taken off the barrel so React.lazy
+// still yields a separate chunk — importing from the package root would pull the whole barrel into
+// the main bundle and defeat the lazy split this call site exists for.
 const LazyCloseProjectDialog = React.lazy(
-  () => import("../CreateProject/CloseProjectDialog")
+  () => import("@spaarke/ui-components/components/CreateProjectWizard/CloseProjectDialog")
 );
 
 // SmartToDoDialog — inline replacement for the retired
@@ -161,7 +173,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   React.useEffect(() => {
     (async () => {
       try {
-        const cleanUserId = userId.replace(/[{}]/g, "");
+        const cleanUserId = cleanGuid(userId);
         const user = await webApi.retrieveRecord("systemuser", cleanUserId, "?$select=_businessunitid_value");
         const buId = user["_businessunitid_value"] as string;
         if (buId) setBusinessUnitId(buId);
@@ -227,10 +239,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenAllUpdates = React.useCallback(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any =
-      (window as any)?.Xrm ??
-      (window.parent as any)?.Xrm ??
-      (window.top as any)?.Xrm;
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
       return;
@@ -284,10 +293,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenWizard = React.useCallback(async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       await xrm.Navigation.navigateTo(
@@ -315,10 +321,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenProjectWizard = React.useCallback(async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       await xrm.Navigation.navigateTo(
@@ -347,7 +350,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     try {
       const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
       const data = documentIds ? `documentIds=${documentIds.join(",")}&${bffParam}` : bffParam;
-      await (window as any).Xrm?.Navigation?.navigateTo(
+      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
+      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Summarize Files" }
       );
@@ -364,7 +370,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenFindSimilar = React.useCallback(async (documentId?: string, containerId?: string) => {
     try {
       const data = `documentId=${documentId || ""}&containerId=${containerId || ""}&bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
-      await (window as any).Xrm?.Navigation?.navigateTo(
+      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
+      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Find Similar Documents" }
       );
@@ -380,7 +389,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleOpenEventWizard = React.useCallback(async () => {
     try {
-      await (window as any).Xrm?.Navigation?.navigateTo(
+      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
+      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New Event" }
       );
@@ -396,7 +408,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleOpenTodoWizard = React.useCallback(async () => {
     try {
-      await (window as any).Xrm?.Navigation?.navigateTo(
+      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
+      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New To Do" }
       );
@@ -412,7 +427,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleOpenWorkAssignmentWizard = React.useCallback(async () => {
     try {
-      await (window as any).Xrm?.Navigation?.navigateTo(
+      // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
+      // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create Work Assignment" }
       );
@@ -495,10 +513,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenDocumentsDialog = React.useCallback((viewId?: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any =
-      (window as any)?.Xrm ??
-      (window.parent as any)?.Xrm ??
-      (window.top as any)?.Xrm;
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
       return;
@@ -512,37 +527,19 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
   const handleAddDocument = React.useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any =
-      (window as any)?.Xrm ??
-      (window.parent as any)?.Xrm ??
-      (window.top as any)?.Xrm;
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation not available");
       return;
     }
 
-    // Resolve container ID from business unit
-    let containerId = "";
-    try {
-      const userSettings = xrm.Utility.getGlobalContext().userSettings;
-      const uid = userSettings.userId.replace(/[{}]/g, "");
-      const user = await xrm.WebApi.retrieveRecord(
-        "systemuser", uid, "?$select=_businessunitid_value"
-      );
-      const buId = user["_businessunitid_value"] as string;
-      if (buId) {
-        const bu = await xrm.WebApi.retrieveRecord(
-          "businessunit", buId, "?$select=sprk_containerid"
-        );
-        containerId = (bu["sprk_containerid"] as string) ?? "";
-      }
-    } catch (err) {
-      console.warn("[WorkspaceGrid] Failed to resolve container ID:", err);
-    }
-    if (!containerId) {
-      console.error("[WorkspaceGrid] No container ID available");
-      return;
-    }
+    // 🔴 DELETED 2026-09-03 (unified-access-control-r2 task 076): the acting user's
+    // business-unit container lookup and its `if (!containerId) return;` guard.
+    //
+    // This launch is the standalone (no parent) entry, so the wizard's "skip associate" branch
+    // applies and the SERVER derives the acting user's BU container — the same value this code was
+    // reading, now read where it can be trusted. The guard additionally made the button silently do
+    // NOTHING for any user whose BU had no container, with only a console line to show for it.
 
     // Detect theme
     let theme = "light";
@@ -562,7 +559,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "parentEntityType=sprk_document" +
       "&parentEntityId=" +
       "&parentEntityName=" +
-      "&containerId=" + containerId +
+      // `&containerId=` REMOVED 2026-09-03 (task 076) — the wizard does not read it.
       "&theme=" + theme +
       "&bffBaseUrl=" + encodeURIComponent(getBffBaseUrl());
 
@@ -604,10 +601,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     async (webResourceName: string, data?: string, options?: DialogOptions) => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any =
-          (window as any)?.Xrm ??
-          (window.parent as any)?.Xrm ??
-          (window.top as any)?.Xrm;
+        const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
         if (!xrm?.Navigation?.navigateTo) return;
 
         const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
@@ -677,11 +671,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // -------------------------------------------------------------------------
 
   const handleNavigate = React.useCallback((target: NavigateTarget) => {
+    // Shared cross-frame walker (task 081 / C-8), asking for the method this
+    // target type calls: navigateTo (view) / openForm (record) / openUrl (url).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any =
-      (window as any)?.Xrm ??
-      (window.parent as any)?.Xrm ??
-      (window.top as any)?.Xrm;
+    const xrm: any = getXrm(target.type === "record" ? "openForm" : target.type === "url" ? "openUrl" : "navigation");
 
     if (target.type === "view" && target.viewId && xrm?.Navigation?.navigateTo) {
       // NOTE (task 091): mapped onto `record` (85%x85%) — nearest named OOB
@@ -826,10 +819,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     if (!activeLayout) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       const mode = activeLayout.isSystem ? "saveAs" : "edit";
@@ -867,10 +857,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCreateLayout = React.useCallback(() => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       xrm.Navigation.navigateTo(
@@ -1037,6 +1024,11 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
             projectName={closeProjectContext.projectName}
             containerId={closeProjectContext.containerId}
             onClose={handleCloseProjectDialog}
+            // Injected 2026-09-04 with the repoint to the shared component. The deleted LW twin
+            // imported both of these itself; the shared one takes them as props so it stays free of
+            // solution-specific imports. Both were already in scope here.
+            authenticatedFetch={authenticatedFetch}
+            bffBaseUrl={getBffBaseUrl()}
           />
         </React.Suspense>
       )}

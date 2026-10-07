@@ -1,14 +1,27 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
-/// OBO (delegated) SPE upload surface.
+/// Workforce SPE upload surface (the <c>/api/obo/...</c> paths keep their historical prefix).
+///
+/// 🔴 IDENTITY (unified-access-control-r2 task 171, owner round 69 — broker-only). Every upload here now writes
+/// APP-ONLY, after the route's own Dataverse decision and with the container derived server-side. Until 2026-10-06 they
+/// wrote as the user (OBO), and SharePoint Embedded lets a delegated caller write only into a container where that user
+/// holds a ROLE: per-record secure containers have none by design, so a creator's upload into its own new secure
+/// project was a Graph 403 (defect U403-1). The route paths, filters and container resolution are unchanged; only the
+/// identity of the Graph call moved. Do NOT reintroduce an OBO upload: it would make access depend on hand-granted
+/// container membership again instead of Dataverse.
 ///
 /// RETIRED 2026-08-26 by unified-access-control-r2 task 071 — FOUR drive/container-keyed routes were
 /// DELETED because they read or mutated EXISTING SPE content with no per-document authorization
@@ -24,79 +37,469 @@ namespace Sprk.Bff.Api.Api;
 /// decision no user is ever granted one. They were a BYPASS BY CONSTRUCTION of the per-document gate,
 /// not a live hole. Do NOT re-add them: the id-keyed routes above are the supported surface.
 ///
-/// WHY THE REMAINING THREE ROUTES ARE STILL UNGATED (escalated, NOT an oversight).
-/// The three routes below CREATE content. At the moment of authorization no `sprk_document` row exists
-/// — every wizard's ordering is `uploadFilesToSpe` THEN `createDocumentRecords` — so there is nothing
-/// for `RetrievePrincipalAccess` to answer about, and their authorization object is the OWNING RECORD /
-/// container, not a document. Adding <see cref="Api.Filters.DocumentAuthorizationFilter"/> here would
-/// resolve `{id}` to a container id, return None, and deny 100% of uploads.
+/// THE UPLOAD SURFACE AS OF TASK 076 (option C) — three routes, two contracts, NO container parameter.
 ///
-/// That seam is owned by tasks 075 (record-aware container resolver) + 076 (route every call site
-/// through it), and must land together with task 073, which gates the app-only twin
-/// `PUT /api/containers/{containerId}/files/{*path}` — both container-upload routes should end up
-/// behind ONE decision. Task 074's route-authorization ArchTest must carry a NAMED WAIVER for these
-/// three until then.
+///   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}   record-keyed, GATED
+///   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session  record-keyed, GATED
+///   PUT  /api/obo/me/files/{*path}                                       record-LESS, acting-user's BU
 ///
-/// Full caller inventory + per-route reasoning:
-/// `projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md`.
+/// The record-keyed pair is the contract: the caller names the OWNING RECORD, the server authorizes the
+/// caller against it via <see cref="Api.Filters.RecordRouteAccessAuthorizationFilter"/>, and only then
+/// resolves the container from that same record through task 075's `RecordContainerResolver`. The
+/// authorization key and the container are the same value by construction. A secure record resolves to its
+/// OWN container or FAILS CLOSED; everything else resolves to the RECORD's own `owningbusinessunit`
+/// container. The record-LESS route serves content that genuinely has no owning record when the bytes
+/// move; it derives the ACTING USER's business-unit container server-side, and secure content can never
+/// reach it.
+///
+/// 🔴 DELETED 2026-09-03 — `PUT /api/obo/containers/{id}/files/{*path}`.
+///
+/// It wrote bytes into a CALLER-NAMED container with no per-resource authorization decision behind it.
+/// It could not be gated in place: it CREATES content, so at authorization time no `sprk_document` row
+/// exists to authorize against — attaching <see cref="Api.Filters.DocumentAuthorizationFilter"/> would
+/// resolve `{id}` to a container id, return None, and deny 100% of uploads. So it was REPLACED rather than
+/// guarded, and the replacement is the three routes above.
+///
+/// It survived past the record-keyed routes' arrival because three client upload paths had no owning
+/// record when the bytes moved (EmailComposer's local attachment, the Analysis wizard's standalone
+/// document, DocumentUploadWizard's "skip associate"). `PUT /api/obo/me/files/{*path}` closed that gap
+/// WITHOUT reintroducing a container parameter — the owner's 2026-08-28 resolution — and the last client
+/// (DocumentUploadWizard) moved off the container-keyed route in the same change that deletes it here.
+///
+/// ⚠️ DO NOT RE-ADD IT, and do not add a container parameter to any route above "just for one caller".
+/// That is option (B), which the owner rejected: a client that names its own storage destination is the
+/// exact shape this project exists to remove. Content that has an owning record uses the record-keyed
+/// routes; content that genuinely does not uses `/api/obo/me/files`.
+///
+/// Full reasoning + the classified caller inventory:
+/// `projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md` and
+/// `notes/task-076-client-cutover-and-supplier-classification.md`.
+/// Prior retirement inventory: `projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md`.
 /// </summary>
 public static class OBOEndpoints
 {
     public static IEndpointRouteBuilder MapOBOEndpoints(this IEndpointRouteBuilder app)
     {
-        // PUT: small upload (as user). Post-upload RAG indexing is triggered by the
-        // wizard client via `@spaarke/sdap-client.SdapApiClient.indexFile()` after a
-        // successful PUT — see project `sdap-client-shared-library-fix-r1` and the
-        // canonical pattern used by DocumentUploadWizard's `triggerRagIndexing`.
-        app.MapPut("/api/obo/containers/{id}/files/{*path}", async (
-            string id, string path, HttpRequest req, HttpContext ctx,
+        // ═════════════════════════════════════════════════════════════════════════════════════════
+        // RECORD-KEYED UPLOAD (unified-access-control-r2 task 076, option C) — the TARGET contract.
+        //
+        // The caller names the OWNING RECORD; the server resolves the container from that same
+        // record, through task 075's RecordContainerResolver, AFTER authorizing the caller against
+        // it. The authorization key and the container are therefore the same value by construction,
+        // and no code path lets them disagree — which is the entire point.
+        //
+        // The container-keyed route this replaced (`PUT /api/obo/containers/{id}/files/{*path}`) was
+        // DELETED 2026-09-03 once its last client moved. See the class summary above for why it
+        // could not simply be gated, and why no route here takes a container parameter.
+        //
+        // 🔴 CLIENT + BFF SHIP TOGETHER. Both halves live in this repo and MUST deploy together:
+        // deploying the BFF first 404s every upload from a client still on the old route, and
+        // deploying the client first 404s every upload against a BFF that lacks these routes. There
+        // is no compatibility window and no feature flag.
+        // ═════════════════════════════════════════════════════════════════════════════════════════
+
+        // PUT: small upload against the owning record.
+        app.MapPut("/api/obo/records/{entityLogicalName}/{recordId:guid}/files/{*path}", async (
+            string entityLogicalName, Guid recordId, string path, HttpRequest req, HttpContext ctx,
+            [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,
             [FromServices] SpeFileStore speFileStore,
+            [FromServices] RecordContainerResolver containerResolver,
             [FromServices] ILogger<Program> logger,
             CancellationToken ct) =>
         {
             var (ok, err) = ValidatePathForOBO(path);
             if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
 
+            // Task 171 (adversarial finding 1): resolved BEFORE any Dataverse or Graph call — a replace is refused
+            // without looking at the container, so the refusal says nothing about which names exist there.
+            var conflict = ResolveConflictBehavior(req);
+
             try
             {
-                logger.LogInformation("OBO upload starting - Container: {ContainerId}, Path: {Path}", id, path);
+                logger.LogInformation(
+                    "OBO record-keyed upload starting - {Entity} {RecordId}, Path: {Path}",
+                    entityLogicalName, recordId, path);
+
+                // The container comes from the record, never from the caller. The two-argument
+                // overload derives the non-secure default from the RECORD's own owningbusinessunit —
+                // do NOT pass a fallback here, or the caller regains the ability to choose.
+                //
+                // Throws SdapProblemException for every refusal, which the global handler renders as
+                // canonical ProblemDetails (ADR-019): secure_record_container_missing (409, a secure
+                // record with no container of its own — FAIL CLOSED, never a fallback),
+                // container_record_not_found (404), container_entity_unknown (400 — a name that is neither
+                // an alias nor a real entity; task 151), container_ownership_ambiguous /
+                // container_ownership_indeterminate (409).
+                //
+                // The route value is passed AS-IS, alias or logical name. The record route filter authorized
+                // it through EntityAccessFilter.EntitySetByType, and the resolver maps it through
+                // DocumentAssociationMap — two tables held in lockstep — so "project" authorizes sprk_projects
+                // and resolves sprk_project: the same record (task 151, #1038). Before that mapping an alias
+                // read as "not securable" and this handler answered a misleading "No storage container is
+                // configured" 409 for a record whose container was derivable.
+                //
+                // CHILD records (task 155, owner C10 part 2): a to-do / event / invoice — and, since f3, a work
+                // assignment / project / contact whose own row can name one — filed under a SECURE project, matter or
+                // work assignment (by a typed lookup or the polymorphic regarding pair) resolves to that root's OWN
+                // container, or refuses — secure_record_container_missing (409, the root has none),
+                // container_ancestor_ambiguous (409, two secure roots, or typed and polymorphic regarding disagree),
+                // container_ancestor_unresolved (409, or 503 when the child's own row, its regarding type or its
+                // root could not be read), container_ancestor_stale (409, task 156: filed under another record — a
+                // communication, event, document, invoice, analysis, agreement, budget or report card — whose LIVE
+                // root no longer equals the copy on this row; the row is enqueued for re-stamping and a retry
+                // succeeds), container_ancestor_unverifiable (409, filed under a service request, or a record that
+                // carries no copy to compare), securable_entities_unknown (409, the registry answered outside its
+                // contract). A copy that equals its source's live root resolves like a direct root link. Otherwise the
+                // record's own business-unit container. Before task 155 every to-do / event / contact upload landed
+                // in the Unresolved branch below.
+                var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
+
+                if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)
+                {
+                    // Reached ONLY for a record with no secure root whose owning business unit has no
+                    // container stamped (or which has no owning business unit). Benign for the ingest paths
+                    // that may skip, but an upload cannot skip — there is nowhere to put the bytes — so it is
+                    // reported rather than silently dropped.
+                    logger.LogWarning(
+                        "OBO record-keyed upload refused - no container could be derived for non-secure "
+                        + "{Entity} {RecordId} (its owning business unit has no sprk_containerid).",
+                        entityLogicalName, recordId);
+
+                    return TypedResults.Problem(
+                        title: "No storage container is configured",
+                        detail: "No SharePoint Embedded container could be derived for this record's "
+                                + "business unit, so there is nowhere to store the file.",
+                        statusCode: 409);
+                }
 
                 // Resolve container ID to drive ID (SPE container IDs != drive IDs)
                 var driveId = await GraphCallScope.Run(
-                    () => speFileStore.ResolveDriveIdAsync(id, ct),
+                    () => speFileStore.ResolveDriveIdAsync(decision.ContainerId, ct),
                     "obo.driveid.resolve");
-                logger.LogDebug("Resolved container {ContainerId} to drive {DriveId}", id, driveId);
 
-                // Stream directly to Graph SDK (no memory buffering)
+                // Stream directly to Graph SDK (no memory buffering). APP-ONLY (task 171): the record filter above
+                // decided, and the container came from that same record — so the BFF writes as itself.
                 var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
-                    "obo.upload.small");
+                    () => speFileStore.UploadSmallAsync(
+                        driveId, path, req.Body, conflict, ct),
+                    "upload.small");
 
-                logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
+                logger.LogInformation("Record-keyed upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // Task 171 attach fix: the upload is app-only, so Graph records the APPLICATION as its creator. Record who
+                // it was for, so POST /api/v1/documents/{id}/file can attach it for THIS caller and nobody else.
+                if (item is not null && !await TryRecordUploadAsync(uploadAttribution, speFileStore, driveId, item.Id, ctx, logger, ct))
+                {
+                    return AttributionUnavailable();
+                }
 
                 return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
             }
             catch (UnauthorizedAccessException ex)
             {
-                logger.LogError(ex, "OBO upload unauthorized");
+                logger.LogError(ex, "OBO record-keyed upload unauthorized");
                 return TypedResults.Unauthorized();
             }
             catch (SpaarkeStorageException ex)
             {
-                logger.LogError(ex, "OBO upload failed - Graph API error: {Message}", ex.Message);
+                logger.LogError(ex, "OBO record-keyed upload failed - Graph API error: {Message}", ex.Message);
                 return ex.ToProblemDetails();
+            }
+            catch (SdapProblemException)
+            {
+                // The resolver's refusals are the contract, not faults. Rethrow so the global handler
+                // renders the typed code/status — swallowing them into the 500 below would turn
+                // "this secure record has no container" into "something went wrong".
+                throw;
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "OBO upload failed - Unexpected error: {Message}", ex.Message);
+                logger.LogError(ex, "OBO record-keyed upload failed - Unexpected error: {Message}", ex.Message);
                 return TypedResults.Problem(
                     title: "Upload failed",
                     detail: $"An unexpected error occurred: {ex.Message}",
                     statusCode: 500
                 );
             }
-        }).RequireRateLimiting("graph-write").RequireAuthorization();
+        })
+        .AddRecordRouteAccessAuthorizationFilter(RecordRouteAccessAuthorizationFilter.AssociateContentOperation)
+        .RequireRateLimiting("graph-write")
+        .RequireAuthorization();
 
+        // ═════════════════════════════════════════════════════════════════════════════════════════
+        // PUT: small upload for content that has NO OWNING RECORD YET.
+        //
+        // This is the fourth and last row of the container-resolution order the owner settled on
+        // 2026-08-28 (`notes/SESSION-STATUS-2026-08-28.md` §6.5 Q1). The other three are built:
+        //
+        //   record exists + secure    -> the record's OWN sprk_containerid, or FAIL CLOSED
+        //   record exists, non-secure -> the RECORD's owningbusinessunit -> sprk_containerid
+        //   NO record yet             -> the ACTING USER's businessunitid -> sprk_containerid   <-- HERE
+        //   server-side ingest        -> Communication:ArchiveContainerId
+        //
+        // WHY IT EXISTS. Three client flows genuinely have no record when the bytes move — the
+        // EmailComposer local attachment (the email may have no persisted regarding yet), the Analysis
+        // wizard's standalone document, and DocumentUploadWizard's "skip associate" (the user declined
+        // a parent). Without this route those three have no callable upload path once the
+        // container-keyed route is deleted, and giving the record-keyed routes a container parameter
+        // for their benefit would be option (B) — the rejected one.
+        //
+        // 🔴 THE INVARIANT STILL HOLDS, and the distinction is the whole point:
+        //
+        //        the user's BU container is the correct VALUE
+        //     != the CLIENT should send a container id
+        //
+        // The SERVER reads Dataverse and derives the acting user's business unit itself. There is no
+        // container parameter on this route, so a caller cannot name one — which is the property this
+        // task exists to establish. Exposure is bounded: a caller can only ever write into their own
+        // BU's container, which they are entitled to anyway.
+        //
+        // ⚠️ NEVER reachable for secure content. Secure records resolve through the RECORD-keyed route
+        // and fail closed. Acting-user BU is admissible ONLY where no record exists — for a secure
+        // record the acting user's BU is provably the WRONG container, because users sit in the
+        // Operations subtree while secure records are owned in `Secure Record`. Do not "generalise"
+        // this route to accept a record id as a convenience; that reintroduces the two-keys-for-one-
+        // decision shape the record-keyed contract removed.
+        //
+        // 🔴 KNOWN RESIDUAL, accepted and separately filed. Content placed in a BU container here and
+        // LATER associated to a secure record is already in the shared container, and SPE permissions
+        // are additive-only, so nothing retracts it. That is
+        // `notes/finding-secure-transition-container-migration.md`, made its own project by owner
+        // direction 2026-08-31. It is the price of supporting create-before-the-record-exists at all,
+        // and it is strictly SMALLER than the behaviour it replaces, where the CLIENT named the
+        // container.
+        //
+        // AUTHORIZATION. There is deliberately no per-resource filter: there is no resource yet to
+        // authorize against. The decision this route can actually make is "is the caller a resolvable
+        // Dataverse principal", and `ResolveForActingUserAsync` makes it — throwing a typed 403
+        // (`acting_user_not_resolvable`) rather than falling back to a shared container. Same shape as
+        // the Permanent waiver on `POST /api/v1/documents` ("CREATE. There is no pre-existing resource
+        // to authorize"). Its waiver is Permanent for that reason, NOT to make a build go green.
+        app.MapPut("/api/obo/me/files/{*path}", async (
+            string path, HttpRequest req, HttpContext ctx,
+            [FromServices] Sprk.Bff.Api.Services.Documents.UploadAttribution uploadAttribution,
+            [FromServices] SpeFileStore speFileStore,
+            [FromServices] RecordContainerResolver containerResolver,
+            [FromServices] ILogger<Program> logger,
+            CancellationToken ct) =>
+        {
+            var (ok, err) = ValidatePathForOBO(path);
+            if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
+
+            // Task 171 (adversarial finding 1): resolved BEFORE any Dataverse or Graph call — a replace is refused
+            // without looking at the container, so the refusal says nothing about which names exist there.
+            var conflict = ResolveConflictBehavior(req);
+
+            try
+            {
+                var callerOid = CallerResolution.ResolveObjectId(ctx.User);
+
+                logger.LogInformation("OBO record-less upload starting - Path: {Path}", path);
+
+                // Throws SdapProblemException(403 acting_user_not_resolvable) when the caller cannot be
+                // resolved to a Dataverse user. Refusing beats resolving to whatever a null filter
+                // would match.
+                var decision = await containerResolver.ResolveForActingUserAsync(callerOid, ct);
+
+                if (decision.ContainerId is null)
+                {
+                    // The caller's business unit has no sprk_containerid stamped. There is nowhere to
+                    // put the bytes, and the one thing we must not do is pick a different container.
+                    logger.LogWarning(
+                        "OBO record-less upload refused - the acting user's business unit has no "
+                        + "sprk_containerid stamped.");
+
+                    return TypedResults.Problem(
+                        title: "No storage container is configured",
+                        detail: "No SharePoint Embedded container is configured for your business unit, "
+                                + "so there is nowhere to store a file that is not attached to a record yet.",
+                        statusCode: 409);
+                }
+
+                var driveId = await GraphCallScope.Run(
+                    () => speFileStore.ResolveDriveIdAsync(decision.ContainerId, ct),
+                    "obo.driveid.resolve");
+
+                // APP-ONLY (task 171). The decision this route can make — "the caller is a resolvable Dataverse user,
+                // and this is THEIR business unit's container" — was made above, server-side. It is the same rule and
+                // identity the Office add-in's no-record save has used since task 065 (OfficeService), so record-less
+                // content follows one rule on every surface.
+                var item = await GraphCallScope.Run(
+                    () => speFileStore.UploadSmallAsync(
+                        driveId, path, req.Body, conflict, ct),
+                    "upload.small");
+
+                logger.LogInformation("Record-less upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // Task 171 attach fix: who this app-only upload was for (see the record-keyed route).
+                if (item is not null && !await TryRecordUploadAsync(uploadAttribution, speFileStore, driveId, item.Id, ctx, logger, ct))
+                {
+                    return AttributionUnavailable();
+                }
+
+                // The response carries the drive id the SERVER chose. Per the 2026-08-28 Q5 answer this
+                // is NOT option (B): accepting a container in the REQUEST lets the caller choose where
+                // bytes go; returning the one the server chose tells the caller where they landed, which
+                // it must record on the sprk_document row it creates next.
+                return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.LogError(ex, "OBO record-less upload unauthorized");
+                return TypedResults.Unauthorized();
+            }
+            catch (SpaarkeStorageException ex)
+            {
+                logger.LogError(ex, "OBO record-less upload failed - Graph API error: {Message}", ex.Message);
+                return ex.ToProblemDetails();
+            }
+            catch (SdapProblemException)
+            {
+                // The resolver's refusals are the contract, not faults — rethrow so the global handler
+                // renders the typed code/status.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "OBO record-less upload failed - Unexpected error: {Message}", ex.Message);
+                return TypedResults.Problem(
+                    title: "Upload failed",
+                    detail: $"An unexpected error occurred: {ex.Message}",
+                    statusCode: 500
+                );
+            }
+        })
+        .RequireRateLimiting("graph-write")
+        .RequireAuthorization();
+
+        // POST: upload session for files too large for a single PUT, against the owning record. App-only since task 171.
+        //
+        // WHY THIS EXISTS (task 076). The chunked OBO pair that nominally served large files was
+        // deleted earlier in this same task because it was dead by 404 — its client began with
+        // GET /api/obo/containers/{id}/drive, a route mapped nowhere. This restores the capability on
+        // the record-keyed contract rather than reviving the container-keyed one.
+        //
+        // ⚠️ Corrected 2026-09-02: this comment used to say files ">= 4 MiB had NO working upload
+        // path at all" because "the small route is capped at PathValidator.SmallUploadMaxBytes
+        // (enforced in UploadSessionManager.UploadSmallAsUserAsync)". Both halves were false — that
+        // guard was deleted by spaarkeai-compose-r8 task 015 and the constant was never enforced
+        // anywhere (it has since been deleted too). The simple PUT handles up to 250 MB, so the
+        // genuine threshold for needing THIS route is 250 MB, not 4 MiB.
+        //
+        // The response carries Graph's own upload-session URL, which the client then PUTs chunks to
+        // DIRECTLY — exactly as the previous client did, and as Graph's large-file protocol requires.
+        // The BFF deliberately does not proxy the chunks: doing so would need per-session server-side
+        // state, and a memory-backed store would break across App Service instances (chunk N landing
+        // on an instance that never saw the session) while a distributed one would put a new
+        // conditionally-registered dependency under an unconditionally-mapped route (CLAUDE.md §10
+        // F.1). The authorization decision is made ONCE, here, against the owning record — which is
+        // where this task's invariant lives.
+        app.MapPost("/api/obo/records/{entityLogicalName}/{recordId:guid}/upload-session", async (
+            string entityLogicalName, Guid recordId, [FromQuery] string path, HttpContext ctx,
+            [FromServices] SpeFileStore speFileStore,
+            [FromServices] RecordContainerResolver containerResolver,
+            [FromServices] ILogger<Program> logger,
+            CancellationToken ct,
+            [FromQuery] string? conflictBehavior = null) =>
+        {
+            var (ok, err) = ValidatePathForOBO(path);
+            if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
+
+            if (!TryParseConflictBehavior(conflictBehavior, out var behavior))
+            {
+                return TypedResults.ValidationProblem(new Dictionary<string, string[]>
+                {
+                    ["conflictBehavior"] = new[] { "conflictBehavior must be one of: fail, rename" }
+                });
+            }
+
+            if (behavior == ConflictBehavior.Replace)
+            {
+                throw ReplaceRefused();
+            }
+
+            try
+            {
+                logger.LogInformation(
+                    "OBO record-keyed upload session starting - {Entity} {RecordId}, Path: {Path}",
+                    entityLogicalName, recordId, path);
+
+                // Identical resolution to the small route, deliberately — one contract, two sizes (including
+                // the alias mapping and the container_entity_unknown refusal, task 151, and the child-record
+                // secure-root resolution and its refusals, task 155).
+                var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);
+
+                if (decision.Outcome == ContainerDecisionOutcome.Unresolved || decision.ContainerId is null)
+                {
+                    logger.LogWarning(
+                        "OBO record-keyed upload session refused - no container could be derived for "
+                        + "non-secure {Entity} {RecordId}.",
+                        entityLogicalName, recordId);
+
+                    return TypedResults.Problem(
+                        title: "No storage container is configured",
+                        detail: "No SharePoint Embedded container could be derived for this record's "
+                                + "business unit, so there is nowhere to store the file.",
+                        statusCode: 409);
+                }
+
+                var driveId = await GraphCallScope.Run(
+                    () => speFileStore.ResolveDriveIdAsync(decision.ContainerId, ct),
+                    "obo.driveid.resolve");
+
+                // APP-ONLY (task 171): this is the call that 403'd for a creator uploading into its own new secure
+                // project on 2026-10-06 — the secure container has no members, by design.
+                // ⚠️ Task 171 attach fix (verifier F1, 2026-10-07): an item uploaded through a SESSION carries NO upload
+                // binding — the BFF never sees the item the session creates, and a binding recorded before it exists (by
+                // path or name) could be matched by another user's file at that path. Such an item therefore CANNOT be
+                // attached to a document through POST /api/v1/documents/{id}/file (an app-only item attaches only with an
+                // item binding). This route has no client today; one that needs >250 MB uploads must first add a
+                // completion step that binds the created item id to the caller.
+                var session = await GraphCallScope.Run(
+                    () => speFileStore.CreateUploadSessionAsync(driveId, path, behavior, ct),
+                    "upload.session.create");
+
+                if (session is null)
+                {
+                    return TypedResults.Problem(
+                        title: "Upload session could not be created",
+                        detail: "SharePoint Embedded did not return an upload session for this file.",
+                        statusCode: 502);
+                }
+
+                logger.LogInformation(
+                    "OBO record-keyed upload session created for {Entity} {RecordId}, expires {Expires}",
+                    entityLogicalName, recordId, session.ExpirationDateTime);
+
+                return TypedResults.Ok(session);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.LogError(ex, "OBO record-keyed upload session unauthorized");
+                return TypedResults.Unauthorized();
+            }
+            catch (SpaarkeStorageException ex)
+            {
+                logger.LogError(ex, "OBO record-keyed upload session failed - Graph API error: {Message}", ex.Message);
+                return ex.ToProblemDetails();
+            }
+            catch (SdapProblemException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "OBO record-keyed upload session failed - Unexpected error: {Message}", ex.Message);
+                return TypedResults.Problem(
+                    title: "Upload session failed",
+                    detail: $"An unexpected error occurred: {ex.Message}",
+                    statusCode: 500
+                );
+            }
+        })
+        .AddRecordRouteAccessAuthorizationFilter(RecordRouteAccessAuthorizationFilter.AssociateContentOperation)
+        .RequireRateLimiting("graph-write")
+        .RequireAuthorization();
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
         // DELETED 2026-08-27 (task 076): POST /api/obo/drives/{driveId}/upload-session and
@@ -114,13 +517,19 @@ public static class OBOEndpoints
         //   3. The chunk route was deader still: even that client never called it. Its uploadChunk
         //      PUT went straight to Graph's own `session.uploadUrl`, not to the BFF.
         //
-        // ⚠️ WHAT THIS DOES NOT FIX. Files >= 4 MiB have NO working upload path, before or after
-        // this deletion. PathValidator.SmallUploadMaxBytes caps the small route at 4 MiB
-        // (enforced at UploadSessionManager.cs:131) and the chunked path was the only alternative.
-        // The client's own SdapApiClient.uploadFile routes >= 4 MiB to the dead path, so large
-        // uploads fail today with a misleading 'Failed to get container drive'. Deleting makes the
-        // failure honest; it does not make large uploads work. A record-keyed upload-session route
-        // is follow-up work and is NOT in task 076's scope — see
+        // ✅ RESOLVED IN THE SAME TASK (updated 2026-08-28). At the time of the deletion above this
+        // block read "Files >= 4 MiB have NO working upload path, before or after this deletion …
+        // a record-keyed upload-session route is follow-up work and is NOT in task 076's scope."
+        // The owner directed otherwise, and it is now IN scope and done: see
+        // POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session above. It reaches the
+        // same live UploadSessionManager upload-session call the deleted pair used (app-only since task 171), minus
+        // the GET /api/obo/containers/{id}/drive hop that never existed.
+        //
+        // ⚠️ CLIENT state (updated 2026-09-02): no shipped client calls the new route yet, so uploads
+        // ABOVE 250 MB still fail — with an accurate size message (Spaarke.SdapClient
+        // UploadOperation.fileTooLarge) instead of a misleading 'Failed to get container drive'.
+        // Between 4 MiB and 250 MB now WORKS: the client's 4 MiB throw was removed, having rested on
+        // a server cap that did not exist. The client cutover is blocked on the §5 escalation in
         // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md.
         //
         // Both routes carried Pending waivers in RouteAuthorizationGuardTests owned by "073/075/076";
@@ -141,14 +550,187 @@ public static class OBOEndpoints
         return app;
     }
 
+    /// <summary>
+    /// Parse the optional <c>conflictBehavior</c> query value. Absent defaults to
+    /// <see cref="ConflictBehavior.Rename"/> — the behaviour the previous chunked client requested,
+    /// and the only one that cannot destroy an existing file. An UNRECOGNISED value is rejected rather
+    /// than silently defaulting: a caller who asks for <c>fail</c> and gets <c>rename</c> because they
+    /// typo'd it has had its conflict policy quietly inverted.
+    /// </summary>
+    private static bool TryParseConflictBehavior(string? raw, out ConflictBehavior behavior)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            behavior = ConflictBehavior.Rename;
+            return true;
+        }
+
+        return Enum.TryParse(raw.Trim(), ignoreCase: true, out behavior)
+               && Enum.IsDefined(behavior);
+    }
+
     // Minimal, local validation to avoid dependency on other files.
+    /// <summary>
+    /// Validates the caller-supplied <c>{*path}</c> of the three OBO upload routes.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This route is deliberately NOT sanitized, unlike every other SPE upload site in the BFF
+    /// (reviewed 2026-08-29).</b> Everywhere else the server constructs the path and the "file name" is just
+    /// a name, so <c>SpeUploadPath.SanitizeFileName</c> strips separators. Here <c>{*path}</c> is a wildcard
+    /// route where the caller may legitimately address a location inside a container it already holds, and
+    /// silently rewriting it would move a caller's bytes without telling them. So this REJECTS (400) rather
+    /// than rewrites.</para>
+    ///
+    /// <para><b>What the pre-2026-08-29 version did and did not do.</b> It correctly blocked traversal
+    /// (<c>..</c>), control characters, a trailing <c>/</c>, blank, and &gt;1024 chars. It did NOT block a
+    /// LEADING <c>/</c>, EMPTY segments (<c>a//b</c>), a bare <c>.</c> segment, or any Windows/SharePoint
+    /// invalid character in a segment — notably <c>'\\'</c>, which several SharePoint surfaces read as a
+    /// separator and which <c>Path.GetInvalidFileNameChars()</c> does NOT report on the linux-x64 runtime
+    /// this publishes to. Those four gaps are closed below, per-SEGMENT, which is what preserves the
+    /// sub-path capability while making each segment a valid name.</para>
+    ///
+    /// <para><b>And it does NOT prevent folder creation — by design.</b> A multi-segment path here still
+    /// makes Graph create the intermediate folders. That is the documented capability of this route and is
+    /// why <c>tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</c> excludes this file by name.</para>
+    ///
+    /// <para>⚠️ <b>Reported finding, NOT acted on here.</b> That capability is currently DORMANT: all three
+    /// client callers send a single file name —
+    /// <c>Spaarke.SdapClient/src/operations/UploadOperation.ts</c> (<c>encodeURIComponent(file.name)</c>),
+    /// <c>Spaarke.UI.Components/src/services/EntityCreationService.ts</c>, and
+    /// <c>services/document-upload/types.ts</c>, which documents the parameter as <c>{fileName}</c>. That is
+    /// the same "dormant client-supplied path plumbing" shape the 2026-08-28 change DELETED at three other
+    /// sites (SaveRequest.FolderPath, UploadFinalizationPayload.FolderPath, OfficeStorageUploader.folderPath).
+    /// Retiring it here is an owner call, not a guard's, because this is a public route contract — so it is
+    /// left intact and recorded instead. Related: EntityCreationService interpolates the file name into the
+    /// URL WITHOUT <c>encodeURIComponent</c>, so a '/' in a user's file name silently becomes extra route
+    /// segments there. After this change that request gets a clean 400 instead of minting folders.</para>
+    /// </remarks>
+    /// <summary>
+    /// Resolves the name-collision behaviour for an upload from the <c>?conflictBehavior=</c> query
+    /// parameter, defaulting to <see cref="ConflictBehavior.Fail"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail is the default deliberately, and it is a behaviour CHANGE.</b> Previously these
+    /// routes inherited Graph's implicit PUT default of <c>replace</c>, so uploading a file whose name
+    /// already existed silently overwrote the stored bytes — and the failure the user actually saw came
+    /// later and from somewhere else: the follow-on <c>sprk_document</c> insert violated the alternate
+    /// key on the SPE item id and Dataverse returned a 412 titled "Duplicate Record" with an
+    /// unsubstituted <c>{1}</c> placeholder. That reads as duplicate detection but is data loss
+    /// followed by a confusing error. With <c>fail</c>, Graph returns 409 and the existing file is
+    /// untouched.</para>
+    ///
+    /// <para>Clients that have ASKED the user what to do pass <c>?conflictBehavior=rename</c> (keep both —
+    /// Graph stores under a non-colliding name). Anything else — absent or unrecognised — is <c>fail</c>.</para>
+    ///
+    /// <para>🔴 <b><c>replace</c> is REFUSED (409 <c>upload_replace_not_supported</c>) — unified-access-control-r2
+    /// task 171, adversarial finding 1.</b> These uploads now write APP-ONLY, and the decision behind them is
+    /// AssociateContent on the record the bytes are filed under — not Write on whatever file already holds that name.
+    /// Containers are shared (a business unit's) and the upload root is flat, so a replace by name would let a caller
+    /// with AssociateContent on record B overwrite record A's file. Under OBO, SPE's own write check on the existing
+    /// item stood in the way; under the broker nothing does. Replacing an existing document's content is a VERSION
+    /// SAVE of that document, which authorizes Write on it (the Office add-in's version save, Compose saves, Office
+    /// itself under the caller's own role). There is no web "upload as a new version" route — a known limit, recorded
+    /// in the task-171 note. The refusal is decided before any Graph or Dataverse call, so it reveals
+    /// nothing about the container.</para>
+    /// </remarks>
+    private static ConflictBehavior ResolveConflictBehavior(HttpRequest req)
+    {
+        var raw = req.Query["conflictBehavior"].ToString().Trim();
+        if (raw.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        {
+            throw ReplaceRefused();
+        }
+
+        return raw.Equals("rename", StringComparison.OrdinalIgnoreCase) ? ConflictBehavior.Rename : ConflictBehavior.Fail;
+    }
+
+    /// <summary>
+    /// Records who an app-only upload was for (task 171 attach fix). <see langword="false"/> when the caller cannot be
+    /// resolved or the record could not be written — the upload then reports <see cref="AttributionUnavailable"/>, because
+    /// a file nobody can attach would leave the user's document without its file.
+    /// </summary>
+    private static async Task<bool> TryRecordUploadAsync(
+        Sprk.Bff.Api.Services.Documents.UploadAttribution attribution, SpeFileStore speFileStore, string driveId, string itemId,
+        HttpContext ctx, ILogger logger, CancellationToken ct)
+    {
+        var caller = CallerResolution.ResolveObjectId(ctx.User);
+        // Both claim forms: the BFF keeps inbound claim-type mapping ON, so in production "tid" arrives as
+        // http://schemas.microsoft.com/identity/claims/tenantid (and "oid" as its objectidentifier twin — CallerResolution).
+        var tenant = Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.ResolveTenantId(ctx.User);
+        try
+        {
+            if (string.IsNullOrWhiteSpace(caller) || string.IsNullOrWhiteSpace(tenant))
+            {
+                logger.LogWarning("Upload attribution: the caller's object id or tenant could not be resolved.");
+            }
+            else
+            {
+                await attribution.RecordItemAsync(tenant, caller, driveId, itemId, ct).ConfigureAwait(false);
+                return true;
+            }
+        }
+        catch (Exception ex) when (!ctx.RequestAborted.IsCancellationRequested)
+        {
+            logger.LogError(ex, "Upload attribution could not be recorded; the upload is reported as not completed.");
+        }
+
+        // K2: the upload is reported as failed, so do not leave an orphan file nobody can attach. Best effort — the
+        // refusal stands whatever the delete does. CancellationToken.None: the cleanup must not be cut short by the
+        // request that is being answered with an error.
+        try
+        {
+            if (!await speFileStore.DeleteFileAsync(driveId, itemId, CancellationToken.None).ConfigureAwait(false))
+            {
+                logger.LogWarning("Upload attribution failed and the uploaded item {ItemId} could not be deleted (not found).", itemId);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Upload attribution failed and the uploaded item {ItemId} in {DriveId} could not be deleted; "
+                + "it is an orphan no one can attach.", itemId, driveId);
+        }
+
+        return false;
+    }
+
+    private static IResult AttributionUnavailable() => TypedResults.Problem(
+        title: "Upload could not be completed",
+        detail: "The file could not be recorded as yours just now, so it could not be attached to its document. Try the "
+                + "upload again shortly.",
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        extensions: new Dictionary<string, object?> { ["code"] = "upload_attribution_unavailable" });
+
+    /// <summary>The refusal of <c>conflictBehavior=replace</c> on an app-only upload route (task 171 finding 1).</summary>
+    internal const string ReplaceRefusedCode = "upload_replace_not_supported";
+
+    private static SdapProblemException ReplaceRefused() => new(
+        code: ReplaceRefusedCode,
+        title: "Replacing a file on upload is not supported",
+        detail: "Uploading never replaces an existing file. Upload it under a new name (conflictBehavior=rename), or open the "
+                + "existing document (Word, the Office add-in or Compose) and save your changes there as a new version.",
+        statusCode: StatusCodes.Status409Conflict);
+
     private static (bool ok, string? error) ValidatePathForOBO(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return (false, "path is required");
+        if (path.Length > 1024) return (false, "path too long");
+        if (path.StartsWith("/", StringComparison.Ordinal)) return (false, "path must not start with '/'");
         if (path.EndsWith("/", StringComparison.Ordinal)) return (false, "path must not end with '/'");
         if (path.Contains("..")) return (false, "path must not contain '..'");
         foreach (var ch in path) if (char.IsControl(ch)) return (false, "path contains control characters");
-        if (path.Length > 1024) return (false, "path too long");
+
+        // Per-SEGMENT validation. Splitting on '/' keeps the sub-path capability intact; requiring each
+        // segment to be a valid NAME is what the previous whole-string checks never did.
+        foreach (var segment in path.Split('/'))
+        {
+            if (!SpeUploadPath.IsSafeSegment(segment))
+            {
+                return (false,
+                    "each '/'-separated segment of path must be a valid file or folder name: non-empty, "
+                    + "not '.' or '..', and free of the characters < > : \" \\ | ? *");
+            }
+        }
+
         return (true, null);
     }
 }

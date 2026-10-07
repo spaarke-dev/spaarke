@@ -154,6 +154,18 @@ node.sprk_actionid  -->  Action.sprk_systemprompt (JPS JSON)
 
 Pure executors (`Condition`, `Start`, `DeliverOutput`, `LookupUserMembership`, etc.) skip the JPS pipeline entirely — they read `node.configJson` directly per their typed config schema (see FR-16 / Wave 3).
 
+`LookupUserMembership` config keys: `entityType` (required), `roles` (optional role filter), `includeRelated` (reserved,
+no-op), and **`targeting`** (optional; `"people"` or omitted).
+
+> **`targeting` (unified-access-control-r2 task 152, ADR-034 Amendment A3).** A LookupUserMembership node whose output
+> reaches a **CreateNotification, SendEmail or briefing** node MUST set `"targeting": "people"`. It selects the records
+> FOR the user — the ones they created (a human Created By), the ones naming them in an "Assigned *" contact column
+> (through their linked contact), and the ones they personally own — and never records reached only through team,
+> business-unit or organization ownership (a BU's default team contains the whole BU, so the default surface notifies
+> everyone in the unit about a team-owned record). Omit `targeting` only for AI scoping (retrieval context). Any other
+> value fails node validation. Do not combine it with a `roles` filter unless you mean to drop terms: a `roles` filter
+> that omits `createdBy` drops Created By.
+
 ### Key Components
 
 | Component | File | Purpose |
@@ -566,7 +578,7 @@ The first decision is **which executor will run this node?** That choice is reco
 | Side-effect actions | `20–24` | `CreateTask`, `SendEmail`, `UpdateRecord`, `CallWebhook`, `SendTeamsMessage` | Outbound writes to Dataverse / Graph / external systems. |
 | Control flow | `30–33` | `Condition`, `Parallel`, `Wait`, `Start` | Branching, fan-out, gates, canvas anchors. |
 | Delivery | `40–42` | `DeliverOutput`, `DeliverToIndex`, `DeliverComposite` | Terminal nodes that emit the playbook result. |
-| Notification + query | `50–52` | `CreateNotification`, `QueryDataverse`, `LookupUserMembership` | In-app messaging + Dataverse reads + membership resolution. |
+| Notification + query | `50–52` | `CreateNotification`, `QueryDataverse`, `LookupUserMembership` | In-app messaging + Dataverse reads + membership resolution. A `LookupUserMembership` node feeding a notification MUST set `"targeting": "people"` (see below). |
 | Workflow primitives | `60, 70, 80, 90` | `AgentService`, `GroundingVerify`, `LiveFact`, `IndexRetrieve` | Foundry agent calls, citation verification, deterministic facts, Insights retrieval. |
 | Insights synthesis | `100–120` | `EvidenceSufficiency`, `DeclineToFind`, `ReturnInsightArtifact` | Evidence-gated Insights playbook nodes. |
 | Post-LLM scrub | `130–143` | `Sanitization`, `ObservationEmit`, `EntityNameValidator`, `LoadKnowledge`, `ReturnResponse` | Sanitizers, validators, and R4 control-flow executors. |

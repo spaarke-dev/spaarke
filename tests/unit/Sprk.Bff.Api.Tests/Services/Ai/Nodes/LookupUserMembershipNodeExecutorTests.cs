@@ -273,6 +273,68 @@ public class LookupUserMembershipNodeExecutorTests
             "must map to an omitted (null) IncludeRelated, not the unresolvable \"*\" sentinel");
     }
 
+    // ── unified-access-control-r2 task 152 (ADR-034 A3): the `targeting` config key ─────────────────────
+
+    [Theory]
+    [InlineData("people")]
+    [InlineData("PEOPLE")]
+    public async Task ExecuteAsync_TargetingPeople_PassesThePeopleTargetingSurface(string targeting)
+    {
+        var userId = Guid.NewGuid();
+        MembershipResolveOptions? captured = null;
+        _resolverMock
+            .Setup(r => r.ResolveAsync(userId, "sprk_matter", It.IsAny<MembershipResolveOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, MembershipResolveOptions?, CancellationToken>((_, _, opts, _) => captured = opts)
+            .ReturnsAsync(BuildEmptyResponse("sprk_matter", userId));
+
+        var result = await _executor.ExecuteAsync(
+            CreateContext(
+                configJson: $$"""{"entityType":"sprk_matter","targeting":"{{targeting}}"}""",
+                outputVariable: "forMe",
+                userId: userId),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        captured!.PeopleTargeting.Should().BeTrue("a notification playbook's membership must be the records FOR the user");
+        captured.AccessConferringOnly.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TargetingOmitted_NodeBehaviourUnchanged()
+    {
+        var userId = Guid.NewGuid();
+        MembershipResolveOptions? captured = null;
+        _resolverMock
+            .Setup(r => r.ResolveAsync(userId, "sprk_matter", It.IsAny<MembershipResolveOptions>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, string, MembershipResolveOptions?, CancellationToken>((_, _, opts, _) => captured = opts)
+            .ReturnsAsync(BuildEmptyResponse("sprk_matter", userId));
+
+        var result = await _executor.ExecuteAsync(
+            CreateContext(configJson: """{"entityType":"sprk_matter"}""", outputVariable: "all", userId: userId),
+            CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        captured.Should().Be(new MembershipResolveOptions(), "the default surface's options are exactly as before task 152");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TargetingUnknownValue_IsAValidationError_NoResolverCall()
+    {
+        var result = await _executor.ExecuteAsync(
+            CreateContext(configJson: """{"entityType":"sprk_matter","targeting":"team"}""", outputVariable: "x", userId: Guid.NewGuid()),
+            CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
+        _resolverMock.Verify(r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public void ConfigSchema_DocumentsTheTargetingKey()
+    {
+        _executor.GetConfigSchema().Fields.Should().Contain(f => f.Name == "targeting" && !f.Required);
+    }
+
     #endregion
 
     #region ExecuteAsync — edge cases

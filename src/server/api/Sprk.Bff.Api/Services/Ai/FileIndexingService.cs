@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 
@@ -28,6 +29,7 @@ public sealed class FileIndexingService : IFileIndexingService
     private readonly ITextChunkingService _chunkingService;
     private readonly IRagService _ragService;
     private readonly ILogger<FileIndexingService> _logger;
+    private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="FileIndexingService"/> class.
@@ -37,35 +39,56 @@ public sealed class FileIndexingService : IFileIndexingService
     /// <param name="chunkingService">Text chunking service.</param>
     /// <param name="ragService">RAG indexing service.</param>
     /// <param name="logger">Logger for diagnostic output.</param>
+    /// <param name="containerResolver">
+    /// Verifies a <c>sprk_document</c> row's pointer before the app-only download (unified-access-control-r2 task 166 r1).
+    /// </param>
     public FileIndexingService(
         ISpeFileOperations speFileOperations,
         ITextExtractor textExtractor,
         ITextChunkingService chunkingService,
         IRagService ragService,
-        ILogger<FileIndexingService> logger)
+        ILogger<FileIndexingService> logger,
+        RecordContainerResolver containerResolver)
     {
         _speFileOperations = speFileOperations;
         _textExtractor = textExtractor;
         _chunkingService = chunkingService;
         _ragService = ragService;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Identity (unified-access-control-r2 task 171, owner round 69 — broker-only).</b> A request that names a
+    /// <c>sprk_document</c> is indexed APP-ONLY through <see cref="IndexFileAppOnlyAsync"/>, which verifies the row's
+    /// pointer first. Every caller that names a document authorized the caller on it before calling (the index-file
+    /// route's Targeted filter + the request-to-row hold, send-to-index's per-document Write check, the post-upload
+    /// enqueuer after a save the caller was authorized for). The OBO read it used to make worked only for a caller
+    /// holding a role on the container, so a secure record's documents were never indexed from the request path.</para>
+    /// <para>A request WITHOUT a document id names a drive item that no Dataverse record stands behind, so SPE's answer
+    /// for the caller remains the decision and the read stays OBO (task 171 escalation trigger 2 — reported, not
+    /// converted).</para>
+    /// </remarks>
     public async Task<FileIndexingResult> IndexFileAsync(
         FileIndexRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(request.DocumentId))
+        {
+            return await IndexFileAppOnlyAsync(request, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             _logger.LogDebug(
-                "Starting OBO file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
+                "Starting OBO file indexing (no document named) for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
 
-            // Download via OBO authentication
+            // Download via OBO authentication: no Dataverse record stands behind this item (see remarks).
             await using var stream = await _speFileOperations.DownloadFileAsUserAsync(
                 httpContext,
                 request.DriveId,
@@ -108,6 +131,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 request.SearchIndexName,
+                request.ReplaceStaleChunks,
                 stopwatch,
                 cancellationToken);
         }
@@ -137,6 +161,17 @@ public sealed class FileIndexingService : IFileIndexingService
             _logger.LogDebug(
                 "Starting app-only file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
+
+            // task 166 r1 (owner round 21 item 1b): a request that names a sprk_document follows that row's
+            // pointer, so the pointer's container is verified before the app-only download (fail closed; an id that
+            // is not a GUID is refused). A request with NO document id carries a pointer the server built itself — an
+            // orphan file the BFF just uploaded, or the API-key service route — and follows no row.
+            if (!string.IsNullOrWhiteSpace(request.DocumentId)
+                && !await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    request.DocumentId, request.DriveId, request.ItemId, cancellationToken))
+            {
+                return FileIndexingResult.Failed("Document storage could not be verified");
+            }
 
             // Download via app-only authentication
             await using var stream = await _speFileOperations.DownloadFileAsync(
@@ -180,6 +215,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 request.SearchIndexName,
+                request.ReplaceStaleChunks,
                 stopwatch,
                 cancellationToken);
         }
@@ -227,6 +263,7 @@ public sealed class FileIndexingService : IFileIndexingService
                 request.Metadata,
                 request.ParentEntity,
                 request.SearchIndexName,
+                replaceStaleChunks: false,
                 stopwatch,
                 cancellationToken);
         }
@@ -267,6 +304,7 @@ public sealed class FileIndexingService : IFileIndexingService
         Dictionary<string, string>? metadata,
         ParentEntityContext? parentEntity,
         string? searchIndexName,
+        bool replaceStaleChunks,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -350,6 +388,45 @@ public sealed class FileIndexingService : IFileIndexingService
         _logger.LogInformation(
             "Indexed {FileName} for tenant {TenantId} speFileId={SpeFileId}: {SuccessCount}/{TotalCount} chunks in {Duration}ms",
             fileName, tenantId, speFileId, successCount, results.Count, stopwatch.ElapsedMilliseconds);
+
+        // Task 029 (spaarkeai-word-add-in-r1, owner decision 2026-09-15, option B): a VERSION re-index REPLACES the
+        // file's chunks. Chunk ids are {speFileId}_{index} and a version keeps its item id, so the batch above
+        // overwrote chunks 0..N-1 in place — but a shorter version would leave the previous version's chunks
+        // N..M-1 behind, with the old content and the old document vector (which Find reads). They are removed
+        // only AFTER every new chunk is confirmed, and from the SAME index the batch went to, so the file is never
+        // without chunks. Only the version-save index job asks for this; every other path skips the block.
+        if (allSucceeded && replaceStaleChunks)
+        {
+            try
+            {
+                var removed = await _ragService.DeleteChunksBeyondCountAsync(
+                    tenantId, speFileId, chunks.Count, searchIndexName, cancellationToken);
+
+                _logger.LogInformation(
+                    "Replaced previous version's chunks for {FileName} speFileId={SpeFileId}: kept {ChunkCount}, removed {RemovedCount} leftover chunk(s) in {IndexName}",
+                    fileName, speFileId, chunks.Count, removed, searchIndexName ?? "(tenant-default)");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // The new chunks are in place, so search already answers from the current version; only the
+                // leftover tail may remain. Report failure so the job retries (the idempotency key is not marked).
+                // The message names the exception TYPE only — never its text — so it can neither leak content
+                // (ADR-015) nor trip the handler's permanent-failure words ("not found", "empty", ...).
+                _logger.LogWarning(ex,
+                    "Indexed {FileName} speFileId={SpeFileId} but could not remove the previous version's leftover chunks in {IndexName}",
+                    fileName, speFileId, searchIndexName ?? "(tenant-default)");
+
+                return new FileIndexingResult
+                {
+                    Success = false,
+                    ChunksIndexed = successCount,
+                    ErrorMessage = $"Indexed {successCount} chunks, but the previous version's leftover chunks could not be removed ({ex.GetType().Name}); retry required",
+                    Duration = stopwatch.Elapsed,
+                    DocumentId = documentId,
+                    SpeFileId = speFileId
+                };
+            }
+        }
 
         return new FileIndexingResult
         {

@@ -131,7 +131,7 @@ Per CLAUDE.md §10 and [`.claude/constraints/bff-extensions.md`](../../.claude/c
 | Latency/TTFB <500ms vs BFF state? | YES → BFF |
 | Writes to BFF-managed session/audit state in same request? | YES → BFF |
 | Retroactive annotation of streaming response? | N/A (validation is pre-stream) |
-| Event-driven (timer, queue, webhook)? | NO → BFF |
+| Does [ADR-052](../adr/ADR-052-workload-placement.md) place it outside the BFF? | NO → BFF |
 
 **Boundary preservation**:
 - No new direct CRUD→AI dependencies — this is AI-internal code in `Api/Ai/`, NOT CRUD code consuming AI. No `IBffAiPublicContracts` facade is required.

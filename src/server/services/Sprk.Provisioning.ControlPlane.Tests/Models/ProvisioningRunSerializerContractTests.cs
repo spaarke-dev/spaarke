@@ -69,9 +69,9 @@ public sealed class ProvisioningRunSerializerContractTests
         var run = new ProvisioningRun
         {
             RunId = "11111111-1111-1111-1111-111111111111",
-            CustomerId = "acme-corp",
+            CustomerId = "acme",
             EnvironmentId = "22222222-2222-2222-2222-222222222222",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             CurrentPhase = "H2a",
             Profile = "spaarke-hosted-model2",

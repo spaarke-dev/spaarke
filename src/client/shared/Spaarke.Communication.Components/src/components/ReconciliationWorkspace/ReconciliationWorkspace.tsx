@@ -39,6 +39,7 @@ import {
   type IDataverseClient,
   type MembershipResolver,
   type SavedView,
+  cleanGuid,
 } from '@spaarke/ui-components';
 import { ReconciliationGrid } from '../ReconciliationGrid';
 import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
@@ -147,9 +148,7 @@ interface AttachmentTextItem {
 }
 
 /** Normalize a Dataverse id for a stable case/brace-insensitive join key. */
-function idKey(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
-}
+const idKey = cleanGuid;
 
 /**
  * Fold each attachment's RE-EXTRACTED text into the reader (owner UAT 2026-08-14, B2.1). The extracted
@@ -187,7 +186,7 @@ async function resolveBrowseDetail(
   communicationId: string,
   authFetch: AuthenticatedFetchFn
 ): Promise<BrowseDetail> {
-  const cleanId = communicationId.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(communicationId);
   const [attachments, emlDocumentId] = await Promise.all([
     resolveAttachments(client, cleanId),
     resolveEmlArchive(client, cleanId),

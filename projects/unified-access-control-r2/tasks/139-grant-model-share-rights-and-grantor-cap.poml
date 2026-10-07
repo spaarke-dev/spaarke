@@ -1,0 +1,426 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="139" project="unified-access-control-r2">
+  <metadata>
+    <title>C4 grant model — Collaborate/Full Access POA shares carry ShareAccess so OOB sharing matches Grant Access; every grant capped at the grantor's own level; superseded "No re-share" docs/tests rewritten</title>
+    <phase>Register-driven (authored 2026-09-30, session 27 — owner decisions round 2, grant-model group)</phase>
+    <gate>after-138 (shares GrantExternalAccessEndpoint.cs, the write-time policy check and the modal)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the rights every internal POA share carries and the level every grant endpoint writes. Authorization-path .cs, tags bff-api/auth/pcf; existing characterization tests that pin the superseded rule must be rewritten.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two rights vocabularies meet here (Dataverse AccessMask bits vs Spaarke AccessRights flags; RecordShareLevels.cs:24-29, :100-116). A mis-paired bit silently grants Share or Delete. The narrowing path can also silently DOWNGRADE someone else's existing grant through the upsert.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies GrantExternalAccessEndpoint.cs and AccessGrantModal.tsx after task 138; task 140 reuses the ceiling method this task adds. Also shares hot files with other pending tasks: ProvisionProjectEndpoint.cs (133 C11 creator-share, 143, 144, 148, 149, 150), InternalShareEndpoints.cs (142, 143, 149), GrantExternalAccessEndpoint.cs (137, 142), AccessibleRecordSetService.cs (the deny entry point; 135, 136, 137, 141, 142, 143, 036), and AccessGrantModal.tsx (066/067 chain). Merge serially and run /conflict-check first.</parallel-reason>
+    <deps>138</deps>
+    <tags>bff-api, auth, security, dataverse, pcf, fluent-ui, testing</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+    <origin>Session 26 defect C4 (HIGH). Session 27 owner answers on C4 (round 1) and round 2 items 3 and Q1 ("cap every grant at the grantor's own level").</origin>
+  </metadata>
+
+  <prompt>Reconcile the grant model with the owner's 2026-09-30 rule, and stop capping grants on one route only. Rules:
+- A systemuser with Write may share (Dataverse OOB) and may use Grant Access for users, contacts and organizations (B-14 is retained).
+- View-only grantees cannot grant; Collaborate and Full Access grantees can.
+- Every grant, on every route, is capped at the grantor's own level.
+
+Make OOB sharing agree with Grant Access by giving the Collaborate and Full Access share levels the Share right. Apply the grantor-level cap to /grant and /invite-and-grant, including org-wide grants, and keep /share-user consistent. Rewrite every doc, comment and test that still states the superseded "No re-share at any level" rule.</prompt>
+
+  <role>SPAARKE platform developer: the external-access management group (DelegationRuleFilter, the grant core, the POA share seam), with Dataverse POA semantics.</role>
+
+  <goal>After this task:
+(1) The three POA levels are: View Only = Read; Collaborate = Read, Write, Append, AppendTo, Share; Full Access = Collaborate + Delete. No level carries Assign. The two rights vocabularies are paired right by right, including Share.
+(2) Secure-provisioning colleagues receive exactly the creator's rights.
+(3) /grant and /invite-and-grant cap the requested level at the caller's own level, computed from a fresh OBO probe by ONE method that task 140 reuses. They narrow and report, never silently lower an existing grant, and apply the same cap to org-wide grants.
+(4) /share-user keeps its per-right intersection (stated decision: narrow) and never silently lowers an existing share.
+(5) Contact and organization grantees on the record's No Access List are refused at write time with a message.
+(6) DelegationRuleFilter and /can-manage-access still mean "Write on this record".
+(7) Legacy shares written under the old masks keep their level on read, and an operator-run backfill upgrades them.
+(8) Every artefact that states "No re-share" is rewritten.
+(9) The behaviour is proven live at a manual gate.</goal>
+
+  <context>
+    <background>THE OWNER'S RULE (session 27, verbatim in substance; notes/session27-owner-decisions-and-research.md:7, :19-21, :30):
+- "If the user has write access, then they can share (OOB functionality) and grant access to users/contacts/organizations."
+- "No re-share" and "grant what you hold" apply only to a principal holding View by virtue of a grant.
+- Collaborate and Full Access carry grant-access ability.
+- Q1: "cap every grant at the grantor's own level".
+This SUPERSEDES the 2026-09-15 decision "No re-share at any level" (notes/task-063-internal-user-share-endpoints.md:94-105). B-14 (notes/design-register.md:84: you may grant if you hold Write) is RETAINED.
+
+WHAT THE CODE SAYS TODAY (verified 2026-09-30):
+- The delegation gate is Write only: `RequiredRight = AccessRights.Write` (Api/ExternalAccess/DelegationRuleFilter.cs:86; the only rights test is :170-179). That already matches the owner's rule for systemusers. It STAYS. DelegationRuleCharacterizationTests.cs:43-51 and :144-155 pin "Write delegates; Share does not substitute". Those pins remain TRUE and stay green.
+- The POA levels carry no Share: ViewOnlyMask = Read, CollaborateMask = Read|Write|Append|AppendTo, FullAccessMask = +Delete (Services/Access/RecordShareLevels.cs:45-53). The remarks at :19-22 state "Share and Assign are at no level (owner, 'No re-share at any level')".
+- The Dataverse bits are Read 1, Write 2, Append 4, AppendTo 16, Delete 65536, Share 262144 (:24-29).
+- So a Collaborate sharee holds Write, and may grant through every Spaarke route. But they hold no ShareAccess, so they CANNOT use Dataverse's own Share in the MDA. The two surfaces disagree.
+- The Intersect table (:109-116) has no Share row. Today Intersect DROPS any Share bit in a requested mask. Adding Share to a level without adding the row would silently strip it.
+- Secure provisioning shares differently by principal:
+  - the creator gets `CollaborateRights + ",ShareAccess"` (Api/ExternalAccess/ProvisionProjectEndpoint.cs:169);
+  - colleagues get `CollaborateRights` (:181);
+  - the rationale comments at :158-181 ("re-sharing stays with the creator so the access list cannot widen through a chain nobody reviewed") state the opposite of the owner's rule.
+  - The share calls are at :730 (creator) and :758 (colleagues).
+- "Grant what you hold" exists ONLY on /share-user, as a per-right intersect-and-narrow (Api/ExternalAccess/InternalShareEndpoints.cs:261-311; the response carries `narrowed`). The remark at :50-51 says no level carries Share or Assign.
+- /grant has no cap at all. AccessLevel is only Enum.IsDefined (GrantExternalAccessEndpoint.cs:95-97), and org-wide grants are allowed (:84-87, :679-682). /invite-and-grant is the same (InviteAndGrantExternalUserEndpoint.cs:62-64, :114-128).
+- 🔴 LATENT DOWNGRADE HAZARD, which the cap would make LIVE: CreateGrantAsync's match path updates the survivor's level IN PLACE to the requested level (GrantExternalAccessEndpoint.cs:248-260). /share-user's write is ModifyAccess, which REPLACES rights (InternalShareEndpoints.cs:343-346). A naive cap would narrow "Full Access please" to Collaborate and then overwrite an existing Full Access grant somebody else made, lowering it while the caller asked for MORE.
+- ExternalAccessLevels.ToDisplayLevel (Infrastructure/ExternalAccess/ExternalCallerContext.cs:234-243) says "Display only. Never authorize on this", and its containment tests include Create. RetrievePrincipalAccess on a record is not guaranteed to report CreateAccess, so reusing it as a cap could under-state a Deep-role user as View Only. The ceiling needs its own named method over Read / Write / Delete only.
+- Superseded artefacts that must be rewritten:
+  - RecordShareLevels.cs:14-41 (remarks);
+  - ProvisionProjectEndpoint.cs:158-181;
+  - InternalShareEndpoints.cs:50-51;
+  - tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs:258-271 ("No re-share" comment), :313-324 (Levels_NeverCarryShareOrAssign), :326-332 (CreatorMask outside the levels), :334-342 (creator vs colleague constants);
+  - tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs:75-110 (colleagues WITHOUT ShareAccess);
+  - notes/phase4-uat-acceptance.md:24 (U-3 "cannot re-share");
+  - notes/design-register.md:84 (B-14 row; add the 2026-09-30 decision alongside it);
+  - notes/task-063-internal-user-share-endpoints.md:94-105 (§4, "No re-share at any level") and tasks/063-internal-user-share-endpoints.poml:102 — add a SUPERSEDED banner pointing at the 2026-09-30 decision; keep the history text.
+- 🟢 The pre-change CREATOR mask (Collaborate + Share = 262167, `InternalUserShareTests.cs:59`) is EXACTLY the new Collaborate mask. Existing secure-provisioning creator shares therefore read as Collaborate with no backfill; the backfill touches only colleague and "+ User" shares at the legacy 23 / 65559 masks.
+- The Q5 "Assigned To" auto-grant function (task 142) writes through CreateGrantAsync with NO human grantor, which is why the ceiling lives in the /grant and /invite-and-grant HANDLERS (and task 140's contact route), not inside the core. Task 142 must still never lower an existing higher grant; cite this task's never-silently-lower rule to it.
+
+LIVE FACTS (session 27):
+- The Share privilege on project, matter and work assignment is held at Deep by "Spaarke Core User" and "Spaarke Office Add In User". So a Collaborate sharee with ShareAccess on the record can use MDA Share.
+- Dataverse's native rule already stops an OOB sharer granting rights they do not hold.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/RecordShareLevels.cs (:14-53 remarks + masks, :55-62 CSV constants, :68-98 TryGetRights/LevelForMask, :109-116 LevelRights, :132-153 Intersect/IsGrantable)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs (ExternalAccessLevels :201-244 — add the grant-ceiling method beside ToDisplayLevel)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (:69-150 handler, :186-383 CreateGrantAsync incl. :248-260 match-path update)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs (:58-83 validation, before onboarding at :92)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs (:20-56 remarks, :261-311 cap, :313-360 write)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs (:158-181 constants + remarks; :730, :758 share calls)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/GrantAccessResponse.cs, InviteAndGrantResponse.cs (additive: granted level + narrowed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (:596 ResolveDenyVetoAsync — expose a narrow single-subject, single-record entry point for the write-time check; do not fork the key-shape logic)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx (:455-489 notice builder; :755, :766, :831 /grant and /invite-and-grant calls)</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio (version bump in all four locations; rebuild)</file>
+      <file role="create">scripts/Upgrade-LegacyRecordShareMasks.ps1 (name indicative; dry-run default — see justification)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/DelegationRuleCharacterizationTests.cs (keep every Write pin; add cap tests)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/PolymorphicGrantWriteTests.cs</file>
+      <file role="read">tests/integration/auth/UnifiedAccessControl/RecordAccessGateTests.cs (must stay green unedited)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/FakeRecordShareTable.cs (only if the fake must carry the Share bit through ModifyAccess/read-back)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/AccessGrantModal.userShare.test.tsx and a /grant-outcome test beside it</file>
+      <file role="modify">projects/unified-access-control-r2/notes/phase4-uat-acceptance.md (U-3), notes/design-register.md (B-14 + new decision row), notes/task-063-internal-user-share-endpoints.md (§4 superseded banner), tasks/063-internal-user-share-endpoints.poml (:102 superseded pointer)</file>
+      <file role="modify">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md (:375-392 delegation section; ADD a POA share-level table — the only level table there today, :436-441, is the EXTERNAL contact level table, which this task does not change)</file>
+      <file role="modify">docs/architecture/uac-access-control.md (level→rights table, the Write gate, the grantor ceiling, narrowing, never-lower)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="138" status="pending">Owns the one write-time policy check (Restricted / direct-only) this task extends with the deny-list refusal, and the modal/PCF changes this task layers onto.</dependency>
+      <dependency task="063" status="completed">Built /share-user's intersect-and-narrow; this task makes it the stated model for all routes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-30 / B-14">Scope: DelegationRuleFilter and RecordAccessGateEndpoint.
+- The delegation right stays Write, evaluated as the caller over OBO. Do not change DelegationRuleFilter.RequiredRight, its target resolution, or /can-manage-access semantics.
+- DelegationRuleCharacterizationTests' existing Write pins and RecordAccessGateTests stay green with no assertion edits. Comment edits that cite the new decision are allowed.</constraint>
+    <constraint source="owner 2026-09-30 (C4)">Scope: RecordShareLevels.
+- ViewOnlyMask = 1.
+- CollaborateMask = 1|2|4|16|262144 = 262167.
+- FullAccessMask = CollaborateMask|65536 = 327703.
+- Assign (524288) is at no level.
+- Share is added to the LevelRights pairing table as ("ShareAccess", 262144, AccessRights.Share), so Intersect carries it only when the caller holds AccessRights.Share.
+- The levels still NEST (View ⊂ Collaborate ⊂ Full). The race-safety note at :35-40 depends on it.</constraint>
+    <constraint source="data compatibility">Scope: RecordShareLevels.LevelForMask.
+- The legacy masks written before this task MUST still read as their level: 23 → Collaborate and 65559 → Full Access. Otherwise /user-shares and the modal show "no level" for every existing share.
+- Any other mask stays null.
+- The legacy masks are upgraded by the backfill script, not rewritten on read.</constraint>
+    <constraint source="owner Q1 — one ceiling">Scope: /grant, /invite-and-grant (this task) and task 140's contact route (reuse). The grantor's ceiling is ONE method on ExternalAccessLevels, over Spaarke AccessRights:
+- Full Access iff Read + Write + Delete;
+- Collaborate iff Read + Write;
+- View Only iff Read;
+- otherwise none.
+Create, Append, AppendTo and Share are NOT consulted, because RetrievePrincipalAccess is not guaranteed to report CreateAccess for an existing record. Do not call ToDisplayLevel for this (its remark forbids authorizing on it).</constraint>
+    <constraint source="stated decision: NARROW">Scope: all three routes. NARROW, do not refuse.
+- A request above the caller's ceiling is written AT the ceiling.
+- The response says so: additive DTO fields for the granted level and narrowed = true on /grant and /invite-and-grant; /share-user keeps its existing narrowed flag and per-right intersection, which is Dataverse's own sharing rule and never exceeds the grantor.
+- A ceiling of none returns 403 with reasonCode `sdap.access.grant.caller_cannot_grant` on /grant and /invite-and-grant (/share-user keeps its existing `sdap.access.user_share.caller_cannot_grant`) and a readable detail. It IS reachable: the handler re-probes, and CallerRecordAccessProbe answers AccessRights.None — it does not throw — for every OBO, WhoAmI, transport and parse failure (CallerRecordAccessProbe.cs:49-56, :450-487), so a transient failure on the second probe lands here. Nothing is written or onboarded.
+- A probe that THROWS returns 500 ProblemDetails with a readable detail. Nothing is written and nothing is onboarded, mirroring InternalShareEndpoints.cs:280-288.
+- The probe is re-run in the handler, not trusted from the filter, mirroring InternalShareEndpoints.cs:268-272.</constraint>
+    <constraint source="data integrity: never silently lower">Scope: all three routes. When the cap narrowed the request (narrowed = true) AND the target already holds more than the narrowed result, refuse with 409 ProblemDetails and a readable detail ("they already have more access than you can grant"). Nothing is written.
+- "Holds more" means: for a contact or org, an active grant row on the key whose level is higher; for a user, any right in the stored share mask that the narrowed mask lacks.
+- An explicit request for a LOWER level (narrowed = false) is a deliberate downgrade by a Write-holder, allowed exactly as today.
+- /invite-and-grant: the grantee Contact may not exist yet. BEFORE onboarding, resolve an EXISTING contact by the request email READ-ONLY (no create; the same match ProvisionAsync uses). If one exists, run the never-lower and deny-list checks against it; if none exists there is no existing row, and the deny-list check runs on the request's OrganizationId (the firm) only. Creating the contact first to obtain an id is forbidden: a refused request must leave no Contact and no CIAM account behind.
+- This 409 carries the stable reasonCode `sdap.access.grant.would_lower_existing`. Task 140 reuses it verbatim.</constraint>
+    <constraint source="owner Q1 — org-wide">Scope: /grant org grants. The same ceiling applies to organization-wide grants. Task 138's policy check already refuses org grants on Secure, Limited and Restricted roots. This task does not duplicate that check; it runs after it.</constraint>
+    <constraint source="C4 fix direction / FR-23">Scope: /grant and /invite-and-grant. A grantee denied on this record by the No Access List is refused at write time with 422 ProblemDetails (reasonCode `sdap.access.grant.grantee_denied`, reused verbatim by task 140) and a readable detail. The grantee cases are: the contact itself; any of the contact's ACTIVE organizations; or, for an org grant, the organization.
+- The check runs before any onboarding. Nothing is written or provisioned.
+- The deny decision MUST come from the SAME code as the read-path deny veto (AccessibleRecordSetService.ResolveDenyVetoAsync, :596) through a narrow entry point. Do not re-implement the key shapes.
+- A deny-list read fault is a refusal with a message (fail closed).
+- Internal-user deny on /share-user is owner Q4 and belongs to task 143 (No Access List for internal users on secure records). Do not implement it here; name it in the notes.</constraint>
+    <constraint source="owner 2026-09-30 (C4) — provisioning">Scope: ProvisionProjectEndpoint. Colleagues named at secure provisioning receive EXACTLY the creator's rights (the new Collaborate level, which now includes ShareAccess). Both constants derive from RecordShareLevels, and the tests assert them against the LITERAL CSV, per the existing discipline at InternalUserShareTests.cs:337-339.</constraint>
+    <constraint source="ADR-038">Scope: tests. No Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor null-check tests. Use the existing fixtures: DelegationRuleTestFixture's substituted probe, FakeRecordShareTable, ProvisionProjectTestFixture. Every new negative has a positive twin that differs only in the caller's rights, as the existing suite requires (DelegationRuleCharacterizationTests.cs:26-32).</constraint>
+    <constraint source="owner binding">Scope: live verification. A MANUAL gate on spaarkedev1 with existing non-admin test users in the correct BU. No relocation. No Dataverse credential in CI. The backfill script is run by the operator, dry-run first.
+- The script authenticates with the operator's OWN identity (az / pac token, as scripts/Deploy-AccessEventEntity.ps1 does). It never uses or adds a client secret (ADR-028 A4).
+- Its write scope is SYSTEMUSER principals at exactly 23 or 65559 on the three root tables. Team principals and any other mask are listed, never modified (escalation 3).
+- Every ModifyAccess is read back, and the before/after counts are recorded.</constraint>
+    <constraint source="CLAUDE.md §10 / ADR-028 A4">Scope: this task's PR.
+- State placement (BFF; no new component beyond the named method, DTO fields and script).
+- Measure the publish-size delta against a fresh master worktree using the short-path, Compress-Archive, equal-file-count procedure. Ceiling 60 MB. No new HIGH CVE.
+- No new .WithClientSecret(...). GrantMembershipAsync stays at zero callers.</constraint>
+    <constraint source="owner binding">Scope: whole task. No scope cuts and nothing deferred. Discovered scope is added here.</constraint>
+      <constraint source="main-session-review">WP-1 — the grantor ceiling, the never-lower rule and the deny/Restricted write-time refusals are enforced INSIDE the single grant-writing core (the method every grant writer calls to persist sprk_externalrecordaccess), as a REQUIRED ceiling parameter — never only in the /grant and /invite-and-grant handlers. No caller may persist a grant without passing a ceiling: 140 passes the contact grantor's effective level, 142's auto-grants pass an explicit documented Collaborate ceiling (owner Q5), and admin/system writers pass their own documented ceiling. An ArchTest or unit guard proves every call site supplies it (seed a call without it and watch the guard fail).</constraint>
+</constraints>
+
+  <adr-tensions>
+    <tension adr="ADR-008 (resource authorization in endpoint filters)" path="C — comply (precedent)">
+      <rule>Resource authorization is applied by endpoint filters at route registration.</rule>
+      <conflict>The cap depends on the caller's rights on the record AND the requested level. It is a narrowing of the write, not an allow/deny decision. The allow/deny stays in DelegationRuleFilter.</conflict>
+      <proposed>Keep the allow/deny in the filter and do the narrowing in the handler, exactly as task 063's /share-user does (InternalShareEndpoints.cs:261-311, already reviewed under ADR-008). No amendment is needed. Cite it in the PR.</proposed>
+      <rejected>Moving the cap into DelegationRuleFilter: rejected, because the filter answers one question for every route on the group (including revoke, close-project and provision), and /can-manage-access reports its verdict verbatim. Level-awareness there would change the gate's meaning, which the owner told this task to keep as Write.</rejected>
+    </tension>
+    <tension adr="design decision 2026-09-15 'No re-share at any level' (not an ADR)" path="superseded by owner">
+      <rule>notes/task-063-internal-user-share-endpoints.md:94-105.</rule>
+      <proposed>Record the 2026-09-30 decision in notes/design-register.md next to B-14, with a "superseded" pointer from the task-063 note. Do not rewrite the task-063 history itself.</proposed>
+    </tension>
+  </adr-tensions>
+
+  <justification>
+    <existing>The ceiling: grep "ToDisplayLevel|GrantCeiling|Intersect\(" over src/server finds ExternalAccessLevels.ToDisplayLevel (ExternalCallerContext.cs:234, display-only) and RecordShareLevels.Intersect (RecordShareLevels.cs:132, POA masks only). There is no level ceiling over AccessRights. The DTO fields: GrantAccessResponse.cs:8 carries no level or narrowed flag. The backfill script: grep of scripts/ for "ModifyAccess" finds only Deploy-AccessEventEntity.ps1 (a schema script, no POA writes).</existing>
+    <extension>The ceiling is a method ADDED to the existing ExternalAccessLevels class, not a new type. The response changes are additive fields on existing DTOs. The script is a new file, because no script enumerates principalobjectaccess rows. It follows Deploy-AccessEventEntity.ps1's shape (-DryRun default, idempotent, report-first).</extension>
+    <cost-of-doing-nothing>Without the ceiling, a Collaborate sharee mints Full Access (including Delete they lack) or org-wide grants through /grant. Without the backfill, every colleague shared before this task keeps a mask without ShareAccess, so MDA Share stays unavailable to exactly the people the owner said may share. Without the DTO fields, a narrowed grant reports success at a level the caller did not get.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/agent-memory/researcher/dataverse-poa-grant-modify-revoke-semantics-2026-09-15.md</file>
+      <file>projects/unified-access-control-r2/notes/task-063-internal-user-share-endpoints.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+    </files>
+    <patterns>
+      <pattern name="grant only what you hold" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InternalShareEndpoints.cs:261-311">Re-probe as the caller, intersect, refuse when nothing grantable, report narrowed. /grant adopts the same shape over levels.</pattern>
+      <pattern name="two-vocabulary pairing" location="src/server/api/Sprk.Bff.Api/Services/Access/RecordShareLevels.cs:100-116">The only place Dataverse bits meet Spaarke flags. Share joins the table here and nowhere else.</pattern>
+      <pattern name="narrowed notice" location="src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx:455-489">Extend to /grant and /invite-and-grant outcomes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Verify task 138 has merged: its write-time check and modal states are present. Re-read DelegationRuleFilter, RecordShareLevels, InternalShareEndpoints.ShareAsync and CreateGrantAsync as they stand.</step>
+    <step order="1">RecordShareLevels:
+- Add Share to the Collaborate and Full masks and to the pairing table.
+- Accept the legacy masks in LevelForMask.
+- Rewrite the remarks to the 2026-09-30 rule, keeping the vocabulary and nesting warnings.</step>
+    <step order="2">ProvisionProjectEndpoint: make creator and colleague rights identical (the new Collaborate level). Rewrite the :158-181 remarks.</step>
+    <step order="3">Add the ceiling method to ExternalAccessLevels. In /grant and /invite-and-grant, after task 138's policy check and before any write or onboarding:
+- re-probe the caller's rights;
+- compute the ceiling;
+- narrow;
+- apply the never-silently-lower refusal against the existing active row;
+- apply the deny-list refusal through the shared deny entry point.
+Return the additive response fields.</step>
+    <step order="4">/share-user: add the never-silently-lower refusal against the stored mask. Keep the intersect-and-narrow. Rewrite the :20-56 remarks.</step>
+    <step order="5">Modal: render narrowed and 409/422/403 outcomes from /grant and /invite-and-grant with the server's detail. Bump the PCF version in all four locations.</step>
+    <step order="6">Backfill script (dry-run default):
+- enumerate principalobjectaccess rows on sprk_project, sprk_matter and sprk_workassignment whose principal is a systemuser and whose mask is exactly 23 or 65559 (list team-principal rows at those masks separately, untouched);
+- ModifyAccess each to 262167 or 327703;
+- report counts; leave every other mask untouched and list it.
+Run -DryRun only and record the output.</step>
+    <step order="7">Rewrite the superseded tests, notes and docs listed in the background. Add the new cap, narrow, lower-refusal and deny tests, each with a positive twin. Perturbation-check: remove the ceiling, remove Share from the pairing table, and remove the lower-refusal; record which tests go red for each.</step>
+    <step order="8">Build, unit + integration + arch suites, jest, PCF build:prod. Measure publish size (§10). Run the CVE scan.</step>
+    <step order="9">Deploy the BFF and PCF to dev. The operator runs the backfill (dry-run, then real). Run the manual live gate (acceptance criterion 13) and record results in projects/unified-access-control-r2/notes/task-139-grant-model.md.</step>
+    <step order="10">Update TASK-INDEX.md: set this task to `✅ [done]`. Document every deviation in the notes file.</step>
+  </steps>
+
+  <escalation>
+    <trigger>1. Live verification shows RetrievePrincipalAccess (CallerRecordAccessProbe) does not report WriteAccess or DeleteAccess for a user whose role or share clearly grants them. The ceiling would then under-state real holders. STOP, record the live probe output, and escalate. Do not add Create/Append/Share to the ceiling test to compensate.</trigger>
+    <trigger>2. Live verification shows a Collaborate sharee can use MDA Share to hand out a right they do not hold (for example Delete), contradicting Dataverse's documented behaviour. STOP. The owner's model assumes the platform caps OOB shares natively.</trigger>
+    <trigger>3. The backfill dry-run finds shares whose mask is neither a current level nor a legacy level (for example a creator share that also carries Delete, or an Assign bit), or legacy-mask shares whose principal is a TEAM. Do not modify them. Report them per record and escalate for an owner decision. Recommendation: upgrade team shares at 23/65559 exactly like user shares (a team shared at Collaborate is the same owner-decided level), and leave every non-level mask untouched as a hand-made MDA share.</trigger>
+    <trigger>4. Task 143 (owner Q4: the No Access List for internal users on secure records) has landed and expects /share-user to refuse denied systemusers. Coordinate through the main session rather than implementing a second deny check here.</trigger>
+    <trigger>5. Task 133 (C11 creator lock-out) or task 144 (named secure owner team) has changed the provisioning share step in a way that conflicts with "creator rights = colleague rights = the Collaborate level". STOP and reconcile with that task's shipped code rather than overwriting it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/RecordShareLevels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/{ExternalCallerContext,AccessibleRecordSetService}.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/{GrantExternalAccessEndpoint,InviteAndGrantExternalUserEndpoint,InternalShareEndpoints,ProvisionProjectEndpoint}.cs + Dtos/{GrantAccessResponse,InviteAndGrantResponse}.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx; src/client/pcf/TrackingFieldTrio (version)</output>
+    <output type="code">scripts/Upgrade-LegacyRecordShareMasks.ps1</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/{InternalUserShareTests,DelegationRuleCharacterizationTests}.cs; tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/PolymorphicGrantWriteTests.cs</output>
+    <output type="docs">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md; projects/unified-access-control-r2/notes/{phase4-uat-acceptance,design-register,task-139-grant-model}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. Level table.
+- TryGetRights yields View Only ("ReadAccess", 1), Collaborate ("ReadAccess,WriteAccess,AppendAccess,AppendToAccess,ShareAccess", 262167) and Full Access (Collaborate CSV + ",DeleteAccess", 327703), asserted against LITERALS.
+- No level's mask contains Assign (524288).
+- LevelForMask maps 1, 262167, 327703, and the legacy 23 and 65559, to their levels. Every other mask maps to null.
+- /share-user at Collaborate by a caller holding Read|Write|Append|AppendTo|Share, for a user whose stored mask is the legacy 23, writes ModifyAccess to 262167 and reports outcome "updated" (not "unchanged"); the same request by a caller WITHOUT Share writes nothing and reports "unchanged" (twin).</criterion>
+    <criterion testable="true">2. Pairing. Intersect(Full Access, callerRights) carries ShareAccess ONLY when callerRights contains AccessRights.Share. Every existing right-by-right pairing test still passes.</criterion>
+    <criterion testable="true">3. Provisioning. The creator share and every colleague share carry the identical CSV (the new Collaborate literal, including ShareAccess). SecureProjectShareTests and InternalUserShareTests are rewritten to assert this. No test asserts "colleague without ShareAccess" any more.</criterion>
+    <criterion testable="true">4. Ceiling method.
+- Read+Write+Delete → Full Access; Read+Write → Collaborate; Read → View Only; None → null.
+- The result does not change when Create, Append, AppendTo or Share are added or removed.</criterion>
+    <criterion testable="true">5. /grant cap, contact.
+- A caller probed at Read|Write (no Delete) requesting Full Access gets 200, a row written at Collaborate, and a response with granted level Collaborate and narrowed = true.
+- The positive twin, a caller with Delete, gets Full Access with narrowed = false.
+- /invite-and-grant behaves identically, with the ceiling computed before onboarding.</criterion>
+    <criterion testable="true">6. /grant cap, organization-wide. The same narrowing applies to an org grant on a Standard root.</criterion>
+    <criterion testable="true">7. Never silently lower.
+- On all three routes, when narrowing occurs and the target already holds a higher level or a wider mask, the result is 409 ProblemDetails (`sdap.access.grant.would_lower_existing`) with a readable detail and NO write (no UpdateAsync, no ModifyAccess).
+- /invite-and-grant: the same 409 for an EXISTING contact (found by the read-only email match) is returned before onboarding; the onboarding seam is asserted not called and no contact is created.
+- The positive twin, an explicit lower-level request with narrowed = false, still downgrades as before.</criterion>
+    <criterion testable="true">8. Probe outcomes on /grant and /invite-and-grant:
+- a probe that THROWS → 500 ProblemDetails with a readable detail;
+- a probe that answers AccessRights.None on the handler's re-probe → 403 `sdap.access.grant.caller_cannot_grant` with a readable detail;
+- in both cases no row is written and no contact or CIAM account is created (onboarding seam asserted not called).
+- /share-user's existing behaviour is pinned alongside: a throwing probe → 500 `sdap.access.user_share.read_failed`, None → 403 `sdap.access.user_share.caller_cannot_grant`, no write.</criterion>
+    <criterion testable="true">9. Deny list at write time.
+- A contact grantee on the record's No Access List, or whose active organization is on it, or an org grantee that is on it, gets 422 `sdap.access.grant.grantee_denied` with a readable detail and nothing written or onboarded.
+- The positive twin, the same request for a non-denied grantee, succeeds.
+- A deny-list read fault is a message-bearing refusal.
+- The decision comes from the shared deny code path (asserted by using the real NoAccessListReader behind a substituted query, not a re-implementation).</criterion>
+    <criterion testable="true">10. Gate unchanged (negative/authorization).
+- A Read-only caller on /grant, /invite-and-grant and /share-user still gets 403 delegation_write_required.
+- EveryRightExceptWrite (including ShareAccess) still gets 403.
+- RecordAccessGateTests pass with no assertion edits.
+- DelegationRuleFilter.RequiredRight is still AccessRights.Write.
+- Positive twin (new): a caller holding exactly the new Collaborate rights (Read, Write, Append, AppendTo, Share) passes the gate on /grant, /invite-and-grant, /share-user and /can-manage-access.
+- /can-manage-access answers 200 for a Write-holder on a Restricted, a Limited and a Secure record alike (the flags govern grant TYPES at write time, task 138, not the gate), and 403 without Write.</criterion>
+    <criterion testable="true">11. Modal. jest asserts that a narrowed /grant or /invite-and-grant response renders the narrowed notice, and that a 409/422/403 ProblemDetails renders the server's detail text.</criterion>
+    <criterion testable="true">12. Superseded artefacts rewritten.
+- RecordShareLevels remarks, ProvisionProjectEndpoint :158-181 and InternalShareEndpoints :50-51 state the 2026-09-30 rule.
+- grep over src/ and tests/ (excluding generated bundle.js) for "No re-share", "re-sharing stays with the creator", "no level carries Share", "Share and Assign are at no level" and "WithoutShareAccess" returns 0 hits; the grep output is recorded in the notes.
+- phase4-uat-acceptance.md U-3 reads: a colleague named at provisioning can read and edit, can share in MDA, and can use Manage Access, capped at their own level; a View Only sharee cannot.
+- design-register.md keeps B-14 and records the 2026-09-30 decision. notes/task-063-internal-user-share-endpoints.md §4 and tasks/063 :102 carry a SUPERSEDED banner, with their history text kept.
+- docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md carries a POA share-level table and describes the cap, narrowing and the never-lower 409. docs/architecture/uac-access-control.md states the same.</criterion>
+    <criterion testable="false">13. MANUAL LIVE GATE on spaarkedev1, existing non-admin test users in the correct BU, results in notes:
+(a) A colleague shared at Collaborate through "+ User" can open the project in MDA, use the MDA Share command on it (and the share it creates cannot include Delete), and open Manage Access (the gate returns 200).
+(b) A colleague shared at View Only cannot open Manage Access (the gate returns 403) and has no MDA Share.
+(c) A Collaborate colleague's /grant at Full Access writes Collaborate and the modal shows the narrowed notice.
+(d) A newly provisioned secure project's colleague share mask equals the creator's (read from principalobjectaccess).
+(e) The operator runs the backfill -DryRun and then for real. Counts are recorded, and a previously shared colleague can then use MDA Share.
+(f) U-3 is run as rewritten.</criterion>
+    <criterion testable="true">14. Build green. BFF unit + integration + NetArchTest green. jest green. PCF build:prod green. Publish-size delta reported per §10 (fresh master worktree, short path, equal file counts), ≤ 60 MB. No new HIGH CVE.</criterion>
+    <criterion testable="true">15. Test scope: cover the stated contract plus the edge cases named above (level literals, legacy masks, Share pairing, ceiling table, narrow/no-narrow twins, never-lower twins, deny twins, probe fault, unchanged gate). Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+Defect/decision links:
+- Session 26 C4 (notes/session26-uac-defects-and-synopsis.md:102-128) and the C4+C1 compound (:352).
+- Session 27 C4 answers (notes/session27-owner-decisions-and-research.md:7, :51-63) and round 2 item 3 / Q1 (:19-21, :30).
+
+Related tasks:
+- 138 (write-time policy check; dependency).
+- 140 (reuses the ceiling method).
+- 135 (C1: makes CIAM honour the read-time deny veto, so a mis-minted grant cannot take effect there either).
+- 142 (owner Q5 "Assigned To" auto-grants: write through the core with no human grantor, so the ceiling does not apply to them, but the never-lower rule does).
+- 143 (owner Q4: the internal-user No Access List on /share-user).
+- 133 (C11) and 144 (C10 part 1): both edit ProvisionProjectEndpoint's share step.
+- 137 (C5): edits the grant-write endpoints' cache invalidation.
+
+Hot-path: BFF Y, SpaarkeAi N, ci-workflows N, skill-directives N, root-CLAUDE.md N.
+
+Review history: the adversarial review of 2026-09-30 folded the requirements that were only in the superseded draft `139-grant-model-grantor-level-cap.poml` (which the main session deletes) into this file:
+- legacy-mask "updated" on /share-user;
+- the Collaborate-mask positive twin on the gate;
+- /can-manage-access on Restricted, Limited and Secure records;
+- team-principal backfill handling;
+- script authentication by operator identity;
+- the task-063 supersession banner;
+- the uac-access-control.md update;
+- C11 coordination.
+
+Anchors verified 2026-09-30:
+- DelegationRuleFilter.cs:86, :170-179
+- RecordShareLevels.cs:14-153
+- ProvisionProjectEndpoint.cs:158-181, :730, :758
+- InternalShareEndpoints.cs:20-56, :261-360
+- GrantExternalAccessEndpoint.cs:84-97, :248-260, :679-682
+- InviteAndGrantExternalUserEndpoint.cs:62-128
+- ExternalCallerContext.cs:201-244
+- InternalUserShareTests.cs:258-342
+- SecureProjectShareTests.cs:75-110
+- DelegationRuleCharacterizationTests.cs:43-51, :144-155
+- phase4-uat-acceptance.md:24
+- design-register.md:84
+
+The numeric value of each mask is derived from the Dataverse AccessRights values documented at RecordShareLevels.cs:24-29 (262167 = 1+2+4+16+262144; 327703 = 262167+65536). Re-derive them; do not trust this file's arithmetic.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor (opus); code-review and adr-check at Step 9.5.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-139" base="task/uac-r2-138-r1 @ d32cc6f35" status="code-complete; BFF + PCF v1.0.33 deploy, the backfill -Apply and the criterion-13 manual live gate are pending (main session; round 4 did not approve live steps for 139)">
+      Full record: projects/unified-access-control-r2/notes/task-139-grant-model.md.
+      - Levels: View Only 1; Collaborate Read/Write/Append/AppendTo/Share 262167; Full Access + Delete 327703; no Assign. Share joined the
+        pairing table (Intersect carries it only for a caller holding AccessRights.Share). Legacy 23 / 65559 read as their level.
+        Creator and colleague provisioning constants are both RecordShareLevels.CollaborateRights (creator value unchanged).
+      - Ceiling: ExternalAccessLevels.GrantCeilingFor (Read/Write/Delete only) via GrantCeiling.FromGrantorRights; /grant and
+        /invite-and-grant re-probe the caller (throw: 500 sdap.access.grant.caller_rights_unreadable; None: 403
+        sdap.access.grant.caller_cannot_grant). NARROW, reported by additive grantedAccessLevel + narrowed. Org-wide grants capped too.
+      - WP-1: policy, ceiling, never-lower (409 sdap.access.grant.would_lower_existing) and No Access (422 sdap.access.grant.grantee_denied)
+        run INSIDE CreateGrantAsync (REQUIRED GrantCeiling) via CheckGrantAsync; /invite-and-grant runs the same check BEFORE onboarding
+        against an existing contact found read-only by email (or the request's firm for a new person). Deny decision through
+        IAccessibleRecordSetService.IsGranteeDeniedOnRecordAsync -> ResolveDenyVetoAsync (guard widened for an organization subject).
+        ArchTest GrantCeilingGuardTests (4) pins the single level writer + the required ceiling.
+      - /share-user: per-right intersection kept; never-lower 409 added. /unshare-user: amendment R3 / S5 — 409
+        sdap.access.user_share.last_reader_on_secure_record for the last enabled Read-holding user share on a secure (or unreadable) record.
+      - DISCOVERED + FIXED (pre-existing on every branch incl. master): the live Web API returns POA principaltypecode as the STRING
+        "systemuser"/"team"; the share read accepted only a number, so the strict read refused every shared record and the soft read
+        answered "no shares". TryReadPrincipalKind + FromPrincipalTypeName; pinned by a wire test using the live body.
+      - Modal: narrowed notice from /grant and /invite-and-grant; server detail for the 403/409/422 refusals and the S5 refusal.
+        TrackingFieldTrio v1.0.33 (5 locations, bundle rebuilt with build:prod).
+      - Backfill: scripts/Upgrade-LegacyRecordShareMasks.ps1 (read-only unless -Apply; operator az identity; system-user rows at exactly
+        23/65559 only; team + non-level rows listed, never modified). Dev dry run 2026-10-02: 2 shares, both current; 0 to upgrade;
+        escalation 3 did not fire.
+      - Superseded artefacts rewritten (RecordShareLevels, ProvisionProjectEndpoint, InternalShareEndpoints remarks; U-3; design-register
+        B-14a; SUPERSEDED banners on task-063 note §4 and 063 POML); AC12 grep over src/ and tests/: 0 hits. Docs: EXTERNAL-ACCESS-ADMIN-SETUP
+        §7.1b (POA level table + ceiling outcomes), uac-access-control.md "The Grant Model".
+      - Escalations: 1 and 2 pending live gate; 3 did not fire; 4 not landed (internal-user No Access on /share-user stays task 143);
+        5 did not fire (133 keeps both constant names; its CreatorAccessMask = 262167 agrees ONLY if 139's CreatorAccessRights line
+        wins the merge; see the r1 outcome below).
+      - Placement: BFF; no new endpoint/service/DI registration/option/job/package. §11 justification per new member in the notes §2.
+        ADR-008 tension: path C (narrowing in handler + core, allow/deny unchanged in DelegationRuleFilter; task 063 precedent).
+      - Tests: see the commit message / notes §6 for exact counts; every new guard proven by perturbation (notes §6 table).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-139-r1" base="task/uac-r2-139 @ 5e9b7e28c" status="verifier round 1 addressed; criterion 13 live gate (deploy, backfill -Apply) and the criterion 14 publish-size measurement remain with the main session">
+      Full record: notes/task-139-grant-model.md §8. No production code changed in r1; tests and notes only.
+      - Findings 3 + 17 (ADR-003, CheckGrantAsync step-4 catch): new GrantorCeilingTests
+        Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing (referenced-org read timeout; deny-list read
+        timeout — a TaskCanceledException without caller cancellation, which ResolveDenyVetoAsync and NoAccessListReader rethrow)
+        and InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding. Seams added to the test doubles only:
+        FlagStubParticipationService.ReferencedOrganizationsThrow, SeamNoAccessListReader.Throws.
+      - Findings 4 + 17 (S5, LastReaderRefusalAsync flag-read catch): new InternalUserShareTests
+        Unshare_WhenTheSecureFlagReadThrows_AppliesTheLastPersonRule (ThrowOnRead = true -&gt; 409 last_reader_on_secure_record,
+        nothing removed).
+      - Perturbation: denied = false in the step-4 catch + isSecure = false in the S5 catch -&gt; exactly the 4 new tests red,
+        126 others green; restored, files touched -&gt; 130/130.
+      - Finding 5 (133 merge hazard): recorded for the main session. Every 133 branch has CreatorAccessRights =
+        RecordShareLevels.CollaborateRights + ",ShareAccess"; the 133 merge MUST take 139's
+        CreatorAccessRights = RecordShareLevels.CollaborateRights (else the CSV ends ",ShareAccess,ShareAccess"). The literal
+        assertions in InternalUserShareTests / SecureProjectShareTests catch a wrong resolution. 133 branches not edited.
+      - Findings 6, 7, 8, 9: accepted with no change (expired higher row still blocks a narrowed re-grant; a null-level row never
+        blocks; PolymorphicGrantWriteTests needed no edit; the onboarding-not-called check stays indirect over concrete services).
+      - Finding 16 (AC14): HIGH-CVE scan done — dotnet list package --vulnerable --include-transitive on Sprk.Bff.Api: no vulnerable
+        packages. Publish-size delta still with the main session.
+      - Finding 15 (AC13): unchanged, pending the main session's live gate (notes §7).
+      - Placement / justification (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package; the two
+        new members are test-double properties.
+    </outcome>
+  </execution>
+  <ui-tests>
+    <test name="A Collaborate sharee can use the native Share command">
+      <steps>
+        <step>As the owner, share a secure project to a second non-admin test user at Collaborate through "+ User".</step>
+        <step>Sign in as that user at https://{org}.crm.dynamics.com and open the project.</step>
+      </steps>
+      <expected>The model-driven Share command is available and succeeds for View Only or Collaborate; Manage Access is also enabled for them.</expected>
+    </test>
+    <test name="A grant above the grantor's level is capped and reported">
+      <steps>
+        <step>As a user holding Collaborate (no Delete) on a record, open Manage Access and grant a contact Full Access.</step>
+      </steps>
+      <expected>The grant is written at Collaborate and the modal says it was capped at your own level; Current Access shows Collaborate.</expected>
+    </test>
+    <test name="A View Only sharee cannot grant">
+      <steps>
+        <step>Sign in as a user holding only View Only on a record and open it.</step>
+      </steps>
+      <expected>Manage Access is disabled (not hidden) with the reason; the native Share command is unavailable.</expected>
+    </test>
+  </ui-tests>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(S5 invariant, owner round 3) A secure record must ALWAYS keep at least one person who can see it: /unshare-user (and any revoke path this task touches) refuses to remove the LAST person with access to a secure record, with a message (not a bare 500). (A1) Whether the grantor-level cap stays for MANUAL Grant Access is awaiting owner confirmation — treat the cap as an escalation trigger, not settled, until the owner answers. Assigned-To auto-grants (142) are uncapped Collaborate per rule 5.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">A1 SETTLED: the grantor-level cap stays for MANUAL Grant Access (owner: "as you've presented it, then yes that should be the cap") — the earlier R3 escalation on the cap is resolved; implement the cap as specified. Assigned-To auto-grants (142) remain uncapped Collaborate (rule 5).</amendment>
+  </amendments>
+</task>

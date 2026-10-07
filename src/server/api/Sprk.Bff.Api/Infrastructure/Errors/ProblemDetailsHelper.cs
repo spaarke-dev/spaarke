@@ -108,7 +108,7 @@ public static partial class ProblemDetailsHelper
         var code = GetErrorCode(errorCode, status);
         var detail = (status == 403 && code.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase))
             ? "missing graph app role (filestoragecontainer.selected) for the api identity."
-            : status == 403 ? "api identity lacks required container-type permission for this operation."
+            : status == 403 ? SpeAccessDeniedDetail(errorMessage)
             : Redact(errorMessage) ?? "Graph API error";
 
         return Results.Problem(
@@ -120,6 +120,24 @@ public static partial class ProblemDetailsHelper
                 ["graphErrorCode"] = code,
                 ["graphRequestId"] = graphRequestId
             });
+    }
+
+    /// <summary>
+    /// The detail for a Graph 403 that is NOT <c>Authorization_RequestDenied</c> (uac-r2 task 171, step 6): SharePoint
+    /// Embedded refused the caller on this container or item, and Graph's own message (redacted) is passed through.
+    /// </summary>
+    /// <remarks>
+    /// It used to say "api identity lacks required container-type permission for this operation." That named the app's
+    /// container-type registration for what is almost always a MEMBERSHIP denial (a delegated caller with no role on the
+    /// container — Graph says just "Access denied"), and it sent the 2026-10-06 upload403 investigation to the wrong
+    /// place. The missing-app-role case keeps its own text above, because there the cause IS the app's grant.
+    /// </remarks>
+    public static string SpeAccessDeniedDetail(string? graphMessage)
+    {
+        var said = Redact(graphMessage);
+        return string.IsNullOrWhiteSpace(said)
+            ? "SharePoint Embedded denied access to this container or item."
+            : $"SharePoint Embedded denied access to this container or item: {said}";
     }
 
     public static IResult ValidationProblem(Dictionary<string, string[]> errors)
@@ -171,6 +189,76 @@ public static partial class ProblemDetailsHelper
             extensions: extensions
         );
     }
+
+    /// <summary>
+    /// The ONE 409 for a record-owner refusal (unified-access-control-r2 task 146): the write was not made because no
+    /// owner resolves for the row — a named parent unreadable, a root flagged secure but not isolated, the Secure team
+    /// missing. Carries the stable <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal"/> code as
+    /// <c>reasonCode</c>, so every HTTP writer reports the same condition the same way (ADR-019).
+    /// </summary>
+    /// <param name="refusalCode">The resolution's refusal code.</param>
+    /// <param name="reason">The resolution's reason (names what is wrong; never a secure record's content).</param>
+    /// <param name="noun">What was not saved ("event", "document", …), for the detail.</param>
+    /// <param name="traceId">Optional correlation id for support.</param>
+    public static IResult RecordOwnerRefused(string? refusalCode, string? reason, string noun, string? traceId = null)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["reasonCode"] = refusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+        };
+        if (!string.IsNullOrWhiteSpace(traceId))
+        {
+            extensions["traceId"] = traceId;
+        }
+
+        return Results.Problem(
+            title: "Record owner unresolved",
+            statusCode: StatusCodes.Status409Conflict,
+            detail: $"The {noun} was not saved: {reason ?? "no owner could be resolved"}.",
+            extensions: extensions);
+    }
+
+    /// <inheritdoc cref="RecordOwnerRefused(string?, string?, string, string?)"/>
+    /// <remarks>
+    /// A refusal the F3 check made (<see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.IsForbidden"/>:
+    /// the caller may not move a child out of a secure root, owner round 10 item 7) is NOT an owner refusal: it is
+    /// answered with the unsecure endpoint's ProblemDetails shape — its status (403, or 500 when the permission could
+    /// not be read), title, the F3 message as the detail, <c>reasonCode</c> and <c>traceId</c>.
+    /// </remarks>
+    public static IResult RecordOwnerRefused(
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal, string noun, string? traceId = null) =>
+        refusal is { IsForbidden: true, SecureRemovalRefusal: { } decision }
+            ? decision.ToProblem(refusal.Reason ?? decision.MoveOutDetail(noun), traceId)
+            : RecordOwnerRefused(refusal.RefusalCode, refusal.Reason, noun, traceId);
+
+    /// <summary>
+    /// The ONE reasonCode of <see cref="UniformRecordNotFound"/>. Deliberately the same for an absent record and
+    /// for one the caller may not read; distinguishing them in any channel would confirm the existence of records
+    /// the caller cannot see.
+    /// </summary>
+    public const string RecordUnavailableReasonCode = "sdap.access.deny.record_unavailable";
+
+    /// <summary>
+    /// The uniform "not found" response: byte-identical, apart from the correlation id, for a record that does not
+    /// exist, a record the caller may not read, and a record that disappears between the authorization check and
+    /// the handler. It never contains the requested id.
+    /// </summary>
+    /// <remarks>
+    /// Moved here from <c>FinanceAuthorizationFilter</c> by unified-access-control-r2 task 159 with its bytes
+    /// unchanged, so the events filter and handlers share it rather than copy it. <c>FinanceAuthorizationFilter</c>
+    /// keeps same-named members that forward here (task 130's contract tests pin them).
+    /// </remarks>
+    public static IResult UniformRecordNotFound(HttpContext httpContext) =>
+        Results.Problem(
+            title: "Not Found",
+            detail: "The requested record was not found.",
+            statusCode: StatusCodes.Status404NotFound,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+            extensions: new Dictionary<string, object?>
+            {
+                ["reasonCode"] = RecordUnavailableReasonCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
 
     private static string GetErrorCode(string? errorCode, int status)
     {

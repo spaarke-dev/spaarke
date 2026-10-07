@@ -28,8 +28,8 @@
     The demo environment is provisioned using this exact script (FR-06).
 
 .PARAMETER CustomerId
-    Customer identifier (lowercase, alphanumeric, 3-10 chars).
-    Drives all resource naming: rg-spaarke-{customerId}-prod, sprk-{customerId}-prod-kv, etc.
+    Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$: 3-8 lowercase letters and digits,
+    starting with a letter (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). Drives all resource naming: rg-spaarke-{customerId}-prod, sprk-{customerId}-prod-kv, etc.
 
 .PARAMETER DisplayName
     Human-readable customer name for display purposes and Dataverse environment.
@@ -54,7 +54,8 @@
 
 .PARAMETER PlatformKeyVaultName
     Name of the shared platform Key Vault (default: sprk-platform-prod-kv).
-    Used to read shared secrets (e.g., BFF API key, OpenAI key).
+    Read for the SPE container type id and written with the tenant registry entry. No longer passed to
+    customer.bicep — its platformKeyVaultName parameter was removed by task 249 (owner D19, 2026-10-02).
 
 .PARAMETER PlatformResourceGroup
     Resource group containing shared platform resources (default: rg-spaarke-platform-prod).
@@ -118,7 +119,7 @@
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9]{3,10}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (AZURE-RESOURCE-NAMING-CONVENTION.md; T237)
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]
@@ -168,9 +169,36 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# A38c secret-free marker pre-check gate (see scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header
+# for full rationale + §11 justification). Gates ServiceBus-ConnectionString at Step 4 ONLY.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
+
+# ============================================================================
+# DEPRECATION NOTICE (§5.2 — this legacy 13-step orchestrator is SUPERSEDED)
+# ============================================================================
+# Provision-Customer.ps1 predates the L2 control-plane (src/server/services/
+# Sprk.Provisioning.ControlPlane.*/**) introduced by customer-provisioning-orchestration-r1. New
+# customer provisioning MUST go through the `/provision-environment` L3 skill
+# (.claude/skills/provision-environment/SKILL.md), which sequences the same work via 19
+# IProvisioningHandler steps + Cosmos state + the A38a/A38b/A38c secret-free credential gates.
+# This script is retained for reference / break-glass use only. It is gated at Step 4 (below)
+# against the same secret-free marker the L2 handlers respect, so it refuses rather than silently
+# reversing an already-completed secret-free migration if it is ever run against one.
+if (-not $env:SPAARKE_SUPPRESS_LEGACY_ORCHESTRATOR_BANNER) {
+    Write-Host ""
+    Write-Host "  ⚠ Provision-Customer.ps1 is the LEGACY 13-step orchestrator (§5.2) — superseded by" -ForegroundColor Yellow
+    Write-Host "    the L2 control-plane. Prefer '/provision-environment' unless you have a specific" -ForegroundColor Yellow
+    Write-Host "    break-glass reason to run this script directly." -ForegroundColor Yellow
+    Write-Host ""
+}
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
+
+# THE SPE container -> business-unit binding (unified-access-control-r2 task 165, owner round 35 item 1): step 10 stamps
+# the container it creates through Invoke-SpeContainerBindOrRemove.
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
 
 $TotalSteps = 13
 $ScriptRoot = $PSScriptRoot
@@ -425,8 +453,9 @@ function Invoke-Step2_CreateResourceGroup {
 #
 # Per Q-E Architecture 1, per-customer Redis is DEPRECATED. Redis is now
 # provisioned per-environment via `scripts/Deploy-RedisCache.ps1`
-# (`spaarke-bff-redis-{env}`), and the BFF is wired to it via Key Vault
-# reference (`Redis-ConnectionString` in `spaarke-bff-{env}` App Settings).
+# (`spaarke-bff-redis-{env}`), and the BFF is wired to it with the plain
+# setting `Redis__Endpoint` and its managed identity (task 242: Azure
+# Managed Redis, access keys disabled -- there is no Redis-ConnectionString).
 #
 # The inline Redis-deploy block previously living in this Step 3 (alongside
 # Storage/KV/Service Bus output extraction) and the `Redis-ConnectionString`
@@ -465,7 +494,6 @@ function Invoke-Step3_DeployBicep {
             customerId=$CustomerId `
             environmentName=$EnvironmentName `
             location=$Location `
-            platformKeyVaultName=$PlatformKeyVaultName `
         --output json 2>&1 | Out-String
 
     if ($LASTEXITCODE -ne 0) {
@@ -512,9 +540,9 @@ function Invoke-Step4_PopulateKeyVault {
 
     # Secrets to set (connection strings from Bicep outputs, plus cross-references)
     # Note: `Redis-ConnectionString` is intentionally NOT set per customer
-    # (Q-E Architecture 1, FR-12). Redis is per-environment; the BFF reads
-    # `Redis-ConnectionString` from the platform Key Vault populated by
-    # `scripts/Deploy-RedisCache.ps1`. See deprecation header in Step 3.
+    # (Q-E Architecture 1, FR-12). Redis is per-environment and Entra-only
+    # (task 242): the BFF reads the plain setting `Redis__Endpoint` and signs
+    # in with its managed identity -- no secret. See deprecation header in Step 3.
     #
     # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R1,R2,R4):
     # Every secret name below is CANONICAL per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
@@ -528,6 +556,17 @@ function Invoke-Step4_PopulateKeyVault {
     # BINDING pre-check (r3 handoff + spec MUST rule): no code path here deletes/renames
     # `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. Neither is written here; the BFF
     # client secret is owned by Register-EntraAppRegistrations.ps1 (platform KV).
+    # ── A38c secret-free marker gate ────────────────────────────────────────────────────────
+    # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
+    # 2026-08-24). This legacy orchestrator is superseded by the L2 control-plane (§5.2 — see
+    # the deprecation banner at script entry) and predates the secret-free credential-selection
+    # seam. Refuse the ENTIRE Step 4 write batch rather than fragment the hashtable write loop
+    # to skip a single entry — this orchestrator should not be run at all against an environment
+    # that has already migrated off ServiceBus-ConnectionString; the correct action is to use
+    # '/provision-environment' (L2 control-plane) instead. Mirrors the A43
+    # Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape.
+    Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $kvName -CustomerId $CustomerId
+
     $secrets = [ordered]@{
         "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
         "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString
@@ -1146,8 +1185,78 @@ function Invoke-Step10_ProvisionSPEContainers {
     # Each business unit gets one SPE container. During provisioning, we create
     # the container for the root BU. Additional BU containers are created via
     # New-BusinessUnitContainer.ps1 when new BUs are added.
+    #
+    # BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): the container is stamped with the
+    # root business unit it is created for, the stamp is read back, and the container is REMOVED if it did not land (the
+    # BFF's SPE admin plane reaches no unbound container). So the OWNER is resolved FIRST — no Dataverse URL, no token or
+    # no root business unit means no container is created at all (it used to create one and only then discover it could
+    # not record it, leaving an orphan) — and a root BU that already has its container is a no-op (it used to create a
+    # second, unused container first).
 
-    # 1. Get container type ID from platform Key Vault
+    # 1. Resolve the owner first: the Dataverse instance URL from prior steps, its token, the root business unit.
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+
+    if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
+        Write-Log "No Dataverse instance URL available — the container's owning business unit cannot be resolved." -Level ERROR
+        throw "SPE container NOT created: no Dataverse instance URL to resolve its owning business unit."
+    }
+
+    Write-Log "Acquiring Dataverse access token for $dataverseUrl..."
+
+    $dvToken = az account get-access-token `
+        --resource $dataverseUrl `
+        --query accessToken -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
+        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level ERROR
+        throw "SPE container NOT created: no Dataverse token to resolve its owning business unit."
+    }
+
+    $dvHeaders = @{
+        "Authorization" = "Bearer $dvToken"
+        "Content-Type"  = "application/json"
+        "OData-MaxVersion" = "4.0"
+        "OData-Version"    = "4.0"
+    }
+
+    Write-Log "Finding root business unit in Dataverse..."
+
+    try {
+        $buResponse = Invoke-RestMethod `
+            -Uri "$dataverseUrl/api/data/v9.2/businessunits?`$filter=parentbusinessunitid eq null&`$select=businessunitid,name,sprk_containerid" `
+            -Headers $dvHeaders `
+            -Method Get `
+            -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
+        throw "SPE container NOT created: the root business unit could not be read."
+    }
+
+    $roots = @($buResponse.value)
+    if ($roots.Count -ne 1) {
+        Write-Log "Expected exactly one root business unit, found $($roots.Count)." -Level ERROR
+        throw "SPE container NOT created: the root business unit is not unique (found $($roots.Count))."
+    }
+
+    $rootBu = $roots[0]
+    $rootBuId = $rootBu.businessunitid
+    Write-Log "Root BU: $($rootBu.name) ($rootBuId)" -Level INFO
+
+    # Idempotent: the root BU already has its container — create nothing.
+    if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
+        Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid) — no container created." -Level WARN
+        Write-Log "If that container predates business-unit stamping, bind it: Backfill-SpeContainerBusinessUnitStamp.ps1 (dry run, -Apply, -Verify)." -Level WARN
+        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (BU already set)" `
+            -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
+        return
+    }
+
+    # 2. Get container type ID from platform Key Vault
     # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R2,R4):
     # The canonical secret name is `SPE-ContainerTypeId` (Seed-ProductionKeyVault.ps1 line 129 +
     # Configure-ProductionAppSettings.ps1 line 64 + config/spaarke-resources.yaml). The prior
@@ -1169,7 +1278,7 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     Write-Log "Container Type ID: $containerTypeId" -Level INFO
 
-    # 2. Get Graph API token via service principal (uses az CLI logged-in identity)
+    # 3. Get Graph API token via service principal (uses az CLI logged-in identity)
     Write-Log "Acquiring Graph API access token..."
 
     $graphToken = az account get-access-token `
@@ -1183,7 +1292,7 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     Write-Log "Graph API token acquired." -Level SUCCESS
 
-    # 3. Create SPE container via Graph API
+    # 4. Create SPE container via Graph API
     $containerDisplayName = "$DisplayName Documents"
     Write-Log "Creating SPE container: '$containerDisplayName'..."
 
@@ -1217,81 +1326,18 @@ function Invoke-Step10_ProvisionSPEContainers {
         throw "SPE container creation failed"
     }
 
-    # 4. Get Dataverse instance URL from prior steps
-    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
-        $State.StepOutputs.DataverseInstanceUrl
-    } else {
-        $DataverseEnvUrl
-    }
-
-    if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
-        Write-Log "No Dataverse instance URL available. Cannot set sprk_containerid on business unit." -Level ERROR
-        Write-Log "Container was created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
-    }
-
-    # 5. Get Dataverse token
-    Write-Log "Acquiring Dataverse access token for $dataverseUrl..."
-
-    $dvToken = az account get-access-token `
-        --resource $dataverseUrl `
-        --query accessToken -o tsv 2>&1
-
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
-        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level WARN
-        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
-    }
-
-    # 6. Find the root business unit (parentbusinessunitid eq null)
-    Write-Log "Finding root business unit in Dataverse..."
-
-    $dvHeaders = @{
-        "Authorization" = "Bearer $dvToken"
-        "Content-Type"  = "application/json"
-        "OData-MaxVersion" = "4.0"
-        "OData-Version"    = "4.0"
-    }
-
+    # 5. Bind it to the root business unit (task 165, owner round 35 item 1): stamp, read back, or remove.
     try {
-        $buResponse = Invoke-RestMethod `
-            -Uri "$dataverseUrl/api/data/v9.2/businessunits?`$filter=parentbusinessunitid eq null&`$select=businessunitid,name,sprk_containerid" `
-            -Headers $dvHeaders `
-            -Method Get `
-            -ErrorAction Stop
-
-        $rootBu = $buResponse.value | Select-Object -First 1
-
-        if (-not $rootBu) {
-            Write-Log "No root business unit found in Dataverse." -Level ERROR
-            throw "Root business unit not found"
-        }
-
-        Write-Log "Root BU: $($rootBu.name) ($($rootBu.businessunitid))" -Level INFO
-
-        # Check if already has a container ID (idempotent)
-        if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
-            Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid)" -Level WARN
-            Write-Log "Skipping BU update. New container ID: $containerId (not applied)." -Level WARN
-            Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (BU already set)" `
-                -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
-            return
-        }
+        Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $rootBuId `
+            -GraphBase 'https://graph.microsoft.com/v1.0'
+        Write-Log "SPE container $containerId bound to root business unit $rootBuId." -Level SUCCESS
     }
     catch {
-        Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
-        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
+        Write-Log "SPE container binding failed: $($_.Exception.Message)" -Level ERROR
+        throw "SPE container could not be bound to its owning business unit — see the log; sprk_containerid was not set."
     }
 
-    # 7. Set sprk_containerid on the root business unit
-    $rootBuId = $rootBu.businessunitid
+    # 6. Set sprk_containerid on the root business unit
     Write-Log "Setting sprk_containerid=$containerId on BU $rootBuId..."
 
     try {
@@ -1306,7 +1352,7 @@ function Invoke-Step10_ProvisionSPEContainers {
     }
     catch {
         Write-Log "Failed to update business unit: $($_.Exception.Message)" -Level ERROR
-        Write-Log "Container created ($containerId) — update BU manually." -Level WARN
+        Write-Log "Container created and BOUND ($containerId) — set sprk_containerid on BU $rootBuId manually." -Level WARN
     }
 
     Write-Log "SPE provisioning complete. Container ID: $containerId" -Level SUCCESS

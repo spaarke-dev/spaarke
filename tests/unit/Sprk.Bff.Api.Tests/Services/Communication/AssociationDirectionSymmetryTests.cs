@@ -41,6 +41,8 @@ public class AssociationDirectionSymmetryTests
         };
         var resolver = new IncomingAssociationResolver(
             rungs, dv.Object, dv.Object, AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
         return (resolver, captured);
     }

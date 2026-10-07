@@ -46,8 +46,5 @@
     "jest-environment-jsdom": "^30.2.0",
     "ts-jest": "^29.4.4",
     "typescript": "^5.3.3"
-  },
-  "dependencies": {
-    "@spaarke/auth": "file:../Spaarke.Auth"
   }
 }

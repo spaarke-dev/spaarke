@@ -73,6 +73,12 @@ public sealed class GraphWireMockFixture : IDisposable
     public string BaseUrl => _server.Urls[0];
 
     /// <summary>
+    /// Clears every stub and every recorded request — for a fixture shared by the tests of one class
+    /// (unified-access-control-r2 task 165's host fixture keeps one fake Graph for its whole host).
+    /// </summary>
+    public void Reset() => _server.Reset();
+
+    /// <summary>
     /// Builds a real <see cref="GraphServiceClient"/> whose base address is this fake endpoint.
     /// </summary>
     /// <remarks>
@@ -104,6 +110,36 @@ public sealed class GraphWireMockFixture : IDisposable
     {
         _server
             .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a GET on EXACTLY <paramref name="path"/> (query string aside) — for a
+    /// collection whose path is a prefix of its items' paths (<c>/containers</c> vs <c>/containers/{id}</c>), where
+    /// <see cref="StubGet"/>'s prefix match would answer the items too.
+    /// </summary>
+    public GraphWireMockFixture StubGetExact(string path, string jsonBody, int statusCode = 200)
+    {
+        _server
+            .Given(Request.Create().WithPath(path).UsingGet())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
+    /// <summary>Serves <paramref name="jsonBody"/> for a POST on EXACTLY <paramref name="path"/> (see <see cref="StubGetExact"/>).</summary>
+    public GraphWireMockFixture StubPostExact(string path, string jsonBody, int statusCode = 200)
+    {
+        _server
+            .Given(Request.Create().WithPath(path).UsingPost())
             .RespondWith(Response.Create()
                 .WithStatusCode(statusCode)
                 .WithHeader("Content-Type", "application/json")
@@ -176,6 +212,23 @@ public sealed class GraphWireMockFixture : IDisposable
     {
         _server
             .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPatch())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
+    /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a PUT — used for create-or-replace resources such as an
+    /// <c>applicationPermissionGrant</c>, where the VERB is part of the contract (task 041 measured the
+    /// POST alternative failing live).
+    /// </summary>
+    public GraphWireMockFixture StubPut(string pathPrefix, string jsonBody, int statusCode = 201)
+    {
+        _server
+            .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPut())
             .RespondWith(Response.Create()
                 .WithStatusCode(statusCode)
                 .WithHeader("Content-Type", "application/json")

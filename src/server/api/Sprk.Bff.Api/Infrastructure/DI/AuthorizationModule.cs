@@ -230,6 +230,10 @@ public static class AuthorizationModule
         // Authorization policies - granular operation-level policies matching SPE/Graph API operations
         services.AddAuthorization(options =>
         {
+            // Fail closed at runtime: an endpoint that declares neither an authorization requirement nor
+            // AllowAnonymous gets "authenticated user" instead of "anyone" (owner round 14 item 2).
+            ApplyFallbackPolicy(options);
+
             // DriveItem Content Operations
             options.AddPolicy("canpreviewfiles", p =>
                 p.Requirements.Add(new ResourceAccessRequirement("driveitem.preview")));
@@ -291,10 +295,27 @@ public static class AuthorizationModule
                 p.Requirements.Add(new ResourceAccessRequirement("driveitem.sensitivitylabel.assign")));
 
             // Legacy Compatibility
-            options.AddPolicy("canreadfiles", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("preview_file")));
-            options.AddPolicy("canwritefiles", p =>
-                p.Requirements.Add(new ResourceAccessRequirement("upload_file")));
+            //
+            // "canwritefiles" + "canreadfiles" REMOVED 2026-09-07 (unified-access-control-r2 task 083)
+            // for the same reason "canmanagecontainers" was removed below, and by the same precedent.
+            //
+            // "canwritefiles" bound ResourceAccessRequirement("upload_file"). Its only two consumers
+            // were PUT /api/drives/{driveId}/upload and DELETE /api/drives/{driveId}/items/{itemId} in
+            // Api/DocumentsEndpoints.cs, both deleted by task 083 — so the policy is orphaned. It is
+            // deleted rather than left registered because it is not merely unused, it is WRONG-DOMAIN:
+            // ResourceAccessHandler.ExtractResourceId accepts containerId / driveId / documentId
+            // interchangeably and then resolves the value as sprk_documents({id}), so the policy
+            // authorizes a DRIVE id against DOCUMENT rights. The next endpoint author to reach for a
+            // plausibly-named "canwritefiles" would inherit that, and inherit it silently — the
+            // failure is a wrong ALLOW/DENY, not a startup error.
+            //
+            // "canreadfiles" (preview_file) was ALREADY orphaned before task 083 — zero consumers
+            // anywhere in src/ — and carries the identical wrong-resource-domain shape. It is removed
+            // in the same edit rather than left as the one surviving member of a retired pair.
+            //
+            // If a files read/write policy is genuinely needed again, it must evaluate the OWNING
+            // RECORD via the task 075/076 resolver, not an SPE key lifted off the route.
+            //
             // "canmanagecontainers" REMOVED 2026-08-25 (spaarke-auth-v4-dataverse-MI task 090,
             // obligation 031-A) together with its only six consumers in DocumentsEndpoints.
             // It bound ResourceAccessRequirement("create_container") — a PER-RESOURCE requirement —
@@ -342,26 +363,59 @@ public static class AuthorizationModule
             });
 
             // Admin Policies
+            //
+            // "SystemAdmin" admits ONLY the Admin or SystemAdmin app role. Until unified-access-control-r2
+            // task 165 it also admitted any token whose delegated scope claim CONTAINED the substring
+            // "admin" (case-insensitive, matched against the whole space-separated scp string), so a future
+            // scope such as "Files.ReadAdmin" — or any API's scope name with "admin" in it — would have
+            // unlocked every operator surface sharing this policy (/api/admin/jobs, /api/admin/membership,
+            // /api/admin/record-matching, /api/ai/rag/admin). No delegated scope the BFF registrations expose
+            // contains "admin" (verified 2026-10-03), so the branch admitted nobody legitimate; an administrator is
+            // identified by the app role, the same signal SpeAdminAuthorizationFilter checks.
             options.AddPolicy("SystemAdmin", p =>
             {
                 p.RequireAuthenticatedUser();
                 p.RequireAssertion(context =>
-                {
-                    var hasAdminRole = context.User.IsInRole("Admin") ||
-                                       context.User.IsInRole("SystemAdmin") ||
-                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
-                                       context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin");
-
-                    var hasAdminScope = context.User.HasClaim(c =>
-                        c.Type == "http://schemas.microsoft.com/identity/claims/scope" &&
-                        c.Value.Contains("admin", StringComparison.OrdinalIgnoreCase));
-
-                    return hasAdminRole || hasAdminScope;
-                });
+                    context.User.IsInRole("Admin") ||
+                    context.User.IsInRole("SystemAdmin") ||
+                    context.User.HasClaim(c => c.Type == "roles" && c.Value == "Admin") ||
+                    context.User.HasClaim(c => c.Type == "roles" && c.Value == "SystemAdmin"));
             });
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// The authorization <b>FallbackPolicy</b>: an authenticated user (owner round 14 item 2,
+    /// unified-access-control-r2 task 167).
+    ///
+    /// <para><b>What it does.</b> ASP.NET Core applies the fallback policy to every request whose endpoint
+    /// carries no authorization metadata — no <c>RequireAuthorization(...)</c>, no <c>[Authorize]</c>, no
+    /// <c>AllowAnonymous()</c> — and to a request that matches no endpoint at all. Without it such an endpoint
+    /// is callable by anyone, signed in or not. With it, the same omission answers 401: the runtime fails
+    /// CLOSED. An explicit <c>AllowAnonymous()</c> still opens a route (the liveness probes, the signed
+    /// webhooks, the public config bundle), and an explicit <c>RequireAuthorization(...)</c> still decides on
+    /// its own policy — the fallback never applies to an endpoint that declares either.</para>
+    ///
+    /// <para><b>Why the build-time guard stays.</b> <c>RouteAuthorizationGuardTests.NoRouteIsAnonymousByOmission</c>
+    /// still fails the build on any route lacking <c>RequireAuthorization*</c> or <c>AllowAnonymous</c> on its
+    /// route or group chain. The fallback protects the runtime if the guard is ever bypassed; the guard keeps
+    /// every route's intent DECLARED and reviewable. Neither replaces the other (owner round 14 item 2).</para>
+    ///
+    /// <para><b>Consequence for an unknown path.</b> A request that matches no route is challenged with 401
+    /// unless it is authenticated; an authenticated caller still gets 404. A route-ABSENCE test therefore
+    /// asserts 404 with a bearer token (or reads the endpoint table), never 404 without one. CORS preflights
+    /// are unaffected: <c>UseCors</c> answers them before <c>UseAuthorization</c> runs.</para>
+    ///
+    /// <para>Public so a test can build a host on THIS policy rather than on a re-declaration of it
+    /// (<c>tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs</c>) — the same
+    /// reasoning as <see cref="AddCredentialSelection"/> below.</para>
+    /// </summary>
+    public static void ApplyFallbackPolicy(AuthorizationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        options.FallbackPolicy = new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build();
     }
 
     /// <summary>
@@ -455,8 +509,11 @@ public static class AuthorizationModule
         //
         // Constructed by factory rather than by convention so the two OPTIONAL dependencies stay
         // optional: SecretClient is registered by SpeAdminModule (only when a Key Vault URI is
-        // configured) and TimeProvider is not registered at all in this app. GetService returns null
-        // for both, which the provider handles; constructor injection would instead fail to resolve.
+        // configured) and TimeProvider is registered only by feature modules (TryAddSingleton in
+        // DocumentsModule, MembershipModule, CommunicationModule, InsightsIngestModule, WorkspaceModule,
+        // ExternalAccessModule). GetService returns null for either when absent, which the provider
+        // handles; constructor injection would instead fail to resolve. (This comment previously said
+        // TimeProvider "is not registered at all in this app" — stale; corrected 2026-09-10, task 097.)
         services.AddSingleton(sp => new OrderedCredentialClientProvider(
             sp.GetRequiredService<IOptions<CredentialSelectionOptions>>(),
             sp.GetRequiredService<IConfiguration>(),

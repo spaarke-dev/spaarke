@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Api.Filters;
@@ -69,7 +70,6 @@ public static class RegistrationEndpoints
         DemoRequestDto request,
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
-        DataverseEnvironmentService environmentService,
         EmailDomainValidator domainValidator,
         IOptions<DemoProvisioningOptions> options,
         ILogger<RegistrationDataverseService> logger,
@@ -103,6 +103,25 @@ public static class RegistrationEndpoints
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request",
                 detail: "Consent must be accepted to submit a demo request.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        }
+
+        // A use case we cannot read is refused rather than dropped. sprk_usecase is
+        // required on the form, and the old behaviour wrote the record without it:
+        // ParseUseCase returned null, the write was skipped, and nothing reported a
+        // problem. A caller sending something we do not understand should be told.
+        var parsedUseCase = ParseUseCase(request.UseCase);
+        if (parsedUseCase is null)
+        {
+            logger.LogWarning(
+                "Demo request rejected: unrecognised use case {UseCase}, TraceId={TraceId}",
+                request.UseCase, httpContext.TraceIdentifier);
+
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "Use case is required and must be one of: DocumentManagement, AiAnalysis, FinancialIntelligence, General.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
         }
@@ -158,7 +177,7 @@ public static class RegistrationEndpoints
                 Organization = request.Organization,
                 JobTitle = request.JobTitle,
                 Phone = request.Phone,
-                UseCase = ParseUseCase(request.UseCase),
+                UseCase = parsedUseCase,
                 ReferralSource = ParseReferralSource(request.ReferralSource),
                 Notes = request.Notes,
                 ConsentAccepted = request.ConsentAccepted
@@ -171,9 +190,11 @@ public static class RegistrationEndpoints
                 recordId, trackingId, request.Email, httpContext.TraceIdentifier);
 
             // Send admin notification (fire-and-forget — do not block the response)
+            // The URL comes from the service that just wrote the record, so the link and
+            // the record cannot point at different environments.
             _ = SendAdminNotificationAsync(
-                emailService, environmentService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
-                dataverseUrl: null, appId: null);
+                emailService, options.Value, trackingId, request, recordId, logger, httpContext.TraceIdentifier,
+                dataverseUrl: dataverseService.DataverseBaseUrl, appId: null);
 
             // Send acknowledgement email to applicant (fire-and-forget)
             _ = SendAcknowledgementEmailAsync(
@@ -448,46 +469,33 @@ public static class RegistrationEndpoints
     /// </summary>
     private static async Task SendAdminNotificationAsync(
         RegistrationEmailService emailService,
-        DataverseEnvironmentService environmentService,
         DemoProvisioningOptions options,
         string trackingId,
         DemoRequestDto request,
         Guid recordId,
         ILogger logger,
         string traceIdentifier,
-        string? dataverseUrl = null,
+        string dataverseUrl,
         string? appId = null)
     {
         try
         {
-            // Build record URL: prefer explicit parameters, then fall back to the default
-            // Dataverse environment record read from Dataverse (via DataverseEnvironmentService).
-            // customer-provisioning-orchestration-r1 task 081 migrated this off the
-            // now-removed DemoProvisioningOptions.Environments/DefaultEnvironment pair —
-            // task 080's DataverseEnvironmentRecord.SelectDefault helper preserves the
-            // original selection semantics.
-            string? envUrl = dataverseUrl;
-            string? envAppId = appId;
-            if (string.IsNullOrEmpty(envUrl))
-            {
-                try
-                {
-                    var envs = await environmentService.GetActiveEnvironmentsAsync(CancellationToken.None);
-                    var defaultEnv = DataverseEnvironmentRecord.SelectDefault(envs);
-                    envUrl = defaultEnv.DataverseUrl;
-                    envAppId = defaultEnv.AppId;
-                }
-                catch (Exception envEx)
-                {
-                    // Environment lookup failed — log and fall back to a generic URL below so
-                    // the admin still gets the notification with a best-effort deep link.
-                    logger.LogWarning(
-                        envEx,
-                        "Failed to resolve default Dataverse environment for admin notification (TrackingId={TrackingId}, TraceId={TraceId}); falling back to generic Dataverse URL.",
-                        trackingId, traceIdentifier);
-                }
-            }
-            var recordUrl = BuildRegistrationRecordUrl(envUrl, envAppId, recordId);
+            // The link points at the environment the record was written to, which the
+            // caller takes from RegistrationDataverseService.DataverseBaseUrl.
+            //
+            // It used to come from the default sprk_dataverseenvironment row, via
+            // DataverseEnvironmentRecord.SelectDefault. That row describes where demos
+            // are provisioned, which is a different environment and has nothing to say
+            // about where a registration request lives. With no row flagged as default
+            // the selection fell through to the first by name, "Demo 1", so every
+            // notification deep-linked into spaarke-demo for a record that only exists
+            // in spaarkedev1, and the admin got "Record Is Unavailable".
+            //
+            // SelectDefault is still correct for its other caller, DemoExpirationService,
+            // which really does want the demo environment. Do not fix this class of bug
+            // by flagging a row as default: that would silently redirect team removal and
+            // SPE revoke on expiry.
+            var recordUrl = BuildRegistrationRecordUrl(dataverseUrl, appId, recordId);
 
             await emailService.SendAdminNotificationAsync(
                 adminEmails: options.AdminNotificationEmails,
@@ -570,23 +578,60 @@ public static class RegistrationEndpoints
         }
     }
 
-    private static UseCaseOption? ParseUseCase(string? value)
+    /// <summary>
+    /// Lower-cases and strips everything that is not a letter or a digit, so that
+    /// separators cannot decide whether a value parses.
+    /// </summary>
+    /// <remarks>
+    /// The previous helpers listed separator variants by hand: "documentmanagement",
+    /// "document-management", "document_management". The space was missed, and the
+    /// website sends its picker labels, so "Document Management" matched nothing,
+    /// fell through to Enum.TryParse, failed there too, and became null. Callers
+    /// treat null as "not supplied", so sprk_usecase was written empty on every
+    /// registration request ever created, with no error on either side.
+    ///
+    /// Normalising once is what stops a separator being a correctness question.
+    /// </remarks>
+    internal static string NormalizeChoice(string value)
+    {
+        var buffer = new StringBuilder(value.Length);
+        foreach (var c in value)
+        {
+            if (char.IsLetterOrDigit(c)) buffer.Append(char.ToLowerInvariant(c));
+        }
+        return buffer.ToString();
+    }
+
+    /// <summary>
+    /// Maps the website's use case to the <see cref="UseCaseOption"/> choice.
+    /// Returns null when the value is absent or unrecognised; the endpoint rejects
+    /// the unrecognised case rather than writing the record without it.
+    /// </summary>
+    internal static UseCaseOption? ParseUseCase(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        return value.ToLowerInvariant() switch
+        return NormalizeChoice(value) switch
         {
-            "documentmanagement" or "document-management" or "document_management" => UseCaseOption.DocumentManagement,
-            "aianalysis" or "ai-analysis" or "ai_analysis" => UseCaseOption.AiAnalysis,
-            "financialintelligence" or "financial-intelligence" or "financial_intelligence" => UseCaseOption.FinancialIntelligence,
-            "general" => UseCaseOption.General,
+            "documentmanagement" => UseCaseOption.DocumentManagement,
+            "aianalysis" => UseCaseOption.AiAnalysis,
+            "financialintelligence" => UseCaseOption.FinancialIntelligence,
+            // "General Evaluation" is the label the website shows. The choice is
+            // called General, so tolerance has to cover the longer form too.
+            "general" or "generalevaluation" => UseCaseOption.General,
             _ => Enum.TryParse<UseCaseOption>(value, true, out var result) ? result : null
         };
     }
 
-    private static ReferralSourceOption? ParseReferralSource(string? value)
+    /// <summary>
+    /// Maps the website's referral source to the <see cref="ReferralSourceOption"/>
+    /// choice. This one never broke, because its labels happen to be single words
+    /// that match the choice names. That is luck rather than design, so it is
+    /// normalised the same way.
+    /// </summary>
+    internal static ReferralSourceOption? ParseReferralSource(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
-        return value.ToLowerInvariant() switch
+        return NormalizeChoice(value) switch
         {
             "conference" => ReferralSourceOption.Conference,
             "website" => ReferralSourceOption.Website,

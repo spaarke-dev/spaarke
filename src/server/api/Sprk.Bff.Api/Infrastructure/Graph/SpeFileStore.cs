@@ -51,12 +51,21 @@ public class SpeFileStore : ISpeFileOperations
     /// the only available assertion was that provisioning reached business-unit creation and then
     /// failed on the unavailable test-host Graph services — and business-unit creation no longer exists.
     /// </remarks>
+    /// <param name="containerTypeId">The container type.</param>
+    /// <param name="displayName">The container's display name.</param>
+    /// <param name="owningBusinessUnitId">
+    /// Stamped on the container before this returns (unified-access-control-r2 task 165, owner round 20 item 1) —
+    /// every container this BFF creates carries the business unit that owns it.
+    /// </param>
+    /// <param name="description">Optional description.</param>
+    /// <param name="ct">Cancellation token.</param>
     public virtual Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
+        Guid owningBusinessUnitId,
         string? description = null,
         CancellationToken ct = default)
-        => _containerOps.CreateContainerAsync(containerTypeId, displayName, description, ct);
+        => _containerOps.CreateContainerAsync(containerTypeId, displayName, owningBusinessUnitId, description, ct);
 
     public Task<ContainerDto?> GetContainerDriveAsync(string containerId, CancellationToken ct = default)
         => _containerOps.GetContainerDriveAsync(containerId, ct);
@@ -75,6 +84,19 @@ public class SpeFileStore : ISpeFileOperations
         => _uploadManager.UploadSmallAsync(driveId, path, content, ct);
 
     /// <summary>
+    /// App-only small upload with an explicit collision behaviour. See <see cref="ISpeFileOperations"/>
+    /// for the contract — notably that this performs NO authorization and the container must be
+    /// server-derived. <c>virtual</c> for the same module-boundary-test-double reason as its sibling.
+    /// </summary>
+    public virtual Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
+        CancellationToken ct = default)
+        => _uploadManager.UploadSmallAsync(driveId, path, content, conflictBehavior, ct);
+
+    /// <summary>
     /// Reads the SPE <c>quickXorHash</c> content identity for a persisted drive item (app-only), for the
     /// FR-C3 content-dedup detector. <c>virtual</c> so the concrete facade can be substituted at the module
     /// boundary in tests (the established idiom — cf. <see cref="UploadSmallAsync"/>). Best-effort: returns
@@ -83,9 +105,18 @@ public class SpeFileStore : ISpeFileOperations
     public virtual Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
         => _driveItemOps.GetQuickXorHashAsync(driveId, itemId, ct);
 
-    // CreateUploadSessionAsync / UploadChunkAsync (app-only chunked upload) DELETED 2026-08-27 by
-    // unified-access-control-r2, following task 073's deletion of Api/UploadEndpoints.cs — their only
-    // caller. See the note in UploadSessionManager.cs for why the OBO twins are NOT covered by this.
+    /// <summary>
+    /// App-only upload SESSION for a large file (unified-access-control-r2 task 171 — replaces the OBO
+    /// <c>CreateUploadSessionAsUserAsync</c>, which 403'd on every secure container). Performs NO authorization: its
+    /// caller, the record-keyed upload-session route, authorizes the caller on the owning record and derives the
+    /// container from it. <c>virtual</c> so a route test can observe which drive the session targets (ADR-038 B1).
+    /// </summary>
+    public virtual Task<UploadSessionResponse?> CreateUploadSessionAsync(
+        string driveId,
+        string path,
+        ConflictBehavior conflictBehavior,
+        CancellationToken ct = default)
+        => _uploadManager.CreateUploadSessionAsync(driveId, path, conflictBehavior, ct);
 
     // Drive Item Operations - delegate to DriveItemOperations
     public Task<IList<FileHandleDto>> ListChildrenAsync(
@@ -114,12 +145,25 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsync(driveId, itemId, ct);
 
+    /// <inheritdoc />
+    public virtual Task<FileHandleDto?> GetFileMetadataUncachedAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.GetFileMetadataUncachedAsync(driveId, itemId, ct);
+
     public Task<FileHandleDto?> GetFileMetadataAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsUserAsync(ctx, driveId, itemId, ct);
+
+    /// <inheritdoc />
+    /// <remarks><c>virtual</c> (task 166 f1): the module-boundary test double of <c>DocumentContainerRelocator</c>
+    /// substitutes it, as the upload / download / delete siblings already are.</remarks>
+    public virtual Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+        => _driveItemOps.GetItemCreatorAsync(driveId, itemId, ct);
 
     public Task<Stream?> DownloadFileAsUserAsync(
         HttpContext ctx,
@@ -143,14 +187,36 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetCurrentVersionIdAsUserAsync(ctx, driveId, itemId, ct);
 
-    // spaarkeai-compose-r6 task 050 (FR-07): user-context (OBO) full version-history list —
-    // the projection backing GET /api/obo/drives/{driveId}/items/{itemId}/versions. Read-only.
-    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
-        HttpContext ctx,
+    /// <inheritdoc />
+    public Task<string?> GetCurrentVersionIdAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
-        => _driveItemOps.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct);
+        => _driveItemOps.GetCurrentVersionIdAsync(driveId, itemId, ct);
+
+    // unified-access-control-r2: app-only version-history list, backing
+    // GET /api/v1/external/projects/{id}/documents/{documentId}/versions and, since task 171 (the OBO list was
+    // deleted), GET /api/documents/{documentId}/versions. Both authorize on the Dataverse side first.
+    // `virtual` (task 166, owner round 45 item 1): the relocation's version replay lists the source's history through it,
+    // and its module-boundary test double substitutes it (see UploadSmallAsync).
+    public virtual Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.ListFileVersionsAsync(driveId, itemId, ct);
+
+    /// <summary>
+    /// App-only download of a specific PRIOR version (unified-access-control-r2 task 166, owner round 45 item 1, for the
+    /// relocation's version replay; task 171 added it to <see cref="ISpeFileOperations"/> for the document version route
+    /// and Compose's row-backed save, both behind a Dataverse decision). Performs NO authorization. <c>virtual</c> for the
+    /// module-boundary double.
+    /// </summary>
+    public virtual Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+        => _driveItemOps.DownloadFileVersionAsync(driveId, itemId, versionId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
@@ -160,24 +226,22 @@ public class SpeFileStore : ISpeFileOperations
         => _driveItemOps.GetPreviewUrlAsync(driveId, itemId, correlationId, ct);
 
     /// <summary>
-    /// Creates a recipient-openable SPE sharing link for a DriveItem via OBO (R2 item 12 — the email
-    /// composer's "Link" attachments). Delegates to <see cref="DriveItemOperations.CreateSharingLinkAsUserAsync"/>.
+    /// Creates a recipient-openable SPE sharing link for a DriveItem APP-ONLY (R2 item 12 — the email composer's "Link"
+    /// attachments; task 171 moved it off OBO). Delegates to <see cref="DriveItemOperations.CreateSharingLinkAsync"/>.
     /// </summary>
     /// <remarks>
-    /// <c>virtual</c> for the same reason as <see cref="DownloadFileAsync"/> (unified-access-control-r2
-    /// task 072): a test asserting that an unauthorized caller was denied must be able to prove NO LINK
-    /// WAS MINTED. A 403 assertion alone would pass even if the createLink had already been issued — and
-    /// unlike a failed download, a minted SPE URL cannot be taken back.
+    /// <c>virtual</c> (unified-access-control-r2 task 072): a test asserting that an unauthorized caller was denied must
+    /// be able to prove NO LINK WAS MINTED. A 403 assertion alone would pass even if the createLink had already been
+    /// issued — and unlike a failed download, a minted SPE URL cannot be taken back.
     /// </remarks>
-    public virtual Task<string?> CreateSharingLinkAsUserAsync(
-        HttpContext ctx,
+    public virtual Task<string?> CreateSharingLinkAsync(
         string driveId,
         string itemId,
         string linkType,
         string scope,
         DateTimeOffset? expiration = null,
         CancellationToken ct = default)
-        => _driveItemOps.CreateSharingLinkAsUserAsync(ctx, driveId, itemId, linkType, scope, expiration, ct);
+        => _driveItemOps.CreateSharingLinkAsync(driveId, itemId, linkType, scope, expiration, ct);
 
     /// <summary>
     /// Resolve a container ID to its drive ID.
@@ -205,10 +269,10 @@ public class SpeFileStore : ISpeFileOperations
     }
 
     // =============================================================================
-    // USER CONTEXT METHODS (OBO Flow)
+    // USER CONTEXT METHODS (OBO Flow) — what is left after task 171 (owner round 69, broker-only): container listing,
+    // the user-info / capability probes, and the Compose "Path B" byte reads/writes for documents with NO
+    // sprk_document row (see ISpeFileOperations remarks). Every row-backed byte path is app-only above.
     // =============================================================================
-    // All methods delegate to specialized operation classes.
-    // These methods accept userToken and use OBO authentication flow.
 
     // Container Operations (user context)
     public Task<IList<ContainerDto>> ListContainersAsUserAsync(
@@ -217,48 +281,27 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _containerOps.ListContainersAsUserAsync(ctx, containerTypeId, ct);
 
-    // Drive Item Operations (user context)
-    public Task<ListingResponse> ListChildrenAsUserAsync(
-        HttpContext ctx,
-        string containerId,
-        ListingParameters parameters,
-        CancellationToken ct = default)
-        => _driveItemOps.ListChildrenAsUserAsync(ctx, containerId, parameters, ct);
+    // UploadSmallAsUserAsync (both overloads) DELETED 2026-10-06 (task 171): every record-backed caller now writes
+    // app-only through UploadSmallAsync above, after a Dataverse decision and a server-derived container.
 
-    public Task<FileContentResponse?> DownloadFileWithRangeAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        RangeHeader? range,
-        string? ifNoneMatch,
-        CancellationToken ct = default)
-        => _driveItemOps.DownloadFileWithRangeAsUserAsync(ctx, driveId, itemId, range, ifNoneMatch, ct);
-
-    public Task<DriveItemDto?> UpdateItemAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        UpdateFileRequest request,
-        CancellationToken ct = default)
-        => _driveItemOps.UpdateItemAsUserAsync(ctx, driveId, itemId, request, ct);
-
-    public Task<bool> DeleteItemAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        CancellationToken ct = default)
-        => _driveItemOps.DeleteItemAsUserAsync(ctx, driveId, itemId, ct);
-
-    // Upload Operations (user context)
-    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+    /// <summary>
+    /// OBO small upload into the configured STAGING container — chat persist, chat Word export, workspace pre-fill only.
+    /// See <see cref="UploadSessionManager.UploadSmallToStagingAsUserAsync"/> for why these stay OBO (task 171,
+    /// escalation trigger 2). <c>virtual</c> for the module-boundary test double.
+    /// </summary>
+    public virtual Task<FileHandleDto?> UploadSmallToStagingAsUserAsync(
         HttpContext ctx,
         string containerId,
         string path,
         Stream content,
         CancellationToken ct = default)
-        => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, ct);
+        => _uploadManager.UploadSmallToStagingAsUserAsync(ctx, containerId, path, content, ct);
 
-    public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+    // `virtual` (spaarkeai-word-add-in-r1 task 023) for the same module-boundary-test-double reason as
+    // UploadSmallAsync/DeleteFileAsync: the Office version save (FR-11) writes a new SPE version of an
+    // EXISTING drive item through this call, and the one-row + same-item invariants are only verifiable if a
+    // test can observe which item was written — and prove, on refusal paths, that nothing was. No behaviour change.
+    public virtual Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
@@ -275,13 +318,18 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.ReplaceFileContentAsUserAsync(ctx, driveId, itemId, content, ifMatch, ct);
 
-    public Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(
-        HttpContext ctx,
+    /// <summary>
+    /// App-only replace of an EXISTING item's content with optional <c>If-Match</c> (task 171): the Office version save
+    /// and Compose's row-backed save, each after a Dataverse WRITE decision on the document and the pointer check.
+    /// <c>virtual</c> for the same module-boundary-test-double reason as the OBO twin above.
+    /// </summary>
+    public virtual Task<FileHandleDto?> ReplaceFileContentAsync(
         string driveId,
-        string path,
-        ConflictBehavior conflictBehavior,
+        string itemId,
+        Stream content,
+        string? ifMatch,
         CancellationToken ct = default)
-        => _uploadManager.CreateUploadSessionAsUserAsync(ctx, driveId, path, conflictBehavior, ct);
+        => _uploadManager.ReplaceFileContentAsync(driveId, itemId, content, ifMatch, ct);
 
     public Task<ChunkUploadResponse> UploadChunkAsUserAsync(
         string userToken,
@@ -304,34 +352,39 @@ public class SpeFileStore : ISpeFileOperations
         => _userOps.GetUserCapabilitiesAsync(ctx, containerId, ct);
 
     // =========================================================================
-    // OBO-context facades for FileAccessEndpoints (CICD-088b — ADR-007 §1)
-    // Delegate to DriveItemOperations so the Microsoft.Graph types stay in
-    // Infrastructure.Graph and never appear in endpoint IL.
-    // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b.
+    // App-only facades for FileAccessEndpoints (CICD-088b — ADR-007 §1; task 171 moved them off OBO). They delegate
+    // to DriveItemOperations so the Microsoft.Graph types stay in Infrastructure.Graph and never appear in endpoint
+    // IL. `virtual` so a route test can observe the call (and prove, on a denial, that none was made) at this facade.
     // =========================================================================
 
-    public Task<string?> GetPreviewUrlAsUserAsync(
-        HttpContext ctx,
+    public virtual Task<string?> GetEmbedPreviewUrlAsync(
         string driveId,
         string itemId,
         IDictionary<string, object>? additionalData = null,
         CancellationToken ct = default)
-        => _driveItemOps.GetPreviewUrlAsUserAsync(ctx, driveId, itemId, additionalData, ct);
+        => _driveItemOps.GetEmbedPreviewUrlAsync(driveId, itemId, additionalData, ct);
 
-    public Task<SpeDriveItemSummary?> GetDriveItemAsUserAsync(
-        HttpContext ctx,
+    public virtual Task<SpeDriveItemSummary?> GetDriveItemAsync(
         string driveId,
         string itemId,
         IEnumerable<string>? selectFields = null,
         CancellationToken ct = default)
-        => _driveItemOps.GetDriveItemAsUserAsync(ctx, driveId, itemId, selectFields, ct);
+        => _driveItemOps.GetDriveItemAsync(driveId, itemId, selectFields, ct);
 
-    public Task<Stream?> GetContentStreamAsUserAsync(
+    /// <summary>
+    /// FR-01 (task 012): resolves an absolute document URL to the SPE drive item it names, as the caller, via
+    /// Graph <c>/shares</c>. See <see cref="DriveItemOperations.ResolveSharedItemAsUserAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// <c>virtual</c> so a test can substitute resolution at this facade — the seam ADR-007 designates for SPE
+    /// access — instead of faking Graph SDK internals (transport-shaped mocking, banned by ADR-038). Same
+    /// precedent as <see cref="CreateContainerAsync"/>.
+    /// </remarks>
+    public virtual Task<SpeSharedItemResolution> ResolveSharedItemAsUserAsync(
         HttpContext ctx,
-        string driveId,
-        string itemId,
+        Uri documentUrl,
         CancellationToken ct = default)
-        => _driveItemOps.GetContentStreamAsUserAsync(ctx, driveId, itemId, ct);
+        => _driveItemOps.ResolveSharedItemAsUserAsync(ctx, documentUrl, ct);
 
     // =========================================================================
     // SPE change-detection facade (spaarkeai-compose-r2 FR-26, task 052)

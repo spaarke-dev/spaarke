@@ -56,7 +56,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers;
 /// <summary>
 /// Contract for a single provisioning-pipeline handler executed against a
 /// <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun"/> row.
-/// Local L2 analog of the BFF's <c>Services/Jobs/IJobHandler</c> shape;
+/// Local L2 analog of the BFF's <c>Services/Jobs/IJobHandler.cs</c> shape;
 /// L2 cannot reference the BFF assembly (see file header for rationale).
 /// </summary>
 /// <remarks>

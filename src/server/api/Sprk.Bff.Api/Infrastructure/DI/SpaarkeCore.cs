@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Configuration;
 using Spaarke.Core.Auth;
@@ -77,17 +76,43 @@ public static class SpaarkeCore
             client.Timeout = TimeSpan.FromSeconds(30);
         });
 
+        // 🔴 UNCONDITIONAL — the delegated (user-OBO) Dataverse client.
+        //
+        // MOVED HERE by unified-access-control-r2 task 126 from AddToolFramework
+        // (Services/Ai/ToolFrameworkExtensions.cs), which runs INSIDE the compound AI gate. That made it an
+        // asymmetrically-registered dependency the moment a non-AI caller needed it. The load-bearing
+        // non-AI consumer is /api/office/communications/* (task 127, #1020): three handlers that read
+        // through this client under the caller's security context, on a group that maps UNCONDITIONALLY —
+        // so with the AI gate off, they could not bind.
+        //
+        // (Task 126 made the move for GET /api/office/search/entities, which spaarkeai-word-add-in-r1 task
+        // 062 later reimplemented as an app-only impersonated read — that route no longer uses this client.
+        // A reader who follows only that history might conclude the registration can go back behind the
+        // gate. It cannot: the communications routes depend on it.)
+        //
+        // That is exactly the Tier-1.5 anti-pattern in CLAUDE.md §10 F.1 / RB-T028-03..06:
+        // "endpoints that map unconditionally must have unconditional service registration."
+        //
+        // The AI tool handlers still resolve it — strictly MORE available than before, never less —
+        // which is why the registration could move rather than being duplicated. A second
+        // AddHttpClient registration would have left two competing descriptors for one interface.
+        services.AddHttpClient<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient,
+                               Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserClient>();
+
         // Step 2: Decorate with CachedAccessDataSource (ADR-009: Redis-first caching for auth data)
-        // Caches authorization DATA (roles, teams, resource access) while decisions are computed fresh.
-        // TTLs: roles/teams = 2 min, resource access = 60s (ADR-003 compliance)
+        // Caches authorization DATA (the per-document and per-record access snapshots) while decisions are computed
+        // fresh. TTL: 60 s (ADR-003 A1). Unified-access-control-r2 task 132 (C12): keys are tenant-scoped through
+        // ITenantCache (ADR-009 path C) and a FAULTED snapshot is never cached; the former 2-minute roles/teams keys
+        // were write-only and are deleted.
         services.AddScoped<IAccessDataSource>(sp =>
         {
             var inner = sp.GetRequiredService<DataverseAccessDataSource>();
-            var cache = sp.GetRequiredService<IDistributedCache>();
+            var cache = sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
+            var httpContextAccessor = sp.GetService<Microsoft.AspNetCore.Http.IHttpContextAccessor>();
             var logger = sp.GetRequiredService<ILogger<CachedAccessDataSource>>();
             // FR-02 of spaarke-redis-cache-remediation-r2: CacheMetrics is now a static class
             // (Sprk.Bff.Api.Telemetry.CacheMetrics). The consumer references it directly; no DI.
-            return new CachedAccessDataSource(inner, cache, logger);
+            return new CachedAccessDataSource(inner, cache, httpContextAccessor, logger);
         });
 
         // Authorization rules

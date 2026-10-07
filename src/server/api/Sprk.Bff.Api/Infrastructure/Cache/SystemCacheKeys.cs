@@ -16,8 +16,11 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 11 entries (see <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c>
-/// for the per-exception three-question justification).
+/// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
+/// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068 and approved by the owner on review 2026-10-02, its
+/// justification in its own remarks; see
+/// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
+/// three-question justification).
 /// </para>
 /// <para>
 /// AI wrappers that use the <c>"system"</c> tenant sentinel against <see cref="ITenantCache"/>
@@ -39,15 +42,17 @@ public static class SystemCacheKeys
     // ---- Job / idempotency infrastructure ---------------------------------
 
     /// <summary>
-    /// Service Bus event idempotency marker ("event already processed").
+    /// Per-unit job idempotency marker ("this unit of work was already done").
     /// Site: <c>Services/Jobs/IdempotencyService.cs</c>. Raw key: <c>idempotency:processed:{eventId}</c>.
-    /// Justification: event IDs are cross-tenant Service Bus message IDs; tenant-scoping
-    /// would break the exactly-once invariant.
+    /// Justification: the ids are system-level — Service Bus message IDs for the queue handlers, and per-unit keys
+    /// built by scheduled jobs from Dataverse record ids (e.g. <c>GrantExpiryReminderJob</c>'s
+    /// <c>grant-expiry-reminder:{grantId}:{expiry}:{threshold}</c>, task 100). The unit, not a tenant, is what
+    /// must happen exactly once, so tenant-scoping would break the invariant.
     /// </summary>
     public const string IdempotencyProcessed = "idempotency-processed";
 
     /// <summary>
-    /// Service Bus event processing lock (cross-instance mutual exclusion).
+    /// Per-unit job claim (cross-instance mutual exclusion) — Service Bus handlers and scheduled jobs alike.
     /// Site: <c>Services/Jobs/IdempotencyService.cs</c>. Raw key: <c>idempotency:lock:{eventId}</c>.
     /// Justification: lock semantics must be tenant-agnostic so any worker can acquire/release.
     /// </summary>
@@ -67,6 +72,41 @@ public static class SystemCacheKeys
     /// fragment the bookmark and re-process records across tenants.
     /// </summary>
     public const string RecordSyncWatermark = "recordsync-watermark";
+
+    /// <summary>
+    /// Scheduled-job dispatch lease (cross-instance mutual exclusion — ADR-036 A1 rule 1, unified-access-control-r2
+    /// task 103). Site: <c>Infrastructure/Scheduling/RedisScheduledJobLease.cs</c>. Raw key:
+    /// <c>{InstanceName}scheduler:lease:{jobId}</c>.
+    /// Justification: a scheduled job runs for the whole BFF, not for a tenant; like <see cref="IdempotencyLock"/>
+    /// the lock must be tenant-agnostic so any instance can take and release it.
+    /// <para>Second site, same key family (unified-access-control-r2 task 143, catalogued in r2): the No Access
+    /// enforcer's per-record removal lock, <c>Infrastructure/ExternalAccess/NoAccessShareEnforcer.cs</c>. Raw key:
+    /// <c>{InstanceName}scheduler:lease:no-access-enforce:{table}:{recordId}</c>. A keyed mutex over the same store, never
+    /// a job's dispatch key (no job id starts with <c>no-access-enforce:</c>); it serializes owner S5's "someone else keeps
+    /// access" check across instances, so it must be tenant-agnostic for the same reason. The reuse is a recorded §6.5
+    /// path-A exception to ADR-036 A1-7 (<c>projects/unified-access-control-r2/design.md</c> §9).</para>
+    /// </summary>
+    public const string SchedulerLease = "scheduler-lease";
+
+    /// <summary>
+    /// The last dispatched cron occurrence per scheduled job (task 103). Site:
+    /// <c>Infrastructure/Scheduling/RedisScheduledJobLease.cs</c>. Raw key: <c>{InstanceName}scheduler:last-fire:{jobId}</c>.
+    /// Justification: it is what makes a tick run once across instances when a short run releases its lease before a
+    /// slower instance wakes; like <see cref="RecordSyncWatermark"/> it is a system-wide bookmark.
+    /// </summary>
+    public const string SchedulerLastFire = "scheduler-last-fire";
+
+    /// <summary>
+    /// The SSE event number line of one Office job (task 068, #1086). Site: <c>Services/Office/JobStatusService.cs</c>.
+    /// Raw key: <c>sdap:job:{jobId}:seq</c> (Redis <c>INCR</c>, 24 h sliding expiry), beside that job's own pub/sub
+    /// channel <c>sdap:job:{jobId}:status</c>.
+    /// Justification: (1) existing — it replaced a per-instance in-memory dictionary, which numbered one job's events
+    /// independently on each instance and after every restart; (2) a tenant key would not help — the job's GUID is the
+    /// unit, and every instance publishing for that job must share one counter; (3) without it a <c>Last-Event-ID</c>
+    /// reconnect skips or repeats events.
+    /// Architecture review: approved by the owner, 2026-10-02.
+    /// </summary>
+    public const string JobStatusSequence = "job-status-sequence";
 
     // ---- Authentication & token caches ------------------------------------
 
@@ -89,17 +129,20 @@ public static class SystemCacheKeys
     public const string DataverseEntityMetadata = "dv-entity-metadata";
 
     /// <summary>
-    /// The set of Dataverse entities carrying <c>sprk_issecure</c>, derived from live attribute metadata
-    /// (unified-access-control-r2 task 075).
+    /// The org's entity catalog as the securable-entity registry derives it from ONE live metadata query:
+    /// every entity LOGICAL NAME in the org, and the subset carrying <c>sprk_issecure</c>
+    /// (unified-access-control-r2 task 075; the known-entity half added by task 151 / #1038).
     /// Site: <c>Infrastructure/Dataverse/SecurableEntityRegistry.cs</c>. Raw key:
-    /// <c>sdap:dv:securable-entities</c>.
+    /// <c>sdap:dv:dv-securable-entities:v2</c> (<c>SecurableEntityRegistry.CacheKey</c>).
     /// Justification: like <see cref="DataverseEntityMetadata"/> this is org-wide SCHEMA, not per-tenant
-    /// data — which entities can be marked secure is a property of the solution, identical for every caller,
-    /// so tenant-scoping would defeat the cache without changing any answer. The cached value is a list of
-    /// entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
-    /// Fail-closed note: an EMPTY result is deliberately never written to this key — an empty set is
+    /// data — which entities exist and which can be marked secure is a property of the solution, identical
+    /// for every caller, so tenant-scoping would defeat the cache without changing any answer. The cached
+    /// value is entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
+    /// Versioning: <c>:v2</c> because the unversioned key holds the previous build's bare securable-names
+    /// array, which must never be read as the known-entity set; the value is also shape-checked on read.
+    /// Fail-closed note: an EMPTY set is deliberately never written to this key — an empty set is
     /// indistinguishable from a failed metadata query, and caching it would make every record read as
-    /// non-secure for the 6h TTL.
+    /// non-secure (or every entity read as unknown) for the 6h TTL.
     /// </summary>
     public const string DataverseSecurableEntities = "dv-securable-entities";
 

@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -55,11 +57,37 @@ public static class ComposeModule
         services.AddSingleton<ComposeDocxProjectionBuilder>();                // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — pure single-walk DOCX->editor projection (byte[]->paraId-tagged HTML + ordered paraId map + status/warnings): the ONE server engine that assigns w14:paraId and emits the editor block from the same paragraph instance, eliminating the mammoth-vs-OOXML two-engine drift. No external NuGet (DocumentFormat.OpenXml already referenced). Consumed by ComposeService.LoadAsync (supersedes ParaIdPreParser on the Load path); thread-safe stateless singleton (ADR-010); registered UNCONDITIONALLY (symmetric per bff-extensions.md §F.1)
 
         // R2 W1 SPE change-detection (FR-26, task 052) — subscription state machine +
-        // BackgroundService renewal (ADR-001 hosted service; ADR-007 Graph stays behind
+        // hand-rolled timer BackgroundService renewal (existing debt, ADR-052 §1; ADR-007 Graph stays behind
         // the SpeFileStore facade; ADR-009 Redis state). Orchestrator is Scoped (injects
         // scoped ISpeFileOperations); the hosted service resolves it via CreateScope.
         services.AddScoped<SpeSyncOrchestrator>();
         services.AddHostedService<SpeWebhookRenewalHostedService>();
+
+        // #781 item 4b — save-identity key health. ONE class on TWO surfaces, mirroring
+        // RoutingConsumerTypeHealthCheck (RoutingModule): the hosted service logs the key's status at
+        // startup, and the same instance answers /healthz/catalog continuously.
+        //
+        // Registered as a singleton FIRST so both surfaces share one instance — AddHostedService and
+        // AddCheck would otherwise each construct their own, and a test subclass registered over this
+        // would only replace one of them.
+        //
+        // DEGRADED, never Unhealthy, and tagged "catalog" so it lands on /healthz/catalog and NOT on
+        // the /healthz liveness probe (which filters on !Tags.Contains("catalog")). Both choices say
+        // the same thing: a broken identity key must not take instances out of rotation or fail a
+        // deploy gate. The platform compensates — existing documents still save via the item-2
+        // self-heal; only the creation of a NEW document is affected. See the class doc for why this
+        // deliberately differs from its Unhealthy-on-drift sibling.
+        services.AddSingleton<ComposeIdentityKeyHealthCheck>();
+        services.AddHostedService(sp => sp.GetRequiredService<ComposeIdentityKeyHealthCheck>());
+        // AddCatalogCheck adds the "catalog" tag and memoizes the result for 30 s, one evaluation shared by every
+        // caller of the anonymous route (unified-access-control-r2 task 167, round 34 item 7); it resolves the
+        // singleton above, exactly as AddCheck<T> did.
+        services.AddHealthChecks()
+            .AddCatalogCheck<ComposeIdentityKeyHealthCheck>(
+                "compose-identity-key",
+                failureStatus: HealthStatus.Degraded,
+                tags: new[] { "compose", "identity-key" });
+
         return services;
     }
 }

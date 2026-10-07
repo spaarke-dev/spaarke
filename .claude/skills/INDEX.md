@@ -43,7 +43,7 @@
 | [code-review](code-review/SKILL.md) | Comprehensive code review (security, performance, style) | No | `/code-review`, "review code" |
 | [conflict-check](conflict-check/SKILL.md) | Detect file conflicts between active PRs and current work | No | `/conflict-check`, "check conflicts", "file overlap" |
 | [dataverse-create-schema](dataverse-create-schema/SKILL.md) | Create/update Dataverse entities, attributes, relationships via Web API. Use MCP `describe_table` for schema discovery first. | No | "create entity", "add column", "dataverse schema" |
-| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, plugins, web resources to Dataverse. Use MCP `describe_table` for post-deployment verification. | No | "deploy to dataverse", "deploy solution" |
+| [dataverse-deploy](dataverse-deploy/SKILL.md) | Deploy solutions, web resources to Dataverse (no plugins — ADR-002). Use MCP `describe_table` for post-deployment verification. | No | "deploy to dataverse", "deploy solution" |
 | [pcf-deploy](pcf-deploy/SKILL.md) | Build, pack, and deploy PCF controls via solution ZIP import | No | "deploy pcf", "build and deploy pcf", "pcf solution import" |
 | [code-page-deploy](code-page-deploy/SKILL.md) | Build and deploy React Code Page web resources to Dataverse | No | "deploy code page", "deploy web resource", "build webresource" |
 | [power-page-deploy](power-page-deploy/SKILL.md) | Build and deploy Vite/React SPA to Dataverse as a Power Pages web resource | No | `/power-page-deploy`, "deploy power pages", "deploy spa", "deploy external workspace" |
@@ -94,6 +94,7 @@
 | [devops-project-register](devops-project-register/SKILL.md) | Inverse of project-start — existing worktree → Project Issue + fields. Used for Phase 3 backfill. | No | `/devops-project-register`, "register project", "backfill on portfolio" |
 | [devops-project-sync](devops-project-sync/SKILL.md) | Workhorse — re-read local state + idempotently update Issue fields. Called by 5 hook tasks. | No | `/devops-project-sync`, "sync portfolio", "update project fields" |
 | [devops-portfolio-status](devops-portfolio-status/SKILL.md) | Portfolio dashboard (terminal); `--snapshot` writes stakeholder narrative to docs/portfolio/ | No | `/devops-portfolio-status`, "portfolio dashboard", "what's running" |
+| [project-spend-update](project-spend-update/SKILL.md) | Manually refresh AI Spend (est.) / AI Calls fields on the portfolio board, one project or all. Deliberately NOT tied to task-execute. | No | `/project-spend-update`, "update project spend", "refresh AI cost" |
 | [devops-project-archive](devops-project-archive/SKILL.md) | **DESTRUCTIVE** — set Project Status, close Issue, **DELETE worktree**, retain folder + .archived marker | No | `/devops-project-archive`, "archive project", "close project" |
 
 ## Skill Categories
@@ -150,7 +151,7 @@
 
 ### ⚙️ Dataverse/Platform
 - **dataverse-create-schema** - Create/update Dataverse entities, attributes, relationships via Web API
-- **dataverse-deploy** - Deploy solutions, plugins, web resources via PAC CLI
+- **dataverse-deploy** - Deploy solutions, web resources via PAC CLI
 - **pcf-deploy** - Build, pack, and deploy PCF controls via solution ZIP import (PCF-specific)
 - **code-page-deploy** - Build and deploy React Code Page web resources (two-step: webpack + inline HTML)
 - **ribbon-edit** - Automate ribbon customization via solution export/import
@@ -393,7 +394,7 @@ alwaysApply: false  # Only true for universal skills like conventions
 │       └── review-checklist.md
 ├── conflict-check/              ← Detect file overlap between active PRs
 │   └── SKILL.md
-├── dataverse-deploy/             ← Dataverse deployment operations (plugins, web resources, solutions)
+├── dataverse-deploy/             ← Dataverse deployment operations (web resources, solutions)
 │   └── SKILL.md
 ├── pcf-deploy/                   ← PCF control build, pack, and deploy (PCF-specific)
 │   └── SKILL.md

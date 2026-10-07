@@ -81,7 +81,7 @@ describe('TimelineComposeBox — resolved vs free-text recipients feed onSend (F
     // Directly exercise onSend's payload shape (bypasses the rich-text BodyEditor's
     // async Lexical mount so the assertion targets the recipient contract, not the editor).
     // Populate body via the underlying textarea fallback rendered by BodyEditor's plain-text mode toggle.
-    fireEvent.click(screen.getByRole('button', { name: 'Plain text' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Message body' }), { target: { value: 'See attached.' } });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled());
@@ -102,7 +102,7 @@ describe('TimelineComposeBox — resolved vs free-text recipients feed onSend (F
 
     fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Follow-up' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Plain text' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Message body' }), { target: { value: 'Checking in.' } });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled());
@@ -122,7 +122,7 @@ describe('TimelineComposeBox — resolved vs free-text recipients feed onSend (F
     fireEvent.blur(screen.getByRole('textbox', { name: 'Cc' }));
     fireEvent.change(screen.getByPlaceholderText('Subject'), { target: { value: 'Status update' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Plain text' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Switch to plain text' }));
     fireEvent.change(screen.getByRole('textbox', { name: 'Message body' }), { target: { value: 'FYI.' } });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Send' })).not.toBeDisabled());

@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151" project="unified-access-control-r2">
+  <metadata>
+    <title>#1038 hardening — RecordContainerResolver must normalize aliases and REFUSE entity names that are not real Dataverse logical names, instead of reading an unrecognised name as "not securable"</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; owner round 2 item 7)</phase>
+    <gate>blocked until PR #1045 (word-add-in-r1) is merged to master AND master is merged into this branch — it introduces `DocumentAssociationMap.ToLogicalName` and the OfficeService caller fix this task builds on.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-path .cs change in the SPE container-isolation seam (tags bff-api, auth, security).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Changes the fail-closed contract of the one component that decides whether secure content can land in a shared, non-retractable SPE container; every upload path in the BFF depends on it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Independent of 144 and 145 (no shared files). Shares Infrastructure/Dataverse/RecordContainerResolver.cs with task 133 (C11 — rewrites the fail-closed log/detail route text at `:250-254`) and task 150 (ABSENT branch `:211-227`; 150 depends on this task). Sequencing: 151 before 150; 151 and 133 not concurrently — whichever lands second rebases (disjoint regions, trivial). SystemCacheKeys.cs is read (not modified) by task 132.</parallel-reason>
+    <deps>none inside this project; external gate PR #1045 (see gate). Sequenced before 150; not concurrent with 133.</deps>
+    <tags>bff-api, auth, security, dataverse, cache, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>GitHub #1038 (word-add-in-r1, found by its task 080 review) + owner round 2 item 7 ("#1038: yes, harden the resolver"). Caller audit on master 2026-09-30 in the session-27 orchestration.</origin>
+  </metadata>
+
+  <prompt>RecordContainerResolver answers "which container does this record's content belong in?". Today it lowercases whatever entity name it is given and asks the securable-entity registry; a name the registry does not recognise is treated as "cannot be secure" and the content is routed to a non-secure container. That is how an Office save to a secure project, passed as the friendly name "project", landed in the shared container (#1038). Make the resolver itself refuse to guess: map known aliases to their logical names, and refuse any name that is not a real entity.</prompt>
+
+  <role>SPAARKE platform developer — BFF SPE container-isolation seam. Fail closed (ADR-003); an unknown answer is never "not secure".</role>
+
+  <goal>`RecordContainerResolver.ResolveForRecordAsync` (both overloads) (a) maps every alias in `DocumentAssociationMap` to its logical name before any decision, (b) resolves a real non-securable entity exactly as today, (c) resolves a real securable entity exactly as today, and (d) throws a typed `SdapProblemException` for a name that is neither an alias nor a real Dataverse entity logical name — never returning a non-secure decision for it. The OBO record-keyed upload routes give a correct answer for alias names instead of a misleading 409. Guards prove each branch bites.</goal>
+
+  <context>
+    <background>THE FAIL-OPEN, AT ITS ROOT. `src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs:138-155`: the name is only trimmed and lower-cased (`:143`), then `if (!await _securableEntities.IsSecurableAsync(normalizedEntity, ct))` returns `SecureContainerDecision.Decide(isSecure: false, …)` (`:151-155`). `SecurableEntityRegistry.IsSecurableAsync` (`SecurableEntityRegistry.cs:61-70`) answers `Contains(name)` over the set of entities carrying `sprk_issecure` — so "project", a misspelling, or any non-entity string is indistinguishable from "a real entity that cannot be secure". The registry's own metadata query already enumerates EVERY entity in the org (the entity query is unfiltered; entities without the attribute come back with an empty attribute collection — `SecurableEntityRegistry.cs:114-173`, note at `:157-162`), so the knowledge needed to tell "unknown" from "not securable" is fetched and thrown away.
+
+#1038 (OPEN): `OfficeService.ResolveContainerAsync` passed the friendly type from `POST /api/office/save` straight in. On THIS branch it still does (`Services/Office/OfficeService.cs:228`); on the peer branch it maps through `DocumentAssociationMap.ToLogicalName(target.EntityType) ?? target.EntityType` first (PR #1045, `OfficeService.cs:243` there). Note the `?? target.EntityType`: an unmapped name still reaches the resolver raw, which is why the resolver itself must refuse.
+
+`DocumentAssociationMap.ToLogicalName` is introduced by PR #1045 (`src/server/shared/Spaarke.Dataverse/Models.cs:112-142` on branch work/spaarkeai-word-add-in-r1): matter, project, invoice, workassignment, event, todo (friendly and logical) and contact. It is NOT on master or this branch yet (master has only `TryApply`, `Models.cs:86`).
+
+CALLER AUDIT (this branch, 2026-09-30):
+- `Api/ExternalAccess/ExternalProjectDataEndpoints.cs:598` — literal "sprk_project". Safe.
+- `Services/Compose/ComposeService.cs:1394-1396` — `ComposeHostEntityLogicalName` = "sprk_matter" (`:1207`). Safe.
+- `Services/Communication/Engine/CommunicationContainerResolver.cs:101-103` — names come from the communication's securable regardings (Dataverse-sourced, `:146-180`). Safe.
+- `Api/OBOEndpoints.cs:119` and `:363` — ROUTE-SUPPLIED `{entityLogicalName}`. The route filter authorizes aliases (`RecordRouteAccessAuthorizationFilter` via `EntityAccessFilter.TryResolveEntitySet`, alias map at `Api/Filters/EntityAccessFilter.cs:108-147` accepts "project", "matter", …), then the resolver sees "project", reads it as non-securable with no fallback, and the handler returns 409 "No storage container is configured" (`OBOEndpoints.cs:121-135`). Fails closed, but the message is wrong — and a non-secure project named by alias is refused although its business-unit container is derivable.
+- `Services/Office/OfficeService.cs:228` — the #1038 fail-open caller (fixed on the peer branch).
+No caller today legitimately passes a name that is not a real entity.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/ISecurableEntityRegistry.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecurableEntityRegistry.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Cache/SystemCacheKeys.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/RecordContainerResolverTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/RecordKeyedUploadAuthorizationTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/SpeScopeFactoryStub.cs (and any other ISecurableEntityRegistry test double the interface change breaks)</file>
+      <file role="read">src/server/shared/Spaarke.Dataverse/Models.cs (DocumentAssociationMap, after PR #1045)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/CommunicationContainerResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: RecordContainerResolver.ResolveForRecordAsync (both overloads). A name that is neither a `DocumentAssociationMap` alias nor a real entity logical name throws a typed `SdapProblemException` (a new stable code, e.g. `container_entity_unknown`); it never returns a decision. A metadata failure while deciding "is this a real entity" propagates (same contract as `IsSecurableAsync` today) — it is not read as "unknown" or "not securable".</constraint>
+    <constraint source="CLAUDE.md §11">Scope: the "real entity" knowledge. Extend `ISecurableEntityRegistry` / `SecurableEntityRegistry` to retain the entity names its existing metadata query already returns; do NOT add a second metadata service, a second metadata round trip, or a hard-coded entity list. Alias mapping uses `DocumentAssociationMap.ToLogicalName` — do not copy its table.</constraint>
+    <constraint source="ADR-009 / NFR-08">Scope: caching. The known-entity set is cached with the same 6h TTL, never cached when empty, and under a key that is allow-listed in `SystemCacheKeys.cs` with its system-level justification. A cached value written by the PREVIOUS build (securable names only) must never be read as the known-entity set — change the key or version it.</constraint>
+    <constraint source="project">Scope: behaviour preservation. For every real logical name, the decision is byte-for-byte what it is today (secure → own container or 409 fail-closed; non-secure → caller fallback or owning-BU container). Only unknown names and aliases change behaviour.</constraint>
+    <constraint source="project">Scope: OBOEndpoints record-keyed routes. The authorization key and the container key must remain the same record: the filter already maps aliases to the same entity set the resolver will now normalize to — prove it with a test for at least "project" and "matter". An unknown route name keeps being denied by the filter; if it ever reaches the resolver it gets the typed refusal, not the "No storage container is configured" 409.</constraint>
+    <constraint source="owner round 2">Scope: record-less paths. Document-only saves with no related record remain supported; this task changes only calls that NAME an entity. Do not make any target required.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing bff-extensions.md; publish size against a FRESH master build (short path, same zip tool, both sizes, delta, file counts); at most 60 MB; no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Scope: tests. No Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor null-check tests; keep the integration tests at their KEEP path (tests/integration/auth/UnifiedAccessControl).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm PR #1045 is merged and master is merged into this branch; re-verify every anchor above (line numbers will have moved) and re-run the caller audit — every `ResolveForRecordAsync` caller and where its name comes from.</step>
+    <step order="2">Extend the registry to answer "is this a real entity" from the metadata query it already runs, with the caching rules in the constraints.</step>
+    <step order="3">In the resolver: normalize through `DocumentAssociationMap.ToLogicalName`; if the result is not a real entity, throw the typed refusal; otherwise continue unchanged. Log the refusal with the supplied name (sanitized) and the caller-visible code.</step>
+    <step order="4">Tests: alias → same decision as its logical name (secure and non-secure); unknown name → typed refusal, never a decision; real non-securable name → unchanged; metadata failure → propagates; cached old-format value → not misread; OBO route with an alias → correct outcome, not the misleading 409. Seed each guard by reverting its line and confirm it fails.</step>
+    <step order="5">Build and run BFF unit + integration suites and NetArchTest; publish-size measurement per CLAUDE.md §10.</step>
+    <step order="6">Comment on #1038 with the resolver-level fix (and close the new tracking issue); update TASK-INDEX.md (`✅ [done]`) and the POML status; record deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The caller audit finds a caller that legitimately passes a name that is not a Dataverse entity logical name and not an alias (e.g. an entity set name like "sprk_projects"): STOP and report it before deciding whether the resolver maps it or the caller changes — silently accepting a new spelling is how #1038 happened.</trigger>
+    <trigger>PR #1045 is merged with `DocumentAssociationMap.ToLogicalName` renamed or with different semantics than described (e.g. it no longer maps "contact"): adapt only after confirming the alias set with word-add-in-r1; do not fork an alias table here.</trigger>
+    <trigger>The HTTP status/code for the refusal collides with an existing client contract (the Office add-in or the OBO upload client already branch on 400/404/409 codes): surface the options rather than picking one silently. Recommendation: 400 with the new stable code (an entity name that is not an entity is a malformed request), distinct from 404 `container_record_not_found` and 409 `secure_record_container_missing`, which existing clients branch on — grep the Office add-in and OBO upload clients for those codes/statuses first and record what they do with a 400.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`SecurableEntityRegistry.QueryMetadataAsync` (`SecurableEntityRegistry.cs:114-173`) already fetches every entity's logical name and discards all but the securable ones; `DocumentAssociationMap.ToLogicalName` (PR #1045) is the alias table; `EntityAccessFilter.EntitySetByType` (`EntityAccessFilter.cs:108-147`) is the route-level alias table. Grep for another "entity exists" metadata helper in Infrastructure/Dataverse returns none besides `MetadataService`.</existing>
+    <extension>Yes — extend the registry interface with one method and one retained set; no new service, endpoint or package. The only new surface is one cache-key constant and one problem code.</extension>
+    <cost-of-doing-nothing>Any caller that passes an unmapped or misspelled entity name for a SECURE record gets a non-secure decision, and the content is written to a shared SPE container that cannot be un-shared (#1038 was exactly this, live on master for Office saves). The OBO record-keyed routes keep answering alias names with a false "No storage container is configured".</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/SecurableEntityRegistry.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/ISecurableEntityRegistry.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/RecordContainerResolverTests.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/RecordKeyedUploadAuthorizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a secure sprk_project, ResolveForRecordAsync("project", id) returns the same ResolvedSecure decision (or the same 409 fail-closed when it has no container) as ResolveForRecordAsync("sprk_project", id); the same holds for "matter"/"sprk_matter" and "workassignment"/"sprk_workassignment".</criterion>
+    <criterion testable="true">Given a non-secure record named by alias, the decision equals the logical-name decision (owning-BU container or caller fallback).</criterion>
+    <criterion testable="true">NEGATIVE: ResolveForRecordAsync("not_an_entity", id) and ("sprk_projectt", id) throw the new typed SdapProblemException for BOTH overloads, including when a non-secure fallback container is supplied; no decision is returned and no Dataverse record read is attempted.</criterion>
+    <criterion testable="true">A real non-securable entity (e.g. "sprk_invoice", "contact") resolves exactly as before.</criterion>
+    <criterion testable="true">NEGATIVE: an entity SET name ("sprk_projects") and an alias from neither `DocumentAssociationMap` nor Dataverse are refused with the typed exception — never mapped silently.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE (dev, read-only): the registry's known-entity set built from the real metadata query contains the three securable roots AND real non-securable entities used by callers (sprk_document, sprk_invoice, sprk_event, sprk_todo, sprk_communication, contact, email), its size is recorded, and the securable subset is unchanged from before the change (exactly the entities carrying sprk_issecure). This proves the "unfiltered entity query returns every entity" premise (`SecurableEntityRegistry.cs:157-158`) that no unit test can — if it is false, every non-securable upload path would be refused.</criterion>
+    <criterion testable="true">NEGATIVE: a metadata query failure propagates (not read as unknown, not as non-securable); an empty metadata answer is not cached.</criterion>
+    <criterion testable="true">A cache entry in the previous format (securable names only) is never interpreted as the known-entity set.</criterion>
+    <criterion testable="true">AUTHORIZATION: on PUT /api/obo/records/{entity}/{id}/files/{*path} and POST …/upload-session, an alias ("project") authorizes and resolves the SAME record (no misleading "No storage container is configured" 409 for a record whose container is derivable); an unknown entity name is still denied, never uploaded.</criterion>
+    <criterion testable="true">ExternalProjectDataEndpoints, ComposeService, CommunicationContainerResolver and OfficeService behave unchanged for their existing inputs (their existing tests pass unmodified).</criterion>
+    <criterion testable="true">Each new guard, when its line is reverted, makes at least one test fail (recorded in the task note).</criterion>
+    <criterion testable="true">BFF unit + integration suites and NetArchTest green; publish size reported per CLAUDE.md §10 and at most 60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: the cases listed above. Anything beyond needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <notes>#1038 (peer issue; the Office caller fix ships in PR #1045). Owner round 2 item 7 and the #1038 section of the session27 note (the Related-To lookup shows a systemuser the secure projects they can access; documents inherit secure settings by association — this task is the defense-in-depth half). The resolver's decision logic is provable with the existing registry/resolver test doubles, but the registry's known-entity set depends on a Dataverse behaviour (the unfiltered metadata query returning every entity), so one read-only MANUAL live gate proves it (no Dataverse in CI). Related: task 133 also edits RecordContainerResolver.cs (the stale "/api/external/projects/provision" route text at `:250-254` is 133's, not this task's); task 150 edits its ABSENT branch after this task.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. Do not start until the gate (PR #1045 merged into this branch) is satisfied.</protocol>
+    <outcome date="2026-09-30" branch="task/uac-r2-151">
+      COMPLETED (code + tests). The resolver normalizes through DocumentAssociationMap.ToLogicalName. For a non-securable
+      name it asks the new ISecurableEntityRegistry.IsKnownEntityAsync and throws SdapProblemException
+      container_entity_unknown (400) for a non-entity, never returning a decision. The registry keeps the entity names from
+      its existing single metadata query, cached with the securable set under sdap:dv:dv-securable-entities:v2 (shape-checked;
+      never cached when empty). Gate satisfied (ToLogicalName present on the branch). No escalation trigger fired: no caller
+      passes a non-entity/non-alias name; the alias set is as described; and the shared upload client branches on 409 only,
+      so a 400 does not collide. Every guard was proven to bite (transcript in notes/task-151-resolver-entity-hardening.md).
+      Read-only live gate against spaarkedev1 confirmed the premise: 1,027 entities known, 1,023 returned with empty
+      attribute collections, all required entities present. FINDING: the dev securable subset is 4 entities (incl.
+      sprk_invoice), not 3. It is unchanged by this task, but the "sprk_invoice is non-securable" premise is false in dev.
+      PENDING for the main session: the post-deploy BFF log-line confirmation, the #1038 comment and #1068 close, the
+      TASK-INDEX update, and the batch publish-size measurement. No NuGet change.
+    </outcome>
+    <outcome date="2026-09-30" branch="task/uac-r2-151" kind="review-fixes">
+      COMPLETED (verifier findings 1-3). (1) "No second metadata round trip" now holds on a cache MISS too:
+      IsSecurableAsync + IsKnownEntityAsync (each fetched the catalog, so a non-securable or unknown name cost TWO
+      full-org metadata queries with Redis down) are replaced by ONE ISecurableEntityRegistry.ClassifyEntityAsync
+      returning EntitySecurability {NotAnEntity=0, NotSecurable, Securable} from one catalog value; the resolver makes
+      one registry call. Pinned by SecurableEntityRegistryTests.OneResolve_WithTheCacheDown_FetchesMetadataExactlyOnce
+      (real registry + real resolver, cache down, 5 names). (2) New AssociationTypeLockstepTests: every
+      EntityAccessFilter.EntitySetByType key is a DocumentAssociationMap spelling and is authorized against the
+      live-verified entity set (spaarkedev1 read-only EntityDefinitions, 2026-09-30) of the logical name the resolver
+      reads; key sets equal both ways. Enumeration via two internal accessors (InternalsVisibleTo, no reflection).
+      (3) RecordContainerResolver.NormalizeEntityName documents the alias-wins exception for bare "invoice" (OOB D365
+      Sales entity; dev has none, 404); pinned by BareInvoice_ResolvesAsSprkInvoice_EvenWhenTheOrgHasTheOobInvoiceEntity.
+      Bites: P1 3 red, P2a 1, P2b 2, P2c 2, P3 2, P4 6; all restored (diff hash identical). Registry doubles
+      consolidated on tests/integration/Shared/Dataverse/TestEntityCatalog. Details: notes/task-151-resolver-entity-hardening.md.
+    </outcome>
+  </execution>
+</task>

@@ -25,7 +25,6 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.Resources;
 using Azure.ResourceManager.Resources.Models;
-using Azure.Storage.Blobs;
 using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
@@ -33,33 +32,35 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 /// <summary>
 /// Runs an ARM what-if preview at subscription scope via
 /// <see cref="ArmDeploymentResource.WhatIfAsync(WaitUntil, ArmDeploymentWhatIfContent, CancellationToken)"/>
-/// and classifies the typed <see cref="WhatIfChange"/> results. Constructed
-/// with an <see cref="ArmClient"/> + <see cref="BlobContainerClient"/> so
-/// tests can inject both against a fake HTTP transport (parity with
-/// <see cref="ArmDeploymentRunner"/>).
+/// and classifies the typed <see cref="WhatIfChange"/> results. Previews the
+/// template on <see cref="BicepDeployRequest.Template"/> — the same bytes H2a
+/// versions and would deploy (task 245b). Constructed with an
+/// <see cref="ArmClient"/> so tests can inject it against a fake HTTP
+/// transport (parity with <see cref="ArmDeploymentRunner"/>).
 /// </summary>
 public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
 {
     private readonly ArmClient _armClient;
-    private readonly BlobContainerClient _artifactsContainer;
-    private readonly BicepInfraDeployOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<ArmWhatIfDriftDetector> _logger;
 
-    /// <summary>Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient + artifacts-container factory pattern.</summary>
+    /// <summary>
+    /// Constructs the detector. Production DI reuses the shared UAMI-pinned ArmClient. Task 249: takes
+    /// the same <see cref="ControlPlaneIdentityOptions"/> <see cref="ArmDeploymentRunner"/> does, so the
+    /// what-if parameters payload it builds via <see cref="ArmDeploymentRunner.BuildParametersPayload"/>
+    /// is IDENTICAL to the real deploy's — including the L2 principal on Model 1 stamps.
+    /// </summary>
     public ArmWhatIfDriftDetector(
         ArmClient armClient,
-        BlobContainerClient artifactsContainer,
-        IOptions<BicepInfraDeployOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<ArmWhatIfDriftDetector> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
-        ArgumentNullException.ThrowIfNull(artifactsContainer);
-        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
 
         _armClient = armClient;
-        _artifactsContainer = artifactsContainer;
-        _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -69,11 +70,12 @@ public sealed class ArmWhatIfDriftDetector : IUpgradeDriftDetector
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(request.Template);
 
-        var templateJson = await ArmDeploymentRunner.ResolveArmTemplateJsonAsync(
-                _artifactsContainer, _options, request.TenancyModel, cancellationToken)
-            .ConfigureAwait(false);
-        var parameters = ArmDeploymentRunner.BuildParametersPayload(request);
+        // Task 245b: preview exactly the template H2a resolved (and versioned) for this run — the
+        // tenancy model already selected it, so there is no second resolution here.
+        var templateJson = request.Template.Json;
+        var parameters = ArmDeploymentRunner.BuildParametersPayload(request, _identity.PrincipalObjectId);
 
         var whatIfProperties = new ArmDeploymentWhatIfProperties(ArmDeploymentMode.Incremental)
         {

@@ -110,6 +110,8 @@ public sealed class CommsAssessedProducerSeamTests
             producer,
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Mock.Of<Spaarke.Dataverse.IFieldMappingDataverseService>(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 
@@ -137,10 +139,24 @@ public sealed class CommsAssessedProducerSeamTests
         signal.Subject.Should().Be("Quarterly filing");
         signal.From.Should().Be("sender@example.com");
         signal.RecipientCount.Should().Be(2);
-        signal.Confidence.Should().Be(0,
-            "no persisted association/triage signal exists yet for this communication — the FR-04 scorer's " +
-            "deterministic-agreement factor is 0, preserving the pre-024 conservative outcome for an " +
-            "unassessed communication (no noise introduced)");
+        // 🔴 CHANGED 2026-09-29 (spaarke-ontology-platform-r1) — a deliberate behaviour change, not a stale
+        // expectation. This asserted Confidence == 0 because the FR-04 scorer MULTIPLIED by the
+        // deterministic-agreement factor, so an unassessed communication scored exactly 0. That multiplicative
+        // zero is the defect that took the RI notification path dark for every email the association engine
+        // could not resolve — including one asking approval of ~$140-145k. The scorer is now a weighted SUM
+        // (0.7 x urgency + 0.3 x agreement), so an unassessed communication scores 0.7 x 0.5 (neutral urgency)
+        // = 0.35.
+        //
+        // The ORIGINAL INTENT of this assertion — "no noise introduced" — is still guaranteed, and is now
+        // asserted directly rather than implied by a zero: 0.35 is BELOW the 0.45 default gate, so an
+        // unassessed communication still reaches nobody. What changed is that the score can now be REINFORCED
+        // once association evidence arrives, instead of being permanently pinned at zero.
+        signal.Confidence.Should().BeApproximately(0.35, 1e-9,
+            "an unassessed communication takes the neutral urgency weight (0.5) and zero agreement: " +
+            "0.7 x 0.5 + 0.3 x 0.0 = 0.35");
+        signal.Confidence.Should().BeLessThan(new CommsPolicyOptions().DefaultConfidenceThreshold,
+            "the original intent holds — an unassessed communication must NOT clear the gate, so no noise " +
+            "reaches the user; it is merely no longer pinned at zero and unable to be reinforced");
     }
 
     [Fact]
@@ -179,7 +195,9 @@ public sealed class CommsAssessedProducerSeamTests
 
         producer.Published.Should().ContainSingle();
         var confidence = producer.Published[0].Confidence;
-        confidence.Should().BeApproximately(0.95, 1e-9, "Urgent (weight 1.0) x TopDeterministicConfidence 0.95");
+        confidence.Should().BeApproximately(0.985, 1e-9,
+            "0.7 x Urgent (weight 1.0) + 0.3 x TopDeterministicConfidence 0.95 (weighted SUM since 2026-09-29; "
+            + "was the product 1.0 x 0.95 = 0.95)");
         confidence.Should().BeGreaterThanOrEqualTo(DefaultThreshold,
             "a high-urgency, well-associated email must clear the shipped default rule-gate threshold " +
             "(CommunicationRuleGate would AUTHORIZE — see CommunicationRuleGateSeamTests for the gate's own proof)");

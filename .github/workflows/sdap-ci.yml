@@ -964,6 +964,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # `*.docx filter=lfs` (.gitattributes), and actions/checkout does NOT smudge LFS by
+          # default — without this the checkout yields a 128-byte `version https://...` POINTER
+          # where a .docx is expected. ComposeWorkspace.redline-from-ledger.test.tsx reads
+          # tests/integration/Spe.Integration.Tests/fixtures/sample.docx as its Load fixture; on a
+          # pointer, `isEditableDocx` fails the byte signature, ComposeEditor renders the
+          # reference-only ("can't be edited in Compose") surface, and all 19 RENDERING tests time
+          # out on `findByRole('textbox')` — while the 5 pure-projection tests pass. That split is
+          # the signature of this bug, not of 19 separate ones.
+          # Mirrors compose-fidelity-gate (line ~880) and ci-tier1-blocking.yml (~645).
+          lfs: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

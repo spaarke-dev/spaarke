@@ -130,14 +130,19 @@ Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-
 
 | Property | Value |
 |----------|-------|
-| **Name** | `spe-api-dev-67e2xz` |
-| **Resource Group** | `spe-infrastructure-westus2` |
+| **Name** | `spaarke-bff-dev` (Linux; deployment slot `staging`) |
+| **Resource Group** | `rg-spaarke-dev` |
 | **Region** | West US 2 |
-| **URL** | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| **URL** | `https://spaarke-bff-dev.azurewebsites.net` |
+
+> **Corrected 2026-10-07.** The dev BFF moved on 2026-05-24 from the Windows app `spe-api-dev-67e2xz`
+> (`spe-infrastructure-westus2`) to the Linux app `spaarke-bff-dev` (`rg-spaarke-dev`) —
+> `config/spaarke-resources.yaml` (`environments.dev.bff`, `_changelog` 2026-05-24) and the `bff-deploy` skill. The old
+> name is NOT the dev BFF; every command on this page now names `spaarke-bff-dev`.
 
 **View Logs**:
 ```bash
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 ---
@@ -339,7 +344,41 @@ const tokenScope = "api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonatio
 API_APP_ID=1e40baad-e065-4aea-a8d4-4b7ab273458c
 API_CLIENT_SECRET=@Microsoft.KeyVault(SecretUri=...)
 TENANT_ID=a221a95e-6abc-4434-aecc-e48338a1b2f2
+Customer__Id=<customerId>
 ```
+
+### Customer identity — the naming/identity chain
+
+> Added 2026-09-29 by `unified-access-control-r2` task 123, per
+> [D-14](../../projects/unified-access-control-r2/notes/D-14-customer-discriminator.md).
+> Operator procedure (including what to do for a stamp that is not per-customer):
+> [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` § 6.5.1](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
+
+One value threads the whole customer stamp, and the BFF now reads it:
+
+```
+customerId  (assigned at provisioning intake; stored on sprk_dataverseenvironment.sprk_customerid)
+   │
+   ├─► rg-spaarke-{customerId}-{env}          the resource group
+   │      ├─► sprk-{customerId}-{env}-kv      Key Vault  (the 8-char cap comes from THIS name)
+   │      ├─► sprk{customerId}{env}sa         Storage    (strips hyphens — collision risk)
+   │      ├─► sprk-{env}-{customerId}-uami    the BFF's managed identity
+   │      └─► tags: { customer: customerId }
+   │
+   └─► Customer__Id app setting ──► CustomerOptions ──► CustomerIdentity   ← the runtime handle
+```
+
+🔴 **`tenantId` is NOT a customer discriminator.** Per D-12 every Model 1 customer lives in the *same*
+Spaarke Entra tenant, so `tenantId` separates Entra tenants and nothing else. Anything keyed per customer
+— a cache-key prefix, a log scope, a metric dimension — takes `CustomerIdentity.Id`, never `tenantId`.
+
+⚠️ **`CustomerIdentity` is defence in depth, not the boundary.** The boundary is the dedicated
+per-customer resource: per D-12 §3 and the ADR-009 amendment, Redis access control is per-**instance**,
+not per-keyspace, so a customer-id key prefix is a convention our code enforces rather than one Redis
+enforces. Nothing here softens the dedicated-per-customer-resource decision.
+
+For the canonical user identifier — Entra `oid`, not `systemuserid`, because external CIAM contacts are
+`contact` rows with no `systemuserid` at all — see D-14 §7.
 
 ---
 
@@ -411,8 +450,8 @@ dotnet user-secrets set "API_CLIENT_SECRET" "your-secret-value"
 **Azure App Service**:
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="your-secret-value"
 ```
 
@@ -425,8 +464,8 @@ az keyvault secret set \
 
 # Then reference in App Service:
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/API-CLIENT-SECRET/)"
 ```
 
@@ -646,8 +685,8 @@ else
 ```powershell
 # Use PowerShell to avoid bash escaping issues with '!' character
 az webapp config appsettings set `
-  --name spe-api-dev-67e2xz `
-  --resource-group spe-infrastructure-westus2 `
+  --name spaarke-bff-dev `
+  --resource-group rg-spaarke-dev `
   --settings "EmailProcessing__DefaultContainerId=b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
 ```
 
@@ -681,7 +720,7 @@ See [sdap-auth-patterns.md](sdap-auth-patterns.md) Pattern 6 for details.
 
 ```bash
 # Check App Service configuration
-az webapp config appsettings list --name spe-api-dev-67e2xz -g spe-infrastructure-westus2
+az webapp config appsettings list --name spaarke-bff-dev -g rg-spaarke-dev
 
 # Verify Key Vault access
 az keyvault secret show --vault-name spe-kv-dev-67e2xz --name API-CLIENT-SECRET
@@ -757,8 +796,8 @@ If using direct App Service settings (not Key Vault references):
 
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="<NEW_SECRET_VALUE>"
 ```
 
@@ -770,8 +809,8 @@ The App Service must be restarted to pick up the new secret value:
 
 ```bash
 az webapp restart \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev
 ```
 
 Allow 30-60 seconds for the app to fully restart.
@@ -780,13 +819,13 @@ Allow 30-60 seconds for the app to fully restart.
 
 ```bash
 # Check health endpoint
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+curl https://spaarke-bff-dev.azurewebsites.net/healthz
 
 # Check Dataverse-specific health (if applicable)
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz/dataverse
+curl https://spaarke-bff-dev.azurewebsites.net/healthz/dataverse
 
 # Check App Service logs for auth errors
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 Expected results:
@@ -892,7 +931,7 @@ api://{client-id}/user_impersonation
 |----------|-----|------------|
 | **BFF API Name** | SPE BFF API | spaarke-bff-api-prod |
 | **BFF API Client ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | *(after creation)* |
-| **Redirect URI** | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
+| **App Service** | `https://spaarke-bff-dev.azurewebsites.net` (until 2026-05-24: `spe-api-dev-67e2xz`) | `https://api.spaarke.com` |
 | **Secret Storage** | App Service settings / user-secrets | Key Vault (`sprk-platform-prod-kv`) |
 | **Naming** | Legacy (pre-convention) | FR-11 compliant (`spaarke-` prefix) |
 

@@ -2,14 +2,17 @@
  * @spaarke/ai-widgets — Canonical WorkspaceTab interface (R6 Pillar 6a)
  *
  * The contract shared by:
- *   - Pillar 6a (state model + Redis/Cosmos persistence + GET /api/workspace/state)
+ *   - Pillar 6a (state model + Redis/Cosmos persistence; the GET /api/workspace/state read route was
+ *                DELETED by unified-access-control-r2 task 166 — no client called it, owner round 10 item 1)
  *   - Pillar 6b (chat tools that mutate tabs: send_workspace_artifact,
  *                update_workspace_tab, close_workspace_tab)
  *   - Pillar 6c (workspace events, execution-trace widget, additive `workspace.*`
  *                events: user_selection, tab_edited, tab_focused, tab_provenance_clicked)
  *   - Pillar 7  (memory composition reads workspace state to compose per-turn snapshot)
  *   - Pillar 9  (widget visibility contract — `visibleToAssistant` filter + per-tab
- *                `getAgentVisibleState()` schema-aware serialization)
+ *                agent-visible state, derived SERVER-SIDE by
+ *                `SprkChatAgentFactory.TryDeriveVisibleState`; the client-side
+ *                `getAgentVisibleState()` derivations were deleted 2026-10-03, C-21)
  *
  * Pillar 6a is the GATE task — drift in this interface breaks four downstream pillars.
  *
@@ -69,8 +72,8 @@
 /**
  * Closed union of agent-visible widget categories per Pillar 9.
  *
- * Each variant maps to a specific `widgetData` shape AND a specific
- * `getAgentVisibleState()` return-shape (Pillar 9 prompt builder). Adding a
+ * Each variant maps to a specific `widgetData` shape AND a specific agent-visible
+ * shape derived by the server-side `SprkChatAgentFactory.TryDeriveVisibleState` (Pillar 9 prompt builder). Adding a
  * fifth variant requires a coordinated update to Pillar 6a/6b/6c/7/9 — DO NOT
  * extend this union without surfacing the cross-pillar impact.
  *
@@ -102,11 +105,11 @@ export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' 
  * Widget data for a `Summary` tab.
  *
  * The agent-visible state surfaced to Pillar 9's prompt builder is computed
- * from these fields by the widget's `getAgentVisibleState()` implementation;
+ * from these fields by the server-side `SprkChatAgentFactory.TryDeriveVisibleState`;
  * the raw `body` is NOT sent to the LLM directly (token economy).
  *
  * @see FR-31 — discriminated union per widgetType
- * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, summary, tldr, hasUserEdits }`
+ * @see Pillar 9 — server-side `SprkChatAgentFactory.TryDeriveVisibleState` derives `{ widgetType, summary, tldr, hasUserEdits }`
  */
 export interface SummaryTabWidgetData {
   /** Discriminator — must equal the parent tab's `widgetType`. */
@@ -131,7 +134,7 @@ export interface SummaryTabWidgetData {
  * when `visibleToAssistant === true` AND the selection is non-empty.
  *
  * @see FR-31 — discriminated union per widgetType
- * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, filename, mimeType, sizeBytes, hasSelection, selectionText? }`
+ * @see Pillar 9 — server-side `SprkChatAgentFactory.TryDeriveVisibleState` derives `{ widgetType, filename, mimeType, sizeBytes, hasSelection, selectionText? }`
  */
 export interface DocumentViewerTabWidgetData {
   /** Discriminator — must equal the parent tab's `widgetType`. */
@@ -163,7 +166,7 @@ export interface DocumentViewerTabWidgetData {
  *
  * @see FR-31 — discriminated union per widgetType
  * @see SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md §2.1 — Dashboard wrapper pattern
- * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, dashboardName, lastViewedSection }`
+ * @see Pillar 9 — server-side `SprkChatAgentFactory.TryDeriveVisibleState` derives `{ widgetType, dashboardName, lastViewedSection }`
  */
 export interface DashboardTabWidgetData {
   /** Discriminator — must equal the parent tab's `widgetType`. */
@@ -184,7 +187,7 @@ export interface DashboardTabWidgetData {
  * raw rows (token economy).
  *
  * @see FR-31 — discriminated union per widgetType
- * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, rowCount, sortColumn, filteredColumns, selectedRows[] }`
+ * @see Pillar 9 — server-side `SprkChatAgentFactory.TryDeriveVisibleState` derives `{ widgetType, rowCount, sortColumn, filteredColumns, selectedRows[] }`
  */
 export interface TableTabWidgetData {
   /** Discriminator — must equal the parent tab's `widgetType`. */
@@ -209,13 +212,12 @@ export interface TableTabWidgetData {
  *
  * Mirrors `DocumentViewerTabWidgetData`'s "compact snapshot + id" pattern: a
  * lean identity/metadata snapshot is PERSISTED (so both the server's
- * `TryDeriveVisibleState` and the client's registry `getVisibleState`
- * derivation have something to read from `widgetData` — the ADR-015
+ * `TryDeriveVisibleState` has something to read from `widgetData` — the ADR-015
  * server-authoritative invariant that blocked the original 042 CompactState
  * shortcut), while the heavy full body/thread is fetched ON-DEMAND via the
  * existing `eml-render` endpoint (FR-C4) using `emlDocumentId` as the fetch
  * handle. `emlDocumentId` is a fetch handle only — it is NEVER part of the
- * derived `SerializedEmailState` (task 040); only `subject`/`from`/`date`/
+ * server-derived Email visible state; only `subject`/`from`/`date`/
  * `threadId`/`snippet` are agent-visible.
  *
  * Population (writing these fields onto the tab's `widgetData` from
@@ -227,7 +229,7 @@ export interface TableTabWidgetData {
  * @see ADR-015 — data minimization: identifiers + derived metadata OK;
  *      content capped to a bounded snippet only
  * @see ADR-007 — SpeFileStore (eml-render is the SPE-backed on-demand body path)
- * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, subject, from, date, threadId, snippet }`
+ * @see Pillar 9 — server-side `SprkChatAgentFactory.TryDeriveVisibleState` derives `{ widgetType, subject, from, date, threadId, snippet }`
  */
 export interface EmailTabWidgetData {
   /** Discriminator — must equal the parent tab's `widgetType`. */
@@ -248,9 +250,9 @@ export interface EmailTabWidgetData {
   /** Conversation/thread id, when the host exposes one. */
   threadId?: string;
   /**
-   * Short body snippet or the user's current selection. Agent-visible
-   * derivation caps this at {@link EMAIL_SNIPPET_CAP_CHARS} (200 chars,
-   * `pillar9-visibility.ts`) — the sole content-bearing field.
+   * Short body snippet or the user's current selection. The server-side
+   * agent-visible derivation caps this at 200 chars
+   * (`SprkChatAgentFactory.TruncateEmailSnippet`) — the sole content-bearing field.
    */
   snippet?: string;
 }
@@ -334,7 +336,10 @@ export interface WorkspaceTabMatterContext {
  * Persistence semantics (Pillar 6a, Q4 hybrid):
  *   - Redis hot tier (24h TTL) — every active-session tab
  *   - Cosmos durable tier     — tabs with `isPinned === true` OR matter-pinned
- *   - Restoration on mount    — via `GET /api/workspace/state`
+ *   - Restoration on mount    — none via a route: `GET /api/workspace/state` was DELETED by
+ *                               unified-access-control-r2 task 166 (no caller; owner round 10 item 1). The
+ *                               server reads workspace state only to compose the chat prompt
+ *                               (`SprkChatAgentFactory` workspace-state block).
  *
  * Discriminated union semantics:
  *   - `widgetType` (5-variant literal) is the discriminator
@@ -369,7 +374,7 @@ export interface WorkspaceTab {
   /**
    * Pillar 9 visibility category — discriminator for the `widgetData` union.
    * Closed union of 5 variants (Summary | DocumentViewer | Dashboard | Table | Email).
-   * Drives both per-variant data typing AND `getAgentVisibleState()` shape.
+   * Drives both per-variant data typing AND the server-derived agent-visible shape.
    * @see FR-31, FR-58 (Pillar 9 prompt builder)
    * @see WorkspaceTabWidgetType
    */
@@ -391,8 +396,8 @@ export interface WorkspaceTab {
   sessionId: string;
 
   /**
-   * Pillar 9 visibility flag — when true the tab's `getAgentVisibleState()` is
-   * included in the per-turn agent prompt snapshot.
+   * Pillar 9 visibility flag — when true the tab's server-derived agent-visible
+   * state is included in the per-turn agent prompt snapshot.
    * Default semantics per CLAUDE.md §9 "Privacy default":
    *   - Agent-created tabs default `true`
    *   - User-created tabs default `false`

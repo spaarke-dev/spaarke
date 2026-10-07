@@ -51,21 +51,43 @@ async function ensureBootstrapped(): Promise<void> {
   bootstrapped = true;
 }
 
-/** Post a transient informational notification on the current mail item. */
+/** Outlook refuses a notification message longer than 150 characters (`NotificationMessageDetails.message`). */
+const MAX_NOTIFICATION_LENGTH = 150;
+
+/** The longest record name quoted inside a notification, so the fixed sentence around it always fits. */
+const MAX_NOTIFIED_NAME_LENGTH = 60;
+
+/** A record name shortened to fit inside a notification sentence. */
+function notifiedName(name: string): string {
+  return name.length <= MAX_NOTIFIED_NAME_LENGTH ? name : `${name.slice(0, MAX_NOTIFIED_NAME_LENGTH - 1)}…`;
+}
+
+/** A message cut to Outlook's limit, as a backstop: a longer one is refused and nothing is shown. */
+function fitNotification(message: string): string {
+  return message.length <= MAX_NOTIFICATION_LENGTH ? message : `${message.slice(0, MAX_NOTIFICATION_LENGTH - 1)}…`;
+}
+
+/**
+ * Post a transient informational notification on the current mail item, replacing any earlier one under `key`.
+ *
+ * `replaceAsync`, not `addAsync` (task 084): quick-save first posts "Saving to Spaarke…" under `spaarke_save`
+ * and then its outcome under the same key. `replaceAsync` adds the message when the key is new and replaces it
+ * when it is not, so the outcome always takes the place of "Saving…".
+ */
 function notifyInfo(key: string, message: string): void {
-  Office.context.mailbox.item?.notificationMessages.addAsync(key, {
+  Office.context.mailbox.item?.notificationMessages.replaceAsync(key, {
     type: Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage,
-    message,
+    message: fitNotification(message),
     icon: 'Icon.16x16',
     persistent: false,
   });
 }
 
-/** Post an error notification on the current mail item. */
+/** Post an error notification on the current mail item, replacing any earlier error. */
 function notifyError(message: string): void {
-  Office.context.mailbox.item?.notificationMessages.addAsync('spaarke_error', {
+  Office.context.mailbox.item?.notificationMessages.replaceAsync('spaarke_error', {
     type: Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage,
-    message,
+    message: fitNotification(message),
   });
 }
 
@@ -88,6 +110,15 @@ function readEmailContext(): QuickSaveEmailContext | null {
   };
 }
 
+/** Open the taskpane programmatically, where the host supports it. */
+async function openTaskpane(): Promise<void> {
+  try {
+    await Office.addin?.showAsTaskpane?.();
+  } catch {
+    // Host may not support programmatic taskpane open — the notification already guides the user.
+  }
+}
+
 /**
  * Opens the taskpane.
  */
@@ -103,6 +134,10 @@ function showTaskPane(event: Office.AddinCommands.Event): void {
  * via fetchEnginePreSelection — no fork) so the prediction matches the taskpane picker
  * and the code page. When the engine has no prediction (email not captured / no usable
  * candidate), it does NOT auto-file a guess — it opens the taskpane so the user chooses.
+ *
+ * Task 084 (#1037): when the caller cannot file to the predicted record (`predicted.canFile === false`
+ * — the save would refuse it, filing needs AppendTo), it does NOT post the save either: it says so and
+ * opens the taskpane, the same path as "no prediction".
  */
 async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
   try {
@@ -121,19 +156,30 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
     if (!pre) {
       // No prediction → open the taskpane for an explicit choice (never auto-file a guess).
       notifyInfo('spaarke_save', 'No suggested record — open Spaarke to choose where to file.');
-      try {
-        await Office.addin?.showAsTaskpane?.();
-      } catch {
-        // Host may not support programmatic taskpane open — the notification already guides the user.
-      }
+      await openTaskpane();
       return;
     }
 
-    const idempotencyKey = await computeQuickSaveIdempotencyKey(context.internetMessageId, pre.predicted);
+    if (pre.predicted.canFile === false) {
+      // The caller can see the prediction but cannot file to it → never post a save the server would
+      // refuse (403 OFFICE_009); let the user choose in the pane instead.
+      notifyInfo(
+        'spaarke_save',
+        `Spaarke suggests ${notifiedName(pre.predicted.name)}, but you can't file to it. Open Spaarke to choose where to file.`
+      );
+      await openTaskpane();
+      return;
+    }
+
+    const idempotencyKey = await computeQuickSaveIdempotencyKey({
+      kind: 'email',
+      internetMessageId: context.internetMessageId,
+      target: pre.predicted,
+    });
     const request = buildEmailSaveRequest(context, pre.predicted, idempotencyKey);
     await apiClient.post('/api/office/save', request);
 
-    notifyInfo('spaarke_save', `Filed to ${pre.predicted.name}.`);
+    notifyInfo('spaarke_save', `Filed to ${notifiedName(pre.predicted.name)}.`);
   } catch (error) {
     console.error('Quick save failed:', error);
     notifyError('Failed to save email. Open Spaarke to try manually.');

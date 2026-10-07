@@ -5,17 +5,7 @@
  */
 
 export { OutlookTaskPanePage } from './OutlookTaskPanePage';
-export type {
-  OutlookTaskPaneConfig,
-  DocumentSearchResult,
-  ShareLinkResponse,
-  AttachmentResponse,
-} from './OutlookTaskPanePage';
+export type { OutlookTaskPaneConfig } from './OutlookTaskPanePage';
 
 export { WordTaskPanePage } from './WordTaskPanePage';
-export type {
-  WordTaskPaneConfig,
-  EntitySearchResult,
-  SaveJobResponse,
-  JobStatusResponse,
-} from './WordTaskPanePage';
+export type { WordTaskPaneConfig, EntitySearchResult, SaveJobResponse, JobStatusResponse } from './WordTaskPanePage';

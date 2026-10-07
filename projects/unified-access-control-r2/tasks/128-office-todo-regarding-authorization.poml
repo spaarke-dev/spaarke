@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="unified-access-control-r2">
+  <metadata>
+    <title>Gate POST /api/office/todo on its REGARDING record — the only live unauthorized WRITE on the Office surface</title>
+    <phase>Register-driven (authored 2026-09-29, session 26; GitHub #1022, from the task 120 census)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds an authorization filter to a live write path and changes the response ordering a shipped add-in observes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The filter's reach is a silent-failure surface: attaching it without teaching ExtractTargetEntity the request type yields a filter that is present, credited by the arch guard, and does nothing.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches OfficeEndpoints.cs, EntityAccessFilter.cs and the arch-test waiver list, all of which tasks 126/127 just changed.</parallel-reason>
+    <deps>126, 127</deps>
+    <tags>bff-api, auth, security</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>GitHub #1022, filed by task 120's route census. Ranked #3 of five live holes by the session-26 waiver audit — the only WRITE.</origin>
+  </metadata>
+
+  <prompt>A caller can attach a to-do to a record they have no right to touch, through the app identity. Make the route check the record it writes against.</prompt>
+
+  <role>SPAARKE platform developer — Office endpoints and the entity-access filter.</role>
+
+  <goal>POST /api/office/todo authorizes the caller against the regarding record before writing, without breaking the legitimate no-regarding (personal to-do) case.</goal>
+
+  <context>
+    <background>Unlike #1021 and #1020, this one IS a filter fix — `/api/office/save` carries
+`.AddEntityAccessFilter()` and this route simply never got it. It had rate limiting, idempotency and
+`OfficeAuthFilter` (authentication only), and nothing verifying access to the caller-named regarding
+record before writing through the app identity.
+
+Distinct from `/quickcreate` (Permanent waiver): that route CREATES the record, so there is no
+pre-existing resource to authorize. Here the regarding record already exists.
+
+⚠️ The regarding pair is OPTIONAL on `CreateTodoRequest` and the handler validates only `Name`, so a
+to-do with no regarding record is legitimate — and for it the filter's pass-through is correct rather
+than a gap. That is the same branch #1025 concerns.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Teach `ExtractTargetEntity` the request shape in the SAME change that attaches the filter — a filter whose extractor returns null passes through and authorizes nothing.</constraint>
+    <constraint>Verify type-name compatibility BEFORE attaching: `EntityAccessFilter` rejects an unknown entity type with 400, so a regarding type accepted by the route but missing from the filter's map would break working requests.</constraint>
+    <constraint>Do NOT break the no-regarding case — a to-do with no regarding record is a legitimate personal to-do with nothing to authorize against.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step>Confirm the route lacks the filter and that `/save` has it.</step>
+    <step>Check every regarding type the route accepts resolves in the filter's map.</step>
+    <step>Extend `ExtractTargetEntity`, attach the filter, and update the route's own comments.</step>
+    <step>Resolve the waiver; add guards and prove they bite.</step>
+    <step>Close #1022.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>The route carries `.AddEntityAccessFilter()` and the filter can see `CreateTodoRequest`.</criterion>
+    <criterion>Every regarding type the route accepts is resolvable by the filter — pinned by a test.</criterion>
+    <criterion>The no-regarding (personal to-do) case still works.</criterion>
+    <criterion>The waiver is resolved; BFF unit + NetArchTest green.</criterion>
+    <criterion>#1022 closed with the outcome recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 26) after tasks 126/127. The smallest of the three by code volume and the one with the most room to look done while doing nothing.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. `ExtractTargetEntity` now projects `CreateTodoRequest`'s
+    `RegardingEntityType`/`RegardingRecordId` into a `SaveEntityReference`, and the route carries
+    `.AddEntityAccessFilter()`. The waiver was DELETED rather than made Permanent — with a real filter
+    attached, Rule A credits the route and no waiver is needed, which is the outcome to prefer: a waiver
+    is a note explaining why the mechanical check cannot see a control. ArchTests pass with the entry
+    gone, which is the strongest available confirmation that the guard sees it. BFF unit 12,682 pass /
+    0 fail; NetArchTest 330/330.</outcome>
+
+    <finding>🔴 COMPATIBILITY WAS A REAL RISK AND WAS CHECKED, NOT ASSUMED. `EntityAccessFilter` rejects
+    an unknown entity type with 400, so a regarding type the route accepts but the filter cannot resolve
+    would have converted working requests into bad ones — a gate that breaks the feature instead of
+    guarding it. `OfficeService._todoRegardingMap` accepts only Matter/Project/Invoice, all present in
+    `EntitySetByType`, and that dictionary is `OrdinalIgnoreCase`, so the capitalised forms the add-in
+    sends resolve against lowercase keys. Pinned by a test so a fourth type cannot be added to one map
+    and not the other.</finding>
+
+    <finding>ADDING THE FILTER CHANGED RESPONSE ORDERING, and a contract test caught it: authorization
+    now runs BEFORE shape validation, so a request naming an inaccessible regarding record is denied
+    rather than told its payload is malformed. That ordering is CORRECT — an unauthorized caller should
+    not learn whether their body was well-formed — so the test was repointed rather than the behaviour
+    changed. It now omits the regarding record, exercising name validation in isolation via the
+    legitimate pass-through, and a NEW test pins the ordering by asserting that a body which is invalid
+    AND unauthorized returns the authorization outcome.</finding>
+
+    <finding>The filter's reach is its silent-failure surface. `ExtractTargetEntity` returns null for an
+    unrecognised request shape, and a null target makes the filter PASS THROUGH — so attaching the filter
+    without extending that method yields a filter that is present, credited by Rule A, and authorizes
+    nothing. Verified to bite by removing the attachment and watching the guard fail. Documented at the
+    method itself so the next route to be gated does not repeat it.</finding>
+  </execution>
+
+  <superseded-at-merge date="2026-09-30">
+    SUPERSEDED by spaarkeai-word-add-in-r1 task 064, whose TodoSourceAccessFilter gates ALL FOUR
+    caller-supplied ids on POST /api/office/todo (regardingRecordId, documentId, communicationId,
+    assignedToContactId) where this task gated only the regarding id — and 064 also caught a leak this task
+    missed: CoreAncestorResolver reads the regarding target app-only to stamp its parent matter/project, so an
+    ungated id let a caller harvest that record's core ancestor. The merge kept 064. Removed at merge: this
+    task's .AddEntityAccessFilter() on /todo, the CreateTodoRequest branch in EntityAccessFilter.ExtractTargetEntity
+    (dead once the route stopped using the filter; the "this method is the filter's reach" warning was KEPT, since
+    it holds for /save), TodoRegardingAuthorizationGuardTests, and the IsDeniedBeforeValidation contract test.
+    TodoSourceAccessFilter (and master's QuickCreateSourceAccessFilter) were added to the census's credited
+    allow-list, since neither name contains "Authorization" and Rule A could not see them.
+
+    ⚠️ A MISS WORTH KEEPING ON RECORD: this task attached a filter enforcing entity.associate_document, which
+    OperationAccessPolicy maps to AppendTo — and no end-user role granted AppendTo until the owner granted it to
+    "Spaarke Office Add In User" on 2026-09-29. Had that grant not landed, /todo would have returned 403 to every
+    non-admin user. The task checked type-name compatibility (can the filter resolve the entity type) and never
+    checked rights compatibility (does any end-user role hold the right it demands). Both dimensions must be
+    checked before attaching an authorization filter.
+  </superseded-at-merge>
+</task>

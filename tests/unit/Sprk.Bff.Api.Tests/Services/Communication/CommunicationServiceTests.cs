@@ -70,6 +70,8 @@ public class CommunicationServiceTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 
@@ -153,6 +155,8 @@ public class CommunicationServiceTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 

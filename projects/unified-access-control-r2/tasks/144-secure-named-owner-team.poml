@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="144" project="unified-access-control-r2">
+  <metadata>
+    <title>C10 part 1 — secure records are owned by a NAMED, NON-DEFAULT, memberless owner team in a no-user Secure Record BU, for projects AND matters AND work assignments; provisioning refuses otherwise; existing secure rows migrated</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 1; GitHub #967)</phase>
+    <gate>startable. The RecordOwnershipResolver step waits for PR #1045 (word-add-in-r1) to merge to master and for master to be merged into this branch — that PR rewrites the same file.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-boundary .cs change (tags bff-api, auth, security) plus an irreversible live-data migration of record ownership.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security isolation boundary with high blast radius: changes who owns every secure record, generalizes provisioning to two more entity types, and includes a one-time ownership migration whose mistakes are silent disclosures.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ProvisionProjectEndpoint.cs, UnsecureProjectEndpoint.cs, DelegationRuleFilter.cs, RecordOwnershipResolver.cs, SECURE-PROJECT-ENVIRONMENT-SETUP.md and SecureBuRoleDepthAssertion*.cs — tasks 145 and 150 edit the same files and depend on this one; DelegationRuleFilter.cs is also a C4 hot file.</parallel-reason>
+    <deps>none (RecordOwnershipResolver step gated on PR #1045 merge — see gate)</deps>
+    <tags>bff-api, auth, security, dataverse, migration, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+    <origin>Session 26 defect C10 (half 1) + session 27 owner round 2 item 6 ("add the Part 1 enforcement (named non-default owner team)"). Closes GitHub #967.</origin>
+  </metadata>
+
+  <prompt>Stop relying on the Secure Record business unit's DEFAULT owner team staying empty. Own every secure project, matter and work assignment by a named, non-default owner team that provisioning resolves, proves memberless, and refuses to use otherwise; make the Secure Record BU a no-user BU and enforce that; give matters and work assignments the same secure/unsecure path projects have; and migrate the secure rows that already exist.</prompt>
+
+  <role>SPAARKE platform developer on the Dataverse row-security isolation boundary. Expert in Dataverse ownership, business-unit depth, owner teams and the BFF ExternalAccess endpoints. Fail closed (ADR-003); verify every write by read-back.</role>
+
+  <goal>After this task: (1) provisioning (for sprk_project, sprk_matter and sprk_workassignment) resolves the named non-default owner team in the Secure Record BU, asserts it has zero members and that no systemuser sits in the Secure Record BU, and refuses with a reason code otherwise; (2) every secure root row in dev is owned by that named team, none by the default team; (3) the unsecure path works for all three entity types; (4) RecordOwnershipResolver resolves the named team for children filed to a secure record; (5) registration refuses to place a user in the Secure Record BU; (6) the standing NFR-05 assertion targets the named team and fails on any member or any user in the BU; (7) the setup guide describes the named team; (8) #967 is closed with the outcome.</goal>
+
+  <context>
+    <background>🔴 TWO HOLES, ONE OF WHICH THE ORIGINAL DEFECT DID NOT NAME. Verified against source 2026-09-30.
+
+HOLE 1 — THE DEFAULT TEAM (C10 half 1, #967). `ProvisionProjectEndpoint.cs:370-379` resolves the owner as the Secure Record BU's DEFAULT owner team (`_businessunitid_value eq {secureBuId} and isdefault eq true and teamtype eq 0`) and `:392-408` checks only the row count. Nothing checks membership. Dataverse maintains a default team's membership AUTOMATICALLY from each user's `businessunitid` and it cannot be curated, so an admin who moves any user into the Secure Record BU (a Change-BU, or `Services/Registration/RegistrationDataverseService.cs:355-376` given an operator-configured `BusinessUnitName` — `Api/RegistrationEndpoints.cs:319`) silently makes that user a member of the team that owns every secure record. The only detector is NFR-05 clause 2 (`tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs:240-258`), which identifies the owner team as "the default team of the secure BU" (`SecureBuRoleDepthAssertionTests.cs:638`) and never runs in CI.
+
+HOLE 2 — BU DEPTH, WHICH A NAMED TEAM ALONE DOES NOT CLOSE. A record owned by ANY team in the Secure Record BU has `owningbusinessunit` = that BU. A user placed in that BU whose ordinary roles carry Business Unit (Local) or Deep depth on sprk_project/sprk_matter/sprk_workassignment reads every secure record by DEPTH, whoever the owner team is. So moving ownership to a named team fixes the membership vector only. The owner's model — "a no-user BU where access is granted only explicitly" — therefore needs a second enforced invariant: ZERO systemusers (human or application) have `businessunitid` = the Secure Record BU.
+
+HOLE 3 — MATTERS AND WORK ASSIGNMENTS ARE NEVER RE-OWNED. All three roots carry `sprk_issecure` (`ProvisionProjectEndpoint.cs:114-118`), but the only secure path is `/provision-project` (`ProvisionProjectEndpoint.cs:205-221`, mapped at `ExternalAccessEndpoints.cs:171-175`) and it reads and re-owns `sprk_projects` only (`:256-261`, `:609-616`). The reverse, `/unsecure-project`, is project-only too (`UnsecureProjectEndpoint.cs:46-47`, `:107-112`). A matter or work assignment flagged secure (today only possible via the MDA form) stays owned by its creator in an ordinary BU — not isolated at all — and, because `RecordContainerResolver.cs:244-266` fails closed on a secure record with no own `sprk_containerid`, every upload to it 409s. The DelegationRuleFilter cases are project-only too (`DelegationRuleFilter.cs:239-249`, `FromProjectId`).
+
+HOLE 4 — CHILDREN FOLLOW THE DEFAULT TEAM. `RecordOwnershipResolver.ResolveFromTargetRecordAsync` (`Services/Dataverse/RecordOwnershipResolver.cs:220-242`) maps the target's `owningbusinessunit` to that BU's DEFAULT owner team. Once secure roots are owned by the named team, a child filed to a secure record would still be owned by the Secure BU's default team — the exact team this task retires. It has zero callers on this branch; PR #1045 (word-add-in-r1, OPEN) wires it for Office and edits the same file (`:233` there).
+
+LIVE FACTS (session 27): dev has 1 secure project, provisioned, owned by the default team, with its own container; the owner role `Secure Record Owner` is assigned to the Secure BU default team; 0 documents are linked to any secure root.
+
+What does NOT change here: the child re-own itself and the owner role's child privileges (C10 part 2 and task 145); the `sprk_issecure` field lock (task 150).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ProvisionProjectResponse.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/UnsecureProjectRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/UnsecureProjectResponse.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertion.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectTestFixture.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/ExternalAccess/SecureProjectShareTests.cs</file>
+      <file role="modify">tests/e2e/specs/secure-project-creation/secure-project-creation.spec.ts</file>
+      <file role="modify">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file role="new">scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (ResolveGrantRoot — the RecordType/RecordId-with-legacy-ProjectId root shape to copy for the generalized request)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs (:319 — where the operator-configured BusinessUnitName enters CreateSystemUserAsync)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs (the delegation Write probe that runs seconds after a create — must work for matter and work assignment roots too)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Scope: every refusal added by this task. Fail closed with a stable `reasonCode` (the `sdap.provision.*` / `sdap.unsecure.*` convention at `ProvisionProjectEndpoint.cs:141-156`). An unreadable membership count, an unreadable BU-user count, a missing team, a second matching team, or a team with any member REFUSES — never falls back to the default team, the root BU or the caller's BU.</constraint>
+    <constraint source="project">Scope: named-team resolution. Resolve by (Secure Record BU id AND team name from configuration AND `teamtype eq 0` AND `isdefault eq false`), `$top=2`, exactly one match required. Configuration key `SecureRecord:OwnerTeamName` sits beside `SecureRecord:BusinessUnitName` with a compiled default, mirroring `ProvisionProjectEndpoint.cs:94-133` — a name, never a GUID.</constraint>
+    <constraint source="project">Scope: the memberless invariant. "Zero members" means zero `teammembership` rows of ANY principal kind (human or application user). "No-user BU" means zero systemusers — enabled or disabled, human or application — whose `businessunitid` is the Secure Record BU. Both are checked at provisioning time before any mutation, and both are clauses of the standing assertion.</constraint>
+    <constraint source="project">Scope: generalized provisioning/unsecure. Extend the EXISTING endpoints and DTOs to accept `RecordType` (sprk_project | sprk_matter | sprk_workassignment) + `RecordId`, keeping the legacy `ProjectId` field and routes working for the shipped wizard. Do NOT add parallel per-entity endpoints (CLAUDE.md §11). The delegation filter resolves the SAME root the handler uses (the `FromGrantRoot` pattern at `DelegationRuleFilter.cs:216-229`) — the record authorized is the record re-owned.</constraint>
+    <constraint source="project">Scope: matters and work assignments. A secure matter/work assignment gets exactly what a secure project gets: named-team ownership verified by read-back, creator share (task 061 semantics), its own SPE container recorded on its own `sprk_containerid`. A secure root that cannot receive its own container is refused, not half-provisioned — otherwise uploads 409 forever (`RecordContainerResolver.cs:244-266`).</constraint>
+    <constraint source="project">Scope: migration. Dry run is the default and prints the full plan; `-Apply` is required to write. Idempotent (a second run changes nothing). Every reassignment is verified by read-back. Existing POA shares on migrated rows are preserved and counted before and after. Auth is an explicit-URL `az` token as in the setup guide §2 — never `pac`'s active profile, and never a new client secret (ADR-028 A4).</constraint>
+    <constraint source="project">Scope: the org setting `organization.sharetopreviousowneronassign`. If it is true, every assign in this task shares the record back to the PREVIOUS owner — for the migration that is the default team, i.e. every future user placed in the BU. Read it before the first assign; if true, STOP (escalation).</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: all enforcement. No Dataverse plugin. Runtime enforcement lives in the BFF provisioning path; standing enforcement is the NFR-05 live assertion run as a MANUAL gate (no Dataverse in CI — owner 2026-09-10). Do not propose relocating test users.</constraint>
+    <constraint source="owner round 2">Scope: this task's deliverable. It delivers a 100% fix of C10 part 1 for all three entity types; discovered scope is added here, not deferred. A document-only save with no related record stays a supported path — nothing here may make a target record required.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. State the placement decision citing `.claude/constraints/bff-extensions.md`; measure publish size against a FRESH master build from a short path with the same zip tool, report both absolute sizes, the delta and the file counts; ceiling 60 MB; run `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="ADR-038">Scope: tests added or changed here. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no ctor null-check tests. Use the existing `ProvisionProjectTestFixture` roster fakes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Re-verify every anchor in the background against current source and live dev (read-only): the owner role's team assignment, the default team's membership, systemusers in the Secure Record BU, `sharetopreviousowneronassign`, and every row with `sprk_issecure eq true` on the three roots with its owner and `sprk_containerid`. Record the census in the task note.</step>
+    <step order="2">Grep for every other secure/unsecure path (writers of ownership on secure rows, readers that assume the default team — including `ProjectClosureEndpoint`, the e2e spec and the provisioning fixtures) and list them in the note; each one found is fixed in this task.</step>
+    <step order="3">Implement named-team resolution plus the two runtime assertions (zero team members, zero BU users) in the provisioning path, before Step 5's assign, with new reason codes. Rewrite every statement that names the default team (class remarks `ProvisionProjectEndpoint.cs:13-25`, the `.WithDescription` at `:211-214`, the Step 3 comments `:360-369`, `:670`, `UnsecureProjectEndpoint.cs:30`).</step>
+    <step order="4">Generalize provisioning and unsecure to sprk_matter and sprk_workassignment by extending the existing DTOs/handlers and the delegation-filter cases; per-entity entity sets and container naming come from one table, not three copies.</step>
+    <step order="5">After PR #1045 is merged into this branch: make RecordOwnershipResolver return the named secure owner team when the target record's owning BU is the Secure Record BU; every other BU keeps its default team. Refuse (null) if the named team cannot be resolved — never the default team.</step>
+    <step order="6">Guard `RegistrationDataverseService.CreateSystemUserAsync`: after `ResolveBusinessUnitIdAsync`, compare the resolved BU ID (not the name string) with the Secure Record BU ID resolved from `SecureRecord:BusinessUnitName` in the SAME target environment (`targetDataverseUrl`); a match is refused with an explicit error before the systemuser is created. An unreadable Secure BU lookup refuses (fail closed).</step>
+    <step order="7">Retarget SecureBuRoleDepthAssertion: the owner team is the named team; clause 2 fails on ANY member; add the no-user-BU clause; clause 3 fails if the owner role is held by the Secure BU default team or any team but the named one. Seed each clause both ways in the unit tests.</step>
+    <step order="8">Rewrite guide §4 (create the named owner team; assign the `Secure Record Owner` role to it; remove the role from the default team; zero-member and zero-user checks) and the §7 checklist; update the I-2 row of DATAVERSE-WRITE-PATH-ARCHITECTURE.md.</step>
+    <step order="9" mode="prescriptive">Live cutover in dev, in this order: create the named team and assign the role (guide §4); run the migration dry run and record the plan; run with -Apply; verify read-back and share counts; remove the role from the default team; run the NFR-05 assertion and the §7 isolation probe by hand and record both outputs.</step>
+    <step order="10">Build, unit + integration suites, publish-size measurement per CLAUDE.md §10.</step>
+    <step order="11">Update TASK-INDEX.md: this task's status cell to `✅ [done]`; POML status to completed. Close #967 with the outcome. Document deviations in the task note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>`organization.sharetopreviousowneronassign` is true in dev: STOP before any assign — the migration would share every secure row to the default team. Present the setting and a recommendation (turn it off, or strip the resulting shares) per CLAUDE.md §6.</trigger>
+    <trigger>Any systemuser (human or application) currently sits in the Secure Record BU, or the default team has members: STOP. Report who, and do NOT move anyone — relocating users is an owner decision (owner directive: do not propose relocating users).</trigger>
+    <trigger>The migration census finds a secure matter or work assignment that is NOT provisioned (user-owned, no own container) and has existing children or documents in a shared container: provisioning it does not retract content already in shared SPE storage. Report the rows and their content location and ask before provisioning them.</trigger>
+    <trigger>Assigning to the named team fails with a privilege error naming anything other than a `Read` on a root table: the design says Read alone suffices; a different answer changes the design (task 145 owns the role's privileges).</trigger>
+    <trigger>Any Dataverse relationship from sprk_project, sprk_matter or sprk_workassignment has Assign cascade = Cascade All/Active/UserOwned: the re-own reassigns children as a side effect, which overlaps C10 part 2. Record the cascade configuration and ask before migrating.</trigger>
+    <trigger>OPEN OWNER QUESTION — the named team's name (compiled default for `SecureRecord:OwnerTeamName`). Before creating the live team in step 9, present the proposed name to the owner. Recommendation: `Secure Record Owners` (distinct from the BU's default team, which carries the BU's own name `Secure Record`, so the two can never be confused in MDA or in the census). The compiled default, the live team, the pinning test and guide §4 move together — the same fail-closed-lookup-key rule as `DefaultSecureBusinessUnitName` (`ProvisionProjectEndpoint.cs:122-133`).</trigger>
+    <trigger>OPEN OWNER QUESTION — detection between provisioning calls. The runtime assertions fire only when something is provisioned; a Change-BU of a user into the Secure Record BU (which no BFF code can block without a plugin, D-1) exposes every EXISTING secure record until the next provisioning call or the next manual NFR-05 run. Recommendation: add a read-only ADR-036 `IScheduledJob` in the BFF (ADR-052 placement: BFF, schedule) that runs the zero-member and zero-BU-user census and logs a CRITICAL finding (no Dataverse writes, no CI involvement); needs a §10 placement statement. Ask the owner whether it is built in this task before step 3 is finished — do not silently leave the gap and do not build it unasked.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`ProvisionProjectEndpoint.cs:370-416` (default-team resolution), `UnsecureProjectEndpoint.cs:87-281`, `RecordOwnershipResolver.cs:220-242`, `DelegationRuleFilter.cs:239-249`. Grep `SecureRecord:` over src/ finds only `SecureRecord:BusinessUnitName` (`ProvisionProjectEndpoint.cs:108`) and `SecureRecord:UnsecureOwnerUserId` (`UnsecureProjectEndpoint.cs:58`); no owner-team name key and no migration script under scripts/ (grep `Secure Record` over scripts/ = 0 hits).</existing>
+    <extension>Yes for the endpoints, DTOs, filter cases, resolver and assertion — all extended in place, no new endpoint. The config key is an extension of the existing `SecureRecord:` section. Only the one-time migration script is new, because no existing script reassigns secure rows and a BFF endpoint for a one-time operator migration would be permanent surface for a one-shot need.</extension>
+    <cost-of-doing-nothing>Any Change-BU of a user into the Secure Record BU grants that user Read on every secure project, matter and work assignment in MDA with no error (#967); secure matters and work assignments are not isolated at all and every upload to them returns 409; children filed to a secure record would be owned by the default team this task retires.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProvisionProjectEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/RecordOwnershipResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</output>
+    <output type="code">scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1</output>
+    <output type="test">tests/integration/data-mutation/ExternalAccess/ProvisionProjectIdempotencyTests.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SecureBuRoleDepthAssertionTests.cs</output>
+    <output type="docs">docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-144-named-secure-owner-team.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Secure Record BU with exactly one named non-default owner team with zero members and zero BU users, provisioning a secure sprk_project, sprk_matter and sprk_workassignment each ends with the row owned by that team (read-back verified), the caller shared at creator rights, and the row's own container recorded.</criterion>
+    <criterion testable="true">NEGATIVE: the named team has one member (human OR application user) — provisioning refuses with a new reason code before any mutation; the record is unchanged.</criterion>
+    <criterion testable="true">NEGATIVE: any systemuser (enabled or disabled) has `businessunitid` = the Secure Record BU — provisioning refuses with a new reason code before any mutation.</criterion>
+    <criterion testable="true">NEGATIVE: the named team is missing, or two teams match — refuses; the default team is NEVER selected (a fixture roster containing the default team plus decoys proves it).</criterion>
+    <criterion testable="true">NEGATIVE: the membership or BU-user read throws — refuses (fail closed), not "zero".</criterion>
+    <criterion testable="true">AUTHORIZATION: the delegation filter authorizes the SAME root the handler re-owns for all three entity types; a caller without Write on that record gets 403 and nothing changes; an unknown RecordType is refused.</criterion>
+    <criterion testable="true">Unsecure works for sprk_matter and sprk_workassignment exactly as for sprk_project (reassign, read-back, share sweep, flag clear, sweepComplete reported); the legacy ProjectId request shape still works for both routes.</criterion>
+    <criterion testable="true">RecordOwnershipResolver: a target owned in the Secure Record BU resolves to the named team; a target in any other BU still resolves to that BU's default team; an unresolvable named team returns null (refuse), never the default team.</criterion>
+    <criterion testable="true">NEGATIVE: registration refuses to create a systemuser whose configured BU resolves (by ID, in the target environment) to the Secure Record BU — no systemuser row is created; an unreadable Secure BU lookup also refuses; a user whose BU is any other BU is created as today.</criterion>
+    <criterion testable="true">SecureBuRoleDepthAssertion: clause 2 targets the named team and fails naming any member; the no-user-BU clause fails naming any user in the BU; clause 3 fails if the owner role is on the default team. Each clause is seeded both ways in unit tests.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE (dev): after migration, `sprk_issecure eq true` rows on all three roots are owned by the named team (0 by the default team); POA share counts per row are equal before and after; the default team holds no role; the NFR-05 assertion passes; the guide §7 impersonated isolation probe (existing non-admin test user) is DENIED on a secure project, a secure matter and a secure work assignment. Both outputs recorded in the task note.</criterion>
+    <criterion testable="true">Migration: the dry run writes nothing; a second -Apply run changes nothing.</criterion>
+    <criterion testable="true">Guide §4 and §7 and the write-path I-2 row describe the named team, the zero-member and zero-user invariants, and the default team's retirement.</criterion>
+    <criterion testable="true">BFF unit and integration suites green; NetArchTest green; publish size reported per CLAUDE.md §10 and at most 60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: the stated contract plus the negative cases named above. Anything beyond needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C10 half 1 (session26 note, C10) and owner round 2 item 6 (session27 note). Hole 2 (BU depth) is discovered scope: the original defect framed the risk as default-team membership only, but a named team does not stop a user in the Secure BU with BU-depth roles. The C10 part-2 work (child re-own, backfill, client-created children, contact coverage) and task 145 (owner-role child privileges, #1046) build on the named team this task introduces. Task 150 (sprk_issecure lock) changes the same provisioning endpoint and depends on this task. Cite #967 in the PR; it closes here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. The live cutover in step 9 is prescriptive and runs only after the code is deployed to the dev BFF.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-144">
+      COMPLETED-WITH-ESCALATION: code, tests, docs and the migration script are done. The live cutover (step 9) is a
+      PENDING MANUAL GATE: this run was read-only against Dataverse by instruction, and three owner decisions block it.
+      Full record: notes/task-144-named-secure-owner-team.md.
+
+      CODE.
+      (1) Provisioning (ProvisionProjectEndpoint + new static SecureRecordOwnerTeam) owns secure roots by the Secure Record BU's
+          NAMED, non-default Owner team (SecureRecord:OwnerTeamName, default "Secure Record Owners", owner decision F9),
+          resolved by BU id + name + teamtype 0 + isdefault false, $top=2, exactly one. It is never the default team.
+          Before any mutation it proves zero teammembership rows of ANY kind and zero systemusers (any kind) in the BU.
+          An unreadable answer to either refuses. New reason codes: secure_owner_team_has_members,
+          secure_owner_team_membership_unreadable, secure_bu_has_users, secure_bu_users_unreadable. A record still owned by
+          another team inside the BU (the retired default team) returns 409 owned_by_other_secure_team and is pointed at
+          the migration script, not given a second container.
+      (2) Provision and unsecure accept recordType + recordId (project | matter | workassignment; the grant routes'
+          vocabulary). The legacy projectId still works. Per-entity sets, columns and container labels come from ONE
+          table (SecureRecordRoot, which wraps ExternalGrantRoot).
+      (3) DelegationRuleFilter resolves the SAME root as the handler (SecureRecordRoot.ResolveTarget → ResolveGrantRoot).
+          An unknown recordType gets 403.
+      (4) RecordOwnershipResolver maps the Secure Record BU → its named team, or null (refuse). It never returns the
+          default team. An ambiguous Secure BU name refuses. With no Secure BU in the environment, every BU keeps its
+          default team.
+      (5) Registration refuses, BY ID and in the target environment, to create a systemuser in the Secure BU, and to add
+          a member to ANY team inside it (a discovered vector). An unreadable or ambiguous lookup refuses with
+          SecureRecordPlacementRefusedException before any POST.
+      (6) The NFR-05 evaluator moved into the BFF (Infrastructure/Dataverse/SecureBuRoleDepthAssertion.cs, with a shared
+          census builder). Clause 2 = the named team, any member. 2b = the named team resolves exactly once.
+          3 = the default team holding the role is a finding. 4 = a no-user BU. prvReadsprk_WorkAssignment was added
+          (it was missing).
+      (7) Owner decision F2 = a: a read-only SecureRecordIsolationCensusJob (ADR-036 IScheduledJob via AddScheduledJob,
+          every 15 min, CRITICAL per finding, heartbeat, throws on an unreadable census).
+      (8) The client classifies the new codes. The setup guide (§0-§2, §4 rewritten with the cutover, §5.5, §7, §8, §9)
+          and the write-path doc (I-2, I-6, owner row) were updated, plus the appsettings.template SecureRecord section
+          and the e2e spec.
+
+      TESTS. 22 SecureNamedOwnerTeamProvisioningTests, 7 SecureRecordIsolationCensusJobTests and
+      8 RegistrationSecureRecordPlacementTests are new. Additions were made to SecureBuRoleDepthAssertionTests,
+      RecordOwnershipResolverTests, SecureProjectShareTests, ProvisionProjectIdempotencyTests and the jest
+      provisioningService suite (26/26). Four tests whose contract WAS the default team were rewritten, with reasons in
+      the note. Perturbation sweep: 17/17 seeded violations bite. P17 first did NOT bite, which exposed a real gap (the
+      unsecure same-root test never sent a conflicting projectId); fixed. Counts for the full BFF unit suite and the
+      ArchTests are in the structured result.
+
+      LIVE (READ-ONLY, spaarkedev1).
+      sharetopreviousowneronassign = false. 0 users in the Secure BU; the default team has 0 members and holds the role;
+      the named team does not exist yet; 0 secure matters or work assignments.
+      The ONE secure project (65a3fab2) is owned by an ORDINARY BU's default team (Spaarke Business Unit 1). It has its
+      own container, no content and 0 shares, so it is NOT isolated today, contrary to the background's "owned by the
+      default team".
+      Migration dry run: plan 0 rows; 1 NOT-ISOLATED; 2 STOPs (named team missing; Assign cascade not accepted); exit 2.
+      -Verify fails as expected.
+
+      ESCALATIONS FIRED.
+      (a) The Assign-cascade trigger fired literally: project and matter cascade Assign to team, sharepointdocumentlocation
+          and sharepointdocument (platform-managed; 0 rows). The migration part stops until the owner accepts the list
+          (-AcceptedAssignCascade).
+      (b) F11's premise is no longer true. The live NFR-05 census shows THREE root-BU humans reaching the Secure BU at Deep
+          on project, matter and work assignment: hotmail #EXT# (Spaarke Basic User), plus Chelsea Friez and Lori Witkin
+          (@demo.spaarke.com, created 2026-10-01, Spaarke Core User + Spaarke Office Add In User). This is structural.
+          Per F11's own recommendation it goes back to the owner: remove the roles vs narrow their depth. No role or
+          user was changed.
+      (c) Owner decision on the NOT-ISOLATED test project: provision, unsecure or delete (recommended: delete or
+          unsecure).
+
+      PLACEMENT (CLAUDE.md §10, bff-extensions.md). All in the BFF on the existing external-access / Dataverse write path,
+      under BFF identity, with no AI dependency. NO new endpoint, package, interface or plugin. One new DI registration
+      (the job, via AddScheduledJob; ADR-052: BFF, schedule).
+
+      JUSTIFICATION (§11).
+      SecureRecordOwnerTeam:
+        existing = the default-team lookup inline in the endpoint; grep SecureRecord: found 2 keys and no owner-team key.
+        extension = it IS the endpoint's lookup, extracted so provisioning and the job check the SAME invariants.
+        cost = two drifting copies, and Change-BU unseen between provisioning calls.
+      SecureRecordRoot:
+        existing = ExternalGrantRoot.
+        extension = wraps it; adds only the id/name columns and the label.
+        cost = per-entity copies, or no matter/WA provisioning (secure-matter uploads 409 forever).
+      SecureRecordIsolationCensusJob:
+        existing = no job reads role topology; NFR-05 was manual-only.
+        extension = it reuses the moved evaluator.
+        cost = a user moved into the Secure BU reads every secure record until the next provisioning call (F2).
+      Evaluator move: moved, not duplicated; otherwise there would be two evaluators.
+      SecureRecord:OwnerTeamName: a sibling key; otherwise a rename needs a redeploy.
+      SecureRecordPlacementRefusedException: derives from InvalidOperationException; otherwise a security stop reads like
+        an outage.
+      Migration script:
+        existing = Backfill-RecordOwnership.ps1 resolves default teams by design; grep found no Secure Record migration.
+        cost = pre-change rows stay on the default team, and provisioning refuses them.
+
+      PENDING (main session / owner).
+      The owner decisions (a)-(c). Deploy. Guide §4.2-§4.3: create the team, assign the role, migration dry run → -Apply →
+      empty second run, remove the role from the default team, -Verify. The NFR-05 live test. The §7 item-7 impersonated
+      probe on a secure project, matter and work assignment. Close #967. Update TASK-INDEX. Publish-size measurement.
+      Also hand off to word-add-in-r1: scripts/Backfill-RecordOwnership.ps1 would choose the Secure BU's default team for
+      rows there and should route it to the named team.
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-144-f1" round="verifier-2">
+      COMPLETED-WITH-ESCALATION (unchanged): every verifier finding closable without a live write is closed. Full record:
+      notes/task-144-named-secure-owner-team.md §12.
+
+      F1 / AC9 (the unpinned fail-closed guard). FIXED IN THE TEST. RegistrationSecureRecordPlacementTests' failed Secure BU
+      lookup now returns a Dataverse-shaped JSON error body, not an empty one. The fail-closed case is a theory over 503
+      and 403, and a sibling theory covers AddUserToTeamAsync. Seeding the status guard off turns 4/4 red. Shipped code
+      unchanged.
+
+      F2 (FirstOrDefault on the Secure BU name). FIXED IN CODE. A shared SecureBusinessUnitsNamed. Evaluate turns two or
+      more matches into one SecureBusinessUnitAmbiguous finding: never a pass, never inert, CRITICAL in the job. Build
+      lists users and named teams across every matching BU. Three tests (evaluator, builder, job). Seeds: the evaluator
+      grading the first match turns 3 red; the builder's .Take(1) turns 1 red.
+
+      F3 (resolver fail-open edge on a misconfigured BU name). ACCEPTED AND DOCUMENTED. The resolver's remarks now state
+      that the Dataverse-side mitigation exists only after guide §4.3 step 4. PR callout in note §12.
+
+      B1 (§6.5 path-A) and the RecordType vocabulary. Need explicit reviewer sign-off and acceptance in the PR (note §12
+      callouts 2 and 3).
+
+      LIVE (READ-ONLY) re-check. Dry run: plan 0 rows, 2 STOPs (named team missing; cascade not accepted), 65a3fab2
+      NOT-ISOLATED, sharetopreviousowneronassign false, 0 BU users, 0 default-team members, 0 secure matters or WAs.
+      NFR-05: one Secure BU (no ambiguity), 17 findings, unchanged. 🔔 F11 STOP STILL FIRES: Chelsea Friez and Lori
+      Witkin reach the Secure BU at Deep, in addition to the hotmail #EXT# account the owner's F11 answer covers. No
+      role or user was touched.
+
+      PLACEMENT / JUSTIFICATION (§10/§11). No new service, DI registration, endpoint, option, job or package. New surface
+      is one public static helper (SecureBuRoleDepthAssertion.SecureBusinessUnitsNamed) and one enum member
+      (SecureBuVerdict.SecureBusinessUnitAmbiguous), both in the existing evaluator.
+        existing = the two inline FirstOrDefault lookups it replaces.
+        extension = it IS those lookups, made one.
+        cost = two BUs with the secure name grade as isolated.
+
+      STILL OPEN. AC11 (live gate: owner decisions (a)-(c), then deploy). AC12 (second -Apply run: live gate). AC14
+      (publish size: the main session, fresh master). TASK-INDEX and #967 (main session). Hand-off to word-add-in-r1
+      (main session).
+    </outcome>
+    <outcome date="2026-10-02" status="completed">Live gate run 2026-10-02 (notes §13): named team created, role moved off the default team, migration -Verify PASS, 65a3fab2 provisioned into isolation, census clauses 2-5 PASS. NFR-05 clause 1 findings are the root-BU dev artifact accepted by the owner (rounds 4 and 5). Escalations a/b/c answered in round 4.</outcome>
+  </execution>
+</task>

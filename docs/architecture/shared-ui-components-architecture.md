@@ -26,7 +26,7 @@ The key architectural decision is **context-agnosticism**: no component may refe
 | **Wizard Infrastructure** | `WizardShell`, `WizardStepper`, `WizardSuccessScreen`, `wizardShellReducer` | Generic multi-step dialog shell with reducer-driven state |
 | **Domain Wizards** | `CreateMatterWizard`, `CreateProjectWizard`, `CreateEventWizard`, `CreateTodoWizard`, `CreateWorkAssignmentWizard`, `CreateRecordWizard`, `SummarizeFilesWizard` | Entity-specific creation flows built on WizardShell |
 | **AI Components** | `SprkChat`, `AiFieldTag`, `AiProgressStepper`, `AiSummaryPopover`, `InlineAiToolbar`, `SlashCommandMenu`, `DiffCompareView` | AI-powered interaction, streaming, revision comparison |
-| **Layout** | `PageChrome`, `SidePane`, `PanelSplitter`, `WorkspaceShell`, `Toolbar`, `RecordCardShell` | Page chrome, panels, toolbars, card shells |
+| **Layout** | `PageChrome`, `SidePane`, `PanelSplitter`, `WorkspaceShell`, `RecordCardShell` | Page chrome, panels, toolbars, card shells |
 | **Dialogs** | `ChoiceDialog`, `SendEmailDialog`, `FindSimilarDialog`, `FilePreviewDialog` | Modal dialog patterns |
 | **Form Controls** | `LookupField`, `RichTextEditor`, `FileUpload`, `ThemeToggle`, `EmailStep`, `AssociateToStep` | Reusable form fields and wizard steps |
 | **Data Visualization** | `MiniGraph`, `EventDueDateCard`, `RelationshipCountCard` | Small visual data displays |
@@ -40,7 +40,7 @@ The key architectural decision is **context-agnosticism**: no component may refe
 | Theme | `src/theme/brand.ts` | Spaarke brand palette (`spaarkeBrand`), `spaarkeLight` / `spaarkeDark` themes |
 | Types | `src/types/` | 15 type definition files: Dataset, Command, Configuration, FetchXml, Lookup, WebApiLike, etc. |
 | Hooks | `src/hooks/` | 19 shared hooks: `useDatasetMode`, `useVirtualization`, `useTheme`, `useSseStream`, `useAiSummary`, `useForceSimulation`, `useSlashCommands`, `useTwoPanelLayout`, etc. |
-| Services | `src/services/` | `EntityCreationService`, `FetchXmlService`, `ViewService`, `ConfigurationService`, `CommandRegistry/Executor`, `SprkChatBridge`, `FieldMappingService`, `PolymorphicResolverService`, `renderMarkdown` |
+| Services | `src/services/` | `EntityCreationService`, `FetchXmlService`, `ViewService`, `ConfigurationService`, `SprkChatBridge`, `FieldMappingService`, `PolymorphicResolverService`, `renderMarkdown` |
 | Utils | `src/utils/` | `xrmContext` (Xrm frame-walk), `themeDetection` (PCF theme bridging), `themeStorage` (localStorage + Dataverse sync), `parseDataParams`, `logger`, `lookupMatching`, `relationshipColors` |
 
 ## Data Flow

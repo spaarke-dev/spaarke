@@ -103,10 +103,10 @@ const RUNG_PHRASES: Record<string, string> = {
  * `record-name-match:sprk_matter:where=subject:matched=name:name="Smith v Smith":number="REAL-2026-123456.02":reason="name in subject"`.
  */
 export interface NameMatchInfo {
-  where?: 'subject' | 'body' | 'attachment' | string;
-  matched?: 'name' | 'number' | string;
-  number?: string;
-  reason?: string;
+  where?: 'subject' | 'body' | 'attachment' | string | undefined;
+  matched?: 'name' | 'number' | string | undefined;
+  number?: string | undefined;
+  reason?: string | undefined;
 }
 
 /** Parse a RecordNameMatch contributor provenance string; null for any other rung. */
@@ -210,6 +210,17 @@ export function entityLabel(entity: string): string {
 }
 
 /**
+ * True when a string is a bare Dataverse GUID (8-4-4-4-12 hex, optional braces). Used to detect a
+ * candidate whose display name fell back to the raw target id — the engine records only a GUID for
+ * thread/attachment matches (no embedded `name="…"`), so the card shows the match reason + entity type
+ * instead of an opaque GUID (email-communication-intelligence-r2 R3-CARD-1). Host `resolveDisplayName`
+ * wiring for real names on those cards is deferred to r3.
+ */
+export function looksLikeGuid(value: string | null | undefined): boolean {
+  return !!value && /^\{?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\}?$/.test(value);
+}
+
+/**
  * One-sentence rationale for a candidate, e.g.:
  * "Suggested because it continues an email thread already filed here and the
  *  sender and recipients are known participants."
@@ -246,18 +257,18 @@ export interface Connection {
   confidence: number;
   status: 'confirmed' | 'suggested' | 'ambiguous';
   /** Competing candidates when the slot is ambiguous (conflict). */
-  alternatives?: ProvenanceCandidate[];
+  alternatives?: ProvenanceCandidate[] | undefined;
   /**
    * Runner-up candidates for a NON-ambiguous slot (the engine had a clear top
    * pick but also recorded lower-confidence alternatives). Surfaced behind an
    * "other candidates" expander so a reviewer can file a different one. Empty/
    * undefined when the slot had a single candidate.
    */
-  otherCandidates?: ProvenanceCandidate[];
+  otherCandidates?: ProvenanceCandidate[] | undefined;
   /** Human match reason for the primary candidate, e.g. "Matched by name in the subject line". */
-  matchReason?: string;
+  matchReason?: string | undefined;
   /** Reference number of the primary record (matter/invoice number, etc.) when known. */
-  recordNumber?: string;
+  recordNumber?: string | undefined;
   order: number;
 }
 
@@ -268,8 +279,8 @@ export interface Connection {
  */
 export interface CandidateGroup {
   targetName: string;
-  recordNumber?: string;
-  matchReason?: string;
+  recordNumber?: string | undefined;
+  matchReason?: string | undefined;
   confidence: number;
   candidates: ProvenanceCandidate[];
 }
@@ -327,7 +338,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
   }
   const out: Connection[] = [];
   byField.forEach((cands, field) => {
-    const meta = SLOT_META[field] ?? { label: entityLabel(cands[0].targetEntity), order: 99 };
+    const meta = SLOT_META[field] ?? { label: entityLabel(cands[0]?.targetEntity ?? field), order: 99 };
     const conflict = cands.length >= 2 && cands.some(c => c.conflict);
     const primary = cands.reduce((a, b) => (b.reinforcedConfidence > a.reinforcedConfidence ? b : a));
     // Non-conflict runners-up (everything but the primary), highest-confidence first.
@@ -343,7 +354,7 @@ export function deriveConnections(doc: ProvenanceDoc, isResolved: boolean): Conn
       field,
       entity: primary.targetEntity,
       slotLabel: meta.label,
-      targetName: primary.targetName ?? primary.targetId,
+      targetName: primary.targetName ?? candidateDisplayName(primary) ?? primary.targetId,
       targetId: primary.targetId,
       confidence: primary.reinforcedConfidence,
       status: conflict ? 'ambiguous' : isWritten ? 'confirmed' : 'suggested',
@@ -449,7 +460,7 @@ export function deriveAiSuggestedTypes(
   for (const sig of doc.signals ?? []) {
     const match = /types=\[([^\]]*)\]/.exec(sig.provenance ?? '');
     if (!match) continue;
-    const types = match[1]
+    const types = (match[1] ?? '')
       .split(',')
       .map(t => t.trim())
       .filter(Boolean);
@@ -696,16 +707,16 @@ export interface PrimaryCandidate {
   entity: string;
   targetId: string;
   targetName: string;
-  recordNumber?: string;
+  recordNumber?: string | undefined;
   confidence: number;
-  matchReason?: string;
+  matchReason?: string | undefined;
   /**
    * Human record-type label for the confirmed chip (e.g. "Matter"), used when the
    * primary was filed via the DENORM fields only (all typed lookups null) so there
    * is no `entity` logical name to resolve. Sourced from the host record's
    * `sprk_regardingrecordtype` lookup FormattedValue. Owner UAT 2026-07-31 item 1.
    */
-  typeLabel?: string;
+  typeLabel?: string | undefined;
 }
 
 /** Denormalized primary fields read off the host record (for the confirmed chip + number resolution). */
@@ -721,10 +732,24 @@ export interface PrimaryReviewModel {
   state: PrimaryReviewState;
   /** Up to `PRIMARY_CANDIDATE_SLOTS` candidates (≥ min confidence), highest first. */
   candidates: PrimaryCandidate[];
+  /**
+   * ALL above-floor candidates (≥ min confidence, highest first), BEFORE the top-3
+   * (`PRIMARY_CANDIDATE_SLOTS`) cap the strip renders — `candidates` is its head slice.
+   * Feeds the "See all" modal so a reviewer can file a genuine 4th+ candidate that the
+   * top-3 truncation hid (email-communication-intelligence-r2 R3-CARD-2: the reconcile
+   * strip showed only 3 while a real match, e.g. PAT-942404 at 96.5%, sat off-strip).
+   */
+  allCandidates: PrimaryCandidate[];
   /** The auto-matched (yellow) or confirmed (green) primary, when one exists. */
   primary?: PrimaryCandidate;
 }
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate
+// rather than importing the canonical `cleanGuid` from `@spaarke/ui-components`.
+// This module is documented (see the `logic/connections` barrel) as having ZERO
+// imports — a stronger, more explicit guarantee than the sibling modules' general
+// "no React import" (NFR-05), and importing even a pure string helper from the
+// React/Fluent-heavy UI component package would break that documented invariant.
 function primaryKey(entity: string, id: string): string {
   return `${entity}:${id.replace(/[{}]/g, '').toLowerCase()}`;
 }
@@ -798,13 +823,15 @@ export function derivePrimaryReview(
 ): PrimaryReviewModel {
   const doc = parseProvenance(provenanceJson) ?? emptyProvenanceDoc();
   const ranked = flattenPrimaryCandidates(doc);
-  const candidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE).slice(0, PRIMARY_CANDIDATE_SLOTS);
+  // The full above-floor list feeds the "See all" modal; `candidates` is its top-3 slice.
+  const allCandidates = ranked.filter(c => c.confidence >= PRIMARY_MATCH_MIN_CONFIDENCE);
+  const candidates = allCandidates.slice(0, PRIMARY_CANDIDATE_SLOTS);
   const filedList = filed ?? [];
 
   // 🟢 Confirmed — a human resolved it (status Resolved).
   if (associationStatus === ASSOCIATION_STATUS_RESOLVED_VALUE) {
     const primary = resolveConfirmedPrimary(ranked, filedList, denorm);
-    if (primary) return { state: 'confirmed', candidates, primary };
+    if (primary) return { state: 'confirmed', candidates, allCandidates, primary };
   }
 
   // 🟡 Needs confirmation — the engine auto-matched (autoFiled or a lone 100%), NOT
@@ -814,11 +841,11 @@ export function derivePrimaryReview(
   const autoMatched = !hasConflict && (doc.decision.autoFiled === true || (top !== undefined && top.confidence >= 1));
   if (autoMatched && top) {
     const primary: PrimaryCandidate = { ...top, recordNumber: top.recordNumber ?? denorm?.recordNumber ?? undefined };
-    return { state: 'needs-confirmation', candidates, primary };
+    return { state: 'needs-confirmation', candidates, allCandidates, primary };
   }
 
   // 🔴 Requires review — the reviewer picks from candidates (or links another record).
-  return { state: 'requires-review', candidates };
+  return { state: 'requires-review', candidates, allCandidates };
 }
 
 /** Section status dot (🔴/🟡/🟢) + one-line label for the single-primary model. */

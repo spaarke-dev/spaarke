@@ -356,6 +356,17 @@ jobs:
           cd ./publish
           zip -r ../bff-api.zip .
 
+      - name: Guard the staging slot against scheduled jobs (ADR-036 A1 rule 2)
+        run: |
+          # A non-production slot runs no scheduled jobs. --slot-settings makes the value slot-sticky, so a swap never
+          # carries it into production. Idempotent.
+          az webapp config appsettings set \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.APP_SERVICE }} \
+            --slot ${{ env.SLOT_NAME }} \
+            --slot-settings Scheduling__RunScheduledJobs=false \
+            --output none
+
       - name: Deploy to staging slot
         run: |
           az webapp deploy \

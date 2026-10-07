@@ -522,8 +522,8 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
     if (!form.environmentId) newErrors.environmentId = "Environment is required.";
     if (!form.containerTypeId.trim()) newErrors.containerTypeId = "Container Type ID is required.";
     if (!form.owningAppId.trim()) newErrors.owningAppId = "Owning App ID is required.";
-    if (!form.keyVaultSecretName.trim())
-      newErrors.keyVaultSecretName = "Key Vault secret name is required.";
+    // Key Vault secret name is optional: SPE Admin authenticates as the BFF's own (managed) identity and
+    // reads no credential from this config. Requiring it only forced a placeholder value.
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -711,22 +711,21 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
               {/* ── Key Vault Secret Name ── */}
               <div className={styles.formFullWidth}>
                 <Field
-                  label="Key Vault Secret Name"
-                  required
-                  hint="Enter only the Key Vault secret name — never paste or enter the actual secret value here."
+                  label="Key Vault Secret Name (not used)"
+                  hint="Leave blank. Never paste a secret value here."
                   validationMessage={errors.keyVaultSecretName}
                   validationState={errors.keyVaultSecretName ? "error" : "none"}
                 >
                   <Input
                     value={form.keyVaultSecretName}
                     onChange={(_e, d) => setField("keyVaultSecretName", d.value)}
-                    placeholder="e.g. spe-owning-app-secret"
                     aria-describedby="kv-secret-hint"
                   />
                 </Field>
                 <span id="kv-secret-hint" className={styles.secretNameHelper}>
-                  The system retrieves the actual credential from Azure Key Vault at runtime using this name.
-                  Do not enter the credential value itself.
+                  Not used. SPE Admin works as the BFF&apos;s own managed identity, so no secret is read
+                  from this configuration. Container access comes from granting that identity on the
+                  container type (Container Types → Consuming Apps tab).
                 </span>
               </div>
 
@@ -760,15 +759,22 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
                   />
                 </Field>
                 <span className={styles.secretNameHelper}>
-                  Credential retrieved from Azure Key Vault at runtime using this name.
+                  Not used. Kept as a record only; no credential is read from this name.
                 </span>
               </div>
 
               {/* ── Section: Permissions ── */}
+              {/* Stored on the config record only. Nothing reads these to grant access: an app's access to
+                  this container type is its grant on the Consuming Apps tab, and the BFF identity's Graph
+                  permissions are app-role assignments in Entra (UAT 2026-10-07). */}
               <div className={styles.sectionDivider}>
                 <Divider />
               </div>
-              <Subtitle2 className={styles.sectionHeading}>Permissions</Subtitle2>
+              <Subtitle2 className={styles.sectionHeading}>Permissions (record only)</Subtitle2>
+              <span className={styles.secretNameHelper}>
+                These checkboxes do not grant anything. To give an app access to this container type, add it
+                on Container Types → Consuming Apps.
+              </span>
 
               {/* ── Delegated Permissions ── */}
               <div className={styles.formFullWidth}>

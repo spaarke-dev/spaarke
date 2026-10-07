@@ -47,7 +47,13 @@ public class ScopePersonasEndpointTests : IClassFixture<CustomWebAppFactory>
     [Fact]
     public async Task GetPersonas_EndpointExists_AcceptsGet()
     {
-        // Act — no auth; we only care that the route is registered (not 404 or 405)
+        // Registration is read from the endpoint table: an ANONYMOUS request answers 401 whether or not the route
+        // exists (the authorization FallbackPolicy, UAC-r2 task 167), so "not 404 / not 405" without a bearer proved
+        // nothing — it stayed green with the route renamed (task 167 f2).
+        EndpointTable.AssertMapped(_factory, "GET", "/api/ai/scopes/personas");
+
+        // Act — signed in, so a missing route or a wrong verb would answer 404 / 405
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         var response = await _client.GetAsync("/api/ai/scopes/personas");
 
         // Assert

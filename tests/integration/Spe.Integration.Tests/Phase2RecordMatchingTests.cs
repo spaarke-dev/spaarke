@@ -26,184 +26,24 @@ public class Phase2RecordMatchingTests : IClassFixture<IntegrationTestFixture>
         _unauthenticatedHttpClient = _fixture.CreateUnauthenticatedClient();
     }
 
-    #region Match Records Endpoint Tests
+    #region Retired routes (unified-access-control-r2 task 164)
 
-    [Fact]
+    // POST /api/ai/document-intelligence/match-records and /associate-record were RETIRED by unified-access-control-r2
+    // task 164 (owner round 10 item 1): no caller in the repo and not in any published API description. They let
+    // any signed-in user find secure matters' names by party name (sweep #31) and re-parent any document onto any
+    // record (#32). The record-matching admin routes below are still mapped under the same flag.
+    [Theory]
     [Trait("Category", "Phase2")]
     [Trait("Category", "RecordMatching")]
-    public async Task MatchRecords_Endpoint_RequiresAuthorization()
+    [InlineData("/api/ai/document-intelligence/match-records")]
+    [InlineData("/api/ai/document-intelligence/associate-record")]
+    public async Task RetiredRecordMatchRoute_IsNotRouted(string path)
     {
-        // Arrange
-        var request = new
-        {
-            Organizations = new[] { "Acme Corp" },
-            People = new[] { "John Smith" },
-            ReferenceNumbers = new[] { "MAT-2024-001" },
-            Keywords = new[] { "contract", "nda" },
-            RecordTypeFilter = "all",
-            MaxResults = 5
-        };
+        var content = new StringContent("{}", Encoding.UTF8, "application/json");
 
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
+        var response = await _httpClient.PostAsync(path, content);
 
-        // Act - use unauthenticated client to test auth requirement
-        var response = await _unauthenticatedHttpClient.PostAsync("/api/ai/document-intelligence/match-records", content);
-
-        // Assert - Should require authorization
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task MatchRecords_Endpoint_Exists()
-    {
-        // Arrange
-        var request = new
-        {
-            Organizations = Array.Empty<string>(),
-            People = Array.Empty<string>(),
-            ReferenceNumbers = Array.Empty<string>(),
-            Keywords = Array.Empty<string>(),
-            RecordTypeFilter = "all",
-            MaxResults = 5
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act
-        var response = await _httpClient.PostAsync("/api/ai/document-intelligence/match-records", content);
-
-        // Assert - Should not be 404 (endpoint exists)
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-            "Match records endpoint should be registered");
-    }
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task MatchRecords_ValidatesRecordTypeFilter()
-    {
-        // Arrange - Test that endpoint accepts valid filter values
-        var validFilters = new[] { "all", "sprk_matter", "sprk_project", "sprk_invoice" };
-
-        foreach (var filter in validFilters)
-        {
-            var request = new
-            {
-                Organizations = new[] { "Test Corp" },
-                RecordTypeFilter = filter,
-                MaxResults = 5
-            };
-
-            var content = new StringContent(
-                JsonSerializer.Serialize(request),
-                Encoding.UTF8,
-                "application/json");
-
-            // Act
-            var response = await _httpClient.PostAsync("/api/ai/document-intelligence/match-records", content);
-
-            // Assert - Route should match (not 404 from routing)
-            // Note: With mock services, handler may return 400/500 which still proves endpoint is registered
-            response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-                $"Match records endpoint should be registered for filter '{filter}'");
-        }
-    }
-
-    #endregion
-
-    #region Associate Record Endpoint Tests
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task AssociateRecord_Endpoint_RequiresAuthorization()
-    {
-        // Arrange
-        var request = new
-        {
-            DocumentId = Guid.NewGuid().ToString(),
-            RecordId = Guid.NewGuid().ToString(),
-            RecordType = "sprk_matter",
-            LookupFieldName = "sprk_matter"
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act - use unauthenticated client to test auth requirement
-        var response = await _unauthenticatedHttpClient.PostAsync("/api/ai/document-intelligence/associate-record", content);
-
-        // Assert - Should require authorization
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-    }
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task AssociateRecord_Endpoint_Exists()
-    {
-        // Arrange
-        var request = new
-        {
-            DocumentId = Guid.NewGuid().ToString(),
-            RecordId = Guid.NewGuid().ToString(),
-            RecordType = "sprk_matter",
-            LookupFieldName = "sprk_matter"
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act
-        var response = await _httpClient.PostAsync("/api/ai/document-intelligence/associate-record", content);
-
-        // Assert - Should not be 404 (endpoint exists)
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-            "Associate record endpoint should be registered");
-    }
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task AssociateRecord_ValidatesLookupFieldName()
-    {
-        // Arrange - Valid lookup field names
-        var validLookupFields = new[] { "sprk_matter", "sprk_project", "sprk_invoice" };
-
-        foreach (var lookupField in validLookupFields)
-        {
-            var request = new
-            {
-                DocumentId = Guid.NewGuid().ToString(),
-                RecordId = Guid.NewGuid().ToString(),
-                RecordType = lookupField,
-                LookupFieldName = lookupField
-            };
-
-            var content = new StringContent(
-                JsonSerializer.Serialize(request),
-                Encoding.UTF8,
-                "application/json");
-
-            // Act
-            var response = await _httpClient.PostAsync("/api/ai/document-intelligence/associate-record", content);
-
-            // Assert - Should not return BadRequest for valid lookup field
-            response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest,
-                $"Lookup field '{lookupField}' should be valid");
-        }
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, $"{path} was retired by task 164");
     }
 
     #endregion
@@ -348,8 +188,6 @@ public class Phase2RecordMatchingTests : IClassFixture<IntegrationTestFixture>
         // Comprehensive test that all Phase 2 endpoints are properly registered
         var phase2Endpoints = new Dictionary<string, (HttpMethod Method, string Description)>
         {
-            ["/api/ai/document-intelligence/match-records"] = (HttpMethod.Post, "Match records based on extracted entities"),
-            ["/api/ai/document-intelligence/associate-record"] = (HttpMethod.Post, "Associate document with matched record"),
             ["/api/admin/record-matching/sync"] = (HttpMethod.Post, "Sync Dataverse records to search index"),
             ["/api/admin/record-matching/status"] = (HttpMethod.Get, "Get search index status")
         };
@@ -378,53 +216,6 @@ public class Phase2RecordMatchingTests : IClassFixture<IntegrationTestFixture>
         foreach (var (endpoint, exists, statusCode) in results)
         {
             exists.Should().BeTrue($"Endpoint {endpoint} should be registered (got {statusCode})");
-        }
-    }
-
-    [Fact]
-    [Trait("Category", "Phase2")]
-    [Trait("Category", "RecordMatching")]
-    public async Task RecordMatchingEndpoints_ReturnProblemDetailsOnError()
-    {
-        // Verify that endpoints return RFC 7807 compliant errors
-        var request = new
-        {
-            Organizations = new[] { "Test" }
-        };
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(request),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act
-        var response = await _httpClient.PostAsync("/api/ai/document-intelligence/match-records", content);
-
-        // Assert - Error responses should be ProblemDetails format (when JSON)
-        if (!response.IsSuccessStatusCode && response.StatusCode != HttpStatusCode.NotFound)
-        {
-            var responseContent = await response.Content.ReadAsStringAsync();
-
-            if (!string.IsNullOrEmpty(responseContent))
-            {
-                try
-                {
-                    var problemDetails = JsonSerializer.Deserialize<JsonElement>(responseContent);
-                    if (problemDetails.ValueKind == JsonValueKind.Object)
-                    {
-                        // ProblemDetails should have status
-                        var hasStatus = problemDetails.TryGetProperty("status", out _) ||
-                                        problemDetails.TryGetProperty("Status", out _);
-
-                        // At minimum, should have status
-                        hasStatus.Should().BeTrue("Error response should include status code in ProblemDetails format");
-                    }
-                }
-                catch (JsonException)
-                {
-                    // Non-JSON response is acceptable for some error scenarios (e.g., plain text error)
-                }
-            }
         }
     }
 

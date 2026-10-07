@@ -363,7 +363,7 @@ public sealed class PlaybookInvocationService
             playbookId, documentId);
 
         // TODO: Enqueue playbook execution via IPlaybookOrchestrationService.
-        // The BFF already supports background execution via BackgroundService (ADR-001).
+        // The BFF already supports background execution via ADR-004 IJobHandler (placement: ADR-052).
         //
         // var request = new PlaybookRunRequest
         // {

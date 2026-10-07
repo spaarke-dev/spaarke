@@ -50,7 +50,7 @@ public class ScheduledRagIndexingOptions
 /// Background service that periodically indexes unindexed documents via bulk RAG indexing.
 /// Acts as a catch-up mechanism for documents that weren't indexed during upload.
 ///
-/// Implements ADR-001 BackgroundService pattern with PeriodicTimer.
+/// A hand-rolled timer BackgroundService with PeriodicTimer (existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1).
 /// Submits BulkRagIndexing jobs to the sdap-jobs queue for processing.
 /// </summary>
 /// <remarks>

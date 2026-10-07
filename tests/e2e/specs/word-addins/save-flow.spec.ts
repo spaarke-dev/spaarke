@@ -5,14 +5,42 @@
  * to Spaarke DMS. Covers document capture, entity association,
  * job status monitoring, and error handling.
  *
- * Prerequisites:
+ * 🔴 THIS SPEC DOES NOT RUN IN CI, AND DOES NOT CURRENTLY RUN ANYWHERE.
+ * ---------------------------------------------------------------------
+ * Classified by task 074 (2026-09-28). Do not read these 32 tests as coverage — no
+ * workflow executes `tests/e2e`, and they do not pass headless today. Measured, not
+ * assumed (see `projects/spaarkeai-word-add-in-r1/notes/074-e2e.md`):
+ *
+ *   Built the add-in, served `dist/` on :3000, ran this spec on chromium. Every test
+ *   failed with `page.waitForFunction: Timeout 15000ms exceeded`. The taskpane BOOTS but
+ *   hangs at "Loading...":
+ *       [Spaarke] Stage 1: Waiting for Office.js...
+ *       Warning: Office.js is loaded outside of Office client
+ *       [Spaarke] Office.js ready: {host: null, platform: null, addin: null}
+ *       [Spaarke] Stage 2: Initializing auth service...      <-- stops here
+ *
+ * TWO CONCRETE BLOCKERS, both in the HARNESS rather than in this spec's intent:
+ *   1. `WordTaskPanePage.mockWordEnvironment()` injects `window.Office`/`window.Word` via
+ *      `addInitScript`, but NOTHING intercepts the real `office.js` CDN script the
+ *      taskpane HTML loads. The real script supersedes the mock and reports
+ *      `host: null`, so host detection never resolves.
+ *   2. The add-in's bootstrap then awaits its auth service (MSAL), which has no
+ *      signed-in user and no Office SSO context headless, and never completes.
+ *
+ * So this is NOT "these tests need Word desktop" — they are authored as mocked headless
+ * tests and the mock is incomplete. Making them run means route-blocking `office.js`,
+ * completing the Office mock, and stubbing auth: that is BUILDING AN E2E HARNESS, which
+ * task 074's escalation trigger explicitly puts outside its scope. Escalated instead.
+ *
+ * Prerequisites if run manually against a live host:
  * - Deployed Word add-in (task 058)
  * - Deployed workers (task 066)
- * - .env file configured with credentials
+ * - .env file configured with credentials (`tests/e2e/config/.env`)
+ * - `ADDIN_TASKPANE_URL` pointed at the served taskpane
  *
  * @see spec.md - FR-09 (Save Word document), FR-10 (Version Word document)
  * @see SaveView.tsx - Component implementation
- * @see WordHostAdapter.ts - Word-specific adapter
+ * @see shared/adapters/WordAdapter.ts - the single Word adapter (task 010 / FR-04; the duplicate word/WordHostAdapter.ts was deleted)
  * @see POST /office/save - API endpoint
  */
 
@@ -132,7 +160,6 @@ test.describe('Word Save Flow - Document Context @e2e @word', () => {
     // Setup Word environment mock
     await taskPanePage.mockWordEnvironment('Test Contract.docx');
     await taskPanePage.mockEntitySearchApi(mockEntities);
-    await taskPanePage.mockRecentApi(mockEntities.slice(0, 2));
 
     await taskPanePage.navigateToSaveMode();
   });
@@ -178,7 +205,6 @@ test.describe('Word Save Flow - Entity Association @e2e @word', () => {
 
     await taskPanePage.mockWordEnvironment('Legal Agreement.docx');
     await taskPanePage.mockEntitySearchApi(mockEntities);
-    await taskPanePage.mockRecentApi(mockEntities.slice(0, 2));
 
     await taskPanePage.navigateToSaveMode();
     await taskPanePage.waitForDocumentContext();
@@ -817,8 +843,31 @@ test.describe('Word Save Flow - Embedded Content @e2e @word', () => {
           return await callback(context);
         },
       };
+      // Task 010 / FR-04: the Word save path no longer calls `body.getOoxml()`. It reads the real
+      // .docx via `Office.context.document.getFileAsync(Office.FileType.Compressed, {sliceSize})`
+      // and assembles the slices. The pane also now obtains its adapter from `HostAdapterFactory`,
+      // whose `detectHostType()` reads `Office.context.host` — absent from these stubs, Stage 4
+      // threw INVALID_HOST and the pane never rendered. Both gaps are filled below.
+      // (code-review W-4, 2026-09-09.)
+      const docxBytes = new Uint8Array(4096);
+      docxBytes[0] = 0x50;
+      docxBytes[1] = 0x4b;
+      docxBytes[2] = 0x03;
+      docxBytes[3] = 0x04;
+      const mockWordFile = {
+        size: docxBytes.length,
+        sliceCount: 1,
+        getSliceAsync: (i: number, cb: (r: any) => void) =>
+          cb({ status: 'succeeded', value: { index: i, size: docxBytes.length, data: docxBytes }, error: null }),
+        closeAsync: (cb: () => void) => cb(),
+      };
       (window as any).Office = {
         context: {
+          host: 'Word',
+          document: {
+            getFileAsync: (_t: any, _o: any, cb: (r: any) => void) =>
+              cb({ status: 'succeeded', value: mockWordFile, error: null }),
+          },
           requirements: {
             isSetSupported: () => true,
           },
@@ -826,7 +875,9 @@ test.describe('Word Save Flow - Embedded Content @e2e @word', () => {
         onReady: (callback: (info: any) => void) => {
           callback({ host: 'Word', platform: 'PC' });
         },
-        HostType: { Word: 'Word' },
+        HostType: { Word: 'Word', Outlook: 'Outlook', Excel: 'Excel', PowerPoint: 'PowerPoint' },
+        FileType: { Text: 'text', Compressed: 'compressed', Pdf: 'pdf' },
+        AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' },
       };
     });
 
@@ -877,14 +928,39 @@ test.describe('Word Save Flow - Empty Document @e2e @word', () => {
           return await callback(context);
         },
       };
+      // Task 010 / FR-04: the Word save path no longer calls `body.getOoxml()`. It reads the real
+      // .docx via `Office.context.document.getFileAsync(Office.FileType.Compressed, {sliceSize})`
+      // and assembles the slices. The pane also now obtains its adapter from `HostAdapterFactory`,
+      // whose `detectHostType()` reads `Office.context.host` — absent from these stubs, Stage 4
+      // threw INVALID_HOST and the pane never rendered. Both gaps are filled below.
+      // (code-review W-4, 2026-09-09.)
+      const docxBytes = new Uint8Array(4096);
+      docxBytes[0] = 0x50;
+      docxBytes[1] = 0x4b;
+      docxBytes[2] = 0x03;
+      docxBytes[3] = 0x04;
+      const mockWordFile = {
+        size: docxBytes.length,
+        sliceCount: 1,
+        getSliceAsync: (i: number, cb: (r: any) => void) =>
+          cb({ status: 'succeeded', value: { index: i, size: docxBytes.length, data: docxBytes }, error: null }),
+        closeAsync: (cb: () => void) => cb(),
+      };
       (window as any).Office = {
         context: {
+          host: 'Word',
+          document: {
+            getFileAsync: (_t: any, _o: any, cb: (r: any) => void) =>
+              cb({ status: 'succeeded', value: mockWordFile, error: null }),
+          },
           requirements: { isSetSupported: () => true },
         },
         onReady: (callback: (info: any) => void) => {
           callback({ host: 'Word', platform: 'PC' });
         },
-        HostType: { Word: 'Word' },
+        HostType: { Word: 'Word', Outlook: 'Outlook', Excel: 'Excel', PowerPoint: 'PowerPoint' },
+        FileType: { Text: 'text', Compressed: 'compressed', Pdf: 'pdf' },
+        AsyncResultStatus: { Succeeded: 'succeeded', Failed: 'failed' },
       };
     });
 

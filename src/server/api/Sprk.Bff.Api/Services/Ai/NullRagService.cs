@@ -99,6 +99,28 @@ public sealed class NullRagService : IRagService
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    public Task<int> DeleteChunksBeyondCountAsync(
+        string tenantId,
+        string speFileId,
+        int keepChunkCount,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DeleteChunksBeyondCountAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        LogDisabled(nameof(DeleteSupersededFileChunksAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     public Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default)
@@ -115,27 +137,6 @@ public sealed class NullRagService : IRagService
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(GetIndexHealthAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-        string indexName,
-        string tenantId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(GetIndexedDocumentsAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public Task<int> DeleteIndexedDocumentAsync(
-        string indexName,
-        string documentId,
-        string tenantId,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(DeleteIndexedDocumentAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

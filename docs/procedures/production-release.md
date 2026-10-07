@@ -112,10 +112,12 @@ SpaarkeMaster contains **383 confirmed components** across these categories:
 | **AI Configuration** | sprk_aiactiontype, sprk_aichatcontextmap, sprk_aichatmessage, sprk_aichatsummary, sprk_aiknowledgedeployment, sprk_aiknowledgesource, sprk_aiknowledgetype, sprk_aimodeldeployment, sprk_aioutputtype, sprk_airetrievalmode, sprk_aiskilltype, sprk_aitooltype, sprk_analysisknowledge, sprk_analysisskill, sprk_analysistool |
 | **Document Management** | sprk_container, sprk_documenttype, sprk_fileversion, sprk_uploadcontext, sprk_attachmentartifact, sprk_emailartifact |
 | **Communication** | sprk_communicationaccount, sprk_communicationattachment, sprk_emailsaverule, sprk_analysisemailmetadata |
-| **Configuration** | sprk_chartdefinition, sprk_charttype, sprk_deliverytemplate, sprk_externalrecordaccess, sprk_externalserviceconfig, sprk_fieldmappingprofile, sprk_fieldmappingrule, sprk_gridconfiguration, sprk_speauditlog, sprk_specontainertypeconfig, sprk_speenvironment, sprk_userpreferences, sprk_workspacelayout |
+| **Configuration** | sprk_chartdefinition, sprk_charttype, sprk_deliverytemplate, sprk_externalrecordaccess, sprk_externalserviceconfig¹, sprk_fieldmappingprofile, sprk_fieldmappingrule, sprk_gridconfiguration, sprk_speauditlog, sprk_specontainertypeconfig, sprk_speenvironment, sprk_userpreferences, sprk_workspacelayout |
 | **Reference/Lookup** | sprk_accounttype_ref, sprk_contacttype_ref, sprk_countryregion_ref, sprk_eventtype_ref, sprk_mattersubtype_ref, sprk_mattertype_ref, sprk_organizationtype_ref, sprk_practicearea_ref, sprk_projecttype_ref, sprk_recordtype_ref, sprk_usertype_ref |
 | **Reporting** | sprk_report, sprk_reportcard, sprk_reportingentity, sprk_reportingview, sprk_kpiassessment |
 | **Other** | sprk_memo, sprk_processingjob, sprk_registrationrequest, sprk_timekeeper, sprk_outputtypes, sprk_analysisdeliverytype, sprk_analysisactiontype |
+
+¹ `sprk_externalserviceconfig` belonged to the retired `Spaarke.CustomApiProxy` plugin (deleted 2026-09-25, ADR-002). Nothing else in `src/` uses it; drop it from the migration once the table is removed from environments.
 
 **4 standard Microsoft entities** (metadata-only — only sprk_ customizations, not the full entity):
 
@@ -138,7 +140,7 @@ All `sprk_*` prefixed web resources including:
 
 These are built from source code and uploaded to dev before export.
 
-#### PCF Custom Controls (10 confirmed in-use)
+#### PCF Custom Controls (11 confirmed in-use)
 
 | Control | Used On |
 |---------|---------|
@@ -149,12 +151,13 @@ These are built from source code and uploaded to dev before export.
 | VisualHost | sprk_matter, sprk_project, sprk_workassignment main forms |
 | SemanticSearchControl | sprk_matter, sprk_project, sprk_invoice, sprk_workassignment main forms |
 | UpdateRelatedButton | Views |
-| EmailProcessingMonitor | Forms |
+| ~~EmailProcessingMonitor~~ | Forms — **deleted 2026-09-25**; remove from forms/solution |
 | ThemeEnforcer | Forms |
 | RegardingLink | sprk_event views (dataset binding) |
+| SpaarkeGridCustomizer | sprk_event and sprk_analysis home grids, as their customizer control (v1.1.1+: the regarding filing columns — the four `sprk_regarding{core}` roots, the ADR-024 pair and the non-root `sprk_regarding*` lookups, from `config/regarding-filing-columns.json` — are not editable inline; set by `scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1`, unified-access-control-r2 task 168). The grid configuration names it, so it MUST ship with SpaarkeMaster |
 
 **Excluded PCFs**:
-AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, SpaarkeGridCustomizer, LegalWorkspace (PCF), UniversalDatasetGrid (broken styles.css web resource reference).
+AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, LegalWorkspace (PCF), UniversalDatasetGrid (broken styles.css web resource reference).
 
 #### Other Components
 
@@ -455,7 +458,7 @@ A single import of SpaarkeMaster deploys:
 - 24 global option sets
 - 7 security roles
 - 21 environment variable definitions + values
-- 4 sitemaps, entity relationships, plugin registrations
+- 4 sitemaps, entity relationships (no Spaarke plugin registrations — ADR-002)
 
 **Note**: Environment variable **values** will be imported from dev. After first import to a new target, update environment-specific values (BFF URL, tenant ID, etc.) — see Phase 5 validation.
 
@@ -525,7 +528,6 @@ During development, individual web resources can be updated without re-exporting
 | `Deploy-WizardCodePages.ps1` | Upload 12 wizard/code page web resources |
 | `Deploy-EventsPage.ps1` | Upload sprk_eventspage HTML |
 | `Deploy-SpeAdminApp.ps1` | Upload sprk_speadmin HTML |
-| `Deploy-PCFWebResources.ps1` | Upload PCF bundle.js + CSS |
 | `Deploy-RibbonIcons.ps1` | Upload SVG ribbon icons |
 
 These are **development iteration tools**, not part of the production release flow. For production releases, all web resources are included in the SpaarkeMaster solution import.

@@ -30,7 +30,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/AccessCacheCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test pinning the cross-mode cache collision, flipped here.</dependency>
+      <dependency task="001" status="completed">Characterization test pinning the cross-mode cache collision, flipped here.</dependency>
     </dependencies>
   </context>
 

@@ -23,7 +23,7 @@
 
 Spaarke builds **custom AI capabilities** integrated into its SharePoint Document Access Platform (SDAP). The platform targets the legal document intelligence market with a unique approach: **no-code AI workflow composition** through our Playbook System -- something Microsoft does not offer.
 
-Our strategy is **"custom first, adopt selectively"**: we build on the same Azure primitives as Microsoft Foundry (Azure OpenAI, Azure AI Search, Document Intelligence) but maintain full control over implementation. This gives us domain-specific capabilities, multi-tenant isolation, and a Playbook System that serves as our primary product differentiator.
+Our strategy is **"custom first, adopt selectively"**: we build on the same Azure primitives as Microsoft Foundry (Azure OpenAI, Azure AI Search, Document Intelligence) but maintain full control over implementation. This gives us domain-specific capabilities, per-customer isolation, and a Playbook System that serves as our primary product differentiator.
 
 **Key strategic decisions:**
 
@@ -70,8 +70,8 @@ Our strategy is **"custom first, adopt selectively"**: we build on the same Azur
 │                                                                     │
 │  CUSTOM IMPLEMENTATIONS (Full Control)                              │
 │  ┌────────────────┐ ┌────────────────┐ ┌────────────────────────┐ │
-│  │ Orchestration  │ │ Tool Handlers  │ │ Multi-tenant RAG       │ │
-│  │ Engine         │ │ (C# plugins)   │ │ (tenantId isolation)   │ │
+│  │ Orchestration  │ │ Tool Handlers  │ │ Per-customer RAG       │ │
+│  │ Engine         │ │ (C# in BFF)    │ │ (dedicated AI Search)  │ │
 │  └────────────────┘ └────────────────┘ └────────────────────────┘ │
 │                                                                     │
 │  AZURE PRIMITIVES (Same as Microsoft Foundry Backend)               │
@@ -87,7 +87,7 @@ Our strategy is **"custom first, adopt selectively"**: we build on the same Azur
 | Aspect | Spaarke Custom | Microsoft Foundry (Managed) |
 |--------|---------------|-----------------------------|
 | **Playbook System** | Unique differentiator | No equivalent |
-| **Multi-tenant RAG** | Custom tenantId filtering | Unknown/limited |
+| **Per-customer RAG** | Dedicated AI Search service per customer | Unknown/limited |
 | **Domain-specific UI** | Custom PCF controls | Generic Copilot chat |
 | **Chunking strategy** | Full control | Pre-built strategies |
 | **Caching** | Redis with SHA256 keys | Managed (opaque) |
@@ -176,20 +176,52 @@ System scopes (SYS-*) are immutable Spaarke IP. Customer scopes (CUST-*) are ful
 
 ## Deployment Models
 
-### Model 1: Spaarke-Hosted
+> **Updated 2026-09-28 (D-12)**: Spaarke has **two deployment models**, and they differ in **one axis only:
+> which Azure tenant owns the customer's subscription.** Everything else is the same. There is no "shared",
+> "trial" or "SMB" tier, no 2a/2b split, and no Model 3. The previously documented "Model 1 = multi-tenant
+> with logical isolation (tenantId filtering)" is **retired** and was wrong on both counts.
 
-- AI resources in Spaarke's Azure subscription
-- Multi-tenant with logical isolation (tenantId filtering)
-- Spaarke meters usage and bills customer
+| | Dataverse environment | Azure tenant | Azure subscription + resource group |
+|---|---|---|---|
+| **Model 1** | dedicated, one per customer | **Spaarke's** | dedicated, one per customer |
+| **Model 2** | dedicated, one per customer | **the customer's own** | dedicated, one per customer |
+
+**Every Azure resource is dedicated per customer in both models** — App Service Plan, AI Search, Redis,
+Azure OpenAI, Cosmos, Key Vault, Storage, Service Bus, Application Insights, SPE container, Dataverse
+environment. Two named exceptions may stay shared, and each must carry a `customerId` discriminator:
+**Static Web Apps** (Office add-ins + external SPA) and **Content Safety**. The exception list is closed.
+
+Every customer also gets their **own Entra app registration for the BFF API** (D-13) — in Spaarke's tenant
+under Model 1, in the customer's own tenant under Model 2. There is no shared/multitenant BFF app
+registration.
+
+### Model 1: Spaarke's Azure tenant
+
+- Dedicated Dataverse environment per customer
+- Dedicated Azure resources per customer, in that customer's **own Azure subscription**, inside Spaarke's
+  Azure tenant
+- Spaarke meters usage and bills the customer; per-customer subscriptions make cost directly attributable
 - Guest Entra ID for customer users
 
-### Model 2: Customer-Hosted (BYOK)
+### Model 2: Customer's own Azure tenant (may include BYOK)
 
-- AI resources in customer's Azure subscription
-- Physical isolation (dedicated resources)
+- The same dedicated stamp, in the **customer's own** Azure tenant and subscription
 - Customer pays Azure directly
 - Internal Entra ID for users
-- Customer manages models via AI Foundry portal
+- Optionally BYOK — the customer manages models via the AI Foundry portal
+
+### What actually differs
+
+Only two things, and both follow from tenant ownership:
+
+| | Model 1 | Model 2 |
+|---|---|---|
+| **H0.5 admin consent** | not required | **required** |
+| **Azure Lighthouse delegation** | not required | **required** |
+
+⚠️ `tenantId` is **not** a customer discriminator. Under Model 1 every customer presents Spaarke's tenant
+GUID, so any filter, partition or cache prefix keyed on `tenantId` separates Entra tenants only — never
+customers. Isolation comes from the dedicated resource boundary, not from a filter.
 
 Both models have **identical feature parity**. The deployment model is a billing/governance decision, not a capability decision.
 
@@ -348,12 +380,16 @@ Enterprise readiness: version control, deployment automation (IaC), audit loggin
 | S1 | ~$250 | 2M chunks |
 | S2 | ~$1,000 | 10M chunks |
 
-### Model 1 Cost Recovery Options
+### Model 1 Billing Options
+
+Under Model 1 each customer has their **own Azure subscription** (in Spaarke's tenant), so Azure spend is
+**directly attributable per customer** — there is no shared infrastructure floor to allocate or recover.
+What remains is how Spaarke charges that attributable cost onward:
 
 | Approach | Description |
 |----------|-------------|
 | **Bundled** | AI included in subscription tier |
-| **Metered** | Track per-query, bill monthly |
+| **Metered** | Pass through the customer's own subscription spend, plus per-query metering |
 | **Hybrid** | Included queries + overage charges |
 
 ---

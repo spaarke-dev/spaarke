@@ -17,7 +17,7 @@
 | [api/](api/INDEX.md) | 8 | BFF API endpoints, filters, errors, jobs, resilience, DI, email, provisioning | 2026-04-05 | Verified (1 Current) |
 | [auth/](auth/INDEX.md) | 13 | OAuth, OBO, MSAL, scopes, Graph SDK, webhooks, access control, BFF URL | 2026-04-05 | Verified (2 Current) |
 | [caching/](caching/INDEX.md) | 3 | Redis distributed cache, request cache, token cache | 2026-04-05 | Verified |
-| [dataverse/](dataverse/INDEX.md) | 5 | Plugins, Web API, entity CRUD, relationships, polymorphic resolver | 2026-04-05 | Verified |
+| [dataverse/](dataverse/INDEX.md) | 5 | Write path (no plugins), Web API, entity CRUD, relationships, polymorphic resolver | 2026-04-05 | Verified |
 | [pcf/](pcf/INDEX.md) | 7 | Control lifecycle, errors, themes, queries, dialogs, **Fluent v9 modern theming**, **Canvas-vs-MDA disabled** | 2026-05-26 | Verified + 2 Current |
 | [ai/](ai/INDEX.md) | 3 | Streaming endpoints, text extraction, analysis scopes | 2026-04-05 | Verified |
 | [testing/](testing/INDEX.md) | 4 | Unit tests, mocking, integration/arch tests (god-class LOC ratchet RETIRED → `docs/standards/COMPONENT-COMPLEXITY.md`) | 2026-08-20 | Verified |
@@ -42,7 +42,7 @@ Load specific pattern files when implementing related features:
 | Authoring/modifying Fluent v9 UI (any surface) | `ui/fluent-v9-component-authoring.md` + `ui/fluent-v9-theming.md` (+ `ui/fluent-v9-portal-gotcha.md` if portal components) |
 | PCF shipped to both Canvas + MDA | `pcf/fluent-v9-canvas-vs-mda-disabled.md` |
 | Authoring in `Spaarke.UI.Components` (cross-surface) | `ui/fluent-v9-react-version-boundaries.md` + `ui/fluent-v9-component-authoring.md` |
-| Writing plugin | `dataverse/plugin-structure.md` |
+| About to write a plugin / rule a record must satisfy on save | `dataverse/plugin-structure.md` (redirect → server-side write path) |
 | Adding caching | `caching/distributed-cache.md` |
 | Writing tests | `testing/unit-test-structure.md` + `testing/mocking-patterns.md` |
 | Background jobs | `api/background-workers.md` |

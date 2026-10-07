@@ -1,5 +1,7 @@
 # PCF Orphan Cleanup — R1
 
+> **Portfolio**: [Project #1172](https://github.com/spaarke-dev/spaarke/issues/1172) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Phase 0 — Project Setup (created 2026-06-22)
 > **Type**: Quality / hygiene — source-tree cleanup + Dataverse cleanup + type-system alignment
 > **Predecessor research**: chat-routing-redesign-r1 TypeScript drift audit → triggered the inventory pass

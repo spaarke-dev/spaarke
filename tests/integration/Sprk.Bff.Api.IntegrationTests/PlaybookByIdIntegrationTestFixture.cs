@@ -16,7 +16,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -41,6 +43,9 @@ internal static class PlaybookByIdTestConstants
     public const string KnownGoodId = "11111111-2222-3333-4444-555555555555";
     public const string KnownMissingId = "00000000-0000-0000-0000-000000000000";
     public const string TenantBOnlyId = "99999999-9999-9999-9999-999999999999";
+
+    /// <summary>The warm-hit test's own id (kept separate so no other test pre-warms its cache slot).</summary>
+    public const string WarmHitId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
 }
 
 /// <summary>
@@ -61,6 +66,32 @@ public class PlaybookByIdIntegrationTestFixture : WebApplicationFactory<Program>
     /// Test stub for <see cref="IPlaybookLookupService"/>. Tracks invocation count + simulated latency.
     /// </summary>
     public StubPlaybookLookupService PlaybookLookup { get; } = new StubPlaybookLookupService();
+
+    /// <summary>
+    /// unified-access-control-r2 task 164: <c>GET /api/ai/playbooks/by-id/{id}</c> now carries the playbook-use
+    /// decision (PlaybookAuthorizationFilter, uniform-404 mode), which reads the playbook row through
+    /// <see cref="IPlaybookService"/> and, for a non-public one, asks the caller's own Dataverse rights through
+    /// <see cref="IAccessDataSource"/>. The ids this suite resolves are PUBLIC playbooks (as the shipped Document
+    /// Profile playbook is); every other id is unknown, so the decision denies it with the uniform 404 before the
+    /// lookup stub or the response cache is reached.
+    /// </summary>
+    public Mock<IPlaybookService> Playbooks { get; } = CreatePlaybookService();
+
+    private static Mock<IPlaybookService> CreatePlaybookService()
+    {
+        var publicIds = new HashSet<Guid>
+        {
+            Guid.Parse(PlaybookByIdTestConstants.KnownGoodId),
+            Guid.Parse(PlaybookByIdTestConstants.TenantBOnlyId),
+            Guid.Parse(PlaybookByIdTestConstants.WarmHitId),
+        };
+        var mock = new Mock<IPlaybookService>(MockBehavior.Loose);
+        mock.Setup(p => p.GetPlaybookAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => publicIds.Contains(id)
+                ? new PlaybookResponse { Id = id, Name = "Public playbook", IsPublic = true }
+                : null);
+        return mock;
+    }
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -177,6 +208,18 @@ public class PlaybookByIdIntegrationTestFixture : WebApplicationFactory<Program>
             // Substitute IPlaybookLookupService with the deterministic stub.
             services.RemoveAll<IPlaybookLookupService>();
             services.AddSingleton<IPlaybookLookupService>(PlaybookLookup);
+
+            // Task 164: the playbook-use decision's seams (see the Playbooks property). The access seam answers
+            // None for everything — this suite's resolvable ids are public, so no rights query is needed for them.
+            services.RemoveAll<IPlaybookService>();
+            services.AddSingleton(Playbooks.Object);
+            var noRights = new Mock<IAccessDataSource>(MockBehavior.Loose);
+            noRights.Setup(a => a.GetRecordAccessAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string userId, string _, Guid recordId, string? _, CancellationToken _) =>
+                    new AccessSnapshot { UserId = userId, ResourceId = recordId.ToString(), AccessRights = AccessRights.None });
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton(noRights.Object);
         });
     }
 

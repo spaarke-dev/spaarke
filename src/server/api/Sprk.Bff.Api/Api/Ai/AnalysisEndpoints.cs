@@ -1,4 +1,3 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Web;
@@ -8,6 +7,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
@@ -36,9 +36,12 @@ public static class AnalysisEndpoints
             .RequireAuthorization()
             .WithTags("AI Analysis");
 
-        // POST /api/ai/analysis/create - Create analysis record and associate N:N scopes
+        // POST /api/ai/analysis/create - Create analysis record and associate N:N scopes.
+        // Task 162 f1 (owner/main-session round 25 item 2): G5, matching promote — the row is created APP-ONLY, so the
+        // filter checks, as the caller, the Create privilege on sprk_analysis, "analysis.attach" (Read + AppendTo) on
+        // the document, the playbook-use decision for a body PlaybookId and Read on each associated scope row.
         group.MapPost("/create", CreateAnalysis)
-            .AddAnalysisExecuteAuthorizationFilter()
+            .AddAnalysisCreateAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("CreateAnalysis")
             .WithSummary("Create analysis record with scope associations")
@@ -50,33 +53,25 @@ public static class AnalysisEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
-        // POST /api/ai/analysis/fork - Fork-on-analysis (ai-advanced-capabilities-analysis-hub-r1
-        // task 021 / UQ-1 Option B / §6.5 Path A). ONE handler atomically composes existing
-        // server-owned seams: create sprk_analysis → mint a new session BOUND to it (task-020
-        // sprk_aichatsummary.sprk_analysis FK) → snapshot + archive the prior session. Returns
-        // { analysisId, newSessionId, archivedSessionId }; the client only stores newSessionId +
-        // shows the warning (server mints session GUIDs, so the fork MUST be server-side).
-        group.MapPost("/fork", ForkAnalysis)
-            .AddAiAuthorizationFilter()
-            .RequireRateLimiting("ai-batch")
-            .WithName("ForkAnalysis")
-            .WithSummary("Fork a running chat into a new Analysis + bound session")
-            .WithDescription("Atomically creates an sprk_analysis, mints a new chat session bound to it via the sprk_aichatsummary.sprk_analysis FK, and archives + snapshots the prior session (transcript preserved in the Cosmos store-of-record per ADR-040). Returns { analysisId, newSessionId, archivedSessionId }.")
-            .Produces<AnalysisForkResponse>(StatusCodes.Status201Created)
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(404)
-            .ProducesProblem(429)
-            .ProducesProblem(500);
+        // POST /api/ai/analysis/fork, POST /{analysisId}/save and POST /{analysisId}/export were DELETED by
+        // unified-access-control-r2 task 162 (owner round 10 item 1): none had a caller in the repo and none
+        // is in a published API description (src/solutions/CopilotAgent/spaarke-bff-openapi.yaml publishes
+        // only /create and GET /{analysisId}). Each authorized nothing about the records it read or wrote
+        // (route authorization sweep 2026-10-02, findings #1, #50, #51). Evidence:
+        // projects/unified-access-control-r2/notes/task-162-ai-analysis-route-authorization.md §2.
 
         // POST /api/ai/analysis/promote - Explicit promotion (ai-advanced-capabilities-analysis-hub-r1
-        // task 023 / spec FR-07 / two-tier session model). Lighter sibling of /fork: binds an
-        // EXISTING loose session to a NEW sprk_analysis via the task-020 FK — NO new session mint, NO
-        // archive. A casual/ad-hoc chat is NEVER auto-promoted; this is the only path that associates
-        // a session with an sprk_analysis after the fact.
+        // task 023 / spec FR-07 / two-tier session model): binds an EXISTING loose session to a NEW
+        // sprk_analysis via the task-020 FK — NO new session mint, NO archive. A casual/ad-hoc chat is
+        // NEVER auto-promoted; this is the only path that associates a session with an sprk_analysis
+        // after the fact.
+        //
+        // Task 162 (sweep finding #22): the filter checks, as the caller, the Create privilege on
+        // sprk_analysis and "analysis.attach" (Read + AppendTo) on the body document and regarding record,
+        // plus the playbook-use decision; the handler checks the session's owner and the session-derived
+        // document (G5: check as the user, then the app writes).
         group.MapPost("/promote", PromoteSession)
-            .AddAiAuthorizationFilter()
+            .AddAnalysisPromoteAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("PromoteSession")
             .WithSummary("Promote a loose chat session into a new, named Analysis")
@@ -89,9 +84,13 @@ public static class AnalysisEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
-        // POST /api/ai/analysis/execute - Execute new analysis with SSE streaming
+        // POST /api/ai/analysis/execute - Execute new analysis with SSE streaming.
+        // Task 162 (sweep finding #52): Read on every document first (unchanged), then the run filter —
+        // Write on every document for the document-profile branch or a side-effecting playbook, and the
+        // playbook-use decision for any other playbook.
         group.MapPost("/execute", ExecuteAnalysis)
             .AddAnalysisExecuteAuthorizationFilter()
+            .AddAnalysisRunAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("ExecuteAnalysis")
             .WithSummary("Execute document analysis with SSE streaming")
@@ -104,37 +103,10 @@ public static class AnalysisEndpoints
             .ProducesProblem(500)
             .ProducesProblem(503);
 
-        // POST /api/ai/analysis/{analysisId}/save - Save working document to SPE
-        group.MapPost("/{analysisId:guid}/save", SaveWorkingDocument)
-            .AddAnalysisRecordAuthorizationFilter()
-            .RequireRateLimiting("ai-batch")
-            .WithName("SaveAnalysisDocument")
-            .WithSummary("Save working document to SharePoint Embedded")
-            .WithDescription("Saves the analysis working document to SPE and creates a new Document record in Dataverse.")
-            .Produces<SavedDocumentResult>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(404)
-            .ProducesProblem(429)
-            .ProducesProblem(500);
-
-        // POST /api/ai/analysis/{analysisId}/export - Export analysis output
-        group.MapPost("/{analysisId:guid}/export", ExportAnalysis)
-            .AddAnalysisRecordAuthorizationFilter()
-            .RequireRateLimiting("ai-batch")
-            .WithName("ExportAnalysis")
-            .WithSummary("Export analysis to various destinations")
-            .WithDescription("Exports analysis output as email, Teams message, PDF, or DOCX.")
-            .Produces<ExportResult>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(403)
-            .ProducesProblem(404)
-            .ProducesProblem(429)
-            .ProducesProblem(500);
-
-        // GET /api/ai/analysis/{analysisId} - Get analysis with history
+        // GET /api/ai/analysis/{analysisId} - Get analysis with history.
+        // Task 162 (sweep finding #2, GitHub #233 item 1): the caller must hold Read on EVERY populated
+        // anchor (parent) record of the analysis; any failure, an unknown id and a handler
+        // KeyNotFoundException all answer the same uniform 404.
         group.MapGet("/{analysisId:guid}", GetAnalysis)
             .AddAnalysisRecordAuthorizationFilter()
             .WithName("GetAnalysis")
@@ -155,25 +127,16 @@ public static class AnalysisEndpoints
     private static async Task<IResult> CreateAnalysis(
         CreateAnalysisRequest request,
         IAnalysisDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<AnalysisOrchestrationService> logger,
+        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Name))
+        // The same validator the authorization filter runs first (task 162 f1).
+        var invalid = ValidateCreateRequest(request);
+        if (invalid is not null)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: "Analysis name is required.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
-        }
-
-        if (request.DocumentId == Guid.Empty)
-        {
-            return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: "A valid documentId is required.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+            return invalid;
         }
 
         logger.LogInformation(
@@ -183,11 +146,28 @@ public static class AnalysisEndpoints
 
         try
         {
+            // Task 146: the analysis is a child of its document — owned by the document's team (the named Secure team
+            // for a document of a secure record). A refusal creates nothing and is a 409 with a stable reason code.
+            var owner = await ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                    new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.DocumentId) })
+                    with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+                cancellationToken);
+            if (!owner.IsOwned)
+            {
+                logger.LogWarning(
+                    "Refused analysis create for document {DocumentId}: {Code} {Reason}",
+                    request.DocumentId, owner.RefusalCode, owner.Reason);
+                return AnalysisOwnerRefusal(owner);
+            }
+
             // Step 1: Create the sprk_analysis record
             var analysisId = await dataverseService.CreateAnalysisAsync(
                 request.DocumentId,
                 request.Name,
                 playbookId: request.PlaybookId,
+                owningTeamId: owner.OwningTeamId,
+                createdByPersonId: owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded on the app-only create
                 ct: cancellationToken);
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
@@ -291,14 +271,13 @@ public static class AnalysisEndpoints
         // R7 Wave 4 (FR-11): PlaybookId is REQUIRED for the canonical orchestrator path.
         // The legacy raw-OpenAI/ActionId-only path was deleted by task 042 (no transition shim
         // per spec Q6). All Analysis Code Page flows always supply a PlaybookId per the contract.
+        // Task 162: on the mapped route, AnalysisAuthorizationFilter's run mode returns this same 400 before any
+        // lookup, so a request reaches this branch only when the handler runs without that filter (a direct call,
+        // or the filter removed from the chain). One constant for both.
         if (!request.PlaybookId.HasValue)
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new
-            {
-                error = "PlaybookId is required. The legacy ActionId-only analysis path was removed by R7 FR-11. " +
-                        "Provide a PlaybookId referencing an sprk_analysisplaybook record."
-            }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = PlaybookIdRequiredMessage }, cancellationToken);
             return;
         }
 
@@ -402,7 +381,7 @@ public static class AnalysisEndpoints
                 var document = await documentLoader.GetDocumentAsync(documentId, cancellationToken);
                 if (document != null)
                 {
-                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, context, cancellationToken);
+                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
                     documentContext = new DocumentContext
                     {
                         DocumentId = Guid.TryParse(document.Id, out var docGuid) ? docGuid : request.DocumentIds[0],
@@ -562,105 +541,26 @@ public static class AnalysisEndpoints
     }
 
     /// <summary>
-    /// Save working document to SPE and create Document record.
-    /// POST /api/ai/analysis/{analysisId}/save
+    /// The 400 body text for an execute request with no PlaybookId. Shared by the handler and by
+    /// AnalysisAuthorizationFilter's run mode (task 162), so the two can never drift.
     /// </summary>
-    private static async Task<IResult> SaveWorkingDocument(
-        Guid analysisId,
-        AnalysisSaveRequest request,
-        IAnalysisOrchestrationService orchestrationService,
-        ILogger<AnalysisOrchestrationService> logger,
-        CancellationToken cancellationToken)
-    {
-        logger.LogInformation("Saving working document for analysis {AnalysisId}, FileName={FileName}, Format={Format}",
-            analysisId, request.FileName, request.Format);
-
-        try
-        {
-            var result = await orchestrationService.SaveWorkingDocumentAsync(analysisId, request, cancellationToken);
-
-            logger.LogInformation("Saved document {DocumentId} for analysis {AnalysisId}",
-                result.DocumentId, analysisId);
-
-            return Results.Ok(result);
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound(new { error = $"Analysis {analysisId} not found" });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-    }
-
-    /// <summary>
-    /// Export analysis output to various destinations.
-    /// POST /api/ai/analysis/{analysisId}/export
-    /// </summary>
-    private static async Task<IResult> ExportAnalysis(
-        Guid analysisId,
-        AnalysisExportRequest request,
-        IAnalysisOrchestrationService orchestrationService,
-        IOptions<AnalysisOptions> options,
-        ILogger<AnalysisOrchestrationService> logger,
-        CancellationToken cancellationToken)
-    {
-        // Validate export format is enabled
-        var analysisOptions = options.Value;
-        var validationError = ValidateExportFormat(request.Format, analysisOptions);
-        if (validationError != null)
-        {
-            return Results.BadRequest(new { error = validationError });
-        }
-
-        logger.LogInformation("Exporting analysis {AnalysisId} to {Format}",
-            analysisId, request.Format);
-
-        try
-        {
-            var result = await orchestrationService.ExportAnalysisAsync(analysisId, request, cancellationToken);
-
-            if (!result.Success)
-            {
-                logger.LogWarning("Export failed for analysis {AnalysisId}: {Error}",
-                    analysisId, result.Error);
-                return Results.BadRequest(new { error = result.Error ?? "Export failed" });
-            }
-
-            // File formats (Docx, Pdf) return bytes for direct browser download.
-            if (result.FileBytes != null)
-            {
-                logger.LogInformation("Streaming {Format} export for analysis {AnalysisId}: {Size} bytes",
-                    request.Format, analysisId, result.FileBytes.Length);
-                return Results.File(
-                    result.FileBytes,
-                    result.FileContentType ?? "application/octet-stream",
-                    result.FileName ?? $"analysis.{request.Format.ToString().ToLowerInvariant()}");
-            }
-
-            // Other formats (Email, Teams) return JSON result.
-            logger.LogInformation("Exported analysis {AnalysisId} to {Format}: Status={Status}",
-                analysisId, request.Format, result.Details?.Status);
-            return Results.Ok(result);
-        }
-        catch (KeyNotFoundException)
-        {
-            return Results.NotFound(new { error = $"Analysis {analysisId} not found" });
-        }
-        catch (InvalidOperationException ex)
-        {
-            return Results.BadRequest(new { error = ex.Message });
-        }
-    }
+    internal const string PlaybookIdRequiredMessage =
+        "PlaybookId is required. The legacy ActionId-only analysis path was removed by R7 FR-11. " +
+        "Provide a PlaybookId referencing an sprk_analysisplaybook record.";
 
     /// <summary>
     /// Get analysis record with chat history.
     /// GET /api/ai/analysis/{analysisId}
     /// </summary>
+    /// <remarks>
+    /// Task 162: AnalysisAuthorizationFilter (AnalysisAccess mode) has already required Read on every
+    /// anchor of the analysis. An analysis that disappears between that check and this read answers the
+    /// SAME uniform 404 as an unknown or unreadable id — never a body that echoes the id.
+    /// </remarks>
     private static async Task<IResult> GetAnalysis(
         Guid analysisId,
         IAnalysisOrchestrationService orchestrationService,
+        HttpContext httpContext,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
     {
@@ -673,7 +573,7 @@ public static class AnalysisEndpoints
         }
         catch (KeyNotFoundException)
         {
-            return Results.NotFound(new { error = $"Analysis {analysisId} not found" });
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
     }
 
@@ -810,21 +710,6 @@ public static class AnalysisEndpoints
         }
 
         return result.Entities[0].Id;
-    }
-
-    /// <summary>
-    /// Validate export format against enabled options.
-    /// </summary>
-    private static string? ValidateExportFormat(ExportFormat format, AnalysisOptions options)
-    {
-        return format switch
-        {
-            ExportFormat.Email when !options.EnableEmailExport => "Email export is disabled",
-            ExportFormat.Teams when !options.EnableTeamsExport => "Teams export is disabled",
-            ExportFormat.Pdf when !options.EnablePdfExport => "PDF export is disabled",
-            ExportFormat.Docx when !options.EnableDocxExport => "DOCX export is disabled",
-            _ => null
-        };
     }
 
     /// <summary>
@@ -1087,7 +972,7 @@ public static class AnalysisEndpoints
         => DocumentProfileOutputMapper.BuildFields(root, fileName, parentEntity, logger);
 
     // =========================================================================
-    // Fork-on-analysis (task 021 / UQ-1 Option B / §6.5 Path A)
+    // Shared by promote (the fork endpoint that also used these was deleted by task 162)
     // =========================================================================
 
     /// <summary>Logical name of the Analysis anchor entity — used for compensation delete.</summary>
@@ -1095,196 +980,11 @@ public static class AnalysisEndpoints
 
     /// <summary>
     /// HostContext.EntityType sentinel that flags an Analysis-owned chat session. Setting this on
-    /// the new session's <see cref="ChatHostContext"/> is what makes
-    /// <c>ChatDataverseRepository.CreateSessionAsync</c> write the <c>sprk_aichatsummary.sprk_analysis</c>
+    /// a session's <see cref="ChatHostContext"/> is what makes
+    /// <c>ChatDataverseRepository</c> write the <c>sprk_aichatsummary.sprk_analysis</c>
     /// lookup FK (task 020, spec FR-05). MUST match <c>ChatDataverseRepository.AnalysisHostContextEntityType</c>.
     /// </summary>
     private const string AnalysisHostContextEntityType = "sprk_analysisoutput";
-
-    /// <summary>
-    /// Fork-on-analysis. <c>POST /api/ai/analysis/fork</c>.
-    ///
-    /// <para>
-    /// Composes existing server-owned seams in ONE handler (ADR-013 — no <c>Services/Ai/</c>
-    /// orchestration fork; consumes <see cref="IAnalysisDataverseService"/>,
-    /// <see cref="ChatSessionManager"/>, <see cref="IChatDataverseRepository"/>):
-    /// </para>
-    /// <list type="number">
-    ///   <item><b>Snapshot + verify prior</b> — <see cref="ChatSessionManager.GetSessionAsync"/>
-    ///     materialises the prior transcript into the Cosmos store-of-record (ADR-040 Path A) and
-    ///     confirms existence <i>before</i> any write, so a missing prior can never orphan a new
-    ///     Analysis.</item>
-    ///   <item><b>Create Analysis</b> — <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>.</item>
-    ///   <item><b>Mint bound session</b> — <see cref="ChatSessionManager.CreateSessionAsync"/> with
-    ///     an Analysis <see cref="ChatHostContext"/> so the task-020 <c>sprk_analysis</c> FK write
-    ///     fires. If the mint throws, the Analysis is compensated (deleted) — no orphan.</item>
-    ///   <item><b>Archive prior</b> — <see cref="IChatDataverseRepository.ArchiveSessionAsync"/>
-    ///     (the durable <c>sprk_isarchived</c> flip is task 022's scope, AIPL-054). We deliberately
-    ///     do NOT call <see cref="ChatSessionManager.DeleteSessionAsync"/> — that hard-deletes the
-    ///     Cosmos transcript (GDPR erasure path) and would LOSE the prior transcript, both the
-    ///     forbidden "archived-but-transcript-lost" orphan and an ADR-040 violation.</item>
-    /// </list>
-    ///
-    /// <para>
-    /// Partial-failure model mirrors <c>CreateSessionAsync</c> (Redis authoritative; a Dataverse
-    /// write failure is tolerated, not fatal): the FK bind failing inside the mint leaves the new
-    /// session live in Redis (bound in-memory), not orphaned; the archive-marker failing leaves the
-    /// fork durable with the transcript preserved. The only compensating rollback is deleting the
-    /// Analysis when the mint itself throws.
-    /// </para>
-    /// </summary>
-    private static async Task<IResult> ForkAnalysis(
-        AnalysisForkRequest request,
-        IAnalysisDataverseService analysisService,
-        ChatSessionManager sessionManager,
-        IChatDataverseRepository chatRepository,
-        IGenericEntityService entityService,
-        HttpContext httpContext,
-        ILogger<AnalysisOrchestrationService> logger,
-        CancellationToken cancellationToken)
-    {
-        // ---- Validate ----
-        if (request is null || string.IsNullOrWhiteSpace(request.PriorSessionId))
-        {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A priorSessionId is required.");
-        }
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "Analysis name is required.");
-        }
-        if (request.DocumentId == Guid.Empty)
-        {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A valid documentId is required.");
-        }
-
-        var tenantId = ExtractTenantId(httpContext);
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                "Tenant ID not found in token claims (tid).");
-        }
-
-        // Issue #863 — the fork's owner. This route takes its session id from the BODY, so
-        // SessionOwnershipFilter (route-value based) does not cover it; the check is here instead
-        // and the route is enumerated in SessionOwnershipGuardTests.BodyScopedSessionRoutes.
-        var forkOwnerOid = CallerResolution.ResolveObjectId(httpContext.User);
-        if (string.IsNullOrEmpty(forkOwnerOid))
-        {
-            return AnalysisProblem(StatusCodes.Status401Unauthorized, "Unauthorized",
-                "User identity not found.");
-        }
-
-        var correlationId = httpContext.TraceIdentifier;
-
-        // ---- Step 1: snapshot + verify the prior session (read-only — NO mutation yet) ----
-        var priorSession = await sessionManager.GetSessionAsync(tenantId, request.PriorSessionId, cancellationToken);
-
-        // Issue #863 — forking READS the prior session's messages into a new one, so it needs the
-        // same ownership test as any other read. Without it, naming a colleague's session id here
-        // copies their conversation into a session you own. Not-found and not-yours are one answer
-        // so the route cannot be used to probe which session ids exist.
-        if (priorSession is not null
-            && !string.Equals(priorSession.OwnerOid, forkOwnerOid, StringComparison.Ordinal))
-        {
-            logger.LogWarning(
-                "Fork DENIED: prior session {SessionId} (tenant={TenantId}) is not owned by the caller. " +
-                "Answered 404 (corr={CorrelationId}).",
-                request.PriorSessionId, tenantId, correlationId);
-            priorSession = null;
-        }
-
-        if (priorSession is null)
-        {
-            // Nothing has been written yet — a missing/expired prior cannot orphan anything.
-            return Results.NotFound(new { error = "Prior session not found", correlationId });
-        }
-        var priorMessageCount = priorSession.Messages?.Count ?? 0;
-
-        // ---- Step 2: create the new Analysis anchor ----
-        Guid analysisId;
-        try
-        {
-            analysisId = await analysisService.CreateAnalysisAsync(
-                request.DocumentId, request.Name, playbookId: request.PlaybookId, ct: cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "Fork: failed to create Analysis for document {DocumentId} (corr={CorrelationId})",
-                request.DocumentId, correlationId);
-            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                "Failed to create the analysis record.");
-        }
-
-        // ---- Step 3: mint the new session BOUND to the Analysis (task-020 FK write fires) ----
-        ChatSession newSession;
-        try
-        {
-            var analysisHostContext = new ChatHostContext(
-                EntityType: AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString(),
-                EntityName: request.Name,
-                WorkspaceType: request.HostContext?.WorkspaceType,
-                PageType: request.HostContext?.PageType);
-
-            newSession = await sessionManager.CreateSessionAsync(
-                tenantId,
-                // Issue #863 — the forked session belongs to the user who forked it. Resolved above
-                // (non-null past the 401 guard); never inherited from the prior session, whose owner
-                // may be someone else entirely on a shared Analysis.
-                forkOwnerOid,
-                request.DocumentId.ToString(),
-                request.PlaybookId,
-                analysisHostContext,
-                cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            // Compensation: the Analysis was created but the new session could not be minted
-            // (e.g. Redis hot-cache unavailable — CreateSessionAsync tolerates a Dataverse write
-            // failure but not a cache-write failure). Roll back the Analysis so no dangling anchor
-            // remains. Compensation uses CancellationToken.None so client abort cannot skip cleanup.
-            logger.LogError(ex,
-                "Fork: new-session mint failed after Analysis {AnalysisId} create — compensating by deleting the Analysis (corr={CorrelationId})",
-                analysisId, correlationId);
-            try
-            {
-                await entityService.DeleteAsync(AnalysisEntityLogicalName, analysisId, CancellationToken.None);
-            }
-            catch (Exception compensationEx)
-            {
-                logger.LogError(compensationEx,
-                    "Fork: COMPENSATION FAILED — Analysis {AnalysisId} may be orphaned; manual cleanup required (corr={CorrelationId})",
-                    analysisId, correlationId);
-            }
-            return AnalysisProblem(StatusCodes.Status500InternalServerError, "Internal Server Error",
-                "Failed to create the forked chat session.");
-        }
-
-        // ---- Step 4: archive the prior session (transcript-preserving; see method remarks) ----
-        try
-        {
-            await chatRepository.ArchiveSessionAsync(tenantId, request.PriorSessionId, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal — the fork is already durable (Analysis + new bound session exist) and the
-            // prior transcript is preserved in the Cosmos store-of-record. The durable archived-flag
-            // flip is task 022 (AIPL-054); the archive-marker call is best-effort here.
-            logger.LogWarning(ex,
-                "Fork: prior-session archive-marker write failed for the archived session — fork already durable " +
-                "(analysis={AnalysisId} newSession={NewSessionId}); transcript preserved; durable archived-flag is task 022 (corr={CorrelationId})",
-                analysisId, newSession.SessionId, correlationId);
-        }
-
-        logger.LogInformation(
-            "Fork complete: analysis={AnalysisId} newSession={NewSessionId} archivedPriorMsgs={PriorMessageCount} (corr={CorrelationId})",
-            analysisId, newSession.SessionId, priorMessageCount, correlationId);
-
-        return Results.Created(
-            $"/api/ai/analysis/{analysisId}",
-            new AnalysisForkResponse(analysisId, newSession.SessionId, request.PriorSessionId));
-    }
 
     // =========================================================================
     // Explicit promotion (task 023 / spec FR-07 / two-tier session model)
@@ -1294,41 +994,50 @@ public static class AnalysisEndpoints
     /// Explicit promotion. <c>POST /api/ai/analysis/promote</c>.
     ///
     /// <para>
-    /// Lighter sibling of <see cref="ForkAnalysis"/>: BIND-only, no mint, no archive. Composes the
-    /// SAME two seams the fork endpoint uses (<see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>
-    /// + the task-020 FK write, here via <see cref="ChatSessionManager.PromoteSessionToAnalysisAsync"/>),
-    /// but never creates a second session and never archives the original — the loose session simply
-    /// BECOMES Analysis-owned in place, keeping its session id.
+    /// BIND-only, no mint, no archive. Composes <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>
+    /// + the task-020 FK write (via <see cref="ChatSessionManager.PromoteSessionToAnalysisAsync"/>), and never
+    /// creates a second session — the loose session simply BECOMES Analysis-owned in place, keeping its id.
     /// </para>
     /// <list type="number">
     ///   <item><b>Fetch + verify</b> — <see cref="ChatSessionManager.GetSessionAsync"/> confirms the
-    ///     loose session exists and is not already Analysis-owned, before any write.</item>
+    ///     loose session exists, is the CALLER's, and is not already Analysis-owned, before any write.</item>
     ///   <item><b>Create Analysis</b> — <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>,
     ///     document-anchored (the request's <c>documentId</c> or the session's own).</item>
     ///   <item><b>Bind in place</b> — <see cref="ChatSessionManager.PromoteSessionToAnalysisAsync"/>
     ///     writes the <c>sprk_analysis</c> FK onto the EXISTING <c>sprk_aichatsummary</c> row and
     ///     updates the session's <see cref="ChatHostContext"/>. If the bind throws or the session
-    ///     vanished, the Analysis is compensated (deleted) — no orphan, same discipline as the fork.</item>
+    ///     vanished, the Analysis is compensated (deleted) — no orphan.</item>
     /// </list>
+    /// <para>
+    /// <b>Authorization (unified-access-control-r2 task 162, sweep finding #22; G5).</b> The row is created
+    /// APP-ONLY, so the caller's rights are checked first. <c>AddAnalysisPromoteAuthorizationFilter</c> checks
+    /// the Create privilege on sprk_analysis, "analysis.attach" on the body document and regarding record, and
+    /// the playbook-use decision. Two checks depend on the SESSION and so run here, after
+    /// <see cref="ChatSessionManager.GetSessionAsync"/> (the issue #863 precedent; listed in
+    /// SessionOwnershipGuardTests.BodyScopedSessionRoutes): the session must be the caller's — a session
+    /// owned by someone else, or with no owner, answers exactly like a missing one, and that check runs BEFORE
+    /// the already-bound 400 so the 400 cannot reveal another user's session — and, when the body names no
+    /// document, "analysis.attach" on the session's own document — the same check as the body document's, evaluated
+    /// by the same evaluator (<see cref="AnalysisAuthorizationFilter.EvaluateOutsideFilterAsync"/>), so its deny is the
+    /// identical body. The session-derived PlaybookId is NOT checked here: it was chosen at session create (task 164's
+    /// surface).
+    /// </para>
     /// </summary>
     private static async Task<IResult> PromoteSession(
         AnalysisPromoteRequest request,
         IAnalysisDataverseService analysisService,
         ChatSessionManager sessionManager,
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         HttpContext httpContext,
         ILogger<AnalysisOrchestrationService> logger,
         CancellationToken cancellationToken)
     {
-        // ---- Validate ----
-        if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
+        // ---- Validate (the same validator the authorization filter runs first) ----
+        var invalid = ValidatePromoteRequest(request, out var regarding);
+        if (invalid is not null)
         {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A sessionId is required.");
-        }
-        if (string.IsNullOrWhiteSpace(request.Name))
-        {
-            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                "A name is required to promote a session to an Analysis.");
+            return invalid;
         }
 
         var tenantId = ExtractTenantId(httpContext);
@@ -1338,10 +1047,31 @@ public static class AnalysisEndpoints
                 "Tenant ID not found in token claims (tid).");
         }
 
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(callerOid))
+        {
+            return AnalysisProblem(StatusCodes.Status401Unauthorized, "Unauthorized",
+                "User identity not found.");
+        }
+
         var correlationId = httpContext.TraceIdentifier;
 
         // ---- Step 1: fetch + verify the loose session (read-only — NO mutation yet) ----
         var session = await sessionManager.GetSessionAsync(tenantId, request.SessionId, cancellationToken);
+
+        // Task 162 — the owner check runs IMMEDIATELY after the read, before any other answer that depends
+        // on the session. Not-yours (including a session with no recorded owner) and not-found are ONE
+        // answer, so the route cannot be used to probe which session ids exist or are bound.
+        if (session is not null
+            && !string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "Promote DENIED: session {SessionId} (tenant={TenantId}) is not owned by the caller. " +
+                "Answered 404 (corr={CorrelationId}).",
+                request.SessionId, tenantId, correlationId);
+            session = null;
+        }
+
         if (session is null)
         {
             // Nothing has been written yet — a missing/expired session cannot orphan anything.
@@ -1358,29 +1088,11 @@ public static class AnalysisEndpoints
                 "This session is already bound to an Analysis and cannot be promoted again.");
         }
 
-        // ---- Resolve the anchor: a regarding target (FR-D9) and/or a document ----
-        // FR-D9 ("Set related record"): promotion may associate the new Analysis to an EXISTING
-        // matter/project (ADR-024 regarding) so it surfaces on that record's Analyses tab, OR anchor it
-        // to a document (the "regarding = document" path, via sprk_documentid). At least one is required.
-        AnalysisRegardingTarget? regarding = null;
-        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingEntityId is not null)
-        {
-            // Both parts must be present; the entity type is a closed set (matter | project) — a document
-            // association is expressed via DocumentId, not here.
-            var entityType = request.RegardingEntityType?.Trim().ToLowerInvariant();
-            if (entityType is not ("sprk_matter" or "sprk_project") ||
-                request.RegardingEntityId is not { } regId || regId == Guid.Empty)
-            {
-                return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                    "A regarding association requires regardingEntityType ('sprk_matter' or 'sprk_project') and a non-empty regardingEntityId.");
-            }
-            regarding = new AnalysisRegardingTarget(entityType, regId, request.RegardingEntityName);
-        }
-
         // Document anchor: prefer the request's explicit documentId; fall back to the session's own
         // DocumentId (set at session-create time from the chat's attached document, if any). Now OPTIONAL
         // — a document-less analysis is valid when a regarding target was supplied (FR-D9 relaxation).
         Guid? documentId = null;
+        var documentIsSessionDerived = false;
         if (request.DocumentId is { } requestDocId && requestDocId != Guid.Empty)
         {
             documentId = requestDocId;
@@ -1390,6 +1102,7 @@ public static class AnalysisEndpoints
                  sessionDocId != Guid.Empty)
         {
             documentId = sessionDocId;
+            documentIsSessionDerived = true;
         }
 
         if (documentId is null && regarding is null)
@@ -1398,13 +1111,58 @@ public static class AnalysisEndpoints
                 "This session has no associated document; promoting to an Analysis requires a documentId or a regarding target (matter/project).");
         }
 
-        // ---- Step 2: create the new Analysis anchor ----
+        // Task 162 (G5) — the filter checked a BODY document; a session-derived one is checked here, as the
+        // caller, with the SAME check (AttachDocumentCheck) evaluated by the SAME evaluator the filter uses, so its deny
+        // is byte-identical to a body-document deny in every case — a missing right, a missing row, a rights-query
+        // fault (task 162 f1, verifier items 7 and 9). A deny or a fault writes nothing.
+        if (documentIsSessionDerived)
+        {
+            var denied = await AnalysisAuthorizationFilter.EvaluateOutsideFilterAsync(
+                httpContext,
+                FinanceAuthorizationTargets.Authorize(
+                    AnalysisAuthorizationFilter.AttachDocumentCheck(documentId!.Value, "session.documentId")),
+                FinanceDenial.Forbidden,
+                logger);
+
+            if (denied is not null)
+            {
+                logger.LogWarning(
+                    "Promote DENIED: analysis.attach on the session's document was refused (session {SessionId}, corr={CorrelationId})",
+                    request.SessionId, correlationId);
+                return denied;
+            }
+        }
+
+        // ---- Step 2: create the new Analysis anchor, owned per task 146 ----
+        // Its parents are its document AND its regarding record: secure-if-any, so an analysis of an ordinary
+        // document filed to a secure matter is the named Secure team's. Resolved before any write; a refusal is a 409
+        // and the session is untouched; a Dataverse fault propagates as the request's 5xx.
+        var owner = await ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+            {
+                documentId is { } docId
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", docId)
+                    : null,
+                regarding is not null
+                    ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regarding.EntityLogicalName, regarding.RecordId)
+                    : null,
+            }) with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User) },
+            cancellationToken);
+        if (!owner.IsOwned)
+        {
+            logger.LogWarning(
+                "Promote refused: no owner for session {SessionId}'s analysis ({Code}) (corr={CorrelationId})",
+                request.SessionId, owner.RefusalCode, correlationId);
+            return AnalysisOwnerRefusal(owner);
+        }
+
         Guid analysisId;
         try
         {
             analysisId = await analysisService.CreateAnalysisAsync(
                 documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId,
-                regarding: regarding, ct: cancellationToken);
+                regarding: regarding, owningTeamId: owner.OwningTeamId, createdByPersonId: owner.CreatedByPerson,
+                ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1436,7 +1194,7 @@ public static class AnalysisEndpoints
         {
             // The session disappeared between the read (Step 1) and the bind (Step 3) — e.g. a Redis
             // eviction racing the request. Compensate the Analysis so no dangling anchor remains
-            // (same no-orphan discipline as ForkAnalysis's mint-failure compensation).
+            // (the no-orphan discipline the deleted fork route also used for its mint failure).
             logger.LogWarning(
                 "Promote: session {SessionId} disappeared before bind — compensating by deleting Analysis {AnalysisId} (corr={CorrelationId})",
                 request.SessionId, analysisId, correlationId);
@@ -1469,7 +1227,67 @@ public static class AnalysisEndpoints
         }
     }
 
-    /// <summary>Builds a canonical ProblemDetails result for the fork endpoint.</summary>
+    /// <summary>
+    /// The /create body validation, run by BOTH the handler and AnalysisAuthorizationFilter's create mode (task 162 f1)
+    /// so a malformed body gets its 400 before any rights query and the two can never drift. The texts are the
+    /// handler's existing ones. (The filter first answers a body with no document with the 400 it always gave, so
+    /// every malformed body's response is unchanged.)
+    /// </summary>
+    internal static IResult? ValidateCreateRequest(CreateAnalysisRequest? request)
+    {
+        if (request is null || string.IsNullOrWhiteSpace(request.Name))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "Analysis name is required.");
+        }
+
+        if (request.DocumentId == Guid.Empty)
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A valid documentId is required.");
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The promote body validation, run by BOTH the handler and AnalysisAuthorizationFilter's promote mode
+    /// (task 162) so a malformed body gets its 400 before any rights query and the two can never drift.
+    /// Returns the 400 for the first failing rule, or <c>null</c>; <paramref name="regarding"/> is the parsed
+    /// regarding target (type trimmed and lower-cased, closed set sprk_matter | sprk_project) or <c>null</c>.
+    /// </summary>
+    internal static IResult? ValidatePromoteRequest(AnalysisPromoteRequest? request, out AnalysisRegardingTarget? regarding)
+    {
+        regarding = null;
+        if (request is null || string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request", "A sessionId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                "A name is required to promote a session to an Analysis.");
+        }
+
+        // FR-D9 ("Set related record"): promotion may associate the new Analysis to an EXISTING
+        // matter/project (ADR-024 regarding) so it surfaces on that record's Analyses tab, OR anchor it
+        // to a document (the "regarding = document" path, via sprk_documentid).
+        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingEntityId is not null)
+        {
+            // Both parts must be present; the entity type is a closed set (matter | project) — a document
+            // association is expressed via DocumentId, not here.
+            var entityType = request.RegardingEntityType?.Trim().ToLowerInvariant();
+            if (entityType is not ("sprk_matter" or "sprk_project") ||
+                request.RegardingEntityId is not { } regId || regId == Guid.Empty)
+            {
+                return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                    "A regarding association requires regardingEntityType ('sprk_matter' or 'sprk_project') and a non-empty regardingEntityId.");
+            }
+            regarding = new AnalysisRegardingTarget(entityType, regId, request.RegardingEntityName);
+        }
+
+        return null;
+    }
+
+    /// <summary>Builds a canonical ProblemDetails result for the analysis endpoints.</summary>
     private static IResult AnalysisProblem(int statusCode, string title, string detail) => Results.Problem(
         statusCode: statusCode,
         title: title,
@@ -1477,6 +1295,13 @@ public static class AnalysisEndpoints
         type: statusCode == StatusCodes.Status400BadRequest
             ? "https://tools.ietf.org/html/rfc7231#section-6.5.1"
             : "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+
+    /// <summary>
+    /// Task 146: the analysis was refused an owner (its document or regarding record is unreadable, flagged secure but
+    /// not isolated, or its team is missing). Nothing was written. A 409 carrying the stable reason code.
+    /// </summary>
+    private static IResult AnalysisOwnerRefusal(Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution refusal) =>
+        Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(refusal, "analysis");
 
     /// <summary>
     /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014).

@@ -71,7 +71,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 Name: "tenantId",
                 Type: SchemaFieldType.String,
                 Required: true,
-                Description: "Tenant identifier used to scope the Redis Agent-thread cache key (agent-thread:{tenantId}). Required.",
+                Description: "Tenant identifier for the Redis Agent-thread cache key. The CONVERSATION scope is the playbook RunId, supplied by the executor — not by this config (task 122). Required.",
                 Default: null),
             new(
                 Name: "prompt",
@@ -166,8 +166,16 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
                 "AgentService node {NodeId}: creating/resuming thread for tenant {TenantId}",
                 context.Node.Id, tenantId);
 
-            // Create or resume a cached thread for this tenant (ADR-009: Redis-first)
-            var threadId = await _agentServiceClient.CreateOrResumeThreadAsync(tenantId, cancellationToken);
+            // Create or resume the thread for THIS PLAYBOOK RUN (ADR-009: Redis-first).
+            //
+            // Scoped by RunId as of task 122. It was tenant-only, and the cache id was the constant
+            // `thread`, so concurrent runs of ANY playbook for ANY user in the tenant appended to one
+            // shared Foundry conversation — each run's synthesis prompt becoming context for the next.
+            // A run is this path's conversation, so it is the correct scope.
+            var threadId = await _agentServiceClient.CreateOrResumeThreadAsync(
+                tenantId,
+                context.RunId.ToString(),
+                cancellationToken);
 
             // ADR-015: thread.id is an opaque SDK identifier, not PII.
             activity?.SetTag("agent.thread.id", threadId);
@@ -274,8 +282,8 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
 internal sealed record AgentServiceNodeConfig
 {
     /// <summary>
-    /// Tenant identifier used to scope the Redis thread cache key
-    /// (<c>agent-thread:{tenantId}</c>). Required.
+    /// Tenant identifier for the Redis thread cache key. The CONVERSATION scope is the playbook
+    /// <c>RunId</c>, supplied by the executor rather than configured here (task 122). Required.
     /// </summary>
     public string? TenantId { get; init; }
 

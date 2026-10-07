@@ -293,7 +293,15 @@ public sealed class ProjectPreFillService
             TextExtractionResult extractionResult;
             if (!string.IsNullOrEmpty(stagingContainerId))
             {
-                var stagingPath = $"ai-prefill/{requestId}/{fileName}";
+                // FLAT staging-container root. The old "ai-prefill/{requestId}/" prefix implicitly minted
+                // two folder levels per request (in SPE, Graph creates every segment of an upload path),
+                // and the {requestId} segment was also the only uniqueness in the path — the path-keyed
+                // simple PUT behind UploadSmallToStagingAsUserAsync takes no conflictBehavior and silently
+                // replaces, so two concurrent pre-fill requests staging the same filename would clobber
+                // each other. The id moves into the filename to keep both properties.
+                // SANITIZED 2026-08-29 — see the twin in MatterPreFillService. fileName is
+                // Path.GetFileName(IFormFile.FileName), i.e. client-supplied and only host-OS-separator-safe.
+                var stagingPath = $"{requestId}_{SpeUploadPath.SanitizeFileName(fileName)}";
 
                 try
                 {
@@ -301,7 +309,7 @@ public sealed class ProjectPreFillService
                     await fileStream.CopyToAsync(buffer, cancellationToken);
                     buffer.Position = 0;
 
-                    var uploadResult = await _speFileStore.UploadSmallAsUserAsync(
+                    var uploadResult = await _speFileStore.UploadSmallToStagingAsUserAsync(
                         httpContext,
                         stagingContainerId,
                         stagingPath,

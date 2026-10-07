@@ -23,7 +23,7 @@ The Document Relationship Graph is a multi-modal document discovery system that 
 | **Hub Topology** | Parent entity hubs (Matter, Project, Invoice, Email) organize structural relationships |
 | **Direct Edges** | Semantic relationships connect directly from source to related documents |
 | **Dual Frontend** | PCF control (form-embedded) and Code Page (dialog) share the same API |
-| **Multi-Tenant** | Tenant isolation on all queries via `tenantId` filter |
+| **Tenant scoping** | An OData `tenantId` filter on all queries. ⚠️ This separates **Entra tenants**, not customers — customer separation is the dedicated per-customer AI Search service (see *Tenant scoping vs customer isolation* below) |
 
 ### System Diagram
 
@@ -171,7 +171,7 @@ Semantic relationships use direct edges: Source → Related Document.
 
 **Key design decision — document-level vs chunk-level vectors**: The visualization uses `documentVector3072` (one vector per document), not `contentVector3072` (per-chunk). This enables document-level similarity matching, while SemanticSearchControl uses chunk-level for RAG retrieval.
 
-**Multi-tenant isolation**: OData filter on `tenantId` in all queries.
+**Tenant scoping vs customer isolation** *(corrected 2026-09-28 per owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md))*: every query carries an OData filter on `tenantId`, and that stays mandatory. But `tenantId` is an **Entra tenant GUID**: under D-12 **Model 1** every customer's environment is hosted in **Spaarke's** Azure tenant, so the value is **identical for every Model 1 customer** and the filter **cannot separate customers** — while its tests pass. **Customer isolation comes from the dedicated per-customer AI Search service** in that customer's own Azure subscription — a resource boundary, not a query filter. The `tenantId` filter remains in force as belt-and-braces.
 
 **`documentType` vs `fileType`**: `documentType` stores business classification names (Contract, Invoice, Agreement), not file extensions. Filter on business names, not extensions.
 
@@ -220,7 +220,7 @@ Both frontends use `d3-force` simulation: link distance proportional to `1 - sim
 
 | ADR | Relevance |
 |-----|-----------|
-| **ADR-001** | Minimal API + BackgroundService — visualization is a BFF endpoint |
+| **ADR-001** | Minimal API — visualization is a BFF endpoint |
 | **ADR-006** | PCF for form controls, Code Pages for dialogs — both used here |
 | **ADR-008** | Endpoint filters for auth — `VisualizationAuthorizationFilter` |
 | **ADR-013** | AI Architecture — extends BFF, not separate service |

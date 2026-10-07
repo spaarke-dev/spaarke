@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 
@@ -44,7 +45,21 @@ internal static partial class DataverseWriteItemMapper
     private static partial Regex LogicalNameRegex();
 
     /// <summary>Successful mapping: the OData JSON body + the column logical names it sets (identifiers only — safe to log counts/names per NFR-07).</summary>
-    internal sealed record MappedItem(string JsonBody, IReadOnlyList<string> Columns);
+    internal sealed record MappedItem(string JsonBody, IReadOnlyList<string> Columns)
+    {
+        /// <summary>
+        /// Every lookup the body binds — column, target table, target entity set, target id (unified-access-control-r2
+        /// task 146 r2: the records a row is FILED under decide its owner, and each costs the caller AppendTo).
+        /// </summary>
+        public IReadOnlyList<MappedLookup> Lookups { get; init; } = Array.Empty<MappedLookup>();
+
+        /// <summary>The columns the body sets to <c>null</c> — a clear, which for a lookup column moves the row OUT of
+        /// that record (task 146 r2).</summary>
+        public IReadOnlyList<string> ClearedColumns { get; init; } = Array.Empty<string>();
+    }
+
+    /// <summary>One lookup a mapped body binds.</summary>
+    internal sealed record MappedLookup(string Column, string RelatedTable, string RelatedEntitySet, Guid RecordId);
 
     /// <summary>
     /// Tri-state outcome: exactly one of <see cref="Item"/> (success),
@@ -61,13 +76,37 @@ internal static partial class DataverseWriteItemMapper
     /// <summary>
     /// Maps <paramref name="item"/> to an OData payload for <paramref name="tableLogicalName"/>.
     /// Performs metadata reads (navigation properties + related entity sets) through
-    /// <paramref name="dataverse"/> ONLY when the item contains lookup objects — simple items
-    /// map without any extra round-trip.
+    /// <paramref name="dataverse"/> ONLY when the item contains lookup objects or a <c>null</c> — items of non-null simple
+    /// values map without any extra round-trip.
     /// </summary>
-    public static async Task<MapOutcome> MapAsync(
+    /// <remarks>
+    /// <para><b>A <c>null</c> on a lookup column is a clear, written as its navigation property's null bind</b>
+    /// (unified-access-control-r2 task 147 r1c-v1, verifier item 1). The Web API declares a lookup only as its
+    /// single-valued navigation property (<c>sprk_RegardingMatter</c>) and the read-only <c>_sprk_regardingmatter_value</c>;
+    /// the logical name <c>sprk_regardingmatter</c> is NOT a property of the entity type, and a body that names it is
+    /// refused ("Could not find a property named 'sprk_regardingmatter' on type 'Microsoft.Dynamics.CRM.sprk_todo'", live
+    /// metadata, spaarkedev1). So the column is cleared through <c>{NavigationProperty}@odata.bind: null</c> — the
+    /// metadata's own navigation property, the form the browser writers sent through <c>Xrm.WebApi</c> before task 147. A
+    /// polymorphic lookup (several navigation properties, one per target table) is cleared through ONE of them — the first
+    /// by ordinal name, so the body is deterministic: every one of them binds the same column. (On the browser routes'
+    /// tables the only polymorphic lookup is <c>ownerid</c>, which those routes refuse — live metadata, 2026-10-05.)
+    /// <see cref="MappedItem.ClearedColumns"/> stays keyed by the column's logical name; a <c>null</c> on any other column is
+    /// written as that column's null.</para>
+    /// </remarks>
+    public static Task<MapOutcome> MapAsync(
         IDataverseUserClient dataverse,
         string tableLogicalName,
         JsonElement item,
+        CancellationToken cancellationToken) =>
+        MapCoreAsync(dataverse, tableLogicalName, item, prefetchedRelationships: null, cancellationToken);
+
+    /// <param name="prefetchedRelationships">The table's <c>ManyToOneRelationships</c> body when the caller already read it
+    /// (as the caller), so it is not read twice.</param>
+    private static async Task<MapOutcome> MapCoreAsync(
+        IDataverseUserClient dataverse,
+        string tableLogicalName,
+        JsonElement item,
+        JsonElement? prefetchedRelationships,
         CancellationToken cancellationToken)
     {
         if (item.ValueKind != JsonValueKind.Object)
@@ -118,20 +157,52 @@ internal static partial class DataverseWriteItemMapper
             return MapOutcome.Invalid("'item' must contain at least one column.");
         }
 
+        // One value per column: a column named twice (e.g. a browser payload's plain key AND a bind of the same lookup)
+        // would leave Dataverse to pick one.
+        if (columns.GroupBy(c => c, StringComparer.Ordinal).FirstOrDefault(g => g.Count() > 1) is { } twice)
+        {
+            return MapOutcome.Invalid($"Column '{twice.Key}' is set more than once.");
+        }
+
+        // A null is a clear. On a lookup column it is written as a navigation property's null bind (see the remarks), so
+        // which nulls are lookups is read from the same metadata the binds use.
+        var clearedColumns = simpleValues.Where(v => v.Value.ValueKind == JsonValueKind.Null).Select(v => v.Column).ToArray();
+        var clearBinds = new Dictionary<string, string>(StringComparer.Ordinal);
+
         // Resolve lookup navigation properties + related entity sets only when needed.
         var lookupBinds = new List<(string NavigationProperty, string RelatedEntitySet, Guid RecordId)>();
-        if (lookups.Count > 0)
+        var mappedLookups = new List<MappedLookup>();
+        if (lookups.Count > 0 || clearedColumns.Length > 0)
         {
-            var relationshipsResponse = await dataverse.GetAsync(
-                $"EntityDefinitions(LogicalName='{tableLogicalName}')?$select=LogicalName" +
-                "&$expand=ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity)",
-                cancellationToken).ConfigureAwait(false);
-            if (!relationshipsResponse.IsSuccess)
+            JsonElement? relationshipsBody = prefetchedRelationships;
+            if (relationshipsBody is null)
             {
-                return MapOutcome.Failed(relationshipsResponse);
+                var relationshipsResponse = await dataverse.GetAsync(
+                    $"EntityDefinitions(LogicalName='{tableLogicalName}')?$select=LogicalName" +
+                    "&$expand=ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity)",
+                    cancellationToken).ConfigureAwait(false);
+                if (!relationshipsResponse.IsSuccess)
+                {
+                    return MapOutcome.Failed(relationshipsResponse);
+                }
+
+                relationshipsBody = relationshipsResponse.Body;
             }
 
-            var navigationByAttributeAndTarget = BuildNavigationPropertyMap(relationshipsResponse.Body);
+            var navigationByAttributeAndTarget = BuildNavigationPropertyMap(relationshipsBody);
+            foreach (var column in clearedColumns)
+            {
+                // Every navigation property of a polymorphic lookup binds the same column; the first by ordinal name keeps
+                // the body deterministic.
+                var navigation = navigationByAttributeAndTarget
+                    .Where(kv => string.Equals(kv.Key.Attribute, column, StringComparison.Ordinal))
+                    .Select(kv => kv.Value)
+                    .OrderBy(n => n, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                if (navigation is not null)
+                    clearBinds[column] = navigation;
+            }
+
             var entitySetByTable = new Dictionary<string, string>(StringComparer.Ordinal);
 
             foreach (var (column, relatedTable, recordId) in lookups)
@@ -161,6 +232,7 @@ internal static partial class DataverseWriteItemMapper
                 }
 
                 lookupBinds.Add((navigationProperty, relatedEntitySet, recordId));
+                mappedLookups.Add(new MappedLookup(column, relatedTable, relatedEntitySet, recordId));
             }
         }
 
@@ -172,17 +244,161 @@ internal static partial class DataverseWriteItemMapper
             writer.WriteStartObject();
             foreach (var (column, value) in simpleValues)
             {
+                if (value.ValueKind == JsonValueKind.Null && clearBinds.TryGetValue(column, out var clearNavigation))
+                {
+                    // A lookup clear: the navigation property's null bind — never the logical name, which the Web API
+                    // does not declare.
+                    writer.WriteNull($"{clearNavigation}{BindSuffix}");
+                    continue;
+                }
+
                 writer.WritePropertyName(column);
                 value.WriteTo(writer);
             }
             foreach (var (navigationProperty, relatedEntitySet, recordId) in lookupBinds)
             {
-                writer.WriteString($"{navigationProperty}@odata.bind", $"/{relatedEntitySet}({recordId:D})");
+                writer.WriteString($"{navigationProperty}{BindSuffix}", $"/{relatedEntitySet}({recordId:D})");
             }
             writer.WriteEndObject();
         }
 
-        return MapOutcome.Ok(new MappedItem(Encoding.UTF8.GetString(stream.ToArray()), columns));
+        return MapOutcome.Ok(new MappedItem(Encoding.UTF8.GetString(stream.ToArray()), columns)
+        {
+            Lookups = mappedLookups,
+            // Keyed by the column's logical name (a lookup's too): the re-file core asks which ownership lookups were cleared.
+            ClearedColumns = clearedColumns,
+        });
+    }
+
+    [GeneratedRegex(@"^/?(?<set>[A-Za-z_][A-Za-z0-9_]*)\(\{?(?<id>[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12})\}?\)$")]
+    private static partial Regex BindValueRegex();
+
+    private const string BindSuffix = "@odata.bind";
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): maps a BROWSER writer's Dataverse Web API payload —
+    /// the exact object a client passes to <c>Xrm.WebApi.createRecord</c> / <c>updateRecord</c> — onto the same
+    /// <see cref="MappedItem"/> the chat tools produce, so the browser's writes go through the ONE G5 core
+    /// (<see cref="OwnedChildWrite"/>) unchanged.
+    /// </summary>
+    /// <remarks>
+    /// <para>Plain keys (column logical names) are kept. Each <c>{NavigationProperty}@odata.bind</c> is translated through
+    /// the table's metadata — read AS THE CALLER — into the lookup column it binds and the table it targets, and its value
+    /// <c>/{entitySet}({id})</c> must name exactly that table's entity set (a bind can never be re-pointed at another
+    /// table). A bind to <c>null</c> is a clear of that column: the column is listed in
+    /// <see cref="MappedItem.ClearedColumns"/> by its logical name, and the body sent to Dataverse keeps the clear as
+    /// <c>{NavigationProperty}@odata.bind: null</c> on the metadata's own navigation property (task 147 r1c-v1, verifier
+    /// item 1: the logical name is not a Web API property, so a body naming it is refused). A column bound or cleared more
+    /// than once is refused. Any other OData annotation is refused, as the chat mapper refuses it: the server builds every
+    /// bind itself.</para>
+    /// </remarks>
+    public static async Task<MapOutcome> MapWebApiPayloadAsync(
+        IDataverseUserClient dataverse,
+        string tableLogicalName,
+        JsonElement payload,
+        CancellationToken cancellationToken)
+    {
+        if (payload.ValueKind != JsonValueKind.Object)
+            return MapOutcome.Invalid("The request body must be a JSON object of column names to values.");
+
+        var binds = payload.EnumerateObject()
+            .Where(p => p.Name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Dictionary<string, (string Attribute, string Target)>? byNavigationProperty = null;
+        JsonElement? relationshipsBody = null;
+        if (binds.Count > 0)
+        {
+            var relationships = await dataverse.GetAsync(
+                $"EntityDefinitions(LogicalName='{tableLogicalName}')?$select=LogicalName" +
+                "&$expand=ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity)",
+                cancellationToken).ConfigureAwait(false);
+            if (!relationships.IsSuccess)
+                return MapOutcome.Failed(relationships);
+
+            // Read once: the item mapping below resolves every bind and clear from the same body.
+            relationshipsBody = relationships.Body;
+            byNavigationProperty = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+            foreach (var ((attribute, target), navigationProperty) in BuildNavigationPropertyMap(relationships.Body))
+                byNavigationProperty.TryAdd(navigationProperty, (attribute, target));
+        }
+
+        var expectedSets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var property in payload.EnumerateObject())
+            {
+                if (property.Name.EndsWith(BindSuffix, StringComparison.OrdinalIgnoreCase))
+                {
+                    var navigationProperty = property.Name[..^BindSuffix.Length];
+                    if (!byNavigationProperty!.TryGetValue(navigationProperty, out var lookup))
+                    {
+                        return MapOutcome.Invalid(
+                            $"'{property.Name}' does not bind a lookup of table '{tableLogicalName}'.");
+                    }
+
+                    // A column bound or cleared twice (navigation properties differing only in case, or a plain key beside
+                    // its bind) reaches the item twice and is refused there — MapCoreAsync's one-value-per-column rule.
+                    if (property.Value.ValueKind == JsonValueKind.Null)
+                    {
+                        // A clear. The item names the column (so the re-file core sees which lookup was cleared); the body
+                        // clears it through the metadata's own navigation property (MapCoreAsync) — never this logical name.
+                        writer.WriteNull(lookup.Attribute);
+                        continue;
+                    }
+
+                    var match = property.Value.ValueKind == JsonValueKind.String
+                        ? BindValueRegex().Match(property.Value.GetString()!.Trim())
+                        : Match.Empty;
+                    if (!match.Success || !Guid.TryParse(match.Groups["id"].Value, out var recordId) || recordId == Guid.Empty)
+                    {
+                        return MapOutcome.Invalid(
+                            $"'{property.Name}' must be '/<entity set>(<id>)' or null.");
+                    }
+
+                    expectedSets[lookup.Attribute] = match.Groups["set"].Value;
+
+                    writer.WritePropertyName(lookup.Attribute);
+                    writer.WriteStartObject();
+                    writer.WriteString("relatedTable", lookup.Target);
+                    writer.WriteString("recordId", recordId.ToString("D"));
+                    writer.WriteEndObject();
+                    continue;
+                }
+
+                if (property.Name.Contains('@', StringComparison.Ordinal) || property.Name.Contains('.', StringComparison.Ordinal))
+                {
+                    return MapOutcome.Invalid(
+                        $"'{property.Name}' is an OData annotation; only column values and '@odata.bind' lookups are accepted.");
+                }
+
+                property.WriteTo(writer);
+            }
+
+            writer.WriteEndObject();
+        }
+
+        using var item = JsonDocument.Parse(stream.ToArray());
+        var mapped = await MapCoreAsync(
+                dataverse, tableLogicalName, item.RootElement, relationshipsBody, cancellationToken)
+            .ConfigureAwait(false);
+        if (mapped.Item is null)
+            return mapped;
+
+        // The bind named an entity set; the server bound the lookup's own target. They must be the same table.
+        foreach (var lookup in mapped.Item.Lookups)
+        {
+            if (expectedSets.TryGetValue(lookup.Column, out var set)
+                && !string.Equals(set, lookup.RelatedEntitySet, StringComparison.OrdinalIgnoreCase))
+            {
+                return MapOutcome.Invalid(
+                    $"Column '{lookup.Column}' binds '/{set}(…)', but its lookup targets '{lookup.RelatedEntitySet}'.");
+            }
+        }
+
+        return mapped;
     }
 
     private static bool TryParseLookup(

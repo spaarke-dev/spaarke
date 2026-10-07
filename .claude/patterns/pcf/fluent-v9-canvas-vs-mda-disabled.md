@@ -9,7 +9,8 @@ Building a PCF that ships to BOTH Canvas Apps and Model-Driven Apps; user report
 
 ## Read These Files
 
-1. `src/client/pcf/UniversalDatasetGrid/control/index.ts` — Spaarke's current Canvas/MDA detection
+1. `src/client/pcf/VisualHost/control/index.ts` — Spaarke's current Canvas/MDA detection
+   <!-- Corrected 2026-09-01: was the DELETED UniversalDatasetGrid/control/index.ts. -->
 2. Drill-down: `knowledge/fluent-ui-v9/docs/community/birkelbach-style-fluent-ui-9-pcfs.md` — full pattern with code
 
 ## Constraints

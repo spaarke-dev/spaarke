@@ -13,7 +13,7 @@
     <parallel-group>phase4-wave4</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Touches Api/ExternalAccess/** and Infrastructure/ExternalAccess/** — exclusive zone; must not run concurrently with 063.</parallel-reason>
-    <deps>063, 060, 032, 038, 041, 042</deps>
+    <deps>063, 060, 032, 038, 041, 042, 105</deps>
     <tags>bff-api, auth, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -32,11 +32,11 @@
       <file role="canonical-reference">projects/unified-access-control-r2/design.md (§4.5 terms, §6 provenance table)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="032" status="pending">FR-19 evaluator terms the report inverts.</dependency>
-      <dependency task="038" status="pending">FR-23 deny-list store.</dependency>
-      <dependency task="041" status="pending">FR-24 explicit column allow-list — the ONLY source for derived-from-field rows.</dependency>
-      <dependency task="042" status="pending">FR-25 standing-grant baseline levels shown per row.</dependency>
-      <dependency task="063" status="pending">Exclusive-zone ordering + shared route-group conventions.</dependency>
+      <dependency task="032" status="completed">FR-19 evaluator terms the report inverts.</dependency>
+      <dependency task="038" status="completed">FR-23 deny-list store.</dependency>
+      <dependency task="041" status="completed">FR-24 explicit column allow-list — the ONLY source for derived-from-field rows.</dependency>
+      <dependency task="042" status="completed">FR-25 standing-grant baseline levels shown per row.</dependency>
+      <dependency task="063" status="completed">Exclusive-zone ordering + shared route-group conventions.</dependency>
     </dependencies>
   </context>
 
@@ -104,4 +104,43 @@
   <notes>spec.md FR-30/FR-23; design.md §4.5/§6/§7. Consumed by 066/067. The FR-32 event log (Phase 5) will hook the deny-list writes — keep them behind the seam so 081 can wrap one choke point.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <amendments>
+    <amendment n="S27" date="2026-09-30" source="session 27 remediation set">Consumers added by the session-27 tasks: (1) the deny-list management endpoints must accept a SYSTEMUSER subject (task 143, owner Q4) and call 143's enforcer on add, applying 143's entry-author rule; (2) the provenance read must expose the source of AUTO grants (task 142 — which Assigned field produced it, and the declined/removed marker) and the contact GRANTOR of contact-issued grants (task 140); (3) suppressed-row reasons must include LIMITED (task 138), not only Secure and Restricted. Coordinate merge order with 138/140/142/143.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="UX" date="2026-10-01" source="owner round 3b UX + session27-ux-research (notes/session27-ux-research-ethical-wall-secure.md, disposition row 1)">ADD a RECORD-SCOPED No Access read. Today nothing can list the No Access entries that apply to a given record: no client code reads sprk_noaccessentry, and this task's planned endpoints only add and remove.
+
+WHAT IT IS NOT. It is NOT the existing reader. `INoAccessListReader.GetDeniedRecordsAsync` (`Infrastructure/ExternalAccess/NoAccessListReader.cs:150` interface, `:268` implementation) answers the INVERSE question: given one subject (contact plus its organizations) and a set of candidate records, which records is that subject denied. The new read answers: given one record, which entries apply to it.
+
+WHAT IT RETURNS, for one record, through two routes (see Authorization; names final at implementation, e.g. entries `GET /api/v1/external-access/no-access?recordType=..&amp;recordId=..` and summary `GET /api/v1/records/{entityLogicalName}/{recordId}/no-access-summary`):
+- (1) every entry naming the record itself: `sprk_objectrecordid` equals the record id (id-only match, as the reader and the schema doc already define it, `src/solutions/SpaarkeCore/entities/sprk_noaccessentry/entity-schema.md:69`);
+- (2) every organization wall over the record: entries whose `sprk_objectorganization` is any organization the record references, resolved with `ExternalParticipationService.GetReferencedOrganizationIdsAsync` (`:710`) — ANY reference, the FR-23 / B-10 over-match, never a registry-only subset;
+- (3) for an sprk_organization record (the task-153 Organization-form banner): entries naming it as subject organization or object organization; for a contact record (the Contact-form banner): entries naming it as subject contact, PLUS entries whose subject organization is an organization the contact is an ACTIVE member of — the reader's own subject expansion (`ExternalParticipationService.QueryActiveOrgIdsAsync`, `:1081`) — each marked "via member organization X". After task 143 the systemuser subject is included wherever it applies. Organization and contact are not grant roots, so (1) and (2) do not apply to them.
+- Per entry: entry id, subject kind, id and display name, object kind (this record, or "via organization X"), active state, created/modified by and on, the Reason text only per the O2 outcome below, and the ENFORCEMENT STATE consumed by task 067. The state describes the Dataverse share-removal half ONLY; the Teams/SPA read-time veto applies to every active, well-formed entry regardless. Exactly one of: "enforced"; "not enforced: author lacks Write on record" (owner N5 — the outcome of task 143 criterion 8a, where the author is the entry's LAST MODIFIER; taken from 143's recorded outcome, or computed by 143's own rule if 143 records none — never a second implementation); "not enforceable in Dataverse" (task 143 escalation (d) / owner N2: team/role/BU-held access); "not applicable" (143 removes shares only on SECURE records, so a non-secure record, or a subject with no systemuser to remove, has no share-removal half). Malformed rows (schema doc Business Rule 1) are returned flagged malformed, not dropped, so an administrator can see and fix them; like the reader, they deny nothing and are not counted in the summary.
+- A SUMMARY block for the task-153 banner: whether any active entry applies, and counts by subject kind and by object path (direct vs via organization). The summary carries no Reason text and, pending O2, no subject identities.
+
+RULES.
+- Reuse, do not fork (CLAUDE.md §11; task 143 "do not add a second deny reader"): add a record-scoped method to `NoAccessListReader`, sharing its select list, row classification, `QueryChunkAsync` seam and fail-closed paths.
+- Fail closed, visibly: any read fault (entries; referenced organizations, INCLUDING a `ReferencedOrganizations.Unresolved` / Unreadable result, `ExternalParticipationService.cs:692-699`; active memberships; the author-rights check) returns ProblemDetails with a stable code (ADR-019). It never returns an empty list or "no restriction" — an empty banner on a walled record is a false negative. A type with NO org-typed lookups returns an empty map, a schema fact and not a fault (`:701-706`); do not confuse the two.
+- Authorization — TWO tiers need TWO gates, because one filter cannot serve both. `DelegationRuleFilter` demands Write for EVERY route in the `/api/v1/external-access` group (`RequiredRight = AccessRights.Write`, `Api/ExternalAccess/DelegationRuleFilter.cs:86`; the group carries `.AddDelegationRuleFilter()`, `ExternalAccessEndpoints.cs:123-126`). A Read-gated summary therefore CANNOT live in that group.
+  - ENTRIES tier (identities and, per O2, Reason): a route in the `/api/v1/external-access` group. The filter's type switch (`DelegationRuleFilter.cs:211-281`) denies any request type it has no case for, so add the case, resolving through `GrantExternalAccessEndpoint.ResolveExplicitRoot` as the `/can-manage-access` case does (`:280-281`), and prove through the real filter pipeline that a caller WITH Write reaches the handler.
+  - SUMMARY tier (the 153 banner): a route OUTSIDE that group, gated on Read of the record AS THE CALLER (OBO, `CallerRecordAccessProbe.GetCallerRightsAsync`, `Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs:210`). Reuse `RecordRouteAccessAuthorizationFilter` (`Api/Filters/RecordRouteAccessAuthorizationFilter.cs:79`: route-value target, fail-closed four ways) with one new Read-mapped key in `OperationAccessPolicy` (`src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs`) — no new filter. Never an app-only read standing in for the caller's gate.
+  - Organization and contact records: `ResolveExplicitRoot` (`GrantExternalAccessEndpoint.cs:632-643`) accepts only project, matter and workassignment — do not widen it, because the grant writes use it too. `contact` is in the shared entity-set map the route-value filter uses (`Api/Filters/EntityAccessFilter.cs:123`); `sprk_organization` is NOT, and that map is held in lockstep with document association (`:118-122`). STOP and escalate before widening it for the organization summary; the entries tier for both types is decided under O2.
+- No materialization: computed per request.
+
+ESCALATION TRIGGER (O2, open owner question — STOP before fixing who can read the entries tier). Should the No Access list, including Reason, stay readable by every core user? Today "Spaarke Core User" holds Global Read on sprk_noaccessentry (live, research note), which contradicts task 143's rule that a refusal must not reveal the reason. RECOMMENDATION: no. Remove Read from Spaarke Core User; grant Read/Write on the table to a dedicated access-administrator role; everyone else with Read on the record sees only the banner (the SUMMARY tier: whether a restriction applies and the counts, no identities, no Reason); Write-holders on the record see the entries through Manage Access, with the BFF reading on their behalf (the ENTRIES tier, behind `DelegationRuleFilter`'s Write check). Do not map the entries route until O2 is answered; the summary route can ship first. If O2 is answered otherwise, record the answer in notes/ and replace criterion (e) with it BEFORE implementing.
+
+JUSTIFICATION (CLAUDE.md §11). Existing: `GetDeniedRecordsAsync` answers the inverse question; this task's planned routes only write; no client reads the table. Extension: one method on the existing reader, one route in the existing Write-gated group (entries) and one route on the existing route-value Read filter (summary), plus one `OperationAccessPolicy` key — no new service, no new filter, no new group. The second route exists only because the group's filter is Write-only by construction. Cost of doing nothing: task 153's banner has nothing to read except the raw table client-side (which keeps the Global Read that O2 would remove, and cannot resolve organization walls over referenced organizations); task 067's No Access section has no source for "entries for this record".
+
+ADDITIONAL ACCEPTANCE (closed set):
+- (a) a record with one direct entry and one wall over an organization it references returns exactly those two entries, each with its object path;
+- (b) an entry over an organization the record does not reference is absent;
+- (c) an inactive entry is reported inactive and is not counted in the summary;
+- (d) a read fault — including an Unreadable referenced-organizations result — returns ProblemDetails, never an empty list or a negative summary;
+- (e) authorization (under the O2 recommendation): ENTRIES route — a caller without Write on the record gets 403 from `DelegationRuleFilter`, and an unknown record id gets the same 403 (enumeration-safe); a caller WITH Write reaches the handler through the real filter pipeline (test). SUMMARY route — a caller without Read gets 403; a caller with Read gets 200 with no Reason and no subject identities. Both routes — unauthenticated gets 401, and a request with no caller bearer token is denied, never answered app-only;
+- (f) an entry whose last modifier lacks Write on the record reads "not enforced: author lacks Write on record", and the same entry still counts as an active restriction in the summary (the read-time veto applies);
+- (g) an entry on a non-secure record, or one with no systemuser to remove, reads "not applicable", never "enforced";
+- (h) for a contact: an entry naming an organization the contact is an ACTIVE member of is returned as "via member organization"; one naming an organization of an inactive membership is absent.
+Consumers: 067 (entries tier), 153 (summary tier, including the Organization and Contact banners). Task 154's standard subgrids read the table directly: if O2 removes table Read from core users they show nothing to non-administrators, and 154 must read through this task's routes instead — tell the orchestrator. Depends on 143 for the systemuser subject and the enforcement state; if 143 has not landed, ship the read with those two marked "unavailable" (never defaulted to "enforced") and tell the orchestrator.</amendment>
+  </amendments>
 </task>

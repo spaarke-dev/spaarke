@@ -143,25 +143,3 @@ export interface FollowOnCardConfig {
    */
   renderSelectedExtra?: () => React.ReactNode;
 }
-
-// ---------------------------------------------------------------------------
-// Recipient item (used by DraftSummaryFollowOnStep + RecipientField)
-// ---------------------------------------------------------------------------
-
-/**
- * A recipient entry in the DraftSummary distribute-to / CC fields.
- *
- * Defined here so the WizardFollowOns module is self-contained and does not
- * depend on `CreateRecordWizard/types` (whose follow-on copies are removed in
- * the per-wizard migrations, tasks 021–024).
- */
-export interface IRecipientItem {
-  /** Unique key for deduplication (contact GUID or freeform email). */
-  key: string;
-  /** Display name shown in the chip. */
-  displayName: string;
-  /** Email address (extracted from contact or freeform entry). */
-  email: string;
-  /** Whether this was manually entered (true) or from contact lookup (false). */
-  isManual?: boolean;
-}

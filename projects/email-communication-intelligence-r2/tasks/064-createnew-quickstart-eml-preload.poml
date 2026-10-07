@@ -10,6 +10,7 @@
     <model-tier-reason>BFF §10 net-new endpoint on the Services/Ai/Chat hot-path + SpaarkeAi-hot-path glue; project CLAUDE.md pins the E-shell/reader integration glue to opus.</model-tier-reason>
     <effort>high</effort>
     <steps-mode>directional</steps-mode>
+  <status>completed</status>
   </metadata>
 
   <goal>
@@ -85,4 +86,32 @@
   <escalation>
     <trigger>If the wizard-consumption investigation shows a materialized .txt/.docx does NOT drive AI-prepopulate end-to-end (server extraction rejects it), STOP and escalate the materialization-format choice (root CLAUDE.md §6) rather than shipping an endpoint whose output the wizard silently ignores.</trigger>
   </escalation>
+
+  <notes>
+    COMPLETED — shipped as "Option C" in commit 309e7f674 (on master), verified 2026-09-07 by a
+    task-execute Step-1 investigation (two Explore sweeps + git provenance) after the status marker
+    was found stale (🔲). All four layers were delivered:
+    - E1c BFF: POST /api/ai/chat/sessions/{sessionId}/documents/from-document
+      (ChatDocumentEndpoints.IngestArchiveDocumentAsync) — takes {documentId|communicationId},
+      resolves via GetDocumentAsync / GetEmailArchiveByCommunicationAsync, downloads via
+      SpeFileStore.DownloadFileAsync, stores the RAW .eml bytes (message/rfc822) under the session
+      binary key, returns {sessionId, fileId, fileName}. Filters: SessionOwnershipFilter +
+      AiAuthorizationFilter + in-handler AuthorizeAsync("read"). Seam/contract test:
+      tests/integration/contract/Api/Ai/ChatDocumentEndpointsContractTests.cs.
+    - E1c client: useHandoffFileLeg already accepts .eml; MatterPreFillService/ProjectPreFillService
+      allow-lists already include .eml + message/rfc822. NO allow-list widening needed.
+    - E1b shared lib: EmailConnectionsReviewProps.onLaunchCreateRecord + CreatedRecordRef + EmlSource
+      (EmailAssociationsAndTracking.types.ts); handleCreateNew → confirmCandidate →
+      applyRegardingSelection (single write path, NFR-10). ReconciliationWorkspace threads
+      onLaunchCreateRecord({emlSource}) + resolveEmlSource via wrapReview into BOTH the grid cell and
+      the browse Related-to tab. E1b RTL tests in EmailAssociationsAndTracking.test.tsx.
+    - E1b hosts: the code page (CommunicationReconciliation/src/main.tsx) and the widget
+      (ReconciliationWorkspaceWidget.tsx) both wire onLaunchCreateRecord + resolveEmlSource +
+      buildEmlFileArgs and mount the shared CreateRecordChooserModal (@spaarke/ui-components) — a
+      deliberate improvement over the POML's original QuickStartModal design (avoids the
+      cross-solution import; QuickStartModal stays SpaarkeAi-local per ADR-012).
+    Escalation trigger did NOT fire: the wizard re-extracts server-side (MatterPreFillService →
+    ITextExtractor.ExtractAsync routes .eml to MimeKit), so raw .eml is the correct materialization.
+    Deploy remained paused per constraint (code merged behind the deploy gate).
+  </notes>
 </task>

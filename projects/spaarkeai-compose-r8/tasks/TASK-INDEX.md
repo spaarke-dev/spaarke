@@ -1,7 +1,29 @@
 ﻿# Task Index — `spaarkeai-compose-r8`
 
 > **Created**: 2026-08-19 · **Re-cut**: 2026-08-20 (decomposed by **file-pass**, not by concern)
-> **Status**: INITIALIZED — execution owner-gated
+> **Status**: **COMPLETE** (2026-09-29). 46 of 48 tasks completed; `074` closed as DO-NOT-DELETE
+> (deleting `ComposeShadowPatchEngine` returns HTTP 200 while discarding edits — the risk was retired by
+> not taking it); one task superseded. `090` wrap-up closed with the PR below.
+>
+> ⚠️ **The per-POML `<status>` markers were stale until 2026-09-29** — eleven tasks read `pending` here
+> while this index showed ✅, because CLAUDE.md §7 step 1 (flip the POML) was skipped each time only the
+> index was updated. A naive status query therefore reported 13 open tasks when one was open. Fixed in
+> bulk; if you add a task, update BOTH.
+>
+> ⚠️ **Three rows here have no POML file** — `046` (soft line breaks), `047` (editor node-inventory
+> survey) and `048` (tabs + symbols). All three were executed as in-flight residual-loss follow-ons
+> during Track A and recorded only here; `047b` exists as a POML because it was a spin-off that got one.
+> Left as-is deliberately: the work is done and described, and writing POMLs after the fact would
+> fabricate a plan that never guided anything. Noted so the set mismatch is a known, explained state
+> rather than a surprise to the next reconciliation.
+>
+> ⚠️ `043` is the mirror case — a POML marked `superseded` with no row here.
+>
+> ⚠️ **`scripts/check-task-status-drift.ps1` cannot read this file.** It expects a marker-FIRST row
+> (`| <marker> <id> | …`); this index is id-first with the marker in the LAST cell, so it parses 1 row
+> of 50 and then reports ~47 phantom drifts. Reconcile this project by the layout it actually uses, not
+> by that script's verdict — and treat the script as needing a second row shape before it can gate
+> id-first projects.
 > **36 tasks / 9 phases** · Legend: 🔲 pending · 🔄 needs retry · ✅ complete · ⛔ blocked
 
 **Phase 4 does not start until Phase 3's gate passes.** A miss is an owner escalation (root §6/§6.5).
@@ -294,9 +316,9 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | File (LOC) | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
-| 070 | Decompose `ComposeService.cs` + delete its waiver | 3,573 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
-| 071 | Decompose `ComposeDocxProjectionBuilder.cs` + delete its waiver | 3,085 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
-| 072 | Decompose `ComposeDocumentRenderer.cs` + delete its waiver | 2,304 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
+| 070 | Decompose `ComposeService.cs` + delete its waiver | 3,573 | FULL | opus/xhigh | ❌ | 040 | ✅ |
+| 071 | **Decomposed `ComposeDocxProjectionBuilder.cs` by reason-to-change** — 3,593 → **1,031**. Four collaborators: `ComposeNumbering` (Word numbering semantics; already consumed by `ComposeShadowPatchEngine`) · `ComposeOoxmlPrimitives` (what a construct SAYS — membership decided by measured per-pipeline call counts) · `ComposeContentModelProjector` (1,513 lines; the second, independent output pipeline) · `ComposeParaOffsetMapBuilder` (the D2 fine-anchor resolver, mirrored by the patch engine). The dominant seam was the PIPELINE boundary, which the POML did not name. Equivalence proven empirically after EACH extraction — 25 corpus docs × both entry points, byte-identical every time; oracle validated on 4 axes (determinism, non-vacuity, sensitivity on BOTH pipelines, restore) before being trusted. The remainder is left whole and cohesive (the HTML pipeline) — a §11.5 documented decision, not a shortfall. DI diff empty | 3,593 | FULL | opus/xhigh | ❌ | 040 | ✅ |
+| 072 | **Decomposed `ComposeDocumentRenderer.cs` by reason-to-change** — 2,987 → **1,997**. Three collaborators: `ComposeRunAuthor` (how a model run becomes OOXML) · `ComposeNumberingAuthor` (write-side `numbering.xml`; mirror of 071's read-side) · `ComposeStyleCatalog` (what an authored doc LOOKS like). **ADR-049 I-5 verified by count, not assertion: 8 body writes, ALL in the renderer, 0 in every collaborator.** `ResolveHyperlinkRelationships` (mutates the live body tree) and table construction (`BuildTableCell` calls `RenderBlocks` back) deliberately LEFT IN — extracting either would have created a second author. Render equivalence over 25 docs × both entry points, byte-identical after each extraction. Validating the oracle found TWO instrument defects (SDK relationship-id nondeterminism; the carrier control cloned everything so the render half never ran) | 2,987 | FULL | opus/xhigh | ❌ | 040 | ✅ |
 | 073 | **Decomposed `Api/ComposeEndpoints.cs` by responsibility** — 18 routes / 25 handlers / 25 public DTOs split into 8 `Map{Feature}Endpoints` files over the SAME `RouteGroupBuilder` (mount · document · save · template · checkout · annotations · sync · active-doc), each with its own reason-to-change. Behaviour proven by TWO byte-identical oracles (source fluent chains incl. endpoint filters; built-host `EndpointDataSource` incl. raw metadata) + an independent route-literal diff. Oracle made permanent as `ComposeRouteSurfaceContractTests`; both tests observed failing first by mutation. `ComposeSaveEndpoints.cs` (677) left whole and cohesive — deliberate, per §11.5. DI 666→666 | 2,932 | FULL | opus/xhigh | ❌ | 013 | ✅ |
 | 074 | **Retire `ComposeShadowPatchEngine.cs`** — **CLOSED as DO-NOT-DELETE, 2026-08-26.** The funded confirmation work *disproved* subsumption: the engine is the only thing applying edits on the `ContentModel`-null op-log branch, and a mutation simulating its deletion returns **HTTP 200 while discarding the edits** (silent data loss). Also owns two recovery capabilities the render path lacks. Re-scheduling requires PORTING those capabilities first — R9-sized, not Track D | 3,049 | FULL | opus/max | ❌ | 031, 040 | ⛔ |
 
@@ -304,7 +326,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 
 | # | Task | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|
-| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` + root §17 update | STANDARD | sonnet/high | ❌ | all | 🔲 |
+| 090 | Anti-clobber deploy · `/test-diet` · write-side fidelity doc · lessons-learned · `projects/INDEX.md` + root §17 update | STANDARD | sonnet/high | ❌ | all | 🔲✅ |
 
 ---
 

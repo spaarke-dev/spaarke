@@ -3,8 +3,8 @@
 > **Purpose**: Authoritative guide for the Spaarke code quality system, covering the full quality lifecycle: pre-commit hooks, PR quality gates, nightly sweeps, weekly summaries, quarterly audits, and task-level quality gates within Claude Code.
 >
 > **Last Updated**: 2026-06-01 (r2 task 080 — added BFF test suite repair lessons + TestClock pattern)
-> **Last Reviewed**: 2026-06-01
-> **Reviewed By**: `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons)
+> **Last Reviewed**: 2026-09-30
+> **Reviewed By**: `sdap.bff.api-test-suite-repair-r2` Phase 5 task 080 (codifies FR-07, FR-13, FR-09 + Track E lessons); `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — Nightly Quality / Weekly Quality / Claude Code Action sections corrected after `nightly-quality.yml`, `weekly-quality.yml`, and `claude-code-review.yml` were deleted)
 > **Status**: Current
 
 ---
@@ -287,7 +287,7 @@ The code-review skill performs multi-dimensional analysis:
 2. CATEGORIZE files by type
    → .cs → .NET review checklist
    → .ts/.tsx → TypeScript/PCF review checklist
-   → Plugin code → Plugin constraints
+   → Dataverse write-path code → ADR-002 WP-1…WP-8 (no plugins; invariants server-side)
 
 3. RUN security checks
    → Secrets detection
@@ -363,8 +363,8 @@ The adr-check skill validates code against Architecture Decision Records:
 
 | ADR | Constraint | Violation Example |
 |-----|------------|-------------------|
-| ADR-001 | No Azure Functions | Using `[FunctionName]` attribute |
-| ADR-002 | Thin plugins (<50ms, no HTTP) | HttpClient in plugin |
+| ADR-001 | BFF endpoints in Minimal API; no Functions or Durable Task packages inside the BFF (placement of background work: ADR-052) | Using `[Function]` / `[FunctionName]` attribute in `Sprk.Bff.Api` |
+| ADR-002 | No Dataverse plugins; record invariants owned server-side (WP-1…WP-8) | Any `IPlugin` type; invariant enforced only in a wizard `onFinish` |
 | ADR-006 | PCF over webresources | Creating legacy .js webresource |
 | ADR-007 | Graph types isolated | GraphServiceClient in controller |
 | ADR-008 | Endpoint filters for auth | Global middleware for auth |
@@ -376,7 +376,7 @@ The adr-check skill validates code against Architecture Decision Records:
 1. IDENTIFY resource types in modified files
    → API endpoint → ADR-001, ADR-008, ADR-010
    → PCF control → ADR-006, ADR-011, ADR-012, ADR-021
-   → Plugin → ADR-002
+   → Dataverse write path / record create → ADR-002
    → Caching → ADR-009
 
 2. LOAD applicable ADRs
@@ -399,11 +399,11 @@ The adr-check skill validates code against Architecture Decision Records:
 
 ### 🔴 Violations Found
 
-**ADR-002: Thin Dataverse Plugins**
-- File: `src/solutions/Plugins/ValidateContact.cs:34`
-- Violation: HttpClient instantiation in plugin
-- Constraint: "No HTTP/Graph calls from plugins"
-- Fix: Move HTTP call to BFF API, call via action
+**ADR-002: No Dataverse Plugins / Server-Side Write Path**
+- File: `src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts` *(illustrative — a known master-today gap, registry I-3)*
+- Violation: record invariant (creation-time field mapping via `applyFieldMappings`) enforced only in client wizard code
+- Constraint: "Client code MAY preview an invariant but MUST NOT be its only enforcement" (WP-2)
+- Fix: Apply the invariant in the BFF write path (single server owner, WP-1) and create via a BFF endpoint (WP-3)
 
 **ADR-021: Fluent UI v9 Design System**
 - File: `src/client/pcf/Panel/styles.ts:12`
@@ -648,7 +648,7 @@ The `sdap-ci.yml` workflow runs on every pull request and push to `master`. All 
 | **Security Scan** | ubuntu-latest | Trivy filesystem vulnerability scan | Yes |
 | **Build & Test** | windows-latest | `dotnet build`, `dotnet test` with coverage | Yes |
 | **Client Quality** | ubuntu-latest | Prettier format check, ESLint strict check | Yes |
-| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), plugin size validation, dependency audit | Yes |
+| **Code Quality** | ubuntu-latest | `dotnet format --verify-no-changes`, ADR architecture tests (NetArchTest), dependency audit (legacy plugin size step is dead — Spaarke ships no plugins, ADR-002; removal deferred to post-cutover) | Yes |
 | **Integration Readiness** | windows-latest | Build for deployment, package artifacts, environment readiness | Yes |
 | **ADR Violations Report** | ubuntu-latest | Parses NetArchTest results and comments on PR | Advisory |
 | **CI Summary** | ubuntu-latest | Aggregates all job results into step summary | Advisory |
@@ -673,54 +673,48 @@ The full PR pipeline MUST complete in **< 5 minutes**. The `client-quality` job 
 
 ## Nightly Quality Pipeline
 
-The `nightly-quality.yml` workflow runs a comprehensive quality sweep on weeknights (Mon-Fri, 6 AM UTC / midnight MST). For trigger details, manual dispatch options, and troubleshooting, see the [CI/CD Workflow Guide - Nightly Quality Workflow](ci-cd-workflow.md#nightly-quality-workflow).
+> **`nightly-quality.yml` removed** 2026-06-01 (commit `902bebc49c`, `github-actions-rationalization-r1` Wave C, D-03) — it was a `src/` regression blocker that NFR-01 forbade fixing in place. It has **no 1:1 successor**: SonarCloud analysis and the nightly Claude Code AI review are not run anywhere in this repo's CI today.
+
+The current nightly sweep is `nightly-health.yml` (daily, 06:00 UTC). For full trigger details, manual dispatch options, and troubleshooting, see the [CI/CD Workflow Guide - Scheduled Workflows](ci-cd-workflow.md#scheduled-workflows).
 
 ### Jobs
 
 | Job | Depends On | What It Does |
 |-----|-----------|-------------|
-| **test-and-coverage** | — | Full test suite with Coverlet coverage collection |
-| **sonarcloud-analysis** | test-and-coverage | SonarCloud deep analysis (uses coverage artifacts) |
-| **ai-code-review** | — | Claude Code headless review using `scripts/quality/nightly-review-prompt.md` |
-| **dependency-audit** | — | `dotnet list --vulnerable` + `npm audit` |
-| **report-results** | All above | Aggregates findings into a rolling GitHub issue (label: `nightly-quality`) |
+| **flake-hunt** | — | Runs the unit test suite 3× sequentially; flags tests that didn't pass all 3 runs |
+| **bundle-size** | — | Builds key client artifacts; flags >10% size regressions vs `.github/baseline-bundle-sizes.json` |
+| **vuln-scan** | — | `dotnet list package --vulnerable --include-transitive` + `npm audit` on 3 key client packages |
+| **full-integration** | — | Full, unfiltered `Spe.Integration.Tests` run |
+| **coverage-observation** | — | Aggregated Cobertura coverage — observation only, never a gate (ADR-038) |
+| **trivy-fs** | — | Filesystem Trivy scan; never fails the job |
+| **dep-audit** | — | Full transitive `dotnet`/`npm` vulnerability audit across every `package-lock.json` root |
+| **graph-app-role-parity** | — | Graph app-role parity check; self-skips today (its `NIGHTLY_*` secrets were never populated) |
+| **report** | All above | Aggregates findings into a rolling GitHub issue, "Nightly Health — {date}" |
 
 ### Performance Target
 
-The nightly pipeline MUST complete in **< 15 minutes**.
+Each job carries its own timeout (20–60 min); there is no single aggregate budget for the workflow.
 
 ### Manual Trigger
 
 ```bash
-# Run nightly quality on-demand via GitHub CLI
-gh workflow run nightly-quality.yml
+# Run nightly health on-demand via GitHub CLI
+gh workflow run nightly-health.yml
 
-# Run without SonarCloud
-gh workflow run nightly-quality.yml -f run_sonarcloud=false
-
-# Run without AI review
-gh workflow run nightly-quality.yml -f run_ai_review=false
+# Also commit the current bundle sizes as the new baseline
+gh workflow run nightly-health.yml -f update_baseline=true
 ```
 
 ---
 
 ## Weekly Quality Summary
 
-The `weekly-quality.yml` workflow runs every Friday at 10 PM UTC (4 PM MST). It aggregates metrics from the week's nightly runs into a trend table.
+> **`weekly-quality.yml` removed** 2026-06-01 (commit `902bebc49c`, D-03) — it depended on `nightly-quality.yml`'s artifacts and was also broken. It has **no successor that tracks the same metrics** (coverage %, new-violation count, TODO count, vulnerable-dependency count); that quality-trend report does not exist today. The closest current weekly reporting is:
 
-### Metrics Tracked
-
-| Metric | Source |
-|--------|--------|
-| Test coverage % | `coverage.cobertura.xml` artifact |
-| New violations count | `ai-review-results.json` artifact |
-| TODO/FIXME count | `ai-review-results.json` artifact |
-| Vulnerable dependency count | `dependency-audit-results` artifact |
-| Build warnings | Test run exit status |
-
-### Output
-
-Creates/updates a GitHub issue labeled `weekly-quality-summary` with a trend table showing the week's quality trajectory.
+| Workflow | Schedule | What It Reports |
+|----------|----------|------------------|
+| `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` — not a code-quality trend |
+| `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full NetArchTest ADR compliance scan — tracking issue |
 
 ---
 
@@ -766,14 +760,14 @@ Two AI review tools provide automated PR feedback:
 - **Config**: `.coderabbit.yaml` (if configured)
 - **Status**: Advisory (comments on PR, does not block merge)
 
-### Claude Code Action
+### Claude Code Action — removed
 
-- **Trigger**: Automatically reviews every PR via GitHub Actions
-- **Workflow**: `.github/workflows/claude-code-review.yml`
-- **Focus**: Architecture-level review, ADR compliance, design patterns
-- **Status**: Advisory (comments on PR, does not block merge)
+There is **no** GitHub Actions workflow running an AI PR-review action in this repo today. `claude-code-review.yml` was removed 2026-05-26 (commit `4edce041ef`) — it required a missing `ANTHROPIC_API_KEY` secret (so it could never complete a review) and duplicated ADR coverage already enforced by:
+- the `code-review` skill — mandatory at `task-execute` Step 9.5 per root `CLAUDE.md` §4
+- the `adr-check` skill — direct ADR validation via `/adr-check`
+- `task-execute` rigor levels — explicit ADR loading per task
 
-Both tools complement each other: CodeRabbit focuses on code-level details while Claude Code Action provides higher-level architectural analysis.
+CodeRabbit's PR comments are therefore the only automated AI review on a PR today; the `code-review`/`adr-check` skills provide the architecture-level analysis that `claude-code-review.yml` used to add.
 
 ---
 
@@ -1004,7 +998,6 @@ This section defines **which tests to run when you modify code in a specific mod
 |-------------|------|-----------|--------|
 | **Sprk.Bff.Api.Tests** | `tests/unit/Sprk.Bff.Api.Tests/` | xUnit + NSubstitute + Moq + FluentAssertions + WireMock.Net | BFF API endpoints, services, filters, infrastructure |
 | **Spaarke.Core.Tests** | `tests/unit/Spaarke.Core.Tests/` | xUnit + FluentAssertions | Shared .NET library (Spaarke.Core) |
-| **Spaarke.Plugins.Tests** | `tests/unit/Spaarke.Plugins.Tests/` | xUnit + FluentAssertions + Moq + CRM SDK | Dataverse plugin validation and projection logic |
 | **Spe.Integration.Tests** | `tests/integration/Spe.Integration.Tests/` | xUnit + FluentAssertions + Moq + Mvc.Testing | End-to-end API integration (auth, AI, reporting, RAG) |
 | **Spaarke.ArchTests** | `tests/Spaarke.ArchTests/` | xUnit + NetArchTest.Rules | ADR compliance via architecture reflection tests |
 | **E2E (Playwright)** | `tests/e2e/` | Playwright + TypeScript | Browser-based PCF control and add-in testing |
@@ -1102,29 +1095,21 @@ cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
 
 **Playwright configuration**: `tests/e2e/config/playwright.config.ts` (Edge primary, 60s timeout, Power Apps URLs)
 
-**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1)
+**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1; EmailProcessingMonitor deleted 2026-09-25)
 
 **ADR constraints validated**: ADR-006 (PCF over webresources), ADR-012 (shared component library), ADR-021 (Fluent UI v9, dark mode), ADR-022 (PCF uses React 16 platform libraries)
 
-### For Dataverse Plugins
+### For the Dataverse Write Path *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
 
-**When you modify**: `src/server/plugins/Spaarke.Plugins/` (Dataverse plugin classes)
+Spaarke ships **no Dataverse plugins** — there is no plugin project or plugin test project (the `Spaarke.Plugins` / `Spaarke.Plugins.Tests` projects previously listed here never existed). Record invariants live in the BFF server-side write path ([ADR-002](../adr/ADR-002-no-heavy-plugins.md) WP-1…WP-8; [`DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md)), so they are tested with the BFF: invariant owners in `Sprk.Bff.Api.Tests`, write-path seams in `Spe.Integration.Tests`.
 
 **Run these tests**:
 ```bash
-# Plugin unit tests (validation and projection logic)
-dotnet test tests/unit/Spaarke.Plugins.Tests/
-
-# Architecture tests (ADR-002 thin plugin constraints)
+# Architecture tests (ADR-002 zero-plugin guard)
 dotnet test tests/Spaarke.ArchTests/ --filter "DisplayName~ADR-002"
 ```
 
-**Key test files**:
-- `tests/unit/Spaarke.Plugins.Tests/ValidationPluginTests.cs` -- field validation logic
-- `tests/unit/Spaarke.Plugins.Tests/ProjectionPluginTests.cs` -- projection/mapping logic
-- `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` -- enforces no HTTP/Graph calls, plugin size constraints
-
-**ADR constraints validated**: ADR-002 (thin plugins, <50ms, no HTTP/Graph calls)
+**Key test file**: `tests/Spaarke.ArchTests/ADR002_PluginTests.cs` -- repo-wide zero-plugin guard (see Architecture Test Inventory below).
 
 ### For Shared Libraries (Spaarke.Core, Spaarke.Dataverse)
 
@@ -1202,7 +1187,6 @@ Given a changed file path, this matrix determines which test projects to execute
 | `src/server/api/Sprk.Bff.Api/Program.cs` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` | -- |
 | `src/server/shared/Spaarke.Core/**` | `Spaarke.Core.Tests` + `Sprk.Bff.Api.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-007\|ADR-009`) | -- |
 | `src/server/shared/Spaarke.Dataverse/**` | `Sprk.Bff.Api.Tests` | `Spe.Integration.Tests` | `Spaarke.ArchTests` (filter: `ADR-007`) | -- |
-| `src/server/plugins/Spaarke.Plugins/**` | `Spaarke.Plugins.Tests` | -- | `Spaarke.ArchTests` (filter: `ADR-002`) | -- |
 | `src/client/pcf/**` | -- | -- | -- | `tests/e2e/` (matching control spec) |
 | `src/client/code-pages/**` | -- | -- | -- | -- (manual or UI test via Step 9.7) |
 | `src/client/shared/**` | -- | -- | -- | `tests/e2e/` (all control specs, since shared components affect all) |
@@ -1226,7 +1210,6 @@ dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettin
 # Run a specific test project
 dotnet test tests/unit/Sprk.Bff.Api.Tests/
 dotnet test tests/unit/Spaarke.Core.Tests/
-dotnet test tests/unit/Spaarke.Plugins.Tests/
 dotnet test tests/integration/Spe.Integration.Tests/
 dotnet test tests/Spaarke.ArchTests/
 
@@ -1249,7 +1232,7 @@ reportgenerator -reports:**/coverage.cobertura.xml -targetdir:coverage-report
 
 ## Coverage Targets
 
-Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`). The `Include` filter covers: `[Sprk.Bff.Api]*`, `[Spaarke.Plugins]*`, `[Spaarke.Core]*`, `[Spaarke.Dataverse]*`. Test assemblies and `Program.cs` are excluded.
+Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`). The `Include` filter covers: `[Sprk.Bff.Api]*`, `[Spaarke.Core]*`, `[Spaarke.Dataverse]*` (it also lists `[Spaarke.Plugins]*`, which matches no assembly — Spaarke ships no plugins, ADR-002). Test assemblies and `Program.cs` are excluded.
 
 ### Per-Module Coverage Targets
 
@@ -1258,7 +1241,6 @@ Coverage is collected via Coverlet (configured in `config/coverlet.runsettings`)
 | **Core services** (SpeFileStore, auth, caching) | `src/server/shared/Spaarke.Core/` | **80%+** | Critical shared infrastructure; high reuse surface |
 | **BFF API endpoints** | `src/server/api/Sprk.Bff.Api/Api/` | **70%+** | Route handlers; integration tests cover remaining paths |
 | **AI pipeline services** | `src/server/api/Sprk.Bff.Api/Services/Ai/` | **70%+** | Complex orchestration; some paths require live AI services |
-| **Dataverse plugins** | `src/server/plugins/Spaarke.Plugins/` | **80%+** | Thin, testable logic; must be exhaustively validated |
 | **Infrastructure** (DI, auth, resilience) | `src/server/api/Sprk.Bff.Api/Infrastructure/` | **60%+** | Framework glue code; some paths only exercised at runtime |
 | **Dataverse abstractions** | `src/server/shared/Spaarke.Dataverse/` | **60%+** | Thin wrappers over SDK; mocking limited by CRM SDK |
 | **Utility/helper classes** | (scattered) | **90%+** | Pure functions; easy to test exhaustively |
@@ -1290,8 +1272,8 @@ Architecture tests (`tests/Spaarke.ArchTests/`) use **NetArchTest.Rules** to enf
 
 | Test File | ADR | What It Enforces |
 |-----------|-----|-----------------|
-| `ADR001_MinimalApiTests.cs` | ADR-001 | No Azure Functions packages or attributes; Minimal API + BackgroundService only |
-| `ADR002_PluginTests.cs` | ADR-002 | Plugin assembly has no HTTP/Graph dependencies; plugins stay thin |
+| `ADR001_MinimalApiTests.cs` | ADR-001 | No Functions or Durable Task packages and no Function-attributed methods inside the BFF assembly |
+| `ADR002_PluginTests.cs` | ADR-002 | Repo-wide **zero-plugin guard** *(2026-09-25)*: no `IPlugin` types; no CrmSdk packages, net4x projects, or `.snk` files; no ILMerge/ILRepack; no plugin registrations in solution XML; no `src/dataverse/plugins` directory. Also: BFF contains no plugin-named types and BFF endpoints reference no `IPlugin` |
 | `ADR007_GraphIsolationTests.cs` | ADR-007 | Graph SDK types do not leak above the SpeFileStore facade layer |
 | `ADR008_AuthorizationTests.cs` | ADR-008 | Authorization uses endpoint filters, not global middleware |
 | `ADR009_CachingTests.cs` | ADR-009 | Redis-first caching; no hybrid L1 cache without profiling justification |

@@ -48,6 +48,8 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 
 **Records**: *core* (project, matter, work assignment, service request) need direct grants. *Child* (invoice, communication, document, event, to-do, analysis) inherit **1 hop** via a denormalized core ancestor. **Matter does NOT inherit from Project** — both are core.
 
+🔴 **"Core" and "externally grantable" are NOT the same list** (owner-confirmed 2026-09-09, task 028). Service request is **core** — nothing else confers access to it — but it is **never grantable to an external contact**. Service requests are submitted by internal workforce users through the SPA; a law firm must never reach one. The grant table `sprk_externalrecordaccess` therefore carries lookups for **project, matter, work assignment, invoice and organization — and deliberately no service request**, and `CallerPrincipal` composes exactly three externally-grantable root sets. Service-request scoping already exists and is a **different mechanism**: the `service-requests` external module scopes by *requester* (`sprk_requestedby == caller`) and returns an empty set for any non-workforce plane, shipped by `spaarke-SPA-external-access-platform-r2` #028 on 2026-08-10. **Do not "complete the fourth root" by adding an accessible service-request set** — it would compose from grants that cannot exist and would encode service requests as externally grantable. See [`notes/task-028-service-request-root.md`](notes/task-028-service-request-root.md).
+
 ## Reuse, do not fork
 
 | Need | Use this — it exists |
@@ -65,6 +67,7 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 | **NFR-05** role-depth assertion | No security role may reach the `Secure Projects` BU. A role edit that re-opens secure projects fails the build |
 | **NFR-07** | Characterization suite exists BEFORE Phase 1 changes behaviour — the current baseline is near-zero |
 | **FR-07 → FR-29** | Delegation ("you may grant if you have Write on the record") ships BEFORE the PCF "+ User" button. Otherwise that button is a one-click privilege escalation on a confidential matter |
+| **Integration suites, run in full, before the PR** | `dotnet test` on `tests/integration/Sprk.Bff.Api.IntegrationTests` AND `tests/integration/Spe.Integration.Tests`, not just a build. `Router` does not run them; the legacy Build & Test does, about an hour after the push. Batch 3 (PR #1096) ran the unit and arch suites only, and three integration tests whose fixtures had not followed tasks 138 and 152 surfaced only in CI (fixed in `8531711d6`) |
 
 ## Parallel-safety rules
 

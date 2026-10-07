@@ -120,8 +120,8 @@ az account show --query "{Name:name, Id:id}" -o table
 | Stack | Path | Purpose |
 |-------|------|---------|
 | AI Foundry | `infrastructure/bicep/stacks/ai-foundry-stack.bicep` | AI Hub, Project, Storage, KV |
-| Model 1 Shared | `infrastructure/bicep/stacks/model1-shared.bicep` | Shared infrastructure |
-| Model 2 Full | `infrastructure/bicep/stacks/model2-full.bicep` | Full customer deployment |
+| ~~Model 1 Shared~~ | ~~`infrastructure/bicep/stacks/model1-shared.bicep`~~ | 🔴 **RETIRED 2026-09-28 (D-12); file deleted by task 225a (2026-10-01)** with `model1-customer.bicep` and `parameters/{dev,staging,prod}.bicepparam`. Model 1 customers are dedicated stamps built by the L2 control plane (H2a refuses Model 1 runs until tasks 225b + 228). |
+| Customer stamp (**both models**) | `infrastructure/bicep/customer.bicep` — the ONLY customer-stamp template, deployed by L2 handler H2a (task 249, owner D19, 2026-10-02: `stacks/model2-full.bicep` and its parameter files were deleted) | Dedicated per-customer deployment — one Azure subscription + resource group per customer (ADR-027 amended 2026-09-28). Not deployed by any GitHub workflow — `deploy-infrastructure.yml` only validates. |
 
 ### Deploy Infrastructure
 
@@ -302,42 +302,38 @@ This skill documents **manual** Azure Infrastructure + Key Vault Secrets work. F
 
 | Workflow | Trigger | What It Deploys |
 |----------|---------|-----------------|
-| `.github/workflows/deploy-infrastructure.yml` | Manual trigger (`workflow_dispatch`) | Azure Infrastructure (Bicep stacks) |
-| `.github/workflows/deploy-bff-api.yml` | Auto (after CI passes on master) OR manual | BFF API — see `bff-deploy` skill |
-| `.github/workflows/deploy-office-addins.yml` | Manual trigger | Office Add-ins SWA — see `office-addins-deploy` skill |
-| `.github/workflows/deploy-platform.yml` | Manual trigger | Cross-platform deployment orchestrator |
-| `.github/workflows/deploy-promote.yml` | Manual trigger | Promote a deployed artifact between environments |
-| `.github/workflows/deploy-slot-swap.yml` | After CI green | Slot swap for App Service blue-green deploys |
+| `.github/workflows/deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | PR / push on `infrastructure/bicep/**`, or `workflow_dispatch` | **Nothing** — lints every Bicep file and compiles `customer.bicep` + the remaining stacks (task 249). Customer stamps are deployed by L2 handler H2a. |
+| `.github/workflows/deploy-bff-api.yml` | `workflow_dispatch` only (never on merge) | BFF API — staging slot → swap → verify, with auto-rollback; see `bff-deploy` skill |
+| `.github/workflows/deploy-office-addins.yml` | Push to `master` on add-in paths, or `workflow_dispatch` | Office Add-ins SWA — see `office-addins-deploy` skill |
+| `.github/workflows/deploy-promote.yml` | `workflow_dispatch` | Direct-target deploy to dev / staging / production (production needs reviewer approval) |
 
-**Note**: Earlier docs referenced `deploy-staging.yml` and `deploy-to-azure.yml` — these workflow files do NOT exist. The actual workflow names are listed above (verified 2026-05-17).
+**Note**: `deploy-staging.yml` and `deploy-to-azure.yml` never existed; `deploy-platform.yml` and `deploy-slot-swap.yml` were deleted (commit `902bebc49c`). Slot swaps are part of `deploy-bff-api.yml`. Full current list: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md) (verified 2026-09-30).
 
 ### When to Use Manual vs Automated
 
 | Scenario | Use |
 |----------|-----|
-| Routine infrastructure update | Automated (`deploy-infrastructure.yml` workflow_dispatch) |
+| Customer stamp (new or upgrade) | L2 control plane via `/provision-environment` (H2a deploys `customer.bicep`) — never a GitHub workflow |
 | Emergency hotfix on Bicep | Manual deployment (this skill) |
 | First-time infrastructure stand-up | Manual deployment (this skill) |
 | Debugging deployment issues | Manual deployment (this skill) |
 | BFF API deploy | `bff-deploy` skill (DO NOT do BFF deploys via this skill) |
 
-### Trigger Automated Infrastructure Deployment
+### Run Bicep Validation On Demand
 
 ```powershell
-# Trigger infrastructure deployment manually
+# Lint + compile every Bicep template (deploys nothing — task 249)
 gh workflow run deploy-infrastructure.yml
 
-# Monitor deployment progress
+# Monitor the run
 gh run watch
-
-# View deployment status
 gh run list --workflow=deploy-infrastructure.yml --limit 5
 ```
 
-### Check Deployment Status
+### Check Workflow Runs
 
 ```powershell
-# View recent deployments
+# View recent validation runs
 gh run list --workflow=deploy-infrastructure.yml
 
 # View specific run details
@@ -398,4 +394,4 @@ Both scripts support `-SkipBuild` flag to deploy existing builds faster.
 | Key Vault secret stored but App Settings reference returns null | App Service's managed identity doesn't have `Get` permission on the Key Vault, OR the reference syntax `@Microsoft.KeyVault(SecretUri=...)` has a typo | Grant the App Service's system-assigned MI Key Vault Secrets User role. Verify reference syntax matches exactly (including the literal `@` and proper VaultName/SecretName fields). Test with `az webapp config appsettings list` to see resolved values. |
 | AI Foundry stack deploy fails with "Hub not found" mid-deploy | Resource dependencies aren't ordered correctly in the Bicep | The `ai-foundry-stack.bicep` example wires Hub → Project → Connections in correct order. Don't shortcut to deploy Project before Hub exists. |
 | Workflow `deploy-staging.yml` or `deploy-to-azure.yml` doesn't exist | Earlier docs referenced these by hopeful name; they were never created | Use the actual workflows listed in `## CI/CD Integration` (verified 2026-05-17). Fixed in this skill version. |
-| Deployment in slot 'staging' but production users still on old version | Slot swap step not run after staging validation | Slot deploys to `staging` are intentional — explicit `az webapp deployment slot swap` step is required to promote. Use `deploy-slot-swap.yml` workflow for this. |
+| Deployment in slot 'staging' but production users still on old version | Slot swap step not run after staging validation | Slot deploys to `staging` are intentional — explicit `az webapp deployment slot swap` step is required to promote. `deploy-bff-api.yml` does the swap (and verifies, with rollback); `deploy-slot-swap.yml` no longer exists. |

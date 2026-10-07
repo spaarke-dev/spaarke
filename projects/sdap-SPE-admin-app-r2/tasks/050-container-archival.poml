@@ -39,7 +39,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">Scope: new endpoints. Minimal API pattern; no Azure Functions.</constraint>
+    <constraint source="ADR-001">Scope: new endpoints. Minimal API pattern; BFF endpoints are never hosted in Azure Functions (no Azure Functions inside the BFF assembly).</constraint>
     <constraint source="ADR-008">Scope: the new endpoints. Authorization via the existing endpoint filter on the /api/spe group. No global middleware.</constraint>
     <constraint source="ADR-007">Scope: the facade boundary. Graph SDK types MUST NOT leak above the service.</constraint>
     <constraint source="project">Scope: the opt-in boundary. Do NOT implement the container-type archive opt-in (PowerShell, Set-SPOContainerType). If archival fails because the type has not opted in, the message MUST say so and name the remediation.</constraint>

@@ -40,7 +40,7 @@ public sealed class JobRetryPolicy
     /// <summary>
     /// Compute the delay to wait BEFORE the given attempt number. Attempt 1 is the initial
     /// call (no delay) — callers compute delay for attempt 2, 3, ... only.
-    /// Formula: <c>BaseDelay * 2^(attemptNumber-1)</c>, capped at <see cref="MaxDelay"/>.
+    /// Formula: <c>BaseDelay * 2^(attemptNumber-2)</c>, capped at <see cref="MaxDelay"/>.
     /// </summary>
     /// <param name="attemptNumber">1-based attempt number that is about to start. Must be &gt;= 1.</param>
     /// <exception cref="ArgumentOutOfRangeException">If <paramref name="attemptNumber"/> &lt; 1.</exception>

@@ -1,9 +1,9 @@
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Compose;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -163,7 +163,19 @@ public static class ReviewMemoEndpoints
         // ReviewMemoAssembler.Assemble is total over a non-empty, already-validated Sections list.
         var memo = ReviewMemoAssembler.Assemble(request);
 
-        var outputId = await persistence.PersistReviewMemoAsync(analysisId, memo, cancellationToken);
+        Guid outputId;
+        try
+        {
+            outputId = await persistence.PersistReviewMemoAsync(
+                analysisId, memo, cancellationToken,
+                Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User)); // task 146 c1-r1
+        }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: the memo is owned like its analysis; when no owner resolves, nothing was written.
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "review memo");
+        }
 
         return Results.Created(
             $"/api/ai/analysis/{analysisId}",
@@ -276,7 +288,7 @@ public static class ReviewMemoEndpoints
             return (Guid.Empty, Problem(
                 StatusCodes.Status400BadRequest,
                 "Save The Document First",
-                "This document isn't saved yet, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — save the document first (that creates its Analysis), then generate the memo.",
+                "This document isn't saved yet, so there's nowhere to save a Review Summary. If a review was completed here it is not lost — save the document first (that creates its Analysis), then generate the Review Summary.",
                 code: "session-not-bound"));
         }
 
@@ -287,15 +299,15 @@ public static class ReviewMemoEndpoints
     /// surface an empty export — surface this clear message instead).</summary>
     private static IResult NoMemoProblem() => Problem(
         StatusCodes.Status404NotFound,
-        "No Review Memo",
-        "No Review Summary Memo has been generated for this session's Analysis yet. Generate the review memo first.",
+        "No Review Summary",
+        "No Review Summary has been generated for this session's Analysis yet. Generate the Review Summary first.",
         code: "no-memo");
 
     /// <summary>Sanitizes the analysis name into a safe Content-Disposition filename; falls back to a
     /// stable default when the name is blank or sanitizes to empty.</summary>
     private static string BuildMemoFileName(string? analysisName)
     {
-        const string suffix = "Review Summary Memo.docx";
+        const string suffix = "Review Summary.docx";
         if (string.IsNullOrWhiteSpace(analysisName))
         {
             return suffix;
@@ -342,6 +354,6 @@ public static class ReviewMemoEndpoints
 public sealed record GenerateReviewMemoResponse(Guid AnalysisId, Guid OutputId, int SectionCount);
 
 /// <summary>Response for <c>GET /api/ai/chat/sessions/{sessionId}/review-memo</c> (FR-14, task 051) —
-/// the persisted memo plus the display metadata the "Email memo" toolbar action needs for its subject
-/// line ("Review Summary Memo — {AnalysisName}") without a second round-trip.</summary>
+/// the persisted memo plus the display metadata the "Email" toolbar action needs for its subject
+/// line ("Review Summary — {AnalysisName}") without a second round-trip.</summary>
 public sealed record ReviewMemoReadResponse(Guid AnalysisId, string? AnalysisName, string? DocumentName, ReviewMemoDocument Memo);

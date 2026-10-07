@@ -62,6 +62,8 @@ $AZ = 'C:\Program Files\Microsoft SDKs\Azure\CLI2\wbin\az.cmd'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot  = Split-Path -Parent $scriptDir
 $actionDir = Join-Path $repoRoot 'infra\dataverse\actions'
+# Sidecar output schemas, matched to a mirror by "<actionCode>.schema.json" (added 2026-09-29).
+$schemaDir = Join-Path $repoRoot 'infra\dataverse\outputschemas'
 
 Write-Host '========================================='
 Write-Host 'Action Mirror Deployment (sprk_analysisaction)'
@@ -95,6 +97,58 @@ $fieldMap = @{
 }
 $jsonFields = @('sprk_outputschemajson', 'sprk_inputschema')
 
+# ── JPS-shaped mirrors ────────────────────────────────────────────────────────────────────────────
+# 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1). This script silently no-opped on every
+# JPS-shaped mirror and printed "UNCHANGED".
+#
+# WHY. $fieldMap above expects a FLAT mirror: a top-level `systemPrompt` string (nda-review,
+# compose-*). A JPS mirror (triage-email, and any file carrying $schema
+# "https://spaarke.com/schemas/prompt/v1") has NO such key — its prompt IS the document:
+# instruction / input / output / examples. The per-column loop does
+# `if (-not ($def.PSObject.Properties.Name -contains $srcKey)) { continue }`, so systemPrompt,
+# outputSchema and inputSchema were ALL skipped, $body came out empty, and the script reported
+# UNCHANGED. Verified: reordering output.fields and adding three examples gave "Changed: 0".
+#
+# That is the same failure class this script's own header documents (compose-r8's target_para_id
+# never reaching Dataverse, so the model was asked for target_text until UAT caught it on
+# 2026-08-26) — except hidden behind a GREEN success message, which is worse than the missing
+# deployer was.
+#
+# WHAT THE RUNTIME STORES. sprk_systemprompt holds the JPS subset only: exactly these keys, in this
+# order, indented 2, with no $comment* keys anywhere and none of the row-level fields (actionCode,
+# name, description, actionType, modelTier, temperature) that live in their own columns.
+$jpsPromptKeys = @('$schema', '$version', 'instruction', 'input', 'output', 'examples', 'metadata')
+
+# Recursively drop $comment* keys — they are author-surface annotations, never part of the contract
+# the model sees. Arrays are walked so per-example comments are stripped too.
+function Remove-CommentKeys {
+    param($Node)
+    if ($Node -is [System.Collections.IEnumerable] -and $Node -isnot [string] -and $Node -isnot [pscustomobject]) {
+        return @($Node | ForEach-Object { Remove-CommentKeys -Node $_ })
+    }
+    if ($Node -is [pscustomobject]) {
+        $clean = [ordered]@{}
+        foreach ($p in $Node.PSObject.Properties) {
+            if ($p.Name -like '$comment*') { continue }
+            $clean[$p.Name] = Remove-CommentKeys -Node $p.Value
+        }
+        return [pscustomobject]$clean
+    }
+    return $Node
+}
+
+# Builds the sprk_systemprompt payload for a JPS mirror, or $null when the mirror is flat.
+function Get-JpsSystemPrompt {
+    param($Def, [string[]]$Keys)
+    if ($Def.PSObject.Properties.Name -contains 'systemPrompt') { return $null }  # flat mirror
+    $present = @($Keys | Where-Object { $Def.PSObject.Properties.Name -contains $_ })
+    if ($present.Count -eq 0) { return $null }                                    # neither shape
+    $jps = [ordered]@{}
+    foreach ($k in $present) { $jps[$k] = Remove-CommentKeys -Node $Def.$k }
+    # Depth 40: JPS output.fields[].items and nested example payloads exceed the default 2.
+    return (([pscustomobject]$jps) | ConvertTo-Json -Depth 40)
+}
+
 $files = Get-ChildItem $actionDir -Filter '*.action.json' | Sort-Object Name
 $changed = 0; $skipped = 0; $missing = 0; $examined = 0
 
@@ -104,6 +158,29 @@ foreach ($file in $files) {
     if (-not $code) { Write-Host "  SKIP $($file.Name) — no actionCode" -ForegroundColor Yellow; $skipped++; continue }
     if ($code -notlike $Filter) { continue }
     $examined++
+
+    # JPS-shaped mirror: synthesize the `systemPrompt` the flat mirrors carry literally, so the
+    # column loop below sees one property shape regardless of mirror style. See the block comment
+    # at $jpsPromptKeys for why this is necessary (silent UNCHANGED no-op before 2026-09-29).
+    $jpsPrompt = Get-JpsSystemPrompt -Def $def -Keys $jpsPromptKeys
+    if ($jpsPrompt) {
+        $def | Add-Member -NotePropertyName 'systemPrompt' -NotePropertyValue $jpsPrompt -Force
+    }
+
+    # Sidecar output schema: infra/dataverse/outputschemas/<actionCode>.schema.json. The BFF reads
+    # sprk_outputschemajson at runtime to build the structured-output request, and for JPS mirrors
+    # the schema — NOT the prompt's output.fields list — is what governs property emission ORDER.
+    # Added 2026-09-29: triage-email's schema existed ONLY in Dataverse, unversioned and invisible
+    # to code review, because nothing in the repo owned it.
+    $schemaPath = Join-Path $schemaDir "$code.schema.json"
+    if ((Test-Path $schemaPath) -and -not ($def.PSObject.Properties.Name -contains 'outputSchema')) {
+        try {
+            $sidecar = Get-Content $schemaPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $def | Add-Member -NotePropertyName 'outputSchema' -NotePropertyValue $sidecar -Force
+        } catch {
+            Write-Host "  WARN $code — $([IO.Path]::GetFileName($schemaPath)) is not valid JSON; leaving sprk_outputschemajson untouched. $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
 
     $escaped = $code.Replace("'", "''")
     $existing = Invoke-RestMethod -Uri "$api/sprk_analysisactions?`$filter=sprk_actioncode eq '$escaped'" -Headers $headers -Method Get

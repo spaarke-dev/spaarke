@@ -1,20 +1,23 @@
-# ADR-001: Minimal API + BackgroundService (Concise)
+# ADR-001: Minimal API BFF Runtime (Concise)
 
-> **Status**: Accepted
+> **Status**: Accepted, as amended (A1, 2026-09-12)
 > **Domain**: API/BFF Architecture
-> **Last Updated**: 2026-05-19
+> **Last Updated**: 2026-09-12 (Amendment A1 — workload placement moved to [ADR-052](ADR-052-workload-placement.md))
 
 ---
 
 ## Decision
 
-Run the **BFF on a single ASP.NET Core App Service** using:
-- **Minimal API** for synchronous HTTP endpoints
-- **BackgroundService** workers for async jobs tied to BFF business logic (Service Bus)
-- **Azure Functions PERMITTED** for narrowly-scoped out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction)
-- **No Durable Functions** (use Service Bus + state machine instead)
+Run the **BFF on a single ASP.NET Core App Service**:
+- **Minimal API** for all synchronous HTTP endpoints
+- **One middleware pipeline** for cross-cutting concerns (ProblemDetails, correlation/telemetry, security headers,
+  rate limiting); resource authorization stays endpoint-level (ADR-008)
+- **Background, scheduled and event-driven work**: *where* it runs → [ADR-052](ADR-052-workload-placement.md);
+  *how* it runs inside the BFF → [ADR-004](ADR-004-job-contract.md) (queue) / [ADR-036](ADR-036-background-job-infrastructure.md) (schedule)
 
-**Rationale**: A single BFF runtime eliminates duplicate cross-cutting concerns (auth, retries, correlation) within the BFF, simplifies BFF debugging, and ensures predictable performance. Out-of-band integration workloads (event-driven sync, timer-driven indexing) are legitimately independent of the BFF and belong in Functions when the trigger semantics or lifecycle independence justify it.
+**Rationale**: A single BFF runtime avoids duplicated cross-cutting concerns (auth, retries, correlation), keeps
+BFF debugging simple and latency predictable. That concern is about user-facing endpoints; it does not decide where
+background work runs (Amendment A1).
 
 ---
 
@@ -22,27 +25,17 @@ Run the **BFF on a single ASP.NET Core App Service** using:
 
 ### ✅ MUST
 
-- **MUST** use Minimal API for all BFF HTTP endpoints (no Functions hosting BFF endpoints)
-- **MUST** use BackgroundService + Service Bus for BFF-coupled async work
-- **MUST** register BFF services in single `Program.cs` middleware pipeline
+- **MUST** use Minimal API for all BFF HTTP endpoints
+- **MUST** register BFF services in the single `Program.cs` middleware pipeline (via feature modules — ADR-010)
 - **MUST** return `ProblemDetails` for all BFF API errors
 - **MUST** expose `/healthz` endpoint for health checks
-- **MUST** (when using Functions) deploy them via Bicep alongside the BFF, share App Insights correlation, and use Managed Identity + Key Vault
 
 ### ❌ MUST NOT
 
 - **MUST NOT** host BFF endpoints in Azure Functions
-- **MUST NOT** duplicate BFF auth, correlation, or ProblemDetails infrastructure inside a Function
-- **MUST NOT** use Durable Functions for orchestrations
-- **MUST NOT** let Functions grow into a shadow BFF — keep them narrowly scoped to out-of-band integration work
-
-### ✅ Functions are appropriate for
-
-- Dataverse → AI Search sync (event-driven + scheduled reconciliation)
-- Closure-extraction and indexing pipelines triggered by events
-- Webhook receivers from external systems
-- Timer-driven indexers and reconciliation jobs
-- Anything where the trigger semantics (event grid, blob, webhook, timer) don't fit BackgroundService ergonomically
+- **MUST NOT** duplicate BFF auth, correlation, or ProblemDetails infrastructure outside the BFF
+- **MUST NOT** put Azure Functions or Durable Task packages, or Function-attributed methods, inside `Sprk.Bff.Api`
+  (enforced by `ADR001_MinimalApiTests`)
 
 ---
 
@@ -59,42 +52,22 @@ app.MapGet("/api/documents/{id}", (string id, DocumentService svc) =>
 
 **See**: [Endpoint Definition Pattern](../patterns/api/endpoint-definition.md) for complete examples
 
-### BackgroundService Worker
+### Background work inside the BFF
 
-```csharp
-// Service Bus processor in BackgroundService
-public class DocumentWorker : BackgroundService
-{
-    protected override async Task ExecuteAsync(CancellationToken ct)
-    {
-        await _processor.StartProcessingAsync(ct);
-    }
-}
-```
+Queue/topic message → `IJobHandler` via `ServiceBusJobProcessor` (ADR-004) · schedule → `IScheduledJob` on
+`ScheduledJobHost` (ADR-036). No new hand-rolled timer `BackgroundService` (ADR-052 §1).
 
-**See**: [Background Worker Pattern](../patterns/api/background-workers.md) for complete examples
+**See**: [Background Worker Pattern](../patterns/api/background-workers.md)
 
 ### Anti-Pattern: Functions hosting BFF endpoints
 
 ```csharp
 // ❌ DON'T: host BFF endpoints in a Function
-[FunctionName("GetDocument")]
+[Function("GetDocument")]
 public async Task<IActionResult> Run([HttpTrigger] HttpRequest req) { }
 
 // ✅ DO: BFF endpoints in Minimal API
 app.MapGet("/api/documents/{id}", ...);
-```
-
-### Acceptable Pattern: Functions for out-of-band integration
-
-```csharp
-// ✅ OK: Dataverse change event → AI Search sync (out-of-band, event-driven)
-[FunctionName("SyncMatterToIndex")]
-public async Task Run([ServiceBusTrigger("dataverse-changes")] DataverseChangeEvent evt)
-{
-    // Independent of BFF request pipeline; deployed via same Bicep package;
-    // shares App Insights correlation; uses Managed Identity + Key Vault.
-}
 ```
 
 ---
@@ -103,6 +76,9 @@ public async Task Run([ServiceBusTrigger("dataverse-changes")] DataverseChangeEv
 
 | ADR | Relationship |
 |-----|--------------|
+| [ADR-052](ADR-052-workload-placement.md) | Where background, scheduled and event-driven work runs (supersedes this ADR's Functions provisions) |
+| [ADR-004](ADR-004-job-contract.md) | Queue-driven work inside the BFF |
+| [ADR-036](ADR-036-background-job-infrastructure.md) | Schedule-driven work inside the BFF |
 | [ADR-008](ADR-008-endpoint-filters.md) | Endpoint filters for authorization (not global middleware) |
 | [ADR-010](ADR-010-di-minimalism.md) | Limit DI registrations to ≤15 non-framework services |
 | [ADR-017](ADR-017-bff-resiliency.md) | Use Polly for resilience in workers and HTTP clients |
@@ -114,9 +90,8 @@ public async Task Run([ServiceBusTrigger("dataverse-changes")] DataverseChangeEv
 
 **Load this ADR when**:
 - Creating new API endpoints
-- Implementing async background jobs
-- Setting up new services or workers
-- Reviewing architecture for Functions usage
+- Setting up new services in the BFF pipeline
+- Reviewing whether something belongs in the BFF runtime (for background work, load **ADR-052** too)
 
 **Related AI Context**:
 - [API Constraints](../constraints/api.md) - Full MUST/MUST NOT rules
@@ -127,16 +102,5 @@ public async Task Run([ServiceBusTrigger("dataverse-changes")] DataverseChangeEv
 
 ## Source Documentation
 
-**Full ADR**: [docs/adr/ADR-001-minimal-api-and-workers.md](../../docs/adr/ADR-001-minimal-api-and-workers.md)
-
-For detailed context including:
-- Historical alternatives considered
-- Detailed consequences analysis
-- Success metrics and compliance checklist
-- Exception scenarios requiring addendum
-
----
-
-**Lines**: 118 (target: 100-150)
-**Pattern Files**: Code examples maintained in `patterns/api/*.md` (single source of truth)
-**Optimized for**: Quick reference during API/worker development
+**Full ADR**: [docs/adr/ADR-001-minimal-api-and-workers.md](../../docs/adr/ADR-001-minimal-api-and-workers.md) —
+includes Amendment A1 and the superseded original text, kept as history.

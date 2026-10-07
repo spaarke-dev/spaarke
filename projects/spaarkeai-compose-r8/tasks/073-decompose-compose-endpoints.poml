@@ -4,7 +4,7 @@
     <title>FR-D01 — Decompose Api/ComposeEndpoints.cs (2,651 lines) below 2,000 and DELETE its god-class waiver</title>
     <phase>7 Track D — God-Class Removal</phase>
     <gate>blocked-on-013</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Restructures the endpoint surface, including the save routes and the outcome contract every client path depends on.</rigor-reason>
     <model-tier>opus</model-tier>

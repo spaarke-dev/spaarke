@@ -17,7 +17,14 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// ADR-001: Minimal API pattern.
 /// ADR-007: SpeFileStore facade for all SPE operations.
 /// ADR-008: Endpoint filter for authorization.
-/// ADR-013: ChatHostContext flows through pipeline for container resolution.
+///
+/// <para>⚠️ CORRECTED 2026-08-29. This line previously read "ADR-013: ChatHostContext flows through pipeline
+/// for container resolution." <b>It does not.</b> <see cref="ResolveContainerId"/> takes a
+/// <c>ChatSession</c> parameter and never reads it: the container is
+/// <c>SharePointEmbedded:StagingContainerId</c>, falling back to <c>EmailProcessing:DefaultContainerId</c> —
+/// pure configuration, with no per-entity decision anywhere in this file. The claim mattered because it made
+/// the export look record-scoped when it is tenant-global; the sink is classified ServerDerivedConfig in
+/// <c>tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs</c> for exactly that reason.</para>
 /// </summary>
 public static class ChatWordExportEndpoints
 {
@@ -58,7 +65,7 @@ public static class ChatWordExportEndpoints
     ///   1. Validate request (content non-empty, filename ends in .docx)
     ///   2. Resolve ChatHostContext from session → get SPE container ID
     ///   3. Generate DOCX via DocxExportService.GenerateFromMarkdownAsync
-    ///   4. Upload DOCX to SPE container via SpeFileStore.UploadSmallAsUserAsync
+    ///   4. Upload DOCX to SPE container via SpeFileStore.UploadSmallToStagingAsUserAsync
     ///   5. Construct Word Online URL from uploaded file's WebUrl
     /// </summary>
     private static async Task<IResult> ExportToWordAsync(
@@ -116,8 +123,9 @@ public static class ChatWordExportEndpoints
                 detail: $"Chat session '{request.SessionId}' not found.");
         }
 
-        // Resolve the SPE container for file upload.
-        // Priority: session's HostContext EntityId → configuration fallback.
+        // Resolve the SPE container for file upload. CONFIGURATION ONLY — see the correction in this
+        // class's summary. The comment here used to claim "Priority: session's HostContext EntityId →
+        // configuration fallback"; ResolveContainerId ignores the session it is handed.
         var containerId = ResolveContainerId(session, configuration);
         if (string.IsNullOrEmpty(containerId))
         {
@@ -150,9 +158,25 @@ public static class ChatWordExportEndpoints
 
             // Upload using user's OBO context for proper authorization
             using var docxStream = new MemoryStream(docxBytes);
-            var uploadPath = $"exports/{request.Filename}";
+            // FLAT CONTAINER ROOT. In SPE, uploading to a PATH makes Graph implicitly create every folder
+            // segment in it, so the old "exports/" prefix minted an `exports` folder nobody asked for. The
+            // prefix bought no collision protection either — there was no per-export key in it, so two
+            // exports of the same filename already replaced one another (UploadSmallToStagingAsUserAsync resolves to
+            // Graph's path-keyed simple PUT, which takes NO @microsoft.graph.conflictBehavior and is
+            // therefore a silent, unconditional REPLACE). Dropping the prefix changes where the item lands,
+            // not whether it can collide.
+            //
+            // ⚠️ SANITIZED 2026-08-29 — THIS WAS THE HIGHEST-EXPOSURE INSTANCE OF THE FOLDER-MINTING DEFECT.
+            // `request.Filename` is CLIENT-SUPPLIED (WordExportRequest body) and went into the upload path
+            // verbatim, so any '/' in it was client-controlled path injection into SPE: Graph creates every
+            // '/'-delimited segment of an upload path as a folder. The ".docx" validation above constrains
+            // only the SUFFIX — "a/b/c.docx" passes it and mints two folders. Same root cause as the Word
+            // add-in's free-text "Document Name" box (Services/Office/OfficeService.cs), which is how the
+            // mystery folders got into SPE Admin. A filename IS a path; removing the folder prefix did not
+            // subsume this.
+            var uploadPath = SpeUploadPath.SanitizeFileName(request.Filename);
 
-            var uploadResult = await speFileStore.UploadSmallAsUserAsync(
+            var uploadResult = await speFileStore.UploadSmallToStagingAsUserAsync(
                 httpContext,
                 driveId,
                 uploadPath,
@@ -224,6 +248,11 @@ public static class ChatWordExportEndpoints
     /// </summary>
     private static string? ResolveContainerId(ChatSession session, IConfiguration configuration)
     {
+        // `session` is deliberately unread — kept only so callers keep passing it and the logging above
+        // stays coherent. It is NOT a container input; see the correction in this class's summary before
+        // writing any doc that says otherwise.
+        _ = session;
+
         // Use the staging container for exports (consistent with MatterPreFillService pattern).
         // The staging container is accessible to all authenticated users via OBO.
         var stagingContainerId = configuration["SharePointEmbedded:StagingContainerId"];
@@ -244,8 +273,13 @@ public static class ChatWordExportEndpoints
     private static string ConstructWordOnlineUrl(string? webUrl, string fileId)
     {
         // If we have the WebUrl from Graph, it's the most reliable path to Word Online.
-        // SharePoint Embedded files return a WebUrl like:
-        //   https://{tenant}.sharepoint.com/contentstorage/{containerId}/Document/{filename}
+        // Corrected 2026-09-10 (comment only — behavior unchanged): for SharePoint Embedded files,
+        // Graph's WebUrl is actually the `_layouts/15/doc2.aspx?sourcedoc=...` VIEWER form, not a
+        // path-shaped URL. The path form some comments/docs describe (observed live 2026-09-10:
+        // `/contentstorage/CSP_{guid}/Document Library/{filename}`) is Graph's `webDavUrl`, not
+        // `WebUrl` — see FileAccessEndpoints.cs ~625-628, which prefers `webDavUrl` for exactly this
+        // reason. `WebUrl` still opens correctly in the browser; the `?web=1` below is about that
+        // doc2.aspx viewer form, not a `/contentstorage/.../Document/{filename}` path.
         // Appending ?web=1 forces it to open in Word Online instead of downloading.
         if (!string.IsNullOrEmpty(webUrl))
         {

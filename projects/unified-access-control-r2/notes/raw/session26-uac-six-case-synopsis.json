@@ -1,0 +1,166 @@
+{
+  "final": {
+    "cases": [
+      {
+        "key": "UC1",
+        "headline": "Two deciders. On MDA/Office per-record gates, Dataverse decides (OBO RetrievePrincipalAccess). On SPA/Teams, the BFF matches ownership and assignment columns app-only and grants a flat R|W|C.",
+        "plane_and_identity": "oid maps to systemuser.azureactivedirectoryobjectid. Internal: OBO, caller found by WhoAmI or an OBO oid lookup, then RPA. Teams: app-only systemuser lookup (isdisabled=false) and a BU/team/primary-contact read, each cached 10 min.",
+        "who_decides": "Dataverse on internal per-record gates. The BFF decides on SPA/Teams and on internal aggregates (Daily Briefing, Workspace briefing, LookupUserMembership node, /api/users/me/memberships). The finance/scorecard recalculate routes check nothing beyond sign-in.",
+        "what_grants_access": "Internal: RPA on the row being checked. For documents that is the sprk_document row's own ownership, not the matter's. Teams: exact match on ownerid, owningteam, owningbusinessunit, or a registry assignment column naming the linked contact/org, plus the linked contact's grants.",
+        "level": "Internal: RPA rights (Assign dropped); download needs Write. If RPA fails, the DataverseAccessDataSource read probe gives Read or None and CallerRecordAccessProbe denies; both results cached 60 s. Teams: R|W|C on membership hits, a grant's own level on grant-only hits; the deny list can remove either.",
+        "key_caveats": [
+          "OVER-GRANT: on Teams, every BU-owned record gets R|W|C whatever the role depth. Aggregates disclose even more: all discovered lookups, no vetoes. Recalculate routes read/write finance fields on any id, app-only.",
+          "UNDER-GRANT/GAPS: Teams ignores POA shares and BU depth and cuts at 5,000 rows. Finance summary denies everyone (matter id checked as a document). The ethical wall is enforced only on Teams, and only when a contact resolves.",
+          "STALE/DIVERGENT: nothing invalidates caches on BU, team or owner change (up to ~15 min on Teams, 60 s internal; faulted reads also cached). The A5 impersonated swap is registered but unused, so the two planes can disagree."
+        ],
+        "evidence": [
+          "AccessibleRecordSetService.cs:997-1002, 1048-1062, 1087-1094",
+          "MembershipResolverService.cs:255-256, 688-716, 868-872",
+          "MembershipEndpoints.cs:86, 409-420, 444-451",
+          "IdentityNormalizationService.cs:55, 131-174, 193-238",
+          "CallerRecordAccessProbe.cs:230-237, 446-452",
+          "DataverseAccessDataSource.cs:426-449, 662-663, 832-844",
+          "FinanceRollupEndpoints.cs:28-33, 47-52",
+          "ExternalAccessModule.cs:195-198"
+        ]
+      },
+      {
+        "key": "UC2",
+        "headline": "Supported only on SPA/Teams /api/v1/external, where the user is treated as a contact. Access comes from grant rows plus standing and org-expansion membership, then deny/Restricted vetoes. Every internal route checked denies non-systemusers (not audited exhaustively).",
+        "plane_and_identity": "Workforce token, B2B guests included; the code enforces no tenant restriction. With no enabled systemuser: contact.azureactivedirectoryobjectid = oid, else an unverified email claim (email > preferred_username > upn; in practice preferred_username) matched to emailaddress1. All reads app-only.",
+        "who_decides": "BFF (AccessibleRecordSetService.ComposeForContactAsync). Dataverse row security is never consulted.",
+        "what_grants_access": "Active, dated grant rows for the contact or its active orgs. Standing term needs the contact's sprk_standinggrant and baseline. Org expansion needs only the ORG's own flag and baseline, via registry org lookups. Then deny list; Restricted is absolute (unreadable flags count as Restricted).",
+        "level": "The highest term: ViewOnly=Read, Collaborate=R|C|W, FullAccess adds Delete (no route uses Delete). Most read routes check presence in the set, not Read.",
+        "key_caveats": [
+          "IDENTITY: the email fallback matches an unbound contact on a mutable, unverified claim and never binds the oid; the no-hijack guard is inert. Duplicate emails (even inactive) cause an ambiguity deny; with the oid column unprovisioned, everyone is denied.",
+          "REVOCATION/FAIL-SOFT: deactivating the contact or org, or passing the end date, revokes nothing (caches 60 s/5 min/10 min). A junction-read fault drops the org axis of the wall (fail-open); a grant fault caches an empty set for 60 s. Over 5,000 rows are silently truncated.",
+          "PLANE-SPECIFIC: the vetoes follow the workforce sign-in, not the contact; the same person via CIAM bypasses them. Tier-1 entitlement is advisory. Content download exists only for projects."
+        ],
+        "evidence": [
+          "AccessibleRecordSetService.cs:1158-1175, 1193-1228, 1296-1301, 578-589",
+          "WorkforcePrincipalResolver.cs:114-212, 220-228",
+          "IdentityNormalizationService.cs:482-531, 541-550, 596-605",
+          "MembershipEndpoints.cs:86, 409-420, 444-451",
+          "ExternalParticipationService.cs:218-224, 857-862, 1101-1103",
+          "AuthorizationModule.cs:49",
+          "DataverseAccessDataSource.cs:426-430"
+        ]
+      },
+      {
+        "key": "UC3",
+        "headline": "Explicit grants only. The BFF reads the CIAM contact's direct and org-inherited grant rows app-only; it runs no deny, Restricted or Secure veto and no standing or org-expansion membership.",
+        "plane_and_identity": "CIAM token, accepted only on /api/v1/external (the only ExternalCollaboration binding). oid maps to contact.sprk_externalobjectid. The first-login email fallback ($top=1, no statecode) binds an unbound contact and refuses one bound to another oid.",
+        "who_decides": "BFF (CiamContactPrincipalStrategy). Dataverse roles, BUs, teams and shares play no part.",
+        "what_grants_access": "Active, unexpired grant rows for the contact or an org it actively belongs to, on a project, matter or WA, minted via /grant by anyone with Write. Children are listable through any root; content, versions, upload and events exist only under projects.",
+        "level": "The highest across rows; FullAccess acts as Collaborate. Reads check set membership, to-dos and creates check rights. Null-level project rows are dropped; null-level matter/WA rows are kept at None but still confer module reads.",
+        "key_caveats": [
+          "DESIGNED, NOT LIVE: FR-21 Restricted, FR-22 Secure (org grants reach secure roots), FR-23 deny and FR-24/25 standing/org-expansion do not run here. The grant endpoints check none of them either.",
+          "REVOCATION: invalidation is keyed on the admin's tid, so changes wait for the 60 s TTL. Only grant rows or membership-row deactivation revoke (not contact, org, root or end date); the reconciliation job is disabled. A grant-read fault caches an empty 200 for 60 s.",
+          "OVER-EXPOSURE: /api/v1/external/api/dataverse/fetch (and /record) has no column filter, so sprk_graphdriveid, sprk_graphitemid and sprk_filepath leak. The email bind is arbitrary with duplicate emails. CIAM-created records are owned by the app user with no ancestor stamp."
+        ],
+        "evidence": [
+          "CallerPrincipalResolver.cs:375-404, 423",
+          "ExternalParticipationService.cs:314-361, 375, 423, 871-907, 1089-1103",
+          "ExternalAccessEndpoints.cs:54-57",
+          "RevokeExternalAccessEndpoint.cs:197-210 vs ExternalParticipationService.cs:193-224",
+          "ExternalModuleDataEndpoints.cs:77-84, 502-548; FetchService.cs:141-150",
+          "ExternalProjectDataEndpoints.cs:322-341",
+          "ExternalAccessModule.cs:360-372"
+        ]
+      },
+      {
+        "key": "UC4",
+        "headline": "For PROVISIONED secure projects, Dataverse isolates the project row: it is owned by the Secure Record BU's default team, and people enter via POA shares or reaching roles. SPA/Teams ignores those shares and never suppresses membership.",
+        "plane_and_identity": "Internal: OBO RPA for the caller's systemuser, on the project row only. Document-id gates check the sprk_document row, which is not in the Secure BU. SPA/Teams: UC1 matching; Secure only cuts the linked contact's org-inherited grants to None (key kept).",
+        "who_decides": "Mixed. Dataverse decides on MDA and on the Office/BFF per-record gates; the BFF decides on SPA/Teams.",
+        "what_grants_access": "POA share: the creator at provisioning (the wizard sends no colleagues), others later via /share-user. Also: users in the Secure Record BU (automatic default-team members), the Secure Record Owner role, and Global/ancestor-Deep/team-held roles. 'Memberless' is environment config, checked only by the opt-in NFR-05 test.",
+        "level": "Internal: RPA. Creator: R/W/Append/AppendTo/Share. /share-user gives ViewOnly, Collaborate or FullAccess, narrowed to the sharer's rights (FullAccess only if the sharer holds Delete); never Share/Assign. Teams: flat R|W|C on a membership hit.",
+        "key_caveats": [
+          "PARTIAL ISOLATION: the flag alone isolates nothing, only a completed provision does (sprk_project only). A failed provision leaves the project in the creator's BU and uploads 409. Documents sit outside the Secure BU, so sharees fail the document gates. A null or FLS-masked flag routes to the shared container.",
+          "WRITE-ONLY ESCALATION: management routes check only Write, so sharees can re-share; /unshare-user removes anyone and /unsecure-project reassigns. A creator-share failure after the ownership move locks the creator out with no retry. MDA, Office and /share-user never consult the deny list or Restricted.",
+          "PLANE DIVERGENCE: SPA/Teams cannot see POA shares, so the creator can be missing there. A registry contact lookup or the linked contact's direct grant admits a user the MDA denies. None-rights suppressed keys stay readable (A5 not live)."
+        ],
+        "evidence": [
+          "ProvisionProjectEndpoint.cs:373-379, 485, 517, 740-772",
+          "InternalShareEndpoints.cs:223, 276-290, 666-683; RecordShareLevels.cs:53, 132-150",
+          "CreateProjectWizard.tsx:697-722",
+          "SecureBuRoleDepthAssertionTests.cs:144-151, 442-451",
+          "DataverseAccessDataSource.cs:372-373; DataverseServiceClientImpl.cs:294-306",
+          "AccessibleRecordSetService.cs:232-256, 1044-1062",
+          "RecordContainerResolver.cs:211-227, 244-265",
+          "UnsecureProjectEndpoint.cs:294-295"
+        ]
+      },
+      {
+        "key": "UC5",
+        "headline": "SPA/Teams only. Rights come only from a DIRECT personal grant row: standing and org-expansion terms are dropped entirely. Org-inherited grant rows drop to None but keep the key, so presence-gated reads still pass.",
+        "plane_and_identity": "Same as UC2. Nothing writes contact.azureactivedirectoryobjectid, so in practice access rests on an email/preferred_username match. Dataverse Secure BU and POA shares cannot apply, because a contact is not a principal.",
+        "who_decides": "BFF (ComposeForContactAsync, with pre-max Secure suppression and then the deny and Restricted vetoes).",
+        "what_grants_access": "An active, dated row keyed to this contact on the secure root: /grant (Write on root), or /invite-and-grant (also creates a CIAM account and sends an invite), or a direct Dataverse write. Deny and Restricted remove even FullAccess, but a junction-read fault drops the org-keyed walls.",
+        "level": "The direct row's own level. But the grant cache drops DirectAccessLevel, so on cache hits a direct grant on a secure root yields None.",
+        "key_caveats": [
+          "LIKELY DEFECT, OVER-GRANT: an org-only secure root keeps its key at None, so project, documents, content, versions, events and grids all pass (only to-dos and mutations deny). /grant has no issecure check, so an org grant exposes every firm member, ended memberships included; null-level matter/WA rows behave the same.",
+          "LIKELY DEFECT, UNDER-GRANT: CachedParticipation and CachedRootGrant do not store DirectAccessLevel. While the cache is warm, direct grants on secure roots read as None: creates, PATCH and to-dos return 403 while presence reads pass.",
+          "PLANE/IDENTITY: the vetoes follow the workforce sign-in, not the contact; the same contact via CIAM bypasses all three. UC2 identity gaps apply (email match; a deactivated contact keeps access). The hard-coded three-root flag list is a latent risk only."
+        ],
+        "evidence": [
+          "AccessibleRecordSetService.cs:232-256, 1264, 1270-1290",
+          "ExternalParticipationService.cs:917-940, 1242-1268",
+          "ExternalProjectDataEndpoints.cs:273, 322, 399-401",
+          "GrantExternalAccessEndpoint.cs:80-87, 674-704",
+          "InviteAndGrantExternalUserEndpoint.cs:92-98",
+          "IdentityNormalizationService.cs:541-550, 596-605",
+          "CallerPrincipalResolver.cs:378-403, 519-524"
+        ]
+      },
+      {
+        "key": "UC6",
+        "headline": "Supported, but sprk_issecure has no effect on CIAM authorization. Any direct or org grant admits at its full level, with no Secure, Restricted or deny veto. This does not conform to FR-21/22/23.",
+        "plane_and_identity": "Same as UC3. The first-login email match binds an unbound contact and inherits all its grants, secure ones included. sprk_issecure is read only for display and for choosing the upload container.",
+        "who_decides": "BFF (CiamContactPrincipalStrategy uses the effective AccessLevel, never DirectAccessLevel).",
+        "what_grants_access": "Any active, dated direct or org grant row on the secure root. /grant has no issecure check and needs only Write, so Collaborate sharees can mint org-wide grants. Direct Dataverse rows and maker-added membership rows also count.",
+        "level": "The highest direct/org level, unsuppressed. Matter/WA rows with a null level still give read access through the module host.",
+        "key_caveats": [
+          "DESIGNED, NOT LIVE: FR-21/22/23 run on the workforce plane only; task 037's 'both planes' meant systemuser/contact, and it never touched CallerPrincipalResolver. An org grant admits every active firm member. A deactivated firm, contact or past-end-date membership keeps access (reconciliation job disabled, report-only).",
+          "SAME PERSON, DIFFERENT ANSWERS: the vetoes apply on a workforce token but not on CIAM (CIAM also gets no standing/org-expansion). No test pins CIAM secure behavior. Fail-closed, but faults are cached 60 s, and revocation waits for the TTL (wrong-tid invalidation).",
+          "Only PROVISIONED secure projects are isolated. An unprovisioned secure project returns 409 on CIAM upload. Matters and WAs have no CIAM content, version or upload routes at all, secure or not."
+        ],
+        "evidence": [
+          "CallerPrincipalResolver.cs:347-350, 375-404, 417-429",
+          "ExternalParticipationService.cs:333-347, 375, 423, 1101-1103",
+          "DelegationRuleFilter.cs:86, 170-179; RecordShareLevels.cs:52-59",
+          "GrantExternalAccessEndpoint.cs:84-93, 655-705",
+          "tasks/037-fr21-fr22-restricted-secure-vetoes.poml:27-34, 66",
+          "ExternalAccessReconciliationJob.cs:48-51, 109; ExternalAccessModule.cs:371-372",
+          "ExternalProjectDataEndpoints.cs:180; RecordContainerResolver.cs:244-265",
+          "projects/unified-access-control-r2/spec.md:84-86"
+        ]
+      }
+    ],
+    "mental_model_verdicts": [
+      {
+        "model": "(a) System users get access when their team assignment matches the record's assigned team",
+        "verdict": "partially correct",
+        "one_line": "On MDA/Office the BFF compares no teams; Dataverse decides through the owning team's roles, depth and shares (for documents, the document row's own owner). On SPA/Teams an owningteam match gives R|W|C, but so do BU, ownerid and registry assignment columns; a custom 'assigned team' lookup confers nothing."
+      },
+      {
+        "model": "(b) Contacts get access when associated to the record",
+        "verdict": "mostly incorrect",
+        "one_line": "Association alone grants nothing; access comes from explicit, dated grant rows (direct or via the org). On the workforce plane, association adds access only through registry lookups plus a standing grant (contact's or org's), never on secure roots. On CIAM it never counts."
+      },
+      {
+        "model": "(c) Secure records work by adding the user's/contact's oid to the record",
+        "verdict": "incorrect",
+        "one_line": "No oid is written to the record; the oid only identifies the caller. System users: provisioning moves the project row (not its documents) to the Secure BU's default team, and people enter via POA shares. Contacts: a grant row keyed by contact id; Secure is BFF suppression on the workforce plane only, which CIAM ignores."
+      }
+    ],
+    "cross_cutting": [
+      "Two deciders for system users: Dataverse RPA on the MDA/Office per-record gates (document gates check the sprk_document row) versus app-only BFF matching on SPA/Teams and aggregates. The A5 fix (ImpersonatedRootSetSource) is registered but inert (ExternalAccessModule.cs:195-198).",
+      "/api/v1/external read gates check presence only (CallerPrincipalResolver.cs:161, module id sets). So None-rights keys (Secure-suppressed org grants, null-level matter/WA rows) can still be read and their content downloaded.",
+      "The Restricted, Secure and deny-list vetoes run only in AccessibleRecordSetService, i.e. for workforce callers on /api/v1/external. The internal plane and the CIAM plane have none, so a wall on a contact holds only for that person's workforce sign-in.",
+      "Anyone with Write can mint access (DelegationRuleFilter.cs:86): /grant and /share-user do no ShareAccess, issecure or deny check. Grant, membership and share rows written directly in Dataverse bypass the BFF, and the reconciliation job ships disabled and report-only.",
+      "Revocation is soft: deactivating a contact, org or root, or passing an end date, revokes nothing. Caches (60 s to 10 min; ~15 min for BU/team changes) have no invalidation hooks and store fault results. The grant cache drops DirectAccessLevel (ExternalParticipationService.cs:1242-1268), and CIAM invalidation uses the wrong tid."
+    ]
+  },
+  "problemCount": 66
+}

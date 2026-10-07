@@ -20,9 +20,9 @@ This directory contains process documentation covering CI/CD, testing, code revi
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
 | [ci-cd-workflow.md](ci-cd-workflow.md) | GitHub Actions workflow inventory, slot-swap deployment, quality gates, promotion flow | 2026-04-05 | 2026-04-05 | Current |
-| [testing-and-code-quality.md](testing-and-code-quality.md) | Testing strategy, coverage standards, test patterns by module (API, PCF, plugins) | 2026-04-05 | 2026-04-05 | Current |
+| [testing-and-code-quality.md](testing-and-code-quality.md) | Testing strategy, coverage standards, test patterns by module (API, PCF, Dataverse write path — no plugins per ADR-002) | 2026-04-05 | 2026-04-05 | Current |
 | **[DEPENDENCY-MANAGEMENT.md](DEPENDENCY-MANAGEMENT.md)** | Dependency update cadence, security patching process, version pinning conventions, Dependabot configuration | 2026-04-05 | 2026-04-05 | New |
-| **[CODE-REVIEW-BY-MODULE.md](CODE-REVIEW-BY-MODULE.md)** | Module-specific code review checklists for BFF API, PCF controls, plugins, Code Pages, shared libraries | 2026-04-05 | 2026-04-05 | New |
+| **[CODE-REVIEW-BY-MODULE.md](CODE-REVIEW-BY-MODULE.md)** | Module-specific code review checklists for BFF API, PCF controls, Dataverse write path (no plugins), Code Pages, shared libraries | 2026-04-05 | 2026-04-05 | New |
 
 ### Development Workflow
 

@@ -1,8 +1,25 @@
 # ADR-034: User-Record Membership Resolution Pattern (Concise)
 
-> **Status**: Accepted — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+> **Status**: Accepted, as amended — shipped in R3 (2026-06-22; Phase 2 sync code-complete + ADR-032 kill-switched until operator deploys topic per task 071)
+>
+> ⚠️ **Amendment A1 (2026-09-04, `unified-access-control-r2`, path B)**: discovery over the 6 identity
+> tables stays correct for **AI scoping** and is **over-inclusive for authorization**. The
+> access-conferring allow-list becomes an **explicit registry** (contact- **and** org-typed), replacing
+> the `sprk_assigned*` prefix convention — which silently admits `sprk_assignedmonitor`, silently denies
+> `sprk_leadcontact`, and lets a **rename** grant or revoke access. The registry is a filter **inside**
+> the canonical resolver, not a second mechanism. **The 1-hop cap is NOT amended** — FR-26 denormalizes
+> the core ancestor, so every chain is one hop by construction. Full rationale + the live-consumer check:
+> [full ADR](../../docs/adr/ADR-034-user-record-membership.md#amendment-a1-2026-09-04-the-access-conferring-allow-list-becomes-first-class-and-per-surface).
+>
+> ⚠️ **Amendment A4 (2026-10-03, `unified-access-control-r2` task 142, path B — ACCEPTED by the owner, round 11)**: the
+> access-conferring registry gains a second, **write-time** consumer. Every registry-listed Contact- or
+> Organization-typed "Assigned *" column on a project, matter or work assignment gives the named subject **Collaborate**
+> as an explicit, **removable** grant (`sprk_externalrecordaccess`), or a POA share when the contact is linked (task 141)
+> to an eligible internal user — maintained by ONE invariant owner, `AssignedAccessMaterializer`, with provenance in the
+> `sprk_assignedaccess` ledger. The read-time standing-grant and organization-expansion terms are **kept** (owner A2
+> reversed). Full rules: [full ADR](../../docs/adr/ADR-034-user-record-membership.md#amendment-a4-2026-10-03-accepted-assigned-to-access-for-contacts-is-materialized-as-removable-grants).
 > **Domain**: BFF API / Dataverse Membership / Identity Normalization
-> **Last Updated**: 2026-06-22 (post-implementation polish per R3 task 100)
+> **Last Updated**: 2026-10-03 (Amendment A4 accepted, `unified-access-control-r2` task 142); 2026-06-22 (post-implementation polish per R3 task 100)
 > **Source project**: `spaarke-platform-foundations-r3` Part 1 (closes the "no canonical mechanism for records this user is associated with" gap surfaced during R2 UAT — notification-new-documents.json silently produced zero rows because its FetchXML joined through a non-existent `sprk_matterteammember` entity).
 > **Cross-references**: extends ADR-013 (AI architecture); reinforces ADR-009 (Redis caching), ADR-010 (DI minimalism), ADR-024 (polymorphic resolver pattern), ADR-028 (Spaarke Auth v2 cross-ref via `azureactivedirectoryobjectid`); aligns with CLAUDE.md §10.
 
@@ -29,7 +46,7 @@ GET /api/users/me/memberships/{entityType}
 
 Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{entityType, personIdentity, ids[], byRole, count, cacheExpiresAt, continuationToken?}`.
 
-**Phase 2** (shipped in R3 as code; runtime gated by operator deploy of task 071 Service Bus topic Bicep): materialized junction table `sprk_userentityassociation` (deployed via R3 task 070) + event-driven Service Bus sync via topic `sprk-membership-changes` (D3 owner decision: topic + subscription-per-consumer, NOT queue, NOT reuse `ServiceBusJobProcessor` queue) + nightly `MembershipReconciliationJob` (R3 task 085 — defense-in-depth backstop per Q2 fire-and-forget publishing; **LOAD-BEARING** because per task 080 inventory the 8 Q4 sprk_assigned* fields are exclusively maker-portal edits, NOT mutated by any BFF endpoint) + Redis pub/sub cache invalidation (R3 task 086, FR-2P2.8). Publisher (task 081), Junction Updater (task 084), and Cache Invalidator (task 086) each ship with ADR-032 Null-peer kill-switches (`Membership:EventPublisher:Enabled`, `Membership:JunctionUpdater:Enabled`, `Membership:CacheInvalidator:Enabled` — all default `false`) so the code is operational today without topic deploy; operator flips flags after task 071 deploys. The Phase 1A endpoint contract is unchanged — strangler-fig pattern preserved.
+**Phase 2** (shipped in R3 as code; runtime gated by operator deploy of task 071 Service Bus topic Bicep): materialized junction table `sprk_userentityassociation` (deployed via R3 task 070) + event-driven Service Bus sync via topic `sprk-membership-changes` (D3 owner decision: topic + subscription-per-consumer, NOT queue, NOT reuse `ServiceBusJobProcessor` queue) + nightly `MembershipReconciliationJob` (R3 task 085 — defense-in-depth backstop per Q2 fire-and-forget publishing; **LOAD-BEARING** because per task 080 inventory the 8 Q4 sprk_assigned* fields were then exclusively maker-portal edits (since 2026-10-03, task 142's writer census lists BFF writers — Office quick-create, the AI record tools, `UpdateRecordActionCore`, the field-mapping push — each of which calls the A4 materializer after its write)) + Redis pub/sub cache invalidation (R3 task 086, FR-2P2.8). Publisher (task 081), Junction Updater (task 084), and Cache Invalidator (task 086) each ship with ADR-032 Null-peer kill-switches (`Membership:EventPublisher:Enabled`, `Membership:JunctionUpdater:Enabled`, `Membership:CacheInvalidator:Enabled` — all default `false`) so the code is operational today without topic deploy; operator flips flags after task 071 deploys. The Phase 1A endpoint contract is unchanged — strangler-fig pattern preserved.
 
 **Naming-collision register** (binding): "Membership" terminology is used throughout to disambiguate from the existing `AssociationResolver` PCF (a DIFFERENT concept — record-to-record FieldMapping for copying values when an Event's Regarding lookup is set). Do not confuse the two surfaces.
 
@@ -59,6 +76,17 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST** publish `MembershipChangedEvent` to the Service Bus **topic** `sprk-membership-changes` (NOT queue, NOT reuse `ServiceBusJobProcessor` queue) — D3 owner clarification. Subscriptions per consumer.
 - **MUST** use **fire-and-forget** event-publishing semantics per Q2 owner clarification: publish best-effort; mutation succeeds even if publish fails. Nightly `MembershipReconciliationJob` is the defense-in-depth backstop. Log publish failures as structured warnings with correlationId (NFR-08).
 - **MUST** keep Phase 1A → Phase 2 endpoint contract identical (strangler-fig). Consumers see byRole map, ids[], count regardless of internal storage mechanism.
+- **MUST** (Amendment A1) distinguish the two **consumption surfaces**: **AI scoping** uses **all** discovered descriptors (unchanged); **authorization** uses **registry-listed columns ONLY**. Generosity is correct for retrieval and is a disclosure for permission.
+- **MUST** (A1) derive the authorization surface's conferring columns from an **explicit registry**, covering **contact-typed AND organization-typed** lookups — not from the `sprk_assigned*` prefix convention, which silently admits `sprk_assignedmonitor` and silently denies `sprk_leadcontact`.
+- **MUST** (**A1.1**, 2026-09-17, `unified-access-control-r2` task 043, owner-approved — CLAUDE.md §6.5 path B) treat the **Dataverse platform ownership columns** — `ownerid`, `owningteam`, `owningbusinessunit` — as **structurally conferring on the authorization surface, WITHOUT a registry entry**. A1 as originally written covered only the maker-authored contact/org axis, which made ownership **inexpressible**: the registry validator rejects any declared `IdentityType` outside `{Contact, Organization}` as malformed, so `ownerid` could not be added even deliberately.
+  - **Why ownership is not a registry concern.** FR-24's rationale is that a *maker-authored* lookup must not confer by naming accident — a rename could silently grant access, so conferral needs review. The three ownership columns are platform-maintained and fixed by the Dataverse data model (see `MembershipFieldDiscoveryService.OwnerAttributeTargets`, "fixed … regardless of solution / entity"); nobody can rename their way into them, and **being the owner IS Dataverse access** — the very thing this filter approximates until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer.
+  - **MUST NOT** widen this to every `SystemUser`/`Team`/`BusinessUnit`-typed lookup. A maker-authored `sprk_reviewer → systemuser` still requires a reviewed registry entry; otherwise register **A-8**'s over-inclusion returns through a different door. The allowance is keyed on the three platform **names**, never on the identity type.
+  - **Evidence this is load-bearing**: omitting owner-based membership caused a production outage once already — R7 W12 task 130 (2026-06-30) recorded *"`sprk_matter` resolved rows=0 for a user who owns 44 matters via `ownerid` … verified via raw SQL"*. ⚠️ And `owningteam` is the column that matters most where records are team/BU-owned: a polymorphic Owner column always resolves to **SystemUser** and binds the caller's own id — on a team-owned record `ownerid` holds the *team's* id and never matches. 🔴 **Mechanism corrected 2026-09-22** (challenged by the `spaarkeai-word-add-in-r1` session, then traced to the call site): this previously read *"discovery binds the FIRST matching target and `IncludedIdentityTables` starts at `systemuser`"*. The first-match part is right — `MembershipFieldDiscoveryService.cs:288-300` scans `lookup.Targets` in order and `break`s on the first hit. But `IncludedIdentityTables` order is **NOT** the determinant: the scan tests against `identityTypeByTable`, a **dictionary** (unordered). The real determinant is that an `AttributeTypeCode.Owner` attribute is given **synthetic** targets (`:531-534`) from the hardcoded `OwnerAttributeTargets = { "systemuser", "team" }` (`:94-95`) — **`systemuser` is first in that array**. So the binding follows the hardcoded array, not operator configuration, and **reordering `IncludedIdentityTables` would NOT change it**. That distinction matters: it means the hazard cannot be configured away.
+- **MUST** (A1) treat adding a conferring column as a **registry edit**. **Renaming a column MUST NOT grant or revoke access** (FR-24).
+- **MUST** (**A4**, 2026-10-03, task 142, owner-accepted §6.5 path B) materialize Assigned-To access only through the ONE invariant owner, `AssignedAccessMaterializer` (`Services/ExternalAccess/`), from its three triggers: L1 inline after every BFF writer of the columns, `POST /api/v1/external-access/assigned-access/sync` (form post-save, the create wizards, "Update Access"), and L4 `AssignedAccessReconciliationJob` (every 5 min). The conferring columns come from the bound registry (`MembershipOptions.AccessConferringRoles`); child-entity entries (event, invoice, to-do, analysis) materialize nothing (owner A6).
+- **MUST** (A4) write at Collaborate through the existing cores only — grants via `GrantExternalAccessEndpoint.CreateGrantAsync` with `GrantCeiling.AssignedToRule` (uncapped by the saver's level, owner A1; an absent expiry becomes today + 90), shares via `IDataverseRecordShareService` with the `RecordShareLevels` Collaborate mask — and never lower existing conferring access: a lower grant is raised and put back, its level AND date, when the assignment ends.
+- **MUST** (A4) make an operator's removal stick: a Manage Access revoke/unshare, a Dismiss of a suggestion, or a removal outside the BFF with no known cause is recorded `Declined` and never re-created while the assignment persists. Declined is not a veto — a manual grant still succeeds (`Adopted`). When the column changes or is cleared, remove only the owner's own UNMODIFIED access, never while another registry column on the root still names the subject.
+- **MUST** (A4) apply the record's policy before writing: Restricted → no contact or organization grant (a linked internal user's share is unaffected); Secure or Limited → no organization grant; Secure → contact grants and shares are SUGGESTED (`PendingConfirmation`), not written; the No Access list always. Write nothing when a flag set, deny list, link or ledger cannot be read (ADR-003).
 
 ### ❌ MUST NOT
 
@@ -68,6 +96,10 @@ Standard Spaarke Auth v2 OBO. Response shape per design.md endpoint contract: `{
 - **MUST NOT** extend a transitive-membership query beyond 1 hop. Reject deeper chains with 400 before any Dataverse query (Q3).
 - **MUST NOT** assume the Phase 1A per-request FetchXML approach is sufficient for all future scale. Monitor AC-1A.5 (p95 ≤300ms); Phase 2 junction table is the escape hatch when margin shrinks.
 - **MUST NOT** confuse the new "Membership" terminology with the existing `AssociationResolver` PCF (record-to-record FieldMapping). The naming-collision register is binding.
+- **MUST NOT** (A1) use unfiltered discovered descriptors as an **access answer**. That set is over-inclusive by design; on the authorization surface it must pass the registry filter first.
+- **MUST NOT** (A1) build a second membership mechanism for the registry. It is a filter **inside** the canonical resolver (M1) — an extension, not a parallel engine.
+- **MUST NOT** (A4) add a second writer of Assigned-To access, a plugin, a flow or a service-endpoint step (ADR-002), or write `sprk_externalrecordaccess` for it directly.
+- **MUST NOT** (A4) read "derived access is not materialized into grant rows" (spec / FR-32 / design §7) as covering Assigned-To access: A4 is the one exception, and its grants are ordinary, audited grant rows.
 
 ---
 
@@ -78,8 +110,19 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 
 public interface IMembershipResolverService
 {
+    // The systemuser plane.
     Task<MembershipResponse> ResolveAsync(
         Guid systemUserId,
+        string entityType,
+        MembershipResolveOptions? options,
+        CancellationToken ct);
+
+    // The CONTACT plane — added after this ADR was written and omitted from it until 2026-09-04.
+    // It is how a caller with no systemuser (external contact / unlicensed workforce) resolves
+    // membership at all; a reader who assumed the systemuser overload was the whole interface would
+    // conclude, wrongly, that the contact plane had no membership path.
+    Task<MembershipResponse> ResolveByContactAsync(
+        Guid contactId,
         string entityType,
         MembershipResolveOptions? options,
         CancellationToken ct);
@@ -90,7 +133,16 @@ public sealed record MembershipResolveOptions(
     IReadOnlyList<string>? IdentityTypes = null,
     IReadOnlyList<string>? IncludeRelated = null,  // 1-hop max per Q3
     int Limit = 500,
-    string? ContinuationToken = null);
+    string? ContinuationToken = null,
+    // A1 opt-in: apply the access-conferring registry filter on the SYSTEMUSER plane
+    // (ResolveByContactAsync always applies it). Default false keeps AI scoping unfiltered.
+    // Added by unified-access-control-r2 task 041; omitted from this block until 2026-09-17.
+    bool AccessConferringOnly = false,
+    // Org-expansion (design §4.5 term 4): the organizations to bind into the resolved identity on the
+    // CONTACT plane, so registry-listed org-typed descriptors emit conditions instead of nothing.
+    // SUPPLIED BY THE CALLER — see the contract table's contact-plane row below for why the resolver
+    // does not read the junction itself. Added by task 043.
+    IReadOnlyList<Guid>? OrganizationIds = null);
 
 public sealed record MembershipResponse(
     [property: JsonPropertyName("entityType")] string EntityType,
@@ -99,7 +151,10 @@ public sealed record MembershipResponse(
     [property: JsonPropertyName("byRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
     [property: JsonPropertyName("count")] int Count,
     [property: JsonPropertyName("cacheExpiresAt")] DateTimeOffset CacheExpiresAt,
-    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null);
+    [property: JsonPropertyName("continuationToken")] string? ContinuationToken = null,
+    // 1-hop transitive results (includeRelated). Omitted from this ADR until 2026-09-04; null on the
+    // paths that do not compute it.
+    [property: JsonPropertyName("relatedByRole")] IReadOnlyDictionary<string, IReadOnlyList<Guid>>? RelatedByRole = null);
 
 public sealed record PersonIdentity(
     Guid SystemUserId,
@@ -118,11 +173,12 @@ public sealed record PersonIdentity(
 | Source field type | Resolves via | Match value |
 |---|---|---|
 | `Lookup → systemuser` | Direct | `systemUserId` |
-| `Lookup → contact` | Direct; cross-referenced to `systemUserId` via `azureactivedirectoryobjectid` (ADR-028) | `contactId` |
+| `Lookup → contact` | Direct. systemuser→contact resolution is **`systemuser.sprk_primarycontact` FIRST**, with the `azureactivedirectoryobjectid` AAD cross-ref (ADR-028) as **fallback** — corrected 2026-09-04 (A1); this table previously documented only the AAD path, which is the fallback, not the primary | `contactId` |
 | `Lookup → team` | Expand `teammembership` to systemusers | `teamIds[]` (cached) |
 | `Lookup → businessunit` | User's BU + any descendant BUs (configurable per role) | `businessUnitId` |
 | `Lookup → account` | User's primary contact's `parentcustomerid` (if contact) | `accountId` (when applicable) |
-| `Lookup → sprk_organization` | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (systemuser plane) | Configured `Membership:OrganizationLookup:UserLookupField` (R3 chose Option (b) config-driven per task 032 decision; default empty = fail-soft empty result) | `organizationIds[]` |
+| `Lookup → sprk_organization` (**contact plane**) | The **`sprk_contactorganization` junction** (`statecode eq 0` = active), read by the CALLER and passed in via `MembershipResolveOptions.OrganizationIds` — **not** by this service. Added 2026-09-17 (`unified-access-control-r2` task 043) because A1's org-typed axis had no documented contact-plane source, and a reader consulting only this table would conclude the contact plane has no org path at all. Two reasons the resolver does not read it itself: the junction lives behind `Infrastructure/ExternalAccess/ExternalParticipationService`, so reading it here would invert the layering; and the accessible-record-set composer ALREADY performs that read for the FR-23 deny veto, so a second read would be a second cache that can disagree with the first mid-composition. ⚠️ The `UserLookupField` mechanism in the row above is **not** a substitute — it resolves `sprk_organization`→`systemuser` and returns nothing for a contact. | `organizationIds[]` |
 | Text (email) | Substring `like` | `primaryEmail` |
 | Text (display name) | NOT supported (too fuzzy) | — |
 

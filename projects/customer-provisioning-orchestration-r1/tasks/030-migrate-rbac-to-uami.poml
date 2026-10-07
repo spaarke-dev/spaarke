@@ -4,7 +4,7 @@
     <title>Migrate all RBAC bicep (KV / Storage / Cognitive / Cosmos) from System-Assigned MI principal to UAMI principal</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth tag + azure-deployment scope + irreversible RBAC changes on production-shape resources. Blast radius: every per-customer BFF's ability to reach KV secrets, Blob storage, Cognitive Services endpoints, and Cosmos data plane. task-create Step 3.5.5 FULL (auth tag; deploy tag).</rigor-reason>
     <model-tier>opus</model-tier>

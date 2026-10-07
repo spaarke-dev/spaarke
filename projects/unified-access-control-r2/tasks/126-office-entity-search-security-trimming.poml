@@ -1,0 +1,203 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="126" project="unified-access-control-r2">
+  <metadata>
+    <title>Security-trim GET /api/office/search/entities — an authenticated user can currently enumerate EVERY matter, project, invoice, account and contact in the tenant</title>
+    <phase>Register-driven (authored 2026-09-29, session 26; GitHub #1021, from the task 120 census)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Closes a live data-disclosure hole on an authenticated endpoint, and the fix adds a delegated (OBO) read path to the Dataverse layer.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The fix is not the filter one-liner the issue implies. No "query as the user" capability exists; creating one touches the shared Dataverse auth layer, where ADR-028 A4 and the MI-vs-secret credential rules bind. Choosing between a delegated query path and per-row probing is a security-architecture decision with an enumeration-oracle trap on the wrong branch.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Spaarke.Dataverse (shared, hot-path) plus OfficeService and OfficeEndpoints, which tasks 120/122 also changed and which spaarkeai-word-add-in-r1 is active in.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, dataverse, security</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <origin>GitHub #1021, filed by task 120's route census. Ranked #1 of five live holes by the session-26 waiver audit: the ONLY one exploitable with no prior knowledge.</origin>
+  </metadata>
+
+  <prompt>A two-character substring plus pagination returns every matter, project, invoice, account and contact in the tenant — names, numbers and descriptions — to any authenticated Spaarke user. Make the search return only what the caller may see, and make the route's own documentation stop claiming a control it does not have.</prompt>
+
+  <role>SPAARKE platform developer — Office endpoints and the shared Dataverse access layer. You are closing a live disclosure hole; the danger is fixing it in a way that leaks through paging or counts instead.</role>
+
+  <goal>`GET /api/office/search/entities` returns only records the calling user can read, enforced by Dataverse's own security model rather than by post-filtering, with no count or paging oracle, and with every comment and description on the route matching what the code now actually does.</goal>
+
+  <context>
+    <background>🔴 THIS IS LIVE, NOT A STUB. Verified 2026-09-29 against source.
+
+`Api/Office/OfficeEndpoints.cs:801-810` registers the route with `AddOfficeRateLimitFilter` +
+`AddOfficeAuthFilter` and NOTHING else. `Api/Filters/OfficeAuthFilter.cs:76-142` is AUTHENTICATION ONLY —
+it checks `IsAuthenticated`, copies `oid`/`tid`/email into `HttpContext.Items`, and calls `next`. It
+consults no decision service and reaches no resource.
+
+`Services/Office/OfficeService.cs:772-800`: when `_dataverseClient` is non-null the REAL query runs, and
+`_dataverseClient` IS injected in production. The stub branch is only for bare test constructions.
+
+⚠️ THE CODE ALREADY ADMITS THE DEFECT, and points at the wrong issue.
+`OfficeService.cs:786-787` says *"app-only read (no per-user security trimming yet) — tracked as a
+follow-up on #919."* The tracking issue is **#1021**, not #919. Fix that reference.
+
+THE EXPOSURE, precisely (`OfficeService.cs:819-858`, `:875-898`):
+  - `contains(name)` / `contains(number)` with NO user predicate
+  - Matter, Project, Invoice, Account, Contact
+  - returns id, name, matter/project/invoice NUMBER and DESCRIPTION
+  - minimum query is 2 characters; `top` up to 50 per type; `skip` paginates
+  ⇒ substring + pagination = full tenant enumeration.
+
+🔴 CORRECTED DURING EXECUTION — the paragraph below is WRONG and is kept only as the record of a
+wrong turn. A "query as the user" capability DOES exist: `IDataverseUserClient` (then at
+`Services/Ai/Handlers/Dataverse/`, now `Infrastructure/Dataverse/`) issues arbitrary OData GETs under
+the caller's security context with no app-only fallback, and `CallerRecordAccessProbe` — not AI code —
+already consumed it. The search below missed it because it covered `Spaarke.Dataverse` and the DI
+modules, not the AI namespace. The task was authored opus/xhigh on the strength of that gap; the real
+work was a routing change plus an ADR-013 relocation.
+
+🔴 THE FIX IS NOT A FILTER. (SUPERSEDED — see above.) There is no "query as the user" capability today — verified:
+  - `IGenericEntityService` → `IDataverseService` is registered `AddSingleton` (`Infrastructure/DI/GraphModule.cs:97`)
+    and built from managed identity or client credentials. A singleton cannot carry per-request user context.
+  - `DataverseWebApiClient` is likewise `AddSingleton` and states it *"has no OBO path"* (`DataverseWebApiClient.cs:63`).
+  - `Spaarke.Dataverse/DataverseAccessDataSource.cs` DOES hold a working OBO exchange
+    (`GetDataverseTokenViaOBOAsync`, `:219`) and sets the token on its `HttpClient` (`:290-296`) — but it is
+    PRIVATE, and the class exposes only `GetUserAccessAsync` (`:268`) and `GetRecordAccessAsync` (`:376`):
+    access snapshots, not a general query.
+
+So the delegated token exchange EXISTS and is proven; what is missing is a query surface that uses it.
+
+⚠️ THE TEMPTING WRONG FIX — post-filtering. Running the app-only query and then probing each row with
+`CallerRecordAccessProbe` leaks through the very thing it is meant to protect: `TotalCount` and `HasMore`
+(`OfficeService.cs:777-781`) are computed BEFORE any trim, so a denied user still learns how many records
+match a substring. That is a record-enumeration oracle. Task 022 removed exactly this shape from bulk
+download, and `CallerRecordAccessProbe` deliberately conflates "not found" with "no access" for the same
+reason. It is also N round trips per keystroke on a typeahead with a 500 ms budget.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="read">src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>🔴 Trim at the SOURCE, not after. Dataverse applies the caller's security model to a delegated query natively; that is the mechanism to use. Post-filtering an app-only result set is forbidden — see the enumeration-oracle note above.</constraint>
+    <constraint>🔴 `TotalCount` and `HasMore` MUST be computed from the TRIMMED result set. A count that reflects untrimmed matches is the disclosure, restated.</constraint>
+    <constraint>ADR-028 A4: never add a new `.WithClientSecret(...)` site. Reuse the existing confidential-client provider that `DataverseAccessDataSource` already uses; do not construct credentials at a new call site.</constraint>
+    <constraint>ADR-003 fail closed: if the delegated token cannot be obtained, the search FAILS. It must never silently fall back to the app-only query — that would restore the hole while every test stays green, which is the exact shape of the `JobOwnershipFilter` fail-open task 120 closed.</constraint>
+    <constraint>ADR-010: prefer extending the existing Dataverse access surface over introducing a new interface. If a new type is genuinely needed, answer CLAUDE.md §11's three questions in the PR.</constraint>
+    <constraint>The per-type best-effort loop (`OfficeService.cs:789-799`) currently swallows every exception and logs a warning. An AUTHORIZATION failure must not be swallowed into an empty result that looks like "no matches" — distinguish it.</constraint>
+    <constraint>Do NOT relax the 500 ms typeahead budget as a way of affording per-row probes; the design should not need them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-003-lean-authorization-seams.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/auth/obo-flow.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify the exposure end to end before changing anything — including that `_dataverseClient` really is injected in production, so this is not the stub branch.</step>
+    <step>Decide the delegated-query surface: extend what `DataverseAccessDataSource` already proves works, rather than minting a second OBO exchange. Record the placement decision per CLAUDE.md §10.</step>
+    <step>Route the entity search through it, and derive `TotalCount` / `HasMore` from the trimmed set.</step>
+    <step>Make an authorization failure loud rather than an empty result.</step>
+    <step>Correct the stale `#919` reference and the route's own description/XML-doc claims so no comment asserts a control that does not exist.</step>
+    <step>Move this route's waiver in `RouteAuthorizationGuardTests.cs` from Pending to gated, and fix the header comment that says "TEN Pending entries" when there are NINE.</step>
+    <step>Add a test that FAILS if the search returns a record the caller cannot read, and one that fails if the count leaks. Seed a removal to prove each bites.</step>
+    <step>Close #1021 with the outcome.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A delegated Dataverse query turns out to require a privilege the BFF's app registration does not hold (e.g. `prvActOnBehalfOfAnotherUser`, noted as an owner go-live prerequisite at `DataverseWebApiService.cs:1003`). That is an environment/consent decision, not a code change.</trigger>
+    <trigger>Delegated querying cannot meet the 500 ms typeahead budget. Do NOT silently fall back to the app-only path; surface the trade-off.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>A user who cannot read a matter does not see it in search results — demonstrated by a test, not asserted.</criterion>
+    <criterion>`TotalCount` and `HasMore` reflect only what the caller may see; a test fails if they leak untrimmed counts.</criterion>
+    <criterion>A failed delegated-token acquisition fails the request; no path reaches the app-only query for this route.</criterion>
+    <criterion>No new `.WithClientSecret(...)` site (ADR-028 A4).</criterion>
+    <criterion>The `#919` reference is corrected and no comment or endpoint description claims a control the code lacks.</criterion>
+    <criterion>The waiver moves from Pending to gated, and the nine-vs-ten header miscount is fixed.</criterion>
+    <criterion>BFF unit suite green; NetArchTest green; publish-size delta reported per CLAUDE.md §10.</criterion>
+    <criterion>#1021 closed with the outcome recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 26) from the waiver audit. Filed opus/xhigh deliberately: the issue reads like "add a filter", and it is not — the capability the fix needs does not exist yet, and the obvious shortcut (post-filtering) reintroduces the disclosure through the count. Sized before any code was written, so the estimate is not an artefact of discovering that mid-task.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29 (session 26). `GET /api/office/search/entities` now queries Dataverse
+    under the CALLER's security context via `IDataverseUserClient`, so Dataverse performs the trim and
+    `TotalCount`/`HasMore` derive from the trimmed set without further work. Fails closed: with the
+    delegated client unavailable the search refuses rather than falling back to app-only. A 401/403 is
+    distinguished from "no matches" — the per-type best-effort catch was narrowed to
+    `when (ex is not InvalidOperationException)` so an authorization fault cannot be swallowed into an
+    empty result across every entity type. Waiver moved Pending → Permanent with the reason recorded;
+    the header's "TEN Pending entries" miscount corrected to NINE (then EIGHT). BFF unit 12,674 pass /
+    0 fail (+7); NetArchTest 330/330.</outcome>
+
+    <deviation>🔴 THE TASK'S OWN PREMISE WAS WRONG. It asserted no "query as the user" capability
+    existed. `IDataverseUserClient` had existed all along, exposing arbitrary OData GETs under the
+    caller's context with no app-only fallback, and `CallerRecordAccessProbe` (not AI code) already
+    used it. It was missed because the search covered `Spaarke.Dataverse` and the DI modules but not
+    `Services/Ai/Handlers/`. Sized opus/xhigh on that false gap; the real work was a routing change.
+    The background section is annotated rather than rewritten, so the wrong turn stays legible.</deviation>
+
+    <deviation>ADR-013 conflict, resolved via CLAUDE.md §6.5 path C with owner approval.
+    `IDataverseUserClient` documented itself as "AI-internal plumbing" under `Services/Ai/Handlers/`.
+    ADR-013 forbids CRUD code injecting AI-internal types, so the BFF's ONLY per-user Dataverse client
+    was formally off-limits to exactly the callers that need security trimming. Relocated to
+    `Infrastructure/Dataverse/` (not `Spaarke.Dataverse` — the impl needs `IHttpContextAccessor` and
+    `Infrastructure.Auth`, which would drag ASP.NET Core into the shared library). Committed separately
+    as a behaviour-neutral rename; git recorded 99%/85% similarity.</deviation>
+
+    <finding>🔴 THE REGISTRATION WAS ASYMMETRIC, and the fail-closed check would have turned that into
+    an outage. `IDataverseUserClient` was registered inside `AddToolFramework`, which runs INSIDE the
+    compound AI gate. `GET /api/office/search/entities` maps UNCONDITIONALLY — so with the AI gate off
+    the client would have been absent and the new fail-closed check would have taken entity search down
+    entirely instead of trimming it. This is precisely the Tier-1.5 anti-pattern of CLAUDE.md §10 F.1 /
+    RB-T028-03..06. Registration MOVED to `AddSpaarkeCore` (unconditional, `Program.cs:41`) rather than
+    duplicated, so there is one descriptor and the AI handlers are strictly more served than before.</finding>
+
+    <finding>The first version of the new tests was VACUOUS — three of four exercised a hand-written
+    fake and local arithmetic, never `OfficeService` (which no test constructs; it has 12+ concrete
+    dependencies). That is the same shape as the session-25 Rule-B test that iterated the list it
+    checked. Replaced with source guards in the established `RouteAuthorizationGuardTests` style, then
+    PROVEN to bite by seeding `_dataverseClient` back into the query path: exactly one test failed, the
+    right one. A first attempt at the seed did not compile, so it proved nothing — noted because a
+    non-compiling seed reads like a passing verification if nobody checks.</finding>
+
+    <finding>The guards initially failed everywhere at once because `RepoRoot()` probed only
+    `Directory.Exists(".git")`. In a git WORKTREE — how this repo is normally developed — `.git` is a
+    FILE. Worth remembering: the failure mode was total, not localized, which is the tell for a harness
+    fault rather than a real regression.</finding>
+  </execution>
+
+  <superseded-at-merge date="2026-09-30">
+    THE SEARCH FIX WAS SUPERSEDED. spaarkeai-word-add-in-r1 task 062 (finding F1) fixed the same
+    /api/office/search/entities hole with a DIFFERENT mechanism — app-only impersonated read (MSCRMCallerID
+    via IImpersonatedCommunicationQuery + ICallerSystemUserResolver) — and the owner chose it over this task's
+    OBO implementation on 2026-09-30. Reasons: ADR-028 Amendment A5 sanctions impersonated read for "what may
+    this workforce user see" sets; this project's own task 036 (ImpersonatedRootSetSource) was headed the same
+    way; and the picker is word-add-in-r1's surface. This task's OfficeService changes, its seven source guards
+    (OfficeEntitySearchSecurityTrimmingTests) and its waiver text were removed or rewritten at the merge.
+
+    WHAT SURVIVES: the IDataverseUserClient relocation (Services/Ai/Handlers/Dataverse/ -> Infrastructure/Dataverse/,
+    §6.5 path C) and its move to UNCONDITIONAL registration in AddSpaarkeCore. Both remain load-bearing — for
+    task 127's three /api/office/communications routes rather than for the search. One namespace guard moved
+    into CommunicationsDelegatedReadGuardTests.
+
+    CORRECTION: the deviation above claims CallerRecordAccessProbe "already depended on" IDataverseUserClient.
+    It never did — it only MENTIONED the client, in remarks explaining why it deliberately avoided it (AI-gated
+    registration; a CRUD->AI dependency). Those are exactly the two objections the relocation removed, which is
+    the accurate precedent. Corrected in IDataverseUserClient.cs and CallerRecordAccessProbe.cs at the merge.
+
+    ⚠️ OPEN RISK INHERITED FROM 062: the surviving mechanism depends on the BFF application user holding
+    prvActOnBehalfOfAnotherUser. 062's own completion note records that this was never verified live; without
+    it the picker errors (fails closed) rather than leaking.
+  </superseded-at-merge>
+</task>

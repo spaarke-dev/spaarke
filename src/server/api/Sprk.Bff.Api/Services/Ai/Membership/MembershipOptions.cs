@@ -82,54 +82,63 @@ public sealed class MembershipOptions
     public OrganizationLookupOptions OrganizationLookup { get; set; } = new();
 
     /// <summary>
-    /// Convention + exclusion configuration that defines which discovered
-    /// <c>contact</c>-target lookups are <b>access-conferring</b> for the
-    /// contact-anchored membership entry point
-    /// (<c>MembershipResolverService.ResolveByContactAsync</c>, teams-app-r1
-    /// task 021, spec.md NFR-05). Drives the role allowlist convention (default
-    /// prefix <c>sprk_assigned</c>) + a data-driven exclusion list. Defaults are
-    /// safe (prefix seeded; empty exclusions) so the feature works with no
-    /// operator configuration.
+    /// Explicit access-conferring column registry (ADR-034 Amendment A1 / spec FR-24, superseding the
+    /// retired <c>sprk_assigned*</c> naming-convention allow-list — unified-access-control-r2 task 041).
+    /// Defines EXACTLY which discovered <c>contact</c>- or <c>sprk_organization</c>-target lookups are
+    /// <b>access-conferring</b> for BOTH membership entry points:
+    /// <c>MembershipResolverService.ResolveByContactAsync</c> (always) and <c>ResolveAsync</c> (only
+    /// when <see cref="MembershipResolveOptions.AccessConferringOnly"/> is requested). Conferral is
+    /// registry membership ONLY — the naming-convention prefix check is deleted, not layered under this.
+    /// Adding a conferring column is now a reviewed registry edit; renaming a column (or a maker naming
+    /// a new column to merely LOOK like an assignment field) has zero effect on access, because only an
+    /// explicit entry does. An entity absent from the registry (or with an empty list) confers NOTHING
+    /// via the derived-member term — fail-closed by construction (spec NFR-01).
+    /// <para>
+    /// Seeded with the migration default (today's effective conferring set, enumerated against live
+    /// Dataverse metadata) by <see cref="MembershipOptionsDefaults"/> ONLY when the operator-bound
+    /// configuration leaves <see cref="AccessConferringRegistry.Entities"/> empty — same reasoning as
+    /// <see cref="IncludedIdentityTables"/> (IConfiguration.Bind APPENDS to List-typed values, so a
+    /// property-level default would double up an operator's own entries).
+    /// </para>
     /// </summary>
-    public AccessConferringRoleOptions AccessConferringRoles { get; set; } = new();
+    public AccessConferringRegistry AccessConferringRoles { get; set; } = new();
 }
 
 /// <summary>
-/// Convention-based role-allowlist configuration for the contact-anchored
-/// membership entry point (teams-app-r1 task 021 / NFR-05). Access-conferring
-/// roles are resolved from live metadata discovery — NEVER a hardcoded field
-/// list — by keeping only <c>contact</c>-target lookups whose logical name
-/// starts with <see cref="ConventionPrefix"/> and are not on
-/// <see cref="ExcludedFields"/>. A newly-added <c>sprk_assigned*</c> contact
-/// lookup therefore auto-qualifies with no code change; adverse/informational
-/// lookups (opposing-counsel, polymorphic <c>sprk_regardingrecord*</c>) never
-/// confer access because they either fail the convention or are not
-/// contact-typed.
+/// The explicit access-conferring column registry (ADR-034 Amendment A1 / spec FR-24). Replaces the
+/// retired naming-convention allow-list (<c>ConventionPrefix</c> + <c>ExcludedFields</c> — DELETED, not
+/// layered under the registry). Keyed by entity logical name (case-insensitive) → the list of
+/// access-conferring columns for that entity. A column confers access via
+/// <see cref="MembershipResolverService"/>'s registry filter if AND ONLY IF it appears here for the
+/// entity being resolved, with its declared <see cref="AccessConferringColumn.IdentityType"/> matching
+/// what live metadata discovery resolves for that field. An entity with NO entry (or an empty list)
+/// confers nothing — fail-closed (spec NFR-01).
 /// </summary>
-public sealed class AccessConferringRoleOptions
+public sealed class AccessConferringRegistry
 {
     /// <summary>
-    /// The canonical access-conferring naming convention prefix. Used when
-    /// <see cref="ConventionPrefix"/> is left blank by the operator.
+    /// Entity logical name (e.g. <c>sprk_matter</c>) → its access-conferring columns. Bound from
+    /// <c>Membership:AccessConferringRoles:Entities</c>. Seeded with the migration default by
+    /// <see cref="MembershipOptionsDefaults"/> ONLY when this is left empty by the operator.
     /// </summary>
-    public const string DefaultConventionPrefix = "sprk_assigned";
+    public Dictionary<string, List<AccessConferringColumn>> Entities { get; set; } =
+        new(StringComparer.OrdinalIgnoreCase);
+}
 
-    /// <summary>
-    /// Logical-name prefix that marks a <c>contact</c>-target lookup as
-    /// access-conferring (case-insensitive). Default: <c>sprk_assigned</c>.
-    /// This is a convention, not a field list — every field matching the prefix
-    /// qualifies unless explicitly excluded. Configurable so the convention can
-    /// evolve without a code change; blank falls back to
-    /// <see cref="DefaultConventionPrefix"/>.
-    /// </summary>
-    public string ConventionPrefix { get; set; } = DefaultConventionPrefix;
+/// <summary>
+/// One access-conferring registry entry: a Lookup field logical name paired with the identity type it
+/// MUST resolve to (per live metadata discovery) for the entry to apply. A registry entry whose
+/// <see cref="IdentityType"/> is neither <c>Contact</c> nor <c>Organization</c> (case-insensitive), or
+/// whose declared type disagrees with what discovery actually resolves for the field, is a malformed
+/// entry: logged and ignored — never widened (spec NFR-01).
+/// </summary>
+public sealed class AccessConferringColumn
+{
+    /// <summary>Dataverse logical name of the Lookup column (e.g. <c>sprk_assignedattorney1</c>).</summary>
+    public string Field { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Logical names of lookup fields that match <see cref="ConventionPrefix"/>
-    /// but MUST NOT confer access (data/config-driven suppression). Empty by
-    /// default. Bound from <c>Membership:AccessConferringRoles:ExcludedFields</c>.
-    /// </summary>
-    public List<string> ExcludedFields { get; set; } = new();
+    /// <summary>The identity type this column confers access as: <c>Contact</c> or <c>Organization</c>.</summary>
+    public string IdentityType { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -261,6 +270,107 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
         "modifiedonbehalfby",
     };
 
+    /// <summary>
+    /// The migration-seed access-conferring registry (ADR-034 Amendment A1 / spec FR-24,
+    /// unified-access-control-r2 task 041, 2026-09-04). Reproduces TODAY's effective conferring set —
+    /// the retired <c>ConventionPrefix="sprk_assigned"</c> convention's contact-typed output — exactly,
+    /// PLUS the org-typed <c>sprk_assignedlawfirm1/2</c> columns per ADR-034 M4. Enumerated against LIVE
+    /// Dataverse metadata (not inherited from any prior doc), scoped to this project's core+child
+    /// entity model (root-project CLAUDE.md § "The model" — Records row: project / matter /
+    /// workassignment / servicerequest core; invoice / communication / document / event / todo /
+    /// analysis child).
+    /// <para>
+    /// <c>sprk_servicerequest</c>, <c>sprk_document</c>, and <c>sprk_communication</c> have ZERO
+    /// <c>sprk_assigned*</c>-prefixed lookups today (verified live) and therefore have NO seed entries
+    /// here — a byte-identical reproduction of today's (accidental) zero-conferring behavior on those
+    /// three entities, not an endorsement of it. <c>sprk_servicerequest</c> in particular carries
+    /// plausible candidates the convention already silently denied (<c>sprk_requestedby</c>,
+    /// <c>sprk_regardingcontact</c>) — exactly the "a naming convention silently denies a plausible
+    /// conferring column" defect FR-24 exists to make a reviewable registry edit instead of a silent
+    /// rename. Left OUT of the seed deliberately (the cutover MUST show zero behavior change) and
+    /// flagged in <c>projects/unified-access-control-r2/notes/task-041-access-conferring-registry-seed.md</c>
+    /// for owner follow-up — NOT resolved here.
+    /// </para>
+    /// <para>
+    /// <c>sprk_workassignment.sprk_assignedlawfirmattorney1</c> has no numbered "2" sibling (a live
+    /// naming irregularity, not a transcription error) — included as-is because it is a real
+    /// <c>sprk_assigned*</c>-prefixed Contact lookup today.
+    /// </para>
+    /// </summary>
+    public static IReadOnlyDictionary<string, IReadOnlyList<AccessConferringColumn>> CanonicalAccessConferringRegistry { get; } =
+        new Dictionary<string, IReadOnlyList<AccessConferringColumn>>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_matter"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoexternal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtointernal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm2", IdentityType = "Organization" },
+            },
+            ["sprk_project"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoexternal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtointernal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm2", IdentityType = "Organization" },
+            },
+            ["sprk_workassignment"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirmattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedto", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoexternal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtointernal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm2", IdentityType = "Organization" },
+            },
+            ["sprk_event"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedto", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedto1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedto2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoexternal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtointernal", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm1", IdentityType = "Organization" },
+                new AccessConferringColumn { Field = "sprk_assignedlawfirm2", IdentityType = "Organization" },
+            },
+            ["sprk_invoice"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedto1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedto2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedtoparalegal2", IdentityType = "Contact" },
+            },
+            ["sprk_todo"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedto", IdentityType = "Contact" },
+            },
+            ["sprk_analysis"] = new[]
+            {
+                new AccessConferringColumn { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedattorney2", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal1", IdentityType = "Contact" },
+                new AccessConferringColumn { Field = "sprk_assignedparalegal2", IdentityType = "Contact" },
+            },
+        };
+
     /// <inheritdoc/>
     public void PostConfigure(string? name, MembershipOptions options)
     {
@@ -273,6 +383,22 @@ public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPo
         if (options.GlobalFieldExclusions.Count == 0)
         {
             options.GlobalFieldExclusions.AddRange(CanonicalAuditFieldExclusions);
+        }
+
+        // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041). Same
+        // seed-only-when-empty rule as the two blocks above, for the same reason: IConfiguration.Bind
+        // APPENDS to List-typed dictionary values, so seeding unconditionally would double up an
+        // operator's own registry entries. Gated on the TOP-LEVEL Entities count so a partially
+        // operator-configured registry (even a single entity) is never mixed with the canonical seed —
+        // "operator config replaces cleanly," exactly as IncludedIdentityTables already documents.
+        if (options.AccessConferringRoles.Entities.Count == 0)
+        {
+            foreach (var (entityType, columns) in CanonicalAccessConferringRegistry)
+            {
+                options.AccessConferringRoles.Entities[entityType] = columns
+                    .Select(c => new AccessConferringColumn { Field = c.Field, IdentityType = c.IdentityType })
+                    .ToList();
+            }
         }
     }
 }

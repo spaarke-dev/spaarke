@@ -404,9 +404,13 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         var jobId = $"correlation-test-{Guid.NewGuid():N}";
         _fixture.Registry.Register(new FakeScheduledJob(jobId, "Correlation Job", "Correlation test"));
 
-        // Act — fire twice.
+        // Act — fire twice, the second after the first completes: two runs of one job never overlap
+        // (ADR-036 A1 rule 1 — an overlapping trigger gets 409).
         var firstResponse = await client.PostAsync($"/api/admin/jobs/{jobId}/trigger", content: null);
         var first = await firstResponse.Content.ReadFromJsonAsync<TriggerResponse>();
+        await WaitUntilAsync(
+            () => _fixture.Store.RunRecords.Any(r => r.RunId == first!.RunId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
         var secondResponse = await client.PostAsync($"/api/admin/jobs/{jobId}/trigger", content: null);
         var second = await secondResponse.Content.ReadFromJsonAsync<TriggerResponse>();
 
@@ -428,6 +432,32 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         matchingRuns.Select(r => r.CorrelationId).Distinct().Should().HaveCount(2,
             "NFR-08 mandates a fresh correlationId per run, even across rapid back-to-back manual triggers");
         matchingRuns.All(r => r.Trigger == JobRunTrigger.ManualAdmin).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TriggerJob_WhileTheJobIsAlreadyRunning_Returns409AndWritesNoRun()
+    {
+        // Arrange — a job that runs until the test releases it.
+        using var client = _fixture.CreateAdminClient();
+        ResetSchedulingState();
+
+        var jobId = $"busy-{Guid.NewGuid():N}";
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _fixture.Registry.Register(new BlockingScheduledJob(jobId, release.Task));
+
+        // Act — trigger, then trigger again while the first run is in flight.
+        var first = await client.PostAsync($"/api/admin/jobs/{jobId}/trigger", content: null);
+        var overlapping = await client.PostAsync($"/api/admin/jobs/{jobId}/trigger", content: null);
+        release.SetResult();
+
+        // Assert — ADR-036 A1 rule 1: one run of a job at a time, even at an admin's request.
+        first.StatusCode.Should().Be(System.Net.HttpStatusCode.Accepted);
+        overlapping.StatusCode.Should().Be(System.Net.HttpStatusCode.Conflict);
+        (await overlapping.Content.ReadAsStringAsync()).Should().Contain(jobId);
+        await WaitUntilAsync(
+            () => _fixture.Store.RunRecords.Any(r => r.JobId == jobId && r.CompletedAtUtc is not null),
+            TimeSpan.FromSeconds(5));
+        _fixture.Store.RunRecords.Count(r => r.JobId == jobId).Should().Be(1, "the refused trigger wrote no run row");
     }
 
     // ================================================================================
@@ -500,6 +530,32 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         details![0].StartedOn.Should().BeAfter(details[1].StartedOn,
             "GET /history MUST return runs in DESC order per AC");
         details[1].StartedOn.Should().BeAfter(details[2].StartedOn);
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 148: a run's own report (JobRunResult.ResultJson, FR-2.8) reaches the admin client
+    /// verbatim — the secure-child backfill's dry run, apply and verify read it from here.
+    /// </summary>
+    [Fact]
+    public async Task GetJobHistory_CarriesEachRunsResultJsonVerbatim()
+    {
+        using var client = _fixture.CreateAdminClient();
+        ResetSchedulingState();
+
+        var jobId = $"report-{Guid.NewGuid():N}";
+        _fixture.Registry.Register(new FakeScheduledJob(jobId, "Report Job", "Has a report"));
+        _fixture.Store.AddOrReplaceJob(new BackgroundJobDefinition(
+            jobId, "Report Job", "Has a report", true, "0 * * * *", null));
+        const string report = "{\"mode\":\"report-only\",\"wouldChange\":3,\"passComplete\":true}";
+        SeedCompletedRun(jobId, DateTimeOffset.UtcNow.AddMinutes(-2), success: true, resultJson: report);
+        SeedCompletedRun(jobId, DateTimeOffset.UtcNow.AddMinutes(-1), success: true);
+
+        var details = await client.GetFromJsonAsync<List<JobRunDetail>>($"/api/admin/jobs/{jobId}/history");
+
+        details.Should().NotBeNull();
+        details!.Should().HaveCount(2);
+        details![0].ResultJson.Should().BeNull("a run that reported nothing carries nothing");
+        details![1].ResultJson.Should().Be(report);
     }
 
     [Fact]
@@ -732,7 +788,8 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         registryJobs!.GetType().GetMethod("Clear")!.Invoke(registryJobs, null);
     }
 
-    private void SeedCompletedRun(string jobId, DateTimeOffset startedAt, bool success, string? errorMessage = null)
+    private void SeedCompletedRun(
+        string jobId, DateTimeOffset startedAt, bool success, string? errorMessage = null, string? resultJson = null)
     {
         var runId = Guid.NewGuid();
         _fixture.Store.SeedRunRecord(new InMemoryBackgroundJobStore.RunRecord(
@@ -747,7 +804,22 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
                 Success: success,
                 ErrorMessage: success ? null : (errorMessage ?? "test-failure"),
                 ProcessedItems: success ? 5 : null,
-                Duration: TimeSpan.FromSeconds(1))));
+                Duration: TimeSpan.FromSeconds(1),
+                ResultJson: resultJson)));
+    }
+
+    /// <summary>Runs until <c>release</c> completes — keeps a job "already running" for the 409 test.</summary>
+    private sealed class BlockingScheduledJob(string jobId, Task release) : IScheduledJob
+    {
+        public string JobId => jobId;
+        public string DisplayName => "Blocking job";
+        public string Description => "Runs until released";
+
+        public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
+        {
+            await release.WaitAsync(cancellationToken);
+            return new JobRunResult(true, null, 1, TimeSpan.Zero);
+        }
     }
 
     /// <summary>Test-only no-op <see cref="IScheduledJob"/> for registry seeding.</summary>

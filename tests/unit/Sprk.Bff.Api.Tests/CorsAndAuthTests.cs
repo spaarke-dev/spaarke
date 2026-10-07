@@ -22,19 +22,23 @@ public class CorsAndAuthTests : IClassFixture<CustomWebAppFactory>
         res.Headers.TryGetValues("Access-Control-Allow-Origin", out var values).Should().BeTrue();
     }
 
-    // Repointed 2026-08-26 by unified-access-control-r2 task 071. This test previously probed
-    // `GET /api/obo/containers/{id}/children`, which task 071 DELETED (drive/container-keyed OBO
-    // route with no per-document authorization decision; zero production callers). A deleted route
-    // answers 404, which is not a statement about bearer enforcement — the thing this test exists to
-    // check. Repointed at `PUT /api/obo/containers/{id}/files/{*path}`, which survives task 071
-    // (11 live wizard call sites) and carries the same `RequireAuthorization()`.
-    // Route ABSENCE for the four retired routes is asserted by
+    // Repointed TWICE, and the reason is the same both times: this test checks BEARER ENFORCEMENT, so
+    // it must probe a route that EXISTS. A deleted route answers 404, which says nothing about auth.
+    //
+    //   2026-08-26 (task 071): from `GET /api/obo/containers/{id}/children` — deleted as a
+    //     container-keyed route with no per-document decision — to
+    //     `PUT /api/obo/containers/{id}/files/{*path}`.
+    //   2026-09-03 (task 076): that route was deleted too, for the same class of reason (it wrote
+    //     bytes to a CALLER-NAMED container). Now probes `PUT /api/obo/me/files/{*path}`, one of the
+    //     three replacements, none of which takes a container parameter.
+    //
+    // Route ABSENCE for all five retired routes is asserted by
     // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs.
     [Fact(Skip = "Requires fully mocked Graph/Dataverse services - OBO endpoint returns 500 without Graph client")]
     public async Task Obo_Endpoints_RequireBearer()
     {
         using var body = new ByteArrayContent(new byte[] { 1, 2, 3 });
-        var res = await _client.PutAsync("/api/obo/containers/cont-id/files/probe.txt", body);
+        var res = await _client.PutAsync("/api/obo/me/files/probe.txt", body);
         res.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         res.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
     }

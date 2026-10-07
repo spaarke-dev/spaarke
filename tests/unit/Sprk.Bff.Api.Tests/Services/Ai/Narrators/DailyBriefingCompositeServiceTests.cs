@@ -241,6 +241,90 @@ public sealed class DailyBriefingCompositeServiceTests
         _workflow.Executions.Should().BeEmpty("an empty briefing produces no email and no ledger entry");
     }
 
+    // ─── Failure markers reach the reader (task 152 verifier round 1 item 3; ADR-003) ─────────
+    //
+    // The collector marks a channel / High Priority entity type whose caller-context read failed. These pin that the
+    // composite carries those markers all the way to the widget response, the ledger entry and the email — "could not
+    // be loaded" stays distinguishable from "nothing to report" past the collector.
+
+    [Fact]
+    public async Task RenderAsync_FailureMarkers_ReachTheResponse_AndTheLedgerEntry()
+    {
+        _collector.Payload = BuildRequest() with { FailedChannels = ["matters"] };
+        _collector.HighPriorityFailed = ["sprk_invoice"];
+        SetupBinding(BuildCodedBinding());
+        SetupWorkflowResolution();
+        var routed = SetupRouterPassthrough();
+
+        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        response.FailedChannels.Should().Equal("matters");
+        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_invoice");
+
+        var sections = routed.Invocations.Single().Payload.GetProperty("sections");
+        sections.GetProperty("failedChannels").EnumerateArray().Select(e => e.GetString()).Should().Equal("matters");
+        sections.GetProperty("highPriorityFailedEntityTypes").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("sprk_invoice");
+    }
+
+    [Fact]
+    public async Task RenderAsync_NothingToNarrateButSectionsFailed_EmptyResponseStillCarriesTheMarkers()
+    {
+        _collector.Payload = new DailyBriefingNarrateRequest { FailedChannels = ["to-dos"] };
+        _collector.HighPriorityFailed = ["sprk_event"];
+
+        var response = await CreateSut().RenderAsync(SystemUserId, TenantId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        response.ChannelNarratives.Should().BeEmpty();
+        response.FailedChannels.Should().Equal(new[] { "to-dos" }, "an empty briefing whose sections FAILED is not 'all caught up'");
+        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_event");
+        _routing.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task EmailAsync_FailureMarkers_TheEmailSaysWhichSectionsCouldNotBeLoaded()
+    {
+        _collector.Payload = BuildRequest() with { FailedChannels = ["matters"] };
+        _collector.HighPriorityFailed = ["sprk_invoice"];
+        SetupBinding(BuildCodedBinding() with { Disposition = BindingDisposition.Email }, consumerCode: "email");
+        SetupWorkflowResolution();
+        var routed = SetupRouterPassthrough();
+
+        var response = await CreateSut().EmailAsync(SystemUserId, TenantId, "user@contoso.com", CancellationToken.None);
+
+        response.FailedChannels.Should().Equal("matters");
+        var html = routed.Invocations.Single().Payload.GetProperty("email").GetProperty("htmlBody").GetString();
+        html.Should().Contain("Some sections could not be loaded")
+            .And.Contain("matters")
+            .And.Contain("high priority (sprk_invoice)");
+    }
+
+    [Fact]
+    public async Task EmailAsync_NoFailures_TheEmailCarriesNoFailureLine()
+    {
+        _collector.Payload = BuildRequest();
+        SetupBinding(BuildCodedBinding() with { Disposition = BindingDisposition.Email }, consumerCode: "email");
+        SetupWorkflowResolution();
+        var routed = SetupRouterPassthrough();
+
+        await CreateSut().EmailAsync(SystemUserId, TenantId, "user@contoso.com", CancellationToken.None);
+
+        routed.Invocations.Single().Payload.GetProperty("email").GetProperty("htmlBody").GetString()
+            .Should().NotContain("could not be loaded");
+    }
+
+    [Fact]
+    public async Task EmailAsync_NothingToSendButSectionsFailed_ResponseStillCarriesTheMarkers()
+    {
+        _collector.Payload = new DailyBriefingNarrateRequest { FailedChannels = ["documents"] };
+        _collector.HighPriorityFailed = ["sprk_project"];
+
+        var response = await CreateSut().EmailAsync(SystemUserId, TenantId, "user@contoso.com", CancellationToken.None);
+
+        response.FailedChannels.Should().Equal("documents");
+        response.HighPriorityFailedEntityTypes.Should().Equal("sprk_project");
+    }
+
     // ─── Helpers ──────────────────────────────────────────────────────────────────────────
 
     private void SetupBinding(Binding? binding, string consumerCode = "default")
@@ -352,12 +436,13 @@ public sealed class DailyBriefingCompositeServiceTests
 
         public DailyBriefingNarrateRequest Payload { get; set; } = new();
         public HighPriorityItemDto[] HighPriority { get; set; } = Array.Empty<HighPriorityItemDto>();
+        public string[] HighPriorityFailed { get; set; } = Array.Empty<string>();
 
         public override Task<DailyBriefingNarrateRequest> CollectAsync(
             Guid systemUserId, BriefingWindowOptions windows, CancellationToken ct)
             => Task.FromResult(Payload);
 
-        public override Task<HighPriorityItemDto[]> CollectHighPriorityAsync(Guid systemUserId, CancellationToken ct)
-            => Task.FromResult(HighPriority);
+        public override Task<HighPriorityCollection> CollectHighPriorityAsync(Guid systemUserId, CancellationToken ct)
+            => Task.FromResult(new HighPriorityCollection(HighPriority, HighPriorityFailed));
     }
 }

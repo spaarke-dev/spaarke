@@ -174,6 +174,24 @@ public static class ConfigurationModule
         // (candidate-selector thresholds + reranker tuning knobs) were DELETED with
         // the dispatcher stack — no code reads their configuration sections anymore.
 
+        // Customer runtime identity (D-14 / unified-access-control-r2 task 123). customerId names every
+        // per-customer Azure resource (rg-spaarke-{customerId}-{env} and everything in it) and was
+        // readable by no BFF code — D-12 having established that tenantId is IDENTICAL for every Model 1
+        // customer, so every tenant-keyed control separates Entra tenants rather than customers.
+        //
+        // NO ValidateDataAnnotations: CustomerOptionsValidator is the single source of truth for
+        // requiredness (the AgentServiceOptions / PublicConfigOptions pattern) — a bare [Required] would
+        // evaluate on every read and crash the Development / Testing boot path.
+        services
+            .AddOptions<CustomerOptions>()
+            .Bind(configuration.GetSection(CustomerOptions.SectionName))
+            .ValidateOnStart();
+
+        // Consumers inject CustomerIdentity, never IOptions<CustomerOptions> — reading the options
+        // directly yields "" when unresolved, and "" used as a cache-key prefix is a key SHARED across
+        // every customer. CustomerIdentity.Id throws instead. ADR-010: concrete singleton, no interface.
+        services.AddSingleton<CustomerIdentity>();
+
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
@@ -183,6 +201,10 @@ public static class ConfigurationModule
         // PublicConfigOptions — enforce in Production / Staging / Demo / QA; short-circuit
         // in Development / Testing envs so test fixtures don't need PublicConfig:* entries.
         services.AddSingleton<IValidateOptions<PublicConfigOptions>, PublicConfigOptionsValidator>();
+        // task 123 (D-14 §8): fail closed in deployed envs when NEITHER Customer:Id nor a derivable
+        // WEBSITE_RESOURCE_GROUP resolves; short-circuit in Development / Testing so fixtures need no
+        // new keys. An absent customer identity must never resolve to a shared default.
+        services.AddSingleton<IValidateOptions<CustomerOptions>, CustomerOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

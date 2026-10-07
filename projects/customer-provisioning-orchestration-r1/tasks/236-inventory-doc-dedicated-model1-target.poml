@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="236" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Rewrite SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md to the dedicated Model 1 target (owner decisions 2026-09-30) — the scope reference every remaining remediation task is measured against</title>
+    <phase>Model 1 dedicated-stamp remediation — notes/model1-dedicated-remediation-plan.md §7 (first task in suggested order)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation rewrite of one existing architecture doc; no code, no tests. Not MINIMAL because the doc is the owner-review reference that T226/T225a/T225b/T227/T228/T218 are scoped against, so every row must be source-verified (knowledge loading required).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-document rewrite with the target content fully specified by plan §1 + §2; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <tags>documentation, provisioning, customer-provisioning, d-12, model1-dedicated</tags>
+    <deps>none</deps>
+  </metadata>
+
+  <goal>
+    `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` describes the per-customer resource set for the
+    **target** model the owner confirmed on 2026-09-30: Model 1 = a per-customer dedicated stamp in the Spaarke tenant
+    (own subscription + RG + Dataverse env; managed solutions; B2B guests; `Spaarke Model 1` container type; prod only).
+    Every row is tagged **Dedicated** (per customer) or **Shared** (Spaarke-operated, serves many customers) and states
+    whether current code already matches the target or which remediation task (T2xx) closes the gap. The retired
+    "shared Model 1 trial/SMB tier" appears only in a short "Retired" section, not as a live option.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md</file>
+      <file>docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>infrastructure/bicep/customer.bicep</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="plan §2 D1–D7 (owner, LOCKED)">
+      The doc states the target exactly as plan §1/§2: Model 1 dedicated stamp in the Spaarke tenant; SPE container
+      type `Spaarke Model 1` (standard, Spaarke pays); B2B guests with Spaarke-paid licenses; subscription + Dataverse
+      env are manual prerequisites; Bing + LlamaParse on Spaarke shared accounts; Prompt Flow retired; prod only.
+      Do not introduce any decision not in plan §2.
+    </constraint>
+    <constraint source="plan §2 D3">
+      Model 2 is out of scope. The doc carries ONE short Model 2 note (customer tenant, `directToCustomer` container
+      type, deferred) and does not maintain a parallel Model 2 column.
+    </constraint>
+    <constraint source="plan §5 Q1 (open)">
+      The Dataverse-environment row states both readings of Q1 (operator creates → H5 verifies/adopts; operator names →
+      H5 creates) and marks it OPEN. Do not pick one.
+    </constraint>
+    <constraint source="doc authority rule (doc header)">
+      "Where this document disagrees with the cited source, the source wins." Every row that describes CURRENT code
+      cites file:line. Where current code does not yet match the target, the row says so and names the closing task
+      from plan §7 — it does not describe the target as if it were already implemented.
+    </constraint>
+    <constraint source="scope">
+      Edit ONLY `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`. Drift found in OTHER docs (root CLAUDE.md
+      §17 pointer row, deployment guide, topology doc, spec/design) is recorded in this POML's completion notes as T235
+      input — not fixed here.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>If the source code contradicts plan §1 in a way that changes a Dedicated/Shared classification (e.g. a
+      resource plan §1 lists as dedicated has no per-customer Bicep module at all), STOP and report — the plan needs a
+      new gap row, not a doc workaround.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step n="1">Read plan §1, §2, §4, §7 and the current doc. List every current row as keep / rewrite / move-to-Retired.</step>
+    <step n="2">Rewrite the header + "How to read" section: two time-scales (per-customer provisioning run; one-time
+      Spaarke-platform/shared) + manual prerequisites. Remove the "one-time-per-Spaarke-tier shared BFF app-reg" framing
+      and the 2026-08-31 "Model 1 has multiple customers in ONE shared env" clarification.</step>
+    <step n="3">Add a "Manual prerequisites (D4)" table: Azure subscription; Dataverse environment (Q1 OPEN); L2 UAMI
+      RBAC on the customer subscription (T228).</step>
+    <step n="4">Rewrite Dataverse, Azure, SPE, M365 sections with a `Deployment` column (Dedicated | Shared) and a
+      `Status vs target` column (✅ matches | 🔲 T2xx). Naming patterns per plan §1 inventory table, verified against
+      `customer.bicep`. Redis row: Standard C1 target vs current Bicep default (cite line; T225a). KV-secret row: split
+      per-customer-resource secrets (dedicated; T226 fixes the `from-shared-service` sourcing) from vendor secrets
+      (Bing, LlamaParse — Shared per D5) and drop Prompt Flow (T226).</step>
+    <step n="5">Dataverse solutions row: state that the solution package is to be DEFINED by T218 (D7); list the current
+      9-zip deploy order only as "current state, to be replaced", citing `Deploy-DataverseSolutions.ps1`.</step>
+    <step n="6">Add a short "Retired (D-12, 2026-09-28 / owner 2026-09-30)" section: shared Model 1 subscription,
+      `rg-spaarke-shared-{env}`, `sprkshared{env}-*` services, `sprk-{env}-shared-bff-uami`, shared BFF app-regs
+      (`Spaarke BFF - Trial 1` / `- Model 1`), `model1-shared.bicep` — each with the retiring task.</step>
+    <step n="7">Update the doc header (Authored/Updated line, authority note) and run a link check on relative links
+      touched (files exist).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>Every per-customer row carries Deployment = Dedicated or Shared, consistent with plan §1's dedicated-vs-shared rule.</criterion>
+    <criterion>Every row whose current code differs from the target names the closing task from plan §7; no row presents an unimplemented target as current state.</criterion>
+    <criterion>Manual-prerequisites table present; the Dataverse-environment row marks Q1 OPEN with both readings.</criterion>
+    <criterion>No live (non-"Retired") row describes a shared Model 1 subscription, shared RG, `sprkshared*` service, shared UAMI, or shared BFF app-reg.</criterion>
+    <criterion>Prompt Flow absent from live rows; Bing + LlamaParse marked Shared (Spaarke accounts, D5).</criterion>
+    <criterion>`sprk_tenancymodel` values shown as `Model1` / `Model2` (post-T224).</criterion>
+    <criterion>Only `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` modified (plus this POML, TASK-INDEX, current-task.md). Drift in other docs listed in completion notes for T235.</criterion>
+    <criterion>All relative links introduced or retained in the doc resolve to existing files.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="file-modified">docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md</output>
+    <output type="task-status">This POML → completed; TASK-INDEX row 236 → ✅; plan §7 status updated.</output>
+  </outputs>
+  <completion-notes>
+    <landed>2026-09-30 SESSION 26 (Opus 5.5 main session; POML tier sonnet@high — over-provisioned, no escalation needed).</landed>
+    <summary>
+      `SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md` rewritten to the dedicated Model 1 target: target summary table;
+      Deployment (Dedicated/Shared) + Status-vs-target columns on every table; manual-prerequisites table (D4) with
+      plan §5 Q1 marked OPEN (both readings); Dataverse / Azure-per-customer / KV secrets + app settings / shared
+      platform / SPE / M365 sections re-cited against `customer.bicep`, `manifest.yaml`, topology doc; "Retired"
+      section listing every shared-tier artifact with its retiring task. Model 2 reduced to one out-of-scope note (D3).
+    </summary>
+    <findings>
+      - G1 SHARPENED: `customer.bicep:721-752` already writes Redis/SB/Storage/DocIntel/AI Search secrets from the
+        customer's OWN resources into the customer KV, and BFF app settings reference the customer KV (:579-596). A
+        `customer.bicep` stamp does not read shared values. Residual G1 = manifest mislabel + H4-shared on every run
+        gating H4b + Model 1 still routed to `model1-shared.bicep`. Plan §4 G1 updated; T226 Step 1 still applies.
+      - G14 NEW (unowned): shared Outlook/Word add-ins + Teams tab bound to one Entra app vs per-customer BFF app-regs
+        (D-13) — token audience + routing for Model 1 customers (same `tid`) undocumented. Needs owner review.
+      - G15 NEW: ADR-027 §3 (unmanaged everywhere, amended 2026-06-02) conflicts with owner's managed-solution
+        requirement — §6.5 resolution folded into T218.
+      - Manifest drift: `SPE-DefaultContainerId` / `SPE-CommunicationArchiveContainerId` labelled `from-bicep-output`
+        but `customer.bicep:705-710` omits them as H8 runtime outputs → noted under T227.
+      - `customer.bicep:46` `platformKeyVaultName` (shared `sprk-{env}-kv`) is only surfaced as an output (:854) →
+        noted under T225b to confirm no consumer and remove.
+      - Step 10.6 fetch found two NEW INCOMING docs on origin/master for this project (uac-r2 D-14, 2026-09-29):
+        INCOMING-CUSTOMERID-STANDARD.md (customerId `^[a-z][a-z0-9]{2,7}$`, max 8 binding) and
+        INCOMING-CUSTOMER-RUNTIME-IDENTITY.md (`Customer__Id` app setting; BFF fails closed without it). Doc gained a
+        customerId-standard note + `Customer__Id` row (T237 / T238); plan gained T237/T238/T239 + owner Q2/Q3; plan order
+        revised to master merge BEFORE T226.
+    </findings>
+    <t235-inputs>
+      Drift in other docs, NOT fixed here (scope constraint):
+      - root CLAUDE.md §17 pointer row for this inventory doc ("one-time-per-Spaarke-tier … Model 1 vs Model 2
+        variance per resource") and the Customer-provisioning row ("Model 1 (shared trial/SMB) + Model 2 (dedicated
+        stamp)") — both describe the retired model.
+      - `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (shared Model 1 tier), `SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`
+        (Trial 1 / shared BFF rows), project `CLAUDE.md` MUST rules + canonical-implementations table (8 solutions).
+    </t235-inputs>
+    <acceptance-criteria-verification>
+      ✅ Deployment column on every table (Azure per-customer table column added post-draft).
+      ✅ Every non-matching row names a plan §7 task; the Azure section states Model 1 does not yet route to customer.bicep.
+      ✅ Manual-prerequisites table; Q1 OPEN with both readings.
+      ✅ No live row describes shared sub / RG / sprkshared* / shared UAMI / shared BFF app-reg (all under "Retired").
+      ✅ Prompt Flow only under "Retired"; Bing + LlamaParse Shared (D5).
+      ✅ `sprk_tenancymodel` shown as Model1 / Model2.
+      ✅ Files: inventory doc + this POML + TASK-INDEX + current-task.md + plan (plan update is a declared output).
+      ✅ Relative-link check: 0 broken.
+    </acceptance-criteria-verification>
+    <quality-gates>Step 9.5 skipped — STANDARD rigor, documentation-only, no tests touched.</quality-gates>
+  </completion-notes>
+</task>

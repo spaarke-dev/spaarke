@@ -48,6 +48,7 @@ import type { ILookupItem } from '../../types/LookupTypes';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { getXrm } from '../../utils/xrmContext';
 import type { ILookupFieldValue } from './fields/LookupField';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Rows fetched per search. Matches R1's proven `$top=10` — enough to fill the
@@ -214,7 +215,7 @@ export async function searchLookupTarget(
  */
 export async function openAdvancedLookup(target: string, logLabel: string): Promise<ILookupFieldValue | null> {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (typeof xrm?.Utility?.lookupObjects !== 'function') {
       // WARN, though it is a no-op: silently doing nothing on click is
       // indistinguishable from a dead control, and cost a full UAT round.
@@ -249,7 +250,7 @@ export async function openAdvancedLookup(target: string, logLabel: string): Prom
     // Normalize the same way `CommunicationActionsApp.tsx:420` does, so picked
     // values compare consistently with `useRecordFieldValues` projections
     // (brace-stripped, lowercased GUID).
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(picked.id);
     return { id, name: picked.name, entityType: picked.entityType };
   } catch (err) {
     // Xrm surfaces its own error UX, so the "never throw on click" contract

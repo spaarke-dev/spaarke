@@ -9,7 +9,8 @@ Choosing between platform-provided theme vs custom theme; designing a Spaarke br
 
 ## Read These Files
 
-1. `src/client/pcf/UniversalDatasetGrid/control/providers/ThemeProvider.ts` — Spaarke's reference theme-detection + FluentProvider wiring
+1. `src/client/pcf/VisualHost/control/providers/ThemeProvider.ts` — Spaarke's reference theme-detection + FluentProvider wiring
+   <!-- Corrected 2026-09-01: was the DELETED UniversalDatasetGrid/control/providers/ThemeProvider.ts. -->
 2. `knowledge/fluent-ui-v9/samples/fluentui_react-v9/Theme/ThemeColors.stories.tsx` — full token grid
 3. Drill-down only if needed: `knowledge/fluent-ui-v9/docs/theming.md` (custom brand ramp, extending tokens), `knowledge/fluent-ui-v9/docs/community/birkelbach-standard-custom-theming.md` (tinycolor2 brand-variant generation)
 

@@ -22,6 +22,8 @@ import type { IPlaybook, AuthenticatedFetchFn } from '../Playbook';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { INavigationService } from '../../types/serviceInterfaces';
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
+import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -55,49 +57,17 @@ export interface ICreateDocumentResult {
  * Matches the SemanticSearchControl NavigationService pattern.
  */
 async function getBusinessUnitContainerId(dataService: IDataService): Promise<string> {
-  // Retrieve the current user record — Xrm.Utility.getUserId() is not available
-  // here so we retrieve 'WhoAmI' equivalent by querying systemuser with no filter.
-  // Dataverse returns the caller's own record when the id is omitted in
-  // retrieveMultipleRecords if we use the /UserInfo endpoint — but IDataService
-  // doesn't expose that. Instead we use the whoami pattern via a known placeholder.
-  //
-  // Preferred approach: ask Dataverse who the current user is via WhoAmI-style
-  // retrieveRecord on the logged-in user.  The xrmDataServiceAdapter wraps
-  // Xrm.WebApi which uses the caller identity automatically, so retrieving the
-  // systemuser record with a dummy whoami approach works by querying
-  // ?$select=_businessunitid_value&$top=1 without a filter — but that could
-  // return any user in a large org.  The safest approach is to use
-  // window.Xrm.Utility.getUserId() via a try/catch and fall back gracefully.
-  //
-  // Since this code runs inside a Dataverse Code Page iframe, Xrm is available.
-  let userId: string | null = null;
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getUserId) {
-        userId = (xrm.Utility.getUserId() as string).replace(/^\{|\}$/g, '');
-        if (userId) break;
-      }
-    } catch {
-      // Cross-origin frame — skip
-    }
-  }
+  // Retrieve the current user id via the shared cross-frame `getXrm()` walker
+  // (task 081 / C-8 — this previously hand-rolled its own window/parent/top
+  // frame walk, one of six duplicates converged onto `xrmContext.ts:306`).
+  // Uses `Utility.getGlobalContext().userSettings.userId` — the modern
+  // equivalent of the older `Xrm.Utility.getUserId()` this comment used to
+  // describe as unavailable via `IDataService`; both resolve the signed-in
+  // user's id, and `getGlobalContext` is on the shared `XrmUtility` contract.
+  const userId = cleanGuid(getXrm('utility')?.Utility?.getGlobalContext?.()?.userSettings?.userId ?? '');
 
   if (!userId) {
-    throw new Error(`${LOG_PREFIX} Cannot determine current user — Xrm.Utility.getUserId() is unavailable.`);
+    throw new Error(`${LOG_PREFIX} Cannot determine current user — Xrm.Utility.getGlobalContext() is unavailable.`);
   }
 
   // Step 1: Get the user's business unit ID

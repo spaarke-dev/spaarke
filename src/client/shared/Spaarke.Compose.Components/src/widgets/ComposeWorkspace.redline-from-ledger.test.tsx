@@ -130,6 +130,15 @@ const composeOutputsReadUrls: string[] = [];
 let loadParaIdMap: unknown[] = [];
 const annotationPosts: Array<{ anchoredAnnotations: Array<Record<string, unknown>> }> = [];
 
+// R8 §GAPS-5 Phase 3 — every POST body sent to the Review Summary write endpoint. Before Phase 3 this
+// array could only ever stay empty: nothing in the repo called that endpoint.
+const reviewMemoPosts: Array<{ overallRisk: string; sections: Array<Record<string, unknown>> }> = [];
+
+// Every SAVE body the client sent. Added 2026-09-07 with the Summary Page wiring: nothing previously
+// asserted that an appendix field actually rides the save request, which is precisely how `summaryPage`
+// stayed dead at the transport boundary for so long.
+const saveBodies: Array<Record<string, unknown>> = [];
+
 /** The review-flag annotations from the most recent session-annotations write. */
 function latestReviewFlagAnnotations(): Array<Record<string, unknown>> {
   const last = annotationPosts[annotationPosts.length - 1];
@@ -197,6 +206,11 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
   // BOTH statuses), the SAME-editor-instance re-materialize race notes/031-execution-notes.md
   // escalated.
   if (url.includes('/api/compose/documents/') && url.includes('/save')) {
+    try {
+      saveBodies.push(JSON.parse(String(_init?.body ?? '{}')));
+    } catch {
+      /* a malformed body is a harness bug, not a product path */
+    }
     return {
       ok: true,
       status: 200,
@@ -205,6 +219,44 @@ const authenticatedFetchMock = jest.fn(async (url: string, _init?: RequestInit):
         documentRecordId: 'sprk-doc-1',
         size: 1024,
         wasPromotedThisSave: false,
+      }),
+    } as unknown as Response;
+  }
+  // R8 §GAPS-5 Phase 3 — Review Summary write + read-back. The GET deliberately 404s until a POST has
+  // landed, mirroring production: the row the READ actions look for is the row the POST writes, which
+  // is exactly the loop that had no entry point before Phase 3.
+  if (url.includes('/review-memo')) {
+    const method = (_init?.method ?? 'GET').toUpperCase();
+    if (method === 'POST') {
+      const body = JSON.parse(String(_init?.body ?? '{}'));
+      reviewMemoPosts.push(body);
+      return {
+        ok: true,
+        status: 201,
+        json: async () => ({
+          analysisId: '00000000-0000-0000-0000-0000000a0a01',
+          outputId: '00000000-0000-0000-0000-0000000a0a02',
+          sectionCount: body.sections?.length ?? 0,
+        }),
+      } as unknown as Response;
+    }
+    const latest = reviewMemoPosts[reviewMemoPosts.length - 1];
+    if (!latest) {
+      return { ok: false, status: 404, json: async () => ({}), text: async () => '' } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        analysisId: '00000000-0000-0000-0000-0000000a0a01',
+        analysisName: 'Agreement Review',
+        documentName: 'contract.docx',
+        memo: {
+          schemaVersion: 'review-memo-v1',
+          overallRisk: latest.overallRisk,
+          sectionCount: latest.sections.length,
+          sections: [],
+        },
       }),
     } as unknown as Response;
   }
@@ -233,7 +285,6 @@ jest.mock('./useComposeWordShuttle', () => ({
   useComposePullAnnotations: () => ({ pull: jest.fn() }),
   useComposeCheckChanges: () => ({ checkChanges: jest.fn() }),
   anchoredAnnotationsToPriorAnchors: () => [],
-  anchoredAnnotationsToDocxAnnotations: () => [],
 }));
 jest.mock('./useComposeReanchor', () => ({
   useComposeReanchor: () => ({ summary: null, reanchor: jest.fn(), reset: jest.fn() }),
@@ -296,6 +347,8 @@ beforeEach(() => {
   bridgeRef.current = null;
   loadParaIdMap = [];
   annotationPosts.length = 0;
+  reviewMemoPosts.length = 0;
+  saveBodies.length = 0;
   // Task 032 — the 128KB-budget degraded-restore marker rides `window.sessionStorage`, keyed by
   // session id. DOC_SESSION is a shared constant across this whole file's tests, so clear it every
   // test to prevent cross-test leakage of a marker one test wrote.
@@ -308,7 +361,7 @@ describe('DEF-09/DEF-12: ComposeWorkspace materializes the redline mark + per-ch
     renderWorkspace(bus);
 
     // Document loads (session id = DOC_SESSION) and the editor mounts.
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Flow 5 — the Assistant-applied signal referencing the stored ledger entry (exactly
     // what ConversationPane emits after a Draft-alternative dispatch). ComposeWorkspace's
@@ -394,7 +447,7 @@ describe('DEF-11: ComposeWorkspace materializes a whole-document edits[] payload
     renderWorkspaceWithBridge(bus);
     expect(bridgeRef.current?.hasRedlineAcceptHandler).toBe(true);
 
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Flow 5 — exactly what ConversationPane emits after a whole-document revise dispatch
     // (same signal DEF-09 uses; only the stored payload SHAPE differs).
@@ -476,7 +529,7 @@ describe('DEF-11: ComposeWorkspace materializes a flag-risks comments[] payload 
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // NOTE: ComposeWorkspace's refresh-durability effect (task 016 FR-04) re-materializes the
     // CURRENT stored compose output as soon as the session loads (page-refresh recovery) — so the
@@ -547,7 +600,7 @@ function seedFlags(comments: unknown[]): void {
 
 async function renderAndWaitForFlags(expectedCount: number): Promise<void> {
   renderWorkspace(new PaneEventBus());
-  await screen.findByRole('textbox', undefined, { timeout: 5000 });
+  await screen.findByRole('textbox');
   const workspaceRoot = await screen.findByTestId('compose-workspace');
   await waitFor(() => {
     expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe(String(expectedCount));
@@ -646,7 +699,7 @@ describe('r8 task 055: a whole-document review flag resolves its anchor determin
     ]);
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
     const workspaceRoot = await screen.findByTestId('compose-workspace');
     await waitFor(() => {
       expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
@@ -794,7 +847,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // The FR-04 refresh-durability effect re-materializes the CURRENT stored compose output on load.
     // The findings branch resolves the flagged clause and places a PERSISTENT advisory comment thread —
@@ -865,7 +918,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
       const bus = new PaneEventBus();
       renderWorkspace(bus);
       // The editor still mounts (no crash); the FR-04 effect logs + skips.
-      await screen.findByRole('textbox', undefined, { timeout: 5000 });
+      await screen.findByRole('textbox');
       await waitFor(() =>
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no usable flagged sections'), REVIEW_LEDGER_REF)
       );
@@ -909,7 +962,7 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // (1) Gutter restore — the pre-existing task 030 guarantee, re-proven here alongside the panel
     // for the FULL closed-guarantee assertion (acceptance criterion 1).
@@ -925,8 +978,16 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
       fireEvent.click(toggle);
     });
     const row = await screen.findByTestId('nda-review-summary-finding-0', undefined, { timeout: 5000 });
-    // deriveTakeaway strips the trailing period off the first sentence — assert without it.
-    expect(row.textContent).toContain('The body imposes an unqualified obligation');
+    // R8 §GAPS-5 Phase 1 — this assertion CHANGED, because it had pinned the defect. It previously
+    // expected the flaggedClause ("The body imposes an unqualified obligation"), which is the grounded
+    // FACT. That was never the intended row content: the row renders a TAKEAWAY, and the takeaway is
+    // the judgment. It read the fact only because this mapping dropped `assessment`, leaving the panel
+    // to marker-parse a composed blob that carries no markers — so deriveTakeaway returned the blob's
+    // first sentence. Restoring the discrete fields makes the row render the judgment, which is what
+    // "the row carries the RIGHT content" always meant. (Trailing period stripped by deriveTakeaway.)
+    expect(row.textContent).toContain('Deviates from the firm standard, which requires a materiality qualifier');
+    // The grounded fact belongs on the in-document gutter note, NOT in the summary's scan strip.
+    expect(row.textContent).not.toContain('The body imposes an unqualified obligation');
     expect(row.textContent).toContain('High'); // the per-finding risk badge
 
     // (3) Zero LLM calls / zero dispatch — every network call is a GET (the point of FR-16).
@@ -934,6 +995,59 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
       ([, init]) => ((init?.method ?? 'GET') as string).toUpperCase() !== 'GET'
     );
     expect(nonReadCalls).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8 §GAPS-5 Phase 1 — the FR-05 discrete fields (flaggedClause / assessment) must survive into the
+// summary panel on BOTH population paths. The ledger-restore leg is asserted in the describe above;
+// this is the LIVE leg. Both mappings hand-copied five fields and dropped these two, so the panel
+// fell back to marker-parsing a blob that post-split payloads compose WITHOUT markers.
+// ---------------------------------------------------------------------------
+
+describe('R8 §GAPS-5 Phase 1: discrete FR-05 fields survive the LIVE advisory path into the summary', () => {
+  it('a live post-split review renders the ASSESSMENT (judgment) as the summary takeaway', async () => {
+    composeOutputsBySession[DOC_SESSION] = [];
+
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    // Mirrors useNdaReviewAdvisoryCommentsBridge's post-split projection: discrete fields carried
+    // through, with `explanation` COMPOSED as [flaggedClause, assessment].join('\n\n') — no
+    // "Grounded fact —"/"Judgment —" markers, which is precisely why parsing it cannot work.
+    const flaggedClause = 'The body imposes an unqualified obligation.';
+    const assessment = 'This deviates from the firm standard, which requires a materiality qualifier.';
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'compose_advisory_comments',
+        advisoryComments: [
+          {
+            targetText: 'Sample document body.',
+            explanation: `${flaggedClause}\n\n${assessment}`,
+            flaggedClause,
+            assessment,
+            sectionRef: '1.1',
+            riskLevel: 'High',
+            standardRef: 'B5 - Obligations',
+          },
+        ],
+        overallRisk: 'High',
+        sessionId: DOC_SESSION,
+        timestamp: '2026-09-07T00:00:00.000Z',
+      });
+    });
+
+    const toggle = await screen.findByTestId('compose-format-review-summary-toggle', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(toggle);
+    });
+
+    const row = await screen.findByTestId('nda-review-summary-finding-0', undefined, { timeout: 5000 });
+    expect(row.textContent).toContain('Deviates from the firm standard, which requires a materiality qualifier');
+    // The grounded fact is the OTHER half — it belongs on the gutter note, not the scan strip. Before
+    // Phase 1 this is what the row showed, because `assessment` never reached the panel.
+    expect(row.textContent).not.toContain('The body imposes an unqualified obligation');
   });
 });
 
@@ -951,7 +1065,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
       timeout: 5000,
@@ -981,7 +1095,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
     ];
     const bus1 = new PaneEventBus();
     const { unmount } = renderWorkspace(bus1);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
     await waitFor(() => {
       expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
     });
@@ -995,7 +1109,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
 
     const bus2 = new PaneEventBus();
     renderWorkspace(bus2);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
       timeout: 5000,
@@ -1036,7 +1150,7 @@ describe("FR-16 task 032: findings + edit coexistence — a later edit no longer
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // BOTH restore — the findings anchor AND the edit redline mark, simultaneously, with zero dispatch.
     await waitFor(() => {
@@ -1095,7 +1209,7 @@ describe("FR-16 task 032: supersede protection — an edit bindingId's own turn 
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Findings unaffected — the gutter anchor restores.
     await waitFor(() => {
@@ -1121,7 +1235,7 @@ describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycl
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // LIVE placement (mirrors useNdaReviewAdvisoryCommentsBridge's emitFromResult — no `ledgerRef`
     // on the wire today, verified by reading the bridge).
@@ -1176,5 +1290,218 @@ describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycl
     // the SAME clause set the live path already placed and skipped the ledger-driven re-placement
     // (`placeAdvisoryComments` has no idempotency of its own).
     expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R8 §GAPS-5 Phase 3 — the WRITE half. `POST .../review-memo` had NO production caller anywhere in
+// the repo: the read half (Download / Email) was built against it as though it were already being
+// called, so both actions always hit the 404 "generate first" banner. The feature could not succeed
+// for anyone. These tests are the forcing function for that call existing.
+// ---------------------------------------------------------------------------
+
+describe('R8 §GAPS-5 Phase 3: the Review Summary write call', () => {
+  /** Opens the toolbar's Review Summary document dropdown and returns its menu. */
+  async function openMemoMenu(): Promise<void> {
+    const trigger = await screen.findByTestId('compose-format-memo-menu', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(trigger);
+    });
+  }
+
+  function seedReview(): void {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+  }
+
+  it('Generate POSTs the panel findings, then reports success from the READ-BACK count', async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    // Wait for the ledger restore to populate the findings the payload is built from.
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    await openMemoMenu();
+    const create = await screen.findByTestId('compose-format-memo-create', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(create);
+    });
+
+    // (1) The POST actually happened — the whole point of Phase 3.
+    await waitFor(() => expect(reviewMemoPosts).toHaveLength(1));
+
+    // (2) It carried the findings, with the FR-05 discrete fields Phase 1 stopped dropping.
+    const body = reviewMemoPosts[0];
+    expect(body.overallRisk).toBe('High');
+    expect(body.sections).toHaveLength(1);
+    expect(body.sections[0]).toMatchObject({
+      sectionRef: '1.1',
+      quotedText: 'Sample document body.',
+      flaggedClause: 'The body imposes an unqualified obligation.',
+      assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+      standardRef: 'B5 - Obligations',
+      riskLevel: 'High',
+    });
+
+    // (3) Decision D2 — afterText is never invented.
+    expect(body.sections[0].afterText).toBeUndefined();
+
+    // (4) Success is reported from the server's read-back, not assumed from the POST returning 201.
+    const banner = await screen.findByTestId('compose-workspace-memo-action-message', undefined, { timeout: 5000 });
+    expect(banner.textContent).toContain('Review Summary created (1 finding)');
+  });
+
+  it('refuses to generate a summary of nothing — no POST, an actionable message instead', async () => {
+    // A review that produced NO findings. A summary of nothing is itself the defect (the same rule R8
+    // item 8 applies to the change summary), so this must refuse rather than persist an empty artifact.
+    composeOutputsBySession[DOC_SESSION] = [];
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    // With no findings the dropdown is gated off entirely (`hasReview` is false), so the refusal is
+    // structural: there is no control to press. Assert THAT, rather than a message that cannot appear.
+    expect(screen.queryByTestId('compose-format-memo-menu')).not.toBeInTheDocument();
+    expect(reviewMemoPosts).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// nda-r1 task 041 — the NDA-REVIEW "Summary Page" appendix, client wiring (2026-09-07).
+//
+// The generator, the SaveComposeDocumentRequest field, the SaveAsync call site and a corpus seam test
+// had all existed and been green since task 041. There was no HTTP body property and no client sender,
+// so the appendix had never been produced in the running app — the last open instance of the
+// "server-ready, client-unwired" defect class. These tests are the client half of the forcing function
+// (ComposeSaveBodyMappingGuardTests is the server half).
+// ---------------------------------------------------------------------------
+
+describe('nda-r1 t041: the Summary Page appendix rides the save body', () => {
+  function seedReview(): void {
+    composeOutputsBySession[DOC_SESSION] = [
+      {
+        key: REVIEW_LEDGER_REF,
+        bindingId: REVIEW_BINDING,
+        turn: 1,
+        disposition: 'compose',
+        payload: {
+          overallRisk: 'High',
+          flaggedSections: [
+            {
+              quotedText: 'Sample document body.',
+              flaggedClause: 'The body imposes an unqualified obligation.',
+              assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+              sectionRef: '1.1',
+              riskLevel: 'High',
+              standardRef: 'B5 - Obligations',
+            },
+          ],
+        },
+      },
+    ];
+  }
+
+  async function saveDocument(): Promise<void> {
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const saveButton = saveWrapper.querySelector('button');
+    if (!saveButton) throw new Error('Save split-button primary action <button> not found');
+    act(() => {
+      fireEvent.click(saveButton);
+    });
+    await screen.findByTestId('compose-workspace-save-success-banner', undefined, { timeout: 5000 });
+  }
+
+  it('sends `summaryPage` — carrying BOTH finding vintages — once the user opts in', async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    // Open the Save split-button's menu and tick the appendix toggle.
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const menuButton = saveWrapper.querySelectorAll('button')[1];
+    if (!menuButton) throw new Error('Save split-button menu trigger not found');
+    act(() => {
+      fireEvent.click(menuButton);
+    });
+    const toggle = await screen.findByTestId('compose-format-summary-page-toggle', undefined, { timeout: 5000 });
+    act(() => {
+      fireEvent.click(toggle);
+    });
+
+    await saveDocument();
+
+    expect(saveBodies.length).toBeGreaterThan(0);
+    const summaryPage = saveBodies[saveBodies.length - 1].summaryPage as
+      | { overallRisk: string; flaggedSections: Array<Record<string, unknown>> }
+      | undefined;
+    expect(summaryPage).toBeDefined();
+    expect(summaryPage!.overallRisk).toBe('High');
+    expect(summaryPage!.flaggedSections).toHaveLength(1);
+    // BOTH vintages ride along: the server's overview line prefers `assessment` and falls back to
+    // `explanation` only for legacy payloads, so sending both means neither vintage loses its "why".
+    expect(summaryPage!.flaggedSections[0]).toMatchObject({
+      sectionRef: '1.1',
+      riskLevel: 'High',
+      standardRef: 'B5 - Obligations',
+      flaggedClause: 'The body imposes an unqualified obligation.',
+      assessment: 'This deviates from the firm standard, which requires a materiality qualifier.',
+    });
+  });
+
+  it("sends NOTHING when the user has not opted in — an appendix is never added on a save's own initiative", async () => {
+    seedReview();
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+    await waitFor(() => {
+      expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
+    });
+
+    await saveDocument();
+
+    expect(saveBodies.length).toBeGreaterThan(0);
+    expect(saveBodies[saveBodies.length - 1].summaryPage).toBeUndefined();
+  });
+
+  it('offers no toggle at all when no review has run — it cannot promise an appendix with no findings', async () => {
+    composeOutputsBySession[DOC_SESSION] = [];
+    const bus = new PaneEventBus();
+    renderWorkspace(bus);
+    await screen.findByRole('textbox');
+
+    const saveWrapper = await screen.findByTestId('compose-format-save', undefined, { timeout: 5000 });
+    const menuButton = saveWrapper.querySelectorAll('button')[1];
+    if (!menuButton) throw new Error('Save split-button menu trigger not found');
+    act(() => {
+      fireEvent.click(menuButton);
+    });
+
+    expect(screen.queryByTestId('compose-format-summary-page-toggle')).not.toBeInTheDocument();
   });
 });

@@ -138,7 +138,7 @@ public sealed class RecordSearchDocument
 /// </para>
 ///
 /// <para>
-/// ADR-001: Uses BackgroundService + PeriodicTimer — no Azure Functions.
+/// Uses BackgroundService + PeriodicTimer in the BFF, governed by ADR-052 (legacy hand-rolled timer, ratchet-listed — migrates when next touched).
 /// ADR-009: Watermark stored in IDistributedCache (Redis-first).
 /// ADR-017: Exponential backoff on HTTP 429 from AI Search (3 retries max).
 /// </para>
@@ -194,7 +194,11 @@ public class RecordSyncJob : BackgroundService
             NameField:         "fullname",
             DescriptionField:  "description",
             ReferenceField:    null,
-            SelectFields:      "contactid,fullname,description,jobtitle,parentcustomerid,modifiedon"),
+            // Web API selects a lookup via its `_<name>_value` form; the raw
+            // `parentcustomerid` 400s with 0x80060888 ("Could not find a property named
+            // 'parentcustomerid'"), which failed the contacts sync every run (every ~15 min).
+            // Confirmed via App Insights 2026-08-31. Pre-existing on master.
+            SelectFields:      "contactid,fullname,description,jobtitle,_parentcustomerid_value,modifiedon"),
 
         new EntityConfig(
             EntityLogicalName: "account",

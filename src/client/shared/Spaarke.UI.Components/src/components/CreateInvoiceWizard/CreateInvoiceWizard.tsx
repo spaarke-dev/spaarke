@@ -547,11 +547,17 @@ const CreateInvoiceWizard: React.FC<ICreateInvoiceWizardProps> = ({
         // -- Follow-on: Add To Do (sprk_todo regarding the new Invoice, NOT the host) --
         if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
           try {
-            const todoResult = await createTodoRegardingChild(dataService, todoFormRef.current, {
-              entityType: 'sprk_invoice',
-              recordId: invoiceId,
-              recordName: invoiceName,
-            });
+            const todoResult = await createTodoRegardingChild(
+              dataService,
+              todoFormRef.current,
+              {
+                entityType: 'sprk_invoice',
+                recordId: invoiceId,
+                recordName: invoiceName,
+              },
+              authFetch,
+              bffBaseUrl
+            );
             if (!todoResult.success) {
               warnings.push(
                 `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +

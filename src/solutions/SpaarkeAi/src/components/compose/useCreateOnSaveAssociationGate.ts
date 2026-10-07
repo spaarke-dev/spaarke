@@ -26,13 +26,14 @@
 
 import * as React from 'react';
 import { createXrmNavigationService } from '@spaarke/ui-components';
-import type { AssociationResult, EntityTypeOption, IDataService, INavigationService } from '@spaarke/ui-components';
+import type { AssociationResult, EntityTypeOption, INavigationService } from '@spaarke/ui-components';
 import { useCreateOnSaveAssociation } from './useCreateOnSaveAssociation';
+import type { DocumentRefile } from './documentAssociationWrite';
 import type { ICreateOnSaveAssociationGateDialogProps } from './CreateOnSaveAssociationGateDialog';
 
 export interface IUseCreateOnSaveAssociationGateOptions {
-  /** Dataverse write surface. Defaults to `createXrmDataService()` (via the underlying hook). Tests inject a mock. */
-  dataService?: IDataService;
+  /** The document re-file. Defaults to the BFF `PUT /api/v1/documents/{id}` (via the underlying hook; UAC-r2 task 147 r1). Tests inject a mock. */
+  refileDocument?: DocumentRefile;
   /** Lookup surface for the embedded picker. Defaults to `createXrmNavigationService()`. Tests inject a mock. */
   navigationService?: INavigationService;
   /** Optional restriction on offered parent types (e.g. from a `GateAssociationAffordance.allowedTargets`). */
@@ -73,7 +74,7 @@ export function useCreateOnSaveAssociationGate(
   options?: IUseCreateOnSaveAssociationGateOptions
 ): IUseCreateOnSaveAssociationGateResult {
   const { association, setAssociation, associate, isAssociating, error } = useCreateOnSaveAssociation({
-    ...(options?.dataService ? { dataService: options.dataService } : {}),
+    ...(options?.refileDocument ? { refileDocument: options.refileDocument } : {}),
   });
 
   // Lazy-init the navigation service once (the Xrm adapter binds lazily -- it

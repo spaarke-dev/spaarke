@@ -103,6 +103,11 @@ public class MembershipReconciliationJobTests
 
         var discovery = new Mock<IMembershipFieldDiscoveryService>(MockBehavior.Loose);
         var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        // Task 152: reconciliation reads systemuser.applicationid (an application user gets no junction row). Every
+        // user in these fixtures is a human — applicationid absent.
+        entityService
+            .Setup(s => s.RetrieveAsync("systemuser", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string[] _, CancellationToken _) => new Entity("systemuser", id));
 
         var services = new ServiceCollection();
         services.AddSingleton(updater.Object);
@@ -207,6 +212,37 @@ public class MembershipReconciliationJobTests
             It.IsAny<CancellationToken>()), Times.Once);
         updater.Verify(u => u.HandleAsync(
             It.Is<MembershipChangedEvent>(e => e.SourceField == "sprk_assignedattorney1" && e.PersonId == UserB),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PolymorphicOwnerDiscoveredAsUserAndTeam_DispatchesOncePerValue()
+    {
+        // Task 172 (GitHub #1011): discovery now emits the polymorphic Owner column TWICE — SystemUser and Team, same
+        // field and role. The job works per FIELD (one projected column, an orphan scan keyed by field, the value
+        // typed from its own EntityReference), so it must keep one descriptor per field: no duplicate-key failure,
+        // and each owner value dispatched exactly once, typed by what it IS (a team-owned row's team → Team).
+        var (job, updater, discovery, entityService) = BuildSut();
+        SetupDiscovery(discovery, MatterEntity,
+            new MembershipDescriptor("ownerid", "owner", "SystemUser", "systemuser", "auto"),
+            new MembershipDescriptor("ownerid", "owner", "Team", "team", "auto"));
+        var teamId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var teamOwned = new Entity(MatterEntity, MatterA) { ["ownerid"] = new EntityReference("team", teamId) };
+        var userOwned = new Entity(MatterEntity, MatterB) { ["ownerid"] = new EntityReference("systemuser", UserA) };
+        SetupParentScanReturnsOnce(entityService, MatterEntity, teamOwned, userOwned);
+        SetupOrphanScanReturnsOnce(entityService);
+
+        var result = await job.ExecuteAsync(BuildCtx(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.ProcessedItems.Should().Be(2, "one Updated event per owner VALUE, not per descriptor");
+        updater.Verify(u => u.HandleAsync(
+            It.Is<MembershipChangedEvent>(e => e.EntityRecordId == MatterA && e.PersonId == teamId
+                && e.PersonIdType == PersonIdentityType.Team && e.SourceField == "ownerid"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        updater.Verify(u => u.HandleAsync(
+            It.Is<MembershipChangedEvent>(e => e.EntityRecordId == MatterB && e.PersonId == UserA
+                && e.PersonIdType == PersonIdentityType.User && e.SourceField == "ownerid"),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -527,9 +563,14 @@ public class MembershipReconciliationJobTests
     [Fact]
     public void ReadLookupAsIdentity_UnknownIdentityType_ReturnsNullPair()
     {
-        var matter = BuildMatter(MatterA, owner: UserA, attorney: null);
-        var weird = OwnerDescriptor() with { IdentityType = "BusinessUnit" };
-        var (id, type) = MembershipReconciliationJob.ReadLookupAsIdentity(matter, weird);
+        // Task 152: the type comes from the VALUE's LogicalName (a polymorphic Owner always discovers as SystemUser).
+        // A business-unit value is derived, not a person or team — no junction identity.
+        var matter = new Entity(MatterEntity, MatterA)
+        {
+            ["owningbusinessunit"] = new EntityReference("businessunit", UserA),
+        };
+        var descriptor = OwnerDescriptor() with { Field = "owningbusinessunit", IdentityType = "BusinessUnit" };
+        var (id, type) = MembershipReconciliationJob.ReadLookupAsIdentity(matter, descriptor);
         id.Should().BeNull("BusinessUnit is derived, not a real lookup target per Q4");
         type.Should().BeNull();
     }

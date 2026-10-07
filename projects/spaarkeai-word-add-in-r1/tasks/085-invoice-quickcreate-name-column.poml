@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>The Office invoice quick-create writes a column that does not exist (sprk_invoicename), so it always fails (#1079, our half)</title>
+    <phase>5 Remediation — write path</phase>
+    <status>completed</status>
+    <status-note>2026-10-01, `04158652e`. Live metadata re-read first: `sprk_invoice.PrimaryNameAttribute = sprk_name`, no `sprk_invoicename` (escalation not fired). The Invoice branch of `QuickCreateAsync` now writes `sprk_name`. `Issue1079_InvoiceQuickCreateNameTests` FAILED before the fix ("found &lt;null&gt;") and passes after; `Issue1079` + `OfficeQuickCreate*` 34/0/3 (Matter/Project unmodified). Review re-checked every non-`None` required attribute: `sprk_regardingrecordtype` / `sprk_extractionstatus` are only ApplicationRequired, so name + owner is a valid API create. Suite 13,065/0/54 (+1 exact); ArchTests 337; publish +30 B vs 084 (212 = 212 = 212); no package change. Real-Dataverse probe: the old set was refused with 400; the new set, owned by the BU1 team, got 204, was read back and deleted. It also found ISS-016 / #1081: the root BU default team has 0 privileges, so the root-team owner check refuses (owner decision; not an 085 defect). Open, stated: the live pane check waits on the next BFF deploy from master (as Test User 1). #1079 stays open for the other owners' 3 sites. Record: `notes/085-invoice-quickcreate-name.md`.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `OfficeService.cs` (bff-api) and adds a regression test under `tests/**`.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A one-attribute fix with the live schema already verified; the only judgment is the test shape, which is specified below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `OfficeService.cs`, which the 060 → 068 → 075 track also edits.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, office, dataverse, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/1079</issue>
+  </metadata>
+
+  <prompt>`OfficeService.QuickCreateAsync` names a new invoice by writing `sprk_invoicename`, which `sprk_invoice` does not have. Write the entity's primary name attribute, `sprk_name`, and pin it with a regression test.</prompt>
+
+  <role>SPAARKE platform developer fixing a live write-path defect in this project's code.</role>
+
+  <goal>An invoice quick-created from the Office pane is created, named via `sprk_name`. No other quick-create type changes.</goal>
+
+  <context>
+    <background>
+      - **Live metadata** (`spaarkedev1`, 2026-10-01): `EntityDefinitions(LogicalName='sprk_invoice')` has
+        `PrimaryNameAttribute = sprk_name`, and there is no `sprk_invoicename` attribute. This was first reported by
+        unified-access-control-r2's task-130 verifier.
+      - `OfficeService.cs` (Invoice branch of `QuickCreateAsync`) writes `entity["sprk_invoicename"] = name;`. It was
+        introduced by #934 (`f5fee2141`). No test asserts the invoice's name attribute, which is why it survived.
+      - Dataverse rejects an undeclared attribute, so **every invoice quick-create from the pane fails today**.
+      - `sprk_billingevent` DOES have `sprk_invoicename`; do not touch references on that entity.
+      - **Not this task:** `Services/RecordMatching/DataverseIndexSyncService.cs:52-55` and two scripts use the same wrong
+        column on `sprk_invoice`. They belong to other owners and are named in #1079 for routing.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">Change only the Invoice branch's name attribute. Matter and Project are created by `RecordCreationService` and are out of scope.</constraint>
+    <constraint source="this task">Read the attribute name from live metadata at the start, and record it. Do not trust this POML or a doc: three docs in this repo state the wrong column.</constraint>
+    <constraint source="ADR-038">Regression test at `tests/integration/regression/Issue1079_InvoiceQuickCreateNameTests.cs`. Drive `POST /api/office/quickcreate/invoice` through the host, and assert the entity passed to `IGenericEntityService.CreateAsync` carries `sprk_name` = the requested name and has NO `sprk_invoicename` attribute. Follow `OfficeQuickCreateContractTests`' harness.</constraint>
+    <constraint source="ADR-019">No new error code.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Reproduce first: the regression test FAILS on the current code (the entity carries `sprk_invoicename`). Record the output.</criterion>
+    <criterion testable="true">After the fix the test passes; the created entity carries `sprk_name` and no `sprk_invoicename`.</criterion>
+    <criterion testable="true">The Matter and Project quick-create tests are unchanged and green.</criterion>
+    <criterion testable="true">Gates: full BFF suite green with the count reconciled; ArchTests green; publish-size delta measured against a fresh build of master (root CLAUDE.md §10); no package change.</criterion>
+    <criterion testable="true">Live check after the next deploy from master: quick-create an invoice from the pane in dev and read the row back (`sprk_name` set). If no deploy has happened, leave this criterion open, stating why.</criterion>
+    <criterion testable="true">`notes/defer-issues.md` ISS-015 is updated (our half fixed), and #1079 is commented with the commit and the other owners' sites still open.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Live metadata shows a different primary name attribute than `sprk_name`: re-verify, and record what was found before writing anything.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read `sprk_invoice`'s primary name attribute from live metadata; record it.</step>
+    <step>Write the regression test; run it and record it failing.</step>
+    <step>Fix the one attribute; run the test, the quick-create suites, the full suite and ArchTests; measure publish size.</step>
+    <step>Record in `notes/085-invoice-quickcreate-name.md`; update ISS-015 and #1079; TASK-INDEX 085 → ✅.</step>
+  </steps>
+
+  <justification>
+    <existing>The fix edits the existing Invoice branch of `OfficeService.QuickCreateAsync`. The only new files are the regression test that ADR-038 requires for a fixed bug and the task note.</existing>
+    <extension>Yes. This changes one attribute name in existing code; it adds no component, endpoint, registration or column.</extension>
+    <cost-of-doing-nothing>Every invoice quick-create from the Office pane fails, because Dataverse rejects the undeclared `sprk_invoicename` attribute (#1079).</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="new">tests/integration/regression/Issue1079_InvoiceQuickCreateNameTests.cs</file>
+    <file role="read">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/085-invoice-quickcreate-name.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/defer-issues.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>tests/integration/regression/Issue1079_InvoiceQuickCreateNameTests.cs</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

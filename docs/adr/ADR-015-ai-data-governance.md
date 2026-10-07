@@ -124,13 +124,13 @@ These tiers are **explicit exceptions** to the "no content in logs" constraint. 
 - MUST store only structured metadata (never verbatim text)
 - MUST compute SHA-256 hash of full response for tamper detection
 - MUST use append-only container policy (no updates, no deletes)
-- MUST partition by `tenantId` with no cross-tenant query capability
+- 🟡 **AMENDED 2026-09-28** — was *"MUST partition by `tenantId` with no cross-tenant query capability"*. Now: **MUST reside in the customer's own dedicated Cosmos account** (D-12 §3), which is what delivers no-cross-**customer** query capability. **MUST NOT** use `/tenantId` as the partition key — see the amendment note below.
 - MUST configure retention policy at container provisioning (default: 7 years)
 - MUST NOT store verbatim prompts or response text (hash only)
 - MUST NOT allow programmatic deletion (except via retention policy expiry or legal hold release)
 
 **Tier 3 (Work History)**:
-- MUST partition by `tenantId` with no cross-tenant query capability
+- 🟡 **AMENDED 2026-09-28** — was *"MUST partition by `tenantId` with no cross-tenant query capability"*. Now: **MUST reside in the customer's own dedicated Cosmos account** (D-12 §3). **MUST NOT** use `/tenantId` as the partition key — see the amendment note below.
 - MUST support user-initiated deletion (GDPR right to erasure, Art. 17)
 - MUST define retention policy at container provisioning (default: 90 days)
 - MUST encrypt at rest (Cosmos default) and in transit (TLS)
@@ -141,13 +141,47 @@ These tiers are **explicit exceptions** to the "no content in logs" constraint. 
 
 Provisioned by task AIPU2-002 (Cosmos DB infrastructure).
 
+> 🟡 **AMENDED 2026-09-28 — `/tenantId` is the wrong partition key. See the amendment note below.**
+> The account is per customer; the partition key must discriminate *within* it.
+
 | Container | Tier | Partition Key | Immutable | Purpose |
 |-----------|------|---------------|-----------|---------|
-| `audit` | 2 | `/tenantId` | Yes (append-only) | Compliance log: every AI interaction recorded |
-| `sessions` | 3 | `/tenantId` | No | Work history: messages, widget state, tool results |
-| `prompts` | 3 | `/tenantId` | No | Saved prompt templates (personal/team ownership) |
-| `memory` | 3 | `/tenantId` | No | Matter-scoped AI memory (structured facts) |
-| `feedback` | 3 | `/tenantId` | No | Per-response feedback (thumbs up/down + text) |
+| `audit` | 2 | ⚠️ `/tenantId` — **to be re-keyed** | Yes (append-only) | Compliance log: every AI interaction recorded |
+| `sessions` | 3 | ⚠️ `/tenantId` — **to be re-keyed** | No | Work history: messages, widget state, tool results |
+| `prompts` | 3 | ⚠️ `/tenantId` — **to be re-keyed** | No | Saved prompt templates (personal/team ownership) |
+| `memory` | 3 | ⚠️ `/tenantId` — **to be re-keyed** | No | Matter-scoped AI memory (structured facts) |
+| `feedback` | 3 | ⚠️ `/tenantId` — **to be re-keyed** | No | Per-response feedback (thumbs up/down + text) |
+
+#### 🟡 Amendment note (2026-09-28) — the account is the boundary; `/tenantId` is a hot partition
+
+**Path**: CLAUDE.md §6.5 path B. **Source**: owner decision D-12 §3
+(`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`).
+
+**Why the original MUSTs no longer hold.** They promised *"no cross-tenant query capability"* and were read
+as delivering **customer** isolation — the guarantee under which the 7-year audit trail and the GDPR Art. 17
+erasure right are offered. Under D-12 Model 1, every customer is hosted in **Spaarke's** Azure tenant, so
+`tenantId` is the **same value for every customer**. Partitioning by it would have placed every customer's
+audit records in **one partition** and provided **no** separation, while the constraint read as if it did.
+
+✅ **What delivers the guarantee now**: D-12 §3 dedicates the **Cosmos account per customer**, in that
+customer's own subscription (ADR-027 as amended the same day). Cross-customer query capability is absent
+because there is no shared account to query — a boundary rather than a predicate.
+
+🔴 **And inside that dedicated account, `/tenantId` is actively harmful**: it is a single constant value, so
+every document lands in **one logical partition**, marching toward the 20 GB partition cap with no
+distribution. Re-key each container to an axis that discriminates *within* one customer — the subject,
+session or record id. **The specific key per container is a follow-up**, not decided here; what is decided is
+that `/tenantId` is not it.
+
+✅ **This resolves a live contradiction between two ADRs.** [ADR-042](ADR-042-memory-architecture-governance.md)
+already **rejects** `/tenantId` partitioning — *"dedicated-per-customer environments make tenant a single hot
+partition"* — and moved `memory-items` off it, while this ADR still mandated it as the compliance standard.
+Neither cited the other. ADR-042 reached the right answer on **capacity** grounds alone; this amendment adds
+the **isolation** reason and aligns the two.
+
+⚠️ **ADR-042 leaves the legacy `/tenantId` container in place** (*"MUST NOT be retired or re-keyed"*). That
+remains correct — this amendment governs the partition key for containers going forward and does not order a
+migration of existing data. Re-keying live containers requires a documented migration, not an ADR edit.
 
 ### Access Control Matrix
 

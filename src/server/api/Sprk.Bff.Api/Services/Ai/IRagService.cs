@@ -156,6 +156,60 @@ public interface IRagService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Deletes one file's leftover chunks — those whose <c>chunkIndex</c> is at or beyond
+    /// <paramref name="keepChunkCount"/> — from the index the file was just written to. Used after a re-index of a
+    /// new VERSION of the same SPE item (task 029, spaarkeai-word-add-in-r1), whose chunk ids
+    /// <c>{speFileId}_{index}</c> overwrite <c>0..keepChunkCount-1</c> in place but cannot reach the tail of a
+    /// previous, longer version.
+    /// </summary>
+    /// <remarks>
+    /// <para>Routing is the SAME as <see cref="IndexDocumentsBatchAsync(IEnumerable{KnowledgeDocument}, string?, CancellationToken)"/>:
+    /// a non-empty <paramref name="searchIndexName"/> goes through the allow-listed 3-argument
+    /// <c>GetSearchClientAsync</c>; null/whitespace goes to the tenant default. Pass the value the batch used, so
+    /// the trim reaches the index the chunks are actually in (unlike <see cref="DeleteBySourceDocumentAsync"/>,
+    /// which only ever targets the tenant default).</para>
+    /// <para>Scoped by tenant and <paramref name="speFileId"/>, and only ids of this pipeline's shape
+    /// (<c>{speFileId}_{chunkIndex}</c>) are deleted — chunks another writer stored for the same file under its own
+    /// id scheme are left alone. Never deletes chunk <c>0..keepChunkCount-1</c>; a <paramref name="keepChunkCount"/>
+    /// below 1 is refused, so the file can never be left without chunks through this method.</para>
+    /// </remarks>
+    /// <returns>Number of chunks deleted (zero when there was no tail).</returns>
+    /// <exception cref="System.ArgumentOutOfRangeException"><paramref name="keepChunkCount"/> is below 1.</exception>
+    /// <exception cref="System.InvalidOperationException">Any leftover chunk could not be deleted — the caller should
+    /// retry; the chunks below <paramref name="keepChunkCount"/> are untouched either way.</exception>
+    Task<int> DeleteChunksBeyondCountAsync(
+        string tenantId,
+        string speFileId,
+        int keepChunkCount,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Deletes the chunks of a SUPERSEDED SharePoint Embedded item — one whose document now names ANOTHER item (a file
+    /// moved between containers by <c>DocumentContainerRelocator</c>, unified-access-control-r2 task 166 f1-v1, owner
+    /// round 37 item 1). The document's new item is indexed under its own ids (<c>{newItemId}_{index}</c>), so the old
+    /// item's chunks would otherwise stay searchable under the document, naming an item it no longer has.
+    /// </summary>
+    /// <remarks>
+    /// <para>Never for the item that was just written — that is <see cref="DeleteChunksBeyondCountAsync"/>'s job, and its
+    /// structural rule (a file is never left without chunks) is unchanged. This method removes chunks of an item NO
+    /// document should be found by any more.</para>
+    /// <para>Scoped by tenant and <paramref name="speFileId"/>; when <paramref name="onlyForDocumentId"/> is set, only the
+    /// chunks attributed to that <c>sprk_document</c> (lower-case, as the indexer writes it) — the source item is still
+    /// another record's file, so the chunks naming THAT record stay. Only ids of the file pipeline's shape
+    /// (<c>{speFileId}_{chunkIndex}</c>) are deleted. Routing as <see cref="DeleteChunksBeyondCountAsync"/>: a non-empty
+    /// <paramref name="searchIndexName"/> through the allow-list, null to the tenant default.</para>
+    /// </remarks>
+    /// <returns>Number of chunks deleted (zero when there were none).</returns>
+    /// <exception cref="System.InvalidOperationException">Any matching chunk could not be deleted — the caller retries.</exception>
+    Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Generate an embedding for text content.
     /// Uses caching when available.
     /// </summary>
@@ -169,9 +223,11 @@ public interface IRagService
     // ── Knowledge-base index administration (D-09 §2 B8, task 011 Phase 1b Tier 3) ────
     // Endpoints (KnowledgeBaseEndpoints) used to inject Azure SDK SearchIndexClient directly
     // and call its index/search APIs. Per ADR-007 (facade pattern) endpoints should consume
-    // domain services, not Azure SDK clients. The following 3 methods absorb those direct
-    // SDK calls so the endpoints depend only on IRagService — which has a fail-fast
-    // Null-Object implementation (NullRagService) registered when the kill switch is off.
+    // domain services, not Azure SDK clients. This method absorbs that direct SDK call so the
+    // endpoint depends only on IRagService — which has a fail-fast Null-Object implementation
+    // (NullRagService) registered when the kill switch is off. The list and delete members
+    // that served the retired GET/DELETE /api/ai/knowledge/indexes/{indexName}/documents
+    // routes were removed with them (unified-access-control-r2 task 163, owner round 10 item 1).
 
     /// <summary>
     /// Returns document chunk counts for the knowledge and discovery indexes scoped to the
@@ -181,40 +237,6 @@ public interface IRagService
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Health summary with per-index document counts and timestamp.</returns>
     Task<KnowledgeIndexHealth> GetIndexHealthAsync(
-        string tenantId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Returns a paged list of indexed document summaries for the requesting tenant in the
-    /// specified index. Used by the knowledge-base admin "list documents" endpoint.
-    /// </summary>
-    /// <param name="indexName">Target index name (knowledge or discovery).</param>
-    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
-    /// <param name="page">1-based page number.</param>
-    /// <param name="pageSize">Page size (1-200).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Paged indexed-document listing.</returns>
-    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
-    Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-        string indexName,
-        string tenantId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Deletes all chunks for a source document from the specified index, scoped to tenant.
-    /// Used by the knowledge-base admin "delete document" endpoint.
-    /// </summary>
-    /// <param name="indexName">Target index name (knowledge or discovery).</param>
-    /// <param name="documentId">Source document ID.</param>
-    /// <param name="tenantId">Tenant ID scoping the filter (ADR-014).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Number of chunks deleted (zero when no chunks match).</returns>
-    /// <exception cref="System.ArgumentException">Thrown when <paramref name="indexName"/> is not a known index.</exception>
-    Task<int> DeleteIndexedDocumentAsync(
-        string indexName,
-        string documentId,
         string tenantId,
         CancellationToken cancellationToken = default);
 }
@@ -229,28 +251,6 @@ public sealed record KnowledgeIndexHealth(
     DateTimeOffset LastUpdated,
     string KnowledgeIndexName,
     string DiscoveryIndexName);
-
-/// <summary>
-/// Paged list of indexed-document summaries returned by
-/// <see cref="IRagService.GetIndexedDocumentsAsync"/>.
-/// </summary>
-public sealed record IndexedDocumentsPage(
-    string IndexName,
-    IReadOnlyList<IndexedDocumentSummary> Documents,
-    int Page,
-    int PageSize,
-    long TotalCount);
-
-/// <summary>
-/// Summary of a single indexed document chunk; mirrors the previous
-/// <c>KnowledgeDocumentSummary</c> verbatim.
-/// </summary>
-public sealed record IndexedDocumentSummary(
-    string ChunkId,
-    string? DocumentId,
-    string FileName,
-    DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
 
 /// <summary>
 /// Options for RAG search operations.

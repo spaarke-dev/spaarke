@@ -5,67 +5,68 @@
 
 ---
 
-## ADR-001: Minimal API + BackgroundService (BFF runtime); Functions permitted for out-of-band integration
+## ADR-001 + ADR-052: Minimal API BFF runtime; background-work placement per workload
 
-**Constraint**: BFF endpoints in Minimal API. BFF-coupled async in BackgroundService + Service Bus. Azure Functions are PERMITTED for out-of-band integration work (Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction). Durable Functions are NOT permitted — use Service Bus + state machine.
+**Constraint**: BFF endpoints in Minimal API; no Azure Functions or Durable Task packages inside `Sprk.Bff.Api`, and no Function-attributed methods (ADR-001). Where background, scheduled and event-driven work runs — the BFF, Azure Functions or Container Apps Jobs — is decided per workload under ADR-052 and stated in the Placement Justification. Inside the BFF: queue → `IJobHandler` (ADR-004); schedule → `IScheduledJob` (ADR-036). No new hand-rolled timer `BackgroundService`.
 
 ### Check For (Violations)
 
 ```bash
-# DurableTask is always a violation
-grep -r "Microsoft.Azure.WebJobs.Extensions.DurableTask\|DurableTask\.Core" --include="*.csproj"
+# Functions / Durable Task packages inside the BFF
+grep -n "Microsoft.Azure.Functions\|Microsoft.Azure.WebJobs\|DurableTask" src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
 
-# [HttpTrigger] on BFF endpoints (BFF endpoints belong in Minimal API)
-grep -r "\[HttpTrigger\]" --include="*.cs"
+# Function attributes inside Sprk.Bff.Api (isolated worker uses [Function]; in-process used [FunctionName])
+grep -rn "\[Function(\|\[FunctionName\|\[TimerTrigger\|\[QueueTrigger\|\[ServiceBusTrigger\|\[HttpTrigger" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 
-# Azure Functions attributes inside Sprk.Bff.Api (BFF should never host Functions)
-grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[QueueTrigger\]\|\[ServiceBusTrigger\]\|\[HttpTrigger\]" src/server/api/Sprk.Bff.Api/ --include="*.cs"
+# A NEW hand-rolled timer BackgroundService (ADR-052 §1) — compare hits with the ArchTest ratchet allowlist
+grep -rln "PeriodicTimer\|Task.Delay(" src/server/api/Sprk.Bff.Api/ --include="*.cs"
 ```
 
-### Check For (Acceptable — verify intent)
+### Check For (Functions projects — verify ADR-052 §5–§6)
 
 ```bash
-# Azure Functions outside the BFF project (could be legitimate out-of-band integration — review)
-grep -r "\[FunctionName\]\|\[TimerTrigger\]\|\[ServiceBusTrigger\]" --include="*.cs" | grep -v "src/server/api/Sprk.Bff.Api/"
+grep -rln "Microsoft.Azure.Functions.Worker" --include="*.csproj" .
 ```
 
-For each Function found outside the BFF:
-- ✅ Confirm it's out-of-band integration work (sync, indexer, webhook receiver, extraction pipeline)
-- ✅ Confirm it's Bicep-deployable with the BFF and shares App Insights correlation
-- ❌ Reject if it duplicates BFF auth, correlation, or ProblemDetails infrastructure
-- ❌ Reject if it's hosting endpoints that belong in the BFF
+For each Functions project:
+- ✅ Lives under `src/server/functions/<Name>/`; references shared libraries only — never `Sprk.Bff.Api`
+- ✅ The Placement Justification cites ADR-052 §3 signals and §4 costs; owner approval obtained for the first Function per tenancy model
+- ✅ Authenticates app-only as the stamp's managed identity — no MSAL confidential client, no managed-identity assertion, no OBO
+- ✅ Flex Consumption, Bicep in the stamp's provisioning, Key Vault references, identity-based host storage
+- ❌ Reject if it hosts user-facing endpoints or duplicates BFF auth, correlation or ProblemDetails infrastructure
 
 ### Fix
 
-- **Functions hosting BFF endpoints** → move to Minimal API endpoints in `Sprk.Bff.Api`
-- **Durable Functions orchestrations** → State machine with Service Bus
-- **Functions duplicating BFF cross-cutting concerns** → consolidate into BFF, share correlation/auth/ProblemDetails infrastructure
+- **Functions or Durable Task inside the BFF** → move the work to its own host (ADR-052), or to the BFF's in-process mechanism (ADR-004 / ADR-036)
+- **Functions hosting BFF endpoints** → Minimal API endpoints in `Sprk.Bff.Api`
+- **Multi-step orchestration** → ADR-052 §7 (Durable Task in its own host, or a hand-rolled state machine with a written reason)
 
 ---
 
-## ADR-002: Thin Dataverse Plugins
+## ADR-002: No Dataverse Plugins + Server-Side Write Path (reviewed 2026-09-25)
 
-**Constraint**: Plugins must be <200 LoC, <50ms p95. No HTTP calls, no orchestration.
+**Constraint**: Spaarke ships **no plugins** (C#, plugin-backed Custom API, low-code). Record invariants (defaults, stamps, isolation, derived fields) have **one BFF server-side owner** (WP-1); client code may preview but never solely enforce (WP-2); tables with registered invariants are written via BFF (WP-3); security fails closed (WP-6).
 
 ### Check For (Violations)
 
 ```bash
-# HTTP calls in plugins
-grep -r "HttpClient\|WebRequest\|GraphServiceClient" src/dataverse/ --include="*.cs"
+# Any plugin code or plugin project (also enforced by tests/Spaarke.ArchTests/ADR002_PluginTests.cs)
+grep -rEn ":\s*IPlugin\b|IPluginExecutionContext|CodeActivity" src/ --include="*.cs"
+grep -rln "Microsoft.CrmSdk.CoreAssemblies\|ILRepack\|ILMerge" src/
 
-# Plugin classes in wrong location
-find src/api -name "*Plugin.cs"
+# WP-2: invariant applied only client-side then written via Xrm.WebApi (review each hit —
+# is there a server-side owner in the invariant registry?)
+grep -rn "applyFieldMappings\|applyResolverFields\|deriveCoreAncestorStamps" src/client src/solutions --include="*.ts" --include="*.tsx"
 
-# Long operations (look for async patterns that shouldn't be there)
-grep -r "await\|Task<\|async " src/dataverse/ --include="*Plugin.cs"
+# WP-6: security flag read that treats NULL as "not secure" (fail-open)
+grep -rn "sprk_issecure == true" src/server
 ```
 
 ### Fix
 
-Move orchestration to BFF API or workers. Plugins should only:
-- Validate input
-- Transform/project data
-- Dispatch messages to Service Bus
+- Plugin code → remove; implement in the BFF write path. If genuinely insufficient, escalate via root CLAUDE.md §6.5 against the ADR-002 reopen criteria.
+- Client-only invariant → add/extend the server owner (see `docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md` registry), route the create/update through the BFF; client keeps preview only.
+- Non-product writes → idempotent, fill-only async fix-up and/or reconciliation (WP-5).
 
 ---
 
@@ -494,14 +495,14 @@ For comprehensive check, run all patterns:
 
 Write-Host "=== ADR Quick Check ==="
 
-Write-Host "`n--- ADR-001: Functions hosting BFF endpoints (violation) ---"
-Get-ChildItem -Recurse -Path src/server/api/Sprk.Bff.Api -Include *.cs | Select-String -Pattern "\[FunctionName\]|\[HttpTrigger\]|\[ServiceBusTrigger\]" | Select-Object -First 200
+Write-Host "`n--- ADR-001: Function attributes inside the BFF (violation) ---"
+Get-ChildItem -Recurse -Path src/server/api/Sprk.Bff.Api -Include *.cs | Select-String -Pattern "\[Function\(|\[FunctionName\]|\[HttpTrigger\]|\[ServiceBusTrigger\]|\[TimerTrigger\]" | Select-Object -First 200
 
-Write-Host "`n--- ADR-001: Durable Functions (always violation) ---"
-Get-ChildItem -Recurse -Include *.csproj | Select-String -Pattern "Microsoft.Azure.WebJobs.Extensions.DurableTask|DurableTask.Core" | Select-Object -First 200
+Write-Host "`n--- ADR-001: Functions / Durable Task packages inside the BFF (violation) ---"
+Select-String -Path src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj -Pattern "Microsoft.Azure.Functions|Microsoft.Azure.WebJobs|DurableTask"
 
-Write-Host "`n--- ADR-001: Functions outside BFF (review — likely out-of-band integration, verify) ---"
-Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "\[FunctionName\]" | Where-Object { $_.Path -notmatch "Sprk\.Bff\.Api" } | Select-Object -First 200
+Write-Host "`n--- ADR-052: Functions projects (review location, references, identity) ---"
+Get-ChildItem -Recurse -Include *.csproj | Select-String -Pattern "Microsoft.Azure.Functions.Worker" | Select-Object -First 200
 
 Write-Host "`n--- ADR-007: Graph Leakage (broad scan) ---"
 Get-ChildItem -Recurse -Include *.cs | Select-String -Pattern "using Microsoft.Graph" | Where-Object { $_.Path -notmatch "\\Infrastructure\\" -and $_.Path -notmatch "SpeFileStore" } | Select-Object -First 200

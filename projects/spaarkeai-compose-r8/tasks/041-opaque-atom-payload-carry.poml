@@ -4,7 +4,7 @@
     <title>FR-A05/A06 — Promote opaque atoms into the write model with verbatim XML payload; table + atom identity</title>
     <phase>4 Track A — Faithful Save</phase>
     <gate>blocked-on-031</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends the write content model and the ProseMirror node contract; a payload-carry error corrupts documents. PROVISIONAL — amendable by task 031.</rigor-reason>
     <model-tier>opus</model-tier>

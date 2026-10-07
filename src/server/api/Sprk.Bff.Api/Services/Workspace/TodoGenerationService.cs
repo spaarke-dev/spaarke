@@ -1,8 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.PowerPlatform.Dataverse.Client;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -18,10 +19,14 @@ public sealed class TodoGenerationOptions
 {
     public const string SectionName = "TodoGeneration";
 
-    /// <summary>Interval between successive runs in hours. Default: 24.</summary>
+    /// <summary>
+    /// Interval between successive runs in hours. Default: 24. Since task 152 (ADR-052 §1 migration to
+    /// <see cref="IScheduledJob"/>) this and <see cref="StartHourUtc"/> compile to the job's cron schedule at startup
+    /// (<see cref="TodoGenerationService.BuildCronSchedule"/>); a change needs a restart.
+    /// </summary>
     public int IntervalHours { get; set; } = 24;
 
-    /// <summary>UTC hour at which the first run fires (0-23). Default: 2 (2 AM UTC).</summary>
+    /// <summary>UTC hour at which the first run of the day fires (0-23). Default: 2 (2 AM UTC).</summary>
     public int StartHourUtc { get; set; } = 2;
 
     /// <summary>Number of days before a deadline that triggers a to-do. Default: 14.</summary>
@@ -78,6 +83,9 @@ internal sealed class TaskScanRecord
 {
     public Guid Id { get; init; }
     public string Subject { get; init; } = string.Empty;
+
+    /// <summary>Task 152: the source event's assigned contact — Rule 5's triggering person.</summary>
+    public Guid? AssignedToContactId { get; init; }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -85,14 +93,24 @@ internal sealed class TaskScanRecord
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Periodic <see cref="BackgroundService"/> that auto-generates <c>sprk_todo</c>
+/// Scheduled job (<see cref="IScheduledJob"/>, ADR-036) that auto-generates <c>sprk_todo</c>
 /// records for actionable conditions.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Runs on a 24-hour interval (configurable via <c>TodoGeneration:IntervalHours</c>).
-/// The first tick is delayed until the configured start hour (default 2 AM UTC) to avoid
-/// hammering Dataverse at application startup.
+/// Runs daily at the configured start hour (default 02:00 UTC; <c>TodoGeneration:StartHourUtc</c> /
+/// <c>TodoGeneration:IntervalHours</c> compile to the cron schedule). <b>Migrated from a hand-rolled
+/// <c>PeriodicTimer</c> <c>BackgroundService</c> by unified-access-control-r2 task 152</b> — ADR-052 §1 requires an
+/// existing timer service to migrate when a PR changes its behaviour, and task 152 does (Assigned To). Under
+/// <c>ScheduledJobHost</c> the run is dispatched ONCE per schedule across instances (ADR-036 A1 distributed lease):
+/// the old timer ran on every BFF instance, so a scaled-out BFF raced itself past the same-name dedupe.
+/// </para>
+/// <para>
+/// <b>Who each to-do is FOR</b> (task 152, #1044 split agreed with word-add-in-r1): Created By is the BFF
+/// application user for every to-do this job creates, so the job fills <c>sprk_assignedto</c> through
+/// <see cref="AssignedToDefaults"/> — the triggering person (Rule 5: the source event's assigned contact), else the
+/// regarding parent's responsible internal contact, else blank with <c>todo_unassigned</c>. Never a team, never an
+/// email match.
 /// </para>
 ///
 /// <para><strong>Rules (5 total)</strong></para>
@@ -115,14 +133,19 @@ internal sealed class TaskScanRecord
 /// If a match is found the item is skipped.</para>
 ///
 /// <para><strong>Error handling</strong>: Each candidate is wrapped in its own try/catch.
-/// A single failure never blocks the remaining items.</para>
+/// A single failure never blocks the remaining items. Cancellation of the run is not a failure: it propagates out of
+/// every rule (task 097 round 11) instead of being logged once per remaining candidate.</para>
 ///
-/// <para>Per ADR-001: BackgroundService only — no Azure Functions.</para>
-/// <para>Per ADR-010: Registered via <see cref="Infrastructure.DI.WorkspaceModule"/> extension method.</para>
+/// <para>Placement (ADR-052): stays in the BFF — B2 (uses BFF domain code: TodoRegardingBuilder, CoreAncestorResolver),
+/// B3 (low volume, once a day, same identity and release cadence). Registered with <c>AddScheduledJob</c> in
+/// <see cref="Infrastructure.DI.WorkspaceModule"/>.</para>
 /// <para>Per ADR-024: All regarding fields applied via <see cref="TodoRegardingBuilder"/>.</para>
 /// </remarks>
-public sealed class TodoGenerationService : BackgroundService
+public sealed class TodoGenerationService : IScheduledJob
 {
+    /// <summary>The scheduled job id (ADR-036).</summary>
+    public const string JobIdConstant = "todo-generation";
+
     // ──────────────────────────────────────────────────────────────────────────
     // Dataverse field / value constants for sprk_todo
     // ──────────────────────────────────────────────────────────────────────────
@@ -148,10 +171,22 @@ public sealed class TodoGenerationService : BackgroundService
     /// <summary>Owner attribute (User/Team) on sprk_todo.</summary>
     private const string FieldOwnerId = "ownerid";
 
-    /// <summary>Status reason values for sprk_todo (see entity-schema.md).</summary>
-    private const int StatusCodeOpen = 1;        // Active
-    private const int StatusCodeCompleted = 2;   // Inactive
-    private const int StatusCodeDismissed = 3;   // Inactive
+    /// <summary>
+    /// Status reason values for sprk_todo — verified against the LIVE option set (spaarkedev1, 2026-10-05, task 097)
+    /// and src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md: Open 1 / In Progress 659490001 (Active),
+    /// Completed 2 / Dismissed 659490002 (Inactive). Dismissed was 3, a value that does not exist.
+    /// </summary>
+    internal const int StatusCodeOpen = 1;                 // Active
+    internal const int StatusCodeInProgress = 659490001;   // Active
+    internal const int StatusCodeCompleted = 2;            // Inactive
+    internal const int StatusCodeDismissed = 659490002;    // Inactive
+
+    /// <summary>
+    /// Event statuses Rules 1 and 3 never generate a To Do for, excluded IN the query (review F5): everything that is not
+    /// open work — Completed, Closed, Cancelled, Transferred, No Further Action (review L2). Defined by the one
+    /// predicate <see cref="EventStatusCode.IsOpenWork"/>, so the owner's decision on "open work" changes one place.
+    /// </summary>
+    internal static readonly IReadOnlyCollection<int> ExcludedFromGeneration = EventStatusCode.NotOpenWork;
 
     /// <summary>statecode values for sprk_todo.</summary>
     private const int StateCodeActive = 0;
@@ -170,8 +205,7 @@ public sealed class TodoGenerationService : BackgroundService
     // connection fails (transient auth, Key Vault cold start, etc.) it throws,
     // which crashes the host with HTTP 500.30 because BackgroundService
     // resolution happens during IHost.StartAsync().
-    // INTENTIONAL: Keeps IDataverseService — casts to DataverseServiceClientImpl for FetchXML queries
-    // and uses CreateAsync across multiple domain groups.
+    // INTENTIONAL: Keeps IDataverseService — QueryExpression reads + CreateAsync across multiple domain groups.
     private IDataverseService? _dataverse;
 
     // Lazily resolved alongside _dataverse so the regarding builder
@@ -185,6 +219,11 @@ public sealed class TodoGenerationService : BackgroundService
     // QueryEventsAsync stub, so routing event queries through _dataverse produced
     // ZERO To Dos (smart-todo-r5 INBOUND fix, 2026-08-17).
     private IEventDataverseService? _events;
+
+    // Lazily resolved alongside _dataverse (unified-access-control-r2 task 146): every generated to-do is owned by
+    // the team of the record it regards (or, for a standalone to-do, of the record its content is about) — the named
+    // Secure team when that record is secure. Never app-owned: with no record at all, the to-do is not created.
+    private Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver? _ownership;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
@@ -201,76 +240,96 @@ public sealed class TodoGenerationService : BackgroundService
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // BackgroundService loop
+    // IScheduledJob (ADR-036) — migrated from the PeriodicTimer loop by task 152 (ADR-052 §1)
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <inheritdoc/>
-    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    public string JobId => JobIdConstant;
+
+    /// <inheritdoc/>
+    public string DisplayName => "To Do Generation";
+
+    /// <inheritdoc/>
+    public string Description =>
+        "Daily scan that creates sprk_todo records for overdue events, budget alerts, deadlines, pending invoices and "
+        + "assigned tasks, each assigned to the person it is for (unified-access-control-r2 task 152).";
+
+    /// <summary>
+    /// The cron schedule <see cref="TodoGenerationOptions"/> compiles to: daily at <c>StartHourUtc</c> when the interval
+    /// is 24 hours or more, otherwise every <c>IntervalHours</c> hours anchored on <c>StartHourUtc</c>. Out-of-range
+    /// values are clamped rather than failing startup. Cron cannot express a period longer than a day or one that does
+    /// not divide 24: an interval above 24 runs daily (the old timer ran every N hours), and a non-divisor leaves a
+    /// shorter gap across midnight (e.g. 5 h from 02:00 fires 02, 07, 12, 17, 22).
+    /// </summary>
+    public static string BuildCronSchedule(TodoGenerationOptions options)
     {
-        _logger.LogInformation(
-            "TodoGenerationService starting. Interval={IntervalHours}h, StartHour={StartHour}h UTC",
-            _options.IntervalHours,
-            _options.StartHourUtc);
+        ArgumentNullException.ThrowIfNull(options);
+        var hour = Math.Clamp(options.StartHourUtc, 0, 23);
+        var interval = options.IntervalHours;
+        return interval is >= 24 or <= 0
+            ? $"0 {hour} * * *"
+            : $"0 {hour % interval}/{interval} * * *";
+    }
 
-        // Delay the first tick until the next configured start-hour window so we
-        // don't blast Dataverse at application startup.
-        var initialDelay = CalculateInitialDelay();
-        if (initialDelay > TimeSpan.Zero)
+    /// <inheritdoc/>
+    public async Task<JobRunResult> ExecuteAsync(JobRunContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        var started = DateTimeOffset.UtcNow;
+
+        // Lazily resolve the Dataverse dependencies on the first run rather than at host startup (avoids a 500.30 when
+        // the Dataverse connection is unavailable during a cold start — the reason the old timer service did the same).
+        if (!TryEnsureDependencies())
         {
-            _logger.LogInformation(
-                "TodoGenerationService waiting {DelayMinutes} minutes before first run",
-                (int)initialDelay.TotalMinutes);
-
-            try
-            {
-                await Task.Delay(initialDelay, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                return;
-            }
+            return new JobRunResult(
+                Success: false,
+                ErrorMessage: "TodoGenerationService could not resolve its Dataverse dependencies.",
+                ProcessedItems: 0,
+                Duration: DateTimeOffset.UtcNow - started);
         }
 
-        // Lazily resolve IDataverseService here (after the initial delay) rather than
-        // in the constructor to avoid forcing a Dataverse connection during host startup.
+        var (created, skipped, failed) = await RunGenerationPassAsync(cancellationToken).ConfigureAwait(false);
+
+        return new JobRunResult(
+            Success: true,
+            ErrorMessage: null,
+            ProcessedItems: created,
+            Duration: DateTimeOffset.UtcNow - started,
+            ResultJson: $"{{\"created\":{created},\"skipped\":{skipped},\"failed\":{failed}}}");
+    }
+
+    private bool TryEnsureDependencies()
+    {
+        if (_dataverse is not null && _events is not null && _regardingBuilder is not null && _ownership is not null)
+        {
+            return true;
+        }
+
         try
         {
-            _dataverse = _serviceProvider.GetRequiredService<IDataverseService>();
-            _events = _serviceProvider.GetRequiredService<IEventDataverseService>();
-            var commService = _serviceProvider.GetRequiredService<ICommunicationDataverseService>();
-            var builderLogger = _serviceProvider.GetRequiredService<ILogger<TodoRegardingBuilder>>();
-            _regardingBuilder = new TodoRegardingBuilder(commService, builderLogger);
+            _dataverse ??= _serviceProvider.GetRequiredService<IDataverseService>();
+            _events ??= _serviceProvider.GetRequiredService<IEventDataverseService>();
+            if (_regardingBuilder is null)
+            {
+                var commService = _serviceProvider.GetRequiredService<ICommunicationDataverseService>();
+                var builderLogger = _serviceProvider.GetRequiredService<ILogger<TodoRegardingBuilder>>();
+                // FR-26 (task 052): the builder stamps the regarding target's core-record ancestor onto every
+                // to-do it writes, so generated to-dos inherit access the same way PCF-authored ones do.
+                var coreAncestors = _serviceProvider.GetRequiredService<CoreAncestorResolver>();
+                _regardingBuilder = new TodoRegardingBuilder(commService, coreAncestors, builderLogger);
+            }
+
+            // Task 146: every generated to-do's owner comes from the one resolver (CreateTodoAsync).
+            _ownership ??= _serviceProvider
+                .GetRequiredService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "TodoGenerationService failed to resolve Dataverse dependencies. " +
-                "Service will not run. This does not affect app startup.");
-            return;
+                "TodoGenerationService failed to resolve Dataverse dependencies; this run is skipped.");
+            return false;
         }
-
-        using var timer = new PeriodicTimer(TimeSpan.FromHours(_options.IntervalHours));
-
-        // Run immediately for the first tick, then on the periodic interval.
-        do
-        {
-            try
-            {
-                await RunGenerationPassAsync(stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                // Log but do not crash the service; the timer will fire again next interval.
-                _logger.LogError(ex, "Unhandled exception in TodoGenerationService run pass");
-            }
-        }
-        while (await timer.WaitForNextTickAsync(stoppingToken));
-
-        _logger.LogInformation("TodoGenerationService stopped");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -280,12 +339,12 @@ public sealed class TodoGenerationService : BackgroundService
     /// <summary>
     /// Executes a single generation pass: scans all 5 rules and creates missing to-dos.
     /// </summary>
-    internal async Task RunGenerationPassAsync(CancellationToken ct)
+    internal async Task<(int Created, int Skipped, int Failed)> RunGenerationPassAsync(CancellationToken ct)
     {
         if (_dataverse is null)
         {
             _logger.LogWarning("TodoGenerationService: IDataverseService not available, skipping pass");
-            return;
+            return (0, 0, 0);
         }
 
         _logger.LogInformation("TodoGenerationService: starting generation pass");
@@ -335,6 +394,8 @@ public sealed class TodoGenerationService : BackgroundService
             totalCreated,
             totalSkipped,
             totalFailed);
+
+        return (totalCreated, totalSkipped, totalFailed);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -361,15 +422,11 @@ public sealed class TodoGenerationService : BackgroundService
         {
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
-            var (items, _) = await _events!.QueryEventsAsync(
-                dueDateTo: today.AddDays(-1), // duedate < today
-                top: 100,
-                ct: ct);
-
-            // Exclude completed/cancelled events.
-            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Task 097 review F5: the not-open-work statuses are excluded IN the query (live values). Round 11: every page
+            // is read (ReadAllPagesAsync), not only the first 100. The due-date bound is task 098's and is unchanged.
+            overdueEvents = await ReadAllPagesAsync("Rule 1", EventPages(dueDateFrom: null, dueDateTo: today.AddDays(-1)), ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "TodoGeneration Rule 1: failed to query overdue events");
             return (0, 0, 1);
@@ -413,7 +470,7 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, evt.Id);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(
                     ex,
@@ -457,7 +514,7 @@ public sealed class TodoGenerationService : BackgroundService
         {
             matters = await QueryMattersOverBudgetAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "TodoGeneration Rule 2: failed to query matters over budget");
             return (0, 0, 1);
@@ -488,7 +545,7 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, matter.Id, matter.UtilizationPercent);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(
                     ex,
@@ -528,16 +585,10 @@ public sealed class TodoGenerationService : BackgroundService
         {
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
-            var (items, _) = await _events!.QueryEventsAsync(
-                dueDateFrom: today,
-                dueDateTo: windowEnd,
-                top: 100,
-                ct: ct);
-
-            // Exclude completed/cancelled events.
-            upcomingEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Task 097 review F5: the not-open-work statuses are excluded in the query (live values). Round 11: every page.
+            upcomingEvents = await ReadAllPagesAsync("Rule 3", EventPages(dueDateFrom: today, dueDateTo: windowEnd), ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "TodoGeneration Rule 3: failed to query upcoming events");
             return (0, 0, 1);
@@ -587,7 +638,7 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, evt.Id);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(
                     ex,
@@ -629,7 +680,7 @@ public sealed class TodoGenerationService : BackgroundService
         {
             invoices = await QueryPendingInvoicesAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "TodoGeneration Rule 4: failed to query pending invoices");
             return (0, 0, 1);
@@ -660,7 +711,7 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, invoice.Id);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(
                     ex,
@@ -695,7 +746,7 @@ public sealed class TodoGenerationService : BackgroundService
         {
             tasks = await QueryAssignedTasksAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
             _logger.LogError(ex, "TodoGeneration Rule 5: failed to query assigned tasks");
             return (0, 0, 1);
@@ -714,9 +765,17 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
-                // Standalone — no regarding parent
+                // Standalone — no regarding parent. Its content (the title) IS the source event's, so the event is
+                // the OWNERSHIP source (task 146): a to-do naming a secure event is owned by the named Secure team.
+                // It is not written as a regarding — the to-do stays standalone, as before. Task 152: the source
+                // event also names the person — its assigned contact (triggering person), else its responsible
+                // internal contact.
                 await CreateTodoAsync(
                     name: todoTitle,
+                    ownershipSource: new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_event", task.Id),
+                    triggeringContactId: task.AssignedToContactId,
+                    assigneeParentEntity: "sprk_event",
+                    assigneeParentId: task.Id,
                     ct: ct);
 
                 _logger.LogInformation(
@@ -724,7 +783,7 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, task.Id);
                 created++;
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(
                     ex,
@@ -742,17 +801,14 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns <c>true</c> if a <c>sprk_todo</c> with <paramref name="title"/>
-    /// already exists and has not been dismissed.
+    /// Returns <c>true</c> if a <c>sprk_todo</c> with <paramref name="title"/> already exists in ANY status —
+    /// Open, In Progress, Completed or Dismissed.
     /// </summary>
     /// <remarks>
-    /// A to-do is considered a duplicate when ALL of the following match:
-    /// <list type="bullet">
-    ///   <item><c>sprk_name</c> = <paramref name="title"/> (exact match)</item>
-    ///   <item><c>statuscode</c> != Dismissed (3)</item>
-    /// </list>
-    /// Dismissed to-dos are intentionally excluded — users who dismissed them
-    /// must not see them re-appear on the next run.
+    /// A to-do is considered a duplicate when <c>sprk_name</c> = <paramref name="title"/> (exact match), whatever its
+    /// status — there is deliberately NO status condition. A DISMISSED To Do (live 659490002) therefore counts as
+    /// existing and is never re-created: the user who dismissed it must not see it re-appear on the next run (task 097
+    /// coordinator decision; the former "!= Dismissed (3)" filter was a no-op, which is what produced this behaviour).
     /// </remarks>
     internal async Task<bool> TodoExistsAsync(string title, CancellationToken ct)
     {
@@ -763,8 +819,9 @@ public sealed class TodoGenerationService : BackgroundService
             NoLock = true
         };
 
+        // Task 097 review F6: NO status condition — a same-titled To Do in ANY status (Open, In Progress, Completed,
+        // Dismissed, or any status added later) counts as existing, so a dismissed To Do is never regenerated.
         query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, title);
-        query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, StatusCodeDismissed);
 
         var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
         return results.Entities.Count > 0;
@@ -788,9 +845,28 @@ public sealed class TodoGenerationService : BackgroundService
     /// <param name="dueDate">Optional due date (<c>sprk_duedate</c>).</param>
     /// <param name="priorityScore">Optional priority score 0-100 (<c>sprk_priorityscore</c>).</param>
     /// <param name="effortScore">Optional effort score 0-100 (<c>sprk_effortscore</c>).</param>
-    /// <param name="ownerId">Optional owner (user or team) — written to <c>ownerid</c>.</param>
-    /// <param name="ownerEntityName">Owner entity logical name (e.g. <c>systemuser</c> or <c>team</c>). Required when <paramref name="ownerId"/> is set.</param>
+    /// <param name="ownershipSource">
+    /// For a STANDALONE to-do (no regarding), the record its content is about — the ownership parent (task 146). Not
+    /// written to the row. Ignored when a regarding is supplied (the regarding is the parent).
+    /// </param>
+    /// <param name="assignedToContactId">A SUPPLIED assignee (contact). Never overwritten.</param>
+    /// <param name="triggeringContactId">Task 152: the triggering person's contact, when the rule has one.</param>
+    /// <param name="assigneeParentEntity">
+    /// Task 152: the record whose responsible internal contact names the person when there is no triggering person.
+    /// Defaults to the regarding parent.
+    /// </param>
+    /// <param name="assigneeParentId">Id for <paramref name="assigneeParentEntity"/>.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// <para><b>Owner (unified-access-control-r2 task 146).</b> The to-do is owned by the team the ONE resolver names
+    /// over every parent on the row — the regarding and its FR-26 core-ancestor stamps — or the
+    /// <paramref name="ownershipSource"/>: the named Secure team when any is secure, else the primary parent's
+    /// business-unit team. This is a background writer with NO acting user, so a to-do with neither a parent nor a
+    /// source is NOT created: <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException"/> is thrown, and
+    /// each rule's own catch logs it with the reason and counts it, as for any failed row — the pass continues.</para>
+    /// <para>The former <c>ownerId</c>/<c>ownerEntityName</c> parameters were removed: no caller passed them
+    /// (word-add-in-r1 note 080 §6.5 item 3), and a second way to set the owner is a way around the resolver.</para>
+    /// </remarks>
     internal async Task<Guid> CreateTodoAsync(
         string name,
         string? regardingEntityName = null,
@@ -800,8 +876,11 @@ public sealed class TodoGenerationService : BackgroundService
         DateTime? dueDate = null,
         int? priorityScore = null,
         int? effortScore = null,
-        Guid? ownerId = null,
-        string? ownerEntityName = null,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent? ownershipSource = null,
+        Guid? assignedToContactId = null,
+        Guid? triggeringContactId = null,
+        string? assigneeParentEntity = null,
+        Guid? assigneeParentId = null,
         CancellationToken ct = default)
     {
         var entity = new Entity(EntityTodo)
@@ -823,11 +902,12 @@ public sealed class TodoGenerationService : BackgroundService
         if (effortScore.HasValue)
             entity[FieldTodoEffortScore] = effortScore.Value;
 
-        if (ownerId.HasValue && !string.IsNullOrEmpty(ownerEntityName))
-            entity[FieldOwnerId] = new EntityReference(ownerEntityName, ownerId.Value);
+        if (assignedToContactId is { } suppliedAssignee && suppliedAssignee != Guid.Empty)
+            entity[AssignedToDefaults.AssignedToAttribute] = new EntityReference("contact", suppliedAssignee);
 
         // ADR-024: regarding fields applied atomically by the builder when present.
-        if (!string.IsNullOrEmpty(regardingEntityName) && regardingId.HasValue && regardingId.Value != Guid.Empty)
+        var hasRegarding = !string.IsNullOrEmpty(regardingEntityName) && regardingId.HasValue && regardingId.Value != Guid.Empty;
+        if (hasRegarding)
         {
             if (_regardingBuilder is null)
             {
@@ -838,11 +918,48 @@ public sealed class TodoGenerationService : BackgroundService
 
             await _regardingBuilder.ApplyResolverFieldsAsync(
                 entity,
-                regardingEntityName,
-                regardingId.Value,
+                regardingEntityName!,
+                regardingId!.Value,
                 regardingDisplayName ?? string.Empty,
                 ct);
         }
+
+        // Task 146: owner from every parent now on the row (regarding + FR-26 stamps), or the standalone to-do's
+        // content source. Resolved AFTER the regarding fields so the stamps count. No acting user on this path.
+        if (_ownership is null)
+        {
+            throw new InvalidOperationException(
+                "IRecordOwnershipResolver not initialized. Service was called before ExecuteAsync completed lazy "
+                + "resolution of Dataverse dependencies; refusing to create an app-owned to-do (task 146).");
+        }
+
+        var primary = hasRegarding
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingEntityName!, regardingId!.Value)
+            : ownershipSource;
+        var ownerContext = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(entity, primary);
+        if (!hasRegarding && ownershipSource is { IsSpecified: true } source)
+        {
+            ownerContext = ownerContext with { Parents = ownerContext.Parents.Append(source).ToArray() };
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(ownerContext, ct);
+        if (!owner.IsOwned)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(EntityTodo, owner);
+        }
+
+        entity[FieldOwnerId] = new EntityReference("team", owner.OwningTeamId!.Value);
+
+        // Task 152 (#1044): name the person this to-do is FOR — after the regarding + core-ancestor stamp, so a parent
+        // without responsible columns (an invoice) defers to its stamped core record.
+        await AssignedToDefaults.ApplyAsync(
+            _dataverse!,
+            entity,
+            triggeringContactId,
+            assigneeParentEntity ?? regardingEntityName,
+            assigneeParentId ?? regardingId,
+            _logger,
+            ct).ConfigureAwait(false);
 
         return await _dataverse!.CreateAsync(entity, ct);
     }
@@ -862,28 +979,32 @@ public sealed class TodoGenerationService : BackgroundService
     private async Task<IEnumerable<MatterScanRecord>> QueryMattersOverBudgetAsync(CancellationToken ct)
     {
         // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
-        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
-        // pattern already used in this class after the same guard).
-        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here. Task 152: queried through the
+        // IGenericEntityService surface rather than an unwrapped ServiceClient — same query, and Rules 2/4/5 become
+        // testable at the module boundary (their Assigned-To precedence is pinned by TodoGenerationServiceTests).
 
-        var query = new QueryExpression("sprk_matter")
-        {
-            ColumnSet = new ColumnSet("sprk_matterid", "sprk_name", "sprk_utilizationpercent"),
-            TopCount = 100
-        };
-
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-        query.Criteria.AddCondition(
-            "sprk_utilizationpercent", ConditionOperator.GreaterThan, _options.BudgetAlertThresholdPercent);
-
-        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
-
-        return results.Entities.Select(e => new MatterScanRecord
-        {
-            Id = e.Id,
-            Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty,
-            UtilizationPercent = e.GetAttributeValue<decimal?>("sprk_utilizationpercent") ?? 0m
-        });
+        // Round 11: paged (ReadAllPagesAsync), not TopCount = 100. Most over budget first, so a capped run handles the
+        // worst; the id ends the order so pages neither overlap nor skip.
+        return await ReadAllPagesAsync("Rule 2", QueryPages(
+            () =>
+            {
+                var query = new QueryExpression("sprk_matter")
+                {
+                    ColumnSet = new ColumnSet("sprk_matterid", "sprk_name", "sprk_utilizationpercent"),
+                };
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+                query.Criteria.AddCondition(
+                    "sprk_utilizationpercent", ConditionOperator.GreaterThan, _options.BudgetAlertThresholdPercent);
+                query.AddOrder("sprk_utilizationpercent", OrderType.Descending);
+                query.AddOrder("sprk_matterid", OrderType.Ascending);
+                return query;
+            },
+            e => new MatterScanRecord
+            {
+                Id = e.Id,
+                Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty,
+                UtilizationPercent = e.GetAttributeValue<decimal?>("sprk_utilizationpercent") ?? 0m
+            }), ct);
     }
 
     /// <summary>
@@ -897,85 +1018,191 @@ public sealed class TodoGenerationService : BackgroundService
     private async Task<IEnumerable<InvoiceScanRecord>> QueryPendingInvoicesAsync(CancellationToken ct)
     {
         // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
-        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
-        // pattern already used in this class after the same guard).
-        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here. Task 152: queried through the
+        // IGenericEntityService surface rather than an unwrapped ServiceClient — same query, and Rules 2/4/5 become
+        // testable at the module boundary (their Assigned-To precedence is pinned by TodoGenerationServiceTests).
 
-        var query = new QueryExpression("sprk_invoice")
-        {
-            ColumnSet = new ColumnSet("sprk_invoiceid", "sprk_name"),
-            TopCount = 100
-        };
-
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
-        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 1); // Pending
-
-        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
-
-        return results.Entities.Select(e => new InvoiceScanRecord
-        {
-            Id = e.Id,
-            Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty
-        });
+        // Round 11: paged (ReadAllPagesAsync), not TopCount = 100. Oldest first, so a capped run handles the longest
+        // pending; the id ends the order so pages neither overlap nor skip.
+        return await ReadAllPagesAsync("Rule 4", QueryPages(
+            () =>
+            {
+                var query = new QueryExpression("sprk_invoice")
+                {
+                    ColumnSet = new ColumnSet("sprk_invoiceid", "sprk_name"),
+                };
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
+                query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 1); // Pending
+                query.AddOrder("createdon", OrderType.Ascending);
+                query.AddOrder("sprk_invoiceid", OrderType.Ascending);
+                return query;
+            },
+            e => new InvoiceScanRecord
+            {
+                Id = e.Id,
+                Name = e.GetAttributeValue<string>("sprk_name") ?? string.Empty
+            }), ct);
     }
 
     /// <summary>
-    /// Queries task-type events (active + open sprk_event records).
+    /// Queries task-type events that are open work (<see cref="EventStatusCode.IsOpenWork"/>).
     /// </summary>
     /// <remarks>
     /// Uses QueryExpression via ServiceClient.
     /// Explicit column selection per ADR-002.
     /// Note: r3 Phase 1 removed the legacy <c>sprk_todoflag</c> field from <c>sprk_event</c>,
-    /// so we no longer filter on it. All active+open events are candidates.
+    /// so we no longer filter on it. Every open-work event is a candidate.
     /// </remarks>
     private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
         // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
-        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
-        // pattern already used in this class after the same guard).
-        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here. Task 152: queried through the
+        // IGenericEntityService surface rather than an unwrapped ServiceClient — same query, and Rules 2/4/5 become
+        // testable at the module boundary (their Assigned-To precedence is pinned by TodoGenerationServiceTests).
 
-        var query = new QueryExpression("sprk_event")
-        {
-            ColumnSet = new ColumnSet("sprk_eventid", "sprk_eventname"),
-            TopCount = 100
-        };
+        // Task 097 round 10. The rule is for ASSIGNED events: sprk_assignedto — the column the To Do's "Assigned: X" person
+        // comes from (TaskScanRecord.AssignedToContactId) — must be set. Without it every open-work event qualified, and
+        // since new events default to Draft (open work, owner decision A) that was every event (spaarkedev1 2026-10-06:
+        // 69 candidates, 58 unassigned; the old Open-only query had 12 unassigned among 20).
+        return await ReadAllPagesAsync("Rule 5", QueryPages(
+            () =>
+            {
+                var query = new QueryExpression("sprk_event")
+                {
+                    ColumnSet = new ColumnSet("sprk_eventid", "sprk_eventname", AssignedToDefaults.AssignedToAttribute),
+                };
 
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
-        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 3); // Open
+                // OWNER DECISION A (task 097 round 9): the ONE "open work" predicate, EventStatusCode.IsOpenWork, selects the
+                // events — expressed exactly as Rules 1 and 3 express it (statuscode ne each NOT-open status).
+                foreach (var excluded in ExcludedFromGeneration)
+                    query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, excluded);
+                query.Criteria.AddCondition(AssignedToDefaults.AssignedToAttribute, ConditionOperator.NotNull);
 
-        var results = await serviceClient.RetrieveMultipleAsync(query, ct);
-
-        return results.Entities.Select(e => new TaskScanRecord
-        {
-            Id = e.Id,
-            Subject = e.GetAttributeValue<string>("sprk_eventname") ?? string.Empty
-        });
+                // Deterministic order — the same as Rules 1 and 3 (DataverseWebApiService.BuildEventQueryUrl): due date
+                // ascending, newest first, then the id as the final tiebreak, so pages never overlap or skip rows.
+                query.AddOrder("sprk_duedate", OrderType.Ascending);
+                query.AddOrder("createdon", OrderType.Descending);
+                query.AddOrder("sprk_eventid", OrderType.Ascending);
+                return query;
+            },
+            e => new TaskScanRecord
+            {
+                Id = e.Id,
+                Subject = e.GetAttributeValue<string>("sprk_eventname") ?? string.Empty,
+                AssignedToContactId = e.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is { } assignee
+                    && assignee.Id != Guid.Empty
+                    ? assignee.Id
+                    : null,
+            }), ct);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Helpers
+    // Paging (task 097 round 11) — the ONE pager every rule reads its candidates through
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>One page of a rule's candidates: the rows, whether more follow, and the cookie for the next page.</summary>
+    internal readonly record struct ScanPage<T>(IReadOnlyList<T> Items, bool MoreRecords, string? PagingCookie);
+
+    /// <summary>Candidates per page, for every rule.</summary>
+    internal const int ScanPageSize = 100;
+
+    /// <summary>
+    /// Pages per rule per run (<see cref="ScanPageSize"/> × this = 5000 candidates per rule). Not raised: a run handles each
+    /// candidate with at least an existence query plus a create (ownership, regarding, assignee reads), and five rules at
+    /// 5000 each already exceed what fits in the scheduler's 2-hour run budget (ScheduledJobHostOptions.MaxRunDuration).
+    /// It equals the Web API's 5000-row window, the hard bound for Rules 1 and 3.
+    /// </summary>
+    internal const int MaxScanPages = 50;
+
+    /// <summary>
+    /// Reads every page of a rule's candidates: page 1, then page N+1 with page N's returned cookie, until a page says no
+    /// more follow — or <see cref="MaxScanPages"/> is reached, which is logged once and is never silent.
+    /// </summary>
+    private async Task<IReadOnlyList<T>> ReadAllPagesAsync<T>(
+        string rule, Func<int, string?, CancellationToken, Task<ScanPage<T>>> readPage, CancellationToken ct)
+    {
+        var records = new List<T>();
+        var page = 1;
+        string? pagingCookie = null;
+        while (true)
+        {
+            var result = await readPage(page, pagingCookie, ct);
+            records.AddRange(result.Items);
+
+            if (!result.MoreRecords)
+                return records;
+
+            if (page >= MaxScanPages)
+            {
+                // Every run starts again at page 1 in the same order, so what lies past the cap is not reached by a later
+                // run either — only once enough earlier candidates leave the result set (closed, paid, under budget…).
+                _logger.LogWarning(
+                    "TodoGeneration {Rule}: read the first {Count} candidates ({Pages} pages) and stopped at the cap. "
+                    + "Candidates after them are NOT processed this run, and will not be until earlier ones leave the "
+                    + "result set (every run starts again at page 1).",
+                    rule, records.Count, page);
+                return records;
+            }
+
+            page++;
+            pagingCookie = result.PagingCookie;
+        }
+    }
+
+    /// <summary>A QueryExpression source: Dataverse paging by <see cref="PagingInfo"/>, the cookie carried forward.</summary>
+    private Func<int, string?, CancellationToken, Task<ScanPage<T>>> QueryPages<T>(
+        Func<QueryExpression> buildQuery, Func<Entity, T> map) => async (page, pagingCookie, ct) =>
+    {
+        var query = buildQuery();
+        query.PageInfo = new PagingInfo { Count = ScanPageSize, PageNumber = page, PagingCookie = pagingCookie };
+        var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
+        return new ScanPage<T>(results.Entities.Select(map).ToList(), results.MoreRecords, results.PagingCookie);
+    };
+
+    /// <summary>
+    /// Rules 1 and 3's source: the app-only sprk_event query on <see cref="IEventDataverseService"/>, which the rules must
+    /// keep — its due-date bounds are task 098's day boundary. That Web API query has no paging cookie: it pages by an
+    /// ordered window (<c>$top = skip + top</c>, the order ending on <c>sprk_eventid</c>; the Web API rejects
+    /// <c>$skip</c>), so the cookie stays null and "more" comes from the count, which Dataverse caps at 5000.
+    /// </summary>
+    private Func<int, string?, CancellationToken, Task<ScanPage<EventEntity>>> EventPages(
+        DateTime? dueDateFrom, DateTime? dueDateTo) => async (page, _, ct) =>
+    {
+        var skip = (page - 1) * ScanPageSize;
+        var (items, totalCount) = await _events!.QueryEventsAsync(
+            dueDateFrom: dueDateFrom,
+            dueDateTo: dueDateTo,
+            skip: skip,
+            top: ScanPageSize,
+            excludeStatusCodes: ExcludedFromGeneration,
+            ct: ct);
+        var more = items.Length == ScanPageSize
+            && (skip + ScanPageSize < totalCount || totalCount >= ScanPageSize * MaxScanPages);
+        return new ScanPage<EventEntity>(items, more, null);
+    };    // ──────────────────────────────────────────────────────────────────────────
+    // Test seam
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Calculates the delay until the next configured start-hour UTC.
-    /// Returns <see cref="TimeSpan.Zero"/> if the start hour has not yet passed today.
+    /// Internal test seam (task 097 round 11): injects the two Dataverse services that <c>ExecuteAsync</c> otherwise
+    /// resolves lazily (<c>TryEnsureDependencies</c>), so <see cref="RunGenerationPassAsync"/> can run against fakes
+    /// without reflection into private fields (tests/CLAUDE.md B8). The production path never calls it.
     /// </summary>
-    private TimeSpan CalculateInitialDelay()
+    internal void SetDataverseForTest(IDataverseService dataverse, IEventDataverseService events)
     {
-        var now = DateTime.UtcNow;
-        var nextRun = new DateTime(now.Year, now.Month, now.Day,
-            _options.StartHourUtc, 0, 0, DateTimeKind.Utc);
-
-        if (nextRun <= now)
-            nextRun = nextRun.AddDays(1); // Already past today's window — wait until tomorrow
-
-        return nextRun - now;
+        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        _events = events ?? throw new ArgumentNullException(nameof(events));
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-    // Test seam
-    // ──────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Internal test seam (task 146): injects the ownership resolver that <c>ExecuteAsync</c> otherwise resolves
+    /// lazily, so creation paths can run without the BackgroundService loop — the same shape as
+    /// <see cref="SetRegardingBuilderForTest"/>.
+    /// </summary>
+    internal void SetOwnershipResolverForTest(Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership)
+    {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+    }
 
     /// <summary>
     /// Internal test seam: allows unit tests to inject a pre-built

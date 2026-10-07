@@ -92,14 +92,21 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             "Starting playbook execution - RunId: {RunId}, PlaybookId: {PlaybookId}, Documents: {DocumentCount}",
             runId, request.PlaybookId, request.DocumentIds.Length);
 
-        // Create run context
+        // Create run context. StartedByOid (task 164, sweep #78): the HTTP caller's Entra oid, recorded so the
+        // agent status route can answer only the caller who started the run. NOT UserId, which is a Dataverse
+        // systemuserid for the eq-userid substitution: on the HTTP path it is the authenticated caller's systemuserid,
+        // resolved server-side by the entry route (request.RunUserId — owner round 16 item 3), never a caller value.
         var context = new PlaybookRunContext(
             runId,
             request.PlaybookId,
             request.DocumentIds,
             httpContext,
             request.UserContext,
-            request.Parameters);
+            request.Parameters)
+        {
+            StartedByOid = Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User),
+            UserId = request.RunUserId
+        };
 
         // If the caller pre-loaded the document context, attach it so all nodes share it.
         if (request.Document != null)
@@ -1236,7 +1243,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 return compositeOutput;
             }
 
-            var substitutedNode = ApplyConfigJsonTemplates(node, runContext);
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext, actionType);
 
             // Create node execution context with streaming callback for per-token SSE events
             var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
@@ -2068,7 +2075,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             string renderedConfigJson;
             try
             {
-                renderedConfigJson = _templateEngine.Render(configWithoutIteration ?? string.Empty, overlay);
+                // Task 164 (owner round 16 item 3): a query-text executor renders position-aware, so its query text
+                // receives escaped values here too; every other executor keeps the flat render it always had.
+                if (HasQueryTextPositions(actionType))
+                {
+                    PlaybookParameterPolicy.EnsureTypedParametersValid(runContext.Parameters);
+                    renderedConfigJson = RenderConfigJsonStructurally(
+                        configWithoutIteration ?? "{}", overlay, _templateEngine, actionType);
+                }
+                else
+                {
+                    renderedConfigJson = _templateEngine.Render(configWithoutIteration ?? string.Empty, overlay);
+                }
             }
             catch (Exception ex)
             {
@@ -2249,10 +2267,21 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// </remarks>
     private PlaybookNodeDto ApplyConfigJsonTemplates(
         PlaybookNodeDto node,
-        PlaybookRunContext runContext)
+        PlaybookRunContext runContext,
+        ExecutorType executorType)
     {
         if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
             return node;
+
+        // Task 164 (owner round 16 item 3) — the substitution point of a query-text executor: the declared typed keys
+        // are type-checked here, whatever the entry path, and its query-text positions render with escaped values
+        // (RenderConfigJsonStructurally). A config that is not JSON cannot be rendered position-aware, so it fails the
+        // node instead of falling back to the flat (unescaped) render.
+        var hasQueryText = HasQueryTextPositions(executorType);
+        if (hasQueryText)
+        {
+            PlaybookParameterPolicy.EnsureTypedParametersValid(runContext.Parameters);
+        }
 
         var context = PlaybookTemplateContextBuilder.Build(runContext);
 
@@ -2272,9 +2301,9 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         string rendered;
         try
         {
-            rendered = RenderConfigJsonStructurally(node.ConfigJson, context);
+            rendered = RenderConfigJsonStructurally(node.ConfigJson, context, _templateEngine, executorType);
         }
-        catch (JsonException ex)
+        catch (JsonException ex) when (!hasQueryText)
         {
             // configJson is not valid JSON — fall back to flat string substitution
             // (preserves the previous behavior for non-JSON configJson values).
@@ -2288,6 +2317,37 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
+    /// The node-config positions whose RENDERED text is executed as a query, by executor type and JSON property name
+    /// (unified-access-control-r2 task 164, owner round 16 item 3). Every value Layer 1 substitutes into one of these is
+    /// escaped for the position's language first (<see cref="PlaybookTemplateContextBuilder.EscapeForQueryText"/>), so a
+    /// parameter — or a node output — cannot change the query's structure, whatever its key.
+    /// </summary>
+    /// <remarks>
+    /// A CLOSED list, found by reading every executor: <see cref="ExecutorType.QueryDataverse"/>'s <c>fetchXml</c> runs as
+    /// FetchXML (<c>QueryDataverseNodeExecutor</c>), and <see cref="ExecutorType.IndexRetrieve"/>'s <c>filter</c> is
+    /// appended to the AI Search OData filter unsanitized (<c>IndexRetrieveNode.BuildFilter</c>). Every other executor
+    /// either escapes its own query values (<c>IndexRetrieveNode</c>'s artifactType / predicate / subjectScope,
+    /// <c>RagService</c>'s parent-entity filter) or parses its ids (<c>UpdateRecordNodeExecutor</c>'s recordId,
+    /// <c>Guid.TryParse</c>). <c>QueryTextPositionsTests</c> pins the list against the executors' config schemas: a schema
+    /// field described as FetchXML or OData that is not listed here fails the build.
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<ExecutorType, IReadOnlyDictionary<string, PlaybookTemplateContextBuilder.QueryTextLanguage>> QueryTextPositions =
+        new Dictionary<ExecutorType, IReadOnlyDictionary<string, PlaybookTemplateContextBuilder.QueryTextLanguage>>
+        {
+            [ExecutorType.QueryDataverse] = new Dictionary<string, PlaybookTemplateContextBuilder.QueryTextLanguage>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["fetchXml"] = PlaybookTemplateContextBuilder.QueryTextLanguage.FetchXml,
+            },
+            [ExecutorType.IndexRetrieve] = new Dictionary<string, PlaybookTemplateContextBuilder.QueryTextLanguage>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["filter"] = PlaybookTemplateContextBuilder.QueryTextLanguage.OData,
+            },
+        };
+
+    /// <summary>True when <paramref name="executorType"/> has at least one <see cref="QueryTextPositions">query-text position</see>.</summary>
+    internal static bool HasQueryTextPositions(ExecutorType executorType) => QueryTextPositions.ContainsKey(executorType);
+
+    /// <summary>
     /// R7 Wave 11 Option D (operator-approved 2026-06-29): JSON-aware template substitution.
     /// Walks the parsed configJson tree depth-first; for each string value that is a
     /// "pure template" (entire string is a single <c>{{...}}</c> expression), renders the
@@ -2296,13 +2356,25 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// becomes a native JSON object, etc. Mixed values (text-with-template) render as
     /// strings per the existing behavior.
     /// </summary>
-    private string RenderConfigJsonStructurally(string configJson, Dictionary<string, object?> context)
+    /// <param name="executorType">
+    /// The node's executor. When it has <see cref="QueryTextPositions">query-text positions</see>, a string property named by
+    /// one of them — at any depth, including inside a nested JSON-string config — renders against a context whose values
+    /// are escaped for that position's language (task 164). <c>null</c> renders every position unescaped (no query text).
+    /// </param>
+    internal static string RenderConfigJsonStructurally(
+        string configJson,
+        Dictionary<string, object?> context,
+        ITemplateEngine templateEngine,
+        ExecutorType? executorType = null)
     {
         using var sourceDoc = JsonDocument.Parse(configJson);
         using var stream = new System.IO.MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
-            WriteJsonElementWithTemplateExpansion(writer, sourceDoc.RootElement, context);
+            var positions = executorType is { } type && QueryTextPositions.TryGetValue(type, out var found) ? found : null;
+            WriteJsonElementWithTemplateExpansion(
+                writer, sourceDoc.RootElement, context, templateEngine, executorType, positions,
+                new Dictionary<PlaybookTemplateContextBuilder.QueryTextLanguage, Dictionary<string, object?>>());
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
@@ -2312,10 +2384,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// For String nodes, expands templates per the pure-vs-mixed rule described above.
     /// For other scalar nodes (Number/Bool/Null), writes verbatim.
     /// </summary>
-    private void WriteJsonElementWithTemplateExpansion(
+    private static void WriteJsonElementWithTemplateExpansion(
         Utf8JsonWriter writer,
         JsonElement element,
-        Dictionary<string, object?> context)
+        Dictionary<string, object?> context,
+        ITemplateEngine templateEngine,
+        ExecutorType? executorType,
+        IReadOnlyDictionary<string, PlaybookTemplateContextBuilder.QueryTextLanguage>? queryTextPositions,
+        Dictionary<PlaybookTemplateContextBuilder.QueryTextLanguage, Dictionary<string, object?>> escapedContexts)
     {
         switch (element.ValueKind)
         {
@@ -2324,7 +2400,25 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 foreach (var prop in element.EnumerateObject())
                 {
                     writer.WritePropertyName(prop.Name);
-                    WriteJsonElementWithTemplateExpansion(writer, prop.Value, context);
+
+                    // Task 164: a query-text position renders against values escaped for its language. Only a STRING
+                    // value is a query text; the escaped context is built once per language per render.
+                    var propertyContext = context;
+                    if (queryTextPositions is not null
+                        && prop.Value.ValueKind == JsonValueKind.String
+                        && queryTextPositions.TryGetValue(prop.Name, out var language))
+                    {
+                        if (!escapedContexts.TryGetValue(language, out var escaped))
+                        {
+                            escaped = PlaybookTemplateContextBuilder.EscapeForQueryText(context, language);
+                            escapedContexts[language] = escaped;
+                        }
+
+                        propertyContext = escaped;
+                    }
+
+                    WriteJsonElementWithTemplateExpansion(
+                        writer, prop.Value, propertyContext, templateEngine, executorType, queryTextPositions, escapedContexts);
                 }
                 writer.WriteEndObject();
                 return;
@@ -2333,7 +2427,8 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 writer.WriteStartArray();
                 foreach (var item in element.EnumerateArray())
                 {
-                    WriteJsonElementWithTemplateExpansion(writer, item, context);
+                    WriteJsonElementWithTemplateExpansion(
+                        writer, item, context, templateEngine, executorType, queryTextPositions, escapedContexts);
                 }
                 writer.WriteEndArray();
                 return;
@@ -2358,7 +2453,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     // After wrap+render+parse, the property value is the native JSON shape
                     // (object/array/number/bool/null/string), not Dictionary.ToString() garbage.
                     var wrappedTemplate = AutoWrapWithJsonHelper(raw);
-                    var renderedJson = _templateEngine.Render(wrappedTemplate, context);
+                    var renderedJson = templateEngine.Render(wrappedTemplate, context);
                     if (TryParseAsJson(renderedJson, out var parsedElement))
                     {
                         WriteJsonElementVerbatim(writer, parsedElement!.Value);
@@ -2368,7 +2463,36 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     // Fall through to render-as-string for graceful degradation.
                 }
 
-                var renderedString = _templateEngine.Render(raw, context);
+                // Nested JSON-as-a-string (Playbook Builder "wrapper" configJson format).
+                // When a string value is ITSELF a JSON object/array that carries templates —
+                // the canvas stores each node's real config as a JSON string under an outer
+                // `configJson` property — render it STRUCTURALLY so any substituted value is
+                // escaped at THIS (inner) nesting level. Writing the result back with
+                // WriteStringValue then re-escapes it for the outer level, so the string stays
+                // valid JSON at BOTH levels. Without this, a multi-line / quote-bearing value
+                // (e.g. an AI summary) is escaped only at the OUTER level; the node executor's
+                // ParseConfig re-parses the inner string and throws
+                // "'0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value".
+                // See docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md Part 4 /
+                // .claude/FAILURE-MODES.md AP-10 / GitHub #919.
+                var trimmedForNestedJson = raw.TrimStart();
+                if (trimmedForNestedJson.StartsWith("{", StringComparison.Ordinal)
+                    || trimmedForNestedJson.StartsWith("[", StringComparison.Ordinal))
+                {
+                    try
+                    {
+                        var renderedNested = RenderConfigJsonStructurally(raw, context, templateEngine, executorType);
+                        writer.WriteStringValue(renderedNested);
+                        return;
+                    }
+                    catch (JsonException)
+                    {
+                        // Not actually JSON (e.g. a mixed string that merely starts with '{{') —
+                        // fall through to flat string rendering below.
+                    }
+                }
+
+                var renderedString = templateEngine.Render(raw, context);
                 writer.WriteStringValue(renderedString);
                 return;
 

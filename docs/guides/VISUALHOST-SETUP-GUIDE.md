@@ -1220,7 +1220,7 @@ Add the `aiSummaryField` key to the **Options JSON** (`sprk_optionsjson`) on any
 ### Requirements
 
 - The field specified in `aiSummaryField` must exist on the entity identified by `sprk_entitylogicalname` on the chart definition
-- The field should be a text field (single-line or multi-line) that is pre-populated by an external process (e.g., a BFF API endpoint, plugin, or flow)
+- The field should be a text field (single-line or multi-line) that is pre-populated by an external process (e.g., a BFF API endpoint/job or a flow — Spaarke ships no Dataverse plugins, ADR-002)
 - VisualHost reads the field via `context.webAPI.retrieveRecord()` — no additional PCF properties are needed
 
 ---
@@ -2444,7 +2444,7 @@ If `aiSummaryField` is omitted, the toolbar shows no sparkle icon (legacy behavi
 ### Authoring Notes
 
 - The column must exist on the parent entity (validate via `dataverse:dv-metadata describe_table` if unsure).
-- The column should be populated by a server-side process (Power Automate flow, plugin, Insights Engine R2, etc.). The VisualHost only READS the value — it does not generate the summary.
+- The column should be populated by a server-side process (BFF job/Action, Insights Engine R2, Power Automate flow, etc. — not a Spaarke plugin; Spaarke ships none, ADR-002). The VisualHost only READS the value — it does not generate the summary.
 - If the column is null/empty for the current record, the popover shows a "Summary not available" empty-state message.
 
 ---
@@ -2466,7 +2466,7 @@ Both columns already exist on `sprk_chartdefinition` (no schema changes needed):
 
 ### Valid keys
 
-The key set is **dev-defined** (registry keys in `WizardRegistry.ts`) — there is no Dataverse-side choice/option-set validation, so entering an unrecognized value shows a toast error (no crash) rather than a form-level error.
+The key set is **dev-defined** (keys in VisualHost's `WIZARD_KEY_TO_PAGE` map in `VisualHostRoot.tsx`) — there is no Dataverse-side choice/option-set validation, so entering an unrecognized value shows a toast error (no crash) rather than a form-level error.
 
 | Key | Opens | Creates |
 |---|---|---|
@@ -2490,7 +2490,7 @@ If `sprk_createwizardkey` is left blank, the control falls back to normalizing t
 The key set is intentionally **dev-defined** — adding a target is a small code change, not a Dataverse config. To wire a new wizard (say `contract`):
 
 1. **Build the wizard Code Page** under `src/solutions/Create{X}Wizard/` — copy an existing one (e.g. `CreateInvoiceWizard`); its `main.tsx` should use the shared `useWizardPageBootstrap()` hook and mount the corresponding shared wizard component. Deploy it as a web resource `sprk_create{x}wizard`.
-2. **Register the key → page mapping** in VisualHost's local resolver `WIZARD_KEY_TO_PAGE` in [`VisualHostRoot.tsx`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx) (e.g. `contract: 'sprk_createcontractwizard'`), and add an entity alias to `ENTITY_TO_WIZARD_KEY` if the entity-fallback name differs from a plain `sprk_`-strip. (This local map deliberately mirrors the shared `wizardRegistry.ts` resolution order but is kept in the PCF so the "+" cutover doesn't drag the wizard components — and their auth deps — back into the PCF bundle.)
+2. **Register the key → page mapping** in VisualHost's local resolver `WIZARD_KEY_TO_PAGE` in [`VisualHostRoot.tsx`](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx) (e.g. `contract: 'sprk_createcontractwizard'`), and add an entity alias to `ENTITY_TO_WIZARD_KEY` if the entity-fallback name differs from a plain `sprk_`-strip. (This local map is the single source of truth for "+" wizard keys. The shared `wizardRegistry.ts` it once mirrored had zero consumers and was deleted 2026-10-03 — reuse audit C-20 — so there is no second registry to update.)
 3. **Bump + redeploy VisualHost** (version in all 5 locations) and deploy the new Code Page web resource.
 4. **Author** a `sprk_chartdefinition` with `sprk_createwizardenabled = Yes` and `sprk_createwizardkey = contract`.
 

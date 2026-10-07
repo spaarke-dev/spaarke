@@ -1,5 +1,23 @@
 # Project Update — Customer Provisioning & Deployment Orchestration (r1)
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Date**: 2026-08-12
 > **Author**: Owner working session (assessment + discussion)
 > **Project**: `customer-provisioning-orchestration-r1`

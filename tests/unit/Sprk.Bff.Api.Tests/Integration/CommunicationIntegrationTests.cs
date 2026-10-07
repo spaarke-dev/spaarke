@@ -40,7 +40,6 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// - BFF send flow: request validation, sender resolution, Graph sendMail, Dataverse record creation
 /// - AI tool handler: parameter extraction, delegation to CommunicationService, result mapping
 /// - Approved sender: config-only sync resolution, async merged resolution with Dataverse + Redis
-/// - Status query: Dataverse retrieval and OptionSetValue/DateTime mapping
 /// - Error paths: Graph failures, Dataverse failures, unauthorized senders
 /// </summary>
 [Trait("status", "repaired")]
@@ -200,6 +199,8 @@ public class CommunicationIntegrationTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>());
     }
 
@@ -335,71 +336,6 @@ public class CommunicationIntegrationTests
         capturedEntity.GetAttributeValue<string>("sprk_regardingrecordid").Should().Be(matterId.ToString());
         capturedEntity.GetAttributeValue<string>("sprk_regardingrecordurl")
             .Should().Contain(matterId.ToString());
-    }
-
-    #endregion
-
-    #region 4. Status Query — After Send Returns Correct Status
-
-    [Fact]
-    public async Task StatusQuery_AfterSend_ReturnsCorrectStatus()
-    {
-        // Arrange: mock IDataverseService.RetrieveAsync to return a sprk_communication entity
-        // with the fields that GetCommunicationStatusAsync reads
-        var communicationId = Guid.NewGuid();
-        var sentAtDateTime = new DateTime(2026, 2, 20, 14, 30, 0, DateTimeKind.Utc);
-
-        var entity = new DataverseEntity("sprk_communication", communicationId);
-        entity["statuscode"] = new OptionSetValue((int)CommunicationStatus.Send); // 659490002
-        entity["sprk_graphmessageid"] = "msg-graph-001";
-        entity["sprk_sentat"] = sentAtDateTime;
-        entity["sprk_from"] = "noreply@contoso.com";
-
-        var dataverseMock = new Mock<IDataverseService>();
-        dataverseMock
-            .Setup(d => d.RetrieveAsync(
-                "sprk_communication",
-                communicationId,
-                It.Is<string[]>(cols =>
-                    cols.Contains("statuscode") &&
-                    cols.Contains("sprk_graphmessageid") &&
-                    cols.Contains("sprk_sentat") &&
-                    cols.Contains("sprk_from")),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(entity);
-
-        // Act: call the mocked RetrieveAsync to simulate what GetCommunicationStatusAsync does,
-        // then apply the same mapping logic as the endpoint handler.
-        var retrievedEntity = await dataverseMock.Object.RetrieveAsync(
-            "sprk_communication",
-            communicationId,
-            new[] { "statuscode", "sprk_graphmessageid", "sprk_sentat", "sprk_from" });
-
-        var statusCodeValue = retrievedEntity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1;
-        var status = (CommunicationStatus)statusCodeValue;
-
-        var sentAtDateTimeRaw = retrievedEntity.GetAttributeValue<DateTime?>("sprk_sentat");
-        DateTimeOffset? sentAt = sentAtDateTimeRaw.HasValue
-            ? new DateTimeOffset(sentAtDateTimeRaw.Value, TimeSpan.Zero)
-            : null;
-
-        var response = new CommunicationStatusResponse
-        {
-            CommunicationId = communicationId,
-            Status = status,
-            GraphMessageId = retrievedEntity.GetAttributeValue<string>("sprk_graphmessageid"),
-            SentAt = sentAt,
-            From = retrievedEntity.GetAttributeValue<string>("sprk_from")
-        };
-
-        // Assert
-        response.CommunicationId.Should().Be(communicationId);
-        response.Status.Should().Be(CommunicationStatus.Send);
-        ((int)response.Status).Should().Be(659490002, "Send status maps to Dataverse statuscode 659490002");
-        response.GraphMessageId.Should().Be("msg-graph-001");
-        response.SentAt.Should().NotBeNull();
-        response.SentAt!.Value.Should().Be(new DateTimeOffset(2026, 2, 20, 14, 30, 0, TimeSpan.Zero));
-        response.From.Should().Be("noreply@contoso.com");
     }
 
     #endregion
@@ -1255,6 +1191,8 @@ public class CommunicationIntegrationTests
                 dataverseMock.Object,
                 dataverseMock.Object,
                 Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             new GraphMessageToEmlConverter(),
@@ -1266,6 +1204,7 @@ public class CommunicationIntegrationTests
             Mock.Of<ITextExtractor>(),
             Options.Create(new AttachmentMatchOptions { Enabled = false }),
             config,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }
 

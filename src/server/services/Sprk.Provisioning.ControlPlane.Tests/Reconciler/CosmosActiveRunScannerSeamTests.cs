@@ -113,8 +113,9 @@ public sealed class CosmosActiveRunScannerSeamTests : IAsyncLifetime
             containerName: container,
             logger: NullLogger<CosmosActiveRunScanner>.Instance);
 
-        // Isolate from other partitions / other test runs.
-        _testCustomerId = $"seam-{Environment.MachineName.ToLowerInvariant()}-{Guid.NewGuid():N}";
+        // Isolate from other partitions / other test runs. Compliant with the
+        // customerId standard (^[a-z][a-z0-9]{2,7}$): "s" + 7 lowercase hex chars.
+        _testCustomerId = "s" + Guid.NewGuid().ToString("N")[..7];
         return Task.CompletedTask;
     }
 
@@ -222,7 +223,7 @@ public sealed class CosmosActiveRunScannerSeamTests : IAsyncLifetime
             RunId = runId,
             CustomerId = _testCustomerId,
             EnvironmentId = Guid.NewGuid().ToString("D"),
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = status,
             Profile = "spaarke-hosted-model2",
         };

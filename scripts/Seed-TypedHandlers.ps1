@@ -135,6 +135,19 @@ $RowFiles = @{
     # (Communicate-gated). Mirror existed since 041; map entry added by task 051's
     # seed-governance reconciliation (FR-P4-02) so the seed covers the full live set.
     "EMAIL-DRAFT"                      = "$RepoRoot/infra/dataverse/sprk_analysistool-email-draft-row.json"
+    # spaarkeai-compose-r8, 2026-09-02 — the THREE per-item email rows whose mirrors landed with
+    # assistant-r3 task 023 (commit 0df621d1e) and whose map entries never followed. Found because
+    # /healthz/catalog on spaarkedev1 returned 503 after a BFF deploy: EmailDraftToolHandler is
+    # compiled in and registered, but these rows were absent from Dataverse, which is exactly the
+    # HandlersWithoutToolRows drift dimension.
+    #
+    # The catalog check's own remediation text says "seed the row via scripts/Seed-TypedHandlers.ps1"
+    # — which was WRONG for these three, because the script did not know about them. A remediation
+    # pointer that names a script which cannot perform the remediation is worse than none: it sends
+    # the operator away satisfied. That is the actual defect these three lines close.
+    "EMAIL-DRAFT-FORWARD"              = "$RepoRoot/infra/dataverse/sprk_analysistool-email-draft-forward-row.json"
+    "EMAIL-DRAFT-REPLY"                = "$RepoRoot/infra/dataverse/sprk_analysistool-email-draft-reply-row.json"
+    "EMAIL-SUMMARIZE-THREAD"           = "$RepoRoot/infra/dataverse/sprk_analysistool-email-summarize-thread-row.json"
     "KNOWLEDGE-BASE-SEARCH"            = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-base-search-row.json"
     # Wave 7c — VerifyCitationsHandler: single row, capability-gated via
     # sprk_requiredcapability = 'verify_citations'. The data-driven block's
@@ -204,8 +217,9 @@ $RowFiles = @{
     "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
     # AIR2-075 RETIREMENT (2026-07-10): GET-WORKSPACE-TAB-CONTENT (GetWorkspaceTabContentHandler)
     # was retired with the orphaned workspace-tab tool cluster — do not re-seed. The KEPT read
-    # path is IWorkspaceStateService.GetTabsAsync via GET /api/workspace/state + the
-    # SprkChatAgentFactory workspace-state prompt block (no seed row of its own).
+    # path is IWorkspaceStateService.GetTabsAsync via the SprkChatAgentFactory workspace-state
+    # prompt block (no seed row of its own); GET /api/workspace/state was DELETED by
+    # unified-access-control-r2 task 166 (owner round 10 item 1: no caller, not published).
     # spaarke-ai-architecture-redesign-r1 / task 008 / FR-P0-07 (read half) — the three
     # dataverse.* READ tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
     #   dataverse.describe    → DataverseDescribeHandler    (describe(path, scope?))

@@ -91,13 +91,15 @@ public record UploadFinalizationPayload
     /// </summary>
     public required string ContainerId { get; init; }
 
-    /// <summary>
-    /// Target folder path within the container.
-    /// </summary>
-    public string? FolderPath { get; init; }
+    // FolderPath DELETED 2026-08-28 alongside SaveRequest.FolderPath (stop minting SPE folders on upload
+    // paths). Its only consumer was UploadFinalizationWorker's traditional-upload branch, which was
+    // itself unreachable — see the deletion note in that file.
 
     /// <summary>
-    /// Temporary file location (blob storage URL or local path).
+    /// Temporary file location. ALWAYS an <c>spe://{driveId}/{itemId}</c> reference to a file the
+    /// synchronous save path has already uploaded — <c>OfficeJobQueue</c> is the sole producer of this
+    /// payload and sets it unconditionally. See the reachability note in
+    /// <see cref="Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker"/>.
     /// </summary>
     public required string TempFileLocation { get; init; }
 
@@ -143,6 +145,48 @@ public record UploadFinalizationPayload
     /// instead of creating a new Document record.
     /// </summary>
     public Guid? DocumentId { get; init; }
+
+    /// <summary>
+    /// Task 029 (spaarkeai-word-add-in-r1): set ONLY for a VERSION save (a Document save that wrote a new SPE
+    /// version of an existing <c>sprk_document</c>), to that save's ProcessingJob id. The worker folds it into the
+    /// profile and index idempotency keys so each saved version is re-profiled and re-indexed once.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the save's job id and not a content hash.</b> It identifies the individual save: a Service Bus
+    /// redelivery or retry of the same finalization message repeats it (so those still skip), while every new save
+    /// has its own job — even one whose bytes repeat an earlier version (B, then A, then B refreshes three times),
+    /// which no content hash can tell apart.</para>
+    /// <para>Null for a first save and for every Email / Attachment save, and then omitted from the JSON, so their
+    /// payloads and keys are byte-for-byte what they were.</para>
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? VersionSaveJobId { get; init; }
+
+    /// <summary>
+    /// Task 080 (spaarkeai-word-add-in-r1, write-path invariant I-6): the business-unit DEFAULT OWNER TEAM that
+    /// <c>SaveAsync</c> resolved for this save's document. The worker gives the SAME team to every document it
+    /// creates for the save — an email's attachment children, and the fallback create — so a parent and its
+    /// children land in the same business unit. (One transient exception: a message enqueued BEFORE this field
+    /// existed has an app-owned parent, while its children are resolved to a team — for that deploy window only.)
+    /// </summary>
+    /// <remarks>
+    /// Null for a version save (it creates no document) and for any message enqueued before this field existed;
+    /// the worker then resolves the team itself from <see cref="AssociationType"/> / <see cref="AssociationId"/>
+    /// and the message's user, through the same resolver. Omitted from the JSON when null, so a version save's
+    /// payload is byte-for-byte what it was.
+    /// </remarks>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? OwningTeamId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 146 c1-r1 (owner round 13 item 9): the person who made the save, resolved by
+    /// <c>SaveAsync</c> with <see cref="OwningTeamId"/> and carried with it, so every document the worker creates for the
+    /// save records them as its creator person (<c>sprk_createdbyperson</c>) — the create is app-only. Null when the
+    /// person could not be resolved, for a version save, and for a message enqueued before this field; the worker then
+    /// resolves it from the message's user only when it resolves the team itself. Omitted from the JSON when null.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? CreatedByPersonId { get; init; }
 }
 
 /// <summary>

@@ -14,9 +14,12 @@
 // AUDIT REFERENCE (customer-provisioning-orchestration-r1 task 203b,
 //                  punch list row A21 / task 201 "Deferred #1")
 //   customer.bicep already provisions the per-customer BFF App Service (bffApi
-//   module) but never grants any RBAC to the L2 UAMI. Same "Deferred #1"
-//   surface as the Model 1 shared BFF (model1-shared-l2-rbac.bicep A21) --
-//   this module is the per-customer parallel for Model 2 Dedicated stamps.
+//   module) but never grants any RBAC to the L2 UAMI. This module grants it on
+//   Model 1 stamps: H2a sends the principal for Model 1 only (task 249, owner
+//   decision 2026-10-02). A Model 2 stamp is in the customer's tenant, where a role
+//   assignment cannot name a principal from Spaarke's tenant (the deployment would
+//   fail); L2 reaches it through its Lighthouse delegation. Its former Model 1 shared
+//   parallel (model1-shared-l2-rbac.bicep) was retired with that stack by task 225a.
 //
 // WHY A MODULE (BCP139 forces the split)
 //   customer.bicep uses `targetScope = 'subscription'`. A role assignment
@@ -34,7 +37,7 @@
 //   (same principal+role+scope tuple yields the same guid; re-deploy is a
 //   no-op create).
 
-@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Empty skips the grant (what-if isolation only -- a real per-customer deploy always needs it for H4b + H9 to function).')
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Sent by H2a for Model 1 stamps only (task 249); empty (Model 2) skips the grant.')
 param controlPlaneUamiPrincipalId string = ''
 
 @description('Name of the per-customer BFF App Service (Microsoft.Web/sites) provisioned by the parent customer.bicep.')

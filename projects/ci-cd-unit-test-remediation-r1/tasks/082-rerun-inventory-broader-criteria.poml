@@ -1,7 +1,7 @@
 <task id="CICD-082" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Re-run test inventory with broader build-vs-maintain criteria — expect 1,500-3,000 DELETE candidates</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -58,4 +58,7 @@
     <criterion testable="true">Spot-check confirms ≥80% of sampled DELETE tags match criteria</criterion>
     <criterion testable="true">No KEEP-protected-path files in DELETE list (or each flagged for same-PR replacement)</criterion>
   </acceptance-criteria>
+  <notes date="2026-09-29" source="task-071 Step 10 drift reconciliation">
+    Index marked complete; POML status write was skipped. Evidence: task 083 executed on this inventory and deleted 54 tests (notes/deep-cleanup-final-summary.md 1). Reconciled 2026-09-29 during task 071 Step 10.
+  </notes>
 </task>

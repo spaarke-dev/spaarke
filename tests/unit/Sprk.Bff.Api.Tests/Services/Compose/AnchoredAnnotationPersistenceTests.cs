@@ -25,6 +25,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -32,7 +33,6 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
-using Spaarke.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -79,7 +79,9 @@ public sealed class AnchoredAnnotationPersistenceTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private ChatSession SeedSession(string sessionId, string documentId, string tenantId = Tenant)
     {
@@ -90,7 +92,8 @@ public sealed class AnchoredAnnotationPersistenceTests
             PlaybookId: null,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
+            Messages: Array.Empty<ChatMessage>())
+        { OwnerOid = TestSessionOwner.Oid };
         _store[sessionId] = session;
         return session;
     }

@@ -38,21 +38,45 @@
 
 ## Deployment Model Matrix
 
-The Spaarke AI Platform supports three deployment models that differ in where Azure
-AI resources live and who manages the encryption keys.
+> **Rewritten 2026-09-28 (D-12)**: this section previously declared **three** deployment models, defined
+> Model 1 as *"Multi-Customer (Shared)"*, and asserted a **shared AI Search index** across customers. All
+> three claims are retired. **Spaarke has exactly two deployment models**, they differ in **one axis only —
+> which Azure tenant owns the customer's subscription** — and **every Azure resource is dedicated per
+> customer in both**. **BYOK is an option within Model 2, not a third model.**
 
-| Aspect | Model 1: Multi-Customer (Shared) | Model 2: Dedicated | Model 3: BYOK (Customer Tenant) |
-|--------|----------------------------------|--------------------|---------------------------------|
-| **Azure Subscription** | Spaarke's subscription | Spaarke's subscription | Customer's subscription |
-| **Azure AI Foundry** | Spaarke-shared project | Spaarke-dedicated project | Customer-provisioned project |
-| **Azure OpenAI** | Spaarke-managed | Spaarke-managed | Customer-managed |
+| | Dataverse environment | Azure tenant | Azure subscription + resource group |
+|---|---|---|---|
+| **Model 1** | dedicated, one per customer | **Spaarke's** | dedicated, one per customer |
+| **Model 2** | dedicated, one per customer | **the customer's own** | dedicated, one per customer |
+
+| Aspect | Model 1 (Spaarke's Azure tenant) | Model 2 (customer's Azure tenant) | Model 2 + BYOK |
+|--------|----------------------------------|-----------------------------------|----------------|
+| **Azure Subscription** | The customer's own subscription, in Spaarke's tenant | The customer's own subscription, in their tenant | Same as Model 2 |
+| **Azure AI Foundry** | Dedicated project per customer | Dedicated project per customer | Customer-provisioned project |
+| **Azure OpenAI** | Dedicated per customer, Spaarke-managed | Dedicated per customer | Customer-managed |
 | **Encryption Keys** | Spaarke-managed (MSFT CMK) | Spaarke-managed (MSFT CMK) | Customer-managed keys (true BYOK) |
-| **AI Search Index** | Shared (`spaarke-knowledge-index-v2`) | Dedicated per-customer | Customer-provisioned |
-| **Bing Connection** | Spaarke-registered | Spaarke-registered | Customer-registered in their project |
-| **BFF Foundry Endpoint** | `AgentService:Endpoint` → Spaarke project | `AgentService:Endpoint` → dedicated project | `AgentService:Endpoint` → customer project |
-| **Agent ID** | `AgentService:AgentId` → Spaarke-deployed | `AgentService:AgentId` → dedicated deploy | `AgentService:AgentId` → customer-deployed |
-| **AnalysisOptions:DefaultRagModel** | `Shared` | `Dedicated` | `CustomerOwned` |
+| **AI Search Index** | **Dedicated AI Search service per customer** | **Dedicated AI Search service per customer** | Customer-provisioned |
+| **Bing Connection** | Spaarke-registered, per customer project | Spaarke-registered, per customer project | Customer-registered in their project |
+| **BFF app registration** | Per customer, in Spaarke's tenant (D-13) | Per customer, in the customer's tenant (D-13) | Same as Model 2 |
+| **BFF Foundry Endpoint** | `AgentService:Endpoint` → that customer's project | `AgentService:Endpoint` → that customer's project | `AgentService:Endpoint` → customer project |
+| **Agent ID** | `AgentService:AgentId` → per-customer deploy | `AgentService:AgentId` → per-customer deploy | `AgentService:AgentId` → customer-deployed |
+| **AnalysisOptions:DefaultRagModel** | `Dedicated` | `Dedicated` | `CustomerOwned` |
 | **AnalysisOptions:CustomerTenantId** | Not required | Not required | **Required** — customer's Azure AD tenant |
+| **H0.5 admin consent** | not required | **required** | **required** |
+| **Azure Lighthouse delegation** | not required | **required** | **required** |
+
+The last two rows are the **only** things that genuinely differ between the models; both follow from which
+tenant owns the subscription.
+
+🔴 **`DefaultRagModel = Shared` is RETIRED — never provision it.** It selected a single AI Search index
+(`spaarke-knowledge-index-v2`) shared across customers, isolated by a `tenantId` filter. Under Model 1 every
+customer presents **Spaarke's** tenant GUID, so that filter separates Entra tenants only and delivers **no
+customer isolation at all** — while reporting success. The enum value still exists in code; treat it as
+never-provision and use `Dedicated` (or `CustomerOwned` for BYOK).
+
+⚠️ `tenantId` is **not** a customer discriminator. Any resource that legitimately stays shared needs a
+`customerId` discriminator instead. The closed exception list is **Static Web Apps** (Office add-ins +
+external SPA) and **Content Safety** — neither of which is an AI Search index.
 
 **Configuration switching**: Moving between models requires only environment variable changes.
 No code changes are required (enforced by the audit in AIPU-086).
@@ -78,8 +102,8 @@ the kill switch at call time (ADR-018).
 
 ### Example values by deployment model
 
-| Key | Multi-Customer (Dev) | Dedicated | BYOK (Customer) |
-|-----|----------------------|-----------|-----------------|
+| Key | Spaarke dev | Model 1 / Model 2 (dedicated) | Model 2 + BYOK (customer) |
+|-----|-------------|------------------------------|---------------------------|
 | `AgentService:Enabled` | `true` | `true` | `true` |
 | `AgentService:Endpoint` | `https://sprkspaarkedev-aif-hub.services.ai.azure.com/api/projects/sprkspaarkedev-aif-proj` | `https://<dedicated-hub>.services.ai.azure.com/api/projects/<dedicated-proj>` | `https://<customer-hub>.services.ai.azure.com/api/projects/<customer-proj>` |
 | `AgentService:AgentId` | *(deployed agent ID)* | *(dedicated agent ID)* | *(customer-deployed agent ID)* |
@@ -128,8 +152,8 @@ because auth uses Managed Identity through the Azure AI Projects SDK (ADR-015).
 
 ### Example values by deployment model
 
-| Key | Multi-Customer / Dedicated | BYOK (Customer) |
-|-----|---------------------------|-----------------|
+| Key | Model 1 / Model 2 (dedicated) | Model 2 + BYOK (customer) |
+|-----|------------------------------|---------------------------|
 | `BingGrounding:Enabled` | `true` | `true` |
 | `BingGrounding:BingConnectionName` | `bing-grounding-connection` | *(customer's connection name in their Foundry project)* |
 
@@ -147,8 +171,8 @@ the keys needed for customer-owned RAG deployments.
 | Config Key | Env Var (App Service) | Type | Required | Default | Purpose |
 |------------|-----------------------|------|----------|---------|---------|
 | `Analysis:Enabled` | `Analysis__Enabled` | `bool` | Yes | `true` | Master kill switch for the Analysis feature. |
-| `Analysis:DefaultRagModel` | `Analysis__DefaultRagModel` | `enum` | No | `Shared` | RAG deployment model: `Shared`, `Dedicated`, or `CustomerOwned`. |
-| `Analysis:SharedIndexName` | `Analysis__SharedIndexName` | `string` | No | `spaarke-knowledge-index-v2` | AI Search index name for `Shared` model. |
+| `Analysis:DefaultRagModel` | `Analysis__DefaultRagModel` | `enum` | No | `Shared` | RAG deployment model. **Set `Dedicated` for Model 1 and Model 2; `CustomerOwned` for Model 2 + BYOK.** 🔴 The code default `Shared` is **RETIRED — never provision it** (see the Deployment Model Matrix above); it keys isolation on `tenantId`, which cannot separate customers under Model 1. Set this key explicitly on every deployment. |
+| `Analysis:SharedIndexName` | `Analysis__SharedIndexName` | `string` | No | `spaarke-knowledge-index-v2` | AI Search index name for the retired `Shared` model. Unused when `DefaultRagModel` is `Dedicated` or `CustomerOwned` — i.e. always, going forward. |
 | `Analysis:CustomerTenantId` | `Analysis__CustomerTenantId` | `string` | When CustomerOwned | — | Customer's Azure AD tenant ID for cross-tenant scenarios. |
 | `Analysis:KeyVaultUrl` | `Analysis__KeyVaultUrl` | `string` | When CustomerOwned | — | Customer Key Vault URL for secret resolution at runtime. |
 | `Analysis:PromptFlowEndpoint` | `Analysis__PromptFlowEndpoint` | `string` | No | — | AI Foundry Prompt Flow endpoint (optional; falls back to direct Azure OpenAI). |
@@ -164,7 +188,7 @@ These settings apply in all deployment models and are required for BFF startup.
 
 | Config Key | Env Var (App Service) | Required | Purpose |
 |------------|-----------------------|----------|---------|
-| `AzureAd:TenantId` | `AzureAd__TenantId` | Yes | Azure AD tenant ID (use `common` for multi-tenant). |
+| `AzureAd:TenantId` | `AzureAd__TenantId` | Yes | Azure AD tenant ID of the tenant this deployment lives in — Spaarke's under Model 1, the customer's under Model 2. Set the explicit tenant GUID; **do not use `common`.** The BFF app registration is per customer and single-tenant in both models (D-13) — there is no shared/multitenant BFF app registration. |
 | `AzureAd:ClientId` | `AzureAd__ClientId` | Yes | BFF API app registration client ID. |
 | `AzureAd:Instance` | `AzureAd__Instance` | No | AAD authority (default: `https://login.microsoftonline.com/`). |
 
@@ -390,7 +414,8 @@ must be substituted by the deployment pipeline or Key Vault references.
   // ─── Analysis (RAG deployment model selector) ────────────────────────────────
   "Analysis": {
     "Enabled": true,
-    "DefaultRagModel": "Shared", // Shared | Dedicated | CustomerOwned
+    "DefaultRagModel": "Dedicated", // Dedicated (Model 1 + Model 2) | CustomerOwned (BYOK).
+                                    // "Shared" is RETIRED — never provision it (D-12).
     "CustomerTenantId": null,    // Required for CustomerOwned model
     "KeyVaultUrl": null,         // Required for CustomerOwned model
     // ... (see AnalysisOptions.cs for full schema)

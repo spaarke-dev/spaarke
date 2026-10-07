@@ -116,9 +116,9 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // UploadSmallAsUserAsync; this proves the create-on-save path now surfaces the SAME clean 423
         // ProblemDetails the replace path already did — not a 500.
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DocumentLockedByWordException("spe-item-create-locked"));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -193,9 +193,9 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // generic re-throw, leaking a raw ODataError and surfacing as an opaque 500. This proves the SAME
         // 412-clean-copy the replace route already had is now ALSO wired for create-on-save.
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new EtagPreconditionFailedException("spe-item-create-moved", "\"stale-create-etag\""));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -266,9 +266,9 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         // of translating to the typed domain exception. This proves the revived/added translation directly.
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
-        var act = () => sut.UploadSmallAsUserAsync(
-            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
-            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+        var act = () => sut.UploadSmallAsync(
+            "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
             "the Kiota ODataError (HTTP 423 / resourceLocked) on a create-on-save upload must translate to the typed lock exception, not leak a raw Microsoft.Graph type");
@@ -286,9 +286,9 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         // already knew how to map to a clean 412.
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
-        var act = () => sut.UploadSmallAsUserAsync(
-            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
-            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+        var act = () => sut.UploadSmallAsync(
+            "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
             "the Kiota ODataError (HTTP 412) on a create-on-save upload must translate to the typed precondition exception, not leak a raw Microsoft.Graph type");
@@ -460,9 +460,16 @@ public sealed class Def14ComposeSaveFixture : WebApplicationFactory<Program>
             // No background workers in tests.
             services.RemoveAll<IHostedService>();
 
-            // Dataverse stub (never reached before the SPE throw, but keeps the graph resolvable).
+            // Dataverse stub. Mostly never reached before the SPE throw — EXCEPT the issue #858
+            // create-on-save container derivation, which now runs BEFORE the SPE write: the container
+            // is server-derived from the acting user's business unit (no matter is bound here), and
+            // IGenericEntityService forwards to THIS mock (GraphModule.cs registers it as
+            // sp.GetRequiredService<IDataverseService>()). Without the arrangement, resolution throws
+            // acting_user_not_resolvable and the 423/412 SPE throws these tests exist for are never
+            // reached.
             var dataverseMock = new Mock<IDataverseService>();
             dataverseMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            TestActingUserBusinessUnit.Arrange(dataverseMock);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
 
@@ -515,6 +522,10 @@ internal sealed class Def14FakeAuthHandler : AuthenticationHandler<Authenticatio
             new("oid", oid),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"DEF14 Test User {oid}"),
+            // uac-r2 task 166 (amendment d): the save routes scope by the CALLER's tid claim, never the body's
+            // tenantId (which they now ignore). Every real Entra token carries one; a principal without it is the
+            // 401 the handlers answer before any SPE call.
+            new("tid", "tenant-aad-def14"),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

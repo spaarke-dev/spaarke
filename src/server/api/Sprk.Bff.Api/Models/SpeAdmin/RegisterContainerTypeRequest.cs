@@ -5,8 +5,9 @@ namespace Sprk.Bff.Api.Models.SpeAdmin;
 /// <summary>
 /// Request body for POST /api/spe/containertypes/{typeId}/register.
 ///
-/// Registers a container type by granting the consuming application (identified by <see cref="AppId"/>)
-/// the specified delegated and application permissions via the SharePoint REST API.
+/// Grants the consuming application (identified by <see cref="AppId"/>) the specified delegated and
+/// application permissions on the container type's registration in this tenant (a Microsoft Graph
+/// applicationPermissionGrant, issued as the signed-in administrator).
 ///
 /// This is the key security operation that enables a consuming app to create and manage SPE containers
 /// of the specified type. Without registration, the container type exists but cannot be used.
@@ -20,9 +21,11 @@ namespace Sprk.Bff.Api.Models.SpeAdmin;
 ///
 /// Valid permission values are defined in <see cref="ContainerTypePermissions"/>.
 ///
-/// The <see cref="SharePointAdminUrl"/> is required because the registration call targets the
-/// SharePoint REST API (not Graph API). It must be the SharePoint Admin Center URL for the tenant,
-/// typically https://{tenant}-admin.sharepoint.com.
+/// <see cref="SharePointAdminUrl"/> is ignored since 2026-10-04, when registration moved from the
+/// SharePoint REST API to Graph. It stays on the type so existing callers keep binding.
+///
+/// The permission names below are the legacy SharePoint REST names; the service maps them onto Graph's
+/// (<c>AddAllPermissions</c> → <c>full</c>).
 /// </remarks>
 public sealed class RegisterContainerTypeRequest
 {
@@ -34,9 +37,8 @@ public sealed class RegisterContainerTypeRequest
     public string AppId { get; init; } = string.Empty;
 
     /// <summary>
-    /// SharePoint Admin Center URL for the tenant (e.g., https://contoso-admin.sharepoint.com).
-    /// Required. Used as the base URL for the SharePoint REST API registration call.
-    /// Must be an absolute HTTPS URL.
+    /// IGNORED — retained for request compatibility only. Registration no longer calls the SharePoint
+    /// REST API, so no admin-center URL is needed.
     /// </summary>
     [JsonPropertyName("sharePointAdminUrl")]
     public string SharePointAdminUrl { get; init; } = string.Empty;

@@ -25,6 +25,7 @@ import {
   IEventTypeConfigCacheEntry,
 } from '../types/EventTypeConfig';
 import { IWebApiLike } from '../types/WebApiLike';
+import { cleanGuid } from '../utils/guid';
 
 /**
  * Default cache TTL: 5 minutes
@@ -692,7 +693,7 @@ export async function getEventTypeFieldConfig(
   }
 
   // Normalize GUID (remove braces if present)
-  const normalizedId = eventTypeId.replace(/[{}]/g, '').toLowerCase();
+  const normalizedId = cleanGuid(eventTypeId);
 
   // Get service instance (use provided or singleton)
   const service = options?.service ?? eventTypeService;

@@ -34,11 +34,16 @@
  * @see AssistantToolMenu.tsx — the ⋮ trigger idiom this mirrors.
  * @see ManageWorkspacesPane.tsx — the drawer this opens (now owns selection +
  *   "+ New" + management).
+ *
+ * The ⋮ trigger button itself is the shared `PaneHeaderMenuTriggerButton`
+ * (C-12, spaarke-ontology-platform-r1 reuse audit D5) — this component has no
+ * dropdown, so it uses only the trigger piece (wrapped in its own `Tooltip`),
+ * not the full `PaneHeaderToolsMenu`.
  */
 
 import * as React from "react";
-import { makeStyles, Button, Tooltip } from "@fluentui/react-components";
-import { MoreVerticalRegular } from "@fluentui/react-icons";
+import { Tooltip } from "@fluentui/react-components";
+import { PaneHeaderMenuTriggerButton } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import { ManageWorkspacesPane } from "./ManageWorkspacesPane";
 
@@ -62,16 +67,6 @@ export interface WorkspacePaneMenuProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles — Fluent v9 tokens only (ADR-021)
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  trigger: {
-    minWidth: "auto",
-  },
-});
-
-// ---------------------------------------------------------------------------
 // WorkspacePaneMenu component
 // ---------------------------------------------------------------------------
 
@@ -80,7 +75,6 @@ const useStyles = makeStyles({
  * rightSlot>`. Opens `ManageWorkspacesPane`. See file header for rationale.
  */
 export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({ tabs }) => {
-  const styles = useStyles();
   const [isManageOpen, setIsManageOpen] = React.useState(false);
 
   const handleOpen = React.useCallback(() => setIsManageOpen(true), []);
@@ -92,14 +86,10 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({ tabs }) =>
   return (
     <>
       <Tooltip content="Workspaces" relationship="label">
-        <Button
-          appearance="subtle"
-          size="small"
-          icon={<MoreVerticalRegular />}
-          aria-label="Workspaces"
-          className={styles.trigger}
+        <PaneHeaderMenuTriggerButton
+          ariaLabel="Workspaces"
           onClick={handleOpen}
-          data-testid="workspace-pane-menu-trigger"
+          testId="workspace-pane-menu-trigger"
         />
       </Tooltip>
 

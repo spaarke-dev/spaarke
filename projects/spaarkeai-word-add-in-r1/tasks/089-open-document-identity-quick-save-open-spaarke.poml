@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT-9/10: a saved document carries its Spaarke identity; Quick Save saves a version of a known document, keeps both on a foreign name and says what happened; the ribbon's Share becomes "Open Spaarke"</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts` (`WordAdapter.ts`, `useSaveFlow.ts`, `word/commands/index.ts`, `quickSaveHelpers.ts`), the add-in manifests and the unified package, and changes how a save chooses version vs create.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data integrity: a wrong identity turns a create into a version of someone else's document (the #1005 class). Writing into the user's open document is a new behaviour with a host-visible side effect.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT3-W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave W2 with 093 (server-only). Disjoint: 089 owns `WordAdapter.ts`, `adapters/types.ts`, `useSaveFlow.ts`, `word/commands/**`, `quickSaveHelpers.ts`, the manifests, `packaging/**`, `webpack.config.js` (version), `word/taskpane/index.tsx`; it touches no `.cs`. 093 is the only W2 task that runs `dotnet`; if 089 needs a server change, it escalates.</parallel-reason>
+    <deps>088</deps>
+    <tags>frontend, office-addins, typescript, manifest, document-identity, unit-test</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 3 (2026-10-03): UAT-9 ("Quick Save gives 'Failed to save'") and UAT-10 ("Share — don't know what this does"), with the owner's decisions the same day: write the identity mark into the open document; Quick Save keeps both automatically when the name belongs to a different document; remove Share — replaced, in a follow-up message, by "Open Spaarke", which opens the app. Diagnosis and decisions: `notes/042-uat-round3-2026-10-03.md` §2, §3, §3a.</prompt>
+
+  <role>SPAARKE developer on the Office add-in: Office.js Common API and Word API, ribbon function commands, the unified (JSON) app package and the XML manifests.</role>
+
+  <goal>Saving the same Word document again — from the pane or the ribbon, in the same session or after reopening it — saves a new version of its Spaarke document instead of colliding with it; Quick Save never fails on a name it can resolve, and always tells the user what it did; the Word ribbon offers "Open Spaarke" instead of Share.</goal>
+
+  <context>
+    <background>
+      - **Root cause (measured, §2 of the round-3 note)**: the server stamps the identity into the STORED copy (task 014);
+        nothing writes it into the document OPEN in Word. The client only reads stamps
+        (`WordAdapter.readDocumentStamp`, Common API `Office.context.document.customXmlParts.getByNamespaceAsync`,
+        `WordAdapter.ts:501`). So the next save of the same open document is a create under the same name → 409
+        `OFFICE_020` against its own earlier record.
+      - **Stamp contract** (`notes/014-xml-part-stamp-decisions.md` §13.3): namespace
+        `urn:spaarke:office:document-identity:1` as the root's DEFAULT xmlns; root `documentIdentity`; one child
+        `documentId` = the GUID, bare lowercase (ADR-044). Constants exported server-side as
+        `OfficeDocumentStamp.StampNamespace` / `.StampRootElement` / `.StampIdElement` — the client must use the SAME
+        three values (one TS constant module; a test pins them against the server's).
+      - **Write with the Common API** (019 condition 1: not `Word.Document.customXmlParts`, WordApi 1.4):
+        `customXmlParts.addAsync(xml)`; guard `isSetSupported('CustomXmlParts', '1.1')` (019 condition 4; the manifest
+        already declares it). Before adding: if one part in the namespace already carries the SAME id → do nothing;
+        any part(s) carrying a different id → delete them (`deleteAsync`) and add the new one, so the document never
+        carries two identities (the server's reader returns null when two disagree).
+      - **Side effect, accepted by the owner**: adding a part marks the document changed, so closing Word asks to save
+        the local copy. A document opened FROM Spaarke already carries the server's stamp with the same id → no write,
+        no prompt.
+      - **Server compatibility to verify, not assume**: the server's `Stamp` must treat a Word-authored part (Word
+        chooses its own part path and props) carrying the SAME id as already stamped (a no-op), and its reader must
+        read it. Prove it with the server's existing stamp tests using a Word-shaped part (create one by adding a part
+        through Word's own format if a fixture exists; otherwise build the shape from the OOXML spec). If the server
+        needs a change, ESCALATE (W2's dotnet slot belongs to 093).
+      - **Quick Save today** (`word/commands/index.ts:140-162`): title (`WordAdapter.ts:187-195`, falls back to
+        "Untitled Document") + `getFileAsync` content → `POST /api/office/save` with NO `targetEntity`, NO
+        `allowRename`, NO `existingDocumentId` (`quickSaveHelpers.ts:182-203`); one `catch` → fixed text "Failed to
+        save. Open Spaarke to try manually." (`:158`), the real error only in `console.error`.
+      - **Quick Save, as decided**: (1) read the identity the way the Share command did (stamp, then
+        `Office.context.document.url` → `POST /api/documents/resolve-identity`, `index.ts:171-177`,
+        `documentIdentityService.ts`); (2) **known document** → version save of it (`existingDocumentId`,
+        `isNewVersion` — the FR-11 path; the server's `OfficeVersionSaveAuthorizationFilter` demands write);
+        (3) **unknown** → create with the SAME file-name rule the pane uses (find the pane's function and call it — do
+        not write a second rule) and `allowRename: true`, so a foreign name is kept-both by the server;
+        (4) after any success → write the stamp (above); (5) the notification states the outcome in words: "Saved to
+        Spaarke as '{name}'", "Saved a new version of '{name}'", or the server's own message for a refusal (403, 429,
+        too large…). Never the fixed "Failed to save" text when the server gave a reason.
+      - **Notification dialog** `word/commands/notify.html` closes after 2.2 s (64-70) — too short to read a reason;
+        keep success short, let errors stay until dismissed or ~8 s.
+      - **Open Spaarke (replaces Share)**: opens `{ORG_URL}/main.aspx?appname={SPAARKE_APP_NAME}&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai`
+        (Matter Management's Workspace = the Console; `SPAARKE_APP_NAME` is the build setting task 088 adds, default
+        `sprk_MatterManagement`). From a function command use `Office.context.ui.openBrowserWindow` where available,
+        else `window.open`. Not shown/disabled per the same rule as the pane when `ORG_URL` is empty.
+      - **Remove Share**: the Word ribbon button + strings in `word/word-manifest.xml:151-165,191-197`,
+        `word/manifest.json:166-189`, the unified merge (`packaging/mergeUnifiedManifest.js`), the `shareDocument`
+        registration in `word/commands/index.ts:194-245`, and its tests. KEEP `shareLinkService` (Send Email uses it,
+        task 075). Outlook's compose-time "Share from Spaarke" is a different command and stays.
+      - **Versions**: bump `UNIFIED_PACKAGE.VERSION` 1.1.0 → **1.1.1** (`webpack.config.js:72-76`; the admin center
+        refuses a same-version update), Word JSON 1.0.9 → **1.0.10**, Word XML 1.0.9.0 → **1.0.10.0** (still built and
+        hosted although the owner removed the XML add-ins from the admin center). The pane footer's hard-coded
+        `APP_VERSION = '1.0.9'` (`word/taskpane/index.tsx:15`) is replaced by the package version injected at build.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="014 §3">A stamp is a hint, never an authorization. Quick Save's version path relies on the server's existing write check; the client never skips resolve-identity's validation by trusting a stamp alone for anything but choosing which id to send.</constraint>
+    <constraint source="#1005 lesson">A file NAME is never identity. Quick Save versions only a document resolved by stamp or URL; a name collision on an unresolved document is kept-both, never versioned.</constraint>
+    <constraint source="owner 2026-10-03">The stamp is written after every successful save of a Word document (pane and ribbon, create and version), only when absent or different. Writing failures are logged and non-fatal: the save already succeeded.</constraint>
+    <constraint source="NFR-10">Gate the stamp write on a capability (e.g. `canWriteDocumentStamp` from the adapter — true only where `CustomXmlParts` 1.1 is supported and the adapter is Word), never on `hostType`. Outlook does nothing new.</constraint>
+    <constraint source="this task">No BFF change. If server stamp compatibility fails, ESCALATE with the evidence.</constraint>
+    <constraint source="this task">Open Spaarke builds its URL from the build settings only, with every value encoded; no token, secret or BFF URL in it.</constraint>
+    <constraint source="ADR-038">Tests in `shared/**/__tests__/` and `word/commands/__tests__/`, listed in `ci-gated-suites.txt`.</constraint>
+    <constraint source="parallel wave">Do NOT edit any `.cs` or 093's files. Do NOT run `npm run build` or `dotnet` (the main session runs builds after the wave); run jest, lint and typecheck. Read the server stamp tests to verify compatibility; if running them is needed, say so and the main session runs them after the wave.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a successful pane save of an unstamped Word document, the open document carries exactly one part in `urn:spaarke:office:document-identity:1` whose `documentId` is the saved id; a second save of the same open document resolves it and is a version save (`existingDocumentId` = that id).</criterion>
+    <criterion testable="true">A document already carrying the same id is not written to (no `addAsync`, no `deleteAsync`); one carrying a different id ends with only the new id.</criterion>
+    <criterion testable="true">With `CustomXmlParts` 1.1 unsupported, or in Outlook, no write is attempted and the save still reports success.</criterion>
+    <criterion testable="true">Quick Save on a resolved document sends `existingDocumentId` + `isNewVersion` and, on success, notifies "Saved a new version of '{name}'".</criterion>
+    <criterion testable="true">Quick Save on an unresolved document sends the pane's file name rule and `allowRename: true`; when the server kept both under another name, the notification names the file actually created.</criterion>
+    <criterion testable="true">Negative: a Quick Save refused by the server shows the server's message (e.g. the 403 reason), not "Failed to save"; a failure with no server reason (network, file read) says what failed in words. Error notifications stay readable for at least 8 s.</criterion>
+    <criterion testable="true">The Word ribbon shows "Open Spaarke" (with tooltip) where Share was, in the Word JSON manifest, the Word XML manifest and the unified package; no manifest or command registration still references `shareDocument`. Open Spaarke opens `{ORG_URL}/main.aspx?appname=sprk_MatterManagement&amp;pagetype=webresource&amp;webresourceName=sprk_spaarkeai` with the default build setting.</criterion>
+    <criterion testable="true">Versions: unified package 1.1.1, Word JSON 1.0.10, Word XML 1.0.10.0, all schema-valid (the existing validation step); the pane footer shows the package version from the build, not a literal.</criterion>
+    <criterion testable="true">Client stamp constants equal the server's `OfficeDocumentStamp` constants (a test reads both).</criterion>
+    <criterion testable="true">Gates: gated jest green with new suites listed; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy + owner re-upload of 1.1.1): save in Word, Quick Save the same document → "Saved a new version"; close and reopen the local file → the pane recognises it; Open Spaarke opens the Console. If unavailable, leave open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The server's stamper or reader does not treat a Word-authored part with the same id as already stamped (it would add a second part, or read null) — STOP; that is a server change for the main session.</trigger>
+    <trigger>`customXmlParts.addAsync` is unavailable or throws in Word on the web or Word desktop for a reason other than an unsupported requirement set — record it and STOP before shipping a write that fails silently on one host.</trigger>
+    <trigger>The pane has no single, callable file-name rule (the name is assembled inline in more than one place) — report the places before extracting one.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read the round-3 note, the stamp contract (014 §3, §13.3), `WordAdapter.readDocumentStamp`, `word/commands/index.ts`, `quickSaveHelpers.ts`, `documentIdentityService.ts`, notify.html and the manifests.</step>
+    <step>Verify server stamp compatibility with a Word-shaped part (read the server tests; escalate per trigger 1 if it fails).</step>
+    <step>Adapter: `writeDocumentStamp` + capability; shared stamp constants; tests.</step>
+    <step>Pane: write the stamp after a successful save; tests.</step>
+    <step>Quick Save: identity → version / create with allowRename + the pane's name rule; outcome notifications; stamp after success; notify timing; tests.</step>
+    <step>Replace Share with Open Spaarke in all manifests and the unified merge; versions; footer version; tests.</step>
+    <step>Gates; record in `notes/089-identity-mark-quick-save-open-spaarke.md`; TASK-INDEX 089 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>The stamp format and server stamper (task 014), the client reader (051), resolve-identity (012), the version-save path (023/024), the keep-both rename (`allowRename`, 025), the record/app URL builder and build settings (027, 086, 088) all exist.</existing>
+    <extension>Yes — adds a write beside the existing read in `WordAdapter`, re-uses the pane's identity and name logic in the ribbon command, and swaps one ribbon button for another. No new route, service or schema.</extension>
+    <cost-of-doing-nothing>Every second save of the same open document collides with its own record (the owner's UAT-9, 4 of 4 failing Quick Saves); Quick Save hides every reason; the ribbon carries a button whose result users cannot see (UAT-10).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Same document, saved twice">
+      <steps>
+        <step>Open a local .docx, save it from the pane to a matter. Close the pane; Quick Save: "Saved a new version of …"; the document record shows version 2.</step>
+        <step>Save the local file, close Word, reopen it: the pane says the document is in Spaarke.</step>
+      </steps>
+    </test>
+    <test name="Foreign name">
+      <steps>
+        <step>Quick Save a new document named like an existing Spaarke document: the notification names the new file it created.</step>
+      </steps>
+    </test>
+    <test name="Open Spaarke">
+      <steps>
+        <step>Word ribbon: "Open Spaarke" is where Share was; it opens Matter Management on the Workspace.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+    <file role="edit">src/client/office-addins/shared/adapters/types.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+    <file role="edit">src/client/office-addins/word/commands/index.ts</file>
+    <file role="edit">src/client/office-addins/word/commands/notify.html</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/quickSaveHelpers.ts</file>
+    <file role="edit">src/client/office-addins/word/word-manifest.xml</file>
+    <file role="edit">src/client/office-addins/word/manifest.json</file>
+    <file role="edit">src/client/office-addins/packaging/mergeUnifiedManifest.js</file>
+    <file role="edit">src/client/office-addins/webpack.config.js</file>
+    <file role="edit">src/client/office-addins/word/taskpane/index.tsx</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentStamp.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/089-identity-mark-quick-save-open-spaarke.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/019-customxml-premise-and-manifest.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/051-client-stamp-reader.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-findings-2026-09-18.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+    <file>src/client/office-addins/word/commands/index.ts</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/089-identity-mark-quick-save-open-spaarke.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+  <notes>
+    <completed>2026-10-03 (wave UAT3-W2, beside server-only task 093). Not committed; the main session commits and builds.</completed>
+    <record>projects/spaarkeai-word-add-in-r1/notes/089-identity-mark-quick-save-open-spaarke.md</record>
+    <summary>Open document gets the identity mark after every successful save (pane via SaveView.onComplete, ribbon via Quick Save) through WordAdapter.writeDocumentStamp (Common API addAsync/deleteAsync, CustomXmlParts-gated, one part, no write when the same id is present) and documentIdentityService.writeIdentityStampAfterSave (capability-gated, non-fatal). Client stamp constants in shared/adapters/documentStampContract.ts, pinned against OfficeDocumentStamp.cs by a test. Quick Save: identity first; resolved = version (existingDocumentId + isNewVersion); new = create with the pane's name rule (extracted unchanged to utils/documentFileName.ts) + allowRename; conflict/indeterminate/denied/error = nothing saved, reason shown; notifications state the outcome (stored file name read from the job's artifact webUrl) or the server's own refusal message; error dialogs stay 8 s with Close. Share replaced by "Open Spaarke" (buildOpenSpaarkeUrl from ORG_URL + SPAARKE_APP_NAME) in the Word XML, Word JSON and unified package; shareDocument registration and tests removed; shareLinkService kept. Versions: package 1.1.1, Word JSON 1.0.10, Word XML 1.0.10.0; footer = injected ADDIN_PACKAGE_VERSION.</summary>
+    <gates>Gated jest 69/69 suites, 962/962 tests (6 new suites listed). Lint 0. Typecheck 68 total / 0 production (= baseline). Unified package 1.1.1 (prod + TEST) VALID against v1.30 schema, controls rejected; Word XML 1.0.10.0 valid (office-addin-manifest validate). 5 seeded regressions each turned tests red, reverted byte-identical.</gates>
+    <server-compatibility>Compatible by code reading - no server change (escalation trigger 1 did not fire): Word relates data-store parts from word/_rels/document.xml.rels (verified on Word-written docx in the repo), which is where OfficeDocumentStamp finds stamps; same id -> AlreadyStamped (reference-identical), reader returns the id. Optional main-session run: OfficeDocumentStampTests + OfficeSaveDocumentStampContractTests (unchanged code); a Word-shaped-part test is specified in the note §2 for the main session to add if wanted.</server-compatibility>
+    <escalations>Trigger 1: not fired. Trigger 2: not evaluable without a host - live check at AC 11 (a refused write logs and the save still succeeds). Trigger 3: judged not fired (one inline pane rule + one pane function; the only second copy was the ribbon's, now retired) - places recorded in the note §3.</escalations>
+    <open>AC 11 (live) OPEN: needs npm run build, deploy, owner re-upload of spaarke-addin-1.1.1.zip. Main session also owns TASK-INDEX 089 and current-task.md. Follow-up: pane tab-switch remount still starts from the identity resolved at pane open (App.tsx; see note §4).</open>
+  </notes>
+</task>

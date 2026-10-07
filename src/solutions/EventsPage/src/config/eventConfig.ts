@@ -8,6 +8,8 @@
  * @see projects/events-workspace-apps-UX-r1/notes/Events-View-GUIDS.md
  */
 
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Event Type to Form GUID Mapping
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,7 +119,7 @@ export function getFormGuidForEventType(eventTypeGuid: string | undefined): stri
   }
 
   // Normalize GUID (remove braces, lowercase)
-  const normalizedGuid = eventTypeGuid.replace(/[{}]/g, "").toLowerCase();
+  const normalizedGuid = cleanGuid(eventTypeGuid);
 
   const mapping = EVENT_TYPE_FORM_MAPPINGS.find(
     (m) => m.eventTypeGuid.toLowerCase() === normalizedGuid
@@ -213,7 +215,8 @@ export async function discoverEntityViews(entityName: string): Promise<IEventVie
   }
 
   try {
-    const xrm = (window as any).parent?.Xrm || (window as any).Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm();
     if (!xrm?.WebApi) {
       console.warn("[eventConfig] Xrm.WebApi not available for view discovery");
       return [];

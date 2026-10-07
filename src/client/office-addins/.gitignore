@@ -3,6 +3,8 @@ node_modules/
 
 # Build output
 dist/
+# Unified app-package zips (scripts/Package-OfficeAddinUnified.ps1, task 078)
+app-package/
 
 # TypeScript cache
 *.tsbuildinfo

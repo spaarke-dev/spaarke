@@ -27,6 +27,13 @@
 //                                           relatedEntities-style field is added. See the
 //                                           ExecuteAsync comment below + notes/task-019-*.md for
 //                                           the open product-semantics question.
+//   - targeting (optional, string)        — unified-access-control-r2 task 152 (ADR-034 Amendment A3).
+//                                           "people" → MembershipResolveOptions.PeopleTargeting: the records
+//                                           FOR the user (human Created By, Assigned To via the linked contact,
+//                                           personal ownership) — never team/BU/organization ownership. REQUIRED
+//                                           on every node whose output reaches a notification, email or briefing
+//                                           (owner round 2 item 9). Omitted → the default AI-scoping surface,
+//                                           unchanged. Any other value is a validation error.
 //   - outputVariable                      — required by the framework on PlaybookNodeDto itself
 //                                           (NOT inside ConfigJson) — validated below.
 //
@@ -128,7 +135,13 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
                 Type: SchemaFieldType.Boolean,
                 Required: false,
                 Description: "Reserved for future 1-hop transitive expansion. NO-OP TODAY: this node has no field for naming the related entities the resolver's IncludeRelated contract requires (concrete entity names, not a wildcard) — see FR-17/A-22 (fixed 2026-08-21). Setting true currently has no effect.",
-                Default: false)
+                Default: false),
+            new(
+                Name: "targeting",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Who the records are FOR. \"people\" = the records the user created (human Created By), is named on (Assigned To, via their linked contact) or personally owns — never records reached only through team, business-unit or organization ownership. REQUIRED as \"people\" whenever this node's output feeds a notification, email or briefing node (ADR-034 A3; a team-owned record must not fan out to the team). Omit for AI scoping (all discovered roles).",
+                Default: null)
         });
 
     /// <inheritdoc />
@@ -163,6 +176,13 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
                 if (string.IsNullOrWhiteSpace(config.EntityType))
                 {
                     errors.Add("LookupUserMembership node requires 'entityType' in ConfigJson");
+                }
+
+                if (config.Targeting is not null
+                    && !string.Equals(config.Targeting.Trim(), LookupUserMembershipNodeConfig.TargetingPeople, StringComparison.OrdinalIgnoreCase))
+                {
+                    errors.Add(
+                        $"LookupUserMembership 'targeting' must be \"{LookupUserMembershipNodeConfig.TargetingPeople}\" or omitted; got \"{config.Targeting}\"");
                 }
             }
         }
@@ -258,12 +278,17 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
             // node, the config schema needs a relatedEntities: string[] field wired 1:1 to
             // MembershipResolveOptions.IncludeRelated (each entry still resolver-validated,
             // 1-hop cap per ADR-034/Q3), not a boolean.
+            // Task 152 (ADR-034 A3): `targeting: "people"` selects the PEOPLE-TARGETING surface — the records FOR
+            // this user. Notification playbooks MUST use it: under the default surface a team- or BU-owned record
+            // reaches every member of the owning team (a BU's default team is the whole BU).
+            var peopleTargeting = config.Targeting is not null;
             var options = new MembershipResolveOptions(
                 Roles: NormalizeRoles(config.Roles),
                 IdentityTypes: null,
                 IncludeRelated: null,
                 Limit: MembershipResolveOptions.DefaultLimit,
-                ContinuationToken: null);
+                ContinuationToken: null,
+                PeopleTargeting: peopleTargeting);
 
             if (config.IncludeRelated == true)
             {
@@ -276,11 +301,12 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
 
             _logger.LogDebug(
                 "LookupUserMembership node {NodeId}: resolving entityType={EntityType} " +
-                "roles={RoleCount} includeRelated={IncludeRelated} for systemUserId={SystemUserId}",
+                "roles={RoleCount} includeRelated={IncludeRelated} targeting={Targeting} for systemUserId={SystemUserId}",
                 context.Node.Id,
                 entityType,
                 options.Roles?.Count ?? 0,
                 config.IncludeRelated ?? false,
+                peopleTargeting ? LookupUserMembershipNodeConfig.TargetingPeople : "default",
                 userId.Value);
 
             // Singleton+Scoped DI bridge — CreateScope per execution, dispose at end.
@@ -458,4 +484,16 @@ internal sealed record LookupUserMembershipNodeConfig
     /// </summary>
     [JsonPropertyName("includeRelated")]
     public bool? IncludeRelated { get; init; }
+
+    /// <summary>The one accepted <see cref="Targeting"/> value.</summary>
+    internal const string TargetingPeople = "people";
+
+    /// <summary>
+    /// unified-access-control-r2 task 152 (ADR-034 Amendment A3): <c>"people"</c> selects the people-targeting
+    /// surface (records FOR the user — human Created By, Assigned To via the linked contact, personal ownership;
+    /// never team/BU/organization ownership). <c>null</c> keeps the default AI-scoping surface. Required as
+    /// <c>"people"</c> on every node whose output reaches a CreateNotification, SendEmail or briefing node.
+    /// </summary>
+    [JsonPropertyName("targeting")]
+    public string? Targeting { get; init; }
 }

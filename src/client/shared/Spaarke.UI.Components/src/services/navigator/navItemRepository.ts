@@ -51,6 +51,7 @@
  */
 
 import { getXrm } from '../../utils/xrmContext';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -156,15 +157,14 @@ export class NavItemRepositoryError extends Error {
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize a Dataverse GUID: strip braces, lowercase. Mirrors
- * `contextService.ts`'s `normalizeGuid` (retired reference impl this task
- * re-adopts) — kept local rather than extracted to a shared util because it
- * is a two-line pure function (CLAUDE.md §11: extension is earned by a real
- * second consumer, not anticipated).
+ * Normalize a Dataverse GUID: strip braces, lowercase. Re-exported under this
+ * module's existing name for its one external consumer
+ * (`navigatorCaptureService.ts`); the implementation now delegates to the
+ * canonical `cleanGuid` (C-7, spaarke-ontology-platform-r1 reuse audit U1) —
+ * the "kept local, no second consumer" rationale this replaced no longer
+ * holds now that a shared, barrel-exported implementation exists.
  */
-export function normalizeGuid(id: string): string {
-  return id.replace(/[{}]/g, '').toLowerCase();
-}
+export const normalizeGuid = cleanGuid;
 
 /** Escape a single-quote for safe interpolation into an OData string literal. */
 function escapeODataString(value: string): string {

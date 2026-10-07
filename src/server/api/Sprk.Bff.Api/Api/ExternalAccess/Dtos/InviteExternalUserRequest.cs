@@ -8,7 +8,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="AccessLevel">Access level to grant (100000000=ViewOnly, 100000001=Collaborate, 100000002=FullAccess).</param>
 /// <param name="FirstName">Optional first name for Contact creation if the Contact does not yet exist.</param>
 /// <param name="LastName">Optional last name for Contact creation if the Contact does not yet exist.</param>
-/// <param name="ExpiryDate">Optional expiry date for the access record. No expiry if not specified.</param>
+/// <param name="ExpiryDate">
+/// Used by <c>/invite-and-grant</c> only — <c>/invite</c> writes no grant and ignores it. Same rule as
+/// <c>GrantAccessRequest.ExpiryDate</c> (spec FR-33, task 097): a date before today is rejected (400) before
+/// any onboarding happens; when omitted, the grant keeps its existing expiry, else gets today + 90 days.
+/// </param>
 /// <param name="OrganizationId">
 /// Optional grantee firm/organization — a <c>sprk_organization</c> id (NOT the OOB <c>account</c>) —
 /// written to the grant's <c>sprk_Organization</c> lookup for firm-level scoping by <c>/invite-and-grant</c>.

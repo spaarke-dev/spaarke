@@ -43,6 +43,7 @@
 | 019 | `.claude/adr/ADR-019-problemdetails.md` | [docs/adr/ADR-019-api-errors-and-problemdetails.md](docs/adr/ADR-019-api-errors-and-problemdetails.md) | [api.md](.claude/constraints/api.md) | [api/error-handling.md](.claude/patterns/api/error-handling.md) |
 | 020 | `.claude/adr/ADR-020-versioning.md` | [docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md](docs/adr/ADR-020-versioning-strategy-apis-jobs-client-packages.md) | [api.md](.claude/constraints/api.md) | - |
 | 021 | `.claude/adr/ADR-021-fluent-design-system.md` | [docs/adr/ADR-021-fluent-ui-design-system.md](docs/adr/ADR-021-fluent-ui-design-system.md) | [pcf.md](.claude/constraints/pcf.md) | [pcf/theme-management.md](.claude/patterns/pcf/theme-management.md) |
+| 052 | `.claude/adr/ADR-052-workload-placement.md` | [docs/adr/ADR-052-workload-placement.md](docs/adr/ADR-052-workload-placement.md) | [jobs.md](.claude/constraints/jobs.md), [bff-extensions.md](.claude/constraints/bff-extensions.md) | [api/background-workers.md](.claude/patterns/api/background-workers.md) |
 
 ---
 
@@ -52,7 +53,7 @@
 |--------|----------------|-------------|---------------|---------------------|
 | API/BFF | [.claude/constraints/api.md](.claude/constraints/api.md) | ADR-001, 004, 008, 010, 011, 017 | - | [sdap-bff-api-patterns.md](docs/architecture/sdap-bff-api-patterns.md) |
 | PCF | [.claude/constraints/pcf.md](.claude/constraints/pcf.md) | ADR-006, 012, 014, 015, 018 | [PCF-CONTROL-DEVELOPMENT.md](docs/guides/PCF-CONTROL-DEVELOPMENT.md) | [sdap-pcf-patterns.md](docs/architecture/sdap-pcf-patterns.md) |
-| Plugins | [.claude/constraints/plugins.md](.claude/constraints/plugins.md) | ADR-002 | [DATAVERSE-PLUGIN-DEVELOPMENT.md](docs/guides/DATAVERSE-PLUGIN-DEVELOPMENT.md) | - |
+| Plugins (none) + Write Path | [.claude/constraints/plugins.md](.claude/constraints/plugins.md) | ADR-002 | [DATAVERSE-WRITE-PATH-ARCHITECTURE.md](docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md) | - |
 | Auth | [.claude/constraints/auth.md](.claude/constraints/auth.md) | ADR-004, 016 | - | [auth-boundaries.md](docs/architecture/auth-boundaries.md), [sdap-auth-patterns.md](docs/architecture/sdap-auth-patterns.md) |
 | Data | [.claude/constraints/data.md](.claude/constraints/data.md) | ADR-003, 005, 007, 009, 019 | - | - |
 | Testing | [.claude/constraints/testing.md](.claude/constraints/testing.md) | ADR-022 | - | - |
@@ -97,7 +98,7 @@
 
 | Pattern | File | Source ADRs | Canonical Source |
 |---------|------|-------------|------------------|
-| Plugin Structure | [.claude/patterns/dataverse/plugin-structure.md](.claude/patterns/dataverse/plugin-structure.md) | ADR-002 | `src/dataverse/plugins/.../BaseProxyPlugin.cs` |
+| Plugin Structure (retired → write path) | [.claude/patterns/dataverse/plugin-structure.md](.claude/patterns/dataverse/plugin-structure.md) | ADR-002 | `src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs` |
 | Web API Client | [.claude/patterns/dataverse/web-api-client.md](.claude/patterns/dataverse/web-api-client.md) | ADR-007, ADR-010 | `src/server/shared/Spaarke.Dataverse/DataverseWebApiClient.cs` |
 | Entity Operations | [.claude/patterns/dataverse/entity-operations.md](.claude/patterns/dataverse/entity-operations.md) | ADR-002, ADR-007 | `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` |
 | Relationship Navigation | [.claude/patterns/dataverse/relationship-navigation.md](.claude/patterns/dataverse/relationship-navigation.md) | ADR-007 | `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs` |

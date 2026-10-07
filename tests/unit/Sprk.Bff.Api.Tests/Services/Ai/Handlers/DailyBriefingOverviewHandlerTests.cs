@@ -30,8 +30,8 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// <para>
 /// Constructs a REAL <see cref="BriefingService"/> (its <c>GetBriefingAsync</c> is not
 /// virtual, so it cannot be Moq'd directly) wired to mocked leaf boundaries
-/// (<see cref="IDataverseService"/>, <see cref="IMembershipResolverService"/>,
-/// <see cref="IGenericEntityService"/> via a real <see cref="PortfolioService"/>) — the same
+/// (<see cref="IDataverseService"/>, and <see cref="IMembershipResolverService"/> + the caller-context query via a
+/// real <see cref="PortfolioService"/>) — the same
 /// construction pattern as <c>BriefingServiceTests.CreateSut</c>. This exercises the handler's
 /// public surface end-to-end against the real aggregation/heuristic logic, not a hand-rolled
 /// double for <c>BriefingResponse</c>.
@@ -46,36 +46,34 @@ public sealed class DailyBriefingOverviewHandlerTests
 
     private readonly Mock<IDataverseService> _dataverseMock = new(MockBehavior.Strict);
     private readonly Mock<IMembershipResolverService> _resolverMock = new(MockBehavior.Strict);
+    private readonly Mock<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery> _callerQueryMock = new();
     private readonly IDistributedCache _briefingCache = new MemoryDistributedCache(
         Options.Create(new MemoryDistributedCacheOptions()));
     private readonly Mock<IDistributedCache> _portfolioCacheMock = new(MockBehavior.Loose);
-    private readonly Mock<IGenericEntityService> _portfolioEntityServiceMock = new(MockBehavior.Loose);
 
     private readonly List<TypedToolHandlerTestFixture.CapturedLogMessage> _capturedLogs = new();
 
     private DailyBriefingOverviewHandler CreateHandler()
     {
+        // The portfolio METRICS are a cache hit (an empty portfolio), so the handler tests observe the top-priority
+        // matter — which, since task 152 verifier round 1, is read through PortfolioService.ReadMattersForSystemUserAsync
+        // (people-targeted, caller-context) using the resolver + caller-query fakes below.
         _portfolioCacheMock
             .Setup(c => c.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((byte[]?)null);
-        _portfolioCacheMock
-            .Setup(c => c.SetAsync(
-                It.IsAny<string>(), It.IsAny<byte[]>(), It.IsAny<DistributedCacheEntryOptions>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        _portfolioEntityServiceMock
-            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection());
+            .ReturnsAsync(System.Text.Encoding.UTF8.GetBytes(System.Text.Json.JsonSerializer.Serialize(new PortfolioSummaryResponse(
+                TotalSpend: 0m, TotalBudget: 0m, UtilizationPercent: 0m, MattersAtRisk: 0, OverdueEvents: 0,
+                ActiveMatters: 0, CachedAt: DateTimeOffset.UtcNow))));
 
         var portfolio = new PortfolioService(
             _portfolioCacheMock.Object,
-            _portfolioEntityServiceMock.Object,
+            _resolverMock.Object,
+            _callerQueryMock.Object,
             StubSystemUserIdentityResolver.Instance,
             NullLogger<PortfolioService>.Instance);
 
         var briefingService = new BriefingService(
             portfolioService: portfolio,
             cache: _briefingCache,
-            membershipResolver: _resolverMock.Object,
             dataverse: _dataverseMock.Object,
             logger: NullLogger<BriefingService>.Instance,
             briefingAi: null); // deterministic template narrative — no AI facade in unit tests
@@ -117,19 +115,25 @@ public sealed class DailyBriefingOverviewHandlerTests
             .ReturnsAsync(systemUserCollection);
     }
 
-    private static Entity BuildMatterEntity(Guid id, string name, int overdue, decimal spend, decimal budget, DateTime? deadline)
+    /// <summary>
+    /// Task 152: the caller-context read returns the matter's detail row (and no overdue tasks), as Dataverse would
+    /// under impersonation for a matter the caller may read.
+    /// </summary>
+    private void SetupCallerMatter(Guid id, string name, decimal spend, decimal budget)
     {
-        var entity = new Entity("sprk_matter", id);
-        entity["sprk_name"] = name;
-        entity["sprk_overdueeventcount"] = overdue;
-        entity["sprk_totalspend"] = new Money(spend);
-        entity["sprk_totalbudget"] = new Money(budget);
-        entity["statecode"] = new OptionSetValue(0);
-        if (deadline.HasValue)
-        {
-            entity["sprk_duedate"] = deadline.Value;
-        }
-        return entity;
+        var row = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, System.Text.Json.JsonElement>>(
+            System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object?>
+            {
+                ["sprk_matterid"] = id.ToString("D"),
+                ["sprk_mattername"] = name,
+                ["sprk_totalspendtodate"] = spend,
+                ["sprk_totalbudget"] = budget,
+            }))!;
+        _callerQueryMock
+            .Setup(q => q.QueryAsync(It.IsAny<string>(), It.IsAny<string?>(), TestSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string set, string? _, Guid _, CancellationToken _) => set == "sprk_matters"
+                ? new List<Dictionary<string, System.Text.Json.JsonElement>> { row }
+                : new List<Dictionary<string, System.Text.Json.JsonElement>>());
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -253,13 +257,8 @@ public sealed class DailyBriefingOverviewHandlerTests
             .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(memberships);
 
-        var deadline = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                BuildMatterEntity(MatterId, "Matter Alpha", overdue: 3, spend: 60_000m, budget: 100_000m, deadline: deadline)
-            }));
+        // Task 152: the matter detail is read AS THE CALLER (IImpersonatedCommunicationQuery), never app-only.
+        SetupCallerMatter(MatterId, "Matter Alpha", spend: 60_000m, budget: 100_000m);
 
         var ctx = BuildContext(userId: TestAadOidString);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildTool(), CancellationToken.None);
@@ -371,12 +370,7 @@ public sealed class DailyBriefingOverviewHandlerTests
         _resolverMock
             .Setup(r => r.ResolveAsync(TestSystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(memberships);
-        _dataverseMock
-            .Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_matter"), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
-            {
-                BuildMatterEntity(MatterId, sensitiveMatterName, overdue: 1, spend: 10_000m, budget: 20_000m, deadline: null)
-            }));
+        SetupCallerMatter(MatterId, sensitiveMatterName, spend: 10_000m, budget: 20_000m);
 
         var ctx = BuildContext(userId: TestAadOidString);
         var result = await CreateHandler().ExecuteChatAsync(ctx, BuildTool(), CancellationToken.None);

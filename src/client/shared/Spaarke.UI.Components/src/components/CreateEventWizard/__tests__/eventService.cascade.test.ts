@@ -1,12 +1,17 @@
 /**
  * EventService — BU cascade integration tests (FR-WIZ-05 / INV-5)
  *
- * Scope: verify that `EventService.createEvent` populates BOTH
- *   - `sprk_containerid`
+ * Scope: verify that `EventService.createEvent` populates
  *   - `sprk_searchindexname`
  * on the create payload, sourced from the current user's owning Business Unit
  * via `EntityCreationService.applyUserBuDefaults` + `resolveUserBuDefaults`,
- * with INV-5 preserved for explicit pre-seeded values.
+ * with INV-5 preserved for explicit pre-seeded values — and that it writes NO
+ * `sprk_containerid`.
+ *
+ * ⚠️ Task 076 (2026-09-03) deleted the `sprk_containerid` half of this cascade along with
+ * `EntityCreationService.applyDefaultContainerId`. Every assertion that used to read a container
+ * value off the payload was converted to assert its ABSENCE — a client does not choose where a
+ * record's content is stored.
  *
  * Notes
  *   - We mock `window.Xrm.Utility.getGlobalContext().userSettings.userId` to provide
@@ -19,6 +24,8 @@
  * @see workAssignmentService.cascade.test.ts (sibling FR-WIZ-04 reference shape)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
 import type { ICreateEventFormState } from '../formTypes';
@@ -75,6 +82,8 @@ function makeDataService(
  */
 function stubXrmUser(userId: string | null) {
   (window as unknown as { Xrm: unknown }).Xrm = {
+    // `WebApi` is required by the shared `getXrm()` walker (task 081 / C-8).
+    WebApi: {},
     Utility: {
       getGlobalContext: () => ({
         userSettings: { userId: userId },
@@ -129,13 +138,14 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     jest.restoreAllMocks();
   });
 
-  it('cascade: BU populates BOTH sprk_containerid and sprk_searchindexname on a clean payload', async () => {
+  // Converted by task 076: was "BU populates BOTH sprk_containerid and sprk_searchindexname".
+  it('cascade: BU populates sprk_searchindexname only — no sprk_containerid — on a clean payload', async () => {
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -143,7 +153,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
 
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 
@@ -156,7 +166,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(
       makeForm({ regardingRecordId: 'matter-guid-1', regardingRecordName: 'Some Matter' }),
       'sprk_matter'
@@ -165,24 +175,25 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 
-  it('NULL BU sprk_searchindexname (Spaarke Dev 1 / Test 1 scenario): containerid still cascades, searchindexname left unset', async () => {
+  // Converted by task 076: was "containerid still cascades, searchindexname left unset".
+  it('NULL BU sprk_searchindexname (Spaarke Dev 1 / Test 1 scenario): neither cascade field is written', async () => {
     // Spaarke Dev 1 / Test 1 scenario per Phase A.5: BU exists but index name not configured.
     const dataService = makeDataService({
       sprk_containerid: 'bu-container-abc',
       sprk_searchindexname: null,
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     // BFF tenant-default chain takes over server-side; payload field left unset
     expect('sprk_searchindexname' in payload!).toBe(false);
   });
@@ -193,7 +204,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-file-index',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -212,7 +223,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -239,7 +250,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     });
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -257,7 +268,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       { userHasBu: false }
     );
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm());
 
     expect(result.success).toBe(true);
@@ -279,7 +290,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
       sprk_searchindexname: 'spaarke-knowledge-index-v2',
     });
 
-    const service = new EventService(dataService);
+    const service = new EventService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createEvent(makeForm(), undefined, {
       getCurrentUserId: () => USER_GUID,
     });
@@ -287,7 +298,7 @@ describe('EventService — FR-WIZ-05 BU cascade', () => {
     expect(result.success).toBe(true);
     const payload = dataService._capturedPayloads['sprk_event']?.[0];
     expect(payload).toBeDefined();
-    expect(payload!['sprk_containerid']).toBe('bu-container-abc');
+    expect(payload!).not.toHaveProperty('sprk_containerid');
     expect(payload!['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
   });
 });

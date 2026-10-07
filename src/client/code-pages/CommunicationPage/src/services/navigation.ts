@@ -5,13 +5,14 @@
  */
 
 import type { ICommunicationNavCallbacks } from '../types/communication';
-import { resolveXrm } from './xrm';
+import { getXrm } from '@spaarke/ui-components';
 
 export function buildNavCallbacks(): ICommunicationNavCallbacks {
   return {
     // On successful send: open the created/updated sprk_communication record.
     onSent: (communicationId: string) => {
-      const xrm = resolveXrm();
+      // Shared cross-frame walker (task 081 / C-8).
+      const xrm = getXrm('openForm');
       if (xrm?.Navigation?.openForm) {
         xrm.Navigation.openForm({ entityName: 'sprk_communication', entityId: communicationId });
       } else {

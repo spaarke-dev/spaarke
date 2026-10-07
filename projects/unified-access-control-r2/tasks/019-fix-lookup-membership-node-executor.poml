@@ -30,7 +30,7 @@
       <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/LookupUserMembershipNodeTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization test (if 001 covered this node) pinning the throw; otherwise created here.</dependency>
+      <dependency task="001" status="completed">Characterization test (if 001 covered this node) pinning the throw; otherwise created here.</dependency>
     </dependencies>
   </context>
 

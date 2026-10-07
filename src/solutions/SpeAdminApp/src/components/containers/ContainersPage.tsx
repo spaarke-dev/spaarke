@@ -1027,11 +1027,31 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   );
 
   /**
-   * Delete (soft-delete) moves containers to the recycle bin via the Graph API.
-   * There is no direct DELETE on containers in the BFF — instead we use
-   * speApiClient.recycleBin endpoints after delete. For now the delete action
-   * is intentionally a placeholder that calls a custom delete-to-recycle-bin
-   * endpoint if/when added. We show a confirmation via window.confirm for safety.
+   * Delete (soft-delete) enqueues a bulk move-to-recycle-bin on the server.
+   *
+   * ── FIXED 2026-09-01 (unified-access-control-r2) ─────────────────────────────
+   * This handler previously made NO SERVER CALL AT ALL. It confirmed ("moved to the
+   * Recycle Bin… restored within 93 days"), optimistically removed the rows from local
+   * state, and reported `"{n} containers deleted (moved to Recycle Bin)"` — so an admin
+   * saw a success message, watched the rows disappear, and NOTHING WAS DELETED. The rows
+   * came back on the next refresh. That is a false compliance signal on a destructive
+   * admin action: an operator could believe customer content had been removed when it
+   * had not.
+   *
+   * Its stated premise was also false. The comment claimed "speApiClient.containers does
+   * not currently expose a delete method… will be wired when the BFF DELETE endpoint is
+   * added" — but `POST /api/spe/bulk/delete` already exists
+   * (`Api/SpeAdmin/BulkOperationEndpoints.cs:50`) and the sibling `ContainerResultsGrid`
+   * (`:413`) has been calling it successfully via `speApiClient.bulk.enqueuDelete`. The
+   * capability was one file away the whole time.
+   *
+   * Two behavioural corrections beyond wiring the call:
+   *  1. Rows are NO LONGER removed optimistically. The delete is an ENQUEUED async job;
+   *     removing rows before the server has acted is what made the no-op look successful.
+   *     The list is refreshed from the server instead.
+   *  2. The message says QUEUED, not "deleted" — because at the moment it returns, the
+   *     work has been accepted, not completed. Claiming completion we cannot observe is
+   *     the same class of lie in a smaller size.
    */
   const handleDelete = React.useCallback(async () => {
     if (!selectedConfig || !hasSelection || actionInProgress) return;
@@ -1046,28 +1066,24 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
     setActionStatus(null);
 
     try {
-      // SPE soft-delete: PATCH status to "inactive" then container goes to recycle bin
-      // via Graph API. The BFF exposes this as a DELETE on /api/spe/containers/{id}.
-      // NOTE: speApiClient.containers does not currently expose a delete method
-      // because the Graph API soft-deletes on DELETE. This will be wired when
-      // the BFF DELETE /api/spe/containers/{id} endpoint is added (future task).
-      // For now we optimistically remove from the list and show a status.
-      // TODO: replace with speApiClient.containers.delete() when endpoint is added.
-      setContainers((prev) =>
-        prev.filter((c) => !selectedIds.has(c.id as TableRowId))
-      );
+      const accepted = await speApiClient.bulk.enqueuDelete({
+        containerIds: selectedContainers.map((c) => c.id),
+        configId: selectedConfig.id,
+      });
+
       setSelectedIds(new Set());
       setActionStatus(
-        `${count} container${count !== 1 ? "s" : ""} deleted (moved to Recycle Bin).`
+        `Delete queued for ${count} container${count !== 1 ? "s" : ""} ` +
+          `(operation ${accepted.operationId}). They move to the Recycle Bin once it completes; ` +
+          `refresh to see the result.`
       );
     } catch (err) {
-      const message =
-        describeApiError(err, "Delete failed. Please try again.");
+      const message = describeApiError(err, "Delete failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
     }
-  }, [selectedConfig, hasSelection, actionInProgress, selectedContainers, selectedIds]);
+  }, [selectedConfig, hasSelection, actionInProgress, selectedContainers]);
 
   // ── Create Container ────────────────────────────────────────────────────────
 

@@ -34,6 +34,15 @@ const TWO_WARNINGS = [
   { type: 'ignored', message: 'b' },
 ];
 
+/**
+ * UAT round 1 #2 (r8, 2026-09-02) — the two formatting-notice families no longer render as full-width
+ * MessageBars; they collapse into one row whose popover holds the same copy. Tests therefore OPEN the
+ * popover before asserting on notice text. The row itself (count + dismiss) is assertable without opening.
+ */
+async function openFormattingNotices(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  await user.click(screen.getByTestId('compose-workspace-formatting-notices-open'));
+}
+
 describe('ComposeBannerStack — UAT-12 annotation-read-failed warning (do not treat as clean)', () => {
   it('renders the honest "tracked changes and comments couldn\'t be read" banner', () => {
     renderStack({ annotationReadFailed: true });
@@ -119,13 +128,19 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     window.sessionStorage.clear();
   });
 
-  it('renders the simplification warning with a dismiss control', () => {
+  it('collapses the simplification warning into one row with a count, a popover and a dismiss control', async () => {
+    const user = userEvent.setup();
     renderStack({ importWarnings: TWO_WARNINGS });
 
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
+    const row = screen.getByTestId('compose-workspace-formatting-notices');
+    // ONE family showing → "1 formatting notice", not one row per warning code. Counting codes here
+    // would reproduce the per-paragraph over-reporting this release retired.
+    expect(row).toHaveTextContent('1 formatting notice');
+    expect(screen.getByTestId('compose-workspace-formatting-notices-dismiss')).toBeInTheDocument();
+
+    // The copy is unchanged — it just lives behind the affordance now.
+    await openFormattingNotices(user);
     expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-workspace-import-warning-dismiss')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dismiss')).toBeInTheDocument();
   });
 
   // UAT #10/#11 (task 052) — Word co-authoring lock (423) honest banner.
@@ -161,18 +176,18 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     const user = userEvent.setup();
     renderStack({ importWarnings: TWO_WARNINGS });
 
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
 
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
   });
 
   it('dismissing the warning does NOT hide other banners in the stack', async () => {
     const user = userEvent.setup();
     renderStack({ importWarnings: TWO_WARNINGS, errorMessage: 'Save failed' });
 
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
 
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
     // The unrelated save-error banner stays visible.
     expect(screen.getByTestId('compose-workspace-error-banner')).toBeInTheDocument();
   });
@@ -181,8 +196,8 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
     const user = userEvent.setup();
     const { rerender } = renderStack({ importWarnings: TWO_WARNINGS });
 
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
 
     // A fresh document load hands a NEW array reference → dismissal resets.
     rerender(
@@ -198,13 +213,14 @@ describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () 
       </FluentProvider>
     );
 
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    await openFormattingNotices(user);
     expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
   });
 
   it('dark mode (ADR-021): renders with no hardcoded hex color', () => {
     const { container } = renderStack({ importWarnings: TWO_WARNINGS }, webDarkTheme);
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
@@ -341,18 +357,22 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     { code: 'comment-anchor-dropped', count: 2 },
   ];
 
-  it('renders save warnings with friendly copy EVEN while hideImportWarnings suppresses the import banner', () => {
+  it('renders save warnings with friendly copy EVEN while hideImportWarnings suppresses the import notice', async () => {
+    const user = userEvent.setup();
     renderStack({
       importWarnings: TWO_WARNINGS,
       hideImportWarnings: true,
       saveDegradationWarnings: SAVE_WARNINGS,
     });
 
-    // Import banner suppressed (UAT round-7 #8) …
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
-    // … but the SAVE-degradation banner still renders — the 026-F5 fix.
-    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
-    expect(banner).toBeInTheDocument();
+    // The row renders for the SAVE family alone — hideImportWarnings suppresses the import family only
+    // (UAT round-7 #8), and 026-F5 requires the save family to survive that suppression. With the two
+    // collapsed behind one row, "1 formatting notice" IS the assertion that the import half is gone.
+    const row = screen.getByTestId('compose-workspace-formatting-notices');
+    expect(row).toHaveTextContent('1 formatting notice');
+    await openFormattingNotices(user);
+    expect(screen.queryByTestId('compose-workspace-import-warning-notice')).not.toBeInTheDocument();
+    const banner = screen.getByTestId('compose-workspace-save-degradation-notice');
     // UAT-07b (committed earlier) renamed the banner TITLE to "Some formatting was simplified when
     // saving"; this assertion was left on the old "content" wording. Match the shipped title.
     expect(screen.getByText('Some formatting was simplified when saving')).toBeInTheDocument();
@@ -367,24 +387,29 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
   // bytes were already written and already carried the simplification being described. The owner saw
   // exactly this in dev. Assert the honest trailer AND assert the false claim is gone, so the old copy
   // cannot come back.
-  it('does NOT claim the original file is unchanged — this banner only renders AFTER a completed save', () => {
+  it('does NOT claim the original file is unchanged — this notice only renders AFTER a completed save', async () => {
+    const user = userEvent.setup();
     renderStack({ saveDegradationWarnings: SAVE_WARNINGS });
+    await openFormattingNotices(user);
 
-    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    const banner = screen.getByTestId('compose-workspace-save-degradation-notice');
     expect(banner.textContent).not.toMatch(/original file is unchanged/i);
     expect(banner.textContent).not.toMatch(/until you save/i);
     expect(banner.textContent).toContain('These changes are in the version you just saved.');
     expect(banner.textContent).toMatch(/version history/i);
   });
 
-  it('falls back to the generic "(code ×N)" copy for an unknown code', () => {
+  it('falls back to the generic "(code ×N)" copy for an unknown code', async () => {
+    const user = userEvent.setup();
     renderStack({ saveDegradationWarnings: [{ code: 'mystery-degradation', count: 3 }] });
+    await openFormattingNotices(user);
 
-    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    const banner = screen.getByTestId('compose-workspace-save-degradation-notice');
     expect(banner.textContent).toContain('Some content was simplified when saving (mystery-degradation ×3).');
   });
 
-  it('renders friendly copy (not the raw code) for previously-cryptic degradation codes (copy-gap 2026-08-18)', () => {
+  it('renders friendly copy (not the raw code) for previously-cryptic degradation codes (copy-gap 2026-08-18)', async () => {
+    const user = userEvent.setup();
     renderStack({
       saveDegradationWarnings: [
         { code: 'unrepresented-footnote-reference', count: 1 },
@@ -392,7 +417,8 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
         { code: 'hard-tier-sdt-flattened', count: 1 },
       ],
     });
-    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    await openFormattingNotices(user);
+    const banner = screen.getByTestId('compose-workspace-save-degradation-notice');
     expect(banner.textContent).toContain("A footnote couldn't be carried into the saved document.");
     expect(banner.textContent).toContain('was saved as plain text and will no longer update automatically.');
     expect(banner.textContent).toContain('A content control');
@@ -403,18 +429,18 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
 
   it('renders nothing for null or an empty set (a clean save clears the banner)', () => {
     renderStack({ saveDegradationWarnings: null });
-    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
 
     renderStack({ saveDegradationWarnings: [] });
-    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
   });
 
   it('dismisses via sessionStorage (SEPARATE key) and a NEW warning set (different signature) re-shows', async () => {
     const user = userEvent.setup();
     const { rerender } = renderStack({ saveDegradationWarnings: SAVE_WARNINGS });
 
-    await user.click(screen.getByTestId('compose-workspace-save-degradation-dismiss'));
-    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
     // The dismissal landed on the save-degradation key, NOT the import-warnings key.
     const keys = Object.keys(window.sessionStorage);
     expect(keys.some(k => k.startsWith('spaarke-compose:save-degradation-dismissed:'))).toBe(true);
@@ -434,28 +460,48 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
         />
       </FluentProvider>
     );
-    expect(screen.getByTestId('compose-workspace-save-degradation-banner')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-workspace-save-degradation-banner').textContent).toContain(
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    await openFormattingNotices(user);
+    expect(screen.getByTestId('compose-workspace-save-degradation-notice').textContent).toContain(
       'A tracked move was saved as delete + insert.'
     );
   });
 
-  it('dismissing the SAVE banner does not affect the import banner (separate families)', async () => {
+  it('026-F5 SEPARATE families: dismissing the collapsed row does not suppress a LATER save notice', async () => {
     const user = userEvent.setup();
-    renderStack({ importWarnings: TWO_WARNINGS, saveDegradationWarnings: SAVE_WARNINGS });
+    const { rerender } = renderStack({ importWarnings: TWO_WARNINGS });
 
-    // Both visible (hideImportWarnings not set here).
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-workspace-save-degradation-banner')).toBeInTheDocument();
+    // One family showing; dismissing the row dismisses what is currently shown — the natural meaning of
+    // a single "dismiss notices" control.
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toHaveTextContent('1 formatting notice');
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
 
-    await user.click(screen.getByTestId('compose-workspace-save-degradation-dismiss'));
-    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
+    // The PROPERTY 026-F5 protects is independence ACROSS TIME, and collapsing the two families behind
+    // one control must not cost it: each family keeps its own sessionStorage key, so a save notice
+    // arriving after an import dismissal still surfaces. That is the regression worth guarding, not the
+    // existence of two separate dismiss buttons.
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeBannerStack
+          errorMessage={null}
+          checkoutStatus="idle"
+          checkoutLockedBy={null}
+          checkoutFailureMessage={null}
+          importWarnings={TWO_WARNINGS}
+          saveDegradationWarnings={SAVE_WARNINGS}
+          pendingAssistantInsert={null}
+        />
+      </FluentProvider>
+    );
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    await openFormattingNotices(user);
+    expect(screen.getByTestId('compose-workspace-save-degradation-notice')).toBeInTheDocument();
   });
 
   it('dark mode (ADR-021): renders with no hardcoded hex color', () => {
     const { container } = renderStack({ saveDegradationWarnings: SAVE_WARNINGS }, webDarkTheme);
-    expect(screen.getByTestId('compose-workspace-save-degradation-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
@@ -552,7 +598,8 @@ describe('ComposeBannerStack — "Opened from PDF" honest-lossiness notice (task
     expect(screen.getByTestId('compose-workspace-pdf-source-banner')).toBeInTheDocument();
   });
 
-  it('pdf-intake-* degradation codes carry friendly copy in the save-warning banner (no raw codes shown to the user)', () => {
+  it('pdf-intake-* degradation codes carry friendly copy in the save notice (no raw codes shown to the user)', async () => {
+    const user = userEvent.setup();
     renderStack({
       saveDegradationWarnings: [
         { code: 'pdf-intake-fixed-layout-reflowed', count: 2 },
@@ -560,7 +607,8 @@ describe('ComposeBannerStack — "Opened from PDF" honest-lossiness notice (task
         { code: 'pdf-intake-table-cell-dropped', count: 1 },
       ],
     });
-    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    await openFormattingNotices(user);
+    const banner = screen.getByTestId('compose-workspace-save-degradation-notice');
     expect(banner.textContent).toMatch(/reflowed from the fixed PDF page layout/i);
     expect(banner.textContent).toMatch(/combined into one cell/i);
     expect(banner.textContent).toMatch(/could not be placed/i);

@@ -27,6 +27,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Task 245a: RunContextContractTests parses handler sources as C# syntax trees, so comments,
+         string literals (incl. verbatim / raw) and `?.` / `!.` access are read correctly. A regex
+         scan misread all of those. Test-only; nothing in the deployed L2 references it. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
     <PackageReference Include="xunit" Version="2.9.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">

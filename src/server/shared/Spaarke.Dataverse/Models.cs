@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Spaarke.Dataverse;
 
 /// <summary>
@@ -8,6 +10,319 @@ public class CreateDocumentRequest
     public required string Name { get; set; }
     public required string ContainerId { get; set; }
     public string? Description { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_document</c> — the acting user's business-unit DEFAULT OWNER
+    /// TEAM (owner decision, spaarkeai-word-add-in-r1 task 080). When set, <c>ownerid</c> is assigned to this
+    /// team and <c>owningbusinessunit</c> DERIVES from it.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the caller supplies it rather than this library resolving it.</b> Resolving "business unit
+    /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
+    /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
+    /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
+    /// <para><b>Required in practice, nullable in shape.</b> Since unified-access-control-r2 task 146 (#1034)
+    /// <c>DataverseServiceClientImpl.CreateDocumentAsync</c> REFUSES (throws, before any write) when this is null:
+    /// every caller resolves it, and "null keeps the calling identity" made the BFF application user the owner, in
+    /// the ROOT business unit (measured 2026-09-22, ALL 512 existing rows sat there, unreachable by any child-BU user
+    /// at Deep depth, and readable by every root-BU user — which is how a secure record's documents were never
+    /// isolated). It stays a nullable property so the JSON shape of this shared contract does not change.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
+    /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
+    /// and so the business unit — that owns the document it creates, including a secure business unit it has no
+    /// access to. The owner is a server-side decision (write-path invariant I-6), never a client input.</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// OPTIONAL caller-supplied primary key for the new <c>sprk_document</c>. When null (every caller except
+    /// the Office document-create save path) Dataverse mints the id exactly as before.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a shared contract gained this</b> (FR-02, spaarkeai-word-add-in-r1 task 014). The Office
+    /// save stamps the <c>sprk_document</c> GUID INTO the bytes it uploads, and on a CREATE the upload
+    /// necessarily precedes the row — so the id has to be known before Dataverse would otherwise mint it. The
+    /// BFF pre-assigns it, stamps it, uploads, and then creates the row WITH that key. The alternatives were
+    /// worse: reordering the save to create-row-before-upload changes when content dedup runs (an explicit
+    /// escalation trigger on that task), and uploading unstamped then writing a second stamped version doubles
+    /// the SPE writes and leaves a window where the stored bytes carry no stamp.</para>
+    /// <para><b>Additive and opt-in.</b> Existing callers are unchanged; this is stated explicitly in the PR
+    /// per root CLAUDE.md §10 because <c>Spaarke.Dataverse</c> is consumed beyond the BFF.</para>
+    /// <para><b>Honest cost.</b> Microsoft's guidance prefers platform-generated sequential GUIDs for
+    /// clustered-index locality. A caller-supplied random GUID is supported but gives that up for these rows —
+    /// a performance note, not a correctness one.</para>
+    /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>), for the same reason as
+    /// <see cref="OwningTeamId"/>: <c>POST /api/v1/documents</c> binds this class directly, and a client-chosen primary
+    /// key lets a caller probe for, or collide with, the id of a row it cannot see. Only the Office save path sets
+    /// it, in server code (task 080 found both properties bindable; neither was intended as a wire field).</para>
+    /// </remarks>
+    [JsonIgnore]
+    public Guid? Id { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the document (unified-access-control-r2 task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>: this create is app-only, so <c>createdby</c> is the BFF
+    /// application user. Resolved by the BFF from the request's own caller; <c>null</c> for a writer that acts for nobody
+    /// (inbound mail). 🔒 Never bound from a request body, for the same reason as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
+}
+
+/// <summary>
+/// The ONE place that maps a caller-supplied association type onto an
+/// <see cref="UpdateDocumentRequest"/>'s lookup field.
+/// </summary>
+/// <remarks>
+/// <para>Created 2026-09-03 (unified-access-control-r2 item 7). It replaces <b>four</b> hand-written
+/// copies of the same switch that had already drifted apart:</para>
+/// <list type="bullet">
+///   <item><c>UploadFinalizationWorker.ApplyAssociationLookup</c> — accepted <b>only friendly</b>
+///     names ("matter"), warn-and-continue on a miss</item>
+///   <item><c>OfficeDocumentPersistence</c> — accepted friendly <b>and</b> logical, warn-and-continue</item>
+///   <item><c>EmailAttachmentProcessor</c> — accepted <b>only logical</b> names ("sprk_matter"),
+///     warn-and-continue</item>
+///   <item><c>RecordMatchEndpoints</c> — only logical, and the <b>only</b> one that failed closed</item>
+/// </list>
+/// <para>The drift was the defect: the same association token silently dropped in one path and
+/// applied in another purely because of which spelling that copy happened to list. This map accepts
+/// <b>both</b> spellings for every supported type, so a caller cannot lose an association by picking
+/// the "wrong" form.</para>
+///
+/// <para><b>Supported types are exactly those with a real lookup column on <c>sprk_document</c></b>,
+/// verified against live Dataverse metadata 2026-09-03: <c>sprk_matter</c>, <c>sprk_project</c>,
+/// <c>sprk_invoice</c>, <c>sprk_workassignment</c>, <c>sprk_event</c>. Do not add a case here without
+/// confirming the column exists — a case that sets a property no column backs produces a Dataverse
+/// write error, and one that is missing produces a silently unassociated document.</para>
+///
+/// <para>⚠️ <b>One known gap — deliberately NOT mapped, because no column exists: <c>account</c></b> (removed
+/// from the Office endpoint's allow-list 2026-09-04; see the alias table's remarks). CORRECTED 2026-09-30: this
+/// paragraph used to list <c>contact</c> and <c>sprk_todo</c> as unmapped too — both ARE mapped, to
+/// <c>sprk_relatedcontact</c> / <c>sprk_relatedtodo</c> (added 2026-09-04), as the alias table below shows.</para>
+/// </remarks>
+public static class DocumentAssociationMap
+{
+    /// <summary>
+    /// Every association spelling a caller may send, mapped to the entity's logical name. The ONE alias table:
+    /// <see cref="TryApply"/> resolves through it, and so does record ownership (task 080), which needs the
+    /// target's logical name to read its business unit. Two tables would drift exactly the way the four
+    /// switches this class replaced did.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <c>account</c> is deliberately ABSENT and must stay absent (owner decision, 2026-09-04).
+    /// <c>sprk_document</c> has NO account lookup in EITHER family, so a save filed to an account could only
+    /// ever land unassociated — the user believes it filed and it did not. The type was removed from the
+    /// Office endpoint's allow-list and from AssociationType rather than being accepted-and-dropped.
+    /// Spaarke's organization analogue is <c>sprk_organization</c> (<c>sprk_relatedorganization</c> /
+    /// <c>sprk_relatedvendororg</c> both exist on sprk_document); if "file to an organization" is wanted, add
+    /// THAT — do not re-add <c>account</c>.
+    /// </remarks>
+    private static readonly IReadOnlyDictionary<string, string> LogicalNameByAlias =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["matter"] = "sprk_matter",
+            ["sprk_matter"] = "sprk_matter",
+            ["project"] = "sprk_project",
+            ["sprk_project"] = "sprk_project",
+            ["invoice"] = "sprk_invoice",
+            ["sprk_invoice"] = "sprk_invoice",
+            ["workassignment"] = "sprk_workassignment",
+            ["sprk_workassignment"] = "sprk_workassignment",
+            ["event"] = "sprk_event",
+            ["sprk_event"] = "sprk_event",
+            // Added 2026-09-04 (unified-access-control-r2). Both columns EXIST and always did; the
+            // 2026-09-03 metadata check missed them because it enumerated only the bare `sprk_{type}`
+            // family and never looked at `sprk_related*`. See UpdateDocumentRequest.TodoLookup /
+            // ContactLookup for the queries that prove it.
+            ["todo"] = "sprk_todo",
+            ["sprk_todo"] = "sprk_todo",
+            ["contact"] = "contact",
+        };
+
+    /// <summary>
+    /// The logical name for an association type in either spelling (<c>matter</c> or <c>sprk_matter</c>), or
+    /// <see langword="null"/> when it is not a type a document can be associated to.
+    /// </summary>
+    public static string? ToLogicalName(string? entityTypeOrAlias) =>
+        !string.IsNullOrWhiteSpace(entityTypeOrAlias)
+        && LogicalNameByAlias.TryGetValue(entityTypeOrAlias.Trim(), out var logicalName)
+            ? logicalName
+            : null;
+
+    /// <summary>
+    /// Every association spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c> in <c>Sprk.Bff.Api.Tests</c>, unified-access-control-r2 task 151
+    /// review), which enumerates both this table and <c>EntityAccessFilter.EntitySetByType</c> to prove they
+    /// accept the same spellings and name the same entity. Internal (<c>InternalsVisibleTo</c>); production code
+    /// asks <see cref="ToLogicalName"/>.
+    /// </summary>
+    internal static IEnumerable<string> SupportedSpellings => LogicalNameByAlias.Keys;
+
+    /// <summary>
+    /// Apply <paramref name="recordId"/> to the lookup matching <paramref name="entityTypeOrAlias"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the association was applied; <see langword="false"/> when the type
+    /// is not one this codebase can associate a document to. A <see langword="false"/> return is the
+    /// caller's decision to make — a background worker logs and continues, a request handler should
+    /// reject — but it must never be ignored, or the document is created unassociated.
+    /// </returns>
+    public static bool TryApply(UpdateDocumentRequest request, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!recordId.HasValue || recordId.Value == Guid.Empty)
+            return false;
+
+        switch (ToLogicalName(entityTypeOrAlias))
+        {
+            case "sprk_matter":
+                request.MatterLookup = recordId;
+                return true;
+            case "sprk_project":
+                request.ProjectLookup = recordId;
+                return true;
+            case "sprk_invoice":
+                request.InvoiceLookup = recordId;
+                return true;
+            case "sprk_workassignment":
+                request.WorkAssignmentLookup = recordId;
+                return true;
+            case "sprk_event":
+                request.EventLookup = recordId;
+                return true;
+            case "sprk_todo":
+                request.TodoLookup = recordId;
+                return true;
+            case "contact":
+                request.ContactLookup = recordId;
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+/// <summary>
+/// One <c>sprk_document</c> record-link lookup. See <see cref="DocumentLinkFields.All"/>.
+/// </summary>
+/// <param name="LogicalName">
+/// Always lowercase. Safe for SDK-based access — <c>ColumnSet</c>, <c>QueryExpression</c>, and the
+/// <c>Microsoft.Xrm.Sdk.Entity</c> indexer are all logical-name-keyed, which is the ONLY access pattern
+/// either current consumer uses (both go through the SDK-based <see cref="IGenericEntityService"/>).
+/// </param>
+/// <param name="SchemaName">
+/// Case-SENSITIVE. Required ONLY for a Web API <c>@odata.bind</c> navigation property — NOT used by
+/// either current consumer, carried here so a FUTURE Web-API-based consumer has a pinned, verified value
+/// instead of deriving one by convention. See <see cref="DocumentLinkFields"/> remarks for why that
+/// convention is unsafe.
+/// </param>
+/// <param name="TargetEntityLogicalName">The entity this lookup points at.</param>
+public sealed record DocumentLinkField(string LogicalName, string SchemaName, string TargetEntityLogicalName);
+
+/// <summary>
+/// The ONE enumeration of every <c>sprk_document</c> record-link lookup — the READ-side counterpart to
+/// <see cref="DocumentAssociationMap"/> immediately above, hoisted here so the two cannot drift apart
+/// (unified-access-control-r2, 2026-09-05).
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Why this exists.</b> Two independent copies of this exact list lived in <c>Sprk.Bff.Api</c> —
+/// <c>AttachmentDocumentAssociationRung.DocumentLinkFields</c> (surfaces a document's OWN record links as
+/// association-candidate suggestions for an incoming communication) and
+/// <c>ComposeService.DocumentAssociationLookupAttributes</c> (a PDF-sourced Compose create-on-save copies
+/// these onto the new Word document so the two file alongside each other) — and the latter's own comment
+/// conceded it was "the SAME closed set". Root <c>CLAUDE.md</c> §11 forbids a third copy; this is the one
+/// home both now consume.
+/// </para>
+/// <para>
+/// <b>Both prior copies were INCOMPLETE</b> — neither listed <c>sprk_relatedinvoice</c> or
+/// <c>sprk_relatedworkassignment</c>, nor the further six columns enumerated below
+/// (<c>sprk_relatedagreement</c>, <c>sprk_relatedcommunication</c>, <c>sprk_relatedcontact</c>,
+/// <c>sprk_relatedorganization</c>, <c>sprk_relatedservicerequest</c>, <c>sprk_relatedtodo</c>,
+/// <c>sprk_relatedvendororg</c>). A document linked ONLY through an omitted column was invisible to every
+/// consumer of the old lists.
+/// </para>
+/// <para>
+/// <b>Every entry below is verified against LIVE Dataverse metadata</b> (<c>spaarkedev1</c>, 2026-09-05:
+/// <c>GET .../api/data/v9.2/EntityDefinitions(LogicalName='sprk_document')/Attributes</c>, filtered to
+/// <c>AttributeType eq 'Lookup'</c>) — not carried forward from any prior written list. Three separate
+/// prior records in this repo were wrong about exactly these columns; see
+/// <c>projects/unified-access-control-r2/notes/document-link-vocabulary-hoist.md</c> for the query and the
+/// raw response.
+/// </para>
+/// <para>
+/// 🔴 <b>THE <c>sprk_related*</c> SCHEMA NAMES ARE NOT UNIFORMLY CASED</b>, and neither are the 4
+/// "primary" (non-<c>related</c>) columns'. <see cref="DocumentLinkField.SchemaName"/> is case-SENSITIVE
+/// (required for a Web API <c>@odata.bind</c> navigation property) and is UNRELATED to
+/// <see cref="DocumentLinkField.LogicalName"/> (always lowercase). <b>Never derive a schema name by
+/// convention</b> — <c>$"sprk_Related{type}"</c> silently produces the WRONG value for 3 of the 12
+/// <c>related</c> columns:
+/// </para>
+/// <list type="bullet">
+///   <item><description>PascalCase (9): <c>sprk_RelatedAgreement</c>, <c>sprk_RelatedCommunication</c>,
+///     <c>sprk_RelatedContact</c>, <c>sprk_RelatedInvoice</c>, <c>sprk_RelatedOrganization</c>,
+///     <c>sprk_RelatedServiceRequest</c>, <c>sprk_RelatedToDo</c>, <c>sprk_RelatedWorkAssignment</c>,
+///     <c>sprk_RelatedEvent</c>.</description></item>
+///   <item><description>lowercase — the trap, since a convention-based builder gets these WRONG:
+///     <c>sprk_relatedmatter</c>, <c>sprk_relatedproject</c>, <c>sprk_relatedvendororg</c>.</description></item>
+///   <item><description>The 4 primary columns are PascalCase despite their plain lowercase logical
+///     names: <c>sprk_Matter</c>, <c>sprk_Project</c>, <c>sprk_Invoice</c>,
+///     <c>sprk_WorkAssignment</c>.</description></item>
+/// </list>
+/// <para>
+/// <b>"Related" targets the SAME entity as its primary counterpart</b> — "a related matter is still a
+/// matter" (061 UAT round-2, the type-agnostic design principle this list follows).
+/// <c>sprk_relatedcontact</c> targets the OOB <c>contact</c> table; <c>sprk_relatedorganization</c> AND
+/// <c>sprk_relatedvendororg</c> BOTH target <c>sprk_organization</c> — there is no separate "vendor org"
+/// entity in Spaarke's model.
+/// </para>
+/// <para>
+/// <b>Scope note.</b> Not every target entity here has a <c>sprk_communication</c> regarding field in the
+/// BFF-layer <c>RegardingFieldMap</c> (<c>Sprk.Bff.Api.Services.Communication.Engine</c>) —
+/// <c>sprk_agreement</c>, <c>sprk_communication</c>, and <c>sprk_todo</c> are absent from that map today.
+/// This is harmless for <c>AttachmentDocumentAssociationRung</c> (it already soft-skips a link whose
+/// target has no regarding field) but means those three targets are not yet surfaced as association
+/// candidates by that rung even though they now appear here. <c>ComposeCreateOnSavePromoter</c>'s
+/// link-inheritance copy does not go through <c>RegardingFieldMap</c> at all, so it is unaffected.
+/// Widening <c>RegardingFieldMap</c> is a separate decision, out of scope for this hoist.
+/// </para>
+/// </remarks>
+public static class DocumentLinkFields
+{
+    public static readonly IReadOnlyList<DocumentLinkField> All =
+    [
+        new("sprk_matter", "sprk_Matter", "sprk_matter"),
+        new("sprk_relatedmatter", "sprk_relatedmatter", "sprk_matter"),
+        new("sprk_project", "sprk_Project", "sprk_project"),
+        new("sprk_relatedproject", "sprk_relatedproject", "sprk_project"),
+        new("sprk_invoice", "sprk_Invoice", "sprk_invoice"),
+        new("sprk_relatedinvoice", "sprk_RelatedInvoice", "sprk_invoice"),
+        new("sprk_workassignment", "sprk_WorkAssignment", "sprk_workassignment"),
+        new("sprk_relatedworkassignment", "sprk_RelatedWorkAssignment", "sprk_workassignment"),
+        new("sprk_relatedagreement", "sprk_RelatedAgreement", "sprk_agreement"),
+        new("sprk_relatedcommunication", "sprk_RelatedCommunication", "sprk_communication"),
+        new("sprk_relatedcontact", "sprk_RelatedContact", "contact"),
+        new("sprk_relatedevent", "sprk_RelatedEvent", "sprk_event"),
+        new("sprk_relatedorganization", "sprk_RelatedOrganization", "sprk_organization"),
+        new("sprk_relatedservicerequest", "sprk_RelatedServiceRequest", "sprk_servicerequest"),
+        new("sprk_relatedtodo", "sprk_RelatedToDo", "sprk_todo"),
+        new("sprk_relatedvendororg", "sprk_relatedvendororg", "sprk_organization"),
+        // 🔴 ADDED 2026-09-29 (spaarkeai-compose-r8). The 2026-09-05 hoist enumerated SIXTEEN columns;
+        // the table carries SEVENTEEN. `sprk_email` (→ the OOB `email` activity) was missed, so a
+        // document linked ONLY to its source email was invisible to every consumer of this list — the
+        // exact failure mode the hoist's own remarks describe, one column short of being fixed.
+        // Re-verified today against live metadata (EntityDefinitions(sprk_document)/Attributes filtered
+        // to AttributeType eq 'Lookup' — 33 lookups total, 17 of them record links); the other sixteen
+        // casings above were all confirmed correct in the same sweep, including the three lowercase traps.
+        // SchemaName is `sprk_Email` — FETCHED, never derived, per this type's own warning.
+        new("sprk_email", "sprk_Email", "email"),
+    ];
+
+    /// <summary>Logical names only, in the same order as <see cref="All"/> — the shape a <c>ColumnSet</c>
+    /// or an <see cref="IGenericEntityService.RetrieveAsync"/> <c>columns</c> argument needs.</summary>
+    public static readonly IReadOnlyList<string> LogicalNames = All.Select(f => f.LogicalName).ToArray();
 }
 
 /// <summary>
@@ -163,6 +478,42 @@ public class UpdateDocumentRequest
     /// <summary>Invoice lookup (sprk_invoice). Maps to sprk_Invoice@odata.bind.</summary>
     public Guid? InvoiceLookup { get; set; }
 
+    /// <summary>
+    /// Work assignment lookup (<c>sprk_workassignment</c>). Added 2026-09-03 (unified-access-control-r2
+    /// item 7 / Q4 widening) — the column already existed on <c>sprk_document</c>; only this request
+    /// model and the association mappers were missing it, so a save filed to a work assignment was
+    /// created UNASSOCIATED.
+    /// </summary>
+    public Guid? WorkAssignmentLookup { get; set; }
+
+    /// <summary>
+    /// Event lookup. Added 2026-09-03, same reason as <see cref="WorkAssignmentLookup"/> — but the
+    /// column is <c>sprk_relatedevent</c>, NOT <c>sprk_event</c>, which does not exist on
+    /// <c>sprk_document</c> at all (corrected 2026-09-04; the original write failed every event-filed
+    /// save outright rather than dropping silently).
+    /// </summary>
+    public Guid? EventLookup { get; set; }
+
+    /// <summary>
+    /// To-do lookup (<c>sprk_relatedtodo</c>). Added 2026-09-04 (unified-access-control-r2).
+    /// <para>
+    /// ⚠️ This column ALWAYS existed. It was previously recorded across three places — the Q4 note,
+    /// <c>EntityAccessFilter</c>, and the inbound email-r2 coordination doc — as proof that a document
+    /// is <b>unmappable</b> to a to-do and that a SCHEMA change was required first. That was wrong in
+    /// exactly one way: the check looked for a bare <c>sprk_todo</c> column and never looked at the
+    /// <c>sprk_related*</c> family. <c>SELECT sprk_relatedtodo FROM sprk_document</c> succeeds.
+    /// </para>
+    /// </summary>
+    public Guid? TodoLookup { get; set; }
+
+    /// <summary>
+    /// Contact lookup (<c>sprk_relatedcontact</c>). Added 2026-09-04 per the owner decision that closed
+    /// the "account/contact saves are filed nowhere" gap: <c>contact</c> becomes real (the column
+    /// exists), and <c>account</c> is REJECTED up front rather than accepted and silently dropped —
+    /// <c>sprk_document</c> has no account lookup in either family.
+    /// </summary>
+    public Guid? ContactLookup { get; set; }
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Document Source Tracking
     // ═══════════════════════════════════════════════════════════════════════════
@@ -245,11 +596,33 @@ public class DocumentEntity
     /// <summary>Full summary (2-4 paragraphs). Maps to sprk_filesummary.</summary>
     public string? Summary { get; set; }
 
-    /// <summary>Comma-separated keywords. Maps to sprk_keywords.</summary>
+    /// <summary>
+    /// Comma-separated keywords. Maps to <c>sprk_filekeywords</c> (corrected
+    /// spaarkeai-word-add-in-r1 task 021 — this comment previously said "sprk_keywords", which is
+    /// not a column on <c>sprk_document</c>; the real column is the one
+    /// <c>DataverseServiceClientImpl</c>'s writer and <c>DocumentProfileFieldMapper</c> both already use).
+    /// </summary>
     public string? Keywords { get; set; }
 
-    /// <summary>Document type classification (e.g., Contract, NDA, Invoice). Maps to sprk_documenttype.</summary>
+    /// <summary>
+    /// Document type classification (e.g., Contract, NDA, Invoice). Maps to <c>sprk_documenttype</c>,
+    /// a Choice (Picklist) column — verified live 2026-09-12. This is the Choice's DISPLAY LABEL
+    /// (from Dataverse's <c>FormattedValues</c>), not free text and not the raw option integer;
+    /// <see cref="DataverseServiceClientImpl.MapToDocumentEntity"/> is the one place that reads it —
+    /// see its remarks for the OptionSetValue-cast regression this comment exists to prevent
+    /// recurring.
+    /// </summary>
     public string? DocumentType { get; set; }
+
+    /// <summary>
+    /// AI profiling status for this document (task 021 / FR-07). Maps to the <c>sprk_filesummarystatus</c>
+    /// Choice column — exactly SEVEN values, verified live: None=100000000, Pending=100000001,
+    /// Completed=100000002, OptedOut=100000003, Failed=100000004, NotSupported=100000005,
+    /// Skipped=100000006. <c>null</c> means the column has never been set on this row (Dataverse
+    /// applies no implicit default), which callers should treat identically to None — profiling has
+    /// not been attempted.
+    /// </summary>
+    public int? SummaryStatus { get; set; }
 
     /// <summary>Extracted entities in JSON format (parties, dates, amounts). Maps to sprk_entities.</summary>
     public string? Entities { get; set; }
@@ -464,6 +837,21 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// The team that owns a NEW output (unified-access-control-r2 task 146) — the same team as its analysis, resolved by
+    /// the BFF's <c>IRecordOwnershipResolver</c>. Required by <c>CreateAnalysisOutputAsync</c>; never bound from a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the output (task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>; <c>null</c> for a writer that acts for nobody. Never bound from
+    /// a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -493,7 +881,7 @@ public class EventEntity
     /// <summary>State code: Active (0), Inactive (1)</summary>
     public int StateCode { get; set; }
 
-    /// <summary>Status code: Draft (1), Planned (2), Open (3), OnHold (4), Completed (5), Cancelled (6), Deleted (7)</summary>
+    /// <summary>Status reason (statuscode) — live values in <see cref="EventStatusCode"/>.</summary>
     public int StatusCode { get; set; }
 
     /// <summary>Base date (sprk_basedate)</summary>
@@ -505,7 +893,7 @@ public class EventEntity
     /// <summary>Completed date (sprk_completeddate)</summary>
     public DateTime? CompletedDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     /// <summary>Source: User (0), System (1), Workflow (2), External (3)</summary>
@@ -514,7 +902,7 @@ public class EventEntity
     /// <summary>Remind at (sprk_remindat)</summary>
     public DateTime? RemindAt { get; set; }
 
-    /// <summary>Related Event lookup ID (_sprk_relatedevent_value)</summary>
+    /// <summary>Not populated: sprk_event has no sprk_relatedevent column (verified live 2026-10-05, task 097).</summary>
     public Guid? RelatedEventId { get; set; }
 
     /// <summary>Related Event Type: Reminder (0), Notification (1), Extension (2)</summary>
@@ -546,7 +934,7 @@ public class EventEntity
     public string? RegardingRecordId { get; set; }
     /// <summary>Regarding record display name (sprk_regardingrecordname)</summary>
     public string? RegardingRecordName { get; set; }
-    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7)</summary>
+    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7) — derived from which entity-specific regarding lookup is populated (sprk_regardingrecordtype itself is a lookup to sprk_recordtype_ref).</summary>
     public int? RegardingRecordType { get; set; }
 
     /// <summary>Created date/time</summary>
@@ -576,111 +964,65 @@ public class CreateEventRequest
     /// <summary>Due date</summary>
     public DateTime? DueDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
+    //    THE BFF (this library cannot reach CoreAncestorResolver or the record-type catalog) and passed here as
+    //    plain values; DataverseWebApiService.BuildCreateEventPayload only shapes them. Set all of them together
+    //    with RegardingRecordType/RegardingRecordId, or none.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>; names the typed lookup).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The regarding record's entity SET, from live metadata — the same set the caller's AppendTo was asked of.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> — the relative model-driven record URL.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> — the business-key number (matter/project), or null.</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps to bind besides the target's own lookup (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
+    /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
+    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
+    /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the event (task 146 c1-r1, owner round 13 item 9), bound as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/>: the create is app-only. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
+
+    /// <summary>
+    /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
+    /// owner decision S1: a BFF-created event is app-only, so its Created By is the application user and cannot say
+    /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
+    /// </summary>
+    public Guid? AssignedToContactId { get; set; }
+
 }
 
-/// <summary>
-/// Request model for updating an Event
-/// </summary>
-public class UpdateEventRequest
-{
-    /// <summary>Event name</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Description</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Event Type ID</summary>
-    public Guid? EventTypeId { get; set; }
-
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
-
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
-
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
-    public int? Priority { get; set; }
-
-    /// <summary>Status code</summary>
-    public int? StatusCode { get; set; }
-
-    /// <summary>Regarding record type</summary>
-    public int? RegardingRecordType { get; set; }
-
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
-
-    /// <summary>Regarding record name</summary>
-    public string? RegardingRecordName { get; set; }
-}
-
-/// <summary>
-/// Event Type entity model (sprk_eventtype)
-/// </summary>
-public class EventTypeEntity
-{
-    /// <summary>Event Type ID (sprk_eventtypeid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_name) - Primary field</summary>
-    public required string Name { get; set; }
-
-    /// <summary>Event code (sprk_eventcode)</summary>
-    public string? EventCode { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>State code: Active (0), Inactive (1)</summary>
-    public int StateCode { get; set; }
-
-    /// <summary>Requires due date: No (0), Yes (1)</summary>
-    public int? RequiresDueDate { get; set; }
-
-    /// <summary>Requires base date: No (0), Yes (1)</summary>
-    public int? RequiresBaseDate { get; set; }
-}
-
-/// <summary>
-/// Event Log entity model (sprk_eventlog)
-/// </summary>
-public class EventLogEntity
-{
-    /// <summary>Event Log ID (sprk_eventlogid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Event lookup ID (_sprk_event_value)</summary>
-    public Guid EventId { get; set; }
-
-    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
-    public int Action { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Created date/time</summary>
-    public DateTime CreatedOn { get; set; }
-
-    /// <summary>Created by user ID</summary>
-    public Guid? CreatedById { get; set; }
-
-    /// <summary>Created by user name</summary>
-    public string? CreatedByName { get; set; }
-}
 
 /// <summary>
 /// Event Log action constants
@@ -702,6 +1044,189 @@ public static class EventLogAction
         Deleted => "Deleted",
         _ => "Unknown"
     };
+}
+
+/// <summary>
+/// <c>sprk_event.statuscode</c> (Status Reason) values and the <c>statecode</c> each one belongs to — the single
+/// source of truth for every BFF read and write of an event's status.
+/// </summary>
+/// <remarks>
+/// <para>Verified against the LIVE option set (spaarkedev1, 2026-10-05, <c>StatusAttributeMetadata</c> with
+/// <c>State</c> per option) and pinned by <c>EventStatusWritePathTests</c> against
+/// <c>docs/data-model/sprk_event-related-tables.md</c>.</para>
+/// <para>Two traps this class exists to close (task 097): (1) the BFF used to carry a fictional 1..7 set
+/// (Open = 3, Completed = 5, Cancelled = 6, Deleted = 7) that Dataverse rejects with <c>0x80048408</c>, so complete,
+/// cancel, soft-delete and create could never succeed; (2) <b>Completed and Closed are ACTIVE (statecode 0)</b> —
+/// pairing them with statecode 1 is rejected too ("not a valid status code for state code Inactive").</para>
+/// </remarks>
+public static class EventStatusCode
+{
+    /// <summary>Draft — statecode 0 (Active). The platform default for a new row.</summary>
+    public const int Draft = 1;
+
+    /// <summary>No Further Action — statecode 1 (Inactive). Used by the archive commands.</summary>
+    public const int NoFurtherAction = 2;
+
+    /// <summary>Open — statecode 0 (Active). What the Daily Briefing reads as open work.</summary>
+    public const int Open = 659490001;
+
+    /// <summary>Completed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Completed = 659490002;
+
+    /// <summary>Closed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Closed = 659490003;
+
+    /// <summary>Cancelled — statecode 1 (Inactive).</summary>
+    public const int Cancelled = 659490004;
+
+    /// <summary>Transferred — statecode 1 (Inactive).</summary>
+    public const int Transferred = 659490005;
+
+    /// <summary>On Hold — statecode 0 (Active).</summary>
+    public const int OnHold = 659490006;
+
+    /// <summary>Reassigned — statecode 0 (Active).</summary>
+    public const int Reassigned = 659490007;
+
+    /// <summary>statecode Active.</summary>
+    public const int StateActive = 0;
+
+    /// <summary>statecode Inactive.</summary>
+    public const int StateInactive = 1;
+
+    /// <summary>Every live value with its label and statecode, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label, int State)> All { get; } = new[]
+    {
+        (Draft, "Draft", StateActive),
+        (Open, "Open", StateActive),
+        (Completed, "Completed", StateActive),
+        (Closed, "Closed", StateActive),
+        (OnHold, "On Hold", StateActive),
+        (Reassigned, "Reassigned", StateActive),
+        (NoFurtherAction, "No Further Action", StateInactive),
+        (Cancelled, "Cancelled", StateInactive),
+        (Transferred, "Transferred", StateInactive),
+    };
+
+    /// <summary>True when <paramref name="statusCode"/> exists in the live option set.</summary>
+    public static bool IsDefined(int statusCode) => All.Any(s => s.Value == statusCode);
+
+    /// <summary>
+    /// The statecode Dataverse requires alongside <paramref name="statusCode"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not in the live option set.</exception>
+    public static int GetStateCode(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.State;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode,
+            "Not a sprk_event statuscode in the live option set.");
+    }
+
+    /// <summary>
+    /// THE definition of "open work" for events — ONE predicate for the complete gate AND the To Do generation rules
+    /// (task 097 review L2; OWNER DECISION A, 2026-10-06: Draft, Open, On Hold, Reassigned — Reassigned is completable).
+    /// <list type="bullet">
+    ///   <item>Open, On Hold, Reassigned: Active statuses whose label says the work is not finished.</item>
+    ///   <item>Draft: included because it is where the client CreateEventWizard and every Dataverse-form create LAND
+    ///   (the platform default; live 2026-10-05: most events are Draft), and the LegalWorkspace / SmartTodo Overdue
+    ///   filters already treat Draft as live work. Excluding it would make most user-created events un-completable.</item>
+    ///   <item>Not open: Completed and Closed (Active, but finished), Cancelled, Transferred, No Further Action.</item>
+    /// </list>
+    /// Used by the complete gate (EventEndpoints.CanCompleteEvent) and the To Do generation rules (<see cref="NotOpenWork"/>).
+    /// </summary>
+    public static bool IsOpenWork(int statusCode) =>
+        statusCode is Draft or Open or OnHold or Reassigned;
+
+    /// <summary>Every live status that is NOT open work (<see cref="IsOpenWork"/>), for server-side exclusion.</summary>
+    public static IReadOnlyCollection<int> NotOpenWork { get; } =
+        All.Select(s => s.Value).Where(v => !IsOpenWork(v)).ToArray();
+
+    /// <summary>The live label for <paramref name="statusCode"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.Label;
+        }
+
+        return "Unknown";
+    }
+}
+
+/// <summary>
+/// The "my events" narrowing of the caller-scoped event list (task 097 round 8; owner decision B, 2026-10-06): an event is
+/// the caller's when it is OWNED by them, OR ASSIGNED to their linked contact (<c>sprk_assignedto</c>, task 152 S1), OR
+/// CREATED by them (<c>sprk_createdbyperson</c>, a SYSTEMUSER lookup — <see cref="RecordCreatorPersonColumn"/>, task 146
+/// c1-r1). The three are OR-ed; the query still runs AS the caller, so this narrows — it never widens — what Dataverse
+/// lets them read. An event the BFF creates is owned by a business-unit TEAM (I-6), so ownership alone would hide it
+/// from the person who created it.
+/// </summary>
+public sealed record EventOwnershipScope(Guid? OwnerUserId, Guid? AssignedToContactId, Guid? CreatedByPersonId)
+{
+    /// <summary>The <c>$filter</c> clause, or null when no part is set (no narrowing).</summary>
+    public string? ToFilter(IFormatProvider inv)
+    {
+        var parts = new List<string>();
+        if (OwnerUserId is { } owner && owner != Guid.Empty)
+            parts.Add(string.Format(inv, "_ownerid_value eq {0:D}", owner));
+        if (AssignedToContactId is { } contact && contact != Guid.Empty)
+            parts.Add(string.Format(inv, "_sprk_assignedto_value eq {0:D}", contact));
+        if (CreatedByPersonId is { } person && person != Guid.Empty)
+            parts.Add(string.Format(inv, "_{0}_value eq {1:D}", RecordCreatorPersonColumn.LogicalName, person));
+        return parts.Count switch
+        {
+            0 => null,
+            1 => parts[0],
+            _ => "(" + string.Join(" or ", parts) + ")",
+        };
+    }
+}
+/// <summary>
+/// <c>sprk_event.sprk_priority</c> values — the single source of truth for every BFF read and write of an event's
+/// priority. Verified against the LIVE option set (spaarkedev1, 2026-10-05) and pinned by
+/// <c>EventReadPathTests</c> against <c>docs/data-model/sprk_event-related-tables.md</c>.
+/// </summary>
+/// <remarks>
+/// Task 097: the BFF used to accept and write 0..3, which Dataverse rejects ("The value 2 of 'sprk_priority' ... is
+/// outside the valid range"). NOTE: <c>sprk_todo.sprk_priority</c> is a DIFFERENT option set (Urgent = 100000000 …
+/// Low = 100000003) — never reuse these constants for a To Do.
+/// </remarks>
+public static class EventPriority
+{
+    public const int Low = 100000000;
+    public const int Normal = 100000001;
+    public const int High = 100000002;
+    public const int Urgent = 100000003;
+
+    /// <summary>Every live value with its label, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label)> All { get; } = new[]
+    {
+        (Low, "Low"),
+        (Normal, "Normal"),
+        (High, "High"),
+        (Urgent, "Urgent"),
+    };
+
+    /// <summary>True when <paramref name="priority"/> exists in the live option set.</summary>
+    public static bool IsDefined(int priority) => All.Any(p => p.Value == priority);
+
+    /// <summary>The live label for <paramref name="priority"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int priority)
+    {
+        foreach (var p in All)
+        {
+            if (p.Value == priority)
+                return p.Label;
+        }
+
+        return "Unknown";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -871,6 +1396,50 @@ public static class RegardingRecordType
         _ => null
     };
 
+    // ── sprk_event's Web API write names (unified-access-control-r2 task 159, #1098) ──
+    // Read from live metadata (spaarkedev1 EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships,
+    // 2026-10-03; projects/unified-access-control-r2/notes/task-159-events-authorization.md §0.2) and pinned by
+    // EventRegardingPayloadTests. A lookup is WRITTEN only as "{navigationProperty}@odata.bind" — never as the
+    // logical name (the Web API rejects it) and never as a "_x_value" key. Every navigation property here is
+    // PascalCase; none equals its logical name.
+
+    /// <summary>The navigation property of <c>sprk_event.sprk_regardingrecordtype</c> (lookup → <c>sprk_recordtype_ref</c>).</summary>
+    public const string EventRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+
+    /// <summary><c>sprk_recordtype_ref</c>'s entity SET (live metadata), the target of <see cref="EventRecordTypeNavigationProperty"/>.</summary>
+    public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
+
+    /// <summary>
+    /// The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown. Covers
+    /// the full live typed-lookup family (14) plus <c>sprk_regardingrecordtype</c>.
+    /// </summary>
+    public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
+    {
+        "sprk_regardingaccount" => "sprk_RegardingAccount",
+        "sprk_regardingagreement" => "sprk_RegardingAgreement",
+        "sprk_regardinganalysis" => "sprk_RegardingAnalysis",
+        "sprk_regardingbudget" => "sprk_RegardingBudget",
+        "sprk_regardingcommunication" => "sprk_RegardingCommunication",
+        "sprk_regardingcontact" => "sprk_RegardingContact",
+        "sprk_regardingevent" => "sprk_RegardingEvent",
+        "sprk_regardinginvoice" => "sprk_RegardingInvoice",
+        "sprk_regardingmatter" => "sprk_RegardingMatter",
+        "sprk_regardingorganization" => "sprk_RegardingOrganization",
+        "sprk_regardingproject" => "sprk_RegardingProject",
+        "sprk_regardingreportcard" => "sprk_RegardingReportCard",
+        "sprk_regardingservicerequest" => "sprk_RegardingServiceRequest",
+        "sprk_regardingworkassignment" => "sprk_RegardingWorkAssignment",
+        "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty,
+        _ => null,
+    };
+
+    /// <summary>
+    /// The ADR-024 <c>sprk_regardingrecordurl</c> value — a RELATIVE model-driven-app URL (the host origin is resolved
+    /// at click time; no org URL or tenant id is hard-coded). The single server-side owner of this format;
+    /// <c>TodoRegardingBuilder.BuildRecordUrl</c> delegates here.
+    /// </summary>
+    public static string BuildRecordUrl(string entityLogicalName, string recordId) =>
+        $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──
     // These map a target entity's LOGICAL NAME (as chosen in the client picker / AnalysisRegardingTarget)
     // to the ADR-024 fields the resolver writes on sprk_analysis. The canonical field-name maps live
@@ -887,21 +1456,52 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    /// <summary>Primary display-name attribute for a target entity (ADR-024 sprk_regardingrecordname source).</summary>
+    // ── The display-name map: ONE source (task 097 round 9) ─────────────────────────────────────────────────
+    // The primary display-name attribute of every regarding target any writer names. It lives HERE, in the shared
+    // library, because the Spaarke.Dataverse analysis stager needs it and cannot reference the BFF; the BFF's
+    // RegardingNameFields.PrimaryNameField DELEGATES here (its own copy had drifted from this one). Every value is
+    // live-verified (spaarkedev1 EntityDefinitions; unified-access-control-r2 task 161 note §2) and pinned by
+    // RegardingNameFieldsTests: sprk_organization's name is sprk_organizationname (sprk_name does not exist there).
+    // sprk_communication is a NAME-ONLY entry — RegardingNameFields.EntitySetName deliberately has no set for it.
+
+    /// <summary>Primary display-name attribute for a regarding target (ADR-024 sprk_regardingrecordname source), or null.</summary>
     public static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
     {
         "sprk_matter" => "sprk_mattername",
         "sprk_project" => "sprk_projectname",
+        "sprk_invoice" => "sprk_name",
+        "sprk_event" => "sprk_eventname",
+        // Verified live 2026-10-02 (spaarkedev1 describe, read-only): sprk_name NVARCHAR(850), e.g. "Email: <subject>".
+        "sprk_communication" => "sprk_name",
+        "sprk_workassignment" => "sprk_name",
+        "sprk_servicerequest" => "sprk_name",
+        "sprk_budget" => "sprk_name",
+        "sprk_reportcard" => "sprk_name",
+        "sprk_analysis" => "sprk_name",
+        "sprk_organization" => "sprk_organizationname",
+        "contact" => "fullname",
+        "account" => "name",
         _ => null,
     };
 
-    /// <summary>Reference-number attribute for a target entity (ADR-024 sprk_regardingrecordnumber source); null when none.</summary>
-    public static string? GetReferenceNumberField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_matternumber",
-        "sprk_project" => "sprk_projectnumber",
-        _ => null,
-    };
+    // ── The reference NUMBER column: read from the catalog, never hard-coded (task 097 round 9) ──────────────
+    // Each sprk_recordtype_ref row names its type's number column in sprk_regardingrecordnumberfield (live spaarkedev1
+    // 2026-10-06: sprk_matternumber, sprk_projectnumber, sprk_invoicenumber, sprk_analysis_number, accountnumber,
+    // sprk_workassignmentnumber, sprk_budgetnumber, …; contact has none). The former hard-coded map covered matter and
+    // project only, so an event or analysis filed under an invoice, analysis, account, work assignment or budget was
+    // written with no number. Every writer that already reads the catalog row takes the column from it.
+
+    /// <summary>The <c>sprk_recordtype_ref</c> column naming a type's reference-number attribute.</summary>
+    public const string RecordNumberFieldColumn = "sprk_regardingrecordnumberfield";
+
+    /// <summary>
+    /// The reference-number attribute a <c>sprk_recordtype_ref</c> row names, or null when the row is absent or names
+    /// none (the number is then left unset — never guessed).
+    /// </summary>
+    public static string? RecordNumberFieldOf(Microsoft.Xrm.Sdk.Entity? recordTypeRef) =>
+        recordTypeRef?.GetAttributeValue<string>(RecordNumberFieldColumn) is { } field && !string.IsNullOrWhiteSpace(field)
+            ? field.Trim()
+            : null;
 }
 
 /// <summary>

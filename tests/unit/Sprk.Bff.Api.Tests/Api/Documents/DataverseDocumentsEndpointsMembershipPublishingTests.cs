@@ -1,142 +1,118 @@
-// R3 Part 1 Phase 2 — Task 082 (2026-06-22)
-// Payload-shape contract tests for the MembershipChangedEvent emitted by
-// the Document cluster's create endpoints per spec FR-2P2.6 +
-// event-source-inventory §3B.
+// R3 Part 1 Phase 2 — Task 082 (2026-06-22); rewritten by unified-access-control-r2 task 152 (2026-10-02), and again
+// by its verifier round 1 (item 7) to RUN THE SITE instead of the shared helper plus a source grep.
 //
-// These tests lock the EXACT wire-format of events the endpoints publish
-// when an OBO caller creates a document. They mirror the inline event-
-// construction in:
-//   - DataverseDocumentsEndpoints.cs (POST /api/v1/documents)
-//   - OfficeService.SaveAsync (POST /office/save background path)
-// Any drift in those code sites (e.g., changed SourceField, EntityLogicalName,
-// MutationType) will fail these tests and surface in PR review.
-//
-// Coverage:
-//   - Add: implicit ownerid on POST /api/v1/documents
-//   - Add: implicit ownerid on POST /office/save (background-processed)
-//   - Delete: documented intentional no-publish + recon-backstop rationale
-//     (DocumentEntity does NOT expose ownerid; junction cleanup deferred to
-//      nightly FR-2P2.7 recon job per inventory §6.1).
-//   - NFR-08: CorrelationId on every emitted event.
-//
-// Reference: projects/spaarke-platform-foundations-r3/spec.md FR-2P2.6, Q2,
-//            NFR-08; projects/spaarke-platform-foundations-r3/notes/event-source-inventory.md §3B + §6.1;
-//            src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs (POST + DELETE handlers).
+// POST /api/v1/documents (DataverseDocumentsEndpoints.CreateDocumentAsync, internal for these tests) publishes the owner
+// MembershipChangedEvent for the row it created. Task 152 (ADR-034 A3): the event states the row's REAL owner — the
+// business-unit default owner TEAM the endpoint resolved and wrote (task 080) — as PersonIdType=Team, PersonId=teamid,
+// the key MembershipReconciliationJob builds for the same row. Before task 152 the endpoint published the caller's AAD
+// oid as a User owner: false for a team-owned row, and in an identity space reconciliation never writes.
 
+using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Documents;
 
-[Trait("status", "new")]
+[Trait("status", "task-152-uac-r2")]
 public class DataverseDocumentsEndpointsMembershipPublishingTests
 {
-    private const string TraceIdFixture = "trace-doc-082";
-    private static readonly Guid CallerOidFixture =
-        Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
-    private static readonly Guid DocumentIdFixture =
-        Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
-
-    /// <summary>
-    /// Mirrors the inline event-construction in
-    /// <c>DataverseDocumentsEndpoints</c> POST handler (and
-    /// <c>OfficeService.SaveAsync</c> /office/save background path).
-    /// If the endpoint changes its payload shape, this builder must change
-    /// too — divergence will surface immediately in PR review.
-    /// </summary>
-    private static MembershipChangedEvent BuildDocumentCreateEvent(
-        Guid callerOid,
-        Guid documentId,
-        string correlationId) =>
-        new()
-        {
-            PersonId = callerOid,
-            PersonIdType = PersonIdentityType.User,
-            EntityLogicalName = "sprk_document",
-            EntityRecordId = documentId,
-            SourceField = "ownerid",
-            Role = "owner",
-            MutationType = MembershipMutationType.Added,
-            CorrelationId = correlationId,
-        };
+    private static readonly Guid DocumentId = Guid.Parse("ffffffff-0000-0000-0000-000000000001");
+    private static readonly Guid ResolvedTeamId = Guid.Parse("cccccccc-9999-9999-9999-cccccccccccc");
+    private const string TraceId = "trace-doc";
 
     [Fact]
-    public void DocumentCreatePayload_HasExpectedShape_PerInventory3B()
+    public async Task DocumentCreate_PublishesTheTeamItResolvedAndWrote_NotTheCallersOid()
     {
-        // Locks the wire contract for POST /api/v1/documents + /office/save.
-        var evt = BuildDocumentCreateEvent(CallerOidFixture, DocumentIdFixture, TraceIdFixture);
+        var site = new Site(resolvedTeam: ResolvedTeamId);
 
-        evt.EntityLogicalName.Should().Be("sprk_document",
-            "event-source-inventory §3B names sprk_document as the document-cluster entity");
-        evt.SourceField.Should().Be("ownerid",
-            "ownerid is the ONLY identity Lookup on sprk_document per inventory (no sprk_assigned* analogs)");
-        evt.Role.Should().Be("owner",
-            "ownerid maps to role 'owner' per FR-2P2.2 role-name strategy");
-        evt.MutationType.Should().Be(MembershipMutationType.Added,
-            "Create mutations emit Added events");
-        evt.PersonIdType.Should().Be(PersonIdentityType.User,
-            "ownerid resolves to an AAD User via systemuser.azureactivedirectoryobjectid");
-        evt.PersonId.Should().Be(CallerOidFixture);
-        evt.EntityRecordId.Should().Be(DocumentIdFixture);
+        var result = await site.RunAsync();
+
+        (result as IStatusCodeHttpResult)?.StatusCode.Should().Be(StatusCodes.Status201Created);
+        site.Written!.OwningTeamId.Should().Be(ResolvedTeamId, "task 080: the row is owned by the resolved team");
+
+        var evt = site.Publisher.Published.Should().ContainSingle().Subject;
+        evt.PersonIdType.Should().Be(PersonIdentityType.Team);
+        evt.PersonId.Should().Be(ResolvedTeamId, "the event names the SAME team the create wrote as the owner");
+        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid, "no publisher emits an AAD oid");
+        evt.SourceField.Should().Be("ownerid");
+        evt.EntityLogicalName.Should().Be("sprk_document");
+        evt.EntityRecordId.Should().Be(DocumentId);
+        evt.MutationType.Should().Be(MembershipMutationType.Added);
+        evt.CorrelationId.Should().Be(TraceId, "NFR-08");
+
+        site.Dataverse.Verify(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the site already holds the owner it wrote — no read-back");
     }
 
     [Fact]
-    public void DocumentCreatePayload_CarriesCorrelationId_PerNFR08()
+    public async Task DocumentCreate_NoTeamResolved_RefusesAndPublishesNothing()
     {
-        // NFR-08: every MembershipChangedEvent MUST carry correlationId.
-        var evt = BuildDocumentCreateEvent(CallerOidFixture, DocumentIdFixture, TraceIdFixture);
+        var site = new Site(resolvedTeam: null);
 
-        evt.CorrelationId.Should().Be(TraceIdFixture,
-            "NFR-08: traceIdentifier propagates as the event's correlationId");
-        evt.CorrelationId.Should().NotBeNullOrWhiteSpace(
-            "publisher rejects empty correlationIds per defense-in-depth");
+        var result = await site.RunAsync();
+
+        (result as IStatusCodeHttpResult)?.StatusCode.Should().NotBe(StatusCodes.Status201Created);
+        site.Written.Should().BeNull("no row is written without an owner team (task 080)");
+        site.Publisher.Published.Should().BeEmpty();
     }
 
     [Fact]
-    public void DocumentDelete_DoesNotPublish_DefersToReconPerInventory61()
+    public void DocumentCreateEndpoint_FalseOwnerCommentIsGone()
     {
-        // Per event-source-inventory.md §6.1 (the "sprk_assigned* mutation gap"
-        // generalized): when the BFF cannot resolve the ownerid of the deleted
-        // row (DocumentEntity does NOT expose ownerid in its current shape),
-        // the nightly recon job (FR-2P2.7 / task 085) is the load-bearing path.
-        // The DELETE handler in DataverseDocumentsEndpoints intentionally does
-        // NOT publish a Removed event — this is a binding design contract.
-        //
-        // This test acts as a documentation lock: if a future PR adds a
-        // Removed-event publish to the DELETE handler without first expanding
-        // IDocumentDataverseService to expose ownerid + sourcing a real
-        // PersonId, the new code will likely emit `PersonId = Guid.Empty`,
-        // which downstream consumers (task 084 junction-updater) will
-        // dead-letter as an invalid identity. Surface that risk in review.
+        var source = OwnerEventTestKit.ReadSource("Api", "DataverseDocumentsEndpoints.cs");
 
-        // The contract — there is NO valid "Removed for unknown owner" event:
-        Action invalidEvent = () =>
+        source.Should().NotContain("PersonId = callerOid", "the caller's oid is never an event's person");
+        source.Should().NotContain("defaulted by Dataverse to the OBO", "the false owner comment is removed");
+    }
+
+    /// <summary>The POST /api/v1/documents site with boundary fakes; <see cref="RunAsync"/> executes the real handler.</summary>
+    private sealed class Site
+    {
+        public Site(Guid? resolvedTeam)
         {
-            _ = new MembershipChangedEvent
+            // c1-r1: POST /api/v1/documents asks ResolveOwnerAsync (the caller is also recorded as the creator person).
+            Ownership.Setup(o => o.ResolveOwnerAsync(It.IsAny<RecordOwnershipContext>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(resolvedTeam is { } team
+                    ? RecordOwnerResolution.Owned(team)
+                    : RecordOwnerResolution.Refused(RecordOwnerRefusal.ActingUserUnresolved, "no team"));
+            Documents.Setup(d => d.CreateDocumentAsync(It.IsAny<CreateDocumentRequest>(), It.IsAny<CancellationToken>()))
+                .Callback<CreateDocumentRequest, CancellationToken>((r, _) => Written = r)
+                .ReturnsAsync(DocumentId.ToString("D"));
+            Documents.Setup(d => d.GetDocumentAsync(DocumentId.ToString("D"), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new DocumentEntity { Id = DocumentId.ToString("D"), Name = "Brief.docx", FileName = "Brief.docx", ContainerId = "b!container" });
+        }
+
+        public Mock<IDocumentDataverseService> Documents { get; } = new(MockBehavior.Strict);
+        public Mock<IRecordOwnershipResolver> Ownership { get; } = new(MockBehavior.Strict);
+        public Mock<IGenericEntityService> Dataverse { get; } = OwnerEventTestKit.Dataverse();
+        public RecordingMembershipEventPublisher Publisher { get; } = new();
+        public CreateDocumentRequest? Written { get; private set; }
+
+        public Task<IResult> RunAsync()
+        {
+            var context = new DefaultHttpContext
             {
-                PersonId = Guid.Empty, // <-- invalid: no resolvable identity
-                PersonIdType = PersonIdentityType.User,
-                EntityLogicalName = "sprk_document",
-                EntityRecordId = DocumentIdFixture,
-                SourceField = "ownerid",
-                Role = "owner",
-                MutationType = MembershipMutationType.Removed,
-                CorrelationId = TraceIdFixture,
+                TraceIdentifier = TraceId,
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim("oid", OwnerEventTestKit.CallerOid.ToString("D")) }, "test")),
             };
-        };
-
-        // While `required` only enforces non-default at construction (Guid.Empty
-        // IS a valid struct value), the design contract is that a non-Empty
-        // PersonId is required for downstream consumers. The DELETE handler
-        // sidesteps this by NOT publishing — the test asserts that absence.
-        invalidEvent.Should().NotThrow(
-            "MembershipChangedEvent has no struct-level guard against PersonId=Empty; the design relies on the endpoint to NOT construct one");
-
-        // The binding behavior is: DELETE handler logs a debug message + relies on recon.
-        // (Asserted at the source via the inline `logger.LogDebug(..."deferred to nightly recon"...)` line.)
-        var documentEntityHasNoOwnerId = true; // DocumentEntity.cs does not expose ownerid/systemuserid
-        documentEntityHasNoOwnerId.Should().BeTrue(
-            "Documenting the design constraint that justifies the DELETE no-publish decision");
+            return DataverseDocumentsEndpoints.CreateDocumentAsync(
+                new CreateDocumentRequest { Name = "Brief.docx", ContainerId = "b!container" },
+                Documents.Object,
+                Publisher,
+                Ownership.Object,
+                Dataverse.Object,
+                NullLogger<Program>.Instance,
+                context,
+                CancellationToken.None);
+        }
     }
 }

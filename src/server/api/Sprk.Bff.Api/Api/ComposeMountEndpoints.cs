@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
 using static Sprk.Bff.Api.Api.ComposeEndpoints;
 
@@ -25,8 +26,9 @@ internal static class ComposeMountEndpoints
         //     TRANSIENT working draft (create-on-save; no sprk_document until first Save).
         //     Reads the original binary already retained by ChatDocumentEndpoints step 9b in
         //     ITenantCache ("doc-upload-binary") — a deterministic Redis read, NOT AI dispatch
-        //     (ADR-039) and NOT SPE/Graph access (ADR-007). Authz via the group's
-        //     RequireAuthorization() (ADR-008 / NFR-04).
+        //     (ADR-039) and NOT SPE/Graph access (ADR-007). Authn via the group's
+        //     RequireAuthorization() (ADR-008 / NFR-04); AUTHORIZATION is the body-scoped session-owner
+        //     check in the handler (uac-r2 task 166, S-64) — the bytes belong to whoever owns the session.
         group.MapPost("/upload", Upload)
             .WithName("ComposeUpload")
             .WithSummary("Serve a session-uploaded file's retained bytes for a transient Compose mount (FR-03)")
@@ -51,12 +53,24 @@ internal static class ComposeMountEndpoints
         group.MapPost("/project", Project)
             .WithName("ComposeProject")
             .WithSummary("Stateless bytes->projection render for the Browse-local-file door (FR-03, no persistence)")
+            // #696 (DEF-02): this door runs SYNCHRONOUS OOXML projection on caller-supplied bytes, and had
+            // only Kestrel's implicit ~28.6 MB body cap. Bounded on the same two levels the save routes use
+            // (ComposeSaveEndpoints), from the same constants, so a document that Compose would refuse to
+            // SAVE is not one it will burn CPU projecting. The transport cap is deliberately the LARGER
+            // number: base64 inflates by 4/3 inside a JSON envelope, so a cap set at MaxDocumentBytes would
+            // reject a legal 25 MB document at the transport with no body — the unexplained-413 failure
+            // FR-S08 removed. The honest per-document check lives in the handler.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             // Read-shaped, deterministic, in-memory CPU work — same bucket as sibling Upload/Load,
             // not a persistence/ingest bucket (nothing is written).
             .RequireRateLimiting("ai-context")
             .Produces<ComposeProjectResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized);
+            // Deliberately NOT .Produces(413): the raised cap is a transport backstop, and an oversize
+            // document is refused by the handler as a 400 ProblemDetails that names the limit. The save
+            // routes declare their responses the same way — a 413 in the contract would advertise a
+            // bodiless rejection as a normal outcome, which is the failure mode FR-S08 removed.
 
         return group;
     }
@@ -81,6 +95,8 @@ internal static class ComposeMountEndpoints
         // SAME builder LoadAsync uses (IComposeService.ProjectDocument), so this door renders via the
         // one-reader projection branch instead of the client mammoth fallback (F-2).
         IComposeService composeService,
+        // Task 166 (S-64): the session named in the body must be the CALLER's (issue #863).
+        ChatSessionManager sessionManager,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -108,6 +124,47 @@ internal static class ComposeMountEndpoints
             "Compose upload-mount: tenant={TenantId} session={SessionId} document={DocumentId} TraceId={TraceId}",
             tenantId, body.SessionId, body.DocumentId, httpContext.TraceIdentifier);
 
+        // ── Task 166 (S-64): the caller must OWN the session the body names, BEFORE any cache read ──
+        //
+        // The retained "doc-upload-binary" bytes are keyed by (claim tenant, sessionId, documentId). The tenant
+        // was already the caller's; the SESSION was whatever the body said — so a same-tenant caller holding
+        // another user's session id and upload id got that user's file bytes, filename and projection back, and
+        // ProjectForMount recorded a PDF-source marker on the other user's session. The chat routes that WRITE
+        // these entries all carry .AddSessionOwnershipFilter(); this read did not, because its session id rides
+        // in the BODY where no route filter can see it — hence the in-handler check, enumerated in
+        // SessionOwnershipGuardTests.BodyScopedSessionRoutes.
+        //
+        // ONE answer: not found, someone else's, unowned (null OwnerOid) and a session-store fault all return the
+        // SAME 404 as expired bytes, and none of them reads the cache or calls ProjectForMount.
+        bool ownsSession;
+        try
+        {
+            var (ownedSession, _) = await ComposeActiveDocumentEndpoints.ResolveOwnedSessionAsync(
+                    sessionManager, tenantId, body.SessionId, CallerResolution.ResolveObjectId(httpContext.User), ct)
+                .ConfigureAwait(false);
+            ownsSession = ownedSession is not null;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The DECISION only — a store fault is "could not establish ownership", which is a refusal.
+            logger.LogWarning(ex,
+                "Compose upload-mount: session-ownership lookup FAULTED tenant={TenantId} session={SessionId}; answering the uniform 404. TraceId={TraceId}",
+                tenantId, body.SessionId, httpContext.TraceIdentifier);
+            ownsSession = false;
+        }
+
+        if (!ownsSession)
+        {
+            logger.LogWarning(
+                "Compose upload-mount DENIED: session={SessionId} tenant={TenantId} is not the caller's (or does not exist). Answered 404, cache NOT read. TraceId={TraceId}",
+                body.SessionId, tenantId, httpContext.TraceIdentifier);
+            return UploadedFileNotAvailable();
+        }
+
         try
         {
             // The chat upload route key uses the raw sessionId string the client sent. The
@@ -122,12 +179,7 @@ internal static class ComposeMountEndpoints
                     "Compose upload-mount: retained bytes not found (expired or never uploaded) tenant={TenantId} session={SessionId} document={DocumentId} TraceId={TraceId}",
                     tenantId, body.SessionId, body.DocumentId, httpContext.TraceIdentifier);
 
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Uploaded File Not Available",
-                    detail: "The uploaded file's bytes are no longer available (the session may have expired). " +
-                            "Re-upload the file in the Assistant, then open it in Compose again.",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                return UploadedFileNotAvailable();
             }
 
             // Filename + content type from the metadata sidecar (best-effort; null-tolerant).
@@ -262,6 +314,25 @@ internal static class ComposeMountEndpoints
         if (body.Content is null || body.Content.Length == 0)
             return BadRequest("content (the document's raw bytes) is required.");
 
+        // #696 (DEF-02): refuse an oversize document BEFORE the synchronous projection, with the same
+        // limit and the same voice as the save routes. Two reasons it is a ProblemDetails naming the
+        // number rather than a bare transport rejection: a user who opens a 40 MB file needs to know what
+        // to do about it, and a door that refused SILENTLY here while the save door explained itself would
+        // read as two different products.
+        if (body.Content.Length > ComposeSaveLimits.MaxDocumentBytes)
+        {
+            logger.LogWarning(
+                "Compose project refused: document is {Size} bytes, over the {Limit}-byte limit (file={FileName}). TraceId={TraceId}",
+                body.Content.Length, ComposeSaveLimits.MaxDocumentBytes, body.FileName, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Document Too Large",
+                detail: $"This document is {body.Content.Length / (1024 * 1024)} MB, and Compose can open documents up to " +
+                        $"{ComposeSaveLimits.MaxDocumentDisplay}. Remove or compress large embedded images, or split the " +
+                        "document, then try again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
         // The SAME builder instance LoadAsync/Upload use, so Browse renders through the one reader (F-2),
         // not a forked projection path. Task 050 (FR-06): the DOCX render stays pure/synchronous/no-I/O
         // (ADR-007/ADR-013); a PDF source (bytes-first detection via body.FileName + magic bytes) forks
@@ -325,6 +396,19 @@ internal static class ComposeMountEndpoints
                 detail: ex.Message);
         }
     }
+
+    /// <summary>
+    /// The ONE "uploaded file not available" answer — returned for expired bytes AND (task 166) for a session
+    /// the caller does not own, does not exist, has no owner, or could not be looked up. Byte-identical across
+    /// all of them by construction: one construction site, no parameters.
+    /// </summary>
+    internal static IResult UploadedFileNotAvailable() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Uploaded File Not Available",
+            detail: "The uploaded file's bytes are no longer available (the session may have expired). " +
+                    "Re-upload the file in the Assistant, then open it in Compose again.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
 
     /// <summary>
     /// Probes the retained-binary cache under the likely session-id spellings (as-sent, then

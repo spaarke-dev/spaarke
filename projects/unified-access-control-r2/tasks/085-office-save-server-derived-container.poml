@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="unified-access-control-r2">
+  <metadata>
+    <title>POST /api/office/save — take the container from the server, not from SaveRequest.ContainerId</title>
+    <phase>0c Secure Documents — Wave 2 (container-selection sweep follow-on)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shipped write surface; changes an authorization contract on an app-only MI write with no SPE ACL backstop.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Must reconcile with task 076's server-derivation decision rather than fork a second container-selection model, and must decide the `TargetEntity == null` branch correctly.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small code surface; the judgement is in the no-record branch and in not breaking the shipped Office add-in.</effort-reason>
+    <parallel-group>wave2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares `EntityAccessFilter.EntitySetByType` with the Q4 widening and with task 076's filter. Two agents editing that map concurrently produces a silent merge mess.</parallel-reason>
+    <deps>076, 083</deps>
+    <tags>bff-api, api, auth, security, office</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Row 9 of task 083's container-selection census (notes/task-083-sink-inventory.md). Filed 2026-08-30 per the owner's Q2 answer of 2026-08-28 (notes/SESSION-STATUS-2026-08-28.md §6.5).</origin>
+  </metadata>
+
+  <prompt>`POST /api/office/save` authorizes the caller against `SaveRequest.TargetEntity` and then writes the bytes into `SaveRequest.ContainerId` — a *different* client-supplied field on the same request body. The authorization key and the write destination are two independently caller-chosen values for one decision.</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>The container the Office save path writes into is derived by the SERVER from the authorized record (or, when there is no record, from the acting user's business unit). `SaveRequest.ContainerId` is gone from the contract, not merely ignored.</goal>
+
+  <context>
+    <background>This is **option (B)** — a route that accepts both a record and a container — live in shipped code. Task 083 rejected that shape explicitly; this is the instance of it that survived four hand recounts because neither `Api/Office/OfficeEndpoints.cs` nor the Office service was in `RouteAuthorizationGuardTests`' hand-maintained 12-file census.
+
+THE EXACT SHAPE (verified 2026-08-30, current HEAD):
+
+- `Api/Office/OfficeEndpoints.cs:168-174` — `group.MapPost("/save", SaveAsync)` carries `.AddOfficeAuthFilter()` **and** `.AddEntityAccessFilter()`. The entity filter authorizes against `SaveRequest.TargetEntity`.
+- `Models/Office/SaveRequest.cs:22` — `TargetEntity` is **optional** (`SaveEntityReference?`, no `[Required]`).
+- `Models/Office/SaveRequest.cs:27` — `ContainerId` is a client-supplied `string?` on the same body.
+- `Services/Office/OfficeService.cs:296-307` — `var containerId = request.ContainerId;` falling back to `_emailProcessingOptions.DefaultContainerId`, else throw.
+- `Services/Office/OfficeService.cs:169` — `ContainerId = request.ContainerId` is also serialized into the ProcessingJob payload, so the client-supplied value **persists** past the request.
+- `Services/Office/OfficeStorageUploader.cs:37-62` — `UploadToSpeAsync` resolves that container to a drive and PUTs. **App-only MI**, so there is no SPE ACL backstop: whatever container id arrives is written to.
+
+TWO COMPOUNDING FACTS, both load-bearing:
+
+1. `EntityAccessFilter.cs:148-159` calls `next(context)` when the target entity is **absent** — by design, deferring validation to the endpoint. Combined with `TargetEntity` being optional, a save with no `TargetEntity` runs on **baseline Office authentication alone**, and then writes into whatever `ContainerId` says.
+2. `RouteAuthorizationGuardTests` scores this route as **gated** — it sees `.AddEntityAccessFilter()` and stops. That is why the second guard (`SpeWriteSinkContainerProvenanceGuardTests`, task 083) asks a different question: not "is this route gated?" but "where did this container id come from?".
+
+TODAY'S TRAFFIC vs THE CONTRACT. No shipped client populates `ContainerId` (`useSaveFlow.ts` does not send it), so this is **the contract, not the traffic** — any authenticated caller who writes the JSON by hand picks the destination container. Do not let "no client sends it" become the reason to leave the field in place; that is exactly the reasoning that left `FolderPath` dormant for the life of the feature.
+
+THE OWNER HAS ALREADY DECIDED THE MODEL (notes/SESSION-STATUS-2026-08-28.md §6.5, binding):
+- When there IS an owning record → derive the container from that record (task 076's path).
+- When there is NO owning record → derive from the **acting user's business unit**, server-side. The client never supplies a container id.
+- Returning the server's CHOSEN container/drive id in the RESPONSE is fine and necessary (the client needs `driveId` for `sprk_graphdriveid` + `indexFile()`). **Accepting one in the request is the vulnerability.** (Q5)
+
+SHARED MAP WARNING. Per the owner's Q4 answer, `EntityAccessFilter.EntitySetByType` gains `sprk_workassignment`, `sprk_event` and `sprk_todo`. That map is SHARED with this route. An entity type absent from it makes a record-keyed path DENY (fail closed) — so this task must **re-verify the Office save surface after that widening lands**, and must not widen it independently.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobQueue.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/RecordRouteAccessAuthorizationFilter.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="reference">tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/SESSION-STATUS-2026-08-28.md</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-083-sink-inventory.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">DELETE `SaveRequest.ContainerId`. Do not merely ignore it server-side — a field that still deserializes is a field a future change will start honouring again. Follow the `FolderPath` precedent at `SaveRequest.cs:29-34`: remove it and leave the reasoning at the deletion site.</constraint>
+    <constraint source="owner-Q1">The no-record branch derives the container from the **acting user's business unit**, server-side. Never from the request.</constraint>
+    <constraint source="owner-Q5">Returning the chosen container/drive id in the RESPONSE is required — the client needs `driveId`. Only ACCEPTING one is forbidden.</constraint>
+    <constraint source="task-076">Reuse the record→container derivation task 076 already routes through. Do NOT add a second one. Exactly one container-selection model.</constraint>
+    <constraint source="ADR-003">If neither a record nor an acting-user business unit resolves, DENY. Never fall back to a config default in the record-bearing case.</constraint>
+    <constraint source="ADR-008">Authorization stays in endpoint filters. Do not move the decision into handler code.</constraint>
+    <constraint source="build-plan">Do not solve any part of this by granting an SPE container permission. `GrantMembershipAsync` stays at zero callers.</constraint>
+    <constraint source="project">The ProcessingJob payload (`OfficeService.cs:169`) must carry the SERVER-DERIVED container, not a client value. A persisted client value outlives the request and defeats the fix.</constraint>
+    <constraint source="project">Do not widen `EntityAccessFilter.EntitySetByType` in this task — that is the Q4 change and the map is shared. Coordinate; re-verify this surface after it lands.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/SESSION-STATUS-2026-08-28.md</file>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify the shape at current HEAD before changing anything — line numbers in this POML were accurate 2026-08-30 but the folder-removal and sanitize commits have moved this file twice already. Confirm `ContainerId` still flows request → `OfficeService` → `OfficeStorageUploader`, and still lands in the job payload.</step>
+    <step order="1">Inventory every producer and consumer of `SaveRequest.ContainerId` — server AND `src/client/office-addins/**`. Grep evidence required. A shipped add-in that sends it turns this from a deletion into a coordinated client change.</step>
+    <step order="2">Server-derive the container: from the authorized record when `TargetEntity` is present (task 076's path); from the acting user's business unit when it is not. Thread the derived value into the job payload.</step>
+    <step order="3">Delete `SaveRequest.ContainerId` and the `_emailProcessingOptions.DefaultContainerId` fallback in the record-bearing branch. Decide explicitly — and state in the notes — whether the config default survives for the no-record branch or is replaced by the BU derivation.</step>
+    <step order="4">Tests: a request naming a container the caller may not reach is refused (or the field no longer exists — assert the contract, not just the behaviour); a save with no `TargetEntity` still lands in the acting user's BU container and nowhere else; the response still carries `driveId`.</step>
+    <step order="5">Update `SpeWriteSinkContainerProvenanceGuardTests` — reclassify the Office sinks `ClientSupplied` → `ServerDerivedRecord`/`ServerDerivedConfig` and correct rows in `notes/task-083-sink-inventory.md`. The guard failing is the signal the change landed.</step>
+    <step order="6">Build, tests, publish size vs the 44.96 MB baseline (ceiling 60), CVE scan. Placement Justification per CLAUDE.md §10.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a shipped Office add-in build DOES send `ContainerId`, STOP. Deleting the field then breaks a deployed client and the fix gets reverted — which reopens the hole. Surface the coordinated-change decision instead of guessing.</trigger>
+    <trigger>If the acting user's business unit does not resolve to exactly one container, STOP and surface it. Do not pick one, and do not fall back to the config default for a record-bearing save.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 076 already derives a container from an authorized record; `EntityAccessFilter` already authorizes the target entity.</existing>
+    <extension>Removes a client-supplied field and routes an existing write through the existing derivation. No new component, no new map, no new filter.</extension>
+    <cost-of-doing-nothing>Any authenticated caller who writes the request JSON by hand chooses which SPE container receives the bytes, on an app-only MI write with no ACL backstop — and, because `TargetEntity` is optional and `EntityAccessFilter` passes through when it is absent, can do so without naming a record at all. In SPE, content placed in a shared container is permanently exposed to that container's members; there is no repair after the fact.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">Office save path writing into a server-derived container; `SaveRequest.ContainerId` deleted</output>
+    <output type="test">tests/ — no-TargetEntity save lands in the acting user's BU container; response still carries driveId</output>
+    <output type="test">tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs — Office sinks reclassified</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-085-office-save-container.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`SaveRequest.ContainerId` no longer exists on the contract — proven by a test that would fail if the property were reinstated, not merely by behaviour.</criterion>
+    <criterion>A save carrying no `TargetEntity` writes into the acting user's business-unit container and cannot be steered elsewhere by the request.</criterion>
+    <criterion>A save carrying a `TargetEntity` writes into the container derived from THAT record, via task 076's existing derivation — exactly one container-selection model exists in the codebase.</criterion>
+    <criterion>The ProcessingJob payload carries the server-derived container id, not a client-supplied one.</criterion>
+    <criterion>The response still returns the chosen `driveId` (Q5 — the client needs it).</criterion>
+    <criterion>`SpeWriteSinkContainerProvenanceGuardTests` classifies every Office sink as server-derived, and Rule A is green.</criterion>
+    <criterion>Client-caller inventory is evidenced by grep, not asserted.</criterion>
+    <criterion>Build 0 warnings; publish size reported against the 44.96 MB baseline; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-08-30. Full write-up: notes/task-085-office-save-container.md.
+
+`SaveRequest.ContainerId` DELETED (tombstoned in place, following the `FolderPath` precedent on the same
+type). New `OfficeService.ResolveContainerAsync` derives the container from the record the caller was
+already authorized against, via task 076's `RecordContainerResolver` — so the authorization key and the
+write destination are ONE value. A secure record with no container of its own is REFUSED
+(`ContainerDecisionOutcome.FailClosed`) rather than falling back to the shared default. Derivation runs
+BEFORE the ProcessingJob payload is serialized, which is what closes the async worker half: previously a
+client-chosen container outlived the request inside a Dataverse row.
+
+⚠️ DELIBERATE DEVIATION FROM THIS POML'S OWN CONSTRAINT. The brief said "no record → derive from the
+acting user's BU". NOT implemented, because `RecordContainerResolver`'s own contract argues against it:
+users sit in the Operations subtree while secure records are owned in Secure Projects, so acting-user
+resolution writes a secure record's content into the general Operations container — the exact isolation
+failure this project exists to close. The owner's Q1 sanctioned acting-user BU for task 076's three
+upload-before-a-record-exists CLIENT paths, a different surface; every shipped add-in path sends a
+TargetEntity, so Office save's no-record branch is contract-only and uses the existing server-side
+config default (fail-closed when unset). Q5's binding requirement — "accepting one in the request is the
+vulnerability" — is fully met, and the response still returns the chosen driveId.
+
+ESCALATION TRIGGER DID NOT FIRE. One scare: `useSaveFlow.ts:62` declares `containerId?: string`, but it
+is on `JobResultArtifact` — the RESPONSE shape — appearing exactly once. That is Q5 working as designed.
+No client sends it in a request; the quick-save body type enumerates its fields without it.
+
+TESTS ASSERT THE CONTRACT, NOT THE BEHAVIOUR, deliberately: no client ever sent ContainerId, so a
+behavioural test over today's callers would have passed throughout the defect's life. The new test
+checks for ANY container- or drive-naming property, because the defect is the capability rather than the
+spelling — reintroducing it as `DriveId` would be the same hole with a different label. Perturbation:
+reinstating the property reddens 2 of 3.
+
+Provenance guard: both Office sinks moved ClientSupplied -> ServerDerivedRecord, owner re-pointed to
+"085 (CLOSED)". Original finding text retained inside each entry — it is the clearest statement of why
+this guard is keyed on SINKS rather than routes (the client value crossed three frames before reaching
+the sink, so no route census could see it).
+
+Verification: build 0 warnings; 3/3 new tests; full BFF suite 10,908 passed / 0 failed / 72 skipped;
+ArchTests 144 passed / 6 failed == clean-tree baseline; publish 45.12 MB compressed incl. PDBs (0.00
+delta, ceiling 60); no vulnerable packages; no packages added. Placement Justification: no new endpoint,
+service, interface, DI registration or package — one existing service gains one already-registered
+scoped dependency, and a property is REMOVED from an existing contract.</notes>
+
+  <!-- Original POML notes follow -->
+  <notes>Row 9 of the task 083 census. The sharpest single finding of the 2026-08-28 session: a route that IS gated, by a filter that IS correct, authorizing against a field that is NOT the one it writes to.
+
+Two claims about this surface were REFUTED during investigation and must not be reintroduced:
+
+(1) "The Office save path derives folders from the document title." FALSE. `SaveRequest.FolderPath` was client-supplied and always null; no client ever set it. It has since been deleted. The observed document-title folders came from an **unsanitized filename** becoming the upload path verbatim (`"…Add In 8/24/2026"` → folder `…Add In 8` → folder `24` → file `2026`; the trailing `8` is the MONTH). Fixed by task 084.
+
+(2) "`GET /api/spe/audit` can confirm the folder provenance." FALSE. `SpeAuditService` is write-only, the Office path logs nothing, and the table has 0 rows.
+
+Both refutations are recorded because each was a confident inference that survived until someone read the source.</notes>
+</task>

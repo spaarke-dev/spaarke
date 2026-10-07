@@ -16,7 +16,7 @@ This document defines the process for validating code changes against SDAP's Arc
 **Technology:** NetArchTest.Rules library with xUnit
 
 **Test Coverage:**
-- **ADR-001:** No Azure Functions packages or attributes (2 tests)
+- **ADR-001:** the BFF assembly carries no Functions or Durable Task packages and no Function-attributed methods (2 tests; where background work runs is ADR-052)
 - **ADR-002:** No plugin orchestration in BFF (2 tests)
 - **ADR-007:** Graph SDK isolation to Infrastructure layer (3 tests)
 - **ADR-008:** Authorization via endpoint filters (4 tests)

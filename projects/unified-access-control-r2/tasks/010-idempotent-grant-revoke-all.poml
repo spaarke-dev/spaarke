@@ -31,7 +31,7 @@
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/GrantLifecycleCharacterizationTests.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="001" status="pending">Characterization tests pinning duplicate-row + single-row-revoke behavior, flipped here.</dependency>
+      <dependency task="001" status="completed">Characterization tests pinning duplicate-row + single-row-revoke behavior, flipped here.</dependency>
     </dependencies>
   </context>
 

@@ -25,8 +25,16 @@ export interface DriveItem {
   /** Drive ID containing this item */
   driveId: string;
 
-  /** Parent folder reference ID */
-  parentReferenceId?: string;
+  /**
+   * Parent folder ID.
+   *
+   * Renamed from `parentReferenceId` 2026-09-03: the BFF's `FileHandleDto` has always serialized
+   * this as `parentId`, so `parentReferenceId` was `undefined` at runtime for every response — a
+   * field name invented by this type rather than read off the wire. It had zero consumers here,
+   * but DocumentUploadWizard reads `parentId` off the same payload, so the mismatch would have
+   * silently dropped the field the moment that path started going through this client.
+   */
+  parentId?: string;
 
   /** Created date/time */
   createdDateTime: string;
@@ -42,6 +50,15 @@ export interface DriveItem {
 
   /** MIME type (files only) */
   mimeType?: string;
+
+  /**
+   * SharePoint web URL for the item.
+   *
+   * Added 2026-09-02: the BFF's `FileHandleDto` has always returned this, and consumers persist it
+   * as `sprk_document.sprk_filepath` — this type was simply an incomplete view of the response.
+   * Optional because Graph omits it for some item states, not because the server might not send it.
+   */
+  webUrl?: string;
 }
 
 /**
@@ -136,7 +153,8 @@ export interface ParentEntityContext {
  *
  * Pattern: writer-identity matching (Pattern 4) — the same user who wrote the
  * file via OBO MUST be the caller indexing it via OBO. Used by wizards after
- * a successful PUT to `/api/obo/containers/{id}/files/{path}`.
+ * a successful PUT to `/api/obo/records/{entityLogicalName}/{recordId}/files/{path}` (or
+ * `/api/obo/me/files/{path}`). The container-keyed route this used to name was deleted by task 076.
  */
 export interface IndexFileRequest {
   /** SPE drive ID (NOT the container ID — these are different). */
@@ -178,4 +196,16 @@ export interface IndexFileResult {
 
   /** Error message when `success` is false. */
   errorMessage?: string;
+}
+
+/**
+ * Result returned by `SdapApiClient.attachDocumentFile()` — the pointer the BFF stamped on the
+ * document (unified-access-control-r2 task 166 f1).
+ */
+export interface AttachDocumentFileResult {
+  documentId: string;
+  driveId: string;
+  itemId: string;
+  /** True when this same file was already attached (the call was idempotent). */
+  alreadyAttached: boolean;
 }

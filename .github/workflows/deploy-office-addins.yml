@@ -11,6 +11,10 @@ on:
       # source (dist/ is gitignored), so a change there changes what ships here.
       # Without this path the add-ins would keep deploying against a stale auth lib.
       - 'src/client/shared/Spaarke.Auth/**'
+      # webpack.config.js aliases this single file into the add-in bundle (it has no
+      # imports of its own), so editing it changes what ships — watch the file, not
+      # the whole Communication.Components package, which the add-ins do not build.
+      - 'src/client/shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
       - '.github/workflows/deploy-office-addins.yml'
   workflow_dispatch:
 
@@ -27,7 +31,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '18'
+          node-version: '20'
           cache: 'npm'
           cache-dependency-path: src/client/office-addins/package-lock.json
 
@@ -63,6 +67,34 @@ jobs:
           TENANT_ID: a221a95e-6abc-4434-aecc-e48338a1b2f2
           BFF_API_CLIENT_ID: 1e40baad-e065-4aea-a8d4-4b7ab273458c
           BFF_API_BASE_URL: https://spaarke-bff-dev.azurewebsites.net
+          # Dataverse org the pane's "Open" buttons (task 027) and the Quick Create deep link
+          # point at. Unset, the pane hides the Open buttons rather than showing ones that do nothing.
+          ORG_URL: https://spaarkedev1.crm.dynamics.com
+          # The Spaarke model-driven app (unique name) every record link opens in (task 088). Without it a
+          # record opens in the user's default app. Same in every environment; empty → links name no app.
+          SPAARKE_APP_NAME: sprk_MatterManagement
+          # Word's Email tab (task 096). ON since spaarkeai-word-add-in-r1 task 097 (2026-10-06). It was held off
+          # (owner decision 2026-10-04) until /api/communications/send authorized every attachment (Read) and every
+          # association (AppendTo) as the caller. That is unified-access-control-r2 task 161
+          # (CommunicationRecordAuthorizationFilter), on master via #1312 (d254d7166); owner go 2026-10-06: "uac-r2
+          # task 161 is working so you can proceed". The code default stays OFF (webpack.config.js); only this
+          # deploy setting turns it on. Set back to "false" to hide the tab again; no code change either way.
+          ADDIN_EMAIL_TAB_ENABLED: "true"
+
+      # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
+      # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->
+      # App type "Teams app") and fails the run on a wrong-size icon. The zips are written OUTSIDE dist/ so the
+      # static site does not publish them; download them from this run's artifacts.
+      - name: Package unified add-in (Outlook + Word)
+        shell: pwsh
+        run: ./scripts/Package-OfficeAddinUnified.ps1
+
+      - name: Upload unified add-in packages
+        uses: actions/upload-artifact@v6
+        with:
+          name: spaarke-addin-unified-package
+          path: src/client/office-addins/app-package/*.zip
+          if-no-files-found: error
 
       - name: Deploy to Azure Static Web App
         uses: Azure/static-web-apps-deploy@v1

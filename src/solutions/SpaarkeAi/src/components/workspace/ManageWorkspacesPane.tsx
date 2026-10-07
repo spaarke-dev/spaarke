@@ -172,7 +172,7 @@ import {
   AddRegular,
 } from "@fluentui/react-icons";
 import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
-import { OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { OOB_MODAL_SIZES, formatRelativeTime, getXrm } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import {
   isPinned,
@@ -392,15 +392,15 @@ const useStyles = makeStyles({
 //     be redundant).
 //   - Unparseable / empty string → returns null. Defensive: don't render a
 //     broken date if the wire shape ever changes unexpectedly.
-//   - <60s ago → "Modified just now" (FR-07 acceptance criterion: new layouts
-//     surface "just now" or near-equivalent relative time).
-//   - <60m ago → "Modified Nm ago"
-//   - <24h ago → "Modified Nh ago"
-//   - <7d ago → "Modified Nd ago"
-//   - older → "Modified {locale short date}" (e.g., "Modified 5/26/2026")
-//
-// Mirrors the `formatRelative` helper in HistoryOverlay.tsx for visual
-// consistency across SpaarkeAi.
+//   - |diff| < 60s (past or future, i.e. clock skew) → "Modified just now"
+//     (FR-07 acceptance criterion: new layouts surface "just now").
+//   - older → "Modified {compact relative time}" (e.g. "Modified 5m ago",
+//     "Modified 3h ago", "Modified 2d ago", "Modified 3w ago",
+//     "Modified 2mo ago") via the shared `formatRelativeTime` with
+//     `style: 'compact'` (task 081 / C-13 — this previously hand-rolled the
+//     same "Nm/Nh/Nd ago" form, mirroring the HistoryOverlay.tsx copy, with
+//     a locale-date fallback after 7 days that the shared formatter replaces
+//     with week/month/year buckets).
 // ---------------------------------------------------------------------------
 
 const UNIX_EPOCH_SENTINEL = 0;
@@ -412,15 +412,7 @@ function formatModifiedOn(iso: string): string | null {
   // Unix-epoch sentinel = "system layout, never modified" → no display.
   if (ts === UNIX_EPOCH_SENTINEL) return null;
 
-  const diffMs = Date.now() - ts;
-  if (diffMs < 60_000) return "Modified just now";
-  if (diffMs < 3_600_000)
-    return `Modified ${Math.floor(diffMs / 60_000)}m ago`;
-  if (diffMs < 86_400_000)
-    return `Modified ${Math.floor(diffMs / 3_600_000)}h ago`;
-  if (diffMs < 7 * 86_400_000)
-    return `Modified ${Math.floor(diffMs / 86_400_000)}d ago`;
-  return `Modified ${new Date(ts).toLocaleDateString()}`;
+  return `Modified ${formatRelativeTime(iso, { style: "compact" })}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -433,18 +425,16 @@ function formatModifiedOn(iso: string): string | null {
 // + templateFilter (task 102 — forces SpaarkeAi 6-template subset).
 // ---------------------------------------------------------------------------
 
-function getXrm(): unknown {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  return w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
-}
+// Xrm is resolved via the shared cross-frame `getXrm()` from
+// `@spaarke/ui-components` (task 081 / C-8 — this file previously defined a
+// local `getXrm` with its own window/parent/top `??` chain).
 
 async function launchEditWizard(
   layout: WorkspaceLayoutDto,
   bffBaseUrl: string,
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('navigation') as any;
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
@@ -537,7 +527,7 @@ function consumeWizardDialogResult(): void {
 
 async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('navigation') as any;
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",

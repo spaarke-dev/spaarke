@@ -279,7 +279,7 @@ All event types share the same entity with a `sprk_eventtype_ref` lookup discrim
 | `sprk_name` / `sprk_eventname` | Name | Text | |
 | `sprk_description` | Description | Text | |
 | `statecode` | Status | State | 0: Active, 1: Inactive |
-| `statuscode` | Status Reason | Status | 1: Draft, 659490001: Open, 659490002: Completed, 659490003: Cancelled, 659490004: Closed, 659490005: Transferred, 659490006: On Hold, 659490007: Reassigned, 2: No Further Action |
+| `statuscode` | Status Reason | Status | 1: Draft, 659490001: Open, 659490002: Completed, 659490003: Closed, 659490004: Cancelled, 659490005: Transferred, 659490006: On Hold, 659490007: Reassigned (all statecode 0 Active except 2/659490004/659490005 = 1 Inactive; Completed and Closed are ACTIVE), 2: No Further Action — verified live spaarkedev1 2026-10-05 |
 | `sprk_assignedto` | Assigned To | Lookup | -> `contact` |
 | `sprk_assignedattorney` | Assigned Attorney | Lookup | -> `contact` |
 | `sprk_assignedparalegal` | Assigned Paralegal | Lookup | -> `contact` |

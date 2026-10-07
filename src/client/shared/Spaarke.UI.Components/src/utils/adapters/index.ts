@@ -50,6 +50,24 @@ export type { AuthenticatedFetch } from './bffDataServiceAdapter';
 export { createBffUploadService } from './bffUploadServiceAdapter';
 export type { GetBearerToken } from './bffUploadServiceAdapter';
 export { createBffNavigationService } from './bffNavigationServiceAdapter';
+
+// Task 147 r1 (UAC-r2, owner round 28 item 1): child-record creates and re-files go through the BFF (G5) —
+// the server owns the owner. The one client seam for every product child writer.
+export {
+  withBffChildWrites,
+  routesChildWritesThroughBff,
+  createChildRecordViaBff,
+  updateChildRecordViaBff,
+  isBffChildCreateTable,
+  isBffChildRefileTable,
+  ChildRecordWriteError,
+  BFF_CHILD_CREATE_TABLES,
+  OWNERSHIP_CHILD_TABLES,
+  isOwnershipChildTable,
+  FILING_ONLY_REFILE_TABLES,
+  isFilingKey,
+  splitFilingPayload,
+} from './bffChildWriteAdapter';
 export type { NavigateFunction, DialogRenderer, DialogCloser } from './bffNavigationServiceAdapter';
 
 // OOB modal size scale (spaarke-modal-system P7 task 090 — FR-11/FR-18).

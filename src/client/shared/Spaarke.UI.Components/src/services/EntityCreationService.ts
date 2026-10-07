@@ -23,16 +23,20 @@
  * import { getBffBaseUrl } from '../config/bffConfig';
  *
  * const service = new EntityCreationService(webApi, authenticatedFetch, getBffBaseUrl());
- * const uploadResult = await service.uploadFilesToSpe(containerId, files);
+ *
+ * // Create the record FIRST — the upload is keyed on it, and the server resolves the storage
+ * // container from that same record (task 076). There is no container parameter.
  * const matterId = await service.createEntityRecord('sprk_matter', matterData);
+ * const uploadResult = await service.uploadFilesToSpe('sprk_matter', matterId, files);
  * await service.createDocumentRecords('sprk_matters', matterId, 'sprk_Matter', uploadResult.uploadedFiles);
  * ```
  */
 
+import { createChildRecordViaBff, isBffChildCreateTable } from '../utils/adapters/bffChildWriteAdapter';
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
-import { SdapApiClient, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
-import { cleanGuid } from './PolymorphicResolverService';
+import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
+import { cleanGuid } from '../utils/guid';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -44,13 +48,18 @@ import { cleanGuid } from './PolymorphicResolverService';
  *
  * Per spaarke-multi-container-multi-index-r1 spec (FR-WIZ-01..05) the 5 parent-record
  * wizards (Matter, Project, Invoice, WorkAssignment, Event) and DocumentUploadWizard
- * cascade three fields from `businessunit` onto the create payload:
+ * cascade SEARCH-INDEX ROUTING fields from `businessunit` onto the create payload:
  *
- *   - `sprk_containerid` — SPE container/drive ID
  *   - `sprk_searchindexname` — Azure AI Search index name (text, soak-only — Phase G/110 drop)
  *   - `sprk_ai_search_index` — `sprk_aisearchindex` lookup (canonical Phase G post-2026-06-10)
  *
- * All three fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
+ * 🔴 **`sprk_containerid` is NO LONGER cascaded onto any create payload** (task 076, 2026-09-03).
+ * A storage location is not the client's to choose; the server derives it from the record. The
+ * `containerId` field below is still RETURNED by `resolveUserBuDefaults` because callers outside
+ * the create-payload path read it (notably Compose's `resolveContainer`) — but nothing writes it
+ * to `sprk_containerid` any more, and nothing should.
+ *
+ * These fields are OPTIONAL on `businessunit`. When unset on the BU, the helpers
  * leave the corresponding payload field untouched and the BFF tenant-default
  * chain (or downstream backfill) takes over server-side.
  */
@@ -309,36 +318,32 @@ export class EntityCreationService {
   }
 
   /**
-   * Apply a default `sprk_containerid` to the create payload IF AND ONLY IF the payload
-   * does not already have an explicit value for that field (INV-5).
+   * 🔴 **`applyDefaultContainerId` was DELETED 2026-09-03 by unified-access-control-r2 task 076
+   * (harmful write "W1"). Do not reintroduce it.**
    *
-   * Mirrors the canonical assignment shape from
-   * `CreateMatterWizard/matterService.ts:216` — `entity['sprk_containerid'] = containerId` —
-   * adding the INV-5 guard so each wizard does not duplicate it.
+   * It stamped the ACTING USER's business-unit container onto every newly-created row — including
+   * secure projects, unconditionally and with no suppression. `CreateProjectWizard/projectService.ts`
+   * set `sprk_issecure` and then called `applyUserBuDefaults` regardless, so a project marked secure
+   * was born pointing at the SHARED container. Because SharePoint Embedded permissions are
+   * additive-only, nothing later retracts content placed there.
    *
-   * @param entity Create payload (mutated in place).
-   * @param containerId BU-derived container ID; passing `undefined` / `null` / `''` is a no-op.
-   * @returns `true` if the value was set, `false` if it was skipped (already present, or input empty).
-   *
-   * @see design.md INV-5
-   * @see spec.md FR-WIZ-01..05 (parent-record wizards)
-   * @see spec.md FR-WIZ-08 (INV-5 preservation across all wizards)
+   * `sprk_containerid` is now written by exactly one authority: the server. For a secure project it
+   * is stamped by provisioning (BFF task 021); for everything else the container is DERIVED at use
+   * time from the record's own business unit, so there is nothing for a create payload to default.
+   * A client that writes this column is asserting a storage location it has no authority to choose —
+   * which is the shape this whole task exists to remove.
    */
-  static applyDefaultContainerId(entity: Record<string, unknown>, containerId: string | null | undefined): boolean {
-    if (containerId === null || containerId === undefined || containerId === '') return false;
-    if (this._hasExplicitValue(entity, 'sprk_containerid')) return false;
-    entity['sprk_containerid'] = containerId;
-    return true;
-  }
 
   /**
    * Apply a default `sprk_searchindexname` to the create payload IF AND ONLY IF the payload
    * does not already have an explicit value for that field (INV-5).
    *
-   * Mirrors `applyDefaultContainerId` — both fields cascade from the current user's owning
-   * Business Unit per FR-WIZ-01..05. When the BU has no configured index name, callers should
-   * pass `undefined` here and the field will be left unset on the payload (the BFF tenant-default
-   * chain handles the fallback server-side).
+   * Cascades from the current user's owning Business Unit per FR-WIZ-01..05. When the BU has no
+   * configured index name, callers should pass `undefined` here and the field will be left unset on
+   * the payload (the BFF tenant-default chain handles the fallback server-side).
+   *
+   * ⚠️ This field is a SEARCH-INDEX ROUTING hint, not a storage location — which is why it survived
+   * the task-076 cutover while its former sibling `applyDefaultContainerId` did not.
    *
    * @param entity Create payload (mutated in place).
    * @param searchIndexName BU-derived index name; passing `undefined` / `null` / `''` is a no-op.
@@ -360,13 +365,18 @@ export class EntityCreationService {
   }
 
   /**
-   * Apply both BU-derived defaults to the create payload, each guarded independently by INV-5.
-   * Convenience wrapper around `applyDefaultContainerId` + `applyDefaultSearchIndexName` for the
-   * 5 parent-record wizards (Matter, Project, Invoice, WorkAssignment, Event).
+   * Apply the BU-derived defaults to the create payload, guarded by INV-5, for the 5 parent-record
+   * wizards (Matter, Project, Invoice, WorkAssignment, Event).
+   *
+   * **Narrowed 2026-09-03 (task 076, W1).** This used to apply TWO fields; the `sprk_containerid`
+   * half is gone along with `applyDefaultContainerId` — see the block comment above it for why. The
+   * returned object no longer carries `containerIdSet`, which is deliberate: dropping the property
+   * turns every caller that branched on it into a COMPILE ERROR rather than a silently-always-false
+   * condition.
    *
    * @param entity Create payload (mutated in place).
-   * @param defaults BU-derived defaults; either or both may be undefined.
-   * @returns Object reporting which fields were actually set (vs. skipped by INV-5 or empty input).
+   * @param defaults BU-derived defaults; `searchIndexName` may be undefined.
+   * @returns Object reporting whether the field was set (vs. skipped by INV-5 or empty input).
    *
    * @see spec.md FR-WIZ-01..05
    * @see spec.md FR-WIZ-08 (INV-5)
@@ -374,12 +384,11 @@ export class EntityCreationService {
   static applyUserBuDefaults(
     entity: Record<string, unknown>,
     defaults: IUserBuCascadeDefaults | null | undefined
-  ): { containerIdSet: boolean; searchIndexNameSet: boolean } {
+  ): { searchIndexNameSet: boolean } {
     if (!defaults) {
-      return { containerIdSet: false, searchIndexNameSet: false };
+      return { searchIndexNameSet: false };
     }
     return {
-      containerIdSet: EntityCreationService.applyDefaultContainerId(entity, defaults.containerId),
       searchIndexNameSet: EntityCreationService.applyDefaultSearchIndexName(entity, defaults.searchIndexName),
     };
   }
@@ -413,7 +422,7 @@ export class EntityCreationService {
    * @see design.md §5.0 (BU cascade source)
    */
   static async resolveUserBuDefaults(webApi: IWebApiLike, userId: string): Promise<IUserBuCascadeDefaults> {
-    const cleanUserId = userId.replace(/^\{|\}$/g, '');
+    const cleanUserId = cleanGuid(userId);
 
     // Step 1: user → BU id
     const userRecord = await webApi.retrieveRecord('systemuser', cleanUserId, '?$select=_businessunitid_value');
@@ -445,23 +454,89 @@ export class EntityCreationService {
   }
 
   /**
-   * Upload files to SPE via the BFF OBO upload endpoint.
+   * Upload files to SPE against their OWNING RECORD (task 076 contract).
    *
-   * Uses: PUT /api/obo/containers/{containerId}/files/{path}
-   * Each file is uploaded individually with Bearer token auth.
+   * Uses: `PUT /api/obo/records/{entityLogicalName}/{recordId}/files/{path}`
    *
-   * Post-upload RAG indexing is the caller's responsibility — invoke
-   * `SdapApiClient.indexFile()` from `@spaarke/sdap-client` for each
-   * returned `ISpeFileMetadata`. See project `sdap-client-shared-library-fix-r1`
-   * for the planned migration of this method to `sdap-client.UploadOperation`.
+   * 🔴 **The container is NOT a parameter, and that is the point.** The server resolves the
+   * container from the same record it authorizes the caller against, so the authorization key and
+   * the storage destination are one value and cannot disagree. Before task 076 the caller named a
+   * container resolved at wizard-OPEN time, which meant a secure record created with files put those
+   * files in the shared business-unit container — and SPE permissions are additive-only, so nothing
+   * retracts that afterwards.
    *
-   * @param containerId SPE container/drive ID for the target storage
+   * **Signature changed 2026-09-03** from `(containerId, files, onProgress)`. The arity change is
+   * deliberate: it makes every un-migrated call site a COMPILE ERROR rather than a silent
+   * pass-through of a string that happens to still fit.
+   *
+   * Post-upload RAG indexing is the caller's responsibility — invoke `indexUploadedFiles`, which
+   * already reads the SERVER's `driveId` off each result rather than any client-side container.
+   *
+   * @param entityLogicalName Dataverse logical name of the owning record (e.g. `'sprk_matter'`)
+   * @param recordId GUID of the owning record — must already exist when this is called
    * @param files Files to upload
    * @param onProgress Optional progress callback
    */
   async uploadFilesToSpe(
-    containerId: string,
+    entityLogicalName: string,
+    recordId: string,
     files: IUploadedFile[],
+    onProgress?: (progress: IUploadProgress) => void
+  ): Promise<IFileUploadResult> {
+    // The server route is constrained `{recordId:guid}`, so a brace-wrapped or upper-cased GUID
+    // would MISS THE ROUTE and 404 — surfacing to the user as a plain "upload failed" with no clue
+    // that the id shape was the cause. Brace-wrapped GUIDs demonstrably reach this service (that is
+    // why `createDocumentRecords` already normalizes its `parentEntityId` the same way), and the
+    // ids flowing in here come from a variety of wizard hosts and Xrm lookups.
+    const cleanRecordId = EntityCreationService._cleanGuid(recordId);
+
+    return await this._uploadEach(
+      files,
+      // `conflictBehavior` is deliberately OMITTED so the BFF applies its non-destructive `fail`
+      // default: a same-named file returns 409 with the stored file untouched, rather than
+      // silently overwriting it.
+      file => this._getSdapClient().uploadFileForRecord(entityLogicalName, cleanRecordId, file),
+      onProgress
+    );
+  }
+
+  /**
+   * Upload files that genuinely have NO owning record yet; the server resolves the container from
+   * the ACTING USER's business unit.
+   *
+   * Uses: `PUT /api/obo/me/files/{path}`
+   *
+   * ⚠️ **Only for the flows that cannot create the record first.** If a record exists, use
+   * {@link uploadFilesToSpe} — sending the bytes here stores them in the caller's business-unit
+   * container instead of the record's, which for a secure record is the wrong container and is not
+   * reversible. At HEAD there are exactly TWO such flows — `createXrmEmailComposeHandlers.ts`
+   * (EmailComposer local attachment) and `CreateAnalysisWizardWidget.tsx` (Analysis wizard standalone
+   * document) — and task 076's classification (`notes/task-076-client-cutover-and-supplier-
+   * classification.md:54-55`) reads both as **parentless**: an email attachment on an unsent draft
+   * and a standalone analysis document genuinely have no record to belong to when the bytes move.
+   * (A third flow, DocumentUploadWizard's "skip associate", was cut over to {@link uploadFilesToSpe}
+   * by task 076 and is no longer a caller here.)
+   *
+   * Note this is still NOT a client-named container: the client supplies nothing, and a caller can
+   * only ever write into their own BU's container, which they are entitled to anyway.
+   */
+  async uploadFilesWithoutRecord(
+    files: IUploadedFile[],
+    onProgress?: (progress: IUploadProgress) => void
+  ): Promise<IFileUploadResult> {
+    return await this._uploadEach(files, file => this._getSdapClient().uploadFileWithoutRecord(file), onProgress);
+  }
+
+  /**
+   * Shared per-file loop for both upload contracts.
+   *
+   * Extracted with the record-keyed cutover so the two cannot drift in progress reporting, error
+   * collection, or DriveItem→ISpeFileMetadata mapping. Divergence between two copies of one upload
+   * path is a failure this project has already paid for more than once.
+   */
+  private async _uploadEach(
+    files: IUploadedFile[],
+    uploadOne: (file: File) => Promise<DriveItem>,
     onProgress?: (progress: IUploadProgress) => void
   ): Promise<IFileUploadResult> {
     if (files.length === 0) {
@@ -479,8 +554,6 @@ export class EntityCreationService {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const fileName = encodeURIComponent(file.name);
-
       onProgress?.({
         current: i + 1,
         total: files.length,
@@ -489,35 +562,24 @@ export class EntityCreationService {
       });
 
       try {
-        const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}`,
-          {
-            method: 'PUT',
-            body: file.file,
-            headers: {
-              'Content-Type': file.file.type || 'application/octet-stream',
-            },
-          }
-        );
+        // The shared client owns URL construction (including encoding the file name) and failure
+        // translation.
+        const item = await uploadOne(file.file);
 
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => response.statusText);
-          errors.push({
-            fileName: file.name,
-            error: `HTTP ${response.status}: ${errorText}`,
-          });
-          onProgress?.({
-            current: i + 1,
-            total: files.length,
-            currentFileName: file.name,
-            status: 'failed',
-            error: `HTTP ${response.status}`,
-          });
-          continue;
-        }
-
-        const metadata: ISpeFileMetadata = await response.json();
-        uploadedFiles.push(metadata);
+        // DriveItem -> ISpeFileMetadata. `size` is nullable on the shared type (folders); an
+        // uploaded file always has one, and 0 is the honest fallback for a zero-byte upload.
+        //
+        // `driveId` is where the bytes ACTUALLY landed, per the server. Under the record-keyed
+        // contract that is the only trustworthy value — the caller no longer chooses, so any
+        // client-side container is at best a guess and at worst (a secure record) simply wrong.
+        // The server always populates it (`ParentReference?.DriveId ?? containerId`).
+        uploadedFiles.push({
+          id: item.id,
+          name: item.name,
+          size: item.size ?? 0,
+          webUrl: item.webUrl,
+          driveId: item.driveId,
+        });
 
         onProgress?.({
           current: i + 1,
@@ -555,6 +617,11 @@ export class EntityCreationService {
    * @returns The GUID of the created record
    */
   async createEntityRecord(entityName: string, entityData: Record<string, unknown>): Promise<string> {
+    // UAC-r2 task 147 r1 (owner round 28 item 1): a CHILD record is created through the BFF (G5) — the server decides its
+    // owner. Roots (matter, project, work assignment) are unchanged here.
+    if (isBffChildCreateTable(entityName)) {
+      return createChildRecordViaBff(this._authenticatedFetch, this._bffBaseUrl, entityName, entityData);
+    }
     const result = await this._webApi.createRecord(entityName, entityData);
     return result.id;
   }
@@ -562,12 +629,13 @@ export class EntityCreationService {
   /**
    * Create sprk_document records in Dataverse linking uploaded SPE files to a parent entity.
    *
-   * Each document record contains:
+   * Each document record is created with:
    *   - sprk_documentname / sprk_filename: file name
-   *   - sprk_driveitemid: SPE drive item ID
-   *   - sprk_filepath: web URL to the file
    *   - sprk_filesize: file size in bytes
    *   - Navigation property @odata.bind to parent entity
+   * and then its file is ATTACHED by the BFF ({@link attachUploadedFile}), which stamps the SPE pointer
+   * (`sprk_graphdriveid` / `sprk_graphitemid`), `sprk_hasfile` and `sprk_filepath` server-side
+   * (unified-access-control-r2 task 166 f1). A row whose file the BFF refuses is removed and reported.
    *
    * @param parentEntityName Logical name of the parent entity set (e.g., 'sprk_matters')
    * @param parentEntityId GUID of the parent entity record
@@ -587,7 +655,21 @@ export class EntityCreationService {
     navigationProperty: string,
     uploadedFiles: ISpeFileMetadata[],
     options?: {
-      /** SPE container/drive ID — stored as sprk_graphdriveid and sprk_containerid */
+      /**
+       * FALLBACK SPE drive id, used only when an uploaded file carries no `driveId` of its own.
+       *
+       * ⚠️ Corrected 2026-09-03: this was documented as *"stored as sprk_graphdriveid and
+       * sprk_containerid"*. The second half was never true — this method has never written
+       * `sprk_containerid`, and `sprk_document` deliberately keeps that column NULL (a fact
+       * `DocumentRecordService.payload.test.ts` pins as a NEGATIVE assertion). A doc comment
+       * describing a write that does not happen is how this project has repeatedly turned a comment
+       * into a believed constraint — see FAILURE-MODES AP-12.
+       *
+       * Prefer leaving this unset: `createDocumentRecords` now reads `file.driveId`, the drive the
+       * SERVER reported on the upload, which is the only value that says where the bytes actually
+       * landed. Pass it only when building document rows for files not uploaded via
+       * `uploadFilesToSpe`.
+       */
       containerId?: string;
       /** Parent record display name — stored in sprk_regardingrecordname for resolver fields */
       parentRecordName?: string;
@@ -612,18 +694,33 @@ export class EntityCreationService {
 
     for (const file of uploadedFiles) {
       try {
-        // Payload aligned with canonical DocumentRecordService fields
+        // 🔴 `sprk_graphdriveid` MUST record where the bytes ACTUALLY landed, which is the drive the
+        // SERVER chose and reported back on the upload response — not a container the caller picked.
+        //
+        // Before task 076's cutover this read `containerId ?? null`, i.e. the container the wizard
+        // resolved when it OPENED. That was survivable only while the client also named the upload
+        // destination, so the two happened to agree. Under the record-keyed contract the server
+        // resolves the container from the owning record, so for a SECURE record they provably
+        // DISAGREE: the bytes go to the record's own container while this column would have pointed
+        // at the shared business-unit one — a dangling pointer that 404s on every subsequent
+        // download, on exactly the records that matter most.
+        //
+        // `driveId` is always populated server-side (`ParentReference?.DriveId ?? containerId`), so
+        // the `options.containerId` fallback below is retained only for callers that build document
+        // rows for files they did not upload through `uploadFilesToSpe`.
+        const driveId = file.driveId ?? containerId ?? undefined;
+
+        // Payload aligned with canonical DocumentRecordService fields.
+        //
+        // 🔴 NO SPE POINTER IN THE CREATE PAYLOAD (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i)).
+        // `sprk_graphitemid` / `sprk_graphdriveid` are the pointer the BFF follows AS THE APPLICATION on every
+        // download, so they are field-secured and writable by the BFF identity only. The row is created without them
+        // (and without `sprk_hasfile` / `sprk_filepath`, which the BFF writes WITH the pointer so "has a file" and
+        // "points at a file" never disagree), then {@link attachUploadedFile} asks the BFF to verify and stamp them.
         const documentEntity: Record<string, unknown> = {
           sprk_documentname: file.name,
           sprk_filename: file.name,
           sprk_filesize: file.size ?? null,
-          sprk_graphitemid: file.id,
-          sprk_graphdriveid: containerId ?? null,
-          sprk_filepath: file.webUrl ?? null,
-          // Upload to SPE succeeded by the time we reach here — mark the file flag.
-          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
-          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
-          sprk_hasfile: true,
         };
 
         // Add @odata.bind navigation property to link document to parent entity.
@@ -658,8 +755,26 @@ export class EntityCreationService {
         }
 
         console.info('[EntityCreationService] createDocumentRecord payload:', JSON.stringify(documentEntity, null, 2));
-        const result = await this._webApi.createRecord('sprk_document', documentEntity);
-        createdDocumentIds.push(result.id);
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the document row is created through the BFF (G5) — the server
+        // decides its owner (the Secure Record Owners team when its parent is secure) and records the caller as its
+        // creator person; a refusal is this file's warning.
+        const documentId = await createChildRecordViaBff(
+          this._authenticatedFetch,
+          this._bffBaseUrl,
+          'sprk_document',
+          documentEntity
+        );
+
+        // The BFF stamps the pointer after verifying the file (task 166 f1). A row whose file could not be attached
+        // is removed rather than left looking like a document with no file.
+        try {
+          await this.attachUploadedFile(documentId, { id: file.id, driveId });
+        } catch (attachErr) {
+          await this._deleteUnattachedDocument(documentId);
+          throw attachErr;
+        }
+
+        createdDocumentIds.push(documentId);
         linkedCount++;
       } catch (err) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -681,6 +796,40 @@ export class EntityCreationService {
       createdDocumentIds,
       warnings,
     };
+  }
+
+  /**
+   * Ask the BFF to attach a file this caller uploaded to the `sprk_document` this caller created
+   * (`POST /api/v1/documents/{id}/file`, unified-access-control-r2 task 166 f1).
+   *
+   * The ONLY way the client gives a document its file: the pointer columns are field-secured and
+   * writable by the BFF identity only. The BFF checks that the caller created the row and uploaded
+   * the file and that the file sits in the container derived for the row, then stamps the pointer,
+   * `sprk_hasfile` and `sprk_filepath` server-side.
+   *
+   * @param documentId GUID of the `sprk_document` just created
+   * @param file the upload response (`id` = drive item id, `driveId` = where the bytes landed)
+   * @throws the server's refusal (403 / 409) — the caller decides what to do with the row
+   */
+  async attachUploadedFile(documentId: string, file: { id: string; driveId?: string }): Promise<void> {
+    await this._getSdapClient().attachDocumentFile(documentId, file);
+  }
+
+  /**
+   * Best-effort removal of a document row whose file could not be attached, so the user never sees a
+   * "document" that has no file. Uses `deleteRecord` when the host WebApi offers it (Xrm.WebApi does);
+   * never throws — the attach failure is what the caller reports.
+   */
+  private async _deleteUnattachedDocument(documentId: string): Promise<void> {
+    if (typeof this._webApi.deleteRecord !== 'function') {
+      return;
+    }
+
+    try {
+      await this._webApi.deleteRecord('sprk_document', documentId);
+    } catch (err) {
+      console.warn(`[EntityCreationService] Could not remove document ${documentId} whose file was not attached:`, err);
+    }
   }
 
   /**

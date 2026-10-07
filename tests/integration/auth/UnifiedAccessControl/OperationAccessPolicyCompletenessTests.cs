@@ -25,10 +25,14 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 ///      (this is how <c>entity.associate_document</c> reaches the rule — a scan that missed
 ///      const-indirection would have silently dropped that finding)
 ///
-/// Scope note: the AI filters (<c>AiAuthorizationFilter</c>, <c>AnalysisAuthorizationFilter</c>,
-/// <c>VisualizationAuthorizationFilter</c>) route through <c>IAiAuthorizationService</c>, which checks
-/// <c>AccessRights.Read</c> directly and never consults this policy — so they are correctly out of
-/// scope. <c>DataverseAuthorizationFilter</c> likewise uses <c>IDataversePrivilegeChecker</c>.
+/// Scope note: <c>AiAuthorizationFilter</c>, <c>VisualizationAuthorizationFilter</c> and the DocumentAccess mode
+/// of <c>AnalysisAuthorizationFilter</c> route through <c>IAiAuthorizationService</c>, which checks
+/// <c>AccessRights.Read</c> directly and never consults this policy. Since unified-access-control-r2 task 162 the
+/// OTHER modes of <c>AnalysisAuthorizationFilter</c> (GET /{analysisId}, /promote, the /execute run check) and
+/// <c>PlaybookAuthorizationFilter.BuildPlaybookUseCheckAsync</c> DO consult it — "read", "write" and
+/// "analysis.attach", through <c>FinanceAuthorizationFilter</c> — and their call sites use the
+/// <c>Operation = SomeConst</c> mechanism this scan covers. <c>DataverseAuthorizationFilter</c> uses
+/// <c>IDataversePrivilegeChecker</c>.
 /// </summary>
 public class OperationAccessPolicyCompletenessTests
 {
@@ -47,8 +51,49 @@ public class OperationAccessPolicyCompletenessTests
         @"Add\w*(?:Authorization|Access)Filter\s*(?:<[^>()]*>)?\s*\(\s*""([^""]+)""",
         RegexOptions.Compiled);
 
+    /// <summary>
+    /// <c>Operation = "literal"</c> in an object initialiser.
+    /// </summary>
+    /// <remarks>
+    /// <b>ANCHORED (task 025, finding M3).</b> The pattern was previously unanchored, so it also matched
+    /// the TAIL of any identifier ending in "Operation" — including a const DECLARATION such as
+    /// <c>private const string AssociateOperation = "entity.associate_document";</c>. That is not a call
+    /// site, and treating it as one made the gate report coverage it did not have: rename the const, or
+    /// move its declaration, and the operation would silently vanish from the scan while the gate stayed
+    /// green. The lookbehind requires that <c>Operation</c> begins an identifier, and the
+    /// <c>const|readonly|string</c> exclusion rejects a declaration outright.
+    /// </remarks>
     private static readonly Regex OperationLiteralPattern = new(
-        @"Operation\s*=\s*""([^""]+)""",
+        @"(?<![A-Za-z0-9_])(?<!const\s)(?<!string\s)Operation\s*=\s*""([^""]+)""",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>HasRequiredRights(rights, "literal")</c> / <c>GetRequiredRights("literal")</c> — operation
+    /// strings passed DIRECTLY to the policy.
+    /// </summary>
+    /// <remarks>
+    /// <b>ADDED by task 025 (finding M3).</b> This is an entire call-site mechanism the gate could not
+    /// see. <c>PermissionsEndpoints.cs</c> alone passes 14 operation literals this way to compute the
+    /// capability flags a client uses to decide what UI to show. Invisible to the scan, every one of
+    /// them could name an operation the policy does not support, and the forcing function above would
+    /// still pass.
+    /// </remarks>
+    private static readonly Regex DirectPolicyCallLiteralPattern = new(
+        @"(?:Has|Get)RequiredRights\s*\(\s*(?:[A-Za-z0-9_.]+\s*,\s*)?""([^""]+)""",
+        RegexOptions.Compiled);
+
+    /// <summary>
+    /// <c>HasRequiredRights(rights, SomeConst)</c> — const indirection through the policy call itself.
+    /// </summary>
+    /// <remarks>
+    /// <b>ADDED by task 025.</b> This is how <c>entity.associate_document</c> is ACTUALLY reached
+    /// (<c>EntityAccessFilter.cs:266</c>). Before this pattern existed the gate found that operation
+    /// only by accidentally matching its const declaration — see
+    /// <see cref="OperationLiteralPattern"/>. Resolved against the same-file const declarations, exactly
+    /// as the <c>Operation = SomeConst</c> mechanism is.
+    /// </remarks>
+    private static readonly Regex DirectPolicyCallConstPattern = new(
+        @"(?:Has|Get)RequiredRights\s*\(\s*(?:[A-Za-z0-9_.]+\s*,\s*)?([A-Z]\w*)\s*\)",
         RegexOptions.Compiled);
 
     private static readonly Regex RequirementLiteralPattern = new(
@@ -106,7 +151,11 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")] // task 130: Operation = "…" initialiser in FinanceEndpoints' resolvers
+    [InlineData("finance.link_invoice")] // task 130 (owner G5): Operation = "…" initialiser, confirm's document check
+    [InlineData("event.attach_regarding")] // task 159: literal in AddRecordRouteAccessAuthorizationFilter("…") (EventEndpoints POST /)
     [InlineData("entity.associate_document")]
+    [InlineData("memory.pin_matter")] // task 166: HasRequiredRights(rights, PinMatterOperation) const indirection
     public void SourceScan_DiscoversKnownCallSiteOperation(string operation)
     {
         var discovered = DiscoverCallSites().Select(c => c.Operation).ToHashSet(StringComparer.Ordinal);
@@ -118,6 +167,75 @@ public class OperationAccessPolicyCompletenessTests
     }
 
     /// <summary>
+    /// The scan sees operation strings passed DIRECTLY to the policy — the mechanism finding M3 showed
+    /// it was blind to.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Task 025 / M3.</b> <c>PermissionsEndpoints.cs</c> computes a client's capability flags
+    /// with 14 <c>HasRequiredRights(rights, "driveitem.…")</c> calls. Every one was invisible to this
+    /// gate, so any of them could have named an operation the policy does not support — which resolves
+    /// to no rights, i.e. a capability silently reported as denied — and the forcing function would
+    /// still have been green.</para>
+    ///
+    /// <para>Asserted as a SET rather than a count: a count would drift on every ordinary edit to that
+    /// file and teach the next reader to re-baseline it, which is how a ratchet becomes noise.</para>
+    /// </remarks>
+    [Fact]
+    public void SourceScan_SeesOperationsPassedDirectlyToTheAccessPolicy()
+    {
+        var discovered = DiscoverCallSites()
+            .Where(c => c.Location.Equals("PermissionsEndpoints.cs", StringComparison.Ordinal))
+            .Select(c => c.Operation)
+            .ToHashSet(StringComparer.Ordinal);
+
+        discovered.Should().Contain(
+            new[]
+            {
+                "driveitem.preview", "driveitem.content.download", "driveitem.content.upload",
+                "driveitem.content.replace", "driveitem.delete", "driveitem.get", "driveitem.update",
+                "driveitem.createlink", "driveitem.versions.list", "driveitem.versions.restore",
+                "driveitem.move", "driveitem.copy", "driveitem.checkout", "driveitem.checkin",
+            },
+            "these are passed to OperationAccessPolicy.HasRequiredRights directly; before task 025 the "
+            + "scan recognised no such mechanism and found NONE of them. Discovered in that file: {0}",
+            string.Join(", ", discovered.OrderBy(x => x, StringComparer.Ordinal)));
+    }
+
+    /// <summary>
+    /// A const DECLARATION is not a call site.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Task 025 / M3 — the anchoring bug.</b> <c>entity.associate_document</c> must be
+    /// discovered because <c>EntityAccessFilter.cs:266</c> genuinely calls
+    /// <c>HasRequiredRights(rights, AssociateOperation)</c> — NOT because the old unanchored
+    /// <c>Operation\s*=\s*"…"</c> pattern happened to match the tail of
+    /// <c>private const string AssociateOperation = "…"</c> on line 87.</para>
+    ///
+    /// <para>The distinction is not academic. Under the accidental match the operation's coverage was
+    /// pinned to the SPELLING OF A PRIVATE FIELD: rename it to <c>AssociateOp</c>, or move the
+    /// declaration to a shared constants file, and the gate would have quietly stopped covering a live
+    /// authorization filter while still reporting success.</para>
+    ///
+    /// <para>This asserts the operation survives with the declaration line removed from the scanned
+    /// text — i.e. that a real call site, not a declaration, is what finds it.</para>
+    /// </remarks>
+    [Fact]
+    public void SourceScan_FindsAssociateOperationByItsCallSite_NotByItsConstDeclaration()
+    {
+        var discovered = DiscoverCallSites().Select(c => c.Operation).ToHashSet(StringComparer.Ordinal);
+
+        discovered.Should().Contain("entity.associate_document");
+
+        // The declaration alone must NOT be enough. Feed the anchored literal pattern the declaration
+        // in isolation: it must not report a call site.
+        const string declarationOnly = "    private const string AssociateOperation = \"entity.associate_document\";";
+
+        OperationLiteralPattern.IsMatch(declarationOnly).Should().BeFalse(
+            "a const declaration is not a call site; matching it is what made the gate report coverage "
+            + "it did not have (finding M3)");
+    }
+
+    /// <summary>
     /// Closed-list guard for the four strings findings A-3 / A-20 identified. The scan above is the
     /// general forcing function; this pins the specific regression so it cannot recur even if the scan
     /// is later narrowed or a call-site moves to a mechanism the scan does not recognise.
@@ -126,7 +244,11 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read", AccessRights.Read)]
     [InlineData("finance.read", AccessRights.Read)]
     [InlineData("finance.confirm", AccessRights.Write)]
+    [InlineData("finance.attach_invoice", AccessRights.AppendTo)] // task 130
+    [InlineData("finance.link_invoice", AccessRights.Write | AccessRights.Append)] // task 130, owner G5: the document HOLDS the lookup
+    [InlineData("event.attach_regarding", AccessRights.AppendTo)] // task 159: the regarding record is attached TO
     [InlineData("entity.associate_document", AccessRights.AppendTo)]
+    [InlineData("memory.pin_matter", AccessRights.AppendTo)] // task 166: a matter pin ATTACHES content to the matter
     public void RegressionA3A20_Operation_ResolvesWithLeastPrivilegeRights(
         string operation, AccessRights expected)
     {
@@ -148,7 +270,11 @@ public class OperationAccessPolicyCompletenessTests
     [InlineData("read")]
     [InlineData("finance.read")]
     [InlineData("finance.confirm")]
+    [InlineData("finance.attach_invoice")] // task 130
+    [InlineData("finance.link_invoice")] // task 130, owner G5
+    [InlineData("event.attach_regarding")] // task 159
     [InlineData("entity.associate_document")]
+    [InlineData("memory.pin_matter")] // task 166
     public void RegressionA3A20_Operation_DoesNotRequireDeleteOrShare(string operation)
     {
         var rights = OperationAccessPolicy.GetRequiredRights(operation);
@@ -213,7 +339,10 @@ public class OperationAccessPolicyCompletenessTests
             var name = Path.GetFileName(file);
 
             foreach (var pattern in new[]
-                     { FilterLiteralPattern, OperationLiteralPattern, RequirementLiteralPattern })
+                     {
+                         FilterLiteralPattern, OperationLiteralPattern, RequirementLiteralPattern,
+                         DirectPolicyCallLiteralPattern, // task 025 / M3
+                     })
             {
                 foreach (Match m in pattern.Matches(code))
                 {
@@ -230,6 +359,16 @@ public class OperationAccessPolicyCompletenessTests
                 .ToLookup(m => m.Groups[1].Value, m => m.Groups[2].Value, StringComparer.Ordinal);
 
             foreach (Match m in OperationConstReferencePattern.Matches(code))
+            {
+                foreach (var literal in constsInFile[m.Groups[1].Value])
+                {
+                    results.Add(new CallSite(literal, name));
+                }
+            }
+
+            // Task 025 / M3: the same indirection, through the policy call rather than an object
+            // initialiser. This is how entity.associate_document is genuinely reached.
+            foreach (Match m in DirectPolicyCallConstPattern.Matches(code))
             {
                 foreach (var literal in constsInFile[m.Groups[1].Value])
                 {

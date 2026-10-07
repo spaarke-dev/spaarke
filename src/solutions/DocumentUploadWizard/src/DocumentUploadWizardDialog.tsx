@@ -31,6 +31,8 @@ import {
     makeStyles,
     tokens,
 } from "@fluentui/react-components";
+import { MailRegular, CheckmarkCircleRegular } from "@fluentui/react-icons";
+import { ChoiceModal } from "@spaarke/ui-components/components/SprkModal";
 
 import { getAuthProvider, authenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 
@@ -53,11 +55,11 @@ import type {
 } from "./types";
 
 import { AddFilesStep } from "./components/AddFilesStep";
-import { AssociateToStep, resolveXrm, resolveBusinessUnitContainerId } from "./components/AssociateToStep";
+import { AssociateToStep } from "./components/AssociateToStep";
 import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
-import type { IDocumentEmailStepProps } from "./components/DocumentEmailStep";
+import type { IDocumentEmailStepProps, IDocumentEmailComposeController } from "./components/DocumentEmailStep";
 // BFF base URL is resolved at runtime via resolveRuntimeConfig() in main.tsx
 // and set on window.__SPAARKE_BFF_BASE_URL__ before React renders.
 import { createBffTokenProvider } from "./services/codePageTokenProvider";
@@ -71,6 +73,7 @@ import type {
     OrchestratorResult,
 } from "./services/uploadOrchestrator";
 import { FileUploadProgress } from "./components/FileUploadProgress";
+import type { ConflictResolution } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
 // nextStepLauncher is no longer used here — inline playbook/find-similar in NextStepsStep
 
@@ -90,6 +93,42 @@ function AutoUploadTrigger({ onStart }: { onStart: () => void }): null {
 }
 
 // (FindSimilarDialog is no longer inline — opens in new tab via nextStepLauncher)
+
+// ---------------------------------------------------------------------------
+// Result merging (single-file collision retries)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold a retry's outcome into the batch result.
+ *
+ * `next` describes ONLY the retried file(s). Replacing `prev` with it would drop every other file
+ * from the counts, from `_summaryResults`, and from the `uploadResults` payload the Next Steps step
+ * consumes. Files in `prev` that were not retried are carried through unchanged.
+ */
+function mergeOrchestratorResults(
+    prev: OrchestratorResult,
+    next: OrchestratorResult,
+): OrchestratorResult {
+    const fileResults = prev.fileResults.map(
+        (r) => next.fileResults.find((n) => n.fileName === r.fileName) ?? r,
+    );
+
+    // Defensive: a retried file that was somehow absent from `prev` still belongs in the result.
+    for (const n of next.fileResults) {
+        if (!fileResults.some((r) => r.fileName === n.fileName)) {
+            fileResults.push(n);
+        }
+    }
+
+    const successCount = fileResults.filter((r) => r.success).length;
+    return {
+        success: successCount > 0,
+        totalFiles: fileResults.length,
+        successCount,
+        failureCount: fileResults.length - successCount,
+        fileResults,
+    };
+}
 
 // ---------------------------------------------------------------------------
 // File state reducer
@@ -192,7 +231,6 @@ export function DocumentUploadWizardDialog({
     parentEntityType,
     parentEntityId,
     parentEntityName,
-    containerId,
     onClose,
 }: IDocumentUploadWizardDialogProps): JSX.Element {
     const styles = useStyles();
@@ -221,24 +259,18 @@ export function DocumentUploadWizardDialog({
     const resolvedParentRef = useRef(resolvedParent);
     resolvedParentRef.current = resolvedParent;
 
-    // Eagerly resolve BU container ID so it's ready if user clicks Skip on AssociateToStep.
-    const buContainerIdRef = useRef<string>("");
-    useEffect(() => {
-        if (!isStandaloneMode) return;
-        const xrm = resolveXrm();
-        if (!xrm) return;
-        resolveBusinessUnitContainerId(xrm)
-            .then((id) => { buContainerIdRef.current = id; })
-            .catch((err) => console.warn("[DocumentUploadWizard] BU container pre-resolve failed:", err));
-    }, [isStandaloneMode]);
+    // 🔴 The eager business-unit container pre-resolve that stood here was DELETED 2026-09-03
+    // (task 076). It existed so a container was ready the moment the user clicked Skip; under the
+    // record-keyed contract the client never names a container at all, and "skip associate" goes to
+    // `PUT /api/obo/me/files/{path}`, where the SERVER derives the acting user's BU container. The
+    // client was reading Dataverse on mount to compute an answer it is no longer asked for.
 
     // ── Effective values (bridge raw props vs AssociateToStep resolution) ────
-    // When standalone and user Skipped associate-to, resolvedParent is null.
-    // Fall back to BU container (pre-resolved at mount) for unassociated uploads.
+    // When standalone and the user skipped associate-to, resolvedParent is null and both identifiers
+    // stay empty — which is exactly what `resolveUploadTarget` reads as "no owning record".
     const effectiveParentEntityType = isStandaloneMode ? (resolvedParent?.parentEntityType ?? "") : parentEntityType;
     const effectiveParentEntityId = isStandaloneMode ? (resolvedParent?.parentEntityId ?? "") : parentEntityId;
     const effectiveParentEntityName = isStandaloneMode ? (resolvedParent?.parentEntityName ?? "") : parentEntityName;
-    const effectiveContainerId = isStandaloneMode ? (resolvedParent?.containerId || buContainerIdRef.current || "") : containerId;
     const effectiveIsUnassociated = isStandaloneMode && (resolvedParent === null || resolvedParent?.isUnassociated === true);
 
     // ── File state (useReducer) ─────────────────────────────────────────────
@@ -248,6 +280,10 @@ export function DocumentUploadWizardDialog({
     const [orchestratorProgress, setOrchestratorProgress] = useState<OrchestratorFileProgress[]>([]);
     const [uploadResult, setUploadResult] = useState<OrchestratorResult | null>(null);
     const [isUploading, setIsUploading] = useState(false);
+    /** File names whose collision retry is in flight — disables their buttons, shows a spinner. */
+    const [resolvingFileNames, setResolvingFileNames] = useState<ReadonlySet<string>>(
+        () => new Set<string>()
+    );
 
     // ── Step 2 state: uploaded document map + profiling status ─────────────
     // uploadedDocumentMap is populated by the upload pipeline (tasks 012/014)
@@ -260,6 +296,12 @@ export function DocumentUploadWizardDialog({
 
     // ── Step 3 state: selected next steps ──────────────────────────────
     const [selectedNextSteps, setSelectedNextSteps] = useState<NextStepActionId[]>([]);
+
+    // ── Send Email Finish-guard ────────────────────────────────────────
+    // The Send Email step registers a controller here; on Finish we check for an unsent
+    // composed email and prompt (Send / Finish without sending / Keep editing).
+    const emailControllerRef = useRef<IDocumentEmailComposeController | null>(null);
+    const [unsentPrompt, setUnsentPrompt] = useState<{ resolve: (choice: "send" | "finish" | "cancel") => void } | null>(null);
 
     // (Find Similar now opens in a new tab via nextStepLauncher — no inline state needed)
 
@@ -318,22 +360,42 @@ export function DocumentUploadWizardDialog({
     );
 
     // ── Run upload pipeline ─────────────────────────────────────────────────
-    const runUploadPipeline = useCallback(async (): Promise<OrchestratorResult> => {
+    /**
+     * Run the pipeline over the selected files, or over a SUBSET when retrying.
+     *
+     * A retry (`options.onlyFileNames` set) must not reset the progress list or the result — the
+     * other files' outcomes are still on screen and still valid. It merges into them instead.
+     */
+    const runUploadPipeline = useCallback(async (options?: {
+        /** Restrict this run to these file names. Omit to run the whole selection. */
+        onlyFileNames?: readonly string[];
+        /** Collision resolution to apply to this run. Only meaningful with `onlyFileNames`. */
+        conflictBehavior?: ConflictResolution;
+    }): Promise<OrchestratorResult> => {
         const selectedFiles = fileStateRef.current.selectedFiles;
+        const retryNames = options?.onlyFileNames;
+        const isRetry = retryNames != null;
 
         // Convert IUploadedFile[] to File[] via the .file property
         const nativeFiles: File[] = selectedFiles
+            .filter((f) => !isRetry || retryNames!.includes(f.name))
             .map((f) => f.file)
             .filter((f): f is File => f != null);
 
         if (nativeFiles.length === 0) {
-            throw new Error("No files to upload. Please add files in Step 1.");
+            throw new Error(
+                isRetry
+                    ? "The file to retry is no longer available. Please add it again in Step 1."
+                    : "No files to upload. Please add files in Step 1.",
+            );
         }
 
         setIsUploading(true);
-        setOrchestratorProgress([]);
-        setUploadResult(null);
-        fileDispatch({ type: "START_UPLOAD" });
+        if (!isRetry) {
+            setOrchestratorProgress([]);
+            setUploadResult(null);
+            fileDispatch({ type: "START_UPLOAD" });
+        }
 
         try {
             const dataverseClient = createCodePageDataverseClient();
@@ -357,7 +419,6 @@ export function DocumentUploadWizardDialog({
                     parentContext: {
                         parentEntityName: effectiveParentEntityType,
                         parentRecordId: effectiveParentEntityId,
-                        containerId: effectiveContainerId,
                         parentDisplayName: effectiveParentEntityName,
                     },
                     tenantId,
@@ -370,18 +431,32 @@ export function DocumentUploadWizardDialog({
                     },
                 },
                 handleOrchestratorProgress,
+                options?.conflictBehavior,
             );
 
-            setUploadResult(result);
+            // On a retry, fold this run's per-file outcomes into the existing result rather than
+            // replacing it — `result` only describes the retried file, so assigning it directly
+            // would drop every other file from the counts and from the Next Steps payload.
+            const effectiveResult =
+                isRetry && uploadResultRef.current
+                    ? mergeOrchestratorResults(uploadResultRef.current, result)
+                    : result;
+
+            setUploadResult(effectiveResult);
 
             // Populate uploadedDocumentMap for SummaryStep (Document Profile streaming)
-            for (const fileResult of result.fileResults) {
+            for (const fileResult of effectiveResult.fileResults) {
                 if (fileResult.success && fileResult.createResult?.recordId && fileResult.speMetadata) {
                     const matchingFile = selectedFiles.find((f) => f.name === fileResult.fileName);
                     if (matchingFile) {
                         uploadedDocumentMap.set(matchingFile.id, {
                             documentId: fileResult.createResult.recordId,
-                            driveId: fileResult.speMetadata.parentId ?? effectiveContainerId,
+                            // The SERVER's drive for this file. `parentId` is the parent FOLDER,
+                            // not the drive — it was only ever a stand-in because the two happened
+                            // to coincide at the container root. The `?? effectiveContainerId`
+                            // fallback behind it named the client-resolved container and is gone
+                            // with the rest of that plumbing (task 076).
+                            driveId: fileResult.speMetadata.driveId ?? "",
                             itemId: fileResult.speMetadata.id,
                         });
                     }
@@ -391,16 +466,44 @@ export function DocumentUploadWizardDialog({
             // Update summary results
             const totalBytes = selectedFiles.reduce((sum, f) => sum + (f.sizeBytes ?? 0), 0);
             _setSummaryResults({
-                successCount: result.successCount,
-                failureCount: result.failureCount,
+                successCount: effectiveResult.successCount,
+                failureCount: effectiveResult.failureCount,
                 totalBytesUploaded: totalBytes,
             });
 
-            return result;
+            return effectiveResult;
         } finally {
             setIsUploading(false);
         }
-    }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, effectiveContainerId, handleOrchestratorProgress, uploadedDocumentMap]);
+    }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, handleOrchestratorProgress, uploadedDocumentMap]);
+
+    // ── Name-collision resolution ───────────────────────────────────────────
+    /**
+     * Retry ONE file with the collision resolution the user picked.
+     *
+     * Nothing was written when the collision was reported (the BFF uploads with
+     * `conflictBehavior=fail` by default), so this is a clean re-run of the full pipeline for that
+     * file — upload, Dataverse record, and indexing — not a patch-up of a partial write.
+     */
+    const handleResolveConflict = useCallback(
+        (fileName: string, resolution: ConflictResolution) => {
+            setResolvingFileNames((prev) => new Set(prev).add(fileName));
+            void runUploadPipeline({ onlyFileNames: [fileName], conflictBehavior: resolution })
+                .catch(() => {
+                    // orchestrateUpload reports per-file failures through progress; a throw here is
+                    // a pipeline-level fault, already surfaced on the row. Swallow so the finally
+                    // below always clears the spinner.
+                })
+                .finally(() => {
+                    setResolvingFileNames((prev) => {
+                        const next = new Set(prev);
+                        next.delete(fileName);
+                        return next;
+                    });
+                });
+        },
+        [runUploadPipeline],
+    );
 
     // ── Email step props (memoized for the dynamic Send Email step) ────────
     const emailStepProps: IDocumentEmailStepProps = useMemo(
@@ -424,7 +527,14 @@ export function DocumentUploadWizardDialog({
                 steps.push({
                     id: "associate-to",
                     label: "Associate To",
-                    canAdvance: () => resolvedParentRef.current !== null && !resolvedParentRef.current.isUnassociated && resolvedParentRef.current.containerId !== "",
+                    // The `&& resolvedParentRef.current.containerId !== ""` clause was DELETED
+                    // 2026-09-03 (task 076). It blocked Next whenever the CLIENT could not resolve
+                    // a container for the selected record — a lookup the upload no longer performs
+                    // or consults. Keeping it would have gated the wizard on a question the client
+                    // is no longer in a position to answer, and refused records the server can
+                    // resolve perfectly well. A record that genuinely has no resolvable container
+                    // now fails per file, with the SERVER's reason, on the Processing step.
+                    canAdvance: () => resolvedParentRef.current !== null && !resolvedParentRef.current.isUnassociated,
                     isSkippable: true,
                     renderContent: (handle: IWizardShellHandle) => (
                         <AssociateToStep
@@ -464,29 +574,46 @@ export function DocumentUploadWizardDialog({
                     return result !== null && !isUploadingRef.current;
                 },
                 renderContent: (_handle: IWizardShellHandle) => {
-                    // After upload completes: show SummaryStep with Document Profile streaming
+                    const progressPane = (
+                        <FileUploadProgress
+                            fileProgress={orchestratorProgress}
+                            onResolveConflict={handleResolveConflict}
+                            resolvingFileNames={resolvingFileNames}
+                        />
+                    );
+
+                    // After upload completes: show SummaryStep with Document Profile streaming.
+                    // Any file still waiting on a collision decision keeps its row ABOVE the
+                    // summary — otherwise one successful file hides the choice entirely and the
+                    // pending file is silently dropped from the batch.
                     if (uploadResult && uploadedDocumentMap.size > 0) {
+                        const hasPendingConflict = orchestratorProgress.some(
+                            (p) => p.phase === "error" && p.nameConflict != null,
+                        );
                         return (
-                            <SummaryStep
-                                files={fileState.selectedFiles}
-                                apiBaseUrl={bffBaseUrl}
-                                getToken={bffTokenProvider}
-                                uploadedDocumentMap={uploadedDocumentMap}
-                                onProcessingChange={setIsProfileProcessing}
-                            />
+                            <>
+                                {hasPendingConflict && progressPane}
+                                <SummaryStep
+                                    files={fileState.selectedFiles}
+                                    apiBaseUrl={bffBaseUrl}
+                                    getToken={bffTokenProvider}
+                                    uploadedDocumentMap={uploadedDocumentMap}
+                                    onProcessingChange={setIsProfileProcessing}
+                                />
+                            </>
                         );
                     }
 
                     // Upload complete but all files failed — show progress with errors
                     if (uploadResult) {
-                        return <FileUploadProgress fileProgress={orchestratorProgress} />;
+                        return progressPane;
                     }
 
                     // Auto-trigger upload when entering Processing step
                     return (
                         <>
                             <AutoUploadTrigger onStart={() => void runUploadPipeline()} />
-                            <FileUploadProgress fileProgress={orchestratorProgress} />
+                            {progressPane}
                         </>
                     );
                 },
@@ -505,9 +632,9 @@ export function DocumentUploadWizardDialog({
                         emailStepProps={emailStepProps}
                         uploadedDocumentMap={uploadedDocumentMapRef.current}
                         uploadedFiles={fileStateRef.current.selectedFiles}
-                        containerId={effectiveContainerId}
                         bffBaseUrl={bffBaseUrl}
                         bffTokenProvider={bffTokenProvider}
+                        onEmailControllerChange={(c) => { emailControllerRef.current = c; }}
                     />
                 ),
             });
@@ -532,17 +659,41 @@ export function DocumentUploadWizardDialog({
             handleFilesAdded,
             handleFileRemoved,
             handleClearErrors,
+            // Both are read by the Processing step's progress pane: without them the retry buttons
+            // fire a stale closure and the in-flight spinner never appears.
+            handleResolveConflict,
+            resolvingFileNames,
         ]
     );
 
     // ── Finish handler ──────────────────────────────────────────────────────
 
     const handleFinish = useCallback(async (): Promise<IWizardSuccessConfig | void> => {
-        // Upload is guaranteed complete by the Processing step.
-        const result = uploadResultRef.current;
+        // Send Email Finish-guard: if the user composed an email (entered recipients) on the
+        // Send Email step but hasn't sent it, prompt before finishing.
+        const controller = emailControllerRef.current;
+        if (controller?.hasUnsentEmail()) {
+            const choice = await new Promise<"send" | "finish" | "cancel">((resolve) => {
+                setUnsentPrompt({ resolve });
+            });
+            setUnsentPrompt(null);
+            if (choice === "cancel") {
+                // Abort the finish and keep the wizard open on the step. An empty message
+                // leaves WizardShell's finishError falsy, so no error bar is shown.
+                throw new Error("");
+            }
+            if (choice === "send") {
+                const ok = await controller.send();
+                if (!ok) {
+                    throw new Error("The email could not be sent. Please check the recipients and try again.");
+                }
+            }
+            // "finish" (or a successful "send") falls through to complete the wizard.
+        }
 
+        // Upload is guaranteed complete by the Processing step.
         return buildSuccessConfig({
-            uploadResults: result,
+            uploadResults: uploadResultRef.current,
             onClose,
         });
     }, [onClose]);
@@ -569,6 +720,32 @@ export function DocumentUploadWizardDialog({
                 finishLabel="Finish"
                 finishingLabel="Processing..."
             />
+
+            {unsentPrompt && (
+                <ChoiceModal
+                    open={true}
+                    onClose={() => unsentPrompt.resolve("cancel")}
+                    title="Send your email?"
+                    message="You've started an email but haven't sent it yet."
+                    cancelLabel="Keep editing"
+                    choices={[
+                        {
+                            id: "send",
+                            label: "Send email",
+                            description:
+                                "Send it now from the Spaarke shared mailbox with the uploaded documents attached, then finish.",
+                            icon: <MailRegular />,
+                        },
+                        {
+                            id: "finish",
+                            label: "Finish without sending",
+                            description: "Finish the upload without sending — the email won't be sent.",
+                            icon: <CheckmarkCircleRegular />,
+                        },
+                    ]}
+                    onSelect={(id) => unsentPrompt.resolve(id as "send" | "finish")}
+                />
+            )}
 
             {/* Find Similar now opens in a new tab via nextStepLauncher */}
         </div>

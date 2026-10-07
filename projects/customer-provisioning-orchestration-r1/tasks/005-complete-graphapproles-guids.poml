@@ -4,7 +4,7 @@
     <title>Complete 11 of 14 null AppRoleId GUIDs in Infrastructure/Auth/GraphAppRoles.cs via az enumeration</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF code file (src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs); tag includes bff-api + auth. Per root CLAUDE.md §8 rigor table, bff-api + auth tags = FULL. Wrong GUID silently fails T3 (Graph app-role parity) at H10 — high blast radius per plan.md § High-Risk Items.</rigor-reason>
     <model-tier>sonnet</model-tier>

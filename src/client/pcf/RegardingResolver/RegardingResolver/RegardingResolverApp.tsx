@@ -2,6 +2,31 @@
  * RegardingResolverApp — v1.4.0 polymorphic parent picker for any child entity
  * following the N:1 polymorphic pattern.
  *
+ * # v1.5.0 (unified-access-control-r2 task 051 — FR-26 core-ancestor re-stamp)
+ *
+ * A CHILD record inherits its parent's access through a DENORMALIZED core-record
+ * ancestor lookup that the child row itself carries — that stamp IS the access
+ * boundary, evaluated as a one-hop set-membership test. So every regarding
+ * transition this control drives has to maintain it:
+ *
+ *   - **set**      — stamp the selected target's ultimate core ancestor.
+ *   - **reparent** — write the new ancestor and null the old one in the SAME
+ *                    payload. A stale stamp is an over-grant (the old parent's
+ *                    principals still reach the row) AND an under-grant (the new
+ *                    parent's do not).
+ *   - **clear**    — null the ancestor stamps alongside the regarding fields.
+ *
+ * All derivation + ordering lives in the shared service (ADR-024). What lands
+ * HERE is the CREATE-mode half: the `__sprk_regarding_pending__` bridge now
+ * carries `ancestorStamps` + `clearLookups` so `sprk_todo_regarding_presave.js`
+ * stages them onto form attributes and they ride the ONE insert. Never a
+ * follow-up update — a crash between create and stamp leaves an unscoped child.
+ *
+ * The subgrid auto-detect path (below) needed the same treatment: Dataverse's
+ * relationship mapping populates one `sprk_regarding{X}` lookup, but when X is a
+ * CHILD record that lookup is a relationship, not an access edge. Phase 2d
+ * derives and stages the real ancestor.
+ *
  * # v1.4.9 (UAT 2026-08-17 — Row-2 "Regarding Name" blank-display fix)
  *
  * Operator UAT (sprk_todo form, RELATED RECORD panel): the "Regarding Number"
@@ -248,12 +273,16 @@ import {
 } from '@spaarke/ui-components/dist/components/PolymorphicPicker/PolymorphicPicker';
 import {
   buildRecordUrl,
+  cleanGuid,
+  deriveCoreAncestorStamps,
   resolveRecordType,
   resolveRecordDisplayNameFieldName,
   resolveRecordNumberFieldName,
+  type ICoreAncestorStamp,
 } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 
 /**
  * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
@@ -273,6 +302,8 @@ import {
   type IRegardingSelection,
   type IResolverWriteContext,
 } from './handlers/ResolverWriteHandler';
+import { refileThroughBff, isSecureRootReader } from './handlers/bffWrites';
+import type { ISecureFlagReader } from './handlers/bffWrites';
 
 // ---------------------------------------------------------------------------
 // Build date embedded in the version footer per src/client/pcf/CLAUDE.md
@@ -280,7 +311,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-08-17';
+const BUILD_DATE = '2026-10-05';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -448,30 +479,25 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Walk through window / parent frames to locate Xrm. PCF runs in an iframe,
- * so the form host is exposed via window.parent or window.top.
+ * Typed local view of the host `Xrm` members this control reads. The shared
+ * `getXrm()` walker (task 081 / C-8) returns the narrower `XrmContext`, which
+ * does not declare `Page` as `Xrm.Page` or this `navigateTo` signature.
  */
-function getXrm():
-  | {
-      Utility?: {
-        getGlobalContext?: () => unknown;
-      };
-      Page?: Xrm.Page;
-      Navigation?: {
-        navigateTo?: (
-          pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
-          navigationOptions: {
-            target: 1 | 2;
-            width: { value: number; unit: '%' | 'px' };
-            height: { value: number; unit: '%' | 'px' };
-          }
-        ) => Promise<unknown>;
-      };
-    }
-  | undefined {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const w = window as any;
-  return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+interface HostXrm {
+  Utility?: {
+    getGlobalContext?: () => unknown;
+  };
+  Page?: Xrm.Page;
+  Navigation?: {
+    navigateTo?: (
+      pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
+      navigationOptions: {
+        target: 1 | 2;
+        width: { value: number; unit: '%' | 'px' };
+        height: { value: number; unit: '%' | 'px' };
+      }
+    ) => Promise<unknown>;
+  };
 }
 
 /**
@@ -502,7 +528,8 @@ async function autoRefreshForm(formType: number): Promise<void> {
   // Skip auto-refresh on CREATE (formType === 1) — presave bridge handles that path.
   if (formType === 1) return;
 
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   if (!xrm) {
     console.warn('[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).');
     return;
@@ -544,7 +571,8 @@ async function autoRefreshForm(formType: number): Promise<void> {
  * inner Xrm-unavailable check in autoRefreshForm covers the actual no-op.
  */
 function getFormType(): number {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ui = (xrm?.Page as any)?.ui;
@@ -572,7 +600,8 @@ function getFormType(): number {
  *      handler's defensive posture).
  */
 async function handleRefreshInternal(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data;
@@ -637,7 +666,7 @@ async function resolveClickTarget(
 ): Promise<{ entityName: string; entityId: string } | null> {
   // Priority 1 — fresh picker selection wins. Synchronous, no WebAPI call.
   if (selectedTarget?.entityType && selectedTarget?.recordId) {
-    const cleanId = String(selectedTarget.recordId).replace(/[{}]/g, '');
+    const cleanId = cleanGuid(String(selectedTarget.recordId));
     if (cleanId.length > 0) {
       return { entityName: selectedTarget.entityType, entityId: cleanId };
     }
@@ -661,7 +690,7 @@ async function resolveClickTarget(
         const etn = parsed.searchParams.get('etn');
         const id = parsed.searchParams.get('id');
         if (etn && id) {
-          const cleanId = id.replace(/[{}]/g, '');
+          const cleanId = cleanGuid(id);
           if (cleanId.length > 0) {
             return { entityName: etn, entityId: cleanId };
           }
@@ -682,13 +711,14 @@ async function resolveClickTarget(
 
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data?.entity;
     const id = data?.getId?.();
     if (typeof id === 'string' && id.length > 0) {
-      return id.replace(/[{}]/g, '');
+      return cleanGuid(id);
     }
   } catch {
     /* ignore */
@@ -712,9 +742,10 @@ function getHostRecordId(): string | undefined {
  * @param catalog - The allowed catalog subset (from resolveAllowedCatalog).
  */
 function detectPrePopulatedParent(
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
+  catalog: readonly ITodoRegardingTargetCatalogEntry[]
 ): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') {
@@ -731,7 +762,7 @@ function detectPrePopulatedParent(
         if (lookupValue && typeof lookupValue.id === 'string' && lookupValue.id.length > 0) {
           return {
             entityType: entry.entityType,
-            recordId: String(lookupValue.id).replace(/[{}]/g, ''),
+            recordId: cleanGuid(String(lookupValue.id)),
             recordName: typeof lookupValue.name === 'string' ? lookupValue.name : '',
             lookupAttribute: entry.lookupAttribute,
           };
@@ -759,14 +790,18 @@ function detectPrePopulatedParent(
  * unavailable → warn + return false. Never throws to the host form.
  */
 function setFormLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
   try {
     const attr = page.getAttribute(fieldName);
     if (!attr) return false;
-    const cleanId = String(id).replace(/[{}]/g, '');
+    // ADR-044: use the canonical normalizer, not a local `replace(/[{}]/g, '')`.
+    // This function now also stages FR-26 ancestor stamps, so a GUID it mangles
+    // is a mis-scoped access edge rather than a cosmetic glitch.
+    const cleanId = cleanGuid(id);
     attr.setValue([{ id: cleanId, name, entityType }]);
     return true;
   } catch (err) {
@@ -776,7 +811,8 @@ function setFormLookupValue(fieldName: string, entityType: string, id: string, n
 }
 
 function setFormTextValue(fieldName: string, value: string | null): boolean {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
@@ -799,7 +835,7 @@ function setFormTextValue(fieldName: string, value: string | null): boolean {
  * (a stable string) since the picker doesn't touch the actual
  * `sprk_recordtype_ref` GUID.
  */
-function adaptCatalogForPicker(catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>): RecordTypeCatalogEntry[] {
+function adaptCatalogForPicker(catalog: readonly ITodoRegardingTargetCatalogEntry[]): RecordTypeCatalogEntry[] {
   return catalog.map(entry => ({
     recordTypeRefId: entry.entityType,
     displayName: entry.entityType,
@@ -905,6 +941,10 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       webApi: context.webAPI as unknown as IResolverWriteContext['webApi'],
       hostEntity,
       hostRecordId: getHostRecordId(),
+      // v1.6.0 (UAC-r2 task 147 r1, owner round 28): a saved host is re-filed through the BFF (the owner follows the
+      // record it is filed under); a new host is never filed under a secure record before it is saved.
+      refileThroughBff,
+      isSecureRoot: isSecureRootReader(context.webAPI as unknown as ISecureFlagReader),
     }),
     [context.webAPI, hostEntity]
   );
@@ -1041,6 +1081,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             recordName: detected.recordName,
             recordUrl,
             recordNumber: null,
+            // Baseline: no stamp derived yet. Phase 2d overwrites this. If the
+            // user saves before 2d resolves, the record is created WITHOUT an
+            // inherited-access stamp — an under-grant, never an over-grant, and
+            // the honest state given we do not yet know the ancestor.
+            ancestorStamps: [],
+            clearLookups: [],
           };
 
           console.log('[RegardingResolver auto-detect] Phase 1 complete', {
@@ -1130,15 +1176,102 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             }
           })();
 
-          const [resolvedDisplayName, resolvedRecordNumber] = await Promise.all([
+          // --- Phase 2d: FR-26 core-ancestor derivation + stamp (task 051) ---
+          //
+          // The subgrid "+ New" path is a genuine SET transition: Dataverse's
+          // relationship mapping populated ONE `sprk_regarding{X}` lookup, but if
+          // X is a CHILD record (a Communication, a Document…) that lookup is a
+          // relationship, NOT an access edge. The child being created inherits
+          // nothing until X's ultimate CORE ancestor is denormalized onto it.
+          //
+          // Derivation is delegated to the shared service (ADR-024) — the same
+          // one-hop, fail-closed function the manual-pick path uses. Where a CORE
+          // parent was detected, it returns the parent itself, and the stamp is
+          // the very lookup Dataverse already set; staging it again is a no-op.
+          //
+          // Runs in parallel with 2b/2c: independent read, no ordering coupling.
+          const ancestorPromise = (async (): Promise<ICoreAncestorStamp[]> => {
+            try {
+              const derivation = await deriveCoreAncestorStamps(
+                writeCtx.webApi,
+                detected.entityType,
+                detected.recordId
+              );
+              if (derivation.status === 'error') {
+                // Fail-closed on the WRITE, not on the form: we must never block
+                // or crash the host save (FR-24). We simply refuse to invent a
+                // stamp we could not verify, and say so loudly — a silently
+                // unstamped child is invisible to everyone who should see it.
+                console.error(
+                  '[RegardingResolver auto-detect] Phase 2d: FR-26 core-ancestor derivation FAILED for ' +
+                    `${detected.entityType}(${detected.recordId}). The record will be created WITHOUT an ` +
+                    "inherited-access stamp and will not be visible to the parent's principals. " +
+                    'Re-open the record and re-pick the regarding target to re-stamp it. ' +
+                    `Cause: ${derivation.error ?? 'unknown'}`
+                );
+                return [];
+              }
+              return derivation.stamps;
+            } catch (err) {
+              console.error('[RegardingResolver auto-detect] Phase 2d: core-ancestor derivation threw:', err);
+              return [];
+            }
+          })();
+
+          const [resolvedDisplayName, resolvedRecordNumber, ancestorStamps] = await Promise.all([
             displayNamePromise,
             recordNumberPromise,
+            ancestorPromise,
           ]);
+
+          // ⚠️ SUPERSESSION GUARD — FR-26 access correctness (task 051 code-review C-1).
+          //
+          // Everything below writes the ACCESS BOUNDARY: it stages ancestor lookups straight onto the
+          // form and then republishes `__sprk_regarding_pending__` WHOLESALE with `clearLookups: []`.
+          // Both awaits above are network round-trips, and a user can pick a different target inside
+          // that window. `handlePickerSelect` will already have published its own bridge carrying the
+          // correct stamps AND clear-list; without this guard we clobber it and the INSERT lands under
+          // the AUTO-DETECTED ancestor instead of the chosen one — the old ancestor's principals gain
+          // access, the intended ones do not, and nothing surfaces an error.
+          //
+          // `autoDetectFiredRef` does NOT cover this: it guards re-entry of the effect, not supersession
+          // by a pick. `pickerSelectGenerationRef` is the file's established mechanism for exactly this
+          // (see handlePickerSelect, which checks it after each of its own awaits); it starts at 0 and
+          // increments on every pick, so any non-zero value means a pick has taken ownership.
+          if (pickerSelectGenerationRef.current !== 0) {
+            console.log(
+              '[RegardingResolver auto-detect] Phase 2 superseded by a user selection — abandoning the ' +
+                "auto-detected stamps rather than overwriting the picked target's bridge (FR-26)."
+            );
+            return;
+          }
 
           console.log('[RegardingResolver auto-detect] Phase 2 async catch-up complete', {
             resolvedDisplayName: resolvedDisplayName ?? '(none — kept baseline)',
             resolvedRecordNumber: resolvedRecordNumber ?? '(none — kept null)',
+            ancestorStamps: ancestorStamps.map(s => `${s.lookupAttribute}=${s.recordId}`),
           });
+
+          // Stage each stamp onto the form so it rides the INSERT. A stamp whose
+          // column is not on the form cannot be staged — `setFormLookupValue`
+          // returns false — and that is an FR-26 inheritance hole worth an error,
+          // not a warn: the row saves fine and looks correct, but nobody who
+          // should inherit access to it can see it.
+          for (const stamp of ancestorStamps) {
+            // Label the lookup with the parent's name where the stamp IS the
+            // detected parent (a CORE target); a derived grandparent's name is
+            // not known here and the column is typically hidden anyway.
+            const label = stamp.entityType === detected.entityType ? (resolvedDisplayName ?? detected.recordName) : '';
+            const staged = setFormLookupValue(stamp.lookupAttribute, stamp.entityType, stamp.recordId, label);
+            if (!staged) {
+              console.error(
+                `[RegardingResolver auto-detect] FR-26: could not stage ancestor stamp "${stamp.lookupAttribute}" ` +
+                  `(${stamp.entityType} ${stamp.recordId}) — the column is not an attribute on this form, so it ` +
+                  'cannot ride the INSERT. Add the column to the form (it may be hidden). This child will NOT ' +
+                  "inherit that ancestor's access."
+              );
+            }
+          }
 
           // Refine recordname if resolved to a different value.
           if (
@@ -1185,6 +1318,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             recordName: resolvedDisplayName ?? detected.recordName,
             recordUrl,
             recordNumber: resolvedRecordNumber,
+            // FR-26: republish the stamps on the bridge so the presave handler
+            // re-stages them at OnSave — belt-and-braces with the setValue calls
+            // above, which a later form re-render could in principle discard.
+            // A fresh CREATE form has nothing to clear.
+            ancestorStamps,
+            clearLookups: [],
           };
         } else {
           // UPDATE mode: host record exists — use applyRegardingSelection
@@ -1363,6 +1502,17 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             recordName: result.displayName ?? selection.recordName,
             recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
             recordNumber: result.recordNumber ?? null,
+            // v1.5.0 (FR-26 / task 051) — the ancestor stamp IS the access edge
+            // for this child, so it MUST ride the same INSERT as the regarding
+            // fields. Never a follow-up update: a crash between create and stamp
+            // would leave an unscoped child.
+            //
+            // `clearLookups` is the reparent half. On a CREATE form a user can
+            // pick A, then pick B before ever saving; without staging A's clear,
+            // the INSERT would carry BOTH lookups (FR-13 violation) AND both
+            // ancestor stamps (the stale-stamp over-grant).
+            ancestorStamps: result.ancestorStamps ?? [],
+            clearLookups: result.clearLookups ?? [],
           };
         }
 
@@ -1465,7 +1615,8 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           return;
         }
 
-        const xrm = getXrm();
+        // Shared cross-frame walker (task 081 / C-8).
+        const xrm = getXrm('navigation') as unknown as HostXrm | undefined;
         if (typeof xrm?.Navigation?.navigateTo !== 'function') {
           // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
           // (developer-visible), do not throw (host-safe).

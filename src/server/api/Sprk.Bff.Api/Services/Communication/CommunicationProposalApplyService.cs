@@ -142,6 +142,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     private readonly IGenericEntityService _genericEntityService;
     private readonly IActionSeam _actionSeam;
     private readonly ICommunicationEnvelopeReader _envelopeReader;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<CommunicationProposalApplyService> _logger;
 
     public CommunicationProposalApplyService(
@@ -149,8 +150,10 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         IGenericEntityService genericEntityService,
         IActionSeam actionSeam,
         ICommunicationEnvelopeReader envelopeReader,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<CommunicationProposalApplyService> logger)
     {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _callerResolver = callerResolver ?? throw new ArgumentNullException(nameof(callerResolver));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
@@ -287,6 +290,10 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
                 statusCode: 422);
         }
 
+        // Task 146: the audit row is owned like its communication. Resolved BEFORE the target write, so a refusal (409)
+        // leaves neither a mutated record nor a mutate-without-audit gap.
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false);
+
         // (8) Apply via the blessed write core UNDER THE CONFIRMING USER'S IMPERSONATION. The value is passed as a
         //     String mapping so UpdateRecordActionCore's metadata-driven coercion resolves Choice/Boolean/Number
         //     against the real column type (fail-loud) and passes Text/DateTime through verbatim.
@@ -320,7 +327,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         {
             auditLogId = await WriteAppliedAuditRowAsync(
                 communicationRef.Id, targetEntity, targetRecordId, targetField,
-                suggestion, suggestionJson, callerSystemUserId, isOverride, effectiveValue, ct).ConfigureAwait(false);
+                suggestion, suggestionJson, callerSystemUserId, isOverride, effectiveValue, auditOwner, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -410,9 +417,10 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         var suggestionJson = row.GetAttributeValue<string>("sprk_aisuggestion");
         var suggestion = ParseSuggestion(suggestionJson);
 
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false); // task 146
         var auditLogId = await WriteDismissedAuditRowAsync(
             communicationRef.Id, targetEntity, targetRecordIdRaw, targetField,
-            suggestion, suggestionJson, callerSystemUserId, ct).ConfigureAwait(false);
+            suggestion, suggestionJson, callerSystemUserId, auditOwner, ct).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Job B dismiss: proposal {ReviewLogId} for {Entity}.{Field} rejected by caller {Caller}; Dismissed audit row {AuditLogId} written (no record change).",
@@ -506,6 +514,9 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
                 statusCode: 422);
         }
 
+        // Task 146: resolve the compensating audit row's owner BEFORE the revert write (as apply does).
+        var auditOwner = await ResolveAuditRowOwnerAsync(communicationRef.Id, callerSystemUserId, ct).ConfigureAwait(false);
+
         // (5) Write the old value back UNDER THE CALLER'S IMPERSONATION (same blessed core as apply).
         var updateResult = await _actionSeam.UpdateRecordAsync(
             new UpdateRecordRequest
@@ -537,7 +548,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         {
             auditLogId = await WriteRevertedAuditRowAsync(
                 communicationRef.Id, targetEntity, targetRecordId, targetField,
-                suggestion, suggestionJson, callerSystemUserId, oldValue, ct).ConfigureAwait(false);
+                suggestion, suggestionJson, callerSystemUserId, oldValue, auditOwner, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -558,6 +569,34 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
 
         return new UndoProposalResult(
             reviewLogId, auditLogId, targetEntity, targetRecordId, targetField, updateResult.FieldsUpdated);
+    }
+
+    /// <summary>
+    /// Task 146: the owner of an audit row written under <paramref name="communicationId"/> — the communication's team
+    /// (the named Secure team's for a secure message), or the creator while the message is unfiled (E1). A REFUSAL is
+    /// a 409 carrying the stable reason code; nothing has been written yet.
+    /// </summary>
+    /// <remarks>Task 146 c1-r1 (owner round 13 item 9): the confirming user asked for the audit row the application
+    /// creates — it is recorded as the row's creator person.</remarks>
+    private async Task<Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution> ResolveAuditRowOwnerAsync(
+        Guid communicationId, Guid callerSystemUserId, CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId) with
+            {
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(callerSystemUserId),
+            },
+            ct).ConfigureAwait(false);
+        if (owner.IsRefused)
+        {
+            throw new SdapProblemException(
+                code: owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                title: "Record owner unresolved",
+                detail: $"Nothing was written: the audit row's owner could not be resolved ({owner.Reason}).",
+                statusCode: 409);
+        }
+
+        return owner;
     }
 
     private async Task<Entity?> LoadReviewLogRowAsync(Guid reviewLogId, CancellationToken ct)
@@ -676,7 +715,8 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     private async Task<Guid> WriteAppliedAuditRowAsync(
         Guid communicationId, string targetEntity, Guid targetRecordId, string targetField,
         ProposalSuggestion suggestion, string? suggestionJson, Guid callerSystemUserId,
-        bool isOverride, string? appliedValue, CancellationToken ct)
+        bool isOverride, string? appliedValue,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         // An override is a DISTINCT terminal action (Overriden, actor = the confirming human) — the audit row records
         // that the human applied a value OTHER than the AI's proposal (FR-E4, task 055a); a plain accept stays Applied.
@@ -707,6 +747,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         if (!string.IsNullOrWhiteSpace(storedSuggestion))
             entity["sprk_aisuggestion"] = storedSuggestion;
 
+        owner.ApplyTo(entity); // task 146
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }
 
@@ -717,7 +758,8 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     /// </summary>
     private async Task<Guid> WriteDismissedAuditRowAsync(
         Guid communicationId, string targetEntity, string? targetRecordIdRaw, string targetField,
-        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId, CancellationToken ct)
+        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         var entity = new Entity(ReviewLogEntity)
         {
@@ -746,6 +788,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         if (!string.IsNullOrWhiteSpace(suggestionJson))
             entity["sprk_aisuggestion"] = suggestionJson;
 
+        owner.ApplyTo(entity); // task 146
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }
 
@@ -781,7 +824,8 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     /// </summary>
     private async Task<Guid> WriteRevertedAuditRowAsync(
         Guid communicationId, string targetEntity, Guid targetRecordId, string targetField,
-        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId, string? revertedToValue, CancellationToken ct)
+        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId, string? revertedToValue,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         var entity = new Entity(ReviewLogEntity)
         {
@@ -809,6 +853,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         if (!string.IsNullOrWhiteSpace(storedSuggestion))
             entity["sprk_aisuggestion"] = storedSuggestion;
 
+        owner.ApplyTo(entity); // task 146
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }
 

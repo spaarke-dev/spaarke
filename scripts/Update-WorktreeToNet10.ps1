@@ -114,7 +114,8 @@ foreach ($p in $serverCsproj) {
            ForEach-Object { $_.Matches } | ForEach-Object { $_.Groups[1].Value }
     if ($tfm -match 'net8') { $net8 += "$($p.FullName) -> $tfm" }
 }
-# net462 plugin is intentionally excluded (sandbox-fixed); only flag net8.x
+# Only flag net8.x. (The former net462 Dataverse plugin, Spaarke.CustomApiProxy, was
+# deleted 2026-09-25 — Spaarke ships no Dataverse plugins per ADR-002.)
 if ($net8.Count -gt 0) {
     $net8 | ForEach-Object { Write-Host "   NET8 STILL PRESENT: $_" -ForegroundColor Red }
     Fail "A server csproj is still net8 — likely an IDE clobbered it. Run: git checkout -- '*.csproj'  (or discard in the IDE), then re-run."

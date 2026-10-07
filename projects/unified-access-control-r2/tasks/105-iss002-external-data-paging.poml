@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-002 (#963) — the external data plane stops truncating silently at $top=200: every collection read is complete or visibly truncated</title>
+    <phase>Register-driven (owner rule 2026-09-15)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-adjacent .cs change in Infrastructure/ExternalAccess (the :1034 read feeds participant resolution); tags bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-located change with an existing honesty rule to copy (task 024); the client-contract judgment point is an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infrastructure/ExternalAccess/** is parallel-unsafe in this project (project CLAUDE.md).</parallel-reason>
+    <deps>036</deps>
+    <tags>bff-api, dataverse, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Register ISS-002 / GitHub #963 — kept in the project under the owner's 2026-09-15 rule: material (this project's surface; :1034 is authorization-adjacent).</origin>
+  </metadata>
+
+  <prompt>ExternalDataService.GetCollectionAsync reads one page and never follows @odata.nextLink, and four call sites pin $top=200. A root with more than 200 children returns exactly 200, and the caller cannot tell that from a complete list. Spec NFR-03 already requires that caps are never silent. Make every one of the four reads either complete or visibly truncated.</prompt>
+  <role>SPAARKE platform developer, C#/.NET, Dataverse Web API paging.</role>
+  <goal>Each of the four collection reads returns every row up to an explicit page cap; a read that hits the cap, or loses a later page, is reported as truncated (logged, and surfaced to the caller where the response can carry it additively) — never returned as a complete list. The participant read (:1034) is fixed first.</goal>
+
+  <context>
+    <background>Register ISS-002 (task 029 code review). Same honesty class as task 024 (SPE paging, `container_not_cleared`), different plane — fixing one does not touch the other. Premise to verify before coding (this project's POMLs have been wrong 15 times): with `$top`, the Dataverse Web API returns NO `@odata.nextLink` — so "follow nextLink" requires replacing `$top` with `Prefer: odata.maxpagesize`. Confirm on Microsoft Learn and record the citation.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs — GetCollectionAsync (:1044) and the four call sites: :213 sprk_documents, :545 sprk_todos, :564 sprk_events, :1034 sprk_externalrecordaccesses</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/decisions/spe-paging-and-revoke-honesty-design.md — the honesty rule: an unverified set is never reported as clean</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs — task 024's paged read (ReadPermissionsAsync / PermissionReadResult)</file>
+      <file role="do-not-copy">src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeGroupResolver.cs:190-202 — double-counts page 1 (ISS-001 / #962)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="register ISS-002">Scope: the fix. Do NOT just raise $top — that moves the cliff without removing it.</constraint>
+    <constraint source="spec NFR-03">Scope: every cap. A cap is never silent: hitting it is logged with the url and row count, and surfaced to the caller.</constraint>
+    <constraint source="task 024 honesty rule">Scope: a failure on page 2 or later. The rows already read are never returned as a complete list.</constraint>
+    <constraint source="project">Scope: a page-1 failure. Its existing behaviour (log + empty) is out of scope — unless a caller treats that empty result as authoritative for an access decision; then escalate (below), do not change it silently.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification (existing service, no new component); publish size against a fresh master; no new HIGH CVE.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair positives with negatives.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Read GetCollectionAsync, the four call sites and each caller up to its endpoint. Record which callers can carry a truncation signal additively. Verify the register's line numbers and the $top/nextLink premise.</step>
+    <step order="1">Page GetCollectionAsync: follow @odata.nextLink up to a named max-pages constant; return the rows plus a truncated flag (cap hit, or a later page failed).</step>
+    <step order="2">Fix :1034 first, then :213, :545, :564 — carry the flag to each caller; surface it where the response allows an additive field; log it everywhere.</step>
+    <step order="3">Tests (KEEP path) for the closed set below; perturbations; build, full suite, publish size; notes/task-105-external-data-paging.md; TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If surfacing the truncation to a client needs anything beyond an additive response field (a shipped SPA / Teams view contract change), STOP and escalate with options. Log-only is not an acceptable silent fallback.</trigger>
+    <trigger>If any caller treats an empty page-1 result as authoritative for an access decision (fail-open), STOP and escalate — that is a disclosure-class finding, not part of this fix.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs</output>
+    <output type="test">tests/ (KEEP path)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-105-external-data-paging.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A root with 250 children returns all 250 from each of the four reads (the second page is followed).</criterion>
+    <criterion testable="true">A root beyond the cap returns the capped rows with truncated = true, and a log line naming the url and the count.</criterion>
+    <criterion testable="true">Negative: page 2 failing after page 1 succeeded returns truncated = true — never the page-1 rows as a complete list.</criterion>
+    <criterion testable="true">Negative: a root with fewer than one page of children makes exactly one request and reports truncated = false.</criterion>
+    <criterion testable="true">Negative: no row appears twice across pages (the ISS-001 defect is not copied).</criterion>
+    <criterion testable="true">Perturbation: not following nextLink fails at least one test; ignoring the cap fails at least one test; dropping the flag on a later-page failure fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; publish size reported against a fresh master and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Register ISS-002; GitHub #963 (label unified-access-control-r2). Task 036 adds a Truncated flag to AccessibleRecordSet for the evaluator's 5,000 cap — reuse its surfacing shape if 036 has landed; do not wait for it otherwise.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -13,13 +13,8 @@
     "**/*.stories.ts",
     "**/*.stories.tsx",
     "**/jest.setup.ts",
-    "AiToolAgent/**",
-    "AISummaryPanel/**",
     "DocumentRelationshipViewer/**",
-    "EmailProcessingMonitor/**",
-    "SourceDocumentViewer/**",
     "ThemeEnforcer/**",
-    "UniversalDatasetGrid/**",
     "VisualHost/**"
   ]
 }

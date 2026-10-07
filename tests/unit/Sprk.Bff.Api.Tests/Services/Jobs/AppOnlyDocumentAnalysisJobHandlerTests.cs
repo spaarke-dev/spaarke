@@ -92,7 +92,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
             .ReturnsAsync(false);
 
         _idempotencyServiceMock
-            .Setup(x => x.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.TryAcquireProcessingLockAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
 
         _idempotencyServiceMock
@@ -166,6 +166,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
         _idempotencyServiceMock.Verify(
             x => x.TryAcquireProcessingLockAsync(
                 job.IdempotencyKey,
+                job.JobId.ToString("N"),
                 It.Is<TimeSpan>(t => t == TimeSpan.FromMinutes(10)),
                 It.IsAny<CancellationToken>()),
             Times.Once);
@@ -334,7 +335,7 @@ public class AppOnlyDocumentAnalysisJobHandlerTests
             .ReturnsAsync(false);
 
         _idempotencyServiceMock
-            .Setup(x => x.TryAcquireProcessingLockAsync(job.IdempotencyKey, It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
+            .Setup(x => x.TryAcquireProcessingLockAsync(job.IdempotencyKey, It.IsAny<string>(), It.IsAny<TimeSpan>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false); // Lock not acquired - another instance has it
 
         // Act

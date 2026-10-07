@@ -40,7 +40,7 @@ The key architectural decision was ADR-006: **field-bound controls on a Datavers
 |---------|------|---------|-----------|
 | ~~AssociationResolver~~ ⛔ RETIRED (2026-07) | ~~`src/client/pcf/AssociationResolver/`~~ (removed) | Retired by SRFR-045; picker + subgrid auto-detect folded into **RegardingResolver**. Field-mapping *value* copying is now the shared-lib `FieldMappingService` engine | — |
 | UpdateRelatedButton | `src/client/pcf/UpdateRelatedButton/` | Triggers BFF API field mapping rules on related records | StandardControl (ReactDOM.render) |
-| SpaarkeGridCustomizer | `src/client/pcf/SpaarkeGridCustomizer/` | Custom cell renderers for Power Apps Grid Control (regarding links) | PAOneGridCustomizer |
+| SpaarkeGridCustomizer | `src/client/pcf/SpaarkeGridCustomizer/` | Power Apps grid customizer (v1.1.1, documented `EventName` / `fireEvent` contract): the regarding filing columns (the four `sprk_regarding{core}` roots, the ADR-024 pair, the non-root `sprk_regarding*` lookups; the ONE list `config/regarding-filing-columns.json`) are not editable (task 168), and regarding links | PAOneGridCustomizer |
 
 > ⛔ **Orphaned controls — do not maintain:** `AssociationResolver`, `DueDatesWidget`, `EventAutoAssociate`, `EventFormController`, `FieldMappingAdmin` (+ `EventCalendarFilter`, `RegardingLink`) are deployed-but-orphaned in `spaarkedev1` and approved for removal. Do not build/redeploy/update or re-investigate them. Authoritative determination: [`client-resources-inventory.md` §0](client-resources-inventory.md#0-orphaned-pcf-controls--do-not-maintain-authoritative-2026-07-10).
 
@@ -55,7 +55,7 @@ The key architectural decision was ADR-006: **field-bound controls on a Datavers
 | Control | Path | Purpose | React API |
 |---------|------|---------|-----------|
 | ThemeEnforcer | `src/client/pcf/ThemeEnforcer/` | Invisible control enforcing user dark mode preference on app load | StandardControl (no React rendering) |
-| EmailProcessingMonitor | `src/client/pcf/EmailProcessingMonitor/` | Admin dashboard for email-to-document processing statistics | StandardControl (ReactDOM.render) |
+| ~~EmailProcessingMonitor~~ | ~~`src/client/pcf/EmailProcessingMonitor/`~~ | **Deleted 2026-09-25** (monitored the retired email-to-document pipeline) | — |
 
 ---
 

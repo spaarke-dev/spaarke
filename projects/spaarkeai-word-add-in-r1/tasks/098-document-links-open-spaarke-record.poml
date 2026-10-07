@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Document links in email open the Spaarke record: the shared composer's "Link" inserts the record link, and the share-link route refuses SPE files with a typed code instead of relaying Graph's error</title>
+    <phase>6 UAT round 5 (2026-10-05)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a BFF route (`.cs`) and a shared-library compose handler (`.ts`) used by several surfaces, with tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully decided by the owner; small, well-located changes on two known files plus tests.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT5-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 099. Disjoint: 098 owns `Api/FileAccessEndpoints.cs` (share-link route), its models/options and tests, and `Spaarke.UI.Components/src/components/EmailComposer/**` (createXrmEmailComposeHandlers, shareLinks) and their tests; it MUST NOT edit anything under `src/client/office-addins/**` (099's). Run `/conflict-check` first: the composer is a shared-library surface other projects (email-communication-intelligence-r2) also edit.</parallel-reason>
+    <deps>096</deps>
+    <tags>bff-api, shared-ui, communication, email, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decision 2026-10-05 (round 5 note §3; 096 note §4): *"the link should just be to open Spaarke record; for external, they can open the file from their external access platform (same as internal user opening from Spaarke)"*.</prompt>
+
+  <role>SPAARKE full-stack developer: BFF Minimal API (ADR-001/008) and the shared compose engine (`@spaarke/ui-components`, ADR-045).</role>
+
+  <goal>When an email author links an attached document, the body carries the Spaarke record link for that `sprk_document` (opens in the Spaarke model-driven app), never a file sharing link; and `POST /api/documents/{id}/share-link` answers SPE files with an honest, typed refusal.</goal>
+
+  <context>
+    <background>
+      - **Why**: every Spaarke document lives in a SharePoint Embedded container and Graph refuses item sharing links
+        there ("This sharing scenario is not supported on CSP Container site"). Today the composer's **Link** toggle calls
+        `onResolveShareLink` → the share-link route → fails → silently keeps the document's internal URL, with no message
+        to the author (096 note §4).
+      - **The record link** is the same shape the add-in and Outlook already use: `{orgUrl}/main.aspx?appname={app}&amp;pagetype=entityrecord&amp;etn=sprk_document&amp;id={id}`
+        (`src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts` builds it; app unique name
+        `sprk_MatterManagement`). In an Xrm host the org URL comes from the host (`Xrm.Utility.getGlobalContext().getClientUrl()`).
+      - **Consumers of `onResolveShareLink`** (verify): `createXrmEmailComposeHandlers.ts` → the Email code page
+        (`src/solutions/EmailPage`), the SpaarkeAi email widget (`Spaarke.AI.Widgets/.../EmailWorkspaceWidget.tsx`), the
+        TrackingFieldTrio PCF, `EmailWorkspace`/`useEmailComposeActions` in `Spaarke.Communication.Components`. One
+        change in the shared handler should cover them; confirm each and list it.
+      - **External recipients** open files through the external access platform — no file-level link is built here.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-05">The composer's link for a document is the Spaarke record link. No caller may mint or insert a Graph sharing link for a Spaarke document.</constraint>
+    <constraint source="owner 2026-10-05">The route returns a typed ProblemDetails refusal for SPE-backed documents (a stable code such as `SHARE_LINK_UNSUPPORTED_SPE`, status 409 or 422 — choose and justify), never Graph's raw error. Do not delete the route (a contract change); state any remaining caller.</constraint>
+    <constraint source="ADR-045">One engine: change the shared handler/engine, not each consumer. The engine never imports `@spaarke/auth`.</constraint>
+    <constraint source="ADR-008 / ADR-028">The route keeps its existing endpoint-filter authorization; nothing about auth changes.</constraint>
+    <constraint source="CLAUDE.md §10">BFF obligations: placement stated; publish size measured master-vs-branch from fresh SHORT-path worktrees (`C:\code_files\wtNNNm` / `wtNNNb`, Compress-Archive Optimal, equal file counts); CVE check.</constraint>
+    <constraint source="ADR-038">Tests: route contract test for the typed refusal; shared-lib tests that Link yields the record link (and never calls the share-link route); update `shareLinks.test.ts`. No `Mock&lt;HttpMessageHandler&gt;`.</constraint>
+    <constraint source="UI copy">If the toggle's label or helper text says "share link", change it to say it links to the Spaarke record (e.g. "Link to Spaarke record"). No other UI change.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ticking Link on an attached Spaarke document puts `…/main.aspx?appname=sprk_MatterManagement&amp;pagetype=entityrecord&amp;etn=sprk_document&amp;id={id}` in the body (org URL from the host); no request is made to `/share-link`.</criterion>
+    <criterion testable="true">With no org URL available, the link is omitted (never a broken or internal SPE URL) and the author sees why.</criterion>
+    <criterion testable="true">`POST /api/documents/{id}/share-link` for an SPE-backed document returns the typed refusal (code + status as chosen), not Graph's message; unauthenticated stays 401.</criterion>
+    <criterion testable="true">Every consumer of `onResolveShareLink` is listed with its verdict (now gets the record link / unaffected).</criterion>
+    <criterion testable="true">Gates: BFF build 0 errors 0 warnings; affected test scopes green; shared-lib EmailComposer tests green; publish-size delta reported (both sizes, tool, file counts); CVE clean.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>`/conflict-check` shows another active project editing `EmailComposer/**` or `FileAccessEndpoints.cs` — coordinate before editing.</trigger>
+    <trigger>A consumer genuinely needs a file-level link for an external party (not served by the external access platform) — STOP and report.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`/conflict-check`; read the route, `createXrmEmailComposeHandlers.ts`, the engine's Link path, `shareLinks.test.ts`, and each consumer.</step>
+    <step>Shared handler/engine: Link → record link; tests.</step>
+    <step>Route: typed refusal; contract test.</step>
+    <step>Gates, publish size; `notes/098-document-links-record.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The share-link route, the composer's `onResolveShareLink` seam and the record-link shape (`openRecordLauncher.ts`) exist.</existing>
+    <extension>Yes — changes what the existing seam returns and how the existing route answers; no new route, service or component.</extension>
+    <cost-of-doing-nothing>Every "Link" on a Spaarke document silently inserts a URL outside recipients cannot open, and the route relays a Graph error nobody can act on.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file role="edit">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts</file>
+    <file role="edit">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/__tests__/shareLinks.test.ts</file>
+    <file role="read">src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/098-document-links-record.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/096-email-tab.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round5-2026-10-05.md</file>
+      <file>.claude/adr/ADR-045-communication-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <notes>MAIN SESSION 2026-10-05: the route refusal was REVERTED (it failed 6 UAC-r2 tests in tests/integration/auth/UnifiedAccessControl, which this project may not edit). Shipped: the composer's record link (the owner's decision in full). Route retirement handed to UAC-r2 with notes/098-share-link-route-refusal.patch. Criterion 3 (typed refusal) is therefore NOT met here by design.</notes>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/098-document-links-record.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

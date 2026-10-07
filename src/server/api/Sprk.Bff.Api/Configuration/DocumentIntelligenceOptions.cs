@@ -146,8 +146,11 @@ public class DocumentIntelligenceOptions
     public string? DocIntelEndpoint { get; set; }
 
     /// <summary>
-    /// Azure Document Intelligence API key.
-    /// Store in Key Vault (production) or user-secrets (development).
+    /// Azure Document Intelligence API key — OPTIONAL. When unset, <c>TextExtractorService</c> uses the
+    /// injected managed-identity <c>TokenCredential</c> ("key if configured, else MI"; customer stamps carry
+    /// no key since customer-provisioning-orchestration-r1 task 243). Entra auth needs a custom subdomain on
+    /// the account (a regional endpoint accepts keys only). Where a key is used, store it in Key Vault
+    /// (production) or user-secrets (development).
     /// </summary>
     public string? DocIntelKey { get; set; }
 

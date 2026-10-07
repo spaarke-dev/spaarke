@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="199" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Reconcile registry schema (add missing sprk_customerid + deploy task 023) + fix /provision-environment skill drift blocking task 186 batch dispatch</title>
+    <phase>Pre-Live-Fire — SESSION 13 pre-check reconciliation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.claude/skills/provision-environment/SKILL.md` (skill-directives hot-path per root CLAUDE.md §10 Hot-Path Declaration) + deploys real Dataverse schema changes to Spaarke's dev registry env (spaarkedev1) + gates the E2E live-fire ceremony (task 186). Main-session-only per §3 Sub-Agent Write Boundary (SKILL.md is under `.claude/`).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical reconciliation — deploy existing task 023 script, add 1 missing column via companion script, surgical skill edits with well-defined replacement text. No architectural judgment. Post-hoc documentation of what was discovered + fixed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>023, 186</deps>
+    <tags>dataverse, solution, fields, schema, registry, skill-directive, provisioning, blocker-reconciliation</tags>
+    <estimated-effort>1.5h (main-session, actual)</estimated-effort>
+  </metadata>
+
+  <prompt>Reconcile the three misalignments discovered during first live batch dispatch attempt of task 186 (2026-08-26 SESSION 13):
+
+**Discovery 1 — Task 023 script never deployed**: TASK-INDEX marked task 023 ✅ (2bfd64dfa 2026-08-17) authoring `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1` but the script was never executed against any env. Verified via raw Dataverse Web API query to `spaarkedev1.crm.dynamics.com/api/data/v9.2/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes` — returned original 17 columns only, none of the 12 v3.3 additions. Task 023 ✅ status reflects code-authoring only, not deployment.
+
+**Discovery 2 — Missing 13th column sprk_customerid**: Task 023 POML enumerated 12 columns but NONE was `sprk_customerid` — the ALT-KEY that L2 `Sprk.Provisioning.ControlPlane.Core/Concurrency/DataverseRegistryConcurrencyStore.cs` and `CustomerRunGuard.cs` require for every registry lookup (`$filter=sprk_customerid eq '{id}'`). Grep across `src/**` confirmed the column is expected by L2 code but has no source-side authoring anywhere. Real gap in task 023's enumeration.
+
+**Discovery 3 — Skill drift in `/provision-environment` Step 1f + Step 6a + Fallback Matrix**: skill payload referenced 3 fields that don't exist anywhere in code, POMLs, script, or live schema: `sprk_profile`, `sprk_upgrademode`, and used string 'Provisioning' + integer 200000004 for `sprk_setupstatus` — actual enum is `NotStarted=0/InProgress=1/Ready=2/Issue=3` (per `DataverseEnvironmentRecord.cs:23-29`). Payload also omitted 5 required NOT-NULL fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`) — Dataverse would 400 on missing required attrs.
+
+Together these three block ANY live dispatch of task 186 (interactive OR batch). Fix all three atomically.</prompt>
+
+  <role>Main-session operator (Sub-Agent Write Boundary applies: SKILL.md edits main-session-only). Author for durability — this reconciliation ships the schema state that r1's L2 code has been assuming since 2026-08-17 but was never actually deployed.</role>
+
+  <goal>By session end: (1) spaarkedev1 has all 12 task-023 columns + `sprk_customerid` + alt-key deployed; (2) `.claude/skills/provision-environment/SKILL.md` Step 1f + Step 6a + Fallback Matrix reference only fields that ACTUALLY exist in the deployed schema with correct enum integers; (3) task 186 batch dispatch can proceed cleanly on next session's re-invocation.</goal>
+
+  <context>
+    <background>
+      The 2026-08-26 SESSION 13 first live batch dispatch of task 186 stopped at Step 0 pre-Step-0.5 with three cascading discoveries:
+
+      1. **pac + MCP env-pointer confusion** — initially pointed at `spaarke-model1-prod` (customer stamp from 2026-08-22 stand-up), operator directed to use `spaarkedev1` as the registry env (since no separate central-managing env exists yet — see operator memory `feedback_no_central_managing_env_yet`).
+
+      2. **Task 023 script deployment gap** — after switching to spaarkedev1, MCP describe still showed 17 columns. Verified via raw Web API: script authoring committed (`2bfd64dfa`) but never executed against any env.
+
+      3. **sprk_customerid missing entirely** — L2 CustomerRunGuard `DataverseRegistryConcurrencyStore.CustomerIdColumn = "sprk_customerid"` (line 60) is the alt-key for every registry lookup. Grep across all r1 tasks + all scripts confirmed NO authoring of this column anywhere. Real gap in task 023's enumeration.
+
+      4. **Skill drift** — SKILL.md Step 1f payload referenced `sprk_profile` + `sprk_upgrademode` (grep-zero across `src/**` — both fields fictional) + used wrong `sprk_setupstatus` values.
+
+      The reconciliation is fully executed in this task; POML authored post-hoc to document scope + close the gap in TASK-INDEX + surface for the next audit.
+    </background>
+    <relevant-files>
+      <file role="deployed-and-reference">scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1</file>
+      <file role="authored-and-deployed">scripts/Add-CustomerIdColumn.ps1</file>
+      <file role="modified">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Concurrency/DataverseRegistryConcurrencyStore.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuard.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs</file>
+      <file role="user-memory-driven">C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\memory\feedback_no_central_managing_env_yet.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="marked-complete-but-not-deployed">Task 023 script authoring commit `2bfd64dfa`. Deployment executed by this task 199.</dependency>
+      <dependency task="186" status="blocked-by-199">Task 186 batch dispatch requires the 3 fixes in this task before proceeding.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root CLAUDE.md §3">Sub-Agent Write Boundary: SKILL.md edits main-session-only (`.claude/skills/**` off-limits to subagents).</constraint>
+    <constraint source="root CLAUDE.md §10">Hot-path declaration: this task modifies `.claude/skills/provision-environment/SKILL.md` — skill-directives hot-path (auto-hot-path per `provision-environment` being a live-fire consumer).</constraint>
+    <constraint source="operator-directive-2026-08-26">Use `spaarkedev1` as the registry env for `environment=dev` runs until a separate central-managing env is designed + provisioned. Per operator memory `feedback_no_central_managing_env_yet`.</constraint>
+    <constraint source="ADR-044">`sprk_customerid` is a String alt-key (not GUID); no canonicalization needed. But `sprk_currentrunid` + `sprk_tenantid` + `sprk_azuresubscriptionid` still store canonical bare-lowercase GUID form per ADR-044.</constraint>
+    <constraint source="task-023-POML">Do NOT extend `DataverseEnvironmentRecord.cs` in this task. Task 023's constraint "consumers land in later tasks (H0 preflight, H2a Bicep composition, H12c runtime refs)" remains in force — this task is schema-deploy + skill-fix only. BFF read-model extension is a separate follow-on.</constraint>
+    <constraint source="§6.5-escalation-protocol">The 3 discoveries were surfaced to owner using the §6.5 ADR/skill/schema-divergence resolution protocol (SESSION 13 chat log 2026-08-26). Path B (ADR amendment) was NOT needed — no ADR contradicted. Path A (project-scoped exception) also not needed — the reconciliation aligns skill + schema to what L2 code was ALREADY assuming. Effectively Path C (comply) — reconcile skill + schema to code reality.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Registry schema deployment + skill drift reconciliation</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/tasks/023-extend-registry-schema-11-columns.poml</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+    </files>
+    <patterns>
+      <pattern name="Web API PowerShell schema authoring" location="scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1">The v2 baseline + v3.3 extension pattern for `sprk_dataverseenvironment` uses direct Web API PowerShell scripts (not Entity.xml). Companion `scripts/Add-CustomerIdColumn.ps1` follows the same shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="RIGOR declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md, task 023 POML, SKILL.md.</step>
+    <step order="1" name="Deploy task 023 schema">Run `pwsh -File scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain "spaarkedev1.crm.dynamics.com"`. Verify: 12 new columns added (v2×6 + v3×3 + v3.3×3) via raw Web API query. **EXECUTED 2026-08-26 SESSION 13 — all 12 columns added successfully.**</step>
+    <step order="2" name="Author sprk_customerid script">Author `scripts/Add-CustomerIdColumn.ps1` (String(64), Recommended, ALT-KEY on `sprk_customerid_key`; idempotent; publishes entity). Follow same Web API PowerShell pattern as task 023 script. **AUTHORED 2026-08-26 SESSION 13.**</step>
+    <step order="3" name="Deploy sprk_customerid">Run `pwsh -File scripts/Add-CustomerIdColumn.ps1 -EnvironmentDomain "spaarkedev1.crm.dynamics.com"`. Verify: `sprk_customerid` column added + `sprk_customerid_key` alt-key registered (status=Pending → Active in 2-5 min). **EXECUTED 2026-08-26 SESSION 13 — column + alt-key both added successfully. Final schema: 30 sprk_ columns.**</step>
+    <step order="4" name="Fix SKILL.md Step 1f">Rewrite Step 1f placeholder-create payload:
+      - REMOVE: `sprk_profile` (grep-zero in code), `sprk_upgrademode` (derived, not persisted)
+      - ADD: 5 NOT-NULL required fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`)
+      - FIX: `sprk_setupstatus` from string 'Provisioning' → integer 1 (InProgress per enum)
+      - FIX: `sprk_tenancymodel` from string → option-set integer (Model1Shared=0, Model2Dedicated=1)
+      - Add explicit "fields intentionally NOT set" section (populated by later handlers)
+      - Add "fields deliberately NOT in placeholder" section (deprecated fields)
+      - Add registry-env pointer sub-note per operator memory `feedback_no_central_managing_env_yet`
+      **APPLIED 2026-08-26 SESSION 13.**</step>
+    <step order="5" name="Fix SKILL.md Step 6a">Correct `sprk_setupstatus` from 200000004 → 2 (Ready per EnvironmentSetupStatus enum). Add lookup via `sprk_customerid` alt-key. Add note that write is issued server-side by L2 `DataverseRegistrySetupStatusUpdater` at H13; operator-side is verify + belt-and-suspenders repair. Remove `sprk_tenantid` from update fields (immutable per §4D I1). **APPLIED 2026-08-26 SESSION 13.**</step>
+    <step order="6" name="Fix SKILL.md Fallback Matrix">Correct `sprk_setupstatus` integer in both `pac data update` fallback and raw Web API PATCH fallback. Update `$dvUrl` to `spaarkedev1.crm.dynamics.com` (registry env) not `{customerEnv}`. **APPLIED 2026-08-26 SESSION 13.**</step>
+    <step order="7" name="File this POML + update TASK-INDEX">Author this POML; append row 199 to TASK-INDEX between 186 and 200; update SESSION 13 header line. **THIS STEP.**</step>
+    <step order="8" name="Save operator-memory reconciliation feedback">Persist `feedback_no_central_managing_env_yet.md` in operator's memory folder to remember the "spaarkedev1 doubles as registry env" architectural reality. **APPLIED 2026-08-26 SESSION 13.**</step>
+    <step order="9" name="Update current-task.md">Update current-task.md Quick Recovery to show SESSION 13 = task 199 reconciliation complete; task 186 unblocked; ready for re-dispatch next session.</step>
+    <step order="10" name="Commit + push atomic">One commit: SKILL.md fixes + `scripts/Add-CustomerIdColumn.ps1` (new) + task 199 POML (new) + TASK-INDEX + current-task.md. Message: `feat(provisioning): reconcile registry schema + fix /provision-environment skill drift blocking task 186 batch dispatch (task 199)`. Push to origin.</step>
+  </steps>
+
+  <justification>
+    <existing>The three fixes are ALL corrections to existing surfaces: (1) task 023 script exists but was never deployed — no new script needed for the 12 columns; (2) `sprk_customerid` requires NEW authoring since it was never on any surface; (3) SKILL.md exists but has drift bugs. Only NEW artifact is `scripts/Add-CustomerIdColumn.ps1`.</existing>
+    <extension>Extending existing pattern per Web API PowerShell schema-authoring pattern. Not introducing a new pattern.</extension>
+    <cost-of-doing-nothing>Task 186 batch dispatch CANNOT proceed until these three fixes land. Without task 199: (a) live dispatch fails at Step 1f with either Dataverse 400 on missing required fields or silent field-drop on non-existent `sprk_profile`/`sprk_upgrademode` fields; (b) even if placeholder create succeeds, L2 CustomerRunGuard cannot find the row (no `sprk_customerid` alt-key); (c) Step 6a writes wrong setupstatus value (200000004 vs enum 2). Cost is corrupted Cosmos run state + partial Azure resources + manual cleanup.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="deployment">Live schema on spaarkedev1: 30 sprk_ columns on `sprk_dataverseenvironment` + `sprk_customerid_key` alt-key registered</output>
+    <output type="code">scripts/Add-CustomerIdColumn.ps1 (new; ~120 LOC)</output>
+    <output type="skill">.claude/skills/provision-environment/SKILL.md (Step 1f + Step 6a + Fallback Matrix corrections)</output>
+    <output type="task">projects/customer-provisioning-orchestration-r1/tasks/199-reconcile-registry-schema-and-skill-alignment.poml (new — this file)</output>
+    <output type="task-index">projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md (new row 199 + SESSION 13 header)</output>
+    <output type="state">projects/customer-provisioning-orchestration-r1/current-task.md (SESSION 13 Quick Recovery)</output>
+    <output type="memory">C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\memory\feedback_no_central_managing_env_yet.md (new; already persisted mid-session)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Query `EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes` on spaarkedev1 returns ≥30 sprk_ columns including all 12 task 023 additions AND `sprk_customerid`.</criterion>
+    <criterion testable="true">Query `EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Keys` on spaarkedev1 returns `sprk_customerid_key` with `KeyAttributes=['sprk_customerid']`.</criterion>
+    <criterion testable="true">Grep `.claude/skills/provision-environment/SKILL.md` returns ZERO matches for `sprk_profile` OR `sprk_upgrademode` OR `200000004`.</criterion>
+    <criterion testable="true">Grep `.claude/skills/provision-environment/SKILL.md` returns matches for `sprk_customerid` (Step 1f + Step 6a) + `sprk_setupstatus = 1` (Step 1f) + `sprk_setupstatus:      2` (Step 6a).</criterion>
+    <criterion testable="true">TASK-INDEX contains row 199 with status ✅ and cross-references to task 023 + task 186.</criterion>
+    <criterion testable="true">Negative: `DataverseEnvironmentRecord.cs` AllColumns array is UNCHANGED (task 023's "consumers land in later tasks" constraint honored).</criterion>
+    <criterion testable="true">Task 186 status flipped from 🟡 to ⏸ blocked-by-199, THEN back to 🟡 (unblocked) once 199 is ✅. Alt: 186 stays 🟡 and gets a note "unblocked 2026-08-26 by 199; re-dispatch pending".</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Task 199 is a POST-HOC POML documenting reconciliation work already executed in main-session during SESSION 13 (2026-08-26). Authoring the POML AFTER the work is a deliberate deviation from the usual "POML first, then execute" pattern — the reconciliation was surfaced via §6.5 escalation protocol at Step 0 pre-Step-0.5 of a live skill invocation, and the fix was small + well-scoped enough to just do it. The POML captures the audit trail + acceptance criteria for future verification.
+
+    Follow-on candidates NOT in this task's scope:
+    - **Extend `DataverseEnvironmentRecord.cs`** to include the 13 new columns (per task 023's "consumers land in later tasks" — this is when the BFF wants to READ the new columns; task 186 doesn't need it since L2 handlers use their own models). Timing: whenever an r2 task or a customer-success flow needs to render/report on the new columns. Priority: LOW.
+    - **Update r1 skill's KV credential-lifecycle rule** (line 63 + 1337 of SKILL.md) per E-3 CLOSURE (auth-v4 task 033 2026-08-24 deleted both KV copies of `BFF-API-ClientSecret`). The current language says "never purge soft-deleted rollback copies" — the copies are already gone. Not blocking anything; correct at your leisure. Priority: LOW.
+    - **Filed junk L2 run**: the role-probe from SESSION 13 Step 0c created a Cosmos entry for `customerId=__role-probe__, tenantId=__probe__`. Will fail H0 fast on invalid tenant. L2's list API doesn't support customerId filter query — nothing to clean up from operator side. Priority: NIL.
+    - **Central managing env**: operator flagged as "good idea to evaluate" for a future r2 project. Scope: separate `spaarke-registry-{dev,demo,prod}` Dataverse env + migration of registry entities out of spaarkedev1 + skill Step 1f/6a language re-alignment. Priority: MED (blocks nothing; improves separation of concerns).
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -116,6 +116,16 @@ public sealed class ComposeResidualLossParityTests
         // over-claim direction testable: if the published document ever calls these lost, parity fails.
         new object?[] { "bookmark", "bookmarkStart", null },
         new object?[] { "sdt", "sdt", "hard-tier-sdt-flattened" },
+        // #777 (2026-09-01) -- the INTERIOR section break, and the one family that does not live among
+        // the paragraph's runs: `w:sectPr` sits in `w:pPr`, which is why it needs PPrFor() rather than
+        // BodyFor() and why it was easy to leave out of a table built around run-level constructs.
+        //
+        // The count assertions are what make it a real measurement here: BuildDocument emits a TRAILING
+        // body-level sectPr too, so `before` is 2. The untouched half proves the interior one is cloned
+        // (2 -> 2, and NO warning -- editing elsewhere must not warn about a break nothing touched), and
+        // the edited half proves it is destroyed (2 -> 1) and reported. A family that only counted the
+        // interior break would have passed just as happily with the trailing section flattened too.
+        new object?[] { "sectPrInterior", "sectPr", "section-break-flattened" },
         // UAT 2026-08-26 (D-1). An INTERNAL cross-reference ("see Section 2") — `w:hyperlink w:anchor`,
         // the shape every legal document is full of and the one shape this corpus had ZERO of: before this
         // row, all 24 fixtures contained exactly ONE hyperlink and no `w:anchor` at all, so the "untouched
@@ -218,12 +228,39 @@ public sealed class ComposeResidualLossParityTests
             }
         }
 
-        // Direction A — every measured loss is documented, by its exact code.
+        // Direction A — every measured loss is documented, by its exact code, IN A TABLE ROW.
+        //
+        // Table-scoped since 2026-09-01 (#777). It used to scan the WHOLE document, so a code mentioned
+        // anywhere satisfied it — including in a paragraph explaining the loss, or in the sign-off
+        // amendment discussing it. That let this direction pass for a loss the TABLE did not list, which
+        // is the one thing it exists to prevent: a reader consults the table, not the prose around it.
+        // Found by seeding the removal of `section-break-flattened` from the table and watching this
+        // direction stay green because the amendment below still named the code.
+        //
+        // Direction B was already table-scoped, for the mirror-image reason (an honest explanation of a
+        // RETIRED code must not read as a fresh claim of it). Both directions now read the same surface.
+        // Scoped to §2's table specifically, not "every table row in the file". The second seeded removal
+        // showed why: the sign-off amendment discussing this row is ITSELF a table, so a whole-file
+        // table-row scan still found the code after the loss table had lost it. The claim under test is
+        // narrow — "the §2 loss table names this code" — and the check has to be exactly that narrow or it
+        // keeps finding the code somewhere and calling that documentation.
+        var lossTableStart = published.IndexOf("## 2. What is lost", StringComparison.Ordinal);
+        var lossTableEnd = published.IndexOf("## 3. What survives", StringComparison.Ordinal);
+        lossTableStart.Should().BeGreaterThan(-1, "§2 is the loss table this check reads");
+        lossTableEnd.Should().BeGreaterThan(lossTableStart, "§3 must follow §2 — the section scan anchors on both");
+
+        var documentedRows = string.Join(
+            "\n",
+            published[lossTableStart..lossTableEnd]
+                .Split('\n')
+                .Where(l => l.TrimStart().StartsWith('|')));
+
         foreach (var code in measuredLossCodes)
         {
-            published.Should().Contain(code,
-                $"the merge emits '{code}' but the published residual list never names it. An undocumented " +
-                "loss is exactly what FR-A10 exists to prevent — the list is the contract users rely on.");
+            documentedRows.Should().Contain(code,
+                $"the merge emits '{code}' but no row of the published residual list's §2 LOSS TABLE names it. An " +
+                "undocumented loss is exactly what FR-A10 exists to prevent — the list is the contract " +
+                "users rely on, and prose discussing a code is not the same as listing it.");
         }
 
         // Direction B — every code the document names is one the merge actually emits. This is the
@@ -255,6 +292,10 @@ public sealed class ComposeResidualLossParityTests
             "field-flattened-to-text", "complex-object-dropped", "unrepresented-footnote-reference",
             "unrepresented-endnote-reference", "edited-paragraph-line-break-dropped", "symbol-flattened",
             "tab-flattened", "hard-tier-sdt-flattened", "content-control-flattened",
+            // #777 (2026-09-01). Added with the document row it verifies. It was absent BOTH here and from
+            // Families(), so the published list could have named this loss and neither direction would
+            // have checked it -- a hole in the mechanism whose whole job is to keep the document honest.
+            "section-break-flattened",
         };
         // Only TABLE ROWS count as a claim. The document also discusses codes in prose — including, by
         // design, the story of a code that USED to be emitted and no longer is — and scanning prose would
@@ -269,8 +310,26 @@ public sealed class ComposeResidualLossParityTests
     // Synthetic documents — three blocks, with the construct in block[1].
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
+    /// <summary>
+    /// Paragraph-PROPERTIES markup for the carrier block, emitted BEFORE its runs (#777, 2026-09-01).
+    /// Empty for every run-level family. `w:pPr` must be the paragraph's first child, so a construct
+    /// that lives there cannot ride on <see cref="BodyFor"/> like the others -- which is the structural
+    /// reason the interior section break was missing from this harness rather than an oversight of
+    /// attention.
+    /// </summary>
+    private static string PPrFor(string familyKey) => familyKey switch
+    {
+        "sectPrInterior" => "<w:pPr><w:sectPr>"
+                            + "<w:pgSz w:w=\"15840\" w:h=\"12240\" w:orient=\"landscape\"/>"
+                            + "<w:pgMar w:top=\"720\" w:right=\"720\" w:bottom=\"720\" w:left=\"720\"/>"
+                            + "</w:sectPr></w:pPr>",
+        _ => string.Empty,
+    };
+
     private static string BodyFor(string familyKey) => familyKey switch
     {
+        // The interior section break contributes no RUN -- it is carried entirely by PPrFor above.
+        "sectPrInterior" => string.Empty,
         "fldSimple" => "<w:fldSimple w:instr=\" PAGE \"><w:r><w:t>1</w:t></w:r></w:fldSimple>",
         "fldChar" => "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>"
                      + "<w:r><w:instrText xml:space=\"preserve\"> REF _Ref1 \\h </w:instrText></w:r>"
@@ -360,7 +419,8 @@ public sealed class ComposeResidualLossParityTests
         var body =
             Para("4A000001", "<w:r><w:t xml:space=\"preserve\">Opening paragraph.</w:t></w:r>")
             + Para("4A000002",
-                   "<w:r><w:t xml:space=\"preserve\">Carrier. </w:t></w:r>" + BodyFor(familyKey))
+                   PPrFor(familyKey)
+                   + "<w:r><w:t xml:space=\"preserve\">Carrier. </w:t></w:r>" + BodyFor(familyKey))
             + TwinBlockFor(familyKey)
             + Para("4A000003", "<w:r><w:t xml:space=\"preserve\">Closing paragraph.</w:t></w:r>")
             + "<w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/>"

@@ -1,5 +1,7 @@
 # ai-advanced-capabilities-agreements-r1 — Agreement Analysis: Review Depth & Output Deliverables
 
+> **Portfolio**: [Project #1128](https://github.com/spaarke-dev/spaarke/issues/1128) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: 🟢 Ready for execution (pipeline run 2026-07-31) · **Branch**: `work/ai-advanced-capabilities-agreements-r1`
 > **Spec**: [spec.md](spec.md) (17 FRs / 6 NFRs) · **Plan**: [PLAN.md](PLAN.md) · **Tasks**: [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md)
 > **Predecessor**: `ai-advanced-capabilities-nda-r1` (shipped NDA advisory vertical) · **Sibling**: `ai-advanced-capabilities-analysis-hub-r1` (platform — 001–070 + Phase 1 shipped)

@@ -79,7 +79,7 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 
 **R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
 - RAG knowledge index (`spaarke-knowledge-index-v2`) with hybrid search (3072-dim vectors)
-- Multi-tenant deployment models (Shared, Dedicated, CustomerOwned)
+- Per-customer RAG deployment: `Dedicated` (the default — a dedicated AI Search service per customer) or `CustomerOwned` (BYOK, in the customer's own subscription). The former `Shared` value is **retired — never provision it**; see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
 - `IKnowledgeDeploymentService` for SearchClient routing
 - `IRagService` for hybrid search with semantic ranking
 - Redis caching for embeddings
@@ -107,7 +107,7 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 | AI Foundry | Prompt Flow orchestration | sprkspaarkedev-aif-hub |
 | Dataverse | Entity storage for Analysis records | sprk_analysis |
 | Custom Pages | Power Apps hosts for PCF controls | Deployed |
-| KnowledgeDeploymentService | Multi-tenant RAG deployment routing | R3 (Active) |
+| KnowledgeDeploymentService | Per-customer RAG deployment routing | R3 (Active) |
 | FileIndexingService | Unified RAG file indexing pipeline | R3+RAG-R1 (Active) |
 | spaarke-knowledge-index-v2 | RAG vector index (3072 dims) | **Primary** |
 | spaarke-records-index | Record matching index | Active |
@@ -547,7 +547,8 @@ pac solution import \
 
 ### Overview
 
-Phase 6 adds multi-tenant RAG (Retrieval-Augmented Generation) infrastructure with hybrid search capabilities.
+Phase 6 adds RAG (Retrieval-Augmented Generation) infrastructure with hybrid search capabilities, deployed
+**per customer** — a dedicated AI Search service per customer, in that customer's own Azure subscription.
 
 ### 6.1 Deploy RAG Knowledge Index
 
@@ -570,7 +571,7 @@ az search index list \
 | Field | Type | Purpose |
 |-------|------|---------|
 | `id` | Edm.String | Unique chunk ID |
-| `tenantId` | Edm.String | Multi-tenant isolation |
+| `tenantId` | Edm.String | The Entra **tenant** GUID. ⚠️ Separates Entra tenants only — **not customers**: under Model 1 every customer presents Spaarke's tenant GUID. Customer isolation comes from the dedicated per-customer AI Search service, not from this field. |
 | `content` | Edm.String | Chunk text content |
 | `contentVector3072` | Collection(Edm.Single) | 3072-dim embedding (text-embedding-3-large) |
 | `documentVector3072` | Collection(Edm.Single) | Document-level embedding |
@@ -586,7 +587,7 @@ The following services are registered in `Program.cs` when AI Search is configur
 | Service | Registration | Purpose |
 |---------|--------------|---------|
 | `SearchIndexClient` | Singleton | Azure SDK client for index management |
-| `IKnowledgeDeploymentService` | Singleton | Multi-tenant SearchClient routing |
+| `IKnowledgeDeploymentService` | Singleton | Per-customer SearchClient routing |
 | `IRagService` | Singleton | Hybrid search with semantic ranking |
 | `IFileIndexingService` | Singleton | Unified RAG indexing pipeline |
 | `IEmbeddingCache` | Singleton | Redis-based embedding cache |
@@ -737,8 +738,7 @@ File → Download → Extract Text → Chunk → Generate Embeddings → Index t
 |----------|--------|---------|
 | `/api/ai/rag/index-file` | POST | Index a file (OBO) |
 | `/api/ai/rag/search` | POST | Hybrid search |
-| `/api/ai/rag/index` | POST | Index document chunks |
-| `/api/ai/rag/index/batch` | POST | Batch index chunks |
+| `/api/ai/rag/index` | POST | Index document chunks (SystemAdmin; caller's own tenant partition) |
 
 ### 8.5 Required Configuration
 
@@ -1176,7 +1176,11 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 
 #### Error: Bicep ai-search Module BCP075
 
-**Symptom**: `model1-shared.bicep` or `model2-full.bicep` fails to compile
+**Symptom**: `customer.bicep` (or any template that consumes the `ai-search` module) fails to compile
+
+> The original symptom named `model1-shared.bicep` and `stacks/model2-full.bicep`. Both are deleted —
+> `model1-shared.bicep` by task 225a (2026-10-01, D-12 retired the shared trial/SMB tier) and
+> `model2-full.bicep` by task 249 (2026-10-02, D19: `customer.bicep` is the only customer-stamp template).
 
 **Resolution**: Change `listQueryKeys()[0].key` to `listQueryKeys().value[0].key`
 

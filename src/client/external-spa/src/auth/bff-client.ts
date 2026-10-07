@@ -31,7 +31,7 @@
  * literal is centralized into the single internal helper `executeFetch` so
  * the project's ESLint Bearer-literal ban (task 070) has exactly one
  * allowlisted exception in the external SPA. All public-facing API methods
- * (`bffApiCall`, `getExternalUserContext`, `grantAccess`, etc.) call
+ * (`bffApiCall`, `getExternalUserContext`, `grantAccessAsContact`, etc.) call
  * `bffApiCall`, which calls `executeFetch`. There is no other place in the
  * external SPA where a Bearer header is set.
  *
@@ -57,54 +57,76 @@ import { getMockResponse } from '../mocks/mock-service';
 // Request / Response types for BFF endpoints
 // ---------------------------------------------------------------------------
 
-/** Request body for granting external access to a project */
-export interface GrantAccessRequest {
-  /** Contact record ID of the user to grant access to */
-  contactId: string;
-  /** Secure Project record ID */
-  projectId: string;
+/**
+ * Request body for contact-side Grant Access (unified-access-control-r2 task 140):
+ * POST /api/v1/external/contact-grants.
+ *
+ * A contact holding Collaborate or Full Access grants ONE colleague of their own
+ * organization, at or below their own level. The body is CLOSED server-side: an
+ * unknown member (e.g. an organization) is refused 400, so there is deliberately
+ * no organization field here — an organization-wide grant is not possible.
+ *
+ * (The former grantAccess / revokeAccess / inviteUser calls posted to
+ * the internal Manage Access route group, which a CIAM token
+ * cannot authenticate to — they were removed by task 140.)
+ */
+export interface ContactGrantRequest {
+  /** 'project' | 'matter' | 'workassignment' */
+  recordType: string;
+  /** The record to grant access to */
+  recordId: string;
+  /** The colleague, by contact id — exactly one of this and granteeEmail */
+  granteeContactId?: string;
   /**
-   * Access level value matching the Dataverse sprk_accesslevel option set.
-   * 100000000 = ViewOnly, 100000001 = Collaborate, 100000002 = FullAccess
+   * The colleague, by email — matched among the active members of the caller's own organizations ONLY
+   * (nobody outside them is considered or disclosed). No such colleague → 422; several → 409.
+   */
+  granteeEmail?: string;
+  /**
+   * Requested level (Dataverse sprk_accesslevel option value).
+   * 100000000 = ViewOnly, 100000001 = Collaborate, 100000002 = FullAccess.
+   * Written at most at the caller's own level.
    */
   accessLevel: number;
-  /** ISO date string for access expiry (optional) */
+  /** Optional ISO date (yyyy-MM-dd). Absent → today + 90 days, never later than the caller's own grant. */
   expiryDate?: string;
-  /** Account record ID (optional, for firm-level scoping) */
-  accountId?: string;
 }
 
-/** Request body for revoking an existing external access record */
-export interface RevokeAccessRequest {
-  /** The sprk_externalrecordaccess record ID to revoke */
+/** The outcome of a contact grant. */
+export interface ContactGrantResponse {
   accessRecordId: string;
-  /** Contact record ID of the user whose access is being revoked */
-  contactId: string;
-  /** Secure Project record ID */
-  projectId: string;
-  /** SPE container ID (optional, used for SPE permission cleanup) */
-  containerId?: string;
+  granteeContactId: string;
+  /** The level actually written */
+  grantedAccessLevel: number | null;
+  /** The caller's own level lowered the request */
+  narrowed: boolean;
+  /** The expiry the grant carries (yyyy-MM-dd) */
+  expiryDate: string | null;
+  /** The requested (or default) expiry was cut back to the caller's own grant */
+  expiryNarrowed: boolean;
 }
 
-/** Request body for inviting a new external user to a project */
-export interface InviteUserRequest {
-  /** Email address of the user to invite (used to look up or create the Contact) */
-  email: string;
-  /** Secure Project record ID */
-  projectId: string;
-  /**
-   * Access level to grant to the invited user.
-   * 100000000 = ViewOnly, 100000001 = Collaborate, 100000002 = FullAccess
-   */
-  accessLevel: number;
-  /** Optional first name for the invited user (used when creating a new Contact) */
-  firstName?: string;
-  /** Optional last name for the invited user (used when creating a new Contact) */
-  lastName?: string;
-  /** ISO date string for invitation expiry (optional) */
-  expiryDate?: string;
-  /** Account record ID (optional, for firm-level scoping) */
-  accountId?: string;
+/** One grant the caller issued on a record. */
+export interface ContactIssuedGrant {
+  accessRecordId: string;
+  contactId: string;
+  fullName: string | null;
+  email: string | null;
+  accessLevel: number | null;
+  expiryDate: string | null;
+}
+
+/** GET /api/v1/external/contact-grants response. */
+export interface ContactIssuedGrantsResponse {
+  grants: ContactIssuedGrant[];
+}
+
+/** POST /api/v1/external/contact-grants/revoke response. */
+export interface ContactGrantRevokeResponse {
+  accessRecordId: string;
+  deactivatedCount: number;
+  /** The colleague still holds access somebody else granted (never touched by the caller's revoke) */
+  accessRemainsFromOthers: boolean;
 }
 
 /**
@@ -159,6 +181,47 @@ export async function bffApiCall<T>(path: string, options: RequestInit = {}): Pr
   }
 
   return parseResponse<T>(response);
+}
+
+/**
+ * Make an authenticated call to the BFF API that returns BINARY content.
+ *
+ * Identical auth/retry semantics to {@link bffApiCall} — it deliberately shares
+ * `acquireActiveBffToken` + `executeFetch` rather than forking a second fetch
+ * path — but resolves the body as a `Blob` instead of parsing it as JSON.
+ *
+ * Why this exists: the external document-download route
+ * (`GET /api/v1/external/projects/{id}/documents/{documentId}/content`) streams
+ * the file itself as `application/octet-stream`. It deliberately NEVER returns a
+ * signed URL or any SPE pointer — see `ExternalProjectDataEndpoints.cs`
+ * ("Pointers are never surfaced to the client"). So a JSON-parsing caller can
+ * never consume it; the bytes must be read directly.
+ *
+ * @param path    API path relative to BFF_API_URL
+ * @param options Standard RequestInit options
+ * @returns The response body as a Blob.
+ */
+export async function bffApiBlob(path: string, options: RequestInit = {}): Promise<Blob> {
+  const token = await acquireActiveBffToken();
+  let response = await executeFetch(path, options, token);
+
+  // On 401, acquire a fresh token (MSAL will refresh silently or redirect) and retry once
+  if (response.status === 401) {
+    const freshToken = await acquireActiveBffToken();
+    response = await executeFetch(path, options, freshToken);
+  }
+
+  if (!response.ok) {
+    let message: string;
+    try {
+      message = await response.text();
+    } catch {
+      message = `HTTP ${response.status}`;
+    }
+    throw new ApiError(response.status, message);
+  }
+
+  return response.blob();
 }
 
 /**
@@ -231,51 +294,48 @@ export async function getExternalUserContext(): Promise<ExternalUserContextRespo
 }
 
 /**
- * POST /api/v1/external-access/grant
+ * POST /api/v1/external/contact-grants (task 140)
  *
- * Grants a contact access to a secure project at the specified access level.
- * Creates an sprk_externalrecordaccess record and provisions SPE permissions.
+ * The caller (a Collaborate or Full Access contact) grants a colleague of their
+ * own organization access to a record. A refusal is a ProblemDetails whose
+ * `detail` is a user-facing message — see {@link problemMessage}.
  */
-export async function grantAccess(request: GrantAccessRequest): Promise<void> {
-  return bffApiCall<void>('/api/v1/external-access/grant', {
+export async function grantAccessAsContact(request: ContactGrantRequest): Promise<ContactGrantResponse> {
+  return bffApiCall<ContactGrantResponse>('/api/v1/external/contact-grants', {
     method: 'POST',
     body: JSON.stringify(request),
+  });
+}
+
+/** GET /api/v1/external/contact-grants (task 140) — the grants the caller issued on a record. */
+export async function listContactGrants(recordType: string, recordId: string): Promise<ContactIssuedGrantsResponse> {
+  const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
+  return bffApiCall<ContactIssuedGrantsResponse>(`/api/v1/external/contact-grants?${query}`);
+}
+
+/** POST /api/v1/external/contact-grants/revoke (task 140) — revoke one grant the caller issued. */
+export async function revokeContactGrant(accessRecordId: string): Promise<ContactGrantRevokeResponse> {
+  return bffApiCall<ContactGrantRevokeResponse>('/api/v1/external/contact-grants/revoke', {
+    method: 'POST',
+    body: JSON.stringify({ accessRecordId }),
   });
 }
 
 /**
- * POST /api/v1/external-access/revoke
- *
- * Revokes an external user's access to a secure project.
- * Sets the access record to revoked and removes SPE permissions.
+ * The user-facing message of a failed BFF call: the ProblemDetails `detail` the
+ * server wrote for exactly this refusal (rendered verbatim — it names the rule,
+ * e.g. "… is not yet a member of your organization …"), else the fallback.
  */
-export async function revokeAccess(request: RevokeAccessRequest): Promise<void> {
-  return bffApiCall<void>('/api/v1/external-access/revoke', {
-    method: 'POST',
-    body: JSON.stringify(request),
-  });
-}
-
-/** Response returned after inviting an external user via Azure AD B2B */
-export interface InviteUserResponse {
-  /** The Dataverse Contact record ID for the invited user */
-  contactId: string;
-  /** The Azure AD B2B invitation redemption URL to share with the user */
-  inviteRedeemUrl: string;
-  /** Invitation status (e.g. "PendingAcceptance", "Completed") */
-  status: string;
-}
-
-/**
- * POST /api/v1/external-access/invite
- *
- * Invites a new external user to a secure project by email.
- * The BFF looks up or creates the Contact record, creates the access record,
- * and sends the portal invitation email via adx_invitation.
- */
-export async function inviteUser(request: InviteUserRequest): Promise<InviteUserResponse> {
-  return bffApiCall<InviteUserResponse>('/api/v1/external-access/invite', {
-    method: 'POST',
-    body: JSON.stringify(request),
-  });
+export function problemMessage(err: unknown, fallback: string): string {
+  if (err instanceof ApiError) {
+    try {
+      const body = JSON.parse(err.message) as { detail?: unknown };
+      if (typeof body.detail === 'string' && body.detail.trim()) {
+        return body.detail;
+      }
+    } catch {
+      /* not a ProblemDetails body */
+    }
+  }
+  return fallback;
 }

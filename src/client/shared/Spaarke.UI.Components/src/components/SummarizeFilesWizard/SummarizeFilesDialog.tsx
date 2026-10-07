@@ -46,6 +46,8 @@ import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
+import { provisionSecureProject, type IProvisionProjectResult } from '../CreateProjectWizard/provisioningService';
+import { SecureProvisioningOutcome } from '../CreateProjectWizard/SecureProvisioningOutcome';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -471,6 +473,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     const warnings: string[] = [];
     let createdProjectId: string | undefined;
     let createdProjectName: string | undefined;
+    // Task 133: a provisioning failure the same caller can finish is shown with its "Try securing again" action.
+    let retryableProvisioning: IProvisionProjectResult | undefined;
 
     // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
     // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
@@ -513,13 +517,68 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     // create-project step selected (Finish was disabled by canAdvance).
     if (currentSelectedActions.includes('create-project') && projectFormValidRef.current && dataService) {
       try {
-        const service = new ProjectService(dataService);
+        // authenticatedFetch + bffBaseUrl are REQUIRED here, not optional conveniences.
+        //
+        // This step renders the same `CreateProjectStep` the real wizard does, Secure toggle
+        // included. Securing a project — marking it secure (task 150: the server's first write;
+        // `projectService` never writes `sprk_issecure`, which is field-secured) and giving it its
+        // OWN container — is `provisionSecureProject`, called below exactly as the wizard does.
+        //
+        // Before the original fix a user could tick "Secure" here and get a project flagged secure
+        // whose documents (then) landed in the SHARED business-unit container, with no warning — the
+        // wizard's provisioning-failure message lives on a path this dialog bypasses. That is the
+        // exact isolation gap unified-access-control-r2 exists to close. This dialog adds no file or
+        // child record to the project it creates, so task 150's hold-back has nothing to hold back here.
+        const service = new ProjectService(dataService, authenticatedFetch, bffBaseUrl);
         const result = await service.createProject(currentProjectFormValues);
 
         if (result.success) {
           completedActions.push(`Project "${result.projectName}" created`);
           createdProjectId = result.projectId;
           createdProjectName = result.projectName;
+
+          // Mirror CreateProjectWizard.tsx onFinish (~:688): provisioning runs AFTER the record
+          // exists (it stamps fields on the project, so the row must be there first) and is
+          // NON-FATAL — the project was created either way, so a provisioning failure is a
+          // warning the admin can act on, never a thrown error that hides the created record.
+          if (currentProjectFormValues.isSecure && result.projectId) {
+            if (authenticatedFetch && bffBaseUrl) {
+              try {
+                const provisionResult = await provisionSecureProject(
+                  { projectId: result.projectId, projectRef: result.projectName ?? '' },
+                  authenticatedFetch,
+                  bffBaseUrl
+                );
+                if (!provisionResult.success) {
+                  // Since task 076 a secure project without its own container REFUSES uploads (it never
+                  // falls back to the shared container), and since task 133 the classified message says
+                  // what state the project was left in — so it is shown as is.
+                  if (provisionResult.retryable) {
+                    retryableProvisioning = provisionResult;
+                  } else {
+                    warnings.push(`Securing the project did not finish: ${provisionResult.errorMessage}`);
+                  }
+                }
+              } catch (err) {
+                // `provisionSecureProject` never throws; kept as a belt. Task 150: the project may or may not have
+                // been marked secure (the server's first write), so the copy claims neither. Copy: owner round 10
+                // item 9 (F6 row 5, option A — notes/task-150-issecure-lock.md §6).
+                warnings.push(
+                  `Securing the project did not finish (${err instanceof Error ? err.message : 'Unknown error'}). ` +
+                    'The project was created; an administrator can check how far securing it got and finish it.'
+                );
+              }
+            } else {
+              // Fail LOUDLY rather than silently creating a project the user believes is secure. Task 150: the client
+              // no longer writes sprk_issecure, so with no BFF to ask the project is NOT marked secure — the old
+              // "was marked Secure" was replaced. Copy: owner round 10 item 9 (F6 row 4, option A —
+              // notes/task-150-issecure-lock.md §6).
+              warnings.push(
+                'The project was created but not secured, because securing it needs a connection to the Spaarke ' +
+                  'service that this dialog does not have. An administrator can secure it.'
+              );
+            }
+          }
         } else {
           warnings.push(`Project creation failed: ${result.errorMessage}`);
         }
@@ -548,9 +607,20 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: warnings.length > 0 ? 'Summary Complete (with warnings)' : 'Summary Complete',
       body: (
-        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Your file summary is ready. {actionSummary}.
-        </Text>
+        <>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            Your file summary is ready. {actionSummary}.
+          </Text>
+          {retryableProvisioning && createdProjectId && authenticatedFetch && bffBaseUrl && (
+            <SecureProvisioningOutcome
+              projectId={createdProjectId}
+              projectRef={createdProjectName}
+              initialResult={retryableProvisioning}
+              authenticatedFetch={authenticatedFetch}
+              bffBaseUrl={bffBaseUrl}
+            />
+          )}
+        </>
       ),
       actions: (
         <>

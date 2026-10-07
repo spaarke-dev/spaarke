@@ -10,82 +10,19 @@
 
 import * as React from 'react';
 import { useState, useEffect } from 'react';
-import { DueDateCard } from '../../../../shared/Spaarke.Visuals/src/components/DueDateCard';
-import type { IEventDueDateCardProps } from '../../../../shared/Spaarke.Visuals/src/components/EventDueDateCard';
+import { DueDateCard, type IEventDueDateCardProps } from '@spaarke/visuals';
+import { cleanGuid } from '@spaarke/ui-components';
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { substituteParameters } from '../services/ViewDataService';
 import { logger } from '../utils/logger';
+import { mapEventToCardProps } from '../utils/eventDueDate';
 
 export interface IDueDateCardVisualProps {
   chartDefinition: IChartDefinition;
   webApi: IConfigWebApi;
   contextRecordId?: string;
   onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
-}
-
-/**
- * Calculate days until due date from today
- */
-function calculateDaysUntilDue(dueDate: Date): {
-  daysUntilDue: number;
-  isOverdue: boolean;
-} {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate);
-  due.setHours(0, 0, 0, 0);
-  const diffMs = due.getTime() - today.getTime();
-  const daysUntilDue = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return { daysUntilDue, isOverdue: daysUntilDue < 0 };
-}
-
-/**
- * Map a Dataverse event record to EventDueDateCard props
- */
-function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  // v1.4.15 — same "active date" selection as DueDateCardList: prefer
-  // sprk_duedate when it's today-or-future; fall back to sprk_finalduedate
-  // when sprk_duedate has passed (the extended date is the new active
-  // deadline). See DueDateCardList.tsx for full rationale.
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-
-  const duedateStr = record.sprk_duedate as string | undefined;
-  const finalduedateStr = record.sprk_finalduedate as string | undefined;
-  const duedate = duedateStr ? new Date(duedateStr) : null;
-  const finalduedate = finalduedateStr ? new Date(finalduedateStr) : null;
-
-  let dueDate: Date;
-  if (duedate && duedate.getTime() >= todayMs) {
-    dueDate = duedate;
-  } else if (finalduedate && finalduedate.getTime() >= todayMs) {
-    dueDate = finalduedate;
-  } else {
-    dueDate = duedate || finalduedate || new Date();
-  }
-
-  const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
-
-  // Event type from FetchXML link-entity alias or formatted value
-  const eventTypeColor = (record['eventtype.sprk_eventtypecolor'] as string) || undefined;
-  const eventTypeName =
-    (record['_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'] as string) ||
-    (record['eventtype.sprk_name'] as string) ||
-    'Event';
-
-  return {
-    eventId: (record.sprk_eventid as string) || '',
-    eventName: (record.sprk_eventname as string) || 'Untitled Event',
-    eventTypeName,
-    dueDate,
-    daysUntilDue,
-    isOverdue,
-    eventTypeColor: eventTypeColor || undefined,
-    description: record.sprk_description as string | undefined,
-    assignedTo: (record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] as string) || undefined,
-  };
 }
 
 export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
@@ -135,7 +72,7 @@ export const DueDateCardVisual: React.FC<IDueDateCardVisualProps> = ({
         );
       } else {
         // Hardcoded single-event-lookup fallback (pre-v1.4.5 behavior).
-        const cleanRecordId = recordId.replace(/[{}]/g, '');
+        const cleanRecordId = cleanGuid(recordId);
         fetchXml = [
           `<fetch top="1">`,
           `  <entity name="${entityName}">`,

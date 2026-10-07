@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Models;
@@ -19,7 +20,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// never receiving a grant, a Direct thread's grant being UNCHANGED (no regression), an Open thread granting
 /// EXACTLY the task-041 derived systemuser set, a non-member never being granted, a contact participant
 /// being skipped (R2), and a derivation/grant failure being swallowed (best-effort, NFR-02). Module
-/// boundaries (<see cref="IGenericEntityService"/> — SDK Dataverse — <see cref="IDataverseAccessGrantService"/>
+/// boundaries (<see cref="IGenericEntityService"/> — SDK Dataverse — <see cref="IDataverseRecordShareService"/>
 /// — the POA testing seam, ADR-010 — and <see cref="IThreadMembershipDerivationService"/> — task 041's shared
 /// derivation contract) are mocked; no <c>Mock&lt;HttpMessageHandler&gt;</c> (ADR-038).
 /// </summary>
@@ -30,18 +31,48 @@ public class DirectThreadAccessServiceTests
     private static readonly Guid ThirdUser = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid ThreadId = Guid.Parse("44444444-4444-4444-4444-444444444444");
     private static readonly Guid CommunicationId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    private static readonly Guid TeamId = Guid.Parse("66666666-6666-6666-6666-666666666666");
 
     private const int ThreadTypeDirect = 100000001;
     private const int ThreadTypeRecordAnchored = 100000000;
 
     private readonly Mock<IGenericEntityService> _entityService = new();
-    private readonly Mock<IDataverseAccessGrantService> _accessGrant = new();
+    private readonly Mock<IDataverseRecordShareService> _accessGrant = new();
     private readonly Mock<IThreadMembershipDerivationService> _membershipDerivation = new();
+
+    /// <summary>A systemuser principal reference — the shape the task-060 seam takes.</summary>
+    private static DataversePrincipalRef User(Guid systemUserId) => DataversePrincipalRef.User(systemUserId);
+
+    /// <summary>
+    /// POA rows as the task-060 seam returns them: systemuser shares with ReadAccess. The tests care only
+    /// about WHO holds a share, so the mask and timestamp are fixed.
+    /// </summary>
+    private static IReadOnlyList<DataversePrincipalAccess> Shares(params Guid[] systemUserIds) =>
+        systemUserIds
+            .Select(id => new DataversePrincipalAccess(User(id), 1, DateTimeOffset.UtcNow))
+            .ToList();
+
+    /// <summary>
+    /// Task 149 r1: the message-access grant first reads the message's owner (a Secure-team-owned message is never
+    /// granted to participants). Every message here is USER-owned unless a test says otherwise — the shape these
+    /// tests were written for. The secure cases are pinned against an evaluating Dataverse in SecureChildShareMirrorTests.
+    /// </summary>
+    public DirectThreadAccessServiceTests()
+    {
+        _entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communication"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                new("sprk_communication") { Id = CommunicationId, ["owninguser"] = new EntityReference("systemuser", Caller) },
+            }));
+    }
 
     private DirectThreadAccessService BuildSut() => new(
         _entityService.Object,
         _accessGrant.Object,
         new Lazy<IThreadMembershipDerivationService>(() => _membershipDerivation.Object),
+        new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
         Mock.Of<ILogger<DirectThreadAccessService>>());
 
     // ── FindOrCreateDirectThreadAsync: create + no regarding anchor ────────────────────────────
@@ -71,7 +102,7 @@ public class DirectThreadAccessServiceTests
         created.Contains("sprk_regardingrecordtype").Should().BeFalse();
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communicationthreads", ThreadId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communicationthreads", ThreadId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -82,8 +113,8 @@ public class DirectThreadAccessServiceTests
     {
         SetupCandidates(ownerId: Caller, candidateThreadIds: new[] { ThreadId });
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Other });
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
 
         var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
 
@@ -104,8 +135,8 @@ public class DirectThreadAccessServiceTests
                 It.Is<QueryExpression>(q => HasOwnerCondition(q, Other)), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity> { new("sprk_communicationthread") { Id = ThreadId } }));
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Caller });
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Caller));
 
         var result = await BuildSut().FindOrCreateDirectThreadAsync(Caller, Other);
 
@@ -119,8 +150,8 @@ public class DirectThreadAccessServiceTests
         // A Direct thread owned by the caller exists, but it is NOT shared to "Other" — must not false-match.
         SetupCandidates(ownerId: Caller, candidateThreadIds: new[] { Guid.NewGuid() });
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { ThirdUser }); // shared to someone else entirely
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(ThirdUser)); // shared to someone else entirely
         _entityService
             .Setup(s => s.RetrieveMultipleAsync(
                 It.Is<QueryExpression>(q => HasOwnerCondition(q, Other)), It.IsAny<CancellationToken>()))
@@ -144,13 +175,35 @@ public class DirectThreadAccessServiceTests
     {
         SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Other });
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
 
         var participants = await BuildSut().GetParticipantSystemUserIdsAsync(ThreadId);
 
         participants.Should().BeEquivalentTo(new[] { Caller, Other });
         participants.Should().NotContain(ThirdUser);
+    }
+
+    [Fact]
+    public async Task GetParticipantSystemUserIdsAsync_TeamShareOnThread_IsNotCountedAsAParticipant()
+    {
+        // Task 060: the POA read is now principal-KIND-typed, because teams share through the same
+        // client that users do. Before that, a team share on a thread would have been returned as a
+        // participating systemuser id — the pre-060 primitive selected only principalid and ASSUMED
+        // every share was a user. A team id landing in this list is a membership leak.
+        SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
+        _accessGrant
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[]
+            {
+                new DataversePrincipalAccess(DataversePrincipalRef.User(Other), 1, DateTimeOffset.UtcNow),
+                new DataversePrincipalAccess(DataversePrincipalRef.Team(TeamId), 1, DateTimeOffset.UtcNow),
+            });
+
+        var participants = await BuildSut().GetParticipantSystemUserIdsAsync(ThreadId);
+
+        participants.Should().BeEquivalentTo(new[] { Caller, Other });
+        participants.Should().NotContain(TeamId, "a team is not a participant of a Direct 1:1 thread");
     }
 
     [Fact]
@@ -162,7 +215,7 @@ public class DirectThreadAccessServiceTests
 
         participants.Should().BeEmpty();
         _accessGrant.Verify(
-            g => g.GetSharedSystemUserIdsAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            g => g.GetPrincipalAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -173,19 +226,19 @@ public class DirectThreadAccessServiceTests
     {
         SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Other });
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
 
         await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, ThirdUser, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
         // No regression (task 052): the Direct branch returns before ever touching the task-041 derivation —
         // one grant mechanism per topology, not a second path layered on top.
@@ -204,7 +257,7 @@ public class DirectThreadAccessServiceTests
         await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -213,17 +266,17 @@ public class DirectThreadAccessServiceTests
     {
         SetupThread(ThreadId, ThreadTypeDirect, ownerId: Caller);
         _accessGrant
-            .Setup(g => g.GetSharedSystemUserIdsAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { Other });
+            .Setup(g => g.GetPrincipalAccessAsync("sprk_communicationthread", ThreadId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Shares(Other));
         _accessGrant
-            .Setup(g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()))
+            .Setup(g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("grant boom"));
 
         var act = () => BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
         await act.Should().NotThrowAsync(); // best-effort (NFR-02)
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -248,19 +301,19 @@ public class DirectThreadAccessServiceTests
         await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Other, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Other), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
         // Negative: a user NOT in the task-041 derived set is never granted (a non-member's impersonated
         // read must still return nothing).
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, ThirdUser, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(ThirdUser), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
         // EXACTLY the derived set — no more, no less (no over-grant).
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
     }
 
@@ -284,14 +337,14 @@ public class DirectThreadAccessServiceTests
         await BuildSut().GrantMessageAccessAsync(CommunicationId, ThreadId);
 
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, Caller, "ReadAccess", It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(Caller), "ReadAccess", It.IsAny<CancellationToken>()),
             Times.Once);
         // R2 scope: contact (external) participants are skipped in R1.
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, contactId, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, User(contactId), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _accessGrant.Verify(
-            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync("sprk_communications", CommunicationId, It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Once); // exactly one grant — the systemuser only
     }
 
@@ -307,7 +360,7 @@ public class DirectThreadAccessServiceTests
 
         await act.Should().NotThrowAsync(); // best-effort (NFR-02) — a derivation failure never fails ingest/send
         _accessGrant.Verify(
-            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            g => g.GrantAccessAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<DataversePrincipalRef>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 

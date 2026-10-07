@@ -115,7 +115,7 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 - **Ledger-first edits** — AI edit payloads are `SessionOutput`s with the `compose` disposition BEFORE render; undo = supersession, not client DOM undo (ADR-040).
 - **AI facade** — `Services/Compose/` never injects `IOpenAiClient`/executor/routing types; Tier-1 NetArchTest enforces (ADR-013).
 - **Graph isolation** — no `Microsoft.Graph` types above the `SpeFileStore`/Infrastructure facade (ADR-007).
-- **Webhook renewal = `BackgroundService`**, not Azure Function (ADR-001).
+- **Webhook renewal = a `BackgroundService` in the BFF** — a hand-rolled timer, existing debt that migrates to an `IScheduledJob` when next touched; where it runs is [ADR-052](../../.claude/adr/ADR-052-workload-placement.md).
 - **Redis-first** for webhook/etag/re-anchor state (ADR-009).
 - **Fluent v9 + dark mode** for all new UI; **`@spaarke/auth`** for client fetches (ADR-021, ADR-028).
 - **Context pane is audit-only** — never an interactive input surface.
@@ -170,7 +170,7 @@ Track deferred work + newly-discovered issues in BOTH `notes/defer-issues.md` (s
 ## Resources
 
 ### Applicable ADRs
-ADR-039 (dispatch/catalogs) · ADR-040 (ledger) · ADR-013 (AI facade) · ADR-028 (auth) · ADR-038 (testing/eval) · ADR-029 (publish hygiene) · ADR-030 (PaneEventBus) · ADR-031 (stage lifecycle) · ADR-033 (streaming side channel) · ADR-001 (Minimal API/BackgroundService) · ADR-007 (Graph isolation) · ADR-008 (endpoint filters) · ADR-009 (Redis-first) · ADR-010 (DI minimalism) · ADR-021 (Fluent v9) · ADR-032 (Null-Object) · ADR-015 (memory tiers) · ADR-005 (SPE storage).
+ADR-039 (dispatch/catalogs) · ADR-040 (ledger) · ADR-013 (AI facade) · ADR-028 (auth) · ADR-038 (testing/eval) · ADR-029 (publish hygiene) · ADR-030 (PaneEventBus) · ADR-031 (stage lifecycle) · ADR-033 (streaming side channel) · ADR-001 (Minimal API) · ADR-052 (workload placement) · ADR-007 (Graph isolation) · ADR-008 (endpoint filters) · ADR-009 (Redis-first) · ADR-010 (DI minimalism) · ADR-021 (Fluent v9) · ADR-032 (Null-Object) · ADR-015 (memory tiers) · ADR-005 (SPE storage).
 
 ### Related Projects
 - `spaarkeai-compose-r1` — direct foundation (Compose service/layout/endpoints); we extend

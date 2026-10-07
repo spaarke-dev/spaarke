@@ -57,7 +57,8 @@ public sealed class AgentServiceOptions
 
     /// <summary>
     /// Sliding expiry (in minutes) for the Redis thread ID cache (ADR-009).
-    /// Cache key pattern: <c>agent-thread:{tenantId}</c>.
+    /// Cache key pattern: <c>agent-thread:{tenantId}:{conversationScope}:v2</c> — the scope is the chat
+    /// session or playbook run, so the TTL below expires ONE conversation, not everyone's (task 122).
     /// After this window of inactivity, the thread ID is evicted and a new thread is created
     /// on the next call to <see cref="AgentServiceClient.CreateOrResumeThreadAsync"/>.
     /// Default: 60 minutes.

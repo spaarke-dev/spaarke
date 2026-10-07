@@ -59,14 +59,12 @@ Load when:
 ### Architecture (ADR-001)
 
 - ❌ **MUST NOT** host BFF endpoints in Azure Functions
-- ❌ **MUST NOT** duplicate BFF cross-cutting concerns (auth, correlation, ProblemDetails) inside a Function
-- ❌ **MUST NOT** use Durable Functions for orchestrations (use Service Bus + state machine)
-- ❌ **MUST NOT** let Functions grow into a shadow BFF — they're scoped to out-of-band integration work only
+- ❌ **MUST NOT** duplicate BFF cross-cutting concerns (auth, correlation, ProblemDetails) outside the BFF
+- ❌ **MUST NOT** put Azure Functions or Durable Task packages, or Function-attributed methods, inside `Sprk.Bff.Api`
 
-### When Azure Functions ARE acceptable (ADR-001)
+### Where background work runs (ADR-052)
 
-- ✅ Out-of-band integration: Dataverse → AI Search sync, scheduled indexers, webhook receivers, event-triggered extraction
-- ✅ Must be Bicep-deployable alongside the BFF, share App Insights correlation, use Managed Identity + Key Vault
+- Background, scheduled and event-driven work: the host — the BFF, Azure Functions or Container Apps Jobs — is decided per workload under [ADR-052](../adr/ADR-052-workload-placement.md) and stated in the Placement Justification. Inside the BFF, queue → ADR-004; schedule → ADR-036.
 
 ### Authorization (ADR-008)
 

@@ -1,9 +1,15 @@
-using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Office.Errors;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Communication;
 
@@ -20,7 +26,9 @@ namespace Sprk.Bff.Api.Services.Office;
 /// - Save: enriches content, uploads to SPE, persists to Dataverse, queues finalization
 /// - Job status: queries Dataverse/in-memory store for job progress
 /// - SSE streaming: real-time job status updates via Redis pub/sub
-/// - Search, share, quick-create: entity and document operations
+/// - Quick-create and To Do: record creation
+/// - Search and matter types: delegated to <see cref="OfficeSearchService"/>, which owns every Dataverse
+///   read this add-in makes (task 059)
 /// </para>
 /// <para>
 /// Per ADR-001, heavy processing (SPE upload, AI processing) is delegated to background workers.
@@ -29,38 +37,93 @@ namespace Sprk.Bff.Api.Services.Office;
 /// </remarks>
 public class OfficeService : IOfficeService
 {
-    private readonly IJobStatusService _jobStatusService;
-    private readonly IProcessingJobService _jobService;
+    // Task 060 (#1084): the save's job record (create, transitions, the idempotency lookup, the status read and the SSE
+    // stream), stored on the Dataverse row instead of a static in-memory dictionary.
+    private readonly OfficeJobStatusService _jobs;
     private readonly OfficeEmailEnricher _emailEnricher;
     private readonly OfficeDocumentPersistence _documentPersistence;
     private readonly OfficeJobQueue _jobQueue;
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
+    private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>FR-26 core-ancestor derivation for the To Do write path (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
+    /// <summary>
+    /// Write-path invariant I-6 (task 080): the BU default owner team every record created here is owned by.
+    /// Required, not optional (ADR-032) — it is registered unconditionally, and a missing one must fail at
+    /// startup rather than quietly re-open app-user ownership, the defect it exists to remove.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownershipResolver;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
-    // sprk_document archive. Optional/null-tolerant so hosts without the Communication module (and the existing
-    // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
-    private readonly EmailUploadCaptureService? _emailUploadCapture;
+    // sprk_document archive. Required (task 059): CommunicationModule registers it unconditionally. CaptureAsync
+    // is itself best-effort (NFR-04) and never throws out of the save.
+    private readonly EmailUploadCaptureService _emailUploadCapture;
+    // Task 059: the Office add-in's Dataverse READS — the "File to" entity search (impersonated, task 062), the
+    // matter-type list, and the sprk_recordtype_ref lookup the To Do writer below stamps. Extracted so this
+    // class issues no Dataverse read of its own; the IOfficeService search members delegate to it.
+    private readonly OfficeSearchService _search;
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Invoice) and the To Do writer.
+    // Required (task 059): registered unconditionally as a singleton (→ IDataverseService, GraphModule.cs).
+    private readonly IGenericEntityService _genericEntityService;
+    // FR-13 (spaarkeai-word-add-in-r1 task 030): the Matter quick-create path. Required (ADR-032): its registration
+    // is unconditional, so an absent one is a startup fault, never a per-request 403.
+    private readonly RecordCreationService _recordCreation;
+    // Task 067 (finding F5): resolves the calling user's Dataverse systemuserid so the job row can record
+    // WHO asked for it (sprk_initiatedby). Reused, not reinvented (CLAUDE.md §11) — this is the same
+    // ICallerSystemUserResolver the Communication read path and task 062's picker already depend on,
+    // TryAdd-registered inline by CommunicationModule, which Program.cs composes unconditionally. Required
+    // (task 059). A caller it cannot resolve still records no creator, and an unrecorded creator is REFUSED by
+    // the ownership checks, so the degradation direction is closed, never open.
+    private readonly ICallerSystemUserResolver _callerSystemUserResolver;
     private readonly ILogger<OfficeService> _logger;
 
-    // In-memory job storage for development/testing (fallback when Dataverse unavailable)
-    private static readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, JobStatusResponse> _jobStore = new();
+    // FR-08's Generate Profile request, on the job queue (task 068, #1086). It replaced OfficeProfileDispatcher, whose
+    // Task.Run behind the 202 lost the profile on a restart, and the three optional parameters that built it.
+    private readonly OfficeProfileQueue _profileQueue;
+
+    // Task 083 (#1044 writer half): the caller's linked CONTACT (task 141's link,
+    // systemuser.sprk_primarycontact / contact.sprk_externalobjectid), used to default CreateTodoAsync's
+    // sprk_assignedto when the request names no assignee. Required, not optional (ADR-032): registered
+    // unconditionally as a singleton by MembershipModule, so an absent one is a startup fault.
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
 
     public OfficeService(
-        IJobStatusService jobStatusService,
-        IProcessingJobService jobService,
+        OfficeJobStatusService jobs,
         OfficeEmailEnricher emailEnricher,
         OfficeDocumentPersistence documentPersistence,
         OfficeJobQueue jobQueue,
         OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
-        ILogger<OfficeService> logger,
-        EmailUploadCaptureService? emailUploadCapture = null)
+        RecordContainerResolver containerResolver,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        RecordCreationService recordCreation,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        OfficeSearchService search,
+        EmailUploadCaptureService emailUploadCapture,
+        IGenericEntityService genericEntityService,
+        ICallerSystemUserResolver callerSystemUserResolver,
+        OfficeProfileQueue profileQueue,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        ILogger<OfficeService> logger)
     {
-        _jobStatusService = jobStatusService;
-        _jobService = jobService;
+        _containerResolver = containerResolver
+            ?? throw new ArgumentNullException(nameof(containerResolver));
+        // Required, not optional (ADR-032): an absent registration must fail at startup, not surface as a 403
+        // "permission" message on every Matter quick-create.
+        _recordCreation = recordCreation
+            ?? throw new ArgumentNullException(nameof(recordCreation));
+        _coreAncestors = coreAncestors
+            ?? throw new ArgumentNullException(nameof(coreAncestors));
+        _ownershipResolver = ownershipResolver
+            ?? throw new ArgumentNullException(nameof(ownershipResolver));
+        _identity = identity
+            ?? throw new ArgumentNullException(nameof(identity));
+        _jobs = jobs;
         _emailEnricher = emailEnricher;
         _documentPersistence = documentPersistence;
         _jobQueue = jobQueue;
@@ -68,7 +131,228 @@ public class OfficeService : IOfficeService
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
+        _search = search;
+        _genericEntityService = genericEntityService;
+        _callerSystemUserResolver = callerSystemUserResolver;
+        _profileQueue = profileQueue;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// The Office save's owner-event publish (POST /office/save; R3 task 082, UAC-r2 task 152 / ADR-034 A3): the saved
+    /// <c>sprk_document</c> is owned by the business-unit default owner TEAM the save resolved (task 080), so the event
+    /// names that team — <c>PersonIdType = Team</c>, <c>PersonId = owningTeamId</c>, the key
+    /// <c>MembershipReconciliationJob</c> builds for the same row — never the caller's AAD oid. Should the save ever
+    /// hold no team, the owner is read back from the row. Fire-and-forget (ADR-034 Q2): never throws.
+    /// </summary>
+    /// <remarks>
+    /// Extracted from <see cref="SaveAsync"/> (task 152 verifier round 1, item 7) so the site's own decisions — which
+    /// table, which owner, the read-back fallback — run in a test. <see cref="SaveAsync"/> depends on a dozen concrete
+    /// collaborators (SPE upload, job store, persistence) and has no unit harness; it passes exactly
+    /// (<c>documentId</c>, <c>owningTeamId</c>) here.
+    /// </remarks>
+    internal static Task<MembershipChangedEvent?> PublishSavedDocumentOwnerAsync(
+        IMembershipEventPublisher publisher,
+        IGenericEntityService dataverse,
+        Guid documentId,
+        Guid? owningTeamId,
+        string correlationId,
+        ILogger logger,
+        CancellationToken cancellationToken)
+        => MembershipOwnerEvents.PublishOwnerAddedAsync(
+            publisher,
+            dataverse,
+            "sprk_document",
+            documentId,
+            // The team this save resolved; should it ever be absent, the owner is read back from the row.
+            owningTeamId is { } savedTeamId ? new Microsoft.Xrm.Sdk.EntityReference("team", savedTeamId) : null,
+            correlationId,
+            logger,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task<GenerateProfileResult> GenerateProfileAsync(
+        Guid documentId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+        return _profileQueue.QueueAsync(
+            documentId,
+            httpContext.TraceIdentifier,
+            CallerResolution.ResolveObjectId(httpContext.User));
+    }
+
+    /// <summary>
+    /// Decides which SPE container this save writes into. Server-side, always — task 085.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With a <c>TargetEntity</c>, the container is derived from that record through task 076's
+    /// <see cref="RecordContainerResolver"/>. That record is the one
+    /// <c>AddEntityAccessFilter</c> already authorized the caller against, so the authorization key
+    /// and the write destination become a single value. The resolver refuses (rather than falling
+    /// back) when a secure record has no container of its own, which is why this method does not catch
+    /// <see cref="SdapProblemException"/>: swallowing it would turn a correct fail-closed refusal into
+    /// what reads like a misconfiguration.
+    /// </para>
+    /// <para>
+    /// <b>Without a <c>TargetEntity</c> there is no record</b>, so the container is derived from the
+    /// ACTING USER's business unit — task 076's
+    /// <see cref="RecordContainerResolver.ResolveForActingUserAsync"/>, the owner-sanctioned answer for
+    /// content that exists before its owning record does. The configured
+    /// <c>EmailProcessing:DefaultContainerId</c> is the LAST resort, and is still fail-closed when unset.
+    /// </para>
+    ///
+    /// <para><b>⚠️ CORRECTED 2026-09-21 (spaarkeai-word-add-in-r1 task 065).</b> This paragraph used to
+    /// read <i>"Every shipped add-in path sends a <c>TargetEntity</c>, so this branch exists for the
+    /// contract rather than for traffic."</i> <b>That was false, and had been since task 037.</b> Three
+    /// shipped paths send no target, and together they are the save spine's mainline rather than an edge:
+    /// <list type="number">
+    /// <item>the <b>Word ribbon quick-save</b> (FR-17, task 037) — <c>buildDocumentSaveRequest</c> in
+    /// <c>quickSaveHelpers.ts</c> sends no <c>targetEntity</c> at all, because a Word ribbon click carries
+    /// no Spaarke context and there is no document-side association prediction to stand in for one;</item>
+    /// <item>every <b>FR-11 version save</b> (task 023) — <c>useSaveFlow.ts</c> sets
+    /// <c>sentEntity = versionTarget ? null : selectedEntity</c> BY OWNER DECISION (D-4/D-5): a version
+    /// save re-associates nothing, and sending a target would add an unrelated
+    /// <see cref="Api.Filters.EntityAccessFilter"/> check that could refuse a legitimate version save.
+    /// That one is authorized instead by <c>OfficeVersionSaveAuthorizationFilter</c>, on the document;</item>
+    /// <item>every <b>pane save with no "Related to" selected</b> — <c>useSaveFlow.ts</c> attaches
+    /// <c>targetEntity</c> only <c>if (sentEntity?.id)</c>.</item>
+    /// </list>
+    /// Roughly 80 of the ~85 <c>POST /office/save</c> bodies in the test corpus are in this shape too.
+    /// <b>So this branch is the traffic, not the contract</b>, and anything that makes it fail closed is a
+    /// save outage rather than a tightening.
+    /// </para>
+    ///
+    /// <para><b>What this does NOT do.</b> Deriving a container is a PLACEMENT decision, not an
+    /// authorization one. A save with no target still passes <see cref="Api.Filters.EntityAccessFilter"/>
+    /// untouched and no per-record check runs anywhere in the path (finding F4). Narrowing the destination
+    /// from one tenant-wide container to one per business unit reduces the blast radius; it does not close
+    /// F4. Closing F4 means requiring <c>TargetEntity</c>, which task 065 ESCALATED rather than shipped —
+    /// see <c>projects/spaarkeai-word-add-in-r1/notes/065-require-target-entity.md</c>.</para>
+    ///
+    /// <para><b>Why a fallback and not a refusal when the acting user cannot be resolved.</b>
+    /// <see cref="RecordContainerResolver.ResolveForActingUserAsync"/> throws
+    /// <see cref="SdapProblemException"/> for a caller who maps to no Dataverse user, or to more than one,
+    /// or to one with no business unit. Those are CALLER-IDENTITY failures, not isolation failures: this
+    /// branch is only reached when there is no record, and <c>ResolveForActingUserAsync</c>'s own contract
+    /// states that <c>FailClosed</c> is unreachable here by construction because nothing on this path
+    /// CAN be secure. Letting such a caller fall through to the configured default is therefore exactly
+    /// today's behaviour for that caller — strictly non-regressive — whereas refusing would convert an
+    /// unprovisioned or duplicated user record into a total quick-save outage. The RECORD branch above
+    /// keeps its no-catch posture, for the opposite reason: there a refusal IS the isolation guarantee.</para>
+    /// </remarks>
+    /// <param name="request">The save being placed.</param>
+    /// <param name="actingUserObjectId">
+    /// The caller's Entra <c>oid</c>, as <c>OfficeAuthFilter</c> resolved it. Used only on the no-record
+    /// branch, and only as a LOOKUP KEY into <c>systemuser.azureactivedirectoryobjectid</c> — never
+    /// compared against a <c>systemuserid</c>.
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    private async Task<string> ResolveContainerAsync(
+        SaveRequest request,
+        string? actingUserObjectId,
+        CancellationToken ct)
+    {
+        if (request.TargetEntity is { } target && target.EntityId != Guid.Empty)
+        {
+            // The LOGICAL name, not the wire spelling. The save endpoint accepts only the friendly types
+            // ("matter", "project", …), while RecordContainerResolver and ISecurableEntityRegistry are keyed on
+            // logical names. Passed through as-is, "project" was never securable, so a save filed to a SECURE
+            // project skipped the secure branch, resolved Unresolved, and landed in the tenant-wide default
+            // container — irreversibly, because SPE permissions are additive-only. Found by task 080's review;
+            // mapped through the same alias table the ownership resolver uses, so the two cannot disagree.
+            var targetLogicalName = DocumentAssociationMap.ToLogicalName(target.EntityType) ?? target.EntityType;
+
+            var decision = await _containerResolver
+                .ResolveForRecordAsync(targetLogicalName, target.EntityId, ct)
+                .ConfigureAwait(false);
+
+            // FailClosed means the record is SECURE and has no container of its own. Falling through to
+            // the configured default here would put a secure record's content in the shared container —
+            // the precise failure this project exists to prevent, and irreversible in SPE because
+            // permissions there are additive-only. Refuse instead.
+            if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+            {
+                throw new InvalidOperationException(
+                    $"The storage container for secure record {target.EntityType} {target.EntityId} could "
+                    + "not be determined. Refusing rather than writing its content into a shared "
+                    + "container, which SPE cannot subsequently un-share.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(decision.ContainerId))
+            {
+                _logger.LogDebug(
+                    "Office save container derived from {EntityType} {EntityId} (outcome: {Outcome})",
+                    target.EntityType, target.EntityId, decision.Outcome);
+
+                return decision.ContainerId!;
+            }
+
+            // Unresolved: a non-secure record with no container and no business-unit default. Falling
+            // through to the configured default is safe here precisely BECAUSE the record is not
+            // secure — the outcome enum guarantees Unresolved is unreachable for a secure record.
+            _logger.LogDebug(
+                "No container resolved for {EntityType} {EntityId} (outcome: {Outcome}); using the "
+                + "configured default.",
+                target.EntityType, target.EntityId, decision.Outcome);
+        }
+        else
+        {
+            // ══ NO RECORD (task 065) ══════════════════════════════════════════════════════════════
+            // The Word ribbon quick-save and every pane save with no "Related to" selected arrive here.
+            // (An FR-11 VERSION save does not: it writes to the target document's own drive and never
+            // calls this method at all — see the call site.) Ask for the acting user's business-unit
+            // container BEFORE reaching for the tenant-wide default. Deliberately NOT reached for a
+            // target-bearing save: see the remarks — a record's container follows the RECORD, and letting
+            // the uploader's business unit win there is the isolation failure task 076 closed.
+            try
+            {
+                var actingUserDecision = await _containerResolver
+                    .ResolveForActingUserAsync(actingUserObjectId, ct)
+                    .ConfigureAwait(false);
+
+                if (!string.IsNullOrWhiteSpace(actingUserDecision.ContainerId))
+                {
+                    _logger.LogDebug(
+                        "Office save has no target entity; container derived from the acting user's "
+                        + "business unit (outcome: {Outcome}).",
+                        actingUserDecision.Outcome);
+
+                    return actingUserDecision.ContainerId!;
+                }
+
+                // A business unit with no sprk_containerid stamped is a legitimate configuration state
+                // (3 of 6 live units, verified 2026-08-27), not an error. Fall through.
+                _logger.LogInformation(
+                    "Office save has no target entity and the acting user's business unit has no "
+                    + "container stamped; using the configured default.");
+            }
+            catch (SdapProblemException ex)
+            {
+                // Caller identity, not isolation — see the remarks. Logged at Warning rather than
+                // swallowed silently, because a tenant where this fires for everyone has an unprovisioned
+                // -user problem worth seeing, and the fallback hides it from the user by design.
+                _logger.LogWarning(
+                    "Office save has no target entity and the acting user's container could not be "
+                    + "derived ({Code}); using the configured default. This is not an isolation decision "
+                    + "— nothing on the no-record branch can be secure.",
+                    ex.Code);
+            }
+        }
+
+        var configured = _emailProcessingOptions.DefaultContainerId;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException(
+                "No storage container could be determined for this save. Neither the target record (if "
+                + "one was named) nor the acting user's business unit yielded one, and "
+                + "EmailProcessing:DefaultContainerId is not configured. Refusing rather than guessing "
+                + "a container.");
+        }
+
+        return configured;
     }
 
     /// <inheritdoc />
@@ -105,14 +389,31 @@ public class OfficeService : IOfficeService
             request = await _emailEnricher.EnrichAttachmentFromGraphAsync(request, httpContext, cancellationToken);
         }
 
+        // Declared outside the try (task 039, finding 2) so the outer catch can mark THIS save's ProcessingJob
+        // Failed. A job left Queued/Running by a save that threw was answered as the "duplicate" of every retry.
+        // jobRecord (task 060) is the save's view of that job, which the catch records as Failed.
+        var jobId = Guid.Empty;
+        JobStatusResponse? jobRecord = null;
+
         try
         {
-            // Step 1: Generate or use provided idempotency key
-            var idempotencyKey = request.IdempotencyKey ?? GenerateIdempotencyKey(request);
+            // Step 1: The save's idempotency key — the ONE source that decides whether this save runs (task 039,
+            // finding 1): the BODY key when the client sends one, else the server's own key (content-aware for
+            // every Document save). The X-Idempotency-Key header never reaches here — it only names the response
+            // cache in IdempotencyFilter, which is bound to the body for Document saves.
+            var idempotencyKey = ResolveIdempotencyKey(request);
 
-            // Step 2: Check for existing job with this idempotency key
-            // TRACKED: GitHub #229 - Replace with Dataverse ProcessingJob query
-            var existingJob = await _documentPersistence.CheckForExistingJobAsync(idempotencyKey, cancellationToken);
+            // Step 2: Check for existing job with this idempotency key. Task 060 (#1084): this read never worked in
+            // production (`dynamic` over another assembly's anonymous type threw, and was swallowed into "no duplicate").
+            var existingJob = await _jobs.FindExistingAsync(idempotencyKey, cancellationToken);
+
+            // Task 047: a key names CONTENT, not a moment. For a version save, a Completed job under this key is the
+            // duplicate only while the document still holds exactly this content. Otherwise B, then A, then B again
+            // was answered with the first B save's job and never written.
+            if (existingJob is not null && !await IsStillTheSameOperationAsync(request, existingJob, cancellationToken))
+            {
+                existingJob = null;
+            }
 
             if (existingJob is not null)
             {
@@ -130,6 +431,56 @@ public class OfficeService : IOfficeService
                 };
             }
 
+            // ══ RECORD OWNERSHIP (task 080, write-path invariant I-6) ═════════════════════════════════
+            // The sprk_document this save creates is owned by a business unit's DEFAULT OWNER TEAM — the team of
+            // the record it is filed against, or the acting user's when it is filed against nothing (owner
+            // decisions 2026-09-22 / 2026-09-25). Left unset, Dataverse makes the app user the owner, which sits
+            // in the ROOT business unit, so no child-BU user could ever read their own saved document.
+            //
+            // Resolved HERE — before the email capture, the job row, the upload and the document row — so a
+            // refusal writes nothing at all. A version save is skipped: it creates no document, and its row keeps
+            // the owner it already has. `IsVersionSave` is the cheap intent predicate; the target is read below.
+            Guid? owningTeamId = null;
+            Guid? createdByPersonId = null;
+            if (!IsVersionSave(request))
+            {
+                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                    {
+                        TargetEntityLogicalName = request.TargetEntity?.EntityType,
+                        TargetRecordId = request.TargetEntity?.EntityId,
+                        // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
+                        // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
+                        CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                        // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for every document this save
+                        // creates app-only — recorded as their creator person (carried to the worker with the team).
+                        RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
+                    },
+                    cancellationToken);
+                owningTeamId = documentOwner.IsOwned ? documentOwner.OwningTeamId : null;
+                createdByPersonId = documentOwner.CreatedByPerson;
+
+                if (owningTeamId is null)
+                {
+                    // Fail-closed, never app-owned: an app-owned row is invisible to its own author, which is the
+                    // defect this exists to remove. The resolver has already logged which link in the chain broke.
+                    return new SaveResponse
+                    {
+                        Success = false,
+                        Error = new SaveError
+                        {
+                            Code = OfficeErrorCodes.RecordOwnerUnresolved,
+                            Message = request.TargetEntity is not null
+                                ? "This item could not be assigned an owner from the record it is filed to, so it "
+                                  + "was not saved. Check that the record still exists and that you can open it."
+                                : "This item could not be assigned an owner from your business unit, so it was not "
+                                  + "saved. Ask an administrator to check your user record's business unit.",
+                            Retryable = false
+                        }
+                    };
+                }
+            }
+
             // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
             // create/reconcile the canonical sprk_communication and run association + triage + provenance — so a
             // hand-filed email is intelligence-bearing, not merely a sprk_document archive. Runs AFTER the
@@ -137,7 +488,7 @@ public class OfficeService : IOfficeService
             // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
             // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
             // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
-            if (_emailUploadCapture is not null && request.ContentType == SaveContentType.Email)
+            if (request.ContentType == SaveContentType.Email)
             {
                 await _emailUploadCapture.CaptureAsync(request, userId, cancellationToken);
             }
@@ -151,62 +502,107 @@ public class OfficeService : IOfficeService
                 _ => throw new ArgumentOutOfRangeException(nameof(request.ContentType))
             };
 
-            // Step 4: Create a new ProcessingJob record in Dataverse
-            var jobId = Guid.Empty;
+            // ══ FR-11 VERSION SAVE (spaarkeai-word-add-in-r1 task 023) ════════════════════════════════
+            // A Document save naming an existing sprk_document writes a NEW SPE VERSION of that document's
+            // own drive item and refreshes that row — it never creates a second row. Scoped by IsVersionSave
+            // on the CONTENT TYPE explicitly, so Email and Attachment saves never read the field, whatever
+            // their body carries. The endpoint filter has already required "write" on the target (ADR-008);
+            // this is the existence + pointer read that follows it, and every refusal returns HERE — before a
+            // ProcessingJob row, an SPE write, or a document row can exist.
+            OfficeDocumentPersistence.VersionTarget? versionTarget = null;
+            if (IsVersionSave(request))
+            {
+                var (target, refusal) = await ResolveVersionTargetAsync(request.Document!, cancellationToken);
+                if (refusal is not null)
+                {
+                    return new SaveResponse { Success = false, Error = refusal };
+                }
 
+                versionTarget = target;
+            }
+
+            // Step 4: Create a new ProcessingJob record in Dataverse (jobId is declared above the try — task 039)
             _logger.LogInformation(
                 "Creating ProcessingJob for {ContentType} save with association {AssociationType}:{AssociationId}",
                 request.ContentType,
                 request.TargetEntity?.EntityType,
                 request.TargetEntity?.EntityId);
 
-            // Serialize the request payload for storage
-            var payload = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                ContentType = request.ContentType.ToString(),
-                TargetEntity = request.TargetEntity,
-                ContainerId = request.ContainerId,
-                FolderPath = request.FolderPath,
-                Email = request.Email,
-                Attachment = request.Attachment,
-                Document = request.Document,
-                TriggerAiProcessing = request.TriggerAiProcessing
-            });
+            // ══ SERVER-DERIVED CONTAINER (task 085) ═══════════════════════════════════════════════
+            // Derived HERE, before the payload is built, so the job record and the upload below cannot
+            // disagree. Previously the payload carried request.ContainerId — a client-chosen container
+            // that outlived the request inside the ProcessingJob row.
+            //
+            // With a TargetEntity, the container comes from the SAME record the caller was authorized
+            // against (AddEntityAccessFilter), via task 076's resolver: the authorization key and the
+            // write destination are now one value, so no code path can let them disagree. The resolver
+            // is also secure-aware — a secure record's own container wins over any business-unit
+            // default, which is the isolation guarantee a client-supplied id could always defeat.
+            //
+            // Without a TargetEntity there is no record to derive from, so the ACTING USER's
+            // business-unit container applies (RecordContainerResolver.ResolveForActingUserAsync),
+            // with EmailProcessing:DefaultContainerId as the last resort — server-side either way, and
+            // still fail-closed when both are unavailable. See ResolveContainerAsync's remarks.
+            //
+            // ⚠️ CORRECTED 2026-09-21 (task 065). This comment used to end: "Office save always carries
+            // a TargetEntity from the shipped add-in, so its no-record branch is contract-only". THAT
+            // WAS FALSE, and had been since task 037 — the Word ribbon quick-save, every FR-11 version
+            // save's sibling create, and every pane save with no "Related to" selected all send no
+            // target. The no-record branch is this route's MAINLINE traffic. The corrected claim, and
+            // the enumeration behind it, are in ResolveContainerAsync's remarks.
+            //
+            // What did NOT change: acting-user resolution is still deliberately kept AWAY from a save
+            // that names a record. RecordContainerResolver §"Why the RECORD's business unit and not the
+            // ACTING USER's" is right about that case — users sit in the Operations subtree while secure
+            // records are owned in Secure Record, so acting-user resolution applied to a RECORD writes
+            // a secure record's content into the general Operations container. Task 076's owner sanction
+            // covers exactly the no-record shape, which is the one the branch below now uses, and it is
+            // the same call OBOEndpoints and ComposeService already make — no new component (CLAUDE.md §11).
+            //
+            // ⚠️ And it is a PLACEMENT change, not an authorization one: a no-target save still passes
+            // EntityAccessFilter untouched (finding F4). See notes/065-require-target-entity.md.
+            //
+            // FR-11 (task 023): a VERSION save writes to the target document's OWN drive — the destination is
+            // an item that already exists, so a container derived from TargetEntity could only disagree with it.
+            var derivedContainerId = versionTarget is not null
+                ? versionTarget.DriveId!
+                : await ResolveContainerAsync(request, userId, cancellationToken);
 
-            try
-            {
-                // Create ProcessingJob in Dataverse using existing IDataverseService
-                jobId = await _jobService.CreateProcessingJobAsync(new
-                {
-                    Name = $"{request.ContentType} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-                    JobType = (int)jobType,
-                    Status = 0, // Queued
-                    Progress = 0,
-                    IdempotencyKey = idempotencyKey,
-                    CorrelationId = Guid.NewGuid().ToString(),
-                    Payload = payload
-                }, cancellationToken);
+            // The request's METADATA for sprk_payload, never its content (task 060, #1084): the content's base64 made
+            // Dataverse refuse the create for 27 of 40 saves in 60 days, and those saves ran with no job row.
+            var payload = OfficeJobStatusService.BuildPayload(request, derivedContainerId);
 
-                _logger.LogInformation(
-                    "ProcessingJob {JobId} created in Dataverse for {ContentType}",
-                    jobId,
-                    request.ContentType);
+            // Task 067 (finding F5): record WHO asked for this job, at CREATE time, in sprk_initiatedby.
+            //
+            // Task 060: the save's own view (written with the row) also records the creator OID the save
+            // authenticated, and ownership reads that first; sprk_initiatedby is the creator for rows written
+            // before it. An unresolved caller yields null here, the property is skipped by the create mapper, and
+            // the row records no systemuser. Resolved BEFORE the create, so a resolver hiccup cannot be mistaken
+            // for a failed create.
+            Guid? initiatedBySystemUserId = null;
+            var callerResolution = await _callerSystemUserResolver
+                .ResolveAsync(httpContext.User, cancellationToken);
+
+            if (callerResolution.IsResolved
+                && Guid.TryParse(callerResolution.SystemUserId, out var resolvedSystemUserId)
+                && resolvedSystemUserId != Guid.Empty)
+            {
+                initiatedBySystemUserId = resolvedSystemUserId;
             }
-            catch (Exception ex)
+            else
             {
                 _logger.LogWarning(
-                    ex,
-                    "Failed to create ProcessingJob in Dataverse, falling back to in-memory storage");
-
-                // Fallback to in-memory for development/testing when Dataverse is unavailable
-                jobId = Guid.NewGuid();
+                    "Could not resolve a Dataverse systemuser for the caller ({Reason}); this job's row will record " +
+                    "no sprk_initiatedby. Ownership still reads the creator OID the save's view records (task 060).",
+                    callerResolution.UnresolvedReason ?? "unknown");
             }
 
-            // Also store in-memory for job status polling (fast access)
+            // The save's view of its job: what the pane polls. Persisted with the row and with every transition below
+            // (task 060), so any instance, before or after a restart, answers the same.
             var correlationId = Guid.NewGuid().ToString();
-            var jobRecord = new JobStatusResponse
+            jobRecord = new JobStatusResponse
             {
-                JobId = jobId,
+                JobId = Guid.Empty, // the row's id, set once it exists
                 Status = JobStatus.Queued,
                 JobType = jobType,
                 Progress = 0,
@@ -215,14 +611,61 @@ public class OfficeService : IOfficeService
                 CreatedAt = DateTimeOffset.UtcNow,
                 CreatedBy = userId
             };
-            _jobStore[jobId] = jobRecord;
+
+            try
+            {
+                // FR-11 (task 023): a version save is named as one, so each revision's job row — which also carries
+                // Document.IsNewVersion/VersionComment in its payload — is identifiable. Every other save keeps the
+                // identical "{ContentType} Save - …" name.
+                jobId = await _jobs.CreateAsync(
+                    jobRecord,
+                    $"{(versionTarget is not null ? "Document Version" : request.ContentType.ToString())} Save - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
+                    idempotencyKey,
+                    payload,
+                    initiatedBySystemUserId,
+                    cancellationToken);
+
+                _logger.LogInformation(
+                    "ProcessingJob {JobId} created in Dataverse for {ContentType}",
+                    jobId,
+                    request.ContentType);
+            }
+            catch (Exception ex)
+            {
+                // Task 060: refused, no longer downgraded to an in-memory job. A job with no row has no durable status
+                // and no idempotency (ADR-017: no orphaned jobs), and nothing has been written yet: no SPE upload, no
+                // document row. The only production cause, the oversized payload, is gone (BuildPayload above).
+                _logger.LogError(ex, "Failed to create ProcessingJob in Dataverse; the save is refused before any write");
+                jobRecord = null; // no row to record against
+                return new SaveResponse
+                {
+                    Success = false,
+                    Error = new SaveError
+                    {
+                        Code = OfficeErrorCodes.DataverseError,
+                        Message = "The save could not be started, so nothing was saved. Try again.",
+                        Retryable = true
+                    }
+                };
+            }
+
+            jobRecord = jobRecord with { JobId = jobId };
 
             // Step 5: Upload content to SPE and queue finalization job
             // Following existing document flow per architecture docs:
             // 1. Create Document → 2. Upload to SPE → 3. Associate Document to SPE → 4. Trigger AI
             Stream? contentStream = null;
             string fileName;
+            // Task 046 (b) / 020: the name the document is SHOWN under (sprk_documentname). Null means "the
+            // stored file name", which is the case only for Attachment — Email (task 046 (b)) and Document
+            // (task 020, FR-06) both set it explicitly below.
+            string? documentName = null;
             long fileSize = 0;
+            // FR-02 (task 014): on a Document CREATE the sprk_document id must be known BEFORE the bytes are
+            // uploaded, because the stamp goes INTO those bytes. Minted in the Document arm below and handed to
+            // the row create, so the stored file and its record cannot disagree about which document this is.
+            // Null for Email/Attachment and for a version save (which already knows its target row).
+            Guid? preAssignedDocumentId = null;
 
             try
             {
@@ -232,7 +675,11 @@ public class OfficeService : IOfficeService
                     case SaveContentType.Email when request.Email != null:
                         // Build .eml file from email metadata using MimeKit
                         contentStream = OfficeEmailEnricher.BuildEmlFromMetadata(request.Email);
-                        fileName = OfficeEmailEnricher.GenerateEmlFileName(request.Email);
+                        // Task 046 (b): a SYSTEM-DERIVED name is stored with a short unique suffix, because the
+                        // path-keyed Replace upload below would otherwise let a second same-subject, same-date
+                        // email overwrite the first. A name the user typed is stored exactly as today.
+                        // sprk_documentname keeps the readable name either way.
+                        (documentName, fileName) = OfficeEmailEnricher.GenerateEmlNames(request.Email);
                         fileSize = contentStream.Length;
                         break;
 
@@ -248,7 +695,10 @@ public class OfficeService : IOfficeService
                         {
                             throw new InvalidOperationException("Attachment content is required for attachment saves");
                         }
-                        fileName = request.Attachment.FileName;
+                        // SANITIZED — see the note on the Document branch below. The client-supplied
+                        // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
+                        // Graph create a folder.
+                        fileName = SpeUploadPath.SanitizeFileName(request.Attachment.FileName);
                         break;
 
                     case SaveContentType.Document when request.Document != null:
@@ -256,45 +706,207 @@ public class OfficeService : IOfficeService
                         if (!string.IsNullOrEmpty(request.Document.ContentBase64))
                         {
                             var bytes = Convert.FromBase64String(request.Document.ContentBase64);
+
+                            // ══ FR-02 (task 014) — STAMP THE IDENTITY INTO THE UPLOADED BYTES ════════════════
+                            // The user's OPEN document in Word is never touched: the stamp goes into the copy
+                            // already in flight to the server, so Word never reports unsaved changes and never
+                            // prompts. Forward-only BY CONSTRUCTION (owner decision 2026-09-04) — this is the
+                            // only write, and it acts on bytes the client just sent; nothing already stored is
+                            // ever rewritten, so there is no backfill, migration or stamp-on-read to find.
+                            Guid stampTarget;
+                            if (versionTarget is not null)
+                            {
+                                stampTarget = versionTarget.DocumentId;
+                            }
+                            else
+                            {
+                                preAssignedDocumentId = Guid.NewGuid();
+                                stampTarget = preAssignedDocumentId.Value;
+                            }
+
+                            var stamp = OfficeDocumentStamp.Stamp(bytes, stampTarget);
+
+                            if (stamp.Outcome == OfficeDocumentStamp.StampOutcome.Corrupt)
+                            {
+                                // Refused BEFORE any SPE write, so nothing partial is stored. Note what does NOT
+                                // land here: a PDF, an EML, an arbitrary binary and a readable non-Word zip are
+                                // all pass-throughs, not errors. Only "carries a zip signature but is not a
+                                // readable package" is refused — bytes no reader could open.
+                                _logger.LogWarning(
+                                    "Document save refused: the uploaded bytes carry a zip signature but could not be "
+                                    + "read as an Office package (job {JobId}). Nothing was written to storage.",
+                                    jobId);
+
+                                jobRecord = jobRecord with
+                                {
+                                    Status = JobStatus.Failed,
+                                    CurrentPhase = "CorruptDocument",
+                                    CompletedAt = DateTimeOffset.UtcNow
+                                };
+                                await _jobs.RecordAsync(jobRecord, stamp.Reason, cancellationToken);
+
+                                return new SaveResponse
+                                {
+                                    Success = false,
+                                    Error = new SaveError
+                                    {
+                                        Code = OfficeErrorCodes.CorruptDocumentPackage,
+                                        Message = "This file could not be read as a Word document, so nothing was saved.",
+                                        Details = stamp.Reason,
+                                        Retryable = false
+                                    }
+                                };
+                            }
+
+                            if (stamp.Outcome == OfficeDocumentStamp.StampOutcome.Unsupported)
+                            {
+                                // A MISSING stamp is a normal, recoverable state (task 019 condition 3), never
+                                // corruption: the save proceeds unstamped and identity falls back to task 012's
+                                // Graph path. Logged so an unhandled package shape is discoverable rather than silent.
+                                _logger.LogWarning(
+                                    "Document stored WITHOUT an identity stamp: {Reason} (job {JobId}). Identity for "
+                                    + "this document falls back to the URL/Graph path.",
+                                    stamp.Reason, jobId);
+                            }
+
+                            bytes = stamp.Bytes;
                             contentStream = new MemoryStream(bytes);
+                            // The STAMPED length: sprk_filesize must describe the bytes actually stored, and the
+                            // finalization payload carries this same value downstream.
                             fileSize = bytes.Length;
                         }
                         else
                         {
                             throw new InvalidOperationException("Document content is required for document saves");
                         }
-                        fileName = request.Document.FileName;
+                        // ══ SANITIZED 2026-08-28 — THIS IS THE FOLDER-MINTING DEFECT, ROOT CAUSE ══════
+                        // The add-in's "Document Name" box is free text (SaveFlow.tsx) and its value
+                        // arrives here as request.Document.FileName with NO client-side cleaning. It then
+                        // becomes the SPE upload path verbatim (OfficeStorageUploader → UploadSmallAsync →
+                        // Drives[id].Root.ItemWithPath(path)), and Graph creates EVERY '/'-delimited
+                        // segment of an upload path as a folder.
+                        //
+                        // So a user typing a date — "New Word Document from Word Web Add In 8/24/2026" —
+                        // produced a folder "New Word Document from Word Web Add In 8", containing a
+                        // folder "24", containing an extension-less file "2026". That is the origin of the
+                        // mystery folders in SPE Admin: not Word Online writing directly to the container,
+                        // and not a folder prefix in our code, but OUR OWN app-only upload of a filename
+                        // with slashes in it. Confirmed against production sprk_document rows (created by
+                        // the BFF service identities, in the reported container) — the app-only upload is
+                        // also why SPE Admin showed no human creator, which is what made it look external.
+                        //
+                        // The EMAIL branch above never had this bug because GenerateEmlFileName sanitizes.
+                        // The asymmetry was the defect; the document and attachment branches now use the
+                        // same sanitizer. Removing the hardcoded folder prefixes elsewhere in this change
+                        // does NOT subsume this — a filename is a path, so it needs its own guard.
+                        fileName = SpeUploadPath.SanitizeFileName(request.Document.FileName);
+
+                        // Task 020 (FR-06): the readable name (sprk_documentname) is the user-facing
+                        // Document Name the pane sends as document.title — independent of the sanitized SPE
+                        // upload path above (the inverted-mapping UAT defect this task closes: the record list
+                        // showed .docx filenames instead of the names users typed). Falls back to the sanitized
+                        // file name only when Title is absent/blank, so sprk_documentname is never empty.
+                        documentName = !string.IsNullOrWhiteSpace(request.Document.Title)
+                            ? request.Document.Title
+                            : fileName;
                         break;
 
                     default:
                         throw new InvalidOperationException($"Unsupported content type: {request.ContentType}");
                 }
 
-                // Get the container ID (use provided or default from configuration)
-                var containerId = request.ContainerId;
-                if (string.IsNullOrEmpty(containerId))
+                // Task 085: the container was derived from the AUTHORIZED RECORD above, before the job
+                // payload was built. This site used to read request.ContainerId and only fall back to
+                // config — which is how a caller chose the destination of an app-only MI write.
+                var containerId = derivedContainerId;
+
+                // FR-11 (task 023): the version path leaves HERE — after the Document branch above has decoded
+                // the bytes and sanitized the name (the folder-minting fix stays on this path too) — and never
+                // reaches the path-keyed upload or CreateDocumentWithSpePointersAsync below.
+                if (versionTarget is not null)
                 {
-                    containerId = _emailProcessingOptions.DefaultContainerId;
-                    if (string.IsNullOrEmpty(containerId))
-                    {
-                        throw new InvalidOperationException(
-                            "ContainerId is required for save operations. Either provide ContainerId in request or configure EmailProcessing:DefaultContainerId.");
-                    }
-                    _logger.LogDebug("Using default container ID from configuration: {ContainerId}", containerId);
+                    return await CompleteVersionSaveAsync(
+                        versionTarget, request, userId, httpContext, jobId, jobRecord, idempotencyKey,
+                        correlationId, contentStream, fileName, fileSize, cancellationToken);
                 }
 
-                // Upload to SPE
-                var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
+                // ══ TASK 025 (spaarkeai-word-add-in-r1) — REFUSE-BEFORE-UPLOAD, DOCUMENT CREATES ══════
+                // D1: a same-name Document create used to land on the SAME SPE item as an existing
+                // document (ConflictBehavior.Replace, path-keyed), overwriting its bytes, and then fail
+                // creating a SECOND row on sprk_graphitemid_uk — so the FIRST document's content was
+                // silently replaced by a save that itself errored. ConflictBehavior.Fail makes Graph
+                // refuse the PUT atomically on a collision: no bytes move, the existing item is provably
+                // untouched. This is a FIXED value chosen from exactly two states — Fail (the default:
+                // refuse and ask) or Rename (the pane's explicit "Keep both" retry, AllowRename) — never a
+                // resolver. Mirrors OBOEndpoints' own default-to-Fail posture and the shipped
+                // external-upload precedent (ExternalProjectDataEndpoints.UploadDocument) — no new
+                // collision-detection mechanism, the same Graph-native conflictBehavior two other callers
+                // already use.
+                //
+                // ══ TASK 054 — THE SAME REFUSAL NOW COVERS EMAIL AND ATTACHMENT ══════════════════
+                // Task 025 scoped Fail to Document because a BLANKET Fail regressed
+                // OfficeImmutableSaveFileSafetyTests: an immutable capture's safety net is content-hash
+                // dedup running AFTER the upload, and that suite pins a same-name, byte-identical
+                // Attachment save as a SUCCESSFUL suppressed duplicate, which a bare refusal turns into a
+                // 409. So a typed-name Email/Attachment collision kept overwriting the first document's
+                // file (the 2026-09-15 owner decision's unimplemented half).
+                //
+                // The conflict is one of ORDERING, and it is resolved in ResolveNameCollisionAsync, not
+                // here: a name alone cannot separate "the same capture saved twice" (a duplicate suppress
+                // is right to collapse) from "two different emails that share a typed name" (two documents
+                // that must become two files) — only the CONTENT can, and it is compared there against the
+                // already-stored file BEFORE anything is written. Every content type therefore asks SPE to
+                // refuse first; what a refusal MEANS is decided below.
+                var conflictBehavior = request.ContentType == SaveContentType.Document
+                    && request.Document?.AllowRename == true
+                        ? ConflictBehavior.Rename
+                        : ConflictBehavior.Fail;
+
+                var upload = await _storageUploader.UploadToSpeAsync(
                     containerId,
-                    request.FolderPath,
                     fileName,
                     contentStream,
-                    cancellationToken);
+                    cancellationToken,
+                    conflictBehavior);
 
-                if (!uploadSuccess || string.IsNullOrEmpty(driveId) || string.IsNullOrEmpty(itemId))
+                if (upload.IsNameCollision)
                 {
-                    // Update job status to failed
-                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Failed, "UploadFailed", 0, uploadError, cancellationToken);
+                    // Reachable for EVERY content type since task 054 (Document, Email and Attachment all
+                    // ask for Fail above). Nothing was written: SPE refused the PUT before any bytes
+                    // moved, so the existing item (and its owning sprk_document row, if any) is provably
+                    // untouched. Extracted to its own method (task 025 code-review, root CLAUDE.md §11.5):
+                    // the ENTIRE collision-resolution contract — reclaim-if-orphaned, continue-if-the-same
+                    // -immutable-content, refuse-otherwise — is auditable in one place, mirroring the
+                    // existing ResolveVersionTargetAsync (Target, Refusal) shape.
+                    var collisionUploadError = upload.Error;
+                    SaveError? refusal;
+                    (refusal, upload) = await ResolveNameCollisionAsync(
+                        upload, containerId, fileName, contentStream, request.ContentType,
+                        request.TargetEntity, cancellationToken);
+
+                    if (refusal is not null)
+                    {
+                        jobRecord = jobRecord with
+                        {
+                            Status = JobStatus.Failed,
+                            CurrentPhase = "NameCollision",
+                            CompletedAt = DateTimeOffset.UtcNow
+                        };
+                        await _jobs.RecordAsync(jobRecord, collisionUploadError, cancellationToken);
+
+                        return new SaveResponse { Success = false, Error = refusal };
+                    }
+                }
+
+                if (!upload.Success || string.IsNullOrEmpty(upload.DriveId) || string.IsNullOrEmpty(upload.ItemId))
+                {
+                    jobRecord = jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "UploadFailed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    };
+                    await _jobs.RecordAsync(jobRecord, upload.Error, cancellationToken);
 
                     return new SaveResponse
                     {
@@ -303,20 +915,29 @@ public class OfficeService : IOfficeService
                         {
                             Code = "OFFICE_012",
                             Message = "Failed to upload file to storage",
-                            Details = uploadError,
+                            Details = upload.Error,
                             Retryable = true
                         }
                     };
                 }
 
+                var driveId = upload.DriveId;
+                var itemId = upload.ItemId;
+                var webUrl = upload.WebUrl;
+                // Task 025: the name the item ACTUALLY holds in SPE — equal to `fileName` under Fail/Replace
+                // (the only paths that ran before this task), but DIFFERENT under Rename, where Graph chose
+                // a non-colliding name. The Dataverse row's stored file name must track SPE, never the name
+                // that was merely requested.
+                var storedFileName = upload.FileName ?? fileName;
+
                 // Update job status to uploading complete
-                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "FileUploaded", 30, null, cancellationToken);
-                _jobStore[jobId] = jobRecord with
+                jobRecord = jobRecord with
                 {
                     Status = JobStatus.Running,
                     Progress = 30,
                     CurrentPhase = "FileUploaded"
                 };
+                await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
                 // Create Document record with SPE pointers
                 var (documentId, wasContentDuplicate) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
@@ -324,35 +945,57 @@ public class OfficeService : IOfficeService
                     driveId,
                     itemId,
                     webUrl,
-                    fileName,
+                    storedFileName,
+                    documentName ?? fileName,
                     fileSize,
                     userId,
-                    cancellationToken);
+                    cancellationToken,
+                    // FR-02 (task 014): the id already stamped into the uploaded bytes becomes this row's
+                    // primary key, so the stored file self-identifies as the record that owns it.
+                    preAssignedDocumentId,
+                    // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
+                    owningTeamId,
+                    createdByPersonId);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
                 // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
                 // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
-                // whole downstream pipeline, CLEAN UP the transient upload blob (gate-after-write; it is now truly
-                // unreferenced — this is the item THIS request just uploaded, never the canonical's own), and
-                // complete the job. The detector already NOTIFIED the user of the canonical. Blob cleanup is
-                // best-effort (never fails the save). The `finally` below still disposes the content stream.
+                // whole downstream pipeline, clean up the upload (gate-after-write), and complete the job. The
+                // detector already NOTIFIED the user of the canonical. Cleanup is best-effort (never fails the save).
+                // The `finally` below still disposes the content stream.
+                //
+                // Task 046: the upload is deleted ONLY when no sprk_document points at it. The create upload above is
+                // path-keyed under ConflictBehavior.Replace, so a name that already exists in the container lands on
+                // THAT existing item — the canonical's own file (the detector's canonical lookup does not exclude the
+                // probed item's row) or another document's. "The item this request just uploaded" is then not a
+                // transient blob, and deleting it destroyed that document's file while this save reported success.
+                // The guard sits here, in the caller that deletes, not in the shared ContentDedupDetector: the
+                // detector's answer (the canonical for this content) is right; the delete assumed the rest.
                 if (wasContentDuplicate)
                 {
-                    await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                    var uploadIsTransient = await _documentPersistence.IsUploadUnreferencedAsync(
+                        itemId, documentId, cancellationToken);
+                    if (uploadIsTransient)
+                    {
+                        await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+                    }
 
-                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "DeduplicatedToExisting", 100, null, cancellationToken);
-                    _jobStore[jobId] = _jobStore[jobId] with
+                    jobRecord = jobRecord with
                     {
                         Status = JobStatus.Completed,
                         Progress = 100,
                         CurrentPhase = "DeduplicatedToExisting",
-                        CompletedAt = DateTimeOffset.UtcNow
+                        CompletedAt = DateTimeOffset.UtcNow,
+                        // Task 039 (finding 3): names the canonical this save resolved to. No file id: the upload was
+                        // either deleted or is some document's own file, and the canonical's file is not re-read here.
+                        Result = DocumentResult(documentId, speFileId: null, driveId: null, webUrl: null)
                     };
+                    await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
                     _logger.LogInformation(
-                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, transient blob cleaned up.",
-                        jobId, documentId);
+                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, upload cleanup attempted: {CleanupAttempted}.",
+                        jobId, documentId, uploadIsTransient);
 
                     return new SaveResponse
                     {
@@ -365,40 +1008,28 @@ public class OfficeService : IOfficeService
                 }
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
-                // Per event-source-inventory §3B (line 64), POST /office/save
-                // creates a sprk_document with ownerid defaulted by Dataverse to
-                // the OBO caller. Publish Added event so the junction-updater
-                // (task 084) + nightly recon (task 085) observe the new
-                // association. When MembershipEventPublisherOptions.Enabled=false
-                // (default), the NullMembershipEventPublisher peer logs + returns
-                // (ADR-032 P2). The Task is discarded explicitly to signal
-                // fire-and-forget semantics — publisher contract guarantees no
-                // exceptions propagate to this site.
-                if (Guid.TryParse(userId, out var callerOid))
-                {
-                    var membershipEvent = new MembershipChangedEvent
-                    {
-                        PersonId = callerOid,
-                        PersonIdType = PersonIdentityType.User,
-                        EntityLogicalName = "sprk_document",
-                        EntityRecordId = documentId,
-                        SourceField = "ownerid",
-                        Role = "owner",
-                        MutationType = MembershipMutationType.Added,
-                        CorrelationId = correlationId,
-                        OccurredOnUtc = DateTime.UtcNow,
-                    };
-
-                    _ = _membershipEventPublisher.PublishAsync(membershipEvent, cancellationToken);
-                }
+                // Per event-source-inventory §3B (line 64), POST /office/save creates a sprk_document owned by the
+                // business-unit default owner TEAM resolved above (RECORD OWNERSHIP). UAC-r2 task 152 (ADR-034 A3):
+                // the event states that real owner — PersonIdType=Team, PersonId=owningTeamId — the same key
+                // MembershipReconciliationJob builds for this row, instead of the caller's AAD oid as a User.
+                // When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns
+                // (ADR-032 P2). The Task is discarded explicitly: fire-and-forget, never throws.
+                _ = PublishSavedDocumentOwnerAsync(
+                    _membershipEventPublisher,
+                    _genericEntityService,
+                    documentId,
+                    owningTeamId,
+                    correlationId,
+                    _logger,
+                    cancellationToken);
 
                 // Update job status to records created
-                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Running, "RecordsCreated", 50, null, cancellationToken);
-                _jobStore[jobId] = _jobStore[jobId] with
+                jobRecord = jobRecord with
                 {
                     Progress = 50,
                     CurrentPhase = "RecordsCreated"
                 };
+                await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
                 // ALWAYS queue finalization job - it creates EmailArtifact/AttachmentArtifact records
                 // and optionally triggers AI processing based on TriggerAiProcessing flag in payload
@@ -413,18 +1044,23 @@ public class OfficeService : IOfficeService
                     fileName,
                     fileSize,
                     documentId,
-                    cancellationToken);
+                    isVersionSave: false,
+                    owningTeamId,
+                    cancellationToken,
+                    createdByPersonId);
 
                 // Mark job as complete - background workers will process asynchronously
-                // User sees immediate success while AI processing continues in background
-                await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "Complete", 100, null, cancellationToken);
-                _jobStore[jobId] = _jobStore[jobId] with
+                // User sees immediate success while AI processing continues in background. The save's view (task 060)
+                // keeps that answer even while the finalization workers move the row's pipeline columns again.
+                jobRecord = jobRecord with
                 {
                     Status = JobStatus.Completed,
                     Progress = 100,
                     CurrentPhase = "Complete",
-                    CompletedAt = DateTimeOffset.UtcNow
+                    CompletedAt = DateTimeOffset.UtcNow,
+                    Result = DocumentResult(documentId, itemId, driveId, webUrl) // task 039 (finding 3)
                 };
+                await _jobs.RecordAsync(jobRecord, null, cancellationToken);
 
                 _logger.LogInformation(
                     "ProcessingJob {JobId} completed, file uploaded to SPE, document {DocumentId} created. Background workers queued for finalization.",
@@ -446,6 +1082,46 @@ public class OfficeService : IOfficeService
                 StreamUrl = $"/api/office/jobs/{jobId}/stream"
             };
         }
+        catch (SdapProblemException refusal)
+        {
+            // A DELIBERATE refusal, not a server fault (unified-access-control-r2 task 155, merged with task 075):
+            // RecordContainerResolver refuses with a stable reason code when it cannot show where this save's bytes may
+            // go — container_record_not_found, container_ancestor_unverifiable, secure_record_container_missing, … —
+            // and nothing has been uploaded. Task 075's catch-all below turns UNEXPECTED exceptions into a generic 500;
+            // a refusal must instead reach the pane with its own code and its client-facing text (SdapProblemException
+            // carries RFC 7807 Title/Detail, never server internals), in the save's pre-existing refusal shape.
+            _logger.LogWarning(
+                "Save for {ContentType} by user {UserId} was refused ({Code}, HTTP {Status}); nothing was uploaded",
+                request.ContentType, userId, refusal.Code, refusal.StatusCode);
+
+            if (jobId != Guid.Empty && jobRecord is not null)
+            {
+                await _jobs.RecordAsync(
+                    jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "Failed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    },
+                    refusal.Code,
+                    CancellationToken.None);
+            }
+
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = refusal.Code,
+                    Message = refusal.Detail ?? refusal.Title,
+                    // A 5xx refusal is transient. So is container_ancestor_stale (task 156), although it is a 409: the
+                    // refusal itself enqueued the re-stamp that makes the same save succeed, and its text tells the user
+                    // to try again in a minute. Every other 4xx refusal is permanent until the data changes.
+                    Retryable = refusal.StatusCode >= 500
+                        || string.Equals(refusal.Code, RecordContainerResolver.AncestorStaleCode, StringComparison.Ordinal)
+                }
+            };
+        }
         catch (Exception ex)
         {
             _logger.LogError(
@@ -455,16 +1131,33 @@ public class OfficeService : IOfficeService
                 userId,
                 ex.Message);
 
-            // Include the actual exception message to aid debugging
-            // In production, consider returning a generic message and logging details server-side only
+            // Task 039 (finding 2): a save that throws AFTER its ProcessingJob exists must not leave that job
+            // Queued/Running. The idempotency lookup answers any retry with a job that did not fail, so a job
+            // stranded mid-flight would make every retry a "duplicate" of a save that never finished. Recorded with
+            // CancellationToken.None so a client disconnect cannot skip it; the update itself is best-effort.
+            if (jobId != Guid.Empty && jobRecord is not null)
+            {
+                await _jobs.RecordAsync(
+                    jobRecord with
+                    {
+                        Status = JobStatus.Failed,
+                        CurrentPhase = "Failed",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    },
+                    ex.Message,
+                    CancellationToken.None);
+            }
+
+            // Task 075: a server fault, so the caller gets a generic message and the endpoint renders a 500. The
+            // exception (logged above, with the request's correlation id) never goes on the wire: its message can
+            // carry server internals, and the full ex.ToString() this used to attach carried the stack trace.
             return new SaveResponse
             {
                 Success = false,
                 Error = new SaveError
                 {
-                    Code = "OFFICE_INTERNAL",
-                    Message = $"Save failed: {ex.Message}",
-                    Details = ex.ToString(), // Full stack trace for debugging
+                    Code = OfficeErrorCodes.InternalError,
+                    Message = "The save could not be completed. Try again; if it keeps failing, contact support with the correlation id.",
                     Retryable = true
                 }
             };
@@ -486,147 +1179,623 @@ public class OfficeService : IOfficeService
                        $"{request.Document?.FileName}|" +
                        $"{request.Document?.ExistingDocumentId}";
 
+        // FR-11 (task 023): a VERSION save also keys on its CONTENT. Without this, every revision of the same
+        // document (same file name, same target, same existing id) produced the SAME key, and the persistent
+        // ProcessingJob lookup in SaveAsync answered the SECOND revision "Duplicate" with the first save's job —
+        // the new bytes were never written. With it, two different revisions are two operations while a retried
+        // identical request still de-duplicates. The version string is unchanged by task 039.
+        //
+        // Task 039 (finding 4): a Document CREATE keys on its content too, with the SAME hashing. The create
+        // string used to be content-free, so a user who saved a new document to a record, edited it, and saved
+        // it again to the same record under the same name got the second save answered "Duplicate" from the
+        // first save's job — the edits were silently never written. Identical bytes still hash identically, so
+        // a true retry is still de-duplicated here (and a byte-identical but deliberate re-save is content
+        // dedup's job — link/graduate, task 028 — not this cache's). Email and Attachment keep their string
+        // byte-for-byte: they name an immutable message or attachment, never editable content.
+        if (request.ContentType == SaveContentType.Document)
+        {
+            var contentHash = HashContent(request.Document?.ContentBase64);
+            canonical += IsVersionSave(request)
+                ? $"|version-content:{contentHash}"
+                : $"|create-content:{contentHash}";
+        }
+
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(canonical));
         return Convert.ToBase64String(hashBytes);
     }
 
-    /// <inheritdoc />
-    public async Task<JobStatusResponse?> GetJobStatusAsync(
-        Guid jobId,
-        string? userId,
-        CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Task 039 (finding 3): what a COMPLETED save's job carries — the <c>sprk_document</c> the save landed on.
+    /// The created document on the create path, the EXISTING document on the version path, and the canonical on
+    /// the immutable duplicate path. The task pane completes on <c>result.artifact.id</c>; without it the job
+    /// reported Completed with nothing to open and the pane stalled on its job card.
+    /// </summary>
+    private static JobResult DocumentResult(Guid documentId, string? speFileId, string? driveId, string? webUrl) => new()
     {
-        _logger.LogInformation(
-            "Job status requested for {JobId} by user {UserId}",
-            jobId,
-            userId);
-
-        // Look up job in in-memory store
-        // TRACKED: GitHub #229 - Replace with Dataverse query once ProcessingJob exists
-        if (_jobStore.TryGetValue(jobId, out var job))
+        Artifact = new CreatedArtifact
         {
-            _logger.LogDebug(
-                "Job {JobId} found in store: Status={Status}, Progress={Progress}",
-                jobId,
-                job.Status,
-                job.Progress);
-
-            // Optionally verify ownership (if userId is provided)
-            if (userId is not null && job.CreatedBy is not null && job.CreatedBy != userId)
-            {
-                _logger.LogWarning(
-                    "Job {JobId} ownership mismatch: Expected {ExpectedUser}, Got {ActualUser}",
-                    jobId,
-                    job.CreatedBy,
-                    userId);
-                return null; // Treat as not found for security
-            }
-
-            await Task.CompletedTask; // Keep method async for future Dataverse calls
-            return job;
+            Type = ArtifactType.Document,
+            Id = documentId,
+            SpeFileId = speFileId,
+            ContainerId = driveId,
+            WebUrl = webUrl
         }
+    };
 
-        // Also check for hardcoded test job ID for backwards compatibility
-        var testJobId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-        if (jobId == testJobId)
+    /// <summary>
+    /// FR-11 (task 023): is this save a VERSION of an existing document? True only for
+    /// <see cref="SaveContentType.Document"/> carrying a non-empty <c>Document.ExistingDocumentId</c>.
+    /// </summary>
+    /// <remarks>
+    /// The ONE predicate for the version path: <see cref="SaveAsync"/> branches on it and
+    /// <c>OfficeVersionSaveAuthorizationFilter</c> gates on it, so the gate and the write cannot disagree about
+    /// what a version save is. Keyed on the content type EXPLICITLY — never on <c>request.Document</c> being
+    /// null — so an Email or Attachment body that happens to carry the field is never acted on.
+    /// </remarks>
+    public static bool IsVersionSave(SaveRequest request) =>
+        request.ContentType == SaveContentType.Document
+        && request.Document?.ExistingDocumentId is { } existingDocumentId
+        && existingDocumentId != Guid.Empty;
+
+    /// <summary>
+    /// Task 039 (finding 1): the save's AUTHORITATIVE idempotency key — the request BODY's
+    /// <c>idempotencyKey</c> when present, else the server's own (<see cref="GenerateIdempotencyKey"/>, content-aware
+    /// for every Document save). The ONE definition: <see cref="SaveAsync"/> de-duplicates on it, and the save
+    /// route binds its <c>X-Idempotency-Key</c> response cache to it for Document saves
+    /// (<c>OfficeEndpoints.DocumentSaveIdempotencyBinding</c>), so the two layers cannot disagree about which saves
+    /// are the same operation. The header itself is never this key.
+    /// </summary>
+    public static string ResolveIdempotencyKey(SaveRequest request) =>
+        request.IdempotencyKey ?? GenerateIdempotencyKey(request);
+
+    /// <summary>
+    /// Task 047: may the job found under this save's key still answer it as a duplicate? For a VERSION save, a
+    /// Completed job does so only while the target document still holds exactly this save's content.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why.</b> A version key (the pane's, or <see cref="GenerateIdempotencyKey"/>'s
+    /// <c>version-content</c> one) names a document and its content, not a moment. Neither layer used to tell a retry
+    /// of a save from a later save of the same content. B, then A, then B again, found the first B save's Completed job,
+    /// so the third save was never written: SPE kept A while the pane reported success. Checking what the document
+    /// holds is key-agnostic, so it holds for every client and for the server's own key.</para>
+    /// <para><b>The rule.</b> A duplicate is answered only when the document is proven to hold these bytes. Then a write
+    /// would only add an identical version, so skipping it loses nothing. When the content differs (a later save wrote
+    /// another version), or cannot be read, the save is a new operation. The worst case of an unreadable document is
+    /// one more identical version, never a lost one.</para>
+    /// <para><b>What is unchanged.</b> Email, Attachment and Document-create saves, and a version job still in flight
+    /// (Queued/Running: its write may not have landed, and a concurrent double submit must not write twice), are decided
+    /// by the key alone, as before. Failed and Cancelled jobs never reach here (task 039,
+    /// <see cref="OfficeDocumentPersistence.CheckForExistingJobAsync"/>).</para>
+    /// </remarks>
+    private async Task<bool> IsStillTheSameOperationAsync(
+        SaveRequest request,
+        JobStatusResponse existingJob,
+        CancellationToken cancellationToken)
+    {
+        if (!IsVersionSave(request) || existingJob.Status != JobStatus.Completed)
         {
-            return new JobStatusResponse
-            {
-                JobId = jobId,
-                Status = JobStatus.Running,
-                JobType = JobType.EmailSave,
-                Progress = 50,
-                CurrentPhase = "FileUploaded",
-                CompletedPhases = new List<CompletedPhase>
-                {
-                    new CompletedPhase
-                    {
-                        Name = "RecordsCreated",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
-                        DurationMs = 250
-                    },
-                    new CompletedPhase
-                    {
-                        Name = "FileUploaded",
-                        CompletedAt = DateTimeOffset.UtcNow.AddSeconds(-2),
-                        DurationMs = 1500
-                    }
-                },
-                CreatedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
-                CreatedBy = userId,
-                StartedAt = DateTimeOffset.UtcNow.AddSeconds(-8)
-            };
+            return true;
         }
-
-        // Job not found in memory - query Dataverse
-        _logger.LogDebug("Job {JobId} not found in memory store, querying Dataverse", jobId);
 
         try
         {
-            var processingJob = await _jobService.GetProcessingJobAsync(jobId, cancellationToken);
-            if (processingJob != null)
+            var requested = Convert.FromBase64String(request.Document!.ContentBase64 ?? string.Empty);
+            var existingDocumentId = request.Document.ExistingDocumentId!.Value;
+
+            // FR-02 (task 014): the document's STORED bytes are stamped; the request's are not. Comparing them
+            // raw would therefore never match, and this check would answer "not the same operation" for every
+            // retry — writing a redundant SPE version each time and silently undoing task 047's guarantee. So
+            // compare like with like: stamp the request exactly as the save would. This is sound because
+            // stamping is byte-DETERMINISTIC and a re-stamp with the same id is a true no-op, which also makes
+            // it correct for a round-tripped document whose bytes already carry this id.
+            var content = OfficeDocumentStamp.Stamp(requested, existingDocumentId).Bytes;
+
+            var target = await _documentPersistence.ResolveVersionTargetAsync(
+                existingDocumentId, cancellationToken);
+            var holdsContent = content.Length > 0 && target is { HasSpePointers: true }
+                ? await _storageUploader.ItemHoldsContentAsync(target.DriveId!, target.ItemId!, content, cancellationToken)
+                : null;
+
+            if (holdsContent == true)
             {
-                // Map Dataverse ProcessingJob to JobStatusResponse
-                // ProcessingJob fields: Id, Name, JobType, Status, Progress, IdempotencyKey, CorrelationId
-                dynamic dvJob = processingJob;
-
-                // Map Dataverse status values to JobStatus enum
-                // Dataverse: 1 = Running, 2 = Completed, 3 = Failed, 4 = Cancelled
-                var dvStatus = (int?)dvJob.Status ?? 1;
-                var status = dvStatus switch
-                {
-                    1 => JobStatus.Running,
-                    2 => JobStatus.Completed,
-                    3 => JobStatus.Failed,
-                    4 => JobStatus.Cancelled,
-                    _ => JobStatus.Running
-                };
-
-                var isCompleted = status == JobStatus.Completed;
-                var response = new JobStatusResponse
-                {
-                    JobId = jobId,
-                    Status = status,
-                    JobType = JobType.EmailSave, // Default to EmailSave for Office jobs
-                    Progress = isCompleted ? 100 : ((int?)dvJob.Progress ?? 0),
-                    CurrentPhase = isCompleted ? "Complete" : "Processing",
-                    CreatedAt = DateTimeOffset.UtcNow, // Not stored in Dataverse yet
-                    CompletedAt = isCompleted ? DateTimeOffset.UtcNow : null
-                };
-
-                _logger.LogInformation(
-                    "Job {JobId} found in Dataverse: Status={Status}, Progress={Progress}",
-                    jobId,
-                    response.Status,
-                    response.Progress);
-
-                return response;
+                return true;
             }
+
+            _logger.LogInformation(
+                "Completed job {JobId} carries this version save's key, but document {DocumentId} {State}; " +
+                "treating the save as a new operation (task 047).",
+                existingJob.JobId,
+                request.Document.ExistingDocumentId,
+                holdsContent == false
+                    ? "now holds different content (a later save wrote another version)"
+                    : "could not be read to confirm it still holds this content");
+            return false;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Not provably the same operation. The save proceeds, and its own validation refuses or writes.
+            _logger.LogWarning(ex,
+                "Could not confirm that completed job {JobId} still describes its document; treating the save as a new " +
+                "operation (task 047).",
+                existingJob.JobId);
+            return false;
+        }
+    }
+
+    private static string HashContent(string? contentBase64) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(contentBase64 ?? string.Empty)));
+
+    /// <summary>
+    /// Task 025 (spaarkeai-word-add-in-r1), extended to immutable captures by task 054: decides what a
+    /// create's name collision means and what to do about it — the ENTIRE collision-resolution contract in
+    /// one auditable place, mirroring the shape of <see cref="ResolveVersionTargetAsync"/> (a
+    /// decision-or-refusal tuple, no job/response mechanics inside it). Returns EITHER a refusal
+    /// (<see cref="SaveError"/>; <c>Upload</c> is the original, still-collided result and MUST NOT be used
+    /// further) OR the upload to continue processing with (<c>Refusal</c> is <c>null</c>). Never both;
+    /// never neither.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Three outcomes, in the order they are decided.</b></para>
+    /// <list type="number">
+    /// <item><b>Nothing owns the name</b> — an orphan left by an earlier attempt that uploaded but failed
+    /// before its Dataverse row was written. Reclaimed via <see cref="ConflictBehavior.Replace"/> rather
+    /// than refused, or a transient failure would become a permanent lockout (task 025).</item>
+    /// <item><b>The name is owned, the content is IMMUTABLE, and the stored file already holds exactly
+    /// these bytes</b> (task 054) — that is the content duplicate the suppress path exists for, so the
+    /// upload proceeds under <see cref="ConflictBehavior.Replace"/> exactly as it did before this task and
+    /// the caller's dedup branch answers it. Unreachable for Document.</item>
+    /// <item><b>Otherwise the name is owned</b> — refused with <see cref="OfficeErrorCodes.NameCollision"/>,
+    /// having written nothing.</item>
+    /// </list>
+    /// <para><b>Task 054 — why the CONTENT is compared, and why before the upload.</b> An immutable
+    /// capture's safety net is content-hash dedup, which runs AFTER the upload because the hash is SPE's; a
+    /// name refusal must decide BEFORE it. A name alone cannot separate the two cases that share it: two
+    /// saves of the SAME capture are a duplicate suppress is right to collapse, while two DIFFERENT emails
+    /// that happen to share a user-typed name are two documents that must become two files. What separates
+    /// them is the content, and <see cref="OfficeStorageUploader.ItemHoldsContentAsync"/> (task 047) answers
+    /// exactly that against the already-stored item before anything is written — a byte comparison, never a
+    /// re-implemented hash, so it cannot disagree with what SPE holds.
+    /// <c>ContentDedupDetector</c> is deliberately NOT touched: its answer is correct for its other callers
+    /// (email-r2, Compose), and the ordering problem belongs to this caller.</para>
+    /// <para><b>Fail-safe.</b> A collision target that cannot be resolved or read answers "not provably
+    /// identical" and is REFUSED. A refusal is recoverable — the user renames and retries; overwriting
+    /// another document's file is not. Same direction as task 046's cleanup guard.</para>
+    /// <para><b>Document saves are unchanged by task 054.</b> Two Word drafts that are byte-identical right
+    /// now are still two distinct drafts (NFR-08), so an editable collision is refused on the NAME alone,
+    /// exactly as task 025 left it. Only an editable refusal can carry <c>CanSaveAsVersion = true</c>: FR-11's
+    /// version-save retry is Document-only — an Email/Attachment save carrying <c>ExistingDocumentId</c>
+    /// ignores it and creates its own document (pinned by
+    /// <c>OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_IgnoresIt_AndBehavesAsBefore</c>),
+    /// so advertising that retry for an immutable capture would offer the pane a choice the server does not
+    /// honour.</para>
+    /// <para><b>Task 088 (UAT-5).</b> Every OWNED collision now carries the owning document's id and display
+    /// name, whatever its content type and wherever it is filed, so the pane can offer "Open". The version
+    /// retry is the separate <c>CanSaveAsVersion</c> flag (editable AND filed to the target record). The
+    /// endpoint strips id, name and flag when the caller cannot read that document.</para>
+    /// </remarks>
+    private async Task<(SaveError? Refusal, OfficeStorageUploader.UploadResult Upload)> ResolveNameCollisionAsync(
+        OfficeStorageUploader.UploadResult collidedUpload,
+        string containerId,
+        string fileName,
+        Stream contentStream,
+        SaveContentType contentType,
+        // Task 055 (#1005): the record this save is filing to. Used ONLY to compare against the colliding
+        // document's own associations — a pure comparison, never an authorization decision (that is the
+        // endpoint's, per ADR-008 and notes/055-collision-names-its-target.md §2).
+        SaveEntityReference? targetEntity,
+        CancellationToken cancellationToken)
+    {
+        // Resolve which row already holds this name in this drive — read-only, best-effort — so the pane
+        // can offer "Save as new version" as a direct retry through the ALREADY-SHIPPED version-save path
+        // (Document.ExistingDocumentId + IsNewVersion), never a second write mechanism.
+        //
+        // Task 055: this lookup now also returns the row's display name and direct associations, from the
+        // SAME single query — an id alone cannot answer "which document is this" or "is it filed where the
+        // caller is filing", and both are required before offering to write into it.
+        var collisionTarget = collidedUpload.DriveId is { } collisionDriveId
+            ? await _documentPersistence.FindCollisionTargetByLocationAsync(collisionDriveId, fileName, cancellationToken)
+            : null;
+        var collidingDocumentId = collisionTarget?.DocumentId;
+
+        if (collidingDocumentId is null)
+        {
+            // The colliding item is UNREFERENCED — no sprk_document points at it. Without this reclaim, a
+            // create that uploads successfully but then fails BEFORE the Dataverse row is written (a
+            // transient Dataverse error, task 039's FailNextDocumentCreate scenario) would leave an
+            // orphaned item that PERMANENTLY refuses every retry under the same name — turning a transient
+            // failure into a lockout, which is a worse outcome than the D1 defect this task removes.
+            // Reclaiming is safe here specifically because nothing owns the name: no existing document's
+            // bytes are at risk, so Replace is the ORIGINAL, still-correct semantics for "this name is mine
+            // to use." Never reached for an owned collision — that always returns the refusal below.
+            _logger.LogInformation(
+                "Name collision on '{FileName}' resolved to an unreferenced item (no owning document); " +
+                "reclaiming it rather than refusing.",
+                fileName);
+
+            // The stream was already read once by the collided attempt (Fail still sends the PUT body;
+            // Graph rejects only after receiving it) — rewind before reusing it, or the reclaim would
+            // upload zero/partial bytes. MemoryStream (every Document save's content stream) is always
+            // seekable; the CanSeek guard is defensive for any future non-seekable source, which would
+            // instead surface as an ordinary upload failure below rather than silently corrupting content.
+            if (contentStream.CanSeek)
+            {
+                contentStream.Position = 0;
+            }
+
+            var reclaimed = await _storageUploader.UploadToSpeAsync(
+                containerId, fileName, contentStream, cancellationToken, ConflictBehavior.Replace);
+            return (null, reclaimed);
+        }
+
+        var isEditable = OfficeDocumentPersistence.IsEditableContent(contentType);
+
+        if (!isEditable)
+        {
+            // Task 054: the name is owned AND this is an immutable capture, so the question the suppress
+            // path would have answered after the upload has to be answered now, from the content.
+            var holdsSameContent = await CollisionTargetHoldsRequestContentAsync(
+                collidingDocumentId.Value, contentStream, cancellationToken);
+
+            if (holdsSameContent == true)
+            {
+                // The stored file already holds exactly these bytes, so this save IS the duplicate the
+                // immutable suppress path is for. Continue under Replace — byte-for-byte the behaviour
+                // before task 054 — and let ContentDedupDetector reconcile it as it always has. The
+                // rewind matters: Fail still sends the PUT body, so the stream was consumed, and reading
+                // it for the comparison above consumed it again.
+                _logger.LogInformation(
+                    "Name collision on '{FileName}' resolved to document {ExistingDocumentId}, whose file already "
+                    + "holds exactly these bytes; continuing as a content duplicate rather than refusing.",
+                    fileName, collidingDocumentId);
+
+                if (contentStream.CanSeek)
+                {
+                    contentStream.Position = 0;
+                }
+
+                var deduplicated = await _storageUploader.UploadToSpeAsync(
+                    containerId, fileName, contentStream, cancellationToken, ConflictBehavior.Replace);
+                return (null, deduplicated);
+            }
+
+            _logger.LogWarning(
+                "Name collision refused: '{FileName}' is already held by document {ExistingDocumentId}, whose file "
+                + "{State}. Nothing was uploaded, so that document's file is untouched.",
+                fileName, collidingDocumentId,
+                holdsSameContent == false
+                    ? "holds different content — this is a different capture that happens to share the name"
+                    : "could not be read to confirm its content (fail-safe: an unknown is never 'identical')");
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Name collision refused: a file named '{FileName}' already exists (existing document {ExistingDocumentId}).",
+                fileName, collidingDocumentId);
+        }
+
+        // ══ TASK 055 (#1005 / ISS-006) — the version retry is offered ONLY when the colliding document is
+        // ══ already filed where this save is filing. (Task 088: that is now the CanSaveAsVersion flag; the
+        // ══ document's identity travels regardless, for the pane's "Open".)
+        //
+        // The defect this closes: Word's default upload name is "Untitled Document.docx" (getSubject() falls
+        // back to it whenever the Title property is blank, which is the norm) and containers are
+        // BUSINESS-UNIT scoped with a flat root — so that one name is a single shared slot for an entire
+        // business unit. A collision therefore routinely resolves an UNRELATED document. Offering "Save as
+        // new version" against it wrote a patent report as a version of a stranger's row, profiled and
+        // RAG-indexed under it, while the matter the user selected received nothing: the version path sends
+        // no TargetEntity (task 023 D-4/D-5, deliberately and correctly), so the caller's chosen record is
+        // silently discarded and the bytes land wherever the COLLIDING document happens to be filed.
+        //
+        // The fix is to withhold the offer, NOT to re-associate. Re-associating would re-file another user's
+        // document onto this caller's record — worse than the defect, and across the authorization boundary
+        // task 023 drew. An empty association set (the orphan actually observed on 2026-09-18) is a
+        // non-match by construction, which is why this is phrased as "matches", never "does not conflict".
+        var associationMatches = targetEntity is { EntityId: var targetId }
+            && collisionTarget is not null
+            && collisionTarget.DirectAssociationIds.Contains(targetId);
+
+        // Immutable captures get no version-save retry either — FR-11's version path is Document-only.
+        var canSaveAsVersion = isEditable && associationMatches;
+
+        if (isEditable && !associationMatches)
+        {
+            _logger.LogInformation(
+                "Collision refusal for '{FileName}': the owning document {ExistingDocumentId} is not filed to "
+                + "the record this save targets, so no version retry is offered.",
+                fileName, collidingDocumentId);
+        }
+
+        // ══ TASK 088 (UAT-5) — the identity travels on EVERY owned collision; the version retry is a FLAG.
+        //
+        // Until task 088 the id's PRESENCE was the version-retry signal, so the #1005 rule above had to
+        // withhold the identity to withhold the offer — which also took away any way to reach the other file
+        // ("Name Already Exists" offered Keep both + Dismiss only, UAT-5). The two meanings are now separate:
+        // CanSaveAsVersion carries the #1005 rule, and the id + name let the pane offer "Open". Nothing here is
+        // an authorization decision: the endpoint (WithholdCollisionIdentityIfUnauthorizedAsync, ADR-008)
+        // strips the id, the name AND the flag unless the caller holds Read on that document, and Open itself
+        // goes through GET /api/documents/{id}/open-links, whose filter re-checks Read.
+        return (new SaveError
+        {
+            Code = OfficeErrorCodes.NameCollision,
+            Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
+            Retryable = false,
+            FileName = fileName,
+            ExistingDocumentId = collidingDocumentId,
+            // The name travels WITH the id, never without it.
+            ExistingDocumentName = collisionTarget?.DocumentName,
+            CanSaveAsVersion = canSaveAsVersion
+        }, collidedUpload);
+    }
+
+    /// <summary>
+    /// Task 054 (spaarkeai-word-add-in-r1): does the document that already owns a collided name hold EXACTLY
+    /// the bytes this save is trying to upload? <c>true</c> / <c>false</c> when the comparison was actually
+    /// made; <c>null</c> when it could not be (the row carries no SPE pointers, its file could not be read,
+    /// or the row itself could not be resolved). An unknown is never "identical" — the caller refuses.
+    /// </summary>
+    /// <remarks>
+    /// Reuses the two seams that already exist for this exact question rather than adding a third:
+    /// <see cref="OfficeDocumentPersistence.ResolveVersionTargetAsync"/> for the row's SPE pointers, and
+    /// <see cref="OfficeStorageUploader.ItemHoldsContentAsync"/> (task 047) for the byte comparison — which
+    /// stops at the first differing byte and never reads more than the request's own length.
+    /// </remarks>
+    private async Task<bool?> CollisionTargetHoldsRequestContentAsync(
+        Guid collidingDocumentId,
+        Stream contentStream,
+        CancellationToken cancellationToken)
+    {
+        OfficeDocumentPersistence.VersionTarget? target;
+        try
+        {
+            target = await _documentPersistence.ResolveVersionTargetAsync(collidingDocumentId, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "Could not resolve sprk_document {DocumentId}, which owns a collided name; its content is unknown.",
+                collidingDocumentId);
+            return null;
+        }
+
+        // No pointers means there is no stored file to compare against — not "the same", just unknown.
+        if (target is not { HasSpePointers: true })
+        {
+            return null;
+        }
+
+        var content = ReadAllBytes(contentStream);
+        if (content.Length == 0)
+        {
+            return null;
+        }
+
+        return await _storageUploader.ItemHoldsContentAsync(
+            target.DriveId!, target.ItemId!, content, cancellationToken);
+    }
+
+    /// <summary>
+    /// Task 054: the full content of a save's content stream, rewound first so the stream can still be
+    /// uploaded afterwards. Every save's stream is an in-memory, seekable one built in <c>SaveAsync</c>.
+    /// </summary>
+    private static byte[] ReadAllBytes(Stream content)
+    {
+        if (content.CanSeek)
+        {
+            content.Position = 0;
+        }
+
+        using var buffer = new MemoryStream();
+        content.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
+    /// <summary>
+    /// FR-11 (task 023): validates a version save's intent and resolves its target row. Returns the target, or
+    /// a refusal whose code is distinct per cause. Runs BEFORE any ProcessingJob, SPE write or document row.
+    /// </summary>
+    private async Task<(OfficeDocumentPersistence.VersionTarget? Target, SaveError? Refusal)> ResolveVersionTargetAsync(
+        DocumentMetadata document,
+        CancellationToken cancellationToken)
+    {
+        // IsNewVersion is the explicit-intent half of the contract. A request naming an existing document while
+        // declaring "not a new version" is ambiguous, and both guesses are data-integrity faults: a second row
+        // (the defect this path removes) or an overwrite nobody asked for. So it is refused, not interpreted.
+        if (!document.IsNewVersion)
+        {
+            return (null, new SaveError
+            {
+                Code = "OFFICE_018",
+                Message = "A save that names an existing document must set isNewVersion to true. Nothing was saved.",
+                Retryable = false
+            });
+        }
+
+        var existingDocumentId = document.ExistingDocumentId!.Value;
+        var target = await _documentPersistence.ResolveVersionTargetAsync(existingDocumentId, cancellationToken);
+
+        if (target is null)
         {
             _logger.LogWarning(
-                ex,
-                "Failed to query Dataverse for job {JobId}, returning not found",
-                jobId);
+                "Version save refused: existing document {ExistingDocumentId} was not found.", existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_016",
+                Message = "The document this save was meant to add a version to could not be found. Nothing was saved.",
+                Retryable = false
+            });
         }
 
-        // Job not found in Dataverse either
-        _logger.LogDebug("Job {JobId} not found in Dataverse", jobId);
-        return null;
+        if (!target.HasSpePointers)
+        {
+            // Never fall back to uploading a fresh item: that is a second document, not a version.
+            _logger.LogWarning(
+                "Version save refused: existing document {ExistingDocumentId} has no SPE pointers.", existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_017",
+                Message = "The document this save was meant to add a version to has no file in storage. Nothing was saved.",
+                Retryable = false
+            });
+        }
+
+        // uac-r2 task 171: the version is written AS THE APPLICATION (the user may hold no role on the container — every
+        // secure container, and any BU container they were not added to), so the row's pointer must name a container and
+        // item this document may use. Under OBO, SPE's own ACL did that; under app-only a re-pointed row would otherwise
+        // let a Write holder overwrite another container's file. Reuses OFFICE_017 ("no usable file in storage") rather
+        // than minting a code the task pane has no message for — the file this row names is not one it may write.
+        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                existingDocumentId, target.DriveId, target.ItemId, cancellationToken).ConfigureAwait(false))
+        {
+            _logger.LogWarning(
+                "Version save refused: existing document {ExistingDocumentId}'s storage pointer could not be verified.",
+                existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_017",
+                Message = "The document's file in storage could not be verified, so a new version could not be written. "
+                          + "Nothing was saved. An administrator must repair the document's storage location.",
+                Retryable = false
+            });
+        }
+
+        return (target, null);
     }
+
+    /// <summary>
+    /// FR-11 (task 023): the version path's write half — a new SPE version of the target's own drive item, the
+    /// target row's file metadata refreshed, and finalization queued against the EXISTING document id.
+    /// </summary>
+    /// <remarks>
+    /// <para>No row is created (the one-row invariant) and no membership <c>Added</c> event is published (no
+    /// new row, so no ownership change). The job phases reuse the names the task pane keys its progress list
+    /// on (<c>FileUploaded</c>, <c>RecordsCreated</c>, <c>Complete</c> — <c>useSaveFlow.ts</c>); on this path
+    /// <c>RecordsCreated</c> means "the existing record was updated".</para>
+    /// </remarks>
+    private async Task<SaveResponse> CompleteVersionSaveAsync(
+        OfficeDocumentPersistence.VersionTarget target,
+        SaveRequest request,
+        string userId,
+        HttpContext httpContext,
+        Guid jobId,
+        JobStatusResponse jobRecord,
+        string idempotencyKey,
+        string correlationId,
+        Stream content,
+        string sanitizedFileName,
+        long fileSize,
+        CancellationToken cancellationToken)
+    {
+        var driveId = target.DriveId!;
+        var itemId = target.ItemId!;
+
+        var write = await _storageUploader.WriteNewVersionAsync(driveId, itemId, content, cancellationToken);
+        if (!write.Success)
+        {
+            jobRecord = jobRecord with
+            {
+                Status = JobStatus.Failed,
+                CurrentPhase = "UploadFailed",
+                CompletedAt = DateTimeOffset.UtcNow
+            };
+            await _jobs.RecordAsync(jobRecord, write.Error, cancellationToken);
+
+            var code = write.ErrorCode ?? "OFFICE_012";
+            return new SaveResponse
+            {
+                Success = false,
+                Error = new SaveError
+                {
+                    Code = code,
+                    Message = code switch
+                    {
+                        "OFFICE_017" => "The document's file was not found in storage, so a new version could not be written. Nothing was saved.",
+                        "OFFICE_019" => "The document is locked for editing, so a new version could not be written. Nothing was saved; try again when it is released.",
+                        "OFFICE_009" => "You do not have permission to write this document's file. Nothing was saved.",
+                        _ => "Failed to write the new version to storage"
+                    },
+                    Details = write.Error,
+                    Retryable = code is "OFFICE_012" or "OFFICE_019"
+                }
+            };
+        }
+
+        jobRecord = jobRecord with { Status = JobStatus.Running, Progress = 30, CurrentPhase = "FileUploaded" };
+        await _jobs.RecordAsync(jobRecord, null, cancellationToken);
+
+        var metadataRefreshed = await _documentPersistence.RecordNewVersionAsync(
+            target, write.ItemName, write.WebUrl, fileSize, cancellationToken);
+
+        jobRecord = jobRecord with { Progress = 50, CurrentPhase = "RecordsCreated" };
+        await _jobs.RecordAsync(jobRecord, null, cancellationToken);
+
+        // The EXISTING document id and the SAME drive item: downstream artifacts and AI attach to this record.
+        // The file name is SPE's (a PUT by item id does not rename the item), falling back to the row's.
+        // Task 029: isVersionSave stamps THIS save's job id on the payload, so the profile and index refresh for the
+        // version just written instead of being answered "already processed" by the first save's keys.
+        await _jobQueue.QueueUploadFinalizationAsync(
+            jobId,
+            idempotencyKey,
+            correlationId,
+            userId,
+            request,
+            driveId,
+            itemId,
+            write.ItemName ?? target.FileName ?? sanitizedFileName,
+            fileSize,
+            target.DocumentId,
+            isVersionSave: true,
+            owningTeamId: null, // a version save creates no document; its row keeps its existing owner
+            cancellationToken);
+
+        jobRecord = jobRecord with
+        {
+            Status = JobStatus.Completed,
+            Progress = 100,
+            CurrentPhase = "Complete",
+            CompletedAt = DateTimeOffset.UtcNow,
+            // Task 039 (finding 3): the EXISTING document — a version never creates one.
+            Result = DocumentResult(target.DocumentId, itemId, driveId, write.WebUrl)
+        };
+        await _jobs.RecordAsync(jobRecord, null, cancellationToken);
+
+        _logger.LogInformation(
+            "ProcessingJob {JobId} completed: new SPE version of item {ItemId} saved to existing document {DocumentId} " +
+            "(metadata refreshed: {MetadataRefreshed}, comment supplied: {HasComment}). Finalization queued.",
+            jobId, itemId, target.DocumentId, metadataRefreshed, !string.IsNullOrWhiteSpace(request.Document?.VersionComment));
+
+        return new SaveResponse
+        {
+            Success = true,
+            Duplicate = false,
+            JobId = jobId,
+            StatusUrl = $"/api/office/jobs/{jobId}",
+            StreamUrl = $"/api/office/jobs/{jobId}/stream"
+        };
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Task 060 (#1084): read from the job's Dataverse row through <see cref="OfficeJobStatusService"/>. It used to be a
+    /// process-wide static dictionary, with a Dataverse fallback that read an anonymous type through <c>dynamic</c> and
+    /// therefore threw in production, so a restart or a second instance answered 404.
+    /// </remarks>
+    public Task<JobStatusResponse?> GetJobStatusAsync(
+        Guid jobId,
+        string? userId,
+        CancellationToken cancellationToken = default)
+        => _jobs.GetAsync(jobId, userId, cancellationToken);
 
     /// <inheritdoc />
     public Task<JobStatusResponse?> GetJobStatusAsync(
         Guid jobId,
         CancellationToken cancellationToken = default)
     {
-        // Delegate to the main method without ownership validation
-        // This overload is used by authorization filters to verify job existence
-        return GetJobStatusAsync(jobId, userId: null, cancellationToken);
+        // Without ownership validation: authorization filters use this overload to verify the job exists and read its
+        // recorded creator.
+        return _jobs.GetAsync(jobId, userId: null, cancellationToken);
     }
-
     /// <inheritdoc />
     public Task<bool> IsHealthyAsync(CancellationToken cancellationToken = default)
     {
@@ -636,523 +1805,46 @@ public class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
-    public async Task<EntitySearchResponse> SearchEntitiesAsync(
+    /// <remarks>Delegates to <see cref="OfficeSearchService"/> (task 059). The search code moved there verbatim.</remarks>
+    public Task<EntitySearchResponse> SearchEntitiesAsync(
         EntitySearchRequest request,
         string userId,
+        Guid callerSystemUserId,
         CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Entity search requested: Query='{Query}', Types={EntityTypes}, Skip={Skip}, Top={Top}, User={UserId}",
-            request.Query,
-            request.EntityTypes != null ? string.Join(",", request.EntityTypes) : "all",
-            request.Skip,
-            request.Top,
-            userId);
-
-        // Determine which entity types to search
-        var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
-
-        // TRACKED: GitHub #229 - Replace with Dataverse queries once tables exist
-        // The implementation should:
-        // 1. Build FetchXML queries for each entity type with 'contains' filter on name fields
-        // 2. Execute queries in parallel for performance
-        // 3. Combine and sort results by relevance + recency
-        // 4. Apply pagination (skip/top) to combined results
-        // 5. Filter by user permissions (Dataverse handles this via security roles)
-
-        // For now, return stub data for testing the endpoint structure
-        var results = GenerateStubResults(request.Query, typesToSearch, request.Top);
-        var totalCount = results.Count + (request.Skip > 0 ? request.Skip : 0);
-
-        await Task.CompletedTask; // Simulate async operation
-
-        return new EntitySearchResponse
-        {
-            Results = results.Skip(request.Skip).Take(request.Top).ToList(),
-            TotalCount = totalCount,
-            HasMore = totalCount > request.Skip + request.Top
-        };
-    }
-
-    /// <summary>
-    /// Determines which entity types to search based on the request.
-    /// </summary>
-    private static HashSet<AssociationEntityType> GetEntityTypesToSearch(string[]? requestedTypes)
-    {
-        // If no types specified, search all
-        if (requestedTypes == null || requestedTypes.Length == 0)
-        {
-            return new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
-        }
-
-        var typesToSearch = new HashSet<AssociationEntityType>();
-        foreach (var typeStr in requestedTypes)
-        {
-            if (Enum.TryParse<AssociationEntityType>(typeStr, ignoreCase: true, out var entityType))
-            {
-                typesToSearch.Add(entityType);
-            }
-        }
-
-        // If no valid types were specified, search all
-        return typesToSearch.Count > 0
-            ? typesToSearch
-            : new HashSet<AssociationEntityType>(Enum.GetValues<AssociationEntityType>());
-    }
-
-    /// <summary>
-    /// Generates stub results for testing. Will be replaced with actual Dataverse queries.
-    /// </summary>
-    private static List<EntitySearchResult> GenerateStubResults(
-        string query,
-        HashSet<AssociationEntityType> entityTypes,
-        int maxResults)
-    {
-        var results = new List<EntitySearchResult>();
-        var queryLower = query.ToLowerInvariant();
-
-        // Generate test data that matches the query
-        var testData = new[]
-        {
-            new { Type = AssociationEntityType.Matter, Name = "Smith vs Jones Matter", Info = "Client: Acme Corp | Status: Active", Primary = "SMJ-2024-001" },
-            new { Type = AssociationEntityType.Matter, Name = "Acme Contract Dispute", Info = "Client: Acme Corp | Status: Open", Primary = "ACD-2024-002" },
-            new { Type = AssociationEntityType.Project, Name = "Acme Implementation Project", Info = "Phase: Development | Due: 2026-06-01", Primary = "PROJ-001" },
-            new { Type = AssociationEntityType.Project, Name = "Smith Foundation Audit", Info = "Phase: Planning | Due: 2026-03-15", Primary = "PROJ-002" },
-            new { Type = AssociationEntityType.Invoice, Name = "INV-2024-0001", Info = "Amount: $15,000 | Status: Pending", Primary = "Acme Corp" },
-            new { Type = AssociationEntityType.Invoice, Name = "INV-2024-0002", Info = "Amount: $8,500 | Status: Paid", Primary = "Smith Foundation" },
-            new { Type = AssociationEntityType.Account, Name = "Acme Corporation", Info = "Industry: Manufacturing | City: Chicago", Primary = "acme@acmecorp.com" },
-            new { Type = AssociationEntityType.Account, Name = "Smith Foundation", Info = "Industry: Non-Profit | City: Boston", Primary = "info@smithfoundation.org" },
-            new { Type = AssociationEntityType.Contact, Name = "John Smith", Info = "Company: Acme Corp | Title: CEO", Primary = "john.smith@acmecorp.com" },
-            new { Type = AssociationEntityType.Contact, Name = "Jane Acme", Info = "Company: Acme Corp | Title: CFO", Primary = "jane.acme@acmecorp.com" }
-        };
-
-        foreach (var item in testData)
-        {
-            // Only include if type is requested
-            if (!entityTypes.Contains(item.Type))
-                continue;
-
-            // Only include if query matches name, info, or primary field
-            var matchesQuery = item.Name.ToLowerInvariant().Contains(queryLower) ||
-                               item.Info.ToLowerInvariant().Contains(queryLower) ||
-                               item.Primary.ToLowerInvariant().Contains(queryLower);
-
-            if (!matchesQuery)
-                continue;
-
-            results.Add(new EntitySearchResult
-            {
-                Id = Guid.NewGuid(),
-                EntityType = item.Type,
-                LogicalName = GetLogicalName(item.Type),
-                Name = item.Name,
-                DisplayInfo = item.Info,
-                PrimaryField = item.Primary,
-                IconUrl = $"/icons/{item.Type.ToString().ToLowerInvariant()}.svg",
-                ModifiedOn = DateTimeOffset.UtcNow.AddDays(-Random.Shared.Next(1, 30))
-            });
-
-            if (results.Count >= maxResults)
-                break;
-        }
-
-        // Sort by relevance (exact match first) then by recency
-        return results
-            .OrderByDescending(r => r.Name.ToLowerInvariant().StartsWith(queryLower))
-            .ThenByDescending(r => r.ModifiedOn)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Gets the Dataverse logical name for an entity type.
-    /// </summary>
-    private static string GetLogicalName(AssociationEntityType entityType) => entityType switch
-    {
-        AssociationEntityType.Matter => "sprk_matter",
-        AssociationEntityType.Project => "sprk_project",
-        AssociationEntityType.Invoice => "sprk_invoice",
-        AssociationEntityType.Account => "account",
-        AssociationEntityType.Contact => "contact",
-        _ => throw new ArgumentOutOfRangeException(nameof(entityType))
-    };
+        => _search.SearchEntitiesAsync(request, userId, callerSystemUserId, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<DocumentSearchResponse> SearchDocumentsAsync(
-        DocumentSearchRequest request,
-        string userId,
+    /// <remarks>Delegates to <see cref="OfficeSearchService"/> (task 059).</remarks>
+    public Task<ReferenceListResponse> GetReferenceListAsync(
+        OfficeReferenceList list,
         CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Document search requested: Query='{Query}', EntityType={EntityType}, EntityId={EntityId}, ContentType={ContentType}, Skip={Skip}, Top={Top}, User={UserId}",
-            request.Query,
-            request.EntityType?.ToString() ?? "any",
-            request.EntityId?.ToString() ?? "none",
-            request.ContentType ?? "any",
-            request.Skip,
-            request.Top,
-            userId);
-
-        // TRACKED: GitHub #229 - Replace with Dataverse/SpeFileStore queries
-        // The implementation should:
-        // 1. Build FetchXML query for sprk_document with filters:
-        //    - Name/filename contains query (case-insensitive)
-        //    - sprk_matter/sprk_project/etc. filter by EntityType + EntityId
-        //    - sprk_contenttype contains ContentType if specified
-        //    - modifiedon date range if ModifiedAfter/ModifiedBefore specified
-        //    - sprk_graphdriveid = ContainerId if specified
-        // 2. Check user permissions via Dataverse security roles
-        // 3. Get thumbnail URLs from SPE via SpeFileStore (batch Graph API call)
-        // 4. Determine CanShare for each document based on user's permissions
-        // 5. Map to DocumentSearchResult DTOs
-
-        // Generate stub data for testing the endpoint structure
-        var results = GenerateStubDocumentResults(request);
-        var totalCount = results.Count + (request.Skip > 0 ? request.Skip : 0);
-
-        await Task.CompletedTask; // Simulate async operation
-
-        return new DocumentSearchResponse
-        {
-            Results = results.Skip(request.Skip).Take(request.Top).ToList(),
-            TotalCount = totalCount,
-            HasMore = totalCount > request.Skip + request.Top
-        };
-    }
-
-    /// <summary>
-    /// Generates stub document results for testing. Will be replaced with actual Dataverse/SPE queries.
-    /// </summary>
-    private static List<DocumentSearchResult> GenerateStubDocumentResults(DocumentSearchRequest request)
-    {
-        var results = new List<DocumentSearchResult>();
-        var queryLower = request.Query.ToLowerInvariant();
-
-        // Generate test data that matches the query
-        var testDocuments = new[]
-        {
-            new
-            {
-                Name = "Contract Agreement v2",
-                FileName = "Contract Agreement v2.docx",
-                ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                Size = 245678L,
-                AssocType = AssociationEntityType.Matter,
-                AssocName = "Smith vs Jones",
-                Description = "Final version of the service contract",
-                ModifiedBy = "John Doe"
-            },
-            new
-            {
-                Name = "Financial Report Q4",
-                FileName = "Financial Report Q4 2025.xlsx",
-                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                Size = 1024567L,
-                AssocType = AssociationEntityType.Account,
-                AssocName = "Acme Corporation",
-                Description = "Q4 2025 financial summary",
-                ModifiedBy = "Jane Smith"
-            },
-            new
-            {
-                Name = "Project Proposal",
-                FileName = "Project Proposal - Acme.pdf",
-                ContentType = "application/pdf",
-                Size = 512000L,
-                AssocType = AssociationEntityType.Project,
-                AssocName = "Acme Implementation Project",
-                Description = "Initial project proposal document",
-                ModifiedBy = "Bob Wilson"
-            },
-            new
-            {
-                Name = "Invoice INV-2024-0001",
-                FileName = "Invoice INV-2024-0001.pdf",
-                ContentType = "application/pdf",
-                Size = 89000L,
-                AssocType = AssociationEntityType.Invoice,
-                AssocName = "INV-2024-0001",
-                Description = "Invoice for consulting services",
-                ModifiedBy = "Jane Smith"
-            },
-            new
-            {
-                Name = "Meeting Notes",
-                FileName = "Meeting Notes 2026-01-15.docx",
-                ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                Size = 45000L,
-                AssocType = AssociationEntityType.Contact,
-                AssocName = "John Smith",
-                Description = "Notes from client meeting",
-                ModifiedBy = "John Doe"
-            }
-        };
-
-        var baseDate = DateTimeOffset.UtcNow;
-        var index = 0;
-
-        foreach (var doc in testDocuments)
-        {
-            // Apply query filter - search name, filename, description
-            var matchesQuery = doc.Name.ToLowerInvariant().Contains(queryLower) ||
-                               doc.FileName.ToLowerInvariant().Contains(queryLower) ||
-                               doc.Description.ToLowerInvariant().Contains(queryLower);
-
-            if (!matchesQuery)
-                continue;
-
-            // Apply EntityType filter
-            if (request.EntityType.HasValue && doc.AssocType != request.EntityType.Value)
-                continue;
-
-            // Apply ContentType filter (partial match)
-            if (!string.IsNullOrEmpty(request.ContentType) &&
-                !doc.ContentType.Contains(request.ContentType, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var documentId = Guid.NewGuid();
-            var modifiedDate = baseDate.AddDays(-index - 1);
-
-            // Apply date range filters
-            if (request.ModifiedAfter.HasValue && modifiedDate < request.ModifiedAfter.Value)
-                continue;
-
-            if (request.ModifiedBefore.HasValue && modifiedDate > request.ModifiedBefore.Value)
-                continue;
-
-            results.Add(new DocumentSearchResult
-            {
-                Id = documentId,
-                Name = doc.Name,
-                FileName = doc.FileName,
-                WebUrl = $"https://spaarke.com/documents/{documentId}",
-                ContentType = doc.ContentType,
-                Size = doc.Size,
-                ModifiedDate = modifiedDate,
-                ModifiedBy = doc.ModifiedBy,
-                ThumbnailUrl = null, // Thumbnails would be fetched from SPE in real implementation
-                AssociationType = doc.AssocType,
-                AssociationId = Guid.NewGuid(),
-                AssociationName = doc.AssocName,
-                ContainerId = Guid.NewGuid(),
-                Description = doc.Description,
-                CanShare = true // In real implementation, check user permissions
-            });
-
-            index++;
-        }
-
-        // Sort by modification date (most recent first)
-        return results.OrderByDescending(r => r.ModifiedDate).ToList();
-    }
+        => _search.GetReferenceListAsync(list, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<ShareLinksResponse> CreateShareLinksAsync(
-        ShareLinksRequest request,
-        string userId,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Share links requested for {DocumentCount} documents by user {UserId}",
-            request.DocumentIds.Count,
-            userId);
-
-        var links = new List<DocumentLink>();
-        var errors = new List<ShareLinkError>();
-        var invitations = new List<ShareInvitation>();
-
-        // Generate share links for each document
-        foreach (var documentId in request.DocumentIds)
-        {
-            // Simulate permission check - in real implementation, query Dataverse
-            var hasSharePermission = await SimulateSharePermissionCheckAsync(documentId, userId, cancellationToken);
-
-            if (!hasSharePermission)
-            {
-                errors.Add(new ShareLinkError
-                {
-                    DocumentId = documentId,
-                    Code = "OFFICE_009",
-                    Message = "Access denied. User lacks share permission for this document."
-                });
-                continue;
-            }
-
-            // Get document metadata - in real implementation, from Dataverse query
-            var documentMetadata = await GetDocumentMetadataForLinkAsync(documentId, cancellationToken);
-
-            if (documentMetadata == null)
-            {
-                errors.Add(new ShareLinkError
-                {
-                    DocumentId = documentId,
-                    Code = "OFFICE_007",
-                    Message = "Document not found."
-                });
-                continue;
-            }
-
-            // Generate shareable URL
-            var shareUrl = GenerateShareLinkUrl(documentId);
-
-            links.Add(new DocumentLink
-            {
-                DocumentId = documentId,
-                Url = shareUrl,
-                DisplayName = documentMetadata.DisplayName,
-                FileName = documentMetadata.FileName,
-                ContentType = documentMetadata.ContentType,
-                Size = documentMetadata.Size,
-                IconUrl = GetDocumentIconUrl(documentMetadata.ContentType)
-            });
-        }
-
-        // Process invitations if grantAccess is true and recipients are provided
-        if (request.GrantAccess && request.Recipients?.Count > 0)
-        {
-            invitations = await ProcessShareInvitationsAsync(
-                request.Recipients,
-                request.DocumentIds,
-                request.Role,
-                userId,
-                cancellationToken);
-        }
-
-        return new ShareLinksResponse
-        {
-            Links = links,
-            Invitations = invitations.Count > 0 ? invitations : null,
-            Errors = errors.Count > 0 ? errors : null,
-            CorrelationId = Guid.NewGuid().ToString()
-        };
-    }
-
-    /// <summary>
-    /// Simulates permission check for share access.
-    /// </summary>
-    private Task<bool> SimulateSharePermissionCheckAsync(
-        Guid documentId,
-        string userId,
-        CancellationToken cancellationToken)
-    {
-        // TRACKED: GitHub #229 - Replace with Dataverse security role check
-        _logger.LogDebug(
-            "Permission check for document {DocumentId} by user {UserId}",
-            documentId,
-            userId);
-
-        return Task.FromResult(true);
-    }
-
-    /// <summary>
-    /// Gets document metadata for link generation.
-    /// </summary>
-    private Task<ShareLinkDocumentMetadata?> GetDocumentMetadataForLinkAsync(
-        Guid documentId,
-        CancellationToken cancellationToken)
-    {
-        // TRACKED: GitHub #229 - Replace with Dataverse query
-        var shortId = documentId.ToString("N").Substring(0, 8);
-        return Task.FromResult<ShareLinkDocumentMetadata?>(new ShareLinkDocumentMetadata
-        {
-            DisplayName = $"Document {shortId}",
-            FileName = $"document-{shortId}.docx",
-            ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            Size = 245678
-        });
-    }
-
-    /// <summary>
-    /// Generates a shareable URL for a document.
-    /// </summary>
-    private static string GenerateShareLinkUrl(Guid documentId)
-    {
-        // TRACKED: GitHub #233 - Make base URL configurable via appsettings
-        const string baseUrl = "https://spaarke.app/doc";
-        return $"{baseUrl}/{documentId}";
-    }
-
-    /// <summary>
-    /// Gets an icon URL based on content type.
-    /// </summary>
-    private static string? GetDocumentIconUrl(string? contentType)
-    {
-        if (string.IsNullOrEmpty(contentType))
-            return "/icons/document.svg";
-
-        return contentType switch
-        {
-            var t when t.Contains("word") => "/icons/word.svg",
-            var t when t.Contains("excel") || t.Contains("spreadsheet") => "/icons/excel.svg",
-            var t when t.Contains("powerpoint") || t.Contains("presentation") => "/icons/powerpoint.svg",
-            var t when t.Contains("pdf") => "/icons/pdf.svg",
-            var t when t.StartsWith("image/") => "/icons/image.svg",
-            var t when t.StartsWith("video/") => "/icons/video.svg",
-            var t when t.StartsWith("audio/") => "/icons/audio.svg",
-            var t when t.StartsWith("text/") => "/icons/text.svg",
-            _ => "/icons/document.svg"
-        };
-    }
-
-    /// <summary>
-    /// Processes external sharing invitations.
-    /// </summary>
-    private async Task<List<ShareInvitation>> ProcessShareInvitationsAsync(
-        IReadOnlyList<string> recipients,
-        IReadOnlyList<Guid> documentIds,
-        ShareLinkRole role,
-        string userId,
-        CancellationToken cancellationToken)
-    {
-        var invitations = new List<ShareInvitation>();
-
-        foreach (var email in recipients)
-        {
-            var isExternal = !email.EndsWith("@spaarke.com", StringComparison.OrdinalIgnoreCase);
-
-            if (!isExternal)
-            {
-                invitations.Add(new ShareInvitation
-                {
-                    Email = email,
-                    Status = InvitationStatus.AlreadyHasAccess
-                });
-                continue;
-            }
-
-            _logger.LogInformation(
-                "Creating invitation for external user {Email} to share {DocumentCount} documents with role {Role}",
-                email,
-                documentIds.Count,
-                role);
-
-            invitations.Add(new ShareInvitation
-            {
-                Email = email,
-                Status = InvitationStatus.Created,
-                InvitationId = Guid.NewGuid()
-            });
-        }
-
-        await Task.CompletedTask;
-        return invitations;
-    }
-
-    /// <summary>
-    /// Internal record for document metadata used in link generation.
-    /// </summary>
-    private record ShareLinkDocumentMetadata
-    {
-        public required string DisplayName { get; init; }
-        public required string FileName { get; init; }
-        public string? ContentType { get; init; }
-        public long? Size { get; init; }
-    }
-
-    /// <inheritdoc />
+    /// <remarks>
+    /// <para>Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter, Project, Invoice</b>; other types
+    /// return null (endpoint 403s) until built out.</para>
+    /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created complete by
+    /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
+    /// Field Mapping Framework, the matter-type and practice-area lookups (Matter) or the project-type lookup
+    /// (Project) when supplied, and the Assigned To contact (task 100). Neither writes its entity's number — the
+    /// platform's autonumber assigns <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim).
+    /// A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
+    /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
+    /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
+    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name, the description and the Assigned To contact
+    /// (task 100). It is owned by the caller's business-unit
+    /// default owner team (task 080, invariant I-6), and REFUSED with <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/>
+    /// when no team resolves — no longer best-effort, which left an unresolved caller's invoice app-owned in ROOT.
+    /// There is no impersonated-create helper in the BFF, so ownership is set via the <c>ownerid</c> lookup rather
+    /// than MSCRMCallerID.</para>
+    /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
         QuickCreateRequest request,
         string userId,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -1160,459 +1852,474 @@ public class OfficeService : IOfficeService
             entityType,
             userId);
 
-        // Get the display name for the created entity
-        var displayName = entityType == QuickCreateEntityType.Contact
-            ? $"{request.FirstName} {request.LastName}".Trim()
-            : request.Name ?? "Unnamed";
+        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
+        if (entityType is not (QuickCreateEntityType.Matter
+            or QuickCreateEntityType.Project
+            or QuickCreateEntityType.Invoice))
+        {
+            _logger.LogInformation(
+                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
+                entityType);
+            return null;
+        }
 
-        // TRACKED: GitHub #229 - Implement Dataverse record creation
-        // The implementation should:
-        // 1. Verify user has create permission for the entity type
-        // 2. Build the entity record with appropriate fields based on entity type:
-        //    - Matter: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Project: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Invoice: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Account: name, description, industrycode, address1_city
-        //    - Contact: firstname, lastname, emailaddress1, parentcustomerid (lookup)
-        // 3. Create the record via Dataverse SDK
-        // 4. Return the created record ID and URL
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively
+        }
 
-        // Simulate async Dataverse operation
-        await Task.Delay(100, cancellationToken);
+        // FR-13: Matter (task 030) and Project (task 031) both go through the shared server-side creation service —
+        // load-bearing owner, BU defaults, Field Mapping Framework, plus the matter-type lookup for Matter. Neither
+        // writes its entity's number; a separate on-create numbering component owns both. Invoice stays on the
+        // minimal path below.
+        if (entityType is QuickCreateEntityType.Matter or QuickCreateEntityType.Project)
+        {
+            return await QuickCreateViaCreationServiceAsync(
+                    entityType, name, request, userId, ownerSystemUserId, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
-        // Generate stub response for testing
-        var createdId = Guid.NewGuid();
+        // Invoice only: name, description and Assigned To (task 100, owner UAT round 5 item 3).
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
+
+        var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
+        // sprk_name is sprk_invoice's primary name attribute (live metadata, 2026-10-01). This wrote
+        // "sprk_invoicename", which sprk_invoice does not have, so Dataverse refused every invoice quick-create
+        // (#1079, task 085). sprk_billingevent is the entity that has a sprk_invoicename column.
+        entity["sprk_name"] = name;
+
+        // Task 100 — both columns verified against live metadata (spaarkedev1, 2026-10-05): sprk_description (Memo,
+        // "Description") and sprk_assignedto1 (contact lookup, "Assigned To 1" — the invoice's first Assigned To slot;
+        // sprk_invoice has no sprk_assignedtointernal). The contact id was authorized (caller holds Read) by
+        // QuickCreateSourceAccessFilter before this runs. An invoice has NO server default assignee: absent means
+        // unassigned (unlike Matter/Project, which name the maker — unified-access-control-r2 task 152).
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity[InvoiceDescriptionAttribute] = request.Description.Trim();
+        }
+
+        if (request.AssignedToContactId is { } invoiceAssignee && invoiceAssignee != Guid.Empty)
+        {
+            entity[InvoiceAssignedToAttribute] = new Microsoft.Xrm.Sdk.EntityReference("contact", invoiceAssignee);
+        }
+
+        // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
+        // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the
+        // caller's business-unit DEFAULT OWNER TEAM. A new invoice is filed against nothing here, so the acting user's
+        // business unit decides. This used to be best-effort — an unresolved caller left the invoice app-owned in the
+        // ROOT business unit, invisible to its own creator — and is now a refusal, like Matter and Project.
+        var invoiceOwner = await _ownershipResolver.ResolveOwnerAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
+                    ? callerSystemUserId
+                    : null,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the invoice the app creates.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
+                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
+                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
+            },
+            cancellationToken).ConfigureAwait(false);
+        var invoiceOwnerTeamId = invoiceOwner.IsOwned ? invoiceOwner.OwningTeamId : null;
+
+        if (invoiceOwnerTeamId is null)
+        {
+            // Rendered by the quick-create endpoint's SdapProblemException catch; no row was written.
+            throw new SdapProblemException(
+                OfficeErrorCodes.RecordOwnerUnresolved,
+                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
+                "The new invoice could not be assigned to your business unit's team, so it was not created. Ask an "
+                + "administrator to check that your user has a business unit and that the unit has its default team.",
+                OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
+        }
+
+        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", invoiceOwnerTeamId.Value);
+        invoiceOwner.StampCreatorOn(entity); // task 146 c1-r1 — the Office user, on the app-created invoice
+
+        var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Quick create completed: EntityType={EntityType}, Id={Id}, Name={Name}",
             entityType,
             createdId,
-            displayName);
+            name);
 
         return new QuickCreateResponse
         {
             Id = createdId,
             EntityType = entityType,
             LogicalName = logicalName,
-            Name = displayName,
-            Url = $"https://spaarkedev1.crm.dynamics.com/main.aspx?etn={logicalName}&id={createdId}&pagetype=entityrecord"
-        };
-    }
-
-    /// <inheritdoc />
-    public async Task<RecentDocumentsResponse> GetRecentDocumentsAsync(
-        string userId,
-        int top = 10,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Recent items requested by user {UserId} with limit {Top}",
-            userId,
-            top);
-
-        // TRACKED: GitHub #229 - Replace with Redis + Dataverse queries
-        // The full implementation should:
-        // 1. Query Redis sorted set for recent associations: "recent:associations:{userId}"
-        // 2. Query Redis sorted set for recent documents: "recent:documents:{userId}"
-        // 3. Query Dataverse for user favorites (sprk_userfavorite table)
-        // 4. Validate user still has access to each item (parallel Dataverse permission checks)
-        // 5. Filter out items user no longer has access to
-        // 6. Return top N items per category sorted by most recently used
-
-        // For now, return stub data for testing the endpoint structure
-        var recentAssociations = GenerateStubRecentAssociations(top);
-        var recentDocuments = GenerateStubRecentDocuments(top);
-        var favorites = GenerateStubFavorites(top);
-
-        await Task.CompletedTask; // Simulate async operation
-
-        return new RecentDocumentsResponse
-        {
-            RecentAssociations = recentAssociations,
-            RecentDocuments = recentDocuments,
-            Favorites = favorites
+            Name = name,
+            // Org URL isn't known server-side (the add-in must not be org-pinned); the add-in uses
+            // Id + Name to select the new record as the regarding, not the Url.
+            Url = null
         };
     }
 
     /// <summary>
-    /// Generates stub recent associations for testing. Will be replaced with Redis queries.
-    /// </summary>
-    private static List<RecentAssociation> GenerateStubRecentAssociations(int top)
-    {
-        var associations = new List<RecentAssociation>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Matter,
-                LogicalName = "sprk_matter",
-                Name = "Smith vs Jones Matter",
-                DisplayInfo = "Client: Acme Corp | Status: Active",
-                LastUsed = DateTimeOffset.UtcNow.AddHours(-2),
-                UseCount = 15
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Project,
-                LogicalName = "sprk_project",
-                Name = "Acme Implementation Project",
-                DisplayInfo = "Phase: Development | Due: 2026-06-01",
-                LastUsed = DateTimeOffset.UtcNow.AddHours(-5),
-                UseCount = 8
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                DisplayInfo = "Industry: Manufacturing | City: Chicago",
-                LastUsed = DateTimeOffset.UtcNow.AddDays(-1),
-                UseCount = 23
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Contact,
-                LogicalName = "contact",
-                Name = "John Smith",
-                DisplayInfo = "Company: Acme Corp | Title: CEO",
-                LastUsed = DateTimeOffset.UtcNow.AddDays(-2),
-                UseCount = 5
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Invoice,
-                LogicalName = "sprk_invoice",
-                Name = "INV-2024-0001",
-                DisplayInfo = "Amount: $15,000 | Status: Pending",
-                LastUsed = DateTimeOffset.UtcNow.AddDays(-3),
-                UseCount = 3
-            }
-        };
-
-        return associations
-            .OrderByDescending(a => a.LastUsed)
-            .Take(top)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Generates stub recent documents for testing. Will be replaced with Redis + Dataverse queries.
-    /// </summary>
-    private static List<RecentDocument> GenerateStubRecentDocuments(int top)
-    {
-        var documents = new List<RecentDocument>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Contract Agreement v2.docx",
-                WebUrl = "https://spaarke.com/documents/contract-agreement-v2",
-                ModifiedDate = DateTimeOffset.UtcNow.AddHours(-1),
-                ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                FileSize = 245678,
-                EntityReference = new EntityReference
-                {
-                    Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Matter,
-                    LogicalName = "sprk_matter",
-                    Name = "Smith vs Jones Matter"
-                }
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Financial Report Q4 2025.xlsx",
-                WebUrl = "https://spaarke.com/documents/financial-report-q4",
-                ModifiedDate = DateTimeOffset.UtcNow.AddHours(-3),
-                ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                FileSize = 1024567,
-                EntityReference = new EntityReference
-                {
-                    Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Account,
-                    LogicalName = "account",
-                    Name = "Acme Corporation"
-                }
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Project Proposal - Acme.pdf",
-                WebUrl = "https://spaarke.com/documents/project-proposal-acme",
-                ModifiedDate = DateTimeOffset.UtcNow.AddDays(-1),
-                ContentType = "application/pdf",
-                FileSize = 512000,
-                EntityReference = new EntityReference
-                {
-                    Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Project,
-                    LogicalName = "sprk_project",
-                    Name = "Acme Implementation Project"
-                }
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                Name = "Meeting Notes 2026-01-15.docx",
-                WebUrl = "https://spaarke.com/documents/meeting-notes-20260115",
-                ModifiedDate = DateTimeOffset.UtcNow.AddDays(-5),
-                ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                FileSize = 45000,
-                EntityReference = new EntityReference
-                {
-                    Id = Guid.NewGuid(),
-                    EntityType = AssociationType.Contact,
-                    LogicalName = "contact",
-                    Name = "John Smith"
-                }
-            }
-        };
-
-        return documents
-            .OrderByDescending(d => d.ModifiedDate)
-            .Take(top)
-            .ToList();
-    }
-
-    /// <summary>
-    /// Generates stub favorites for testing. Will be replaced with Dataverse queries.
-    /// </summary>
-    private static List<FavoriteEntity> GenerateStubFavorites(int top)
-    {
-        var favorites = new List<FavoriteEntity>
-        {
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Matter,
-                LogicalName = "sprk_matter",
-                Name = "Smith vs Jones Matter",
-                FavoritedAt = DateTimeOffset.UtcNow.AddDays(-30)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Account,
-                LogicalName = "account",
-                Name = "Acme Corporation",
-                FavoritedAt = DateTimeOffset.UtcNow.AddDays(-25)
-            },
-            new()
-            {
-                Id = Guid.NewGuid(),
-                EntityType = AssociationType.Project,
-                LogicalName = "sprk_project",
-                Name = "Acme Implementation Project",
-                FavoritedAt = DateTimeOffset.UtcNow.AddDays(-15)
-            }
-        };
-
-        return favorites
-            .OrderByDescending(f => f.FavoritedAt)
-            .Take(top)
-            .ToList();
-    }
-
-    /// <inheritdoc />
-    public async Task<ShareAttachResponse> GetAttachmentsAsync(
-        ShareAttachRequest request,
-        string userId,
-        string correlationId,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation(
-            "Attachment packaging requested for {DocumentCount} documents by user {UserId}, DeliveryMode={DeliveryMode}, CorrelationId={CorrelationId}",
-            request.DocumentIds.Length,
-            userId,
-            request.DeliveryMode,
-            correlationId);
-
-        var attachments = new List<AttachmentPackage>();
-        var errors = new List<AttachmentError>();
-        long totalSize = 0;
-
-        // Process each document
-        foreach (var documentId in request.DocumentIds)
-        {
-            try
-            {
-                // TRACKED: GitHub #229 - Replace with real implementation once dependencies available:
-                // 1. Get document from Dataverse via IDataverseService
-                // 2. Verify user has share permission via UAC
-                // 3. Check size limits (25MB per file, 100MB total)
-                // 4. For URL mode: Generate pre-signed download URL
-                // 5. For Base64 mode: Download content from SPE and encode
-
-                // Generate stub attachment for testing
-                var attachment = await PackageAttachmentAsync(
-                    documentId,
-                    request.DeliveryMode,
-                    totalSize,
-                    cancellationToken);
-
-                if (attachment != null)
-                {
-                    // Check if adding this file would exceed total size limit (100MB per spec NFR-03)
-                    const long maxTotalAttachmentSizeBytes = 100 * 1024 * 1024; // 100MB
-                    if (totalSize + attachment.Size > maxTotalAttachmentSizeBytes)
-                    {
-                        _logger.LogWarning(
-                            "Total attachment size would exceed limit. DocumentId={DocumentId}, CurrentTotal={CurrentTotal}, FileSize={FileSize}, Limit={Limit}",
-                            documentId,
-                            totalSize,
-                            attachment.Size,
-                            maxTotalAttachmentSizeBytes);
-
-                        errors.Add(new AttachmentError
-                        {
-                            DocumentId = documentId,
-                            ErrorCode = "OFFICE_005",
-                            Message = $"Adding this file ({attachment.Size / (1024 * 1024):F1}MB) would exceed the total attachment limit of {maxTotalAttachmentSizeBytes / (1024 * 1024)}MB."
-                        });
-                        continue;
-                    }
-
-                    attachments.Add(attachment);
-                    totalSize += attachment.Size;
-
-                    _logger.LogDebug(
-                        "Packaged attachment: DocumentId={DocumentId}, FileName={FileName}, Size={Size}",
-                        documentId,
-                        attachment.FileName,
-                        attachment.Size);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex,
-                    "Failed to package attachment for DocumentId={DocumentId}, CorrelationId={CorrelationId}",
-                    documentId,
-                    correlationId);
-
-                errors.Add(new AttachmentError
-                {
-                    DocumentId = documentId,
-                    ErrorCode = "OFFICE_012",
-                    Message = "Failed to retrieve document from storage."
-                });
-            }
-        }
-
-        _logger.LogInformation(
-            "Attachment packaging completed: {SuccessCount} succeeded, {ErrorCount} failed, TotalSize={TotalSize} bytes, CorrelationId={CorrelationId}",
-            attachments.Count,
-            errors.Count,
-            totalSize,
-            correlationId);
-
-        return new ShareAttachResponse
-        {
-            Attachments = attachments.ToArray(),
-            Errors = errors.Count > 0 ? errors.ToArray() : null,
-            CorrelationId = correlationId,
-            TotalSize = totalSize
-        };
-    }
-
-    /// <summary>
-    /// Packages a single document for attachment.
-    /// Stub implementation - will be replaced with actual SPE and Dataverse calls.
+    /// The Matter (task 030) and Project (task 031) leg of <see cref="QuickCreateAsync"/>, FR-13: delegates to
+    /// <see cref="RecordCreationService"/> and adapts its outcome to this method's contract.
     /// </summary>
     /// <remarks>
-    /// Size limits per spec NFR-03:
-    /// - Single file: 25MB max
-    /// - Total attachments: 100MB max
-    /// - Recommended base64 threshold: 1MB (URL preferred for larger files)
+    /// <para>A structured <see cref="RecordCreationFailure"/> is surfaced as the codebase's typed-problem exception
+    /// (<see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/>) because
+    /// <see cref="IOfficeService.QuickCreateAsync"/> returns <c>QuickCreateResponse?</c> and its signature cannot
+    /// change here: the shared <c>Phase2EndToEndFixture</c> mocks it. The endpoint renders that exception in the
+    /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
+    /// the contract the wizard-migration evaluation consumes.</para>
+    /// <para>Owner attribution is LOAD-BEARING for both (an unresolved caller is refused, 403), unlike the
+    /// best-effort posture the Invoice leg keeps. Every optional field is passed through for both; each path reads
+    /// only its own (<c>MatterTypeId</c> / <c>PracticeAreaId</c> on a Matter, <c>ProjectTypeId</c> on a Project).</para>
     /// </remarks>
-    private async Task<AttachmentPackage?> PackageAttachmentAsync(
-        Guid documentId,
-        AttachmentDeliveryMode deliveryMode,
-        long currentTotalSize,
+    private async Task<QuickCreateResponse?> QuickCreateViaCreationServiceAsync(
+        QuickCreateEntityType entityType,
+        string name,
+        QuickCreateRequest request,
+        string userId,
+        string? ownerSystemUserId,
         CancellationToken cancellationToken)
     {
-        const long maxAttachmentSizeBytes = 25 * 1024 * 1024; // 25MB per file
-        const long recommendedBase64ThresholdBytes = 1 * 1024 * 1024; // 1MB
+        var result = await _recordCreation.CreateAsync(
+            new RecordCreationRequest
+            {
+                EntityType = entityType,
+                Name = name,
+                Description = request.Description,
+                CallerUserId = userId,
+                OwnerSystemUserId = ownerSystemUserId,
+                MatterTypeId = request.MatterTypeId,
+                PracticeAreaId = request.PracticeAreaId,
+                ProjectTypeId = request.ProjectTypeId,
+                AssignedToContactId = request.AssignedToContactId,
+                SourceEntityLogicalName = request.SourceEntityType,
+                SourceRecordId = request.SourceRecordId,
+            },
+            cancellationToken).ConfigureAwait(false);
 
-        // TRACKED: GitHub #229 - Replace with real implementation:
-        // 1. Look up document in Dataverse by ID
-        // 2. Verify SPE pointers exist (GraphDriveId, GraphItemId)
-        // 3. Check user share permission
-        // 4. Validate size constraints
-        // 5. Generate download URL or base64 content based on delivery mode
-
-        // Simulate async operation
-        await Task.Delay(10, cancellationToken);
-
-        // Generate stub data for testing
-        // Use document ID to generate consistent test data
-        var hash = documentId.GetHashCode();
-        var testFiles = new[]
+        if (result.Failure is { } failure)
         {
-            ("Contract.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 245678L),
-            ("Report.pdf", "application/pdf", 512000L),
-            ("Data.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 1024567L),
-            ("Presentation.pptx", "application/vnd.openxmlformats-officedocument.presentationml.presentation", 3145728L),
-            ("Notes.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 45000L)
-        };
-
-        var (filename, contentType, size) = testFiles[Math.Abs(hash) % testFiles.Length];
-
-        // Check single file size limit (25MB per file per spec NFR-03)
-        if (size > maxAttachmentSizeBytes)
-        {
-            _logger.LogWarning(
-                "Attachment exceeds size limit: DocumentId={DocumentId}, Size={Size}, Limit={Limit}",
-                documentId,
-                size,
-                maxAttachmentSizeBytes);
-
-            // In real implementation, this would throw or return an error
-            // For stub, we'll just return a smaller file
-            size = 1024000; // 1MB
+            throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                failure.Code,
+                $"{QuickCreateFieldRequirements.GetDisplayName(entityType)} Not Created",
+                failure.Detail,
+                MapCreationFailureStatus(failure.Kind));
         }
 
-        // URL expiry - 5 minutes per spec
-        var urlExpiry = DateTimeOffset.UtcNow.AddMinutes(5);
-
-        // Generate pre-signed download URL (always required)
-        // In real implementation, this would generate a cryptographic token
-        var downloadToken = Convert.ToBase64String(
-            System.Text.Encoding.UTF8.GetBytes($"{documentId}:{urlExpiry:o}"));
-        var downloadUrl = $"/office/share/attach/{Uri.EscapeDataString(downloadToken)}";
-
-        // For base64 mode, include base64 content for small files
-        string? contentBase64 = null;
-        if (deliveryMode == AttachmentDeliveryMode.Base64)
+        return new QuickCreateResponse
         {
-            if (size > recommendedBase64ThresholdBytes)
+            Id = result.RecordId,
+            EntityType = entityType,
+            LogicalName = result.LogicalName,
+            Name = result.Name,
+            Warnings = result.Warnings.Count > 0 ? result.Warnings : null,
+            // Org URL isn't known server-side (the add-in must not be org-pinned).
+            Url = null
+        };
+    }
+
+    /// <summary><c>sprk_invoice</c> description column (Memo, "Description"; live metadata 2026-10-05, task 100).</summary>
+    internal const string InvoiceDescriptionAttribute = "sprk_description";
+
+    /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
+    internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
+
+    /// <summary>HTTP status for each creation refusal. Every refusal means no row was written.</summary>
+    internal static int MapCreationFailureStatus(RecordCreationFailureKind kind) => kind switch
+    {
+        RecordCreationFailureKind.InvalidInput => StatusCodes.Status400BadRequest,
+        RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
+        // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
+        RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
+        // Task 158 r1: a caller walled off (or without the rights to create under) a secure record — 403; a secure create that
+        // could not be checked or completed (and was removed again) — 500.
+        RecordCreationFailureKind.SecureFilingRefused => StatusCodes.Status403Forbidden,
+        RecordCreationFailureKind.SecureFilingFailed => StatusCodes.Status500InternalServerError,
+        _ => StatusCodes.Status500InternalServerError
+    };
+
+    /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
+    /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c>. The first three entries are the types
+    /// the add-in "Related to" picker offers (Matter/Project/Invoice) and are looked up via
+    /// <see cref="CreateTodoRequest.RegardingEntityType"/>. The <c>Document</c> / <c>Communication</c> entries
+    /// (FR-14, task 035) are the pane's independent "carrying" regarding — looked up via
+    /// <see cref="CreateTodoRequest.DocumentId"/> / <see cref="CreateTodoRequest.CommunicationId"/>, NOT via
+    /// <c>RegardingEntityType</c> — because both a carrier and a record may be set on the same call. See
+    /// <c>notes/035-todo-regarding-decision.md</c>.
+    ///
+    /// <para><b>Internal, not private (task 064).</b> <see cref="Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter"/>
+    /// read-gates exactly the ids this table causes to be WRITTEN, and it drives off this table rather than
+    /// declaring its own copy. That is the forcing function: adding a row here automatically gates the new
+    /// type, and a row that disappears un-gates a write that also stops happening. Two tables would have
+    /// drifted, and the drift's failure direction is an ungated write.</para></summary>
+    internal static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> TodoRegardingMap =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Matter"] = ("sprk_regardingmatter", "sprk_matter"),
+            ["Project"] = ("sprk_regardingproject", "sprk_project"),
+            ["Invoice"] = ("sprk_regardinginvoice", "sprk_invoice"),
+            ["Document"] = ("sprk_regardingdocument", "sprk_document"),
+            ["Communication"] = ("sprk_regardingcommunication", "sprk_communication"),
+        };
+
+    /// <inheritdoc />
+    public async Task<CreateTodoResponse?> CreateTodoAsync(
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Create To Do requested by user {UserId}", userId);
+
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively.
+        }
+
+        // Core sprk_todo body (mirrors CreateTodoWizard's todoService.createTodo — statecode/statuscode Open+Active).
+        var entity = new Microsoft.Xrm.Sdk.Entity("sprk_todo");
+        entity["sprk_name"] = name;
+        entity["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);   // Active
+        entity["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1);  // Open
+
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity["sprk_description"] = request.Description!.Trim();
+        }
+
+        // sprk_duedate is Date-Only — write UTC-midnight of the supplied yyyy-MM-dd (best-effort parse).
+        if (!string.IsNullOrWhiteSpace(request.DueDate)
+            && DateOnly.TryParse(request.DueDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var due))
+        {
+            entity["sprk_duedate"] = due.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        }
+
+        // Priority/Effort scores (client resolved the choice → 0-100 score, mirroring the wizard).
+        entity["sprk_priorityscore"] = request.PriorityScore;
+        entity["sprk_effortscore"] = request.EffortScore;
+
+        // Assignee → CONTACT (sprk_assignedto migrated systemuser → contact, 2026-06-21).
+        if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
+        {
+            entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
+        }
+        else
+        {
+            // Task 083 (#1044 writer half): task 080 made the owner a BU default team (above), so nothing on
+            // the row names the person it is for, and the Daily Briefing (UAC-r2 task 152's people-targeting
+            // surface, which matches sprk_assignedto through the SAME link) could not find it. Default to the
+            // CALLER's linked contact — task 141's link, read through IIdentityNormalizationService exactly as
+            // 141's contract directs (141-link-contract.md §6): resolve the caller's systemuserid with the
+            // existing task-067 resolver (already done by the endpoint into ownerSystemUserId), then
+            // ResolveAsync(...).ContactId. Two contacts on one oid, or an inactive one, resolve to null (141's
+            // ambiguity rule) — never refused: a To Do that is hard to find beats a refused one. Do NOT call
+            // ContactIdentityBinder here; linking is the reconciliation job's and the sign-in resolver's job.
+            Guid? callerContactId = null;
+            if (Guid.TryParse(ownerSystemUserId, out var callerSystemUserId))
             {
-                _logger.LogWarning(
-                    "File exceeds recommended base64 threshold: DocumentId={DocumentId}, Size={Size}, Threshold={Threshold}",
-                    documentId,
-                    size,
-                    recommendedBase64ThresholdBytes);
+                try
+                {
+                    callerContactId = (await _identity.ResolveAsync(callerSystemUserId, cancellationToken)
+                        .ConfigureAwait(false)).ContactId;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "The caller's linked contact could not be resolved for {CallerId}", callerSystemUserId);
+                }
             }
 
-            // Generate stub base64 content (placeholder - real implementation would encode actual file)
-            contentBase64 = Convert.ToBase64String(
-                System.Text.Encoding.UTF8.GetBytes($"Stub content for {documentId}"));
+            if (callerContactId is { } resolvedContactId && resolvedContactId != Guid.Empty)
+            {
+                entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", resolvedContactId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and the "
+                    + "caller has no linked contact, so sprk_assignedto is left blank; the To Do is still "
+                    + "created (never refused) but will not surface in the caller's Daily Briefing until the "
+                    + "link exists",
+                    ownerSystemUserId ?? "(unresolved)",
+                    "caller_has_no_linked_contact");
+            }
         }
 
-        return new AttachmentPackage
+        // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
+        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType)
+            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
+            && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
         {
-            DocumentId = documentId,
-            FileName = filename,
-            ContentType = contentType,
-            Size = size,
-            DownloadUrl = downloadUrl,
-            UrlExpiry = urlExpiry,
-            ContentBase64 = contentBase64
-        };
+            entity[reg.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(reg.LogicalName, regardingId);
+            entity["sprk_regardingrecordid"] = regardingId.ToString();
+            if (!string.IsNullOrWhiteSpace(request.RegardingRecordName))
+            {
+                entity["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
+            }
+
+            // Best-effort record-type ref (denormalized ADR-024 resolver lookup). Non-fatal — the typed lookup
+            // above is the load-bearing relationship; a missing record-type ref only affects cross-entity display.
+            var recordTypeId = await _search.ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
+                .ConfigureAwait(false);
+            if (recordTypeId is { } rtId && rtId != Guid.Empty)
+            {
+                entity["sprk_regardingrecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", rtId);
+            }
+
+            // FR-26 core-ancestor stamp (task 052) — applied AFTER the typed lookup so it cannot be
+            // overwritten. Two of the three types this picker offers are CORE (Matter, Project) and stamp
+            // only themselves; INVOICE is child-class, so the add-in can already file a To Do under an
+            // invoice today and that To Do would otherwise carry no matter/project stamp — invisible to
+            // everyone whose access comes from the invoice's matter.
+            var stamp = await _coreAncestors
+                .StampAsync(entity, reg.LogicalName, regardingId, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!stamp.Succeeded)
+            {
+                // NFR-01 fail-closed, expressed in THIS method's existing error contract: a null return
+                // is what every other guard here uses, and the endpoint maps it to a failure. Creating
+                // the To Do without the stamp would be a silent inheritance hole, which is worse.
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for {RegardingType} {RegardingId}. {Error}",
+                    reg.LogicalName, regardingId, stamp.Error);
+                return null;
+            }
+        }
+
+        // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed.
+        // Independent of the record regarding above: both may be written to the same sprk_todo (constraint:
+        // "Setting only one when both are available is a defect, not a graceful degradation"). Does NOT touch
+        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md).
+        // When a record regarding was chosen above, the stamp is that record's and a carrier adds none (the pair names
+        // the record: CoreAncestorResolver.ClassifyStampSource reads every carrier as a carrier). When NO record was
+        // chosen, a single carrier IS what the To Do is filed under (ClassifyStampSource rule 5) — so it is stamped
+        // from that carrier below (unified-access-control-r2 task 156, verifier round 1 item 8).
+        if (request.DocumentId is { } documentId
+            && documentId != Guid.Empty
+            && TodoRegardingMap.TryGetValue("Document", out var docCarrier))
+        {
+            entity[docCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(docCarrier.LogicalName, documentId);
+        }
+
+        if (request.CommunicationId is { } communicationId
+            && communicationId != Guid.Empty
+            && TodoRegardingMap.TryGetValue("Communication", out var commCarrier))
+        {
+            entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
+        }
+
+        // Carrier-only To Do (no record regarding): stamp it from what it is filed under, so it is BORN with the copy the
+        // storage resolver compares and the reconciliation job keeps fresh. Before this, the carrier-only To Do was
+        // created with no copy, so its first upload answered 409 container_ancestor_stale until the re-stamp landed, and
+        // until then it inherited none of the carrier's project / matter / work assignment (C10 part 2: a child of a
+        // secure record is secure). The ONE classification rule decides: exactly one carrier → that record; a document
+        // AND an email with no record → AmbiguousSource → nothing is stamped (the storage resolver refuses it as
+        // ambiguous, and it inherits nothing — fail closed). Same fail-closed contract as the record regarding above.
+        if (!entity.Contains("sprk_regardingrecordid")
+            && Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.ClassifyStampSource(
+                    "sprk_todo", entity,
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.PartyRegardingColumnNames("sprk_todo"))
+                is { Kind: Sprk.Bff.Api.Services.Dataverse.StampSourceKind.Source, Source: { } carrierSource })
+        {
+            var carrierStamp = await _coreAncestors
+                .StampAsync(entity, carrierSource.Intermediate, carrierSource.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!carrierStamp.Succeeded)
+            {
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for its {CarrierType} {CarrierId}. {Error}",
+                    carrierSource.Intermediate, carrierSource.Id, carrierStamp.Error);
+                return null;
+            }
+        }
+
+        // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
+        // never an individual. RECORD-FIRST — the To Do belongs with what it is filed against: the record regarding
+        // first, then the document or email it was created from, and only when there is neither, the acting user.
+        // Before this, a resolved caller owned the To Do and an unresolved one silently left it app-owned in ROOT.
+        var (todoTeamId, todoCreatorPerson) = await ResolveTodoOwnerTeamAsync(
+            entity, request, userId, ownerSystemUserId, cancellationToken).ConfigureAwait(false);
+        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", todoTeamId);
+        // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the To Do the app creates.
+        Spaarke.Dataverse.RecordCreatorPersonColumn.StampIfKnown(entity, todoCreatorPerson);
+
+        var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Create To Do completed: Id={TodoId}, Name={Name}, Regarding={RegardingType}",
+            todoId, name, request.RegardingEntityType ?? "(none)");
+
+        return new CreateTodoResponse { TodoId = todoId, Name = name };
+    }
+
+    /// <summary>
+    /// The owner team for a new To Do (task 080): the default owner team of the business unit of whatever the To Do
+    /// is filed against — the regarding record, else its document carrier, else its communication carrier — or the
+    /// acting user's when it is filed against nothing.
+    /// </summary>
+    /// <remarks>
+    /// Task 146 (secure-if-any): EVERY parent the To Do carries is passed — the record regarding, its core-ancestor
+    /// stamps, and the document / email carriers — with the first named as the primary (its business unit decides an
+    /// ordinary To Do). Any secure parent makes the To Do the named Secure team's; any named-but-unreadable parent
+    /// refuses rather than being skipped (a carrier could be the secure one). Before 146 only the first target was
+    /// passed, so a To Do on an ordinary matter carrying a SECURE document was owned in the ordinary unit.
+    /// </remarks>
+    /// <exception cref="SdapProblemException"><see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> (403) when no team
+    /// resolves. Thrown rather than returned as null so the endpoint can tell this refusal from its generic one.</exception>
+    private async Task<(Guid Team, Guid? CreatorPerson)> ResolveTodoOwnerTeamAsync(
+        Microsoft.Xrm.Sdk.Entity todo,
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId,
+        CancellationToken cancellationToken)
+    {
+        (string? LogicalName, Guid? Id) target =
+            !string.IsNullOrWhiteSpace(request.RegardingEntityType)
+            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
+            && TodoRegardingMap.TryGetValue(request.RegardingEntityType!, out var regarding)
+                ? (regarding.LogicalName, regardingId)
+                : request.DocumentId is { } documentId && documentId != Guid.Empty
+                    ? (TodoRegardingMap["Document"].LogicalName, documentId)
+                    : request.CommunicationId is { } communicationId && communicationId != Guid.Empty
+                        ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
+                        : (null, null);
+
+        var primary = target.LogicalName is not null && target.Id is { } targetId
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(target.LogicalName, targetId)
+            : null;
+        var todoOwner = await _ownershipResolver.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo, primary) with
+            {
+                CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
+                    ? callerSystemUserId
+                    : null,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                // Task 146 c1-r1 (owner round 13 item 9): the Office user is the person who asked.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
+                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
+                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
+            },
+            cancellationToken).ConfigureAwait(false);
+        var teamId = todoOwner.IsOwned ? todoOwner.OwningTeamId : null;
+
+        return teamId is { } resolvedTeam ? (resolvedTeam, todoOwner.CreatedByPerson) : throw new SdapProblemException(
+            OfficeErrorCodes.RecordOwnerUnresolved,
+            OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
+            target.LogicalName is not null
+                ? "The To Do could not be assigned an owner from the item it is filed to, so it was not created. "
+                  + "Check that the item still exists and that you can open it."
+                : "The To Do could not be assigned an owner from your business unit, so it was not created. Ask an "
+                  + "administrator to check your user record's business unit.",
+            OfficeErrorCodes.GetStatusCode(OfficeErrorCodes.RecordOwnerUnresolved));
     }
 
     /// <inheritdoc />
@@ -1620,419 +2327,5 @@ public class OfficeService : IOfficeService
         Guid jobId,
         string? lastEventId,
         CancellationToken cancellationToken = default)
-    {
-        // Use Channel to produce events - avoids yield-inside-try-catch limitation
-        var channel = System.Threading.Channels.Channel.CreateUnbounded<byte[]>(
-            new System.Threading.Channels.UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = true
-            });
-
-        // Start the producer task
-        _ = ProduceJobStatusEventsAsync(jobId, lastEventId, channel.Writer, cancellationToken);
-
-        return channel.Reader.ReadAllAsync(cancellationToken);
-    }
-
-    /// <summary>
-    /// Produces SSE events for job status streaming and writes them to the channel.
-    /// </summary>
-    private async Task ProduceJobStatusEventsAsync(
-        Guid jobId,
-        string? lastEventId,
-        System.Threading.Channels.ChannelWriter<byte[]> writer,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            _logger.LogInformation(
-                "SSE stream started for job {JobId}, LastEventId={LastEventId}",
-                jobId,
-                lastEventId ?? "none");
-
-            // Parse last event ID for reconnection support
-            long startSequence = 0;
-            if (SseHelper.TryParseLastEventId(lastEventId, out var parsedJobId, out var parsedSequence))
-            {
-                if (parsedJobId == jobId)
-                {
-                    startSequence = parsedSequence;
-                    _logger.LogInformation(
-                        "SSE reconnection detected for job {JobId}, resuming from sequence {Sequence}",
-                        jobId,
-                        startSequence);
-                }
-            }
-
-            long sequence = startSequence;
-            var heartbeatInterval = TimeSpan.FromSeconds(15); // Per spec.md
-            var pollInterval = TimeSpan.FromMilliseconds(500); // Internal poll frequency
-            var lastHeartbeat = DateTimeOffset.UtcNow;
-
-            // Send initial connected event
-            sequence++;
-            var eventId = SseHelper.GenerateEventId(jobId, sequence);
-            await writer.WriteAsync(SseHelper.FormatConnected(jobId, eventId), cancellationToken);
-
-            // Get initial job status and send it
-            var currentStatus = await GetJobStatusAsync(jobId, cancellationToken);
-            if (currentStatus is null)
-            {
-                // Job not found - send error and close
-                _logger.LogWarning("SSE stream: Job {JobId} not found", jobId);
-                await writer.WriteAsync(SseHelper.FormatError(
-                    "OFFICE_008",
-                    "Job not found or has expired",
-                    jobId.ToString()), cancellationToken);
-                return;
-            }
-
-            // Send initial status
-            sequence++;
-            eventId = SseHelper.GenerateEventId(jobId, sequence);
-            await writer.WriteAsync(SseHelper.FormatProgress(
-                currentStatus.Progress,
-                currentStatus.CurrentPhase,
-                eventId), cancellationToken);
-
-            // Send completed phases if any
-            if (currentStatus.CompletedPhases?.Count > 0)
-            {
-                foreach (var phase in currentStatus.CompletedPhases)
-                {
-                    // Only send phases after the reconnection point
-                    sequence++;
-                    if (sequence <= startSequence)
-                        continue;
-
-                    eventId = SseHelper.GenerateEventId(jobId, sequence);
-                    await writer.WriteAsync(SseHelper.FormatStageUpdate(
-                        phase.Name,
-                        "Completed",
-                        phase.CompletedAt,
-                        eventId), cancellationToken);
-                }
-            }
-
-            // Check if job is already in terminal state
-            if (currentStatus.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
-            {
-                sequence++;
-                eventId = SseHelper.GenerateEventId(jobId, sequence);
-
-                if (currentStatus.Status == JobStatus.Completed)
-                {
-                    _logger.LogInformation("SSE stream: Job {JobId} already completed", jobId);
-                    await writer.WriteAsync(SseHelper.FormatJobComplete(
-                        jobId,
-                        currentStatus.Result?.Artifact?.Id,
-                        currentStatus.Result?.Artifact?.WebUrl,
-                        eventId), cancellationToken);
-                }
-                else
-                {
-                    _logger.LogInformation("SSE stream: Job {JobId} already failed/cancelled", jobId);
-                    await writer.WriteAsync(SseHelper.FormatJobFailed(
-                        jobId,
-                        currentStatus.Error?.Code ?? "OFFICE_INTERNAL",
-                        currentStatus.Error?.Message ?? "Job failed",
-                        currentStatus.Error?.Retryable ?? false,
-                        eventId), cancellationToken);
-                }
-
-                return;
-            }
-
-            // Main streaming loop using Redis pub/sub via JobStatusService
-            // Falls back to polling if Redis subscription fails
-            var useRedisSubscription = await _jobStatusService.IsHealthyAsync(cancellationToken);
-
-            if (useRedisSubscription)
-            {
-                _logger.LogInformation(
-                    "SSE stream using Redis pub/sub for job {JobId}",
-                    jobId);
-
-                // Start heartbeat task
-                using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var heartbeatTask = SendHeartbeatsAsync(
-                    jobId,
-                    writer,
-                    heartbeatInterval,
-                    heartbeatCts.Token,
-                    () => sequence);
-
-                try
-                {
-                    // Subscribe to job status updates via Redis pub/sub
-                    await foreach (var update in _jobStatusService.SubscribeToJobAsync(jobId, cancellationToken))
-                    {
-                        // Skip updates we've already sent (based on sequence)
-                        if (update.Sequence <= startSequence)
-                        {
-                            _logger.LogDebug(
-                                "SSE stream: Skipping update with sequence {Sequence} (already sent) for job {JobId}",
-                                update.Sequence,
-                                jobId);
-                            continue;
-                        }
-
-                        // Update our sequence tracker
-                        sequence = Math.Max(sequence, update.Sequence);
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-
-                        // Format and send the SSE event based on update type
-                        var sseEvent = update.UpdateType switch
-                        {
-                            JobStatusUpdateType.Progress => SseHelper.FormatProgress(
-                                update.Progress,
-                                update.CurrentPhase,
-                                eventId),
-
-                            JobStatusUpdateType.StageComplete when update.CompletedPhase is not null =>
-                                SseHelper.FormatStageUpdate(
-                                    update.CompletedPhase.Name,
-                                    "Completed",
-                                    update.CompletedPhase.CompletedAt,
-                                    eventId),
-
-                            JobStatusUpdateType.StageStarted when update.CurrentPhase is not null =>
-                                SseHelper.FormatStageUpdate(
-                                    update.CurrentPhase,
-                                    "Running",
-                                    update.Timestamp,
-                                    eventId),
-
-                            JobStatusUpdateType.JobCompleted => SseHelper.FormatJobComplete(
-                                jobId,
-                                update.Result?.Artifact?.Id,
-                                update.Result?.Artifact?.WebUrl,
-                                eventId),
-
-                            JobStatusUpdateType.JobFailed or JobStatusUpdateType.JobCancelled =>
-                                SseHelper.FormatJobFailed(
-                                    jobId,
-                                    update.Error?.Code ?? "OFFICE_INTERNAL",
-                                    update.Error?.Message ?? "Job failed",
-                                    update.Error?.Retryable ?? false,
-                                    eventId),
-
-                            _ => SseHelper.FormatProgress(update.Progress, update.CurrentPhase, eventId)
-                        };
-
-                        await writer.WriteAsync(sseEvent, cancellationToken);
-
-                        _logger.LogDebug(
-                            "SSE event sent for job {JobId}: Type={UpdateType}, Progress={Progress}",
-                            jobId,
-                            update.UpdateType,
-                            update.Progress);
-
-                        // Terminal states end the stream
-                        if (update.UpdateType is JobStatusUpdateType.JobCompleted
-                            or JobStatusUpdateType.JobFailed
-                            or JobStatusUpdateType.JobCancelled)
-                        {
-                            _logger.LogInformation(
-                                "SSE stream ending for job {JobId} due to terminal state {State}",
-                                jobId,
-                                update.UpdateType);
-                            return;
-                        }
-                    }
-                }
-                finally
-                {
-                    // Cancel heartbeat task
-                    heartbeatCts.Cancel();
-                    try { await heartbeatTask; } catch (OperationCanceledException) { }
-                }
-            }
-            else
-            {
-                // Fallback to polling when Redis is unavailable
-                _logger.LogWarning(
-                    "SSE stream falling back to polling for job {JobId} (Redis unavailable)",
-                    jobId);
-
-                var fallbackPollInterval = TimeSpan.FromMilliseconds(500);
-                var previousStatus = currentStatus.Status;
-                var previousProgress = currentStatus.Progress;
-                var previousPhase = currentStatus.CurrentPhase;
-                var previousCompletedPhaseCount = currentStatus.CompletedPhases?.Count ?? 0;
-                var fallbackLastHeartbeat = DateTimeOffset.UtcNow;
-
-                while (!cancellationToken.IsCancellationRequested)
-                {
-                    // Check if heartbeat is needed
-                    var now = DateTimeOffset.UtcNow;
-                    if (now - fallbackLastHeartbeat >= heartbeatInterval)
-                    {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-                        await writer.WriteAsync(SseHelper.FormatHeartbeat(now, eventId), cancellationToken);
-                        fallbackLastHeartbeat = now;
-                        _logger.LogDebug("SSE heartbeat sent for job {JobId}", jobId);
-                    }
-
-                    await Task.Delay(fallbackPollInterval, cancellationToken);
-
-                    currentStatus = await GetJobStatusAsync(jobId, cancellationToken);
-                    if (currentStatus is null)
-                    {
-                        _logger.LogWarning("SSE stream: Job {JobId} was deleted during streaming", jobId);
-                        await writer.WriteAsync(SseHelper.FormatError(
-                            "OFFICE_008",
-                            "Job no longer exists",
-                            jobId.ToString()), cancellationToken);
-                        return;
-                    }
-
-                    // Send progress updates
-                    if (currentStatus.Progress != previousProgress)
-                    {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-                        await writer.WriteAsync(SseHelper.FormatProgress(
-                            currentStatus.Progress,
-                            currentStatus.CurrentPhase,
-                            eventId), cancellationToken);
-                        previousProgress = currentStatus.Progress;
-                    }
-
-                    // Send completed phase updates
-                    var currentCompletedPhaseCount = currentStatus.CompletedPhases?.Count ?? 0;
-                    if (currentCompletedPhaseCount > previousCompletedPhaseCount)
-                    {
-                        for (var i = previousCompletedPhaseCount; i < currentCompletedPhaseCount; i++)
-                        {
-                            var phase = currentStatus.CompletedPhases![i];
-                            sequence++;
-                            eventId = SseHelper.GenerateEventId(jobId, sequence);
-                            await writer.WriteAsync(SseHelper.FormatStageUpdate(
-                                phase.Name,
-                                "Completed",
-                                phase.CompletedAt,
-                                eventId), cancellationToken);
-                        }
-                        previousCompletedPhaseCount = currentCompletedPhaseCount;
-                    }
-
-                    // Send current phase change
-                    if (currentStatus.CurrentPhase != previousPhase && !string.IsNullOrEmpty(currentStatus.CurrentPhase))
-                    {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-                        await writer.WriteAsync(SseHelper.FormatStageUpdate(
-                            currentStatus.CurrentPhase,
-                            "Running",
-                            DateTimeOffset.UtcNow,
-                            eventId), cancellationToken);
-                        previousPhase = currentStatus.CurrentPhase;
-                    }
-
-                    // Check for terminal state
-                    if (currentStatus.Status != previousStatus &&
-                        currentStatus.Status is JobStatus.Completed or JobStatus.Failed or JobStatus.Cancelled)
-                    {
-                        sequence++;
-                        eventId = SseHelper.GenerateEventId(jobId, sequence);
-
-                        if (currentStatus.Status == JobStatus.Completed)
-                        {
-                            await writer.WriteAsync(SseHelper.FormatJobComplete(
-                                jobId,
-                                currentStatus.Result?.Artifact?.Id,
-                                currentStatus.Result?.Artifact?.WebUrl,
-                                eventId), cancellationToken);
-                        }
-                        else
-                        {
-                            await writer.WriteAsync(SseHelper.FormatJobFailed(
-                                jobId,
-                                currentStatus.Error?.Code ?? "OFFICE_INTERNAL",
-                                currentStatus.Error?.Message ?? $"Job {currentStatus.Status.ToString().ToLowerInvariant()}",
-                                currentStatus.Error?.Retryable ?? false,
-                                eventId), cancellationToken);
-                        }
-                        return;
-                    }
-                    previousStatus = currentStatus.Status;
-                }
-            }
-
-            _logger.LogInformation(
-                "SSE stream ended for job {JobId} (cancellation requested)",
-                jobId);
-        }
-        catch (OperationCanceledException)
-        {
-            _logger.LogInformation(
-                "SSE stream cancelled for job {JobId} (client disconnected)",
-                jobId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(
-                ex,
-                "SSE stream error for job {JobId}",
-                jobId);
-
-            // Send terminal error event per ADR-019
-            try
-            {
-                await writer.WriteAsync(SseHelper.FormatError(
-                    "OFFICE_INTERNAL",
-                    "Internal server error during job status streaming",
-                    jobId.ToString()), CancellationToken.None);
-            }
-            catch
-            {
-                // Ignore errors when writing final error event
-            }
-        }
-        finally
-        {
-            writer.Complete();
-        }
-    }
-
-    /// <summary>
-    /// Sends heartbeat events at regular intervals to keep the SSE connection alive.
-    /// </summary>
-    private async Task SendHeartbeatsAsync(
-        Guid jobId,
-        System.Threading.Channels.ChannelWriter<byte[]> writer,
-        TimeSpan interval,
-        CancellationToken cancellationToken,
-        Func<long> getCurrentSequence)
-    {
-        try
-        {
-            while (!cancellationToken.IsCancellationRequested)
-            {
-                await Task.Delay(interval, cancellationToken);
-
-                var sequence = getCurrentSequence() + 1;
-                var eventId = SseHelper.GenerateEventId(jobId, sequence);
-                var heartbeatEvent = SseHelper.FormatHeartbeat(DateTimeOffset.UtcNow, eventId);
-
-                await writer.WriteAsync(heartbeatEvent, cancellationToken);
-
-                _logger.LogDebug("SSE heartbeat sent for job {JobId}", jobId);
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected when cancellation is requested
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "Error sending heartbeat for job {JobId}",
-                jobId);
-        }
-    }
+        => _jobs.StreamAsync(jobId, lastEventId, cancellationToken);
 }

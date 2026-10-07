@@ -38,7 +38,7 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 020 | Module/widget-entitlement Dataverse schema | P2 | ✅ (Option B; owner-created `sprk_approlemodulemap` 2026-08-10) | 015 | S/h | FULL | — (schema) |
 | 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | ✅ SUPERSEDED-BY-072 (never built as a standalone; the Option-B `ModuleEntitlementResolver` delivered in 072 IS this resolver) | 020 | O/h | FULL | — (auth core) |
 | 022 | GET /me entitlement endpoint (Redis-cached) | P2 | ✅ SUPERSEDED-BY-072 (never built as a standalone; `GET /api/v1/external/me/entitlements` delivered in 072 IS this endpoint) | 021 | O/h | FULL | Group C |
-| 023 | Lazy Contact attribution (oid resolve-or-create) | P2 | 🔲 | 021 | S/h | FULL | Group C |
+| 023 | Lazy Contact attribution (oid resolve-or-create) | P2 | ✅ DELIVERED-BY unified-access-control-r2 task 141 (2026-10-01; contact created at first MEMBER sign-in per owner round 2, superseding FR-11's "no Contact merely by access"; P3 intake requester wiring stays here — `notes/task-023-delivered-by-uac-r2-141.md`) | 021 | S/h | FULL | Group C |
 | 024 | Workforce-plane external-app auth policy | P2 | 🔲 | 015 | O/h | FULL | — (auth) |
 | 025 | D1 workforce role→level grading | P2 | 🔲 | 024 | S/x | FULL | — |
 | 026 | Core-user admin UI (grant/revoke; reuse AccessGrantModal) | P2 | 🔲 | 021 | S/h | FULL | Group C |

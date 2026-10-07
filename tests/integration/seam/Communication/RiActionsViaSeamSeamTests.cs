@@ -149,6 +149,10 @@ public sealed class RiActionsViaSeamSeamTests
             entity.Object,
             new Mock<IFieldMappingDataverseService>().Object,
             new Mock<IServiceScopeFactory>().Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             NullLogger<ActionSeam>.Instance);
 
         var outbox = new OutboxService(entity.Object, NullLogger<OutboxService>.Instance);       // REAL outbox
@@ -192,7 +196,12 @@ public sealed class RiActionsViaSeamSeamTests
         task.Should().NotBeNull("the RI action is created via the Layer-A seam (ADR-013), not a direct write");
         task!.GetAttributeValue<string>("sprk_eventname").Should().Contain("Settlement terms");
         task.GetAttributeValue<EntityReference>("sprk_regardingcommunication")!.Id.Should().Be(h.CommunicationId);
-        task.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(h.OwnerId);
+        // unified-access-control-r2 task 146: a task filed to a record is owned by that record's TEAM (the resolver's
+        // answer over its parents — the communication here), not the recipient; the recipient is still notified
+        // (the ping and the appnotification below) and belongs in Assigned To (task 152; owner B2).
+        task.GetAttributeValue<EntityReference>("ownerid")!.LogicalName.Should().Be("team");
+        task.GetAttributeValue<EntityReference>("ownerid")!.Id.Should().Be(
+            Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
 
         // (2) One outbox row, kind=communication-assessed, IDs + minimal display metadata + regardingRecordId only.
         var outboxRow = h.Creates.SingleOrDefault(e => e.LogicalName == "sprk_notificationoutbox");

@@ -1,0 +1,464 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="unified-access-control-r2">
+  <metadata>
+    <title>C7: workforce identity binding by Entra oid for unlicensed employees (Type 2), plus a reliable systemuser↔contact link for licensed users</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C7 plus owner round-2 decision 4)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <status-note>2026-10-01, branch task/uac-r2-141: code, tests, scripts, docs, notes and handoffs done; Step 9.5 code-review + adr-check run and their findings fixed. NOT "completed": this run was instructed READ-ONLY for live Dataverse/Entra/Azure and to skip the publish-size measurement, so the schema apply, the acct claim, the dev setting, the BFF deploy, the job runs and the manual live gate are pending manual gates (notes/task-141-identity-binding.md §8, G-1..G-9). The main session owns the TASK-INDEX marker.
+2026-10-01, verifier fix round, branch task/uac-r2-141-f1: BLOCKED ON AN OWNER DECISION. The schema asks Dataverse for an alternate key AND field-level security on contact.sprk_externalobjectid, and the platform allows only one (notes §9, CLAUDE.md §6 / §6.5 escalation; recommendation B2: keep FLS on the binding column, put the key on an unsecured mirror column). G-1 is stopped by a preflight in the schema script; every later gate waits with it. All other verifier findings are closed (notes §10).
+2026-10-01, second verifier fix round, branch task/uac-r2-141-f2: STILL BLOCKED ON THE SAME OWNER DECISION (notes §9). Findings 4-6 fixed (notes §12): the registration link's retry claim corrected and the no-retry gap for other environments recorded and logged; the invite lookup failure returns 503 with its own reason code on both endpoints; the read-only oid readers now give the binder's answer (every statecode). Findings 1-3 and 11-15 are the §9 decision and the pending manual gates G-1..G-9, unchanged.
+2026-10-02, third fix round, branch task/uac-r2-141-f3: NOT BLOCKED. Owner round 4 item 4 = B2 implemented (FLS stays on sprk_externalobjectid; the alternate key moves to the unsecured mirror sprk_externalobjectidkey written in the same request as every bind and create; reads unchanged) — criterion 3 met in code, platform-enforced once G-1 runs. The registration-link gap is closed: the identity-link job reconciles every environment this BFF provisions into. The remaining INFO finding is fixed. What remains are the owner-approved live gates G-1..G-8 (run by the main session after deploy) plus a NEW live decision G-1b (the dev provisioning target spaarke-demo has no dev-BFF application user), and the publish-size measurement G-9 (main session). notes §13.</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rewrites identity binding on the authorization path (who a caller IS decides whose grants they inherit), adds Dataverse schema and field security, and adds a background job. Tags bff-api/auth. Security-sensitive per root CLAUDE.md §6.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>An identity-binding mistake is an account takeover: whoever binds to a contact inherits its grants. The collision rule, the member-or-guest test and the removal of three email fallbacks all need judgment, and the live data already contains the collision case (3 of 8 active dev systemusers).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies Infrastructure/ExternalAccess/** (a contended directory). File overlaps with other pending tasks: AccessibleRecordSetService.cs (036, 135), CallerPrincipalResolver.cs (135), ExternalParticipationService.cs (131), MembershipResolverService.cs (152, doc comment only here), IdentityNormalizationService.cs / WorkforcePrincipalResolver.cs (013, re-opened and now depending on 141), ExternalAccessModule.cs (036). Merge serially: run /conflict-check first and rebase onto whichever of 036 / 131 / 135 merged before this task.</parallel-reason>
+    <deps>none (downstream: 013 and 152 depend on 141; the C9 Assigned-To auto-grant work must too)</deps>
+    <tags>bff-api, auth, security, dataverse, identity, testing</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+    <origin>Defect C7 (session26-uac-defects-and-synopsis.md). Owner decision round 2 item 4 and item 10 Q3 (session27-owner-decisions-and-research.md). Delivers spaarke-SPA-external-access-platform-r2 FR-11 / task 023, which was never built. Replaces task 013 / A-18, which is being re-opened in favour of this task.</origin>
+  </metadata>
+
+  <prompt>Build the identity binding that SPA-r2 decided and the owner confirmed on 2026-09-30. A workforce caller binds to a contact through their Entra oid, stored in contact.sprk_externalobjectid. The first sign-in may bind by email only for a home-tenant MEMBER with exactly one match. After that, binding is by oid only. With no match, create a contact keyed by the oid. A person who is both an employee and an invited external user is refused and flagged, because a contact carries one binding. In the same task, link every licensed systemuser to its contact the same way, and maintain sprk_primarycontact. Assigned-To auto-grants, the No Access List for internal users, and briefing "assigned to" matching all depend on that link, and today only 1 of 8 active dev users has it.</prompt>
+
+  <role>SPAARKE platform developer and identity engineer. Knows Entra token claims (oid, tid, acct, idtyp, email, preferred_username), Dataverse alternate keys and field-level security, and the Spaarke CIAM and workforce resolution planes (ADR-028 A1/A2). Follows ADRs strictly.</role>
+
+  <goal>An employee of the configured customer workforce tenant (a member, acct=0) with no Power Apps licence (Type 2) resolves to exactly one contact bound by oid, and no longer gets 403 principal_not_resolved in dev. Every active licensed systemuser either has a verified systemuser↔contact link (contact.sprk_externalobjectid = systemuser.azureactivedirectoryobjectid, and systemuser.sprk_primarycontact pointing at that contact) or carries a durable, operator-visible collision flag. No code path queries contact.azureactivedirectoryobjectid. No path resolves or binds a contact on an unguarded email match: that covers the workforce fallback, the systemuser email fallback in AccessibleRecordSetService, the CIAM first-login fallback and the invite resolve-or-create. SPA-r2 task 023 is recorded as delivered by this task.</goal>
+
+  <context>
+    <background>WHO THIS IS FOR. A Type-2 user is a customer employee without a Power Apps licence who signs in with company SSO. They use SPA and Teams only, never MDA. Four earlier decisions require this user: teams-app-r1 D11 "Option B", SPA-r2 Legal Front Door, UAC-r2 B-4 and ADR-028 A2. The owner's model is that internal workers are matched automatically, external users arrive by invitation, and contact-based users get SPA/Teams only.
+
+WHAT IS BROKEN TODAY. Verified 2026-09-30 against source and against live spaarkedev1.
+1. THE WORKFORCE CONTACT-ONLY BRANCH QUERIES A COLUMN THAT DOES NOT EXIST IN DEV. In `WorkforcePrincipalResolver.cs:153-202` the branch calls `IdentityNormalizationService.TryResolveContactByWorkforceIdentityAsync` (`IdentityNormalizationService.cs:242-303`).
+   - The oid lookup `TryResolveContactIdAsync` (`:535-577`) filters `contact.azureactivedirectoryobjectid` (`:547-550`).
+   - The email query (`:590-654`) SELECTS the same column (`:598`).
+   - The spaarkedev1 contact entity has no such attribute. Both queries throw and are caught as null (`:568-576`, `:646-653`), and `:273-281` then denies. Every Type-2 employee therefore gets 403.
+   - Where the column does exist but is empty (nothing in src writes it; the only write of azureactivedirectoryobjectid is to systemuser, at `RegistrationDataverseService.cs:372`), the email match is a hijack path. Two reasons: `ExtractVerifiedEmail` (`WorkforcePrincipalResolver.cs:220-228`) verifies nothing, and task 013's guard can only deny a contact bound to a different oid, which never exists.
+2. THE INERT-GUARD WARNING IS WRONG. `GuardInertNoBindingColumn` (`IdentityNormalizationService.cs:353`, emitted at `:620-635`) can only fire when the query SUCCEEDS. When the column is absent, the query throws first, so the warning never fires in exactly the environment its comment describes.
+3. A THIRD READER OF THE ABSENT COLUMN. `Services/Ai/Context/CallerContactResolver.cs:112-118` resolves "assign it to me" through `contact.azureactivedirectoryobjectid`. In dev it returns lookup-failed for everyone. The systemuser fallback at `IdentityNormalizationService.cs:146-150` uses the same broken lookup.
+4. THE LICENSED USER'S CONTACT LINK IS MOSTLY MISSING. `IdentityNormalizationService.ResolveAsync` derives a systemuser's contact from `systemuser.sprk_primarycontact` (`:140-150`, read at `:213`/`:222`). `MembershipResolverService.cs:868-889` silently skips Contact-typed membership descriptors (assignedAttorney, assignedParalegal, assignedTo*) when there is no contact and only logs `member_skipped`. Several consumers depend on `sprk_primarycontact`: Assigned-To access (C9, which the owner calls "one of the core reasons for the UAC"), the No Access List for internal users (Q4), briefing "assigned to" matching (Q8, `useInlineTodoCreate.ts:221-237`), and the internal-vs-external badge (`TrackingFieldTrio/index.ts:966-969`).
+5. THE SYSTEMUSER EMAIL FALLBACK BYPASSES EVERY GUARD. With no linked contact, `AccessibleRecordSetService.cs:1022-1026` calls `ResolveExternalContactAsync(oid: null, email: principal.Email)`. That method returns an UNBOUND contact on an email match with `$top=1`, no ambiguity check and no binding (`ExternalParticipationService.cs:333-347`), so a licensed user inherits the grants of any unbound contact that carries their email. `IIdentityNormalizationService.cs:73-75` already records this.
+6. CIAM FALLBACK WEAKNESSES. `ExternalParticipationService.cs`:
+   - `ResolveContactRowByEmailAsync` uses `$top=1` with no ambiguity check (`:423`).
+   - `ResolveContactByOidAsync` uses `$top=1`, so two contacts carrying one oid pick one silently (`:375`).
+   - The oid comparison is a string compare (`:352`), not a parsed-Guid compare.
+   - Neither query filters `statecode`.
+   - `BindOidToContactAsync` (`:460-490`) writes any oid onto an unbound contact.
+   - A failed oid read is indistinguishable from "no contact": `ResolveContactByOidAsync` returns null on a non-success status or an exception (`:384-397`), and `ResolveExternalContactAsync` then falls through to the email fallback (`:327-348`). The email path can then bind the same oid onto a SECOND contact. The workforce oid lookup has the same collapse (`IdentityNormalizationService.cs:564-576`).
+   - `ResolveContactByEmailAsync` (`:404-408`) is public, unguarded (`$top=1`) and has zero callers in src or tests.
+   - The only production caller of the CIAM resolution is `CiamContactPrincipalStrategy` (`CallerPrincipalResolver.cs:339-373`). It collapses every non-resolution into one deny code (`sdap.access.deny.contact_not_found`, `:371-372`), so an ambiguity or collision deny is not distinguishable in the audit trail.
+7. INVITE COLLISION IS SILENT. `InviteExternalUserEndpoint.ResolveOrCreateContactAsync` (`:173-215`) resolves by email with `top: 1`. `ProvisionAsync` (`:127-135`) returns "AlreadyProvisioned" for ANY bound contact, and it is shared with `/invite-and-grant` (`InviteAndGrantExternalUserEndpoint.cs:97`). After this task a bound contact may carry a WORKFORCE oid, so inviting an employee's email would silently skip creating a CIAM account, and the external person could never sign in.
+8. THE LINK IS CACHED. `IdentityNormalizationService.ResolveAsync` caches `PersonIdentity` for 10 minutes (`:55`, written at `:174`) and has no invalidation. An inline link written during a request would therefore not take effect for up to 10 minutes unless the cache entry is replaced.
+9. "HOME TENANT" IS NOT ALWAYS AzureAd:TenantId. D-13 (`notes/D-13-per-customer-bff-app-registration.md` §1): in Model 1 the per-customer BFF app registration lives in SPAARKE's tenant, so a Model-1 customer's employees carry the CUSTOMER's `tid`, not `AzureAd:TenantId`. In Model 2 the registration is in the customer's tenant and the two coincide. A member test keyed only on `AzureAd:TenantId` would refuse every Model-1 Type-2 employee and would auto-bind Spaarke's own staff into a customer's environment. The existing `TenantRouting:Tenants[].Tid` map (`Infrastructure/Routing/TenantEnvironmentRoutingOptions.cs:57-99`) names customer workforce tenants, but it is not configured in `appsettings.template.json`. The multitenant app registration itself (prerequisite E-6) is still open.
+10. `idtyp` IS OPTIONAL AND EXPECTED ABSENT (`notes/task-081-caller-classification.md:38`). The repo's caller-kind classifier is `CallerIdentity.FromPrincipal` (`src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs:229`). It honours `idtyp` when it is present and otherwise uses `scp` and `sub`==`oid`.
+
+OUT OF SCOPE, stated so that nobody "fixes" it by mistake: `ICommunicationDataverseService.QueryContactByEmailAsync` (`src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:3065-3081`, used by communication participant correlation) matches email participants to contacts for indexing. It is not a caller-identity or binding path.
+
+LIVE DATA (spaarkedev1, 2026-09-30):
+- 8 active interactive systemusers.
+- 1 has `sprk_primarycontact`: ralph.schroeder@spaarke.com → contact 8e9918a9. That contact's `sprk_externalobjectid` is 6a9fa229…, NOT the user's oid c74ac1af…
+- 3 users have an email-matched contact already bound to a different (CIAM-written) oid: ralph.schroeder@spaarke.com, eyal.iffergan@spaarke.com and ralph.schroeder@hotmail.com. That is the collision case, live.
+- 1 user (testuser1@spaarke.com) has an UNBOUND email-matched contact, so it is a bind candidate.
+- 4 users (final.test, demo, jake.schroeder and e2e.test2 @demo.spaarke.com) have no contact, so each needs one created.
+- 6 contacts in total carry `sprk_externalobjectid`, and every existing writer is the CIAM path.
+- `sprk_externalobjectid` is a TEXT column, so it cannot say which plane wrote a value.
+
+WHAT SPA-r2 ALREADY DECIDED. spaarke-SPA-external-access-platform-r2 spec FR-11 and assumption spec.md:224 widen `sprk_externalobjectid` to hold a CIAM OR a workforce oid (one field for both planes; oids are globally unique). Task 023 (`projects/spaarke-SPA-external-access-platform-r2/tasks/023-lazy-contact-attribution.poml`, status not-started, no code exists; a grep for ContactAttribution finds nothing) was the build. Its escalation trigger named the cross-plane collision, and the owner has now answered it: refuse and flag.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IIdentityNormalizationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Context/CallerContactResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (CiamContactPrincipalStrategy :339-373: surface the distinct deny code and message)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs (shares ProvisionAsync at :97; the refusal must reach its response as a message)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs (link the contact when a systemuser is created, :355-377; the write must go to the same `targetDataverseUrl`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs (the only caller, :145-152, passes `targetDataverseUrl: environment.DataverseUrl`)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">scripts/Register-EntraAppRegistrations.ps1 (add the `acct` optional claim; today it configures no optional claims, per notes/task-081-caller-classification.md:38)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/appsettings.template.json (the customer-workforce-tenant setting, unless TenantRouting is confirmed as the source)</file>
+      <file role="modify">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (§6.5 App Service configuration, §7.3 identity: the acct claim, the customer-tenant setting, the collision-resolution procedure). `docs/guides/auth-deployment-setup.md` is a RETIRED STUB (retired 2026-08-17) and is not edited.</file>
+      <file role="modify">docs comments only: src/server/api/Sprk.Bff.Api/Services/Ai/Membership/Models/PersonIdentity.cs:7,40; MembershipResolverService.cs:875-877; Infrastructure/DI/AnalysisServicesModule.cs:956; Services/Ai/Context/CallerSystemUserResolver.cs:12 (all describe the retired contact.azureactivedirectoryobjectid cross-ref)</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/WorkforceEmailNoHijackTests.cs (the inert-guard tests :588-620 and the residual note :795-814 are rewritten)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/WorkforcePrincipalResolverTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/IdentityNormalizationServiceTests.cs</file>
+      <file role="modify">tests/integration/seam/Ai/CallerContactResolverSeamTests.cs</file>
+      <file role="modify">projects/spaarke-SPA-external-access-platform-r2/tasks/023-lazy-contact-attribution.poml and projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md:41 (mark delivered by UAC-r2 141)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Scheduling/IScheduledJob.cs (ADR-036 contract for the reconciliation job)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/ExternalAccessReconciliationJob.cs (the safety convention to copy: AddScheduledJob registration, report-only writes switch named positively, a before-state log per row, a failed scan recorded as a failed run, no throw from ExecuteAsync per ADR-036 A1 rule 4)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs:229 (CallerIdentity.FromPrincipal, the caller-kind classifier used to exclude app-only tokens)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Routing/TenantEnvironmentRoutingOptions.cs (existing config map of customer workforce `tid`s)</file>
+      <file role="canonical-reference">IdentityNormalizationService.DecideWorkforceEmailMatch (:482-531) and ReadOidBinding (:435-452), the pure-decision pattern to extend, not replace</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner round 2 item 4 (BINDING)">Scope: every workforce and CIAM contact binding.
+- The binding key is the Entra oid, stored in `contact.sprk_externalobjectid`. There is ONE field for both planes. Do not add a second oid column.
+- An email bind happens ONLY at first sign-in, ONLY with exactly one active matching contact that is unbound, and ONLY for the eligible caller of each plane. On the workforce plane that is a MEMBER of the configured customer workforce tenant. The CIAM and systemuser rules are in the next constraints.
+- After a contact is bound, resolution is by oid only, and email is never consulted again for that caller.
+- On the WORKFORCE plane only, when nothing matches, create a contact keyed by the oid at first sign-in. This is settled by owner round 2 item 4 ("Otherwise create the contact keyed by oid") and Q3, and it supersedes SPA-r2 FR-11's "no Contact merely by having access" wording (step 10 records this). It is not an open question.
+- A contact carries one binding. A person who is both an employee and an invited external user is REFUSED and FLAGGED, never merged and never re-bound.</constraint>
+    <constraint source="owner round 2 item 4 + ADR-003 + D-13">Scope: the member-or-guest decision on the WORKFORCE plane (token callers).
+- A member is a caller whose `tid` is a customer workforce tenant served by this deployment AND whose `acct` claim is 0.
+- The customer workforce tenant is NOT `AzureAd:TenantId` by definition. It coincides with it in Model 2, but not in Model 1 (background item 9). Read it from one explicit, per-deployment configuration source: the existing `TenantRouting:Tenants[].Tid` map if execution confirms it is the authoritative list, otherwise a single new setting documented in the customer deployment guide. An empty or missing value denies every email bind and creation (fail closed). It never defaults to `AzureAd:TenantId`. See the escalation for the choice of source.
+- A guest (`acct` = 1), a caller from any other tenant (including the app registration's own tenant in Model 1 when that is not the customer tenant), or a token with no `acct` claim gets NO email bind and NO contact creation. Such a caller resolves only through an existing oid binding and is otherwise denied.
+- If `acct` is absent, fail closed. Never infer member status from the email domain or from a `#EXT#` UPN.
+- App-only tokens are never bound. Classify with `CallerIdentity.FromPrincipal` (`Spaarke.Core/Auth/CallerIdentity.cs:229`), not with `idtyp` alone, because `idtyp` is optional and expected absent.</constraint>
+    <constraint source="ADR-028 A1 + owner model (externals arrive by invitation)">Scope: the CIAM plane (`ExternalParticipationService`, `CiamContactPrincipalStrategy`).
+- The CIAM plane NEVER creates a contact. External users arrive by invitation, and the invite already writes the oid (`InviteExternalUserEndpoint.cs:141-145`).
+- The CIAM first-login email bind is RETAINED as the repair path for an invite whose oid write failed after the CIAM account was created (`ProvisionAsync` creates the account at `:138` and writes the oid at `:141-145`). It binds only onto exactly one ACTIVE contact that is unbound, is not marked with the Workforce plane, and is not referenced by any systemuser's `sprk_primarycontact`. Anything else is a collision: deny and flag.
+- The `acct` member test does not apply to CIAM local accounts. The CIAM plane is identified as today, by `tid` equal to `Ciam:TenantId` (`CallerPrincipalResolver.cs:302-309`).</constraint>
+    <constraint source="owner round 2 item 4 + D-1">Scope: licensed systemusers linked WITHOUT a token (the reconciliation job and `RegistrationDataverseService`).
+- The oid is `systemuser.azureactivedirectoryobjectid` (directory-synced). The email is `systemuser.internalemailaddress` (directory-synced), never a client value.
+- The member-or-guest rule still applies. A systemuser whose `domainname` marks a B2B guest (`#EXT#`) gets no email bind: create-by-oid when no active contact carries its email; otherwise flag it and write nothing.
+- Only enabled, interactive users are processed (`isdisabled` = false; `accessmode` excludes non-interactive and application users; `applicationid` null).</constraint>
+    <constraint source="owner round 2 item 4">Scope: collisions.
+- A collision is any of: an email match bound to a different oid; an oid carried by more than one contact; a licensed user whose `sprk_primarycontact` points at a contact bound to a different oid; or an invite whose email matches a workforce-bound contact or a contact referenced by a systemuser's `sprk_primarycontact`.
+- Every collision produces a deny or refusal PLUS a durable flag that an operator can see in Dataverse. A log line alone does not count as a flag.
+- The flag records the colliding identity (oid and plane) and the time. Writing it is idempotent: a repeated collision by the same identity does not write again, so a caller retrying a denied sign-in cannot turn the deny path into a stream of Dataverse writes.
+- An operator (System Administrator) resolves a collision in Dataverse by the documented procedure. The next reconciliation run re-evaluates the contact and clears the flag once the collision no longer holds. The procedure is written in the notes and in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
+- The API response carries a message and a distinct reason code, not a bare 500.</constraint>
+    <constraint source="ADR-003">Scope: inactive contacts. An oid carried by an INACTIVE contact denies, with its own deny code. It never falls through to the email bind and never creates a replacement contact. Deactivating a contact is how an operator removes a person, and auto-creation must not undo that.</constraint>
+    <constraint source="ADR-003">Scope: every oid lookup on both planes. A lookup has three outcomes: found, not found and could-not-read. Could-not-read (a non-success status, an exception or a timeout) DENIES. It does not fall through to the email path or to creation. Today both planes collapse it into "not found" (background item 6).</constraint>
+    <constraint source="project (ADR-009 cache)">Scope: the `PersonIdentity` cache. A bind or link written during a request takes effect on that request, either by returning the new identity directly or by replacing the cache entry for that systemuser. It must not wait out the 10-minute TTL.</constraint>
+    <constraint source="project (live data)">Scope: licensed systemusers. NEVER clear or re-point an existing `sprk_primarycontact` automatically. A licensed user whose existing link collides is flagged and left exactly as it is until the owner decides (see escalation). Removing Ralph's link in dev, for example, would silently remove his Assigned-To access.</constraint>
+    <constraint source="SPA-r2 FR-11 + owner round 2">Scope: contact creation.
+- Creation is idempotent by oid: exactly one contact per oid, including when two first sign-ins race.
+- The created contact carries the oid, first and last name and email from the token, and no grants.
+- Creating a contact grants no access. Access still comes only from Dataverse (systemusers) or explicit grants (contacts), as C9 decided.</constraint>
+    <constraint source="D-1 / DATAVERSE-WRITE-PATH-ARCHITECTURE WP-1, WP-5">Scope: where the link is maintained.
+- Every write of the binding and of `sprk_primarycontact` happens in the BFF. No plugin.
+- Systemusers are created outside the product (Entra/PPAC sync), so an ADR-036 `IScheduledJob` reconciliation keeps the link, placed per ADR-052. It is needed because an internal user named in an Assigned-To field needs the link even if they never sign in to the BFF.
+- Inline binding at first resolution and at `RegistrationDataverseService.CreateSystemUserAsync` covers the fast path. No new hand-rolled timer `BackgroundService`.
+- `CreateSystemUserAsync` writes the link to the SAME environment it created the systemuser in (`targetDataverseUrl`).
+- The job copies the safety convention of `ExternalAccessReconciliationJob`. Linking a systemuser to an existing contact hands that user the contact's grants, which is the same class of write as that job's R1. So: an `AddScheduledJob` registration; a writes switch named positively, where absent, empty or unparseable means report-only; a before-state log line for every row it would change; a failed scan recorded as a failed run (never as "nothing to reconcile"); and no throw from `ExecuteAsync`.
+- The switch is a rollout guard, not a deferral. In dev the live gate runs report-only, the report is reviewed, and then writes are enabled.</constraint>
+    <constraint source="project (security, discovered 2026-09-30)">Scope: `contact.sprk_externalobjectid` and `systemuser.sprk_primarycontact`. Once these decide whose grants a caller inherits, anyone with Write on contact could put their own oid on a contact that holds grants. Lock both with field-level security in the same way owner decision round 2 item 2 locks `sprk_issecure`: only the BFF app user can write.
+- READ must stay available to every user who reads the fields today, because a secured column is hidden from anyone without a Read profile. The live client reads are `useInlineTodoCreate.ts:232` (systemuser `_sprk_primarycontact_value`) and `TrackingFieldTrio/index.ts:969` (a filter on `_sprk_primarycontact_value`). Both run as the signed-in user. So Read goes to all users, and Create and Update go only to the write profile.
+- The BFF application user is added to the write profile EXPLICITLY. Do not rely on its current System Administrator role, which D-13 per-customer app users may not carry.
+- Verify the current state live first (the session-27 check found 0 `fieldpermission` rows for the access fields).</constraint>
+    <constraint source="ADR-028">Scope: all changed code. Keep the resolver broker-only: claims are read from the validated token and Dataverse is queried app-only. No OBO or Graph call with the caller token. ADR-028 A4: add no new `.WithClientSecret(...)`. Reuse the existing `IDataverseService` / `ExternalParticipationService` token paths.</constraint>
+    <constraint source="ADR-003">Scope: every resolution path.
+- If the binding state cannot be read, deny.
+- An ambiguous match is denied, never resolved to the first row.
+- Compare oids as parsed `Guid`s, never as strings, and write them in "D" (lowercase, hyphenated) format.
+- Only active contacts (statecode 0) resolve or bind.</constraint>
+    <constraint source="ADR-038">Scope: tests.
+- Decisions are pure functions asserted directly.
+- No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests, no constructor null-check tests.
+- Tests go at the KEEP paths `tests/integration/auth/**` and `tests/unit/Sprk.Bff.Api.Tests/**`.
+- Exercising internals through `InternalsVisibleTo` is an ADR-038 §7 B8 deviation that task 013 left pending (`IdentityNormalizationService.cs:315-321`). Surface it as a CLAUDE.md §6.5 path A/B in the PR. Do not copy it silently.</constraint>
+    <constraint source="owner directive">Scope: live verification. No Dataverse test runs in CI. The live proof is a MANUAL gate that uses the existing non-admin dev test users in their current BUs. Do not propose relocating users.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR.
+- State the placement decision, citing `.claude/constraints/bff-extensions.md`.
+- Measure the publish-size delta against a FRESH build of master, with both sides in fresh short-path worktrees, using PowerShell `Compress-Archive` and equal file counts. The ceiling is 60 MB.
+- Report no new HIGH CVE.
+- Tests are updated for every changed service.</constraint>
+    <constraint source="owner directive">Scope: this whole task. No scope cuts and nothing deferred. Scope discovered during execution is added to this task, not pushed off.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md (C7, :156-178; UC plane notes, :361, :383, :394)</file>
+      <file>projects/unified-access-control-r2/notes/wave2-parallel-merge-plan.md (A-18 residual, :1077-1162; §A16)</file>
+      <file>projects/unified-access-control-r2/notes/task-081-caller-classification.md (optional claims, idtyp)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-11 :59, assumption :224)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/azure-deployment.md (publish-size method)</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Canonical v2 identity binding.</pattern>
+      <pattern name="pure identity decision" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs:482-531">Extend DecideWorkforceEmailMatch into a single decision shared by both planes. Do not fork a second rule.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load the knowledge files and declare FULL rigor. Re-verify every anchor in the background against current source, and re-run the live systemuser and contact queries. Record the 2026-09-30 baseline counts (1 linked, 3 collisions, 1 bind candidate, 4 to create) in notes/task-141-identity-binding.md.</step>
+    <step order="1">Design the single binding decision as a pure function. Its inputs:
+- the plane (Workforce token, CIAM token, or Systemuser without a token);
+- the identity facts (oid; for a Workforce token also tid against the configured customer workforce tenant(s), acct, the CallerIdentity kind and the email claim; for a Systemuser the directory-synced email and the guest marker);
+- the oid lookup result (a three-state value: rows, or could-not-read), including each row's statecode;
+- the email lookup rows, each with its binding, plane marker, statecode and whether any systemuser's `sprk_primarycontact` references it.
+Its outcomes are ResolveByOid / BindByEmail / CreateByOid / Deny(reason) / Collision(reason).
+Write the decision table in the notes before coding. Include every negative case named in the acceptance criteria.
+Resolve the customer-tenant configuration source (see escalation) before coding the member test.</step>
+    <step order="2">Schema, applied to dev in this order (the sequence is binding):
+(a) Confirm `sprk_externalobjectid` carries only well-formed oids today, then normalise them to "D" format.
+(b) Enforce one contact per oid. Use a Dataverse alternate key if the platform accepts it on a column that is null for unbound contacts; otherwise handle create-then-requery for races. Record which approach was used and why.
+(c) Add the plane and collision marker the refusals need (see justification), and backfill the 6 existing bindings as External, because every current writer is CIAM.
+(d) Apply field-level security to `contact.sprk_externalobjectid` and `systemuser.sprk_primarycontact`.
+Export the changes into the owning solution so they deploy to other environments.</step>
+    <step order="3">Workforce plane.
+- Replace every query of `contact.azureactivedirectoryobjectid` (`IdentityNormalizationService.cs:541-550`, `:596-599`, `CallerContactResolver.cs:112-118`) with the `sprk_externalobjectid` binding. Route the systemuser fallback (`:146-150`) through it as well.
+- Wire the decision into `TryResolveContactByWorkforceIdentityAsync` / `WorkforcePrincipalResolver`, including the member test and the create-by-oid write.
+- Make the oid lookup three-state. Could-not-read denies (`TryResolveContactIdAsync`, `:535-577`, currently returns null on an exception).
+- Rewrite or retire `GuardInertNoBindingColumn` so that any warning which remains fires only on a condition that really means the guard cannot discriminate, with an accurate comment. A missing binding column must surface as its own deny code with an error log, not a silent null.</step>
+    <step order="4">Licensed-user link.
+- Inline: when a systemuser resolves with no linked contact, apply the same decision keyed by the systemuser's own oid, then set `sprk_primarycontact`. Make the new link effective on the same request (the cache constraint).
+- `RegistrationDataverseService.CreateSystemUserAsync`: link or create at creation time, in the target environment.
+- Reconciliation: an ADR-036 `IScheduledJob` walks enabled interactive systemusers, links or creates, flags collisions, clears flags whose collision no longer holds, and never re-points an existing link. It is idempotent, pages through users, is cheap when nothing has changed, and reports counts per outcome. It follows the `ExternalAccessReconciliationJob` safety convention.
+- Remove the email fallback at `AccessibleRecordSetService.cs:1022-1026`. A licensed user's contact comes only from the link.</step>
+    <step order="5">CIAM plane (`ExternalParticipationService.cs`):
+- The email fallback reads two rows and denies ambiguity.
+- The oid lookup reads two rows and denies ambiguity.
+- Compare oids as parsed Guids.
+- Filter to active contacts.
+- The oid lookup is three-state. Could-not-read denies and does not fall through to the email fallback.
+- `BindOidToContactAsync` refuses a contact that is already bound (either plane), is marked Workforce, or is referenced by a systemuser's `sprk_primarycontact`. It records the CIAM plane on a successful bind. A failed bind write is not silently "resolved anyway": decide it in the decision table and record the choice.
+- The CIAM plane never creates a contact.
+- Delete `ResolveContactByEmailAsync` (`:404-408`, zero callers), so no unguarded `$top=1` email lookup remains.
+- `CiamContactPrincipalStrategy` (`CallerPrincipalResolver.cs:362-373`) returns the decision's distinct deny code (ambiguity, collision, unreadable, inactive) instead of the single `contact_not_found`.
+Use the same pure decision as the workforce plane, with each plane passing its own facts.</step>
+    <step order="6">Invite path (`InviteExternalUserEndpoint.cs:121-135,173-215`, shared with `InviteAndGrantExternalUserEndpoint.cs:97`):
+- Resolve by email, reading two rows of ACTIVE contacts.
+- A contact bound on the WORKFORCE plane, or referenced by any systemuser's `sprk_primarycontact`, is refused and flagged. The refusal is HTTP 409 with a ProblemDetails message and a distinct reason code, instead of "AlreadyProvisioned". Both `/invite` and `/invite-and-grant` return it, and `/invite-and-grant` writes no grant.
+- A contact bound on the CIAM plane keeps today's idempotent behaviour.
+- An ambiguous email is refused (409, with a message and its own reason code).</step>
+    <step order="7">Configuration and app registration.
+- Add the `acct` optional claim to the BFF access-token configuration in `scripts/Register-EntraAppRegistrations.ps1`. Apply it to the dev BFF registration.
+- Add the customer-workforce-tenant setting chosen in step 1 to `appsettings.template.json` and to the dev configuration.
+- Document both as per-customer app-registration and deployment requirements (D-13) in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (§6.5 / §7.3), the authoritative guide. `auth-deployment-setup.md` is a retired stub. Cover Model 1, where the tenant differs from `AzureAd:TenantId`.</step>
+    <step order="8">Tests at the KEEP paths:
+- The full decision table.
+- Resolver wiring (the contact-only branch no longer denies when a binding exists).
+- CallerContactResolver resolves by the binding.
+- The reconciliation job's decision over row sets.
+- The CIAM ambiguity, Guid-compare, no-create and could-not-read cases.
+- The invite refusal on both `/invite` and `/invite-and-grant`.
+- The Model-1 tenant case and the app-only-token-without-`idtyp` case.
+- A source guard test that fails if any query against the contact entity names `azureactivedirectoryobjectid` again. Prove it bites by seeding one.
+Rewrite the inert-guard tests (`WorkforceEmailNoHijackTests.cs:588-620`) and the residual note (`:795-814`) to match the new behaviour.</step>
+    <step order="9">Deploy the BFF to dev (bff-deploy skill). Run the reconciliation once in report-only mode and review the report against the step-0 baseline. Then enable writes in dev and run it again. Execute the manual live gate in the acceptance criteria. Record the before and after counts and each flagged collision in the notes.</step>
+    <step order="10">Close the paper trail:
+- Mark `projects/spaarke-SPA-external-access-platform-r2/tasks/023-lazy-contact-attribution.poml` as completed with a note "delivered by unified-access-control-r2 task 141". Update SPA-r2 `TASK-INDEX.md:41`.
+- Record in that project's notes that creating a contact at first member sign-in supersedes FR-11's "no Contact merely by access" wording, per owner round 2. The P3 intake-submit requester wiring stays with SPA-r2 as their consumer of this mechanism.
+- Remove the "do not mark A-18 closed" residual at `IIdentityNormalizationService.cs:50-75` and point the re-opened task 013 at this task as the closure of A-18.</step>
+    <step order="11">Run the full BFF unit suite, integration auth tests and NetArchTest. Measure publish size per CLAUDE.md §10. Update this project's TASK-INDEX status to `✅ [done]` and document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>OWNER DECISION on the handling of COLLISION rows for licensed users. It blocks only those rows, not the rest of step 4.
+Dev already has 3 licensed users whose email-matched contact carries a different (CIAM) oid, and one of them (ralph.schroeder@spaarke.com) already has `sprk_primarycontact` pointing at that contact. The rule is "refuse and flag". Options:
+(a) flag, with no new link, until an operator resolves it;
+(b) keep or create a `sprk_primarycontact` link for internal matching while the workforce oid stays unbound;
+(c) create a new, separate contact for the workforce identity.
+RECOMMENDATION: (a), which is also the default until answered. It is the owner's literal rule and it never lets one contact carry two planes' access. It costs no existing access, because the constraint already forbids clearing or re-pointing an existing `sprk_primarycontact` (Ralph's Assigned-To access continues). The dev collisions are test artefacts (internal addresses invited as externals), and an operator resolves each one by deciding which identity keeps the contact.
+Rejected: (b) mixes a CIAM-bound contact's grants into an internal user's accessible set through `AccessibleRecordSetService`'s contact-grant term. (c) creates duplicate contacts for one person, so Assigned-To fields that already name the old contact stop matching.</trigger>
+    <trigger>CONFIGURATION SOURCE for "customer workforce tenant", needed at step 1. If `TenantRouting:Tenants[]` (`TenantEnvironmentRoutingOptions.cs`) is confirmed as the authoritative per-deployment list of customer workforce tenants, use it. If it is not, or if it conflicts with the D-13 Model-1 layout, stop and ask.
+RECOMMENDATION: one explicit per-deployment setting (a list of customer workforce tenant ids). It is written by provisioning, empty means deny, and it never defaults to `AzureAd:TenantId`.
+Do NOT hard-code `AzureAd:TenantId`. In Model 1 that would refuse every customer employee and bind Spaarke's own staff instead (background item 9).</trigger>
+    <trigger>If the `acct` optional claim cannot be issued on the workforce token for this app registration, or cannot be relied on for Teams SSO tokens, STOP. The member test is the security property of the email bind, and replacing it with a domain or UPN heuristic is not an implementation detail. There is no safe fallback. Without `acct`, the constraint already denies both the email bind and creation. Report the Microsoft-documented alternatives, with sources, and let the owner choose. Never infer membership.</trigger>
+    <trigger>If field-level security on `sprk_primarycontact` or `sprk_externalobjectid` breaks an existing client write, STOP rather than drop the lock. A known example would be a form or PCF that sets `sprk_primarycontact`; a 2026-09-30 grep of src found no client writer, only the reads listed in the FLS constraint. Such writes must move behind a BFF endpoint, as for `sprk_issecure` (owner round 2 item 2). Report the writer and the proposed endpoint before building it.</trigger>
+    <trigger>If a ruling requires relaxing any existing alternate key, or making a record's TargetEntity required, STOP. Both are forbidden by owner directive.</trigger>
+    <trigger>If no unlicensed home-tenant MEMBER test account exists in the dev Entra tenant for the live gate, ask the owner for one. Do not relocate an existing user or make one a guest.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grep, 2026-09-30:
+- The binding machinery that exists is CIAM-only and private: `ExternalParticipationService.BindOidToContactAsync` (`:460`) and the invite `ResolveOrCreateContactAsync` (`InviteExternalUserEndpoint.cs:173`, email-keyed, top 1).
+- The SPA-r2 `ContactAttributionService` was never built (a grep for ContactAttribution or EnsureRequesterContact returns nothing).
+- No code writes or reconciles `systemuser.sprk_primarycontact`. A grep of src finds only reads: `IdentityNormalizationService.cs:213,222`, `useInlineTodoCreate.ts:232` and `TrackingFieldTrio/index.ts:969`.
+- Existing ADR-036 jobs, grep `: IScheduledJob`: `ExternalAccessReconciliationJob` (grant expiry stamp, inactive-organization and ended-membership deactivation), `MembershipReconciliationJob` (the `sprk_userentityassociation` junction), `GrantExpiryReminderJob` and `PlaybookSchedulerJob`. None touches identity binding.
+- No contact column records which plane wrote `sprk_externalobjectid`, and none records a binding collision (a grep for sprk_externalidentity, sprk_identityplane, sprk_identitysource, or identity/binding conflict finds nothing relevant).</existing>
+    <extension>Extend first:
+- The decision grows out of `DecideWorkforceEmailMatch` and `ReadOidBinding`.
+- The CIAM and invite paths call it instead of carrying their own copies.
+- Resolution stays in `IdentityNormalizationService` and `ExternalParticipationService`.
+Three things are genuinely new:
+(1) One small binding writer (bind or create by oid, set `sprk_primarycontact`, raise the collision flag), shared by the workforce resolver, registration, the reconciliation job and the CIAM bind. `IdentityNormalizationService` is a read-only resolver with a 10-minute cache, and giving it Dataverse writes adds a second reason to change (CLAUDE.md §11.5). If execution shows the writer fits cohesively in an existing class, extend that class instead and say so in the PR.
+(2) One ADR-036 `IScheduledJob` for reconciliation. It is not folded into `ExternalAccessReconciliationJob`. That job's single reason to change is the lifecycle of grant and membership rows, and it scans `sprk_externalrecordaccess` / `sprk_contactorganization`. This job scans systemusers and contacts for identity binding, which is a different reason to change (CLAUDE.md §11.5). It copies that job's safety convention instead. If execution finds the two share a scan or a schedule cohesively, extend the existing job and say so in the PR.
+(3) Schema: a plane/collision choice column on contact (or the smallest equivalent), plus a uniqueness guarantee on `sprk_externalobjectid`.
+(4) Configuration, only if `TenantRouting:Tenants[]` is not confirmed as the source: one per-deployment list of customer workforce tenant ids (see escalation).</extension>
+    <cost-of-doing-nothing>Concrete failures:
+- Every Type-2 employee is denied 403 principal_not_resolved in dev today.
+- 7 of 8 licensed dev users have no contact link, so Assigned-To access (C9), the No Access List for internal users (Q4) and briefing matching (Q8) silently skip them (`MembershipResolverService.cs:868-889`, member_skipped).
+- `AccessibleRecordSetService.cs:1022-1026` hands a licensed user the grants of any unbound contact that carries their email.
+- Without a plane marker, `ProvisionAsync` (`:127-135`) answers "AlreadyProvisioned" when an employee is invited as an external, so the invitee never gets a CIAM account and nobody is told.
+- Without a uniqueness guarantee, two concurrent first sign-ins create two contacts for one oid, and the next oid lookup is ambiguous and denies.
+- Without an explicit customer-workforce-tenant source, the member test either refuses every Model-1 customer employee or binds Spaarke's own staff into a customer environment.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build, test and publish</tool>
+    <tool name="dataverse MCP / Web API">Schema changes, field security, live verification queries</tool>
+    <tool name="terminal">Publish-size measurement, deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IdentityNormalizationService.cs; Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs; ExternalParticipationService.cs; AccessibleRecordSetService.cs; Api/ExternalAccess/InviteExternalUserEndpoint.cs; Services/Ai/Context/CallerContactResolver.cs; Services/Registration/RegistrationDataverseService.cs; the binding writer and reconciliation job (paths chosen per placement justification)</output>
+    <output type="schema">contact plane/collision marker; sprk_externalobjectid uniqueness; field-level security profile for sprk_externalobjectid and sprk_primarycontact, exported to the owning solution</output>
+    <output type="script">scripts/Register-EntraAppRegistrations.ps1 (acct optional claim)</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/** and tests/unit/Sprk.Bff.Api.Tests/** as listed in relevant-files</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-141-identity-binding.md; SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §6.5/§7.3 (acct claim, customer-tenant setting, collision procedure); SPA-r2 task 023 closure note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a member (tid in the configured customer workforce tenant(s), acct=0) whose oid is already bound to an active contact, the caller resolves to that contact by oid, and email is not consulted.</criterion>
+    <criterion testable="true">Given a member with no oid binding and exactly one active, unbound contact matching their email (not marked with another plane, and not referenced by a systemuser's `sprk_primarycontact` of a different oid), the first sign-in binds the oid to that contact (in "D" format, plane Workforce) and resolves to it. The next sign-in resolves by oid, even if the email claim then differs.</criterion>
+    <criterion testable="true">Given a member with no oid binding and no email match, exactly one contact keyed by the oid is created and resolved. Two concurrent first sign-ins still leave exactly one contact for that oid. The created contact holds no grants.</criterion>
+    <criterion testable="true">Negative (collision): an email match on a contact bound to a different oid, on either plane, is denied, writes no binding, creates no contact and raises a durable collision flag that records the colliding oid and plane. A repeated identical collision writes no second flag.</criterion>
+    <criterion testable="true">Negative (ambiguity): two or more active contacts carrying the email, or two contacts carrying the oid, are denied on both planes. No first-row pick, no create, and a flag is raised.</criterion>
+    <criterion testable="true">Negative (authorization, workforce): a guest (acct=1), a caller whose tid is not a configured customer workforce tenant, a token with no acct claim, or an app-only token as classified by `CallerIdentity.FromPrincipal` (including one with no `idtyp` claim) gets no email bind and no contact creation. It resolves only through an existing oid binding and is otherwise denied with a deny code.</criterion>
+    <criterion testable="true">Negative (authorization, Model 1): with the customer workforce tenant configured as T and `AzureAd:TenantId` set to a different tenant S, an acct=0 member of S gets no email bind and no creation, and an acct=0 member of T does. With the customer-tenant setting empty, nobody gets an email bind or creation.</criterion>
+    <criterion testable="true">Negative: an unreadable binding (malformed or all-zero value) or a Dataverse read failure on either the oid or the email lookup denies on both planes. It never resolves, never binds, never falls through from a failed oid read to the email path, and never creates.</criterion>
+    <criterion testable="true">Negative (inactive): an oid carried only by an INACTIVE contact denies with its own deny code. It does not email-bind another contact and does not create a replacement. An inactive contact is never an email-bind target.</criterion>
+    <criterion testable="true">CIAM never creates a contact, and the CIAM email bind refuses a contact marked Workforce or referenced by a systemuser's `sprk_primarycontact`. `CiamContactPrincipalStrategy` returns the distinct deny code for ambiguity, collision, unreadable and inactive, not the single `contact_not_found`.</criterion>
+    <criterion testable="true">A bind or link written during a request is reflected in that request's resolved identity (contact id present) without waiting for the 10-minute `PersonIdentity` cache TTL.</criterion>
+    <criterion testable="true">No query against the contact entity names `azureactivedirectoryobjectid` anywhere in src. A guard test fails if one is added, and it was shown to bite by seeding one.</criterion>
+    <criterion testable="true">The inert-guard warning is either gone or fires only on a condition that really disables the check, and its comment is accurate. A missing binding column produces its own deny code and an error log.</criterion>
+    <criterion testable="true">`AccessibleRecordSetService` no longer resolves a licensed user's contact by email. The only source is the systemuser↔contact link.</criterion>
+    <criterion testable="true">CIAM: both lookups read two rows and deny ambiguity, oids are compared as parsed Guids, only active contacts resolve, and a bind onto an already-bound contact is refused. `ResolveContactByEmailAsync` no longer exists.</criterion>
+    <criterion testable="true">Invite: on both `/invite` and `/invite-and-grant`, an email matching a WORKFORCE-bound contact, or a contact referenced by a systemuser's `sprk_primarycontact`, is refused with HTTP 409, a ProblemDetails message and a distinct reason code, and is flagged. No CIAM account is created and no grant is written. It is not answered "AlreadyProvisioned". A CIAM-bound contact keeps today's idempotent response. An ambiguous email is refused (409, with a message). No path returns a bare 500.</criterion>
+    <criterion testable="true">Reconciliation decision: over a row set shaped like the 2026-09-30 dev data, the job links the unbound candidate, creates the missing contacts, flags the 3 collisions, leaves the existing `sprk_primarycontact` untouched, and on a second run changes nothing. A guest systemuser (`#EXT#` in `domainname`) is never email-bound. A flag whose collision no longer holds is cleared.</criterion>
+    <criterion testable="true">Reconciliation wiring: the job is registered through the ADR-036 `AddScheduledJob` path with a cron. Its writes switch defaults to report-only when the value is absent, empty or unparseable. In report-only mode it logs the before-state and the intended change for every row and writes nothing. A failed scan ends the run as `Success=false`, never as zero drift.</criterion>
+    <criterion testable="true">`RegistrationDataverseService.CreateSystemUserAsync` links or creates the contact in the same `targetDataverseUrl` environment as the systemuser, never in the default environment.</criterion>
+    <criterion testable="true">`CallerContactResolver` ("assign it to me") resolves through the binding for a linked user and returns an honest unresolved result otherwise.</criterion>
+    <criterion testable="true">Authorization: a non-admin user without the write profile cannot create or update `contact.sprk_externalobjectid` or `systemuser.sprk_primarycontact`. The BFF application user can, through its explicit membership of the write profile. A non-admin user can still READ both fields.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev), using existing test users in their current BUs:
+(1) An unlicensed member of the configured customer workforce tenant signs in to Teams or SPA and resolves (no 403). One contact is bound or created. The second sign-in resolves by oid (App Insights shows the oid path).
+(2) A guest or no-acct token is not bound.
+(3) The 3 known collision emails are refused and flagged, and the refusal is visible to an operator in Dataverse.
+(4) The reconciliation job runs first in report-only mode (it writes nothing, and its report is recorded), then with writes enabled. After that, every enabled interactive systemuser is either linked (`sprk_primarycontact` set and `contact.sprk_externalobjectid` equal to the systemuser oid) or flagged. Before and after counts are recorded.
+(5) A linked internal user named in a contact-typed assigned field (for example `sprk_assignedattorney1`) no longer produces `member_skipped`, and the record appears in their accessible set.
+(6) A non-admin cannot edit the two locked fields in MDA. As that same non-admin, Daily Briefing inline to-do creation still defaults Assigned To (the `useInlineTodoCreate.ts:232` read), and the TrackingFieldTrio access modal still shows an internal user as internal (the `index.ts:969` read).
+(7) A first sign-in by a user who is linked for the first time shows the linked contact on that same request (no 10-minute wait).
+(8) An invite to the email of a workforce-bound dev contact returns 409 with a message and creates no CIAM account.</criterion>
+    <criterion testable="true">`Register-EntraAppRegistrations.ps1` configures the `acct` optional claim, and the deployment guide states it as a per-customer requirement. The dev BFF registration carries it. The customer-workforce-tenant setting is in `appsettings.template.json`, in the dev configuration and in the customer deployment guide, including the Model-1 case.</criterion>
+    <criterion testable="true">The operator procedure for resolving a collision flag is written in the notes and in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.</criterion>
+    <criterion testable="true">SPA-r2 task 023 and its TASK-INDEX row are marked delivered by UAC-r2 141. The A-18 residual comment is removed, and task 013 points to this task.</criterion>
+    <criterion testable="true">The BFF unit suite, integration auth tests and NetArchTest are green. The publish-size delta is measured against fresh master per CLAUDE.md §10 (both sizes, the tool and file counts), and the total is at most 60 MB. There is no new HIGH CVE, and the placement decision is stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+- Defect C7 (session26-uac-defects-and-synopsis.md:156-178). Owner decisions: session27-owner-decisions-and-research.md round 2 item 4, Q3 (first-sign-in link approved) and the "Live fact" paragraph (only 1 of 8 dev systemusers linked).
+- Downstream consumers that depend on the link this task builds: the C9 Assigned-To auto-grant work (Q5: Assigned-* contacts are auto-granted Collaborate), the internal-user No Access List on secure records (Q4), and the notification / Daily Briefing targeting of "Assigned To" (Q8, `sprk_todo.sprk_assignedto` is a contact lookup). Those tasks should declare a dependency on 141.
+- Task 013 (A-18) is being re-opened in favour of this task. Its pure-decision extraction is the base this task extends.
+- The live data queried 2026-09-30 is the concrete test fixture for the reconciliation criterion. Do not treat it as a stable fact: re-query at step 0.
+- File overlaps with pending tasks 036, 131, 135, 152 and 013 are listed in parallel-reason. Merge serially.
+- Adversarial review 2026-09-30 added these, all derived from code or the binding notes:
+  - the customer-workforce-tenant source (D-13 Model 1);
+  - CIAM never creates a contact, and its email bind is kept only as the invite-repair path;
+  - the systemuser-plane member test;
+  - inactive-contact and could-not-read denies;
+  - PersonIdentity cache invalidation;
+  - FLS Read preservation and the explicit app-user profile;
+  - flag idempotence and resolution;
+  - the reconciliation job safety convention (copied from ExternalAccessReconciliationJob);
+  - the /invite-and-grant refusal (HTTP 409);
+  - the registration target environment.
+</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting. Follow the task-execute pre-execution checklist. FULL rigor: code-review plus adr-check at Step 9.5, with any ADR tension surfaced as CLAUDE.md §6.5 path A/B/C.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-141">
+CODE-COMPLETE; LIVE GATES PENDING. Full record: notes/task-141-identity-binding.md (§0 baseline, §1 acct verdict, §2 setting, §3 decision table, §4 implementation map, §5 placement + justification, §6 deviations, §7 tests + perturbations + review fixes, §8 pending manual gates). Peer contract: notes/141-link-contract.md. Provisioning handoff: notes/handoffs/INCOMING-141-workforce-tenant-list.md.
+
+OWNER ANSWERS APPLIED: I1 = (b) new setting WorkforceIdentity:CustomerTenantIds, empty = deny, never AzureAd:TenantId, not TenantRouting:Tenants[]; I2 = (1) a licensed user's colliding sprk_primarycontact is kept, flagged, never cleared or re-pointed; T2 live identity test.user@demo.spaarke.com.
+
+ESCALATION TRIGGERS: 1 and 2 answered by the owner. 3 (acct) does not fire: acct is a documented optional claim on access tokens issued for this registration, Teams SSO included (sources in notes §1); not yet configured, so it is gate G-2; until then Type-2 first sign-ins fail closed (workforce_acct_claim_missing). 4 (FLS breaks a client writer) does not fire: client code only reads both fields. 5 does not fire: contact had no alternate key. 6 does not fire: test.user@demo.spaarke.com exists.
+
+PLACEMENT (CLAUDE.md §10, bff-extensions.md §A): all in the BFF — the binding runs inside the authorization path of each Teams/SPA/CIAM request (latency-coupled), over BFF-owned identity data, under the BFF's app-only identity; the job is in-process on Spaarke.Scheduling per ADR-052 (BFF domain code, BFF-owned tables, low volume). No new NuGet package; no AI-internal type; no OBO, no Graph with the caller token, no new .WithClientSecret (ADR-028 A2/A4).
+
+THREE-QUESTION JUSTIFICATIONS (CLAUDE.md §11), one per new surface — full table in notes §5:
+- ContactBindingDecision — existing: DecideWorkforceEmailMatch/ReadOidBinding (013) and the CIAM copies in ExternalParticipationService; extension: YES, it is those generalised to every plane, copies deleted; cost: each plane keeps its own rule and the CIAM path keeps $top=1 and the failed-read fall-through.
+- WorkforceIdentityOptions + validator + member test — existing: TenantRouting:Tenants[] (routing, unconfigured), AzureAd:TenantId; extension: no, owner I1 = (b), both are wrong in Model 1; cost: Model-1 employees refused or Spaarke staff bound into a customer stamp.
+- IContactIdentityStore / DataverseContactIdentityStore — existing: IDataverseService (SDK, no If-Match / If-None-Match / alternate-key create-only), ExternalParticipationService's private Web API calls; extension: no, the conditional writes ARE the race guarantees; interface = ADR-010 test seam (HTTP doubles banned); cost: two racing first sign-ins create two contacts, a bind overwrites a concurrent bind.
+- ContactIdentityBinder + factory — existing: IdentityNormalizationService (read-only, cached), ExternalParticipationService (grant data); extension: no, writes would add a second reason to change (§11.5); one writer for five callers; cost: five call sites writing bindings/links/flags their own way.
+- IdentityLinkReconciliationJob — existing: ExternalAccessReconciliationJob, MembershipReconciliationJob; extension: no, different scan and reason to change; copies the safety convention; cost: users who never sign in to Teams/SPA never get a link (C9/Q4/Q8 skip them).
+- Schema (plane + flag columns, alternate key, FLS, view) — existing: sprk_externalobjectid (text, no plane), no collision column, no key, 0 fieldpermission rows; extension: the existing column is extended; cost: no durable flag, "AlreadyProvisioned" for an employee, anyone with contact Write could bind their oid onto a granted contact.
+- Config: WorkforceIdentity:CustomerTenantIds and IdentityLink:Reconciliation:WritesEnabled (appsettings.template.json, deployment guide §6.5.2).
+
+ADR TENSIONS (CLAUDE.md §6.5): ADR-038 B8 (InternalsVisibleTo, left pending by 013) — PATH C: the decision is public and asserted directly. No other tension open. Deviations: D-1 CIAM resolution moved from ExternalParticipationService into the binder (one cohesive rule + writes; the POML allowed it); D-3 IdentityNormalizationService honours a flagged kept link while CallerContactResolver ("assign it to me") follows only the oid binding (owner I2; stated in the link contract); D-4 contact created at first MEMBER sign-in supersedes SPA-r2 FR-11 wording (owner round 2); D-5 job filter accessmode 0/1/2; D-6 live steps and publish-size not executed (instruction).
+
+STEP 9.5: code-review and adr-check run over every changed file. Findings fixed (notes §7.1): R-1 no bind/link is ever sent as If-Match: * (invite bind of a just-created contact and registration link of a just-created systemuser now re-read and never overwrite / re-point); R-2 the invite bind runs the masking probe; R-3 a non-JSON response is a could-not-read, not an exception; R-4 the job keeps a flag whose systemuser was scanned but not decided; R-5 guide procedure for duplicate oids corrected; R-6 write-path invariant registry row I-10 added (WP-1). Accepted with reasons (notes §7.1): per-decision email in job logs, ~3 reads per repeated denied sign-in, a narrow ≤10-min stale-identity race (less access, never more), a reused flag reason for "linked to internal user", the job shipping-state test, the per-consumer named HttpClient, +7 registrations inside the feature module (ADR-010's documented accepted elevation). Every new guard and fix was shown to bite: G + P1..P29 seeded, each RED, sources restored.
+
+TESTS: full BFF suite 13,347 passed / 0 failed / 54 skipped (13,401); NetArchTest 337 / 0 / 0; dotnet list package --vulnerable --include-transitive: no vulnerable packages, no package changes. Publish size NOT measured (instructed to skip) — gate G-9.
+
+PAPER TRAIL: SPA-r2 task 023 + TASK-INDEX row marked delivered by this task, notes/task-023-delivered-by-uac-r2-141.md records the FR-11 supersession and the P3 requester wiring staying with SPA-r2; task 013 carries an a18-closure block pointing here (its status stays pending until this task's live gate passes); the A-18 residual comment was removed from IIdentityNormalizationService.
+
+PENDING MANUAL GATES (exact commands in notes §8): G-1 Set-ContactIdentityBindingSchema.ps1 -Apply then -Verify on spaarkedev1 (dry run 2026-10-01 clean: 6 oids lowercase D; everything else WOULD create); G-2 acct claim on 1e40baad (-AcctClaimOnly); G-3 WorkforceIdentity__CustomerTenantIds__0=a221a95e-6abc-4434-aecc-e48338a1b2f2 on the dev BFF; G-4 deploy; G-5 report-only job run reviewed against §0; G-6 writes on, run twice; G-7 FLS authorization as a non-admin; G-8 the eight live-gate items with test.user@demo.spaarke.com; G-9 publish size.
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-141-f1" round="verifier-fix">
+BLOCKED ON AN OWNER DECISION (finding 1); every other finding closed. Full record: notes/task-141-identity-binding.md §9 (the escalation), §10 (per finding), §10.1 (seeded violations), §11 (PR statements).
+
+FINDING 1 (CRITICAL, alternate key vs FLS on contact.sprk_externalobjectid): confirmed against Microsoft Learn ("Attributes must not have field-level security applied"; "Columns that have the Enable column security property enabled can't be used as an alternate key"). NOT decided here — an unanswered escalation is a first-class stop. Options A/B1/B2/C/D with costs in notes §9; recommendation B2 (keep FLS on the binding column; alternate key on a new unsecured mirror column written with it; reads unchanged; tampering with the mirror can only deny service). Done instead: Set-ContactIdentityBindingSchema.ps1 gained a platform-rule preflight that stops -Apply before any network call (shown to bite: throws BLOCKED with the overlap; a temp copy without it proceeds to authentication) and reports FAIL in dry run / -Verify. The in-memory store's doc states it models a combination the platform refuses. Link contract §1.1, guide §6.5.2, the provisioning handoff, SPA-r2 023 closure and its delivery note corrected. Criteria 3 and FLS stay open on this decision.
+
+FINDING 2 (four guards never shown to bite): tests added and each seeded alone — truncated scan (F1), probe Failed (F2), cheap Verified path IsActive (F3), invite-flag re-evaluation (F4, pure + job). All RED when seeded, restored.
+
+FINDING 3 (one flag per contact): fixed for systemuser AND token-plane parties. A flag records every colliding party (CollisionParty; new memo column sprk_identitycollisionparties, JSON; the four summary columns remain the first party). Idempotence per party (identity + reason): a retry writes nothing, a different identity is appended. Job pass 2 evaluates each party and applies the pure ContactBindingDecision.ReconcileFlag: clear only when no party holds AND no systemuser collided with the contact this run (the verifier's rule); prune otherwise. Appends, prunes and clears are conditional on the row version (412 on an append re-reads once and appends again; a prune or clear without a version is refused). A flag at 20 parties or with an unreadable parties column is never overwritten or cleared by the job; the operator clears it after resolving (guide §6.5.3). Seeds F5-F9, F11, F12.
+
+FINDING 4 (inline link ungated): WorkforcePrincipalResolver.TryLinkSystemUserAsync now does nothing (no read, no write) unless IdentityLink:Reconciliation:WritesEnabled is true, the job's own switch, read through ContactIdentityBinder.LinkWritesEnabled (the job uses the same helper). Not gated, with reasons in the binder doc and guide §6.5.2: the Type-2 first sign-in and the registration link. Seed F10.
+
+FINDING 5: the D-3 mixing (a flagged kept link honoured by IdentityNormalizationService, so AccessibleRecordSetService loads that contact's external grants for the licensed user — Ralph in dev) is stated for the PR in notes §11 and in the link contract §5.
+
+FINDING 13 (acct): re-checked READ-ONLY — az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c: access-token optional claims email, preferred_username, upn; acct NOT configured; AzureADMultipleOrgs; v1 tokens. The Teams package's webApplicationInfo.id is this registration. Microsoft documents acct for JWT v1.0/v2.0 and that access-token optional claims apply to every access token issued for the API, Teams SSO included. Trigger 3 does not fire. App registration not changed (G-2 pending), dev setting not set (G-3 pending).
+
+FINDINGS 6, 7, 9: nothing to fix (023 status kept as POML step 10 asked, with a status-note that it is delivered but not live). FINDINGS 8, 15: publish size not measured (instructed). FINDINGS 10-12, 14: see 1, 3, and §8 (G-5 counts no longer drift).
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package. New surface: the memo column sprk_identitycollisionparties with the CollisionParty / FlagReconciliation types (extends CollisionFlag and the four flag columns; a text(100) oid column cannot hold a list; cost of nothing = finding 3), and the static helper ContactIdentityBinder.LinkWritesEnabled (the job's existing parse, shared; cost of nothing = finding 4). WorkforcePrincipalResolver gains an IConfiguration constructor dependency (already registered). All in the BFF per bff-extensions.md §A.
+
+TESTS: identity-binding set (IdentityBinding, WorkforceEmailNoHijack, DataverseContactIdentityStore, ExternalAccessContractTests, RegistrationContactLink, WorkforcePrincipalResolver) 228 passed / 0 failed; full BFF suite (tests/unit/Sprk.Bff.Api.Tests) 13,368 passed / 0 failed / 54 skipped (13,422); NetArchTest (tests/Spaarke.ArchTests) 337 / 0 / 0. ADR-038: no Mock&lt;HttpMessageHandler&gt;, no DI-registration test, no ctor null-check test; no InternalsVisibleTo used by the new tests.
+
+LIVE: nothing was written to Dataverse, Entra or Azure. Read-only: the az ad app show above; the schema-script guard proof used an invalid URL and stopped before any request.
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-141-f2" round="verifier-fix-2">
+STILL BLOCKED ON THE OWNER DECISION in notes §9 (alternate key vs FLS on contact.sprk_externalobjectid; recommendation B2). Findings 4, 5 and 6 fixed; 7 and 8 recorded; 1-3 and 11-15 are the §9 decision and the pending manual gates G-1..G-9, unchanged. Full record: notes/task-141-identity-binding.md §12 (per finding), §12.1 (recorded gap), §12.2 (PR statements), §12.3 (seeded violations), §12.4 (placement), §12.5 (suites).
+
+FINDING 4 (registration link promised a retry that does not exist outside the BFF's own environment): RegistrationDataverseService.IsReconciledByThisBff compares the link environment with Dataverse:ServiceUrl, the only environment IdentityLinkReconciliationJob scans. A link that does not land logs one of two warnings: "re-decides the user on its next run once IdentityLink:Reconciliation:WritesEnabled is true" (own environment) or "NOT retried by this BFF" (any other). XML doc, the binder's Failed-outcome doc, its link-not-written log line and its switch remarks corrected. RECORDED GAP (notes §12.1, guide §6.5.2, link contract §3), not a retry: a registration link in another environment is covered only by a BFF deployed against that environment; a safety net (bounded retry, or a registry-scanning job) is an owner choice not taken here. Seeds S1, S2.
+
+FINDING 5 (invite lookup failure lost its reason code): InviteContactAction.Fail now returns InviteLookupFailure → HTTP 503 ProblemDetails, reasonCode sdap.access.invite.contact_lookup_failed, detail = ContactIdentityBinder.InviteMessage (no longer dead), on /invite AND /invite-and-grant; nothing created, bound, flagged or granted. ProducesProblem(503) declared on both. Seeds S3, S4.
+
+FINDING 6 (two answers to one question): ContactBindingDecision.ActiveContactsBoundToQuery renamed ContactsBoundToQuery and widened to every statecode (statecode selected, top 2), matching the binder's FindContactsByOidAsync. IdentityNormalizationService and CallerContactResolver answer it with DecideBoundContact (the binder's own D1-D4 step, made public) over BoundContactLookup. Active + inactive on one oid → no contact in both readers, as in the binder; a sole inactive contact → none (CallerContactResolver reason inactive-contact). Seeds S5-S8.
+
+FINDING 7 (INFO): Ralph's flagged kept link is honoured (D-3, owner I2 = (1)); repeated for the PR in notes §12.2. FINDING 8 (INFO): report-only cost recorded in guide §6.5.2; the later-BU re-run was already documented.
+
+FINDINGS 1, 11 (criterion 3), 2, 12, 13 (FLS + live gate): blocked on §9 / G-1, G-7, G-8. FINDINGS 3, 14: acct re-checked READ-ONLY 2026-10-01 (az ad app show --id 1e40baad-e065-4aea-a8d4-4b7ab273458c: access-token optional claims email, preferred_username, upn; acct NOT configured; AzureADMultipleOrgs; v1) — trigger 3 does not fire; G-2 and G-3 pending; the app registration was not changed. FINDING 15: suites re-run below; publish size G-9 not measured (instructed).
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package; all in the BFF (bff-extensions.md §A), inside existing components. New public surface (three-question table in notes §12.4): IsReconciledByThisBff (existing: the job's Dataverse:ServiceUrl store; extends RegistrationDataverseService; cost of nothing: operators told a link is retried when it never is); InviteLookupFailure + LookupFailureResult (existing: InviteRefusal + RefusalResult; sibling, since a failure is not a refusal; cost: the reason code never reaches the client); ContactsBoundToQuery / BoundContactLookup / DecideBoundContact (existing: ActiveContactsBoundToQuery, private DecideOnOid; exposes rather than copies; cost: readers and binder disagree); the inactive-contact reason identifier.
+
+TESTS: seeds S1-S8 each RED alone, sources restored byte-identical. ADR-038: no Mock&lt;HttpMessageHandler&gt;, no DI-registration test, no ctor null-check test, no InternalsVisibleTo. Identity/access subset 354 passed / 0 failed; full BFF suite (tests/unit/Sprk.Bff.Api.Tests) 13,382 passed / 0 failed / 54 skipped (13,436); NetArchTest (tests/Spaarke.ArchTests) 337 / 0 / 0. No package or csproj change. Publish size not measured (G-9).
+
+LIVE: nothing written to Dataverse, Entra or Azure; the only live call was the read-only az ad app show.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-141-f3" round="fix-3">
+CODE-COMPLETE; OWNER-APPROVED LIVE GATES PENDING (main session). Full record: notes/task-141-identity-binding.md §13 (§13.0 merge, §13.1 B2, §13.2 registration gap, §13.3 other findings, §13.4 placement + justification, §13.5 seeded violations, §13.6 Step 9.5, §13.7 suites); gates in §8 (G-1 unblocked, NEW G-1b). Peer contract notes/141-link-contract.md updated (§1, §1.1, §3, §4, §5, new §7 "what changed for consumers") — ready for word-add-in-r1 task 083.
+
+MERGE: integ/uac-r2-batch2 merged (origin/master + 130/131/134/151 + 109/135/136/144/145). Five conflicts resolved keeping both sides — CiamContactPrincipalStrategy now takes identity from ContactIdentityBinder (141) AND record scope from the unified evaluator (135/136), and no longer depends on ExternalParticipationService; both scheduled jobs registered; the contract-test host carries 136's DataReads stub, 141's identity store and 135/136's veto/plane wiring. Three 135/144 test files that built on the participation service's removed contact resolution or on the pre-141 registration ctor were rewired (no behaviour change). Identity/access subset after the merge 519/0.
+
+(1) OWNER ROUND 4 ITEM 4 = B2, IMPLEMENTED per the notes §9 impact list: FLS stays on contact.sprk_externalobjectid; the alternate key sprk_ExternalObjectIdUniqueKey sits on the new unsecured mirror contact.sprk_externalobjectidkey (Text 100). BindPayload writes binding + mirror + plane in one request; CreatePayload(oid, ...) carries the binding; BuildCreateByKeyPath addresses the mirror; every read (store, ContactsBoundToQuery, both read-only readers) still filters on the secured column. The duplicate-key fault (0x80060892, HTTP 412) is classified StoreWriteStatus.KeyConflict, never retried as a version race; a bind refused by the index, or a create refused twice with no contact bound, flags the holder (new reason KeyMirrorConflict 100000011) and denies sdap.access.deny.contact_key_conflict — a squatted mirror DENIES, never binds (tests on the workforce, CIAM, systemuser and job paths). The flag holds while the mirror slot is held, even on an inactive holder, and is judged from the holder row (so a report-only run never promises to clear it). InMemoryContactIdentityStore models the key on the mirror and no longer a key+FLS combination the platform refuses. Schema script: step (a) creates the mirror and copies the 6 existing bindings into it before step (b) keys it; platform-rule preflight PASSES (shown: -Apply against an unreachable URL passes the preflight and stops at auth; a seeded copy with the key back on the binding throws BLOCKED before any request; read-only dry run on spaarkedev1: OK, 6 copies WOULD, key WOULD); new source guard ContactIdentitySchemaAgreementTests (script keys exactly KeyMirrorColumn, secures the binding, never both on one column, choices cover every enum value). Link contract §1.1 and guide §6.5.2/§6.5.3 rewritten. CRITERION 3 (exactly one contact per oid under two concurrent first sign-ins) IS MET in code, platform-enforced once G-1 creates the key.
+
+(2) REGISTRATION-LINK GAP CLOSED (not recorded): IdentityLinkReconciliationJob now reconciles, after its own environment, every environment this BFF provisions users into — DATAVERSE_URL and every ACTIVE sprk_dataverseenvironment row (ProvisioningTargetUrls: normalised, de-duplicated, never the own environment) — with the full probe, pass 1 and pass 2 through RegistrationDataverseService.ContactBinderFor(url), the existing per-environment token path. Same report-only switch everywhere; one environment's failure fails the run but never the others; an unreadable registry fails the run while DATAVERSE_URL is still reconciled. Because the approve endpoint provisions only into ACTIVE registry rows (and the default is DATAVERSE_URL), every registration-created user is in an environment the job reconciles: a failed link is retried and a flag written there is re-evaluated and cleared. IsReconciledByThisBff and the "NOT retried" warning are gone. LIVE FINDING (read-only): the dev BFF's only provisioning target is Demo 1 (spaarke-demo), where the dev BFF identities are NOT application users and the binding schema does not exist — every run will report that environment as failed (accurately; registration from dev into Demo 1 cannot work either). New decision G-1b for the main session/owner (not covered by round 4's approval, which named dev): (a) add the dev BFF MI as an app user there and run G-1 against it, (b) deactivate the stale Demo 1 registry row in spaarkedev1 (recommended), or (c) accept the reported failure during G-5/G-6.
+
+(3) OTHER VERDICT FINDINGS: INFO 503-detail test fixed (the endpoint's last-resort fallback text is now distinct and the test pins the decision's InviteMessage). Remaining verdict items are live gates (FLS authorization, manual live gate, acct claim, dev tenant setting, publish size) — owner-approved, run by the main session.
+
+ESCALATION TRIGGERS: none fired. Round-4 answers in force; no ADR tension (Step 9.5 below).
+
+PLACEMENT / JUSTIFICATION (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, scheduled job or package; all in the BFF (bff-extensions.md §A) inside existing components — the existing job gains a pass, the existing store/binder/decision gain members. Three-question table per new surface in notes §13.4: the mirror column + key + reason option (owner-decided; the binding cannot carry the key; without it every create denies), KeyMirrorColumn / MirrorHeldWithoutBinding / DenyContactKeyConflict / KeyMirrorConflict / RawKeyMirror (extend the decision; without them a squat is indistinguishable from a race), StoreWriteStatus.KeyConflict / IsDuplicateKey / FindContactsByKeyMirrorAsync (extend the store; without them a duplicate-key 412 is retried as a race and the holder cannot be flagged), RegistrationDataverseService.ContactBinderFor (extracts the existing token path so the job reuses it, ADR-028), the job's provisioning-target pass + ProvisioningTargetUrls (extends the existing job; without it the verifier's gap stays open), DataverseEnvironmentService.GetActiveEnvironmentsAsync virtual (test seam; ADR-038 B1). ADR-052/ADR-036: no new background work; the existing AddScheduledJob registration is unchanged.
+
+STEP 9.5: code-review + adr-check over the diff. ADR-002/003/010/028/036/038/052 compliant; no tension. Fixed from review: per-environment status in the heartbeat and ResultJson; an unreachable environment no longer reported as "masked"; a test helper no longer sets a key the service stopped reading. Accepted with reasons (notes §13.6): a repeated squatted sign-in costs two refused creates + five reads + one error log (idempotent flag); the job file grew (~700 lines) but keeps one reason to change; dev reports spaarke-demo failed until G-1b.
+
+SEEDED VIOLATIONS: B1-B20 each seeded alone, built, run, restored byte-identical and touched — all RED (notes §13.5; B16/B19/B20 re-run with a harness that rebuilds before every run).
+
+TESTS: identity/access subset 637 passed / 0 failed; full BFF suite (tests/unit/Sprk.Bff.Api.Tests) 13,791 passed / 0 failed / 54 skipped (13,845); NetArchTest (tests/Spaarke.ArchTests) 341 / 0 / 0. ADR-038: no Mock of HttpMessageHandler, no DI-registration test, no ctor null-check test, no InternalsVisibleTo. No package or csproj change. Publish size not measured (G-9, main session).
+
+LIVE (read-only only): schema dry run against spaarkedev1; sprk_dataverseenvironment rows in spaarkedev1; application users and binding columns in spaarke-demo; az webapp config appsettings list filtered to DATAVERSE_URL and Dataverse__ServiceUrl. Nothing written to Dataverse, Entra or Azure.
+    </outcome>
+  </execution>
+</task>

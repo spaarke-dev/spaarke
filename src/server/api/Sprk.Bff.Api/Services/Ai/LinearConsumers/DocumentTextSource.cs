@@ -31,7 +31,7 @@ public sealed class DocumentTextSource : IDocumentTextSource
         var document = await _documentLoader.GetDocumentAsync(documentId.ToString(), cancellationToken)
             ?? throw new InvalidOperationException($"Document {documentId} not found in Dataverse.");
 
-        var extractedText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        var extractedText = await _documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
 
         _logger.LogInformation(
             "Extracted document text: DocumentId={DocumentId}, FileName={FileName}, TextLength={TextLength}",

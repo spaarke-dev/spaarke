@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-15 in Word: Send Email offers a choice — Spaarke email or Outlook on the web; FR-10: records open as a focused Spaarke page</title>
+    <phase>5 Remediation — spec reconciliation follow-through</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts`/`.tsx` in `office-addins/shared/taskpane` (frontend) and adds tests under `__tests__`.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only work that copies two patterns already in this codebase (`createTodoLauncher`'s code-page URL and `openRecordLauncher`'s browser open). No server, auth or schema change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only `office-addins/shared/taskpane/**` send-email and record-open code; 076 (the next BFF task) does not touch these files.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, office-addins, typescript, send-email, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner decisions of 2026-10-02 (spec FR-15 and FR-10, amended by task 079): in Word, Send Email lets the user choose between Spaarke's email composer and Outlook on the web; and a record opened from the pane opens as a focused Spaarke page (app navigation hidden, command bar kept).</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in. Office.js, React, Fluent UI v9; NFR-10 (capability gating, no host-type branches in views).</role>
+
+  <goal>A Word user can send an email carrying the document and record links either through Spaarke (recorded against the record) or through Outlook on the web, choosing each time; and Open on the record card lands on a focused record page.</goal>
+
+  <context>
+    <background>
+      - **FR-15 as amended**: Outlook keeps its shipped native compose (`OutlookAdapter.composeNewEmail` →
+        `displayNewMessageForm`, task 036). Word, where `canComposeEmail` is false, gets the choice. It was hidden in
+        Word by the owner's 2026-09-15 decision, which the 2026-10-02 decision supersedes.
+      - **(A) Spaarke email**: the Communication code page `sprk_communicationpage` in compose mode. Its URL contract
+        is `src/client/code-pages/CommunicationPage/src/services/parseParams.ts`: `mode=compose`, `to`, `cc`,
+        `subject`, `body`, and `associatedTo=&lt;entityType&gt;:&lt;guid&gt;` (repeatable). Open it the way
+        `shared/taskpane/services/createTodoLauncher.ts` opens `sprk_smarttodo`:
+        `{orgUrl}/main.aspx?pagetype=webresource&amp;webresourceName=…&amp;data=…`, via `Office.context.ui.openBrowserWindow`.
+        **Verify from `parseParams.ts` and `CommunicationPage/src/index.tsx` whether the parameters are read from the
+        top-level query or from `data`** before writing the builder.
+      - **(B) Outlook on the web**: `https://outlook.office.com/mail/deeplink/compose?subject=…&amp;body=…`
+        (`notes/036-send-email-via-outlook.md` option 1). Plain-text body.
+      - **Links**: reuse what Send Email already builds — the document share link (`shareLinkService.mintDocumentShareLink`)
+        and the record link (`openRecordLauncher`'s URL builder). Do not mint links a second way.
+      - **FR-10 focused page**: `openRecordLauncher.ts` builds `{orgUrl}/main.aspx?etn=…&amp;id=…&amp;pagetype=entityrecord`.
+        Add `navbar=off` (hide the app's navigation). Keep the command bar (`cmdbar` NOT set to false) so Save and the
+        record's actions stay. The pane's create flow already uses `navbar=off` (`App.tsx`, the create URL).
+        `openBrowserWindow` cannot remove the browser's own address bar or tabs — that is accepted (FR-10).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-10">The Word choice is gated by capabilities (`canOpenBrowserWindow` true, `canComposeEmail` false), never by `hostType`/`Office.context.host`. Outlook's behaviour is unchanged.</constraint>
+    <constraint source="this task">No BFF change, no new route, no new share-link path. The Spaarke option sends nothing itself — it opens the composer pre-filled; the user sends from there.</constraint>
+    <constraint source="this task">URL-encode every parameter. Do not put a token, a secret or the BFF base URL into either URL.</constraint>
+    <constraint source="ADR-021">Fluent UI v9 only for the choice (a menu or two buttons), semantic tokens, dark mode. Mirror the existing Send Email affordance in `SaveFlow.tsx`.</constraint>
+    <constraint source="ADR-038">Tests in `shared/taskpane/**/__tests__/`, added to `ci-gated-suites.txt`: both URL builders (encoding, `associatedTo`, the link lines), the gating (Word shows the choice; Outlook unchanged; no `canOpenBrowserWindow` ⇒ no choice), and the record URL carrying `navbar=off` and not `cmdbar=false`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">In Word (capabilities: `canComposeEmail` false, `canOpenBrowserWindow` true) Send Email offers exactly two choices: Spaarke email and Outlook on the web.</criterion>
+    <criterion testable="true">The Spaarke choice opens `sprk_communicationpage` in compose mode with the subject, a body carrying the document link and the record link, and `associatedTo` naming the related record; with no related record, `associatedTo` is omitted and the email still opens.</criterion>
+    <criterion testable="true">The Outlook-on-the-web choice opens the compose deep link with the same subject and the same two links in the body.</criterion>
+    <criterion testable="true">In Outlook, Send Email behaves exactly as before (native compose); a test pins it.</criterion>
+    <criterion testable="true">Negative: with `canOpenBrowserWindow` false, Word renders no Send Email affordance (not rendered-and-disabled).</criterion>
+    <criterion testable="true">Open on the record card produces a URL with `navbar=off` and without `cmdbar=false`; the existing refetch-on-return behaviour is unchanged.</criterion>
+    <criterion testable="true">Gates: gated jest green with the new suites added; lint 0; `npm run typecheck` 0 production errors; `npm run build` succeeds.</criterion>
+    <criterion testable="true">Live (after a deploy): from Word desktop or web, each choice opens with working links, and the Spaarke-composed email appears against the record after sending. If no deploy or host is available, leave this open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The Communication page cannot be opened in compose mode with pre-fill from a plain browser URL (outside the model-driven app's navigateTo) — STOP and report what it requires.</trigger>
+    <trigger>The Outlook-on-the-web deep link truncates or rejects a body carrying both links — record the measured limit and STOP before shortening links.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read `parseParams.ts` / `CommunicationPage/src/index.tsx`, `createTodoLauncher.ts`, `openRecordLauncher.ts`, `sendEmailService.ts` and the Send Email affordance in `SaveFlow.tsx`.</step>
+    <step>Write the two URL builders next to `sendEmailService.ts`, reusing its link minting; test them.</step>
+    <step>Add the Word choice behind the capabilities; test the gating both ways and Outlook unchanged.</step>
+    <step>Add `navbar=off` to the record URL; update its test.</step>
+    <step>Run the gates; record in `notes/086-word-send-email-and-focused-open.md`; TASK-INDEX 086 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>Outlook's Send Email (`sendEmailService.ts`, `OutlookAdapter.composeNewEmail`), the share-link minter, `openRecordLauncher`'s URL builder and `createTodoLauncher`'s code-page URL all exist; the Spaarke composer page and its URL contract exist (`CommunicationPage`).</existing>
+    <extension>Yes — this extends `sendEmailService.ts` with two URL builders and the existing Send Email affordance with a Word choice; no new service, route, capability or component library entry.</extension>
+    <cost-of-doing-nothing>A Word user cannot email a document or record link from the pane at all (FR-15 as amended 2026-10-02), and Open lands on the full app instead of the record.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Word: Send Email choice">
+      <steps>
+        <step>In Word (desktop and web), with a saved, filed document, open the pane: Send Email offers Spaarke email and Outlook on the web.</step>
+        <step>Spaarke email: a browser tab opens the Spaarke composer with the subject, both links and the record associated. Send it; it appears against the record.</step>
+        <step>Outlook on the web: a browser tab opens Outlook's compose with the same subject and links.</step>
+      </steps>
+    </test>
+    <test name="Outlook unchanged">
+      <steps>
+        <step>In Outlook, Send Email opens Outlook's own compose window as before.</step>
+      </steps>
+    </test>
+    <test name="Focused record open">
+      <steps>
+        <step>Open on the record card: the record opens in a browser tab without the app's navigation, with its command bar; edit and save, return to Word: the card shows the edit.</step>
+      </steps>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch Office to a dark theme: the choice renders with semantic tokens, readable.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="read">src/client/office-addins/shared/taskpane/services/createTodoLauncher.ts</file>
+    <file role="read">src/client/code-pages/CommunicationPage/src/services/parseParams.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/086-word-send-email-and-focused-open.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/036-send-email-via-outlook.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
+    <file>src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+  </outputs>
+
+  <notes>
+    **Completed 2026-10-02**, executed as a background Sonnet-5 subagent in the shared worktree
+    (parallel with the main session's task 076; office-addins-only, no git state changes). Client-only —
+    no BFF file touched.
+
+    `openRecordLauncher.buildOpenRecordUrl` now appends `navbar=off` unconditionally (never `cmdbar=false`)
+    — one change, consumed by `SaveFlow.tsx`'s Open affordances AND `sendEmailService.ts`'s record link.
+    Added generic `openUrlInBrowserWindow` (reuses the existing `defaultOpener`) for the Word choice to
+    open through, not a second mechanism.
+
+    `sendEmailService.ts`: extracted the existing link-resolution step (document share-link mint + record
+    deep link) into a shared `resolveSendEmailLinks`, used by BOTH the unchanged Outlook path
+    (`prepareSendEmail`) and the new `prepareWordSendEmailChoice` — structurally enforces "never mint a
+    link a second way," not just by convention. Added `buildSpaarkeComposeUrl` (the
+    `sprk_communicationpage` `data=` envelope, verified against `parseParams.ts`/`index.tsx`, HTML body),
+    `buildOutlookWebComposeUrl` (the documented `outlook.office.com` deep link, plain-text body), and
+    `resolveSendEmailAffordance` (the one pure, tested gating function: `'outlook-native' | 'word-choice' |
+    'none'`, capability-only per NFR-10).
+
+    **A real encoding bug was found and fixed during this task's own verification**: the first
+    `buildSpaarkeComposeUrl` used a single-encode construction that is silently corrupted by
+    `parseParams.ts`'s real (unconditional, double) decode sequence whenever a field value contains a
+    literal `&amp;`/`=` — exactly what the embedded four-param record URL and an "X &amp; Y"-style subject both
+    are. Caught by a round-trip test reproducing the REAL decode algorithm (not the test's own encoding
+    assumptions); fixed via explicit `encodeURIComponent(inner.toString())`. Full derivation in
+    `notes/086-word-send-email-and-focused-open.md`.
+
+    `App.tsx`: extracted `buildSendEmailRelatedRecordInput` (shared by both Send Email paths); added
+    `handleSendEmailChoice`; replaced the single `canSendEmail` boolean with the `resolveSendEmailAffordance`
+    result, rendering the unchanged single Button for Outlook or a new Fluent v9 `Menu` (two `MenuItem`s —
+    "Spaarke email" / "Outlook on the web") for Word; neither renders when there is nothing to link or
+    neither capability holds.
+
+    Deviation: the POML's `&lt;relevant-files&gt;` named `SaveFlow.tsx` as a Send Email edit target; the
+    affordance actually lives in `App.tsx` (confirmed by grep before writing anything) — `SaveFlow.tsx` was
+    not touched. Gating is tested via the extracted pure `resolveSendEmailAffordance` rather than mounting
+    the full `App.tsx` in RTL (no precedent for that in this package; task 036 took the same proportionate
+    approach for the Outlook button).
+
+    Neither escalation trigger fired: the Communication page's compose-mode pre-fill works from a plain
+    browser URL (verified by reading `index.tsx`/`parseParams.ts`/`App.tsx`). CORRECTED on main-session review:
+    it does NOT match `createTodoLauncher.ts` — that launcher appends flat params to a configured base URL, not
+    `main.aspx?...&amp;data=`; the `data=` form has no shipped precedent here, so the live check is its first proof); the Outlook-web body-length trigger was not
+    measured live (no live host reachable here) but is not expected to fire given the body's actual length
+    — recorded as an estimate, not a verification.
+
+    Gates: gated jest 62/62 suites, 836/836 tests (817 before this task's +19 new tests — no new suite
+    file; both touched test files were already gated from tasks 027/036); lint exit 0; `npm run typecheck`
+    68 total / **0 production** (pinned baseline, after fixing one `exactOptionalPropertyTypes` regression
+    introduced and caught mid-task); `npm run build` exit 0. Self-run code-review + adr-check: 0 Critical,
+    0 Warning, 1 Suggestion (a minor naming nit); 0 ADR violations.
+
+    Acceptance criterion 8 (live, post-deploy check) left open — no deployed SWA / live Office host /
+    Dataverse session reachable from this environment. Full report: `notes/086-word-send-email-and-focused-open.md`.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

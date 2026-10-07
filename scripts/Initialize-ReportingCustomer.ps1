@@ -22,9 +22,9 @@
     Script is idempotent — safe to re-run; existing workspace/profile are reused.
 
 .PARAMETER CustomerId
-    Unique, URL-safe identifier for the customer (e.g., "contoso-legal").
-    Used as part of the workspace name and SP profile name.
-    Must contain only lowercase letters, digits, and hyphens.
+    The customer's customerId (e.g., "contoso") — the customerId standard
+    ^[a-z][a-z0-9]{2,7}$ (3-8 lowercase letters and digits, starting with a letter;
+    docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md). Used as part of the SP profile name.
 
 .PARAMETER CustomerName
     Display name for the customer (e.g., "Contoso Legal Services").
@@ -61,7 +61,7 @@
 .EXAMPLE
     # Dry run — preview all onboarding steps
     .\Initialize-ReportingCustomer.ps1 `
-        -CustomerId "contoso-legal" `
+        -CustomerId "contoso" `
         -CustomerName "Contoso Legal Services" `
         -DataverseOrg "https://contoso.crm.dynamics.com" `
         -WhatIf
@@ -69,14 +69,14 @@
 .EXAMPLE
     # Full onboarding — shared capacity (dev/test)
     .\Initialize-ReportingCustomer.ps1 `
-        -CustomerId "contoso-legal" `
+        -CustomerId "contoso" `
         -CustomerName "Contoso Legal Services" `
         -DataverseOrg "https://contoso.crm.dynamics.com"
 
 .EXAMPLE
     # Full onboarding — dedicated F2 capacity (production)
     .\Initialize-ReportingCustomer.ps1 `
-        -CustomerId "fabrikam-corp" `
+        -CustomerId "fabrikam" `
         -CustomerName "Fabrikam Corporation" `
         -DataverseOrg "https://fabrikam.crm.dynamics.com" `
         -CapacityId "00000000-0000-0000-0000-000000000000"
@@ -84,7 +84,7 @@
 .EXAMPLE
     # Onboarding with user list for security role assignment guidance
     .\Initialize-ReportingCustomer.ps1 `
-        -CustomerId "woodgrove-legal" `
+        -CustomerId "woodgrv" `
         -CustomerName "Woodgrove Legal" `
         -DataverseOrg "https://woodgrove.crm.dynamics.com" `
         -SecurityRoleUsers @("alice@woodgrove.com", "bob@woodgrove.com")
@@ -92,7 +92,7 @@
 .EXAMPLE
     # Re-run after partial failure (idempotent — skips already-created resources)
     .\Initialize-ReportingCustomer.ps1 `
-        -CustomerId "contoso-legal" `
+        -CustomerId "contoso" `
         -CustomerName "Contoso Legal Services" `
         -DataverseOrg "https://contoso.crm.dynamics.com"
 
@@ -128,7 +128,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidatePattern('^[a-z0-9][a-z0-9\-]{1,48}[a-z0-9]$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (AZURE-RESOURCE-NAMING-CONVENTION.md; T237)
     [string]$CustomerId,
 
     [Parameter(Mandatory = $true)]

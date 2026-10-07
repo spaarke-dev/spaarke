@@ -15,6 +15,7 @@ using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 using Xunit;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Seam.Ai;
 

@@ -5,10 +5,11 @@
  * done through Xrm.WebApi alone (statecode/statuscode changes are silently
  * ignored by Xrm.WebApi.updateRecord in some Dataverse environments).
  *
- * For basic Xrm access (getXrm, getWebApi) use ../services/xrmProvider.ts.
+ * For basic Xrm access use `getXrm` from @spaarke/ui-components (or getWebApi
+ * in ../services/xrmProvider.ts).
  */
 
-import { getXrm } from "../services/xrmProvider";
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -17,42 +18,16 @@ import { getXrm } from "../services/xrmProvider";
  * Used for direct REST API calls that bypass Xrm.WebApi.
  */
 export function getClientUrl(): string | null {
-  const xrm = getXrm() as any;
-  if (!xrm) return null;
-
-  // Try Xrm.Utility.getGlobalContext().getClientUrl()
+  // Shared cross-frame walker (task 081 / C-8) with the 'clientUrl' capability
+  // checked PER FRAME: the nearest frame whose Xrm returns a client URL wins,
+  // so a frame with WebApi but no usable Utility is skipped (the behaviour of
+  // the former local fallback walk, which task 081 round 2 had dropped).
   try {
-    const ctx = xrm.Utility?.getGlobalContext?.();
-    const url = ctx?.getClientUrl?.();
-    if (url) return url;
+    const url = getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
+    return url || null;
   } catch {
-    /* unavailable */
+    return null;
   }
-
-  // Fallback: walk frame hierarchy for Xrm.Utility
-  const framesToCheck: Array<Window | null> = [];
-  try {
-    framesToCheck.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    framesToCheck.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-  framesToCheck.push(window);
-
-  for (const frame of framesToCheck) {
-    try {
-      const ctx = (frame as any)?.Xrm?.Utility?.getGlobalContext?.();
-      const url = ctx?.getClientUrl?.();
-      if (url) return url;
-    } catch {
-      /* cross-origin or unavailable */
-    }
-  }
-  return null;
 }
 
 /**
@@ -70,7 +45,7 @@ export async function setRecordState(
   const clientUrl = getClientUrl();
   if (!clientUrl) throw new Error("Cannot resolve Dataverse client URL");
 
-  const cleanId = recordId.replace(/[{}]/g, "");
+  const cleanId = cleanGuid(recordId);
   const url = `${clientUrl}/api/data/v9.2/${entitySetName}(${cleanId})`;
   const response = await fetch(url, {
     method: "PATCH",

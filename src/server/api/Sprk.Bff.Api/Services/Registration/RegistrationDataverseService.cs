@@ -4,6 +4,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -22,11 +25,29 @@ public class RegistrationDataverseService : IDisposable
     /// </summary>
     public const string HttpClientName = "RegistrationDataverse";
 
+    /// <summary>
+    /// The Dataverse environment this service writes registration requests to,
+    /// without a trailing slash. From DATAVERSE_URL.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so that anything building a link to a record it created uses the
+    /// environment the record is actually in. The admin notification used to take
+    /// that URL from the default <c>sprk_dataverseenvironment</c> row instead, which
+    /// describes where demos are provisioned and is a different environment. With no
+    /// row flagged as default the selection fell to the first by name, "Demo 1", so
+    /// every notification deep-linked into spaarke-demo for a record that only exists
+    /// in spaarkedev1, and the link opened "Record Is Unavailable".
+    /// </remarks>
+    public string DataverseBaseUrl { get; }
+
     private readonly HttpClient _httpClient;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IConfiguration _configuration;
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
+    private readonly ContactIdentityBinderFactory _binderFactory;
+    private readonly IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -45,12 +66,17 @@ public class RegistrationDataverseService : IDisposable
         TrackingIdGenerator trackingIdGenerator,
         TokenCredential credential,
         IHttpClientFactory httpClientFactory,
-        ILogger<RegistrationDataverseService> logger)
+        ILogger<RegistrationDataverseService> logger,
+        ContactIdentityBinderFactory binderFactory,
+        IMembershipCacheInvalidator accessCacheInvalidator)
     {
         _logger = logger;
+        _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
+        _accessCacheInvalidator = accessCacheInvalidator ?? throw new ArgumentNullException(nameof(accessCacheInvalidator));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
         _httpClientFactory = httpClientFactory;
+        _configuration = configuration;
 
         // Admin Dataverse URL: required config (no fallback per FR-33 retirement).
         var dataverseUrl = configuration["DATAVERSE_URL"];
@@ -60,7 +86,8 @@ public class RegistrationDataverseService : IDisposable
                 "RegistrationDataverseService requires DATAVERSE_URL configuration.");
         }
 
-        _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
+        DataverseBaseUrl = dataverseUrl.TrimEnd('/');
+        _apiUrl = $"{DataverseBaseUrl}/api/data/v9.2";
         _logger.LogInformation("RegistrationDataverseService targeting Dataverse at {ApiUrl}", _apiUrl);
 
         // Factory-created client (pooled handler per ADR-010). BaseAddress + default Prefer
@@ -336,6 +363,10 @@ public class RegistrationDataverseService : IDisposable
     /// <param name="businessUnitName">Target business unit name.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
+    /// <exception cref="SecureRecordPlacementRefusedException">
+    /// The configured business unit IS the Secure Record business unit of the target environment, or that cannot be
+    /// ruled out (task 144). No systemuser is created.
+    /// </exception>
     public async Task<Guid> CreateSystemUserAsync(
         string azureAdObjectId,
         string firstName,
@@ -347,6 +378,13 @@ public class RegistrationDataverseService : IDisposable
     {
         // First, resolve the business unit ID by name
         var buId = await ResolveBusinessUnitIdAsync(businessUnitName, ct, targetDataverseUrl);
+
+        // Task 144 (#967): never place a user in the Secure Record business unit. A user there reads every secure
+        // record by business-unit depth, whoever owns them. Compared by ID, in the SAME environment the user is created
+        // in — a name comparison would miss a differently-spelled configuration, and the admin environment's Secure
+        // Record BU says nothing about the demo environment's. Checked BEFORE the POST, so a refusal creates nothing.
+        await EnsureNotSecureRecordBusinessUnitAsync(
+            buId, $"business unit '{businessUnitName}'", ct, targetDataverseUrl);
 
         var entity = new Dictionary<string, object?>
         {
@@ -388,8 +426,179 @@ public class RegistrationDataverseService : IDisposable
 
         var userId = Guid.Parse(entityIdHeader.Split('(', ')')[1]);
         _logger.LogInformation("Created systemuser {UserId} in Dataverse", userId);
+
+        // Task 141: link the new user to its contact at creation — in the SAME environment the systemuser was
+        // created in (the target, never the default one), so Assigned-To / No Access / briefing matching work
+        // from the user's first day rather than from the next reconciliation tick.
+        try
+        {
+            await LinkContactForNewSystemUserAsync(
+                userId, azureAdObjectId, firstName, lastName, email, ContactLinkEnvironment(targetDataverseUrl), ct);
+        }
+        finally
+        {
+            // Task 132 (C12): the business-unit bind (and the contact link) changed this user's identity. For a brand
+            // new user there is nothing cached; when Dataverse hands back an EXISTING user's id, its cached identity,
+            // membership and root sets would otherwise keep the old business unit for their TTLs.
+            await EvictUserAccessAsync(userId, targetDataverseUrl, "business-unit bind").ConfigureAwait(false);
+        }
+
         return userId;
     }
+
+    /// <summary>
+    /// Evicts the user's cached identity, membership and impersonated root sets after a write that changed their teams
+    /// or business unit (unified-access-control-r2 task 132 · defect C12) — through the ONE hook every such writer
+    /// must call (<see cref="IMembershipCacheInvalidator.InvalidateUserAccessAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Only for a write to THIS BFF's own environment.</b> This BFF's caches hold the users of its own
+    /// <c>Dataverse:ServiceUrl</c> environment only (D-13: one BFF per customer environment). A write whose
+    /// environment (<paramref name="targetDataverseUrl"/>, else <c>DATAVERSE_URL</c>) is a different one — a demo or
+    /// customer target — has nothing here to evict, and is skipped. When either URL is unknown it evicts: an
+    /// unnecessary eviction costs one re-read; a missing one leaves old access for the TTLs.</para>
+    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationService</c> is a background path): the eviction is
+    /// tenant-agnostic. <b>Never fails the write</b> — it has already happened; the TTL is the backstop. Not bound to
+    /// the caller's token, for the same reason.</para>
+    /// </remarks>
+    private async Task EvictUserAccessAsync(Guid systemUserId, string? targetDataverseUrl, string operation)
+    {
+        var writeEnvironment = ContactLinkEnvironment(targetDataverseUrl);
+        if (!IsThisBffsEnvironment(writeEnvironment))
+        {
+            _logger.LogDebug(
+                "[ACCESS-EVICT] {Operation} for systemuser {SystemUserId} wrote to {Environment}, not this BFF's own " +
+                "environment — no cached entry here can describe that user (D-13); nothing evicted",
+                operation, systemUserId, writeEnvironment);
+            return;
+        }
+
+        try
+        {
+            await _accessCacheInvalidator
+                .InvalidateUserAccessAsync(systemUserId, $"registration:{operation}", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The hook's contract is never-throws; this guards the write against a broken implementation anyway.
+            _logger.LogWarning(ex,
+                "[ACCESS-EVICT] Eviction after {Operation} for systemuser {SystemUserId} failed; the cached entries lapse " +
+                "on their TTLs", operation, systemUserId);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="dataverseBaseUrl"/> is this BFF's own <c>Dataverse:ServiceUrl</c> environment (task 132).
+    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>.
+    /// </summary>
+    internal bool IsThisBffsEnvironment(string? dataverseBaseUrl)
+    {
+        var own = _configuration["Dataverse:ServiceUrl"];
+        if (string.IsNullOrWhiteSpace(own) || string.IsNullOrWhiteSpace(dataverseBaseUrl))
+        {
+            return true;
+        }
+
+        return string.Equals(own.Trim().TrimEnd('/'), dataverseBaseUrl.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The environment a new systemuser's contact link is written to: the environment the systemuser was
+    /// CREATED in — <paramref name="targetDataverseUrl"/> when one was given, else this service's own
+    /// (<see cref="DataverseBaseUrl"/>, the DATAVERSE_URL environment). Never the BFF's default
+    /// <c>Dataverse:ServiceUrl</c>, which is a different environment for every demo/customer target.
+    /// </summary>
+    public string ContactLinkEnvironment(string? targetDataverseUrl)
+        => (string.IsNullOrWhiteSpace(targetDataverseUrl) ? DataverseBaseUrl : targetDataverseUrl).TrimEnd('/');
+
+    /// <summary>
+    /// The identity binder for <paramref name="dataverseBaseUrl"/>, authenticated through this service's existing
+    /// per-environment token path (the BFF's own credential; ADR-028 — no new secret, no caller token). Used for a
+    /// new systemuser's contact link at creation, and by the identity-link reconciliation job for every environment
+    /// this BFF provisions users into (task 141, third fix round).
+    /// </summary>
+    public ContactIdentityBinder ContactBinderFor(string dataverseBaseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(dataverseBaseUrl);
+        var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        return _binderFactory.CreateBinder(baseUrl, token => GetAccessTokenForUrlAsync(baseUrl, token));
+    }
+
+    /// <summary>
+    /// Runs the identity-binding decision for a just-created systemuser against <paramref name="dataverseBaseUrl"/>
+    /// (task 141): bind or create the contact keyed by the user's Entra oid and set <c>sprk_primarycontact</c>,
+    /// or flag a collision. NON-FATAL by design: the systemuser exists either way.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A link that does not land is retried</b> (a fault, a deny, a lost race — or a collision flag, which
+    /// is re-evaluated). The environment a registration links in is always one the identity-link reconciliation job
+    /// reconciles: the approve endpoint provisions only into an ACTIVE <c>sprk_dataverseenvironment</c> row, and
+    /// with no target the user is created in this service's own <c>DATAVERSE_URL</c> environment. The job
+    /// reconciles this BFF's <c>Dataverse:ServiceUrl</c> AND both of those (its provisioning-target pass), so it
+    /// re-decides the user on its next run once <c>IdentityLink:Reconciliation:WritesEnabled</c> is true; until then
+    /// it reports what it would do. (Second fix round: the job scanned only its own environment and this path
+    /// logged "NOT retried" for every other one — verifier finding 4, closed in the third fix round.)</para>
+    /// <para>The one way out of that coverage is an operator deactivating the environment's registry row after
+    /// provisioning into it: the BFF then stops serving that environment, deliberately.</para>
+    /// </remarks>
+    /// <returns>The link result, or null when nothing could be attempted (unusable oid, or a fault).</returns>
+    public async Task<SystemUserLinkResult?> LinkContactForNewSystemUserAsync(
+        Guid systemUserId, string azureAdObjectId, string firstName, string lastName, string email,
+        string dataverseBaseUrl, CancellationToken ct)
+    {
+        if (!Guid.TryParse(azureAdObjectId, out var oid) || oid == Guid.Empty)
+        {
+            _logger.LogWarning(
+                "[ID-BIND] Systemuser {SystemUserId} was created with an unusable AAD object id; no contact link",
+                systemUserId);
+            return null;
+        }
+
+        var baseUrl = dataverseBaseUrl.TrimEnd('/');
+        try
+        {
+            var binder = ContactBinderFor(baseUrl);
+
+            // email is the UPN this service created the user with (directory data, not a client value), so it
+            // is both the directory-synced email and the domainname the guest test reads.
+            var row = new SystemUserIdentityRow(
+                systemUserId, oid, email, email, PrimaryContactId: null, ETag: null,
+                FirstName: firstName, LastName: lastName);
+            var result = await binder.EnsureSystemUserLinkAsync(row, applyWrites: true, ct).ConfigureAwait(false);
+
+            if (result.IsLinked)
+            {
+                _logger.LogInformation(
+                    "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link {Outcome} (contact {ContactId})",
+                    systemUserId, baseUrl, result.Outcome, result.ContactId);
+            }
+            else
+            {
+                LogLinkNotMade(systemUserId, baseUrl, result.Outcome.ToString(), result.DenyCode, null);
+            }
+
+            return result;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            LogLinkNotMade(systemUserId, baseUrl, "Fault", null, ex);
+            return null;
+        }
+    }
+
+    private void LogLinkNotMade(Guid systemUserId, string environment, string outcome, string? denyCode, Exception? ex)
+        => _logger.LogWarning(ex,
+            "[ID-BIND] New systemuser {SystemUserId} in {Environment}: contact link NOT made ({Outcome}, code {Code}). "
+            + "The identity-link reconciliation job re-decides the user on its next run — it reconciles this BFF's own "
+            + "environment and every environment it provisions users into (DATAVERSE_URL and every ACTIVE "
+            + "sprk_dataverseenvironment row) — once IdentityLink:Reconciliation:WritesEnabled is true (report-only "
+            + "until then; deployment guide §6.5.2)",
+            systemUserId, environment, outcome, denyCode);
 
     #endregion
 
@@ -402,11 +611,21 @@ public class RegistrationDataverseService : IDisposable
     /// <param name="systemUserId">Dataverse systemuser ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <param name="targetDataverseUrl">Target Dataverse URL. If null, uses the default (admin) environment.</param>
+    /// <exception cref="SecureRecordPlacementRefusedException">
+    /// The team belongs to the target environment's Secure Record business unit, or that cannot be ruled out
+    /// (task 144). No membership is created.
+    /// </exception>
     public async Task AddUserToTeamAsync(
         string teamName, Guid systemUserId, CancellationToken ct = default,
         string? targetDataverseUrl = null)
     {
-        var teamId = await ResolveTeamIdAsync(teamName, ct, targetDataverseUrl);
+        var (teamId, teamBusinessUnitId) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
+
+        // Task 144 (#967): a member of the Secure Record BU's named owner team reads every secure record it owns, and a
+        // configured team name is all it takes to make one. No team in that business unit may gain a member here.
+        await EnsureNotSecureRecordBusinessUnitAsync(
+            teamBusinessUnitId, $"team '{teamName}'", ct, targetDataverseUrl);
+
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association/$ref";
         var targetApiUrl = !string.IsNullOrEmpty(targetDataverseUrl)
             ? $"{targetDataverseUrl.TrimEnd('/')}/api/data/v9.2"
@@ -419,26 +638,36 @@ public class RegistrationDataverseService : IDisposable
             ["@odata.id"] = $"{targetApiUrl}/{SystemUserEntitySet}({systemUserId})"
         };
 
-        HttpResponseMessage response;
-        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        try
         {
-            using var request = await CreateAuthenticatedRequestForUrlAsync(
-                HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
-            request.Content = JsonContent.Create(refBody);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            using var client = _httpClientFactory.CreateClient(HttpClientName);
-            response = await client.SendAsync(request, ct);
-        }
-        else
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
-            request.Content = JsonContent.Create(refBody);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            response = await _httpClient.SendAsync(request, ct);
-        }
+            HttpResponseMessage response;
+            if (!string.IsNullOrEmpty(targetDataverseUrl))
+            {
+                using var request = await CreateAuthenticatedRequestForUrlAsync(
+                    HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
+                request.Content = JsonContent.Create(refBody);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                using var client = _httpClientFactory.CreateClient(HttpClientName);
+                response = await client.SendAsync(request, ct);
+            }
+            else
+            {
+                using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
+                request.Content = JsonContent.Create(refBody);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                response = await _httpClient.SendAsync(request, ct);
+            }
 
-        response.EnsureSuccessStatusCode();
-        _logger.LogInformation("Added systemuser {UserId} to team {TeamName}", systemUserId, teamName);
+            response.EnsureSuccessStatusCode();
+            _logger.LogInformation("Added systemuser {UserId} to team {TeamName}", systemUserId, teamName);
+        }
+        finally
+        {
+            // Task 132 (C12): whether or not the response confirmed it, the association may have been applied (a
+            // timeout after Dataverse committed). Evicting is always safe; not evicting leaves the user without the
+            // team's records for the identity + membership TTLs.
+            await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team add").ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -452,27 +681,37 @@ public class RegistrationDataverseService : IDisposable
         string teamName, Guid systemUserId, CancellationToken ct = default,
         string? targetDataverseUrl = null)
     {
-        var teamId = await ResolveTeamIdAsync(teamName, ct, targetDataverseUrl);
+        // Removal is never guarded: taking a member OUT of any team cannot widen access (task 144 guards additions).
+        var (teamId, _) = await ResolveTeamAsync(teamName, ct, targetDataverseUrl);
         var navigationUrl = $"{TeamEntitySet}({teamId})/teammembership_association({systemUserId})/$ref";
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
 
-        HttpResponseMessage response;
-        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        try
         {
-            using var request = await CreateAuthenticatedRequestForUrlAsync(
-                HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
-            using var client = _httpClientFactory.CreateClient(HttpClientName);
-            response = await client.SendAsync(request, ct);
-        }
-        else
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
-            response = await _httpClient.SendAsync(request, ct);
-        }
+            HttpResponseMessage response;
+            if (!string.IsNullOrEmpty(targetDataverseUrl))
+            {
+                using var request = await CreateAuthenticatedRequestForUrlAsync(
+                    HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
+                using var client = _httpClientFactory.CreateClient(HttpClientName);
+                response = await client.SendAsync(request, ct);
+            }
+            else
+            {
+                using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
+                response = await _httpClient.SendAsync(request, ct);
+            }
 
-        response.EnsureSuccessStatusCode();
-        _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
+            response.EnsureSuccessStatusCode();
+            _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
+        }
+        finally
+        {
+            // Task 132 (C12): the OVER-GRANT direction — without this the removed user keeps every team-owned record
+            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationService).
+            await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team remove").ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -536,26 +775,13 @@ public class RegistrationDataverseService : IDisposable
         return bu.Value.GetProperty("businessunitid").GetGuid();
     }
 
-    private async Task<Guid> ResolveTeamIdAsync(
+    private async Task<(Guid TeamId, Guid BusinessUnitId)> ResolveTeamAsync(
         string teamName, CancellationToken ct, string? targetDataverseUrl = null)
     {
         var filter = $"name eq '{EscapeODataValue(teamName)}'";
-        var relativePath = $"{TeamEntitySet}?$filter={filter}&$select=teamid&$top=1";
+        var relativePath = $"{TeamEntitySet}?$filter={filter}&$select=teamid,_businessunitid_value&$top=1";
 
-        HttpResponseMessage response;
-        if (!string.IsNullOrEmpty(targetDataverseUrl))
-        {
-            using var request = await CreateAuthenticatedRequestForUrlAsync(
-                HttpMethod.Get, targetDataverseUrl, relativePath, ct);
-            using var client = _httpClientFactory.CreateClient(HttpClientName);
-            response = await client.SendAsync(request, ct);
-        }
-        else
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, relativePath, ct);
-            response = await _httpClient.SendAsync(request, ct);
-        }
-
+        using var response = await SendGetAsync(relativePath, ct, targetDataverseUrl);
         response.EnsureSuccessStatusCode();
 
         var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
@@ -563,7 +789,122 @@ public class RegistrationDataverseService : IDisposable
         if (team == null)
             throw new InvalidOperationException($"Team '{teamName}' not found in Dataverse ({targetDataverseUrl ?? _apiUrl})");
 
-        return team.Value.GetProperty("teamid").GetGuid();
+        var teamId = team.Value.GetProperty("teamid").GetGuid();
+
+        // Every team has a business unit. One that comes back without it cannot be shown to be outside the Secure
+        // Record BU, so it is treated as Guid.Empty and refused by the guard below rather than assumed safe.
+        var businessUnitId = team.Value.TryGetProperty("_businessunitid_value", out var bu)
+                             && bu.ValueKind == JsonValueKind.String
+                             && Guid.TryParse(bu.GetString(), out var parsed)
+            ? parsed
+            : Guid.Empty;
+
+        return (teamId, businessUnitId);
+    }
+
+    /// <summary>
+    /// Task 144 (C10 part 1, #967): refuses to place a principal in the Secure Record business unit of the TARGET
+    /// environment — by ID, never by comparing names. Fail closed: an unreadable or ambiguous Secure Record lookup
+    /// refuses; only "this environment has no Secure Record BU at all" lets the call through without a comparison.
+    /// </summary>
+    /// <param name="businessUnitId">The business unit the user (or the team being joined) belongs to.</param>
+    /// <param name="subject">What is being placed, for the message (e.g. <c>business unit 'X'</c>).</param>
+    /// <remarks>
+    /// <para><b>Why here.</b> Registration is the one BFF path that places users in business units, and it takes the
+    /// business-unit and team NAMES from operator-configured <c>sprk_dataverseenvironment</c> rows
+    /// (<c>RegistrationEndpoints.cs</c>). Configuring either as the Secure Record BU, or a team inside it, would give
+    /// every demo user Read on every secure record — by depth, or by ownership through the named owner team. A Change-BU
+    /// made in the maker portal cannot be blocked from the BFF (no plugins, ADR-002); that case is caught by the
+    /// provisioning-time assertions and the scheduled census job instead.</para>
+    /// <para><b>No Secure Record BU in the target environment</b> is an answer, not a failure: nothing there can be
+    /// placed in it, and refusing would stop registration in every environment that does not hold secure records.</para>
+    /// </remarks>
+    private async Task EnsureNotSecureRecordBusinessUnitAsync(
+        Guid businessUnitId, string subject, CancellationToken ct, string? targetDataverseUrl)
+    {
+        var environment = targetDataverseUrl ?? DataverseBaseUrl;
+        var secureBuName = SecureRecordOwnerTeam.BusinessUnitName(_configuration);
+        var relativePath =
+            $"{BusinessUnitEntitySet}?$filter={SecureRecordOwnerTeam.BusinessUnitFilter(secureBuName)}" +
+            "&$select=businessunitid&$top=2";
+
+        List<JsonElement> matches;
+        try
+        {
+            using var response = await SendGetAsync(relativePath, ct, targetDataverseUrl);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new HttpRequestException(
+                    $"Dataverse answered {(int)response.StatusCode} {response.ReasonPhrase}.",
+                    inner: null,
+                    statusCode: response.StatusCode);
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            matches = result?.Value ?? new List<JsonElement>();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex,
+                "Refusing to place {Subject} in {Environment}: the Secure Record business unit '{SecureBuName}' could "
+                + "not be looked up, so it cannot be ruled out (task 144, fail closed).",
+                subject, environment, secureBuName);
+            throw new SecureRecordPlacementRefusedException(
+                $"Refused: {subject} could not be checked against the Secure Record business unit "
+                + $"'{secureBuName}' in {environment} because that lookup failed. A user placed in that business "
+                + "unit, or in a team inside it, reads every secure record.", ex);
+        }
+
+        if (matches.Count == 0)
+        {
+            return; // This environment has no Secure Record business unit; nothing can be placed in it.
+        }
+
+        if (matches.Count > 1)
+        {
+            _logger.LogError(
+                "Refusing to place {Subject} in {Environment}: more than one business unit is named '{SecureBuName}', "
+                + "so the Secure Record business unit is ambiguous (task 144, fail closed).",
+                subject, environment, secureBuName);
+            throw new SecureRecordPlacementRefusedException(
+                $"Refused: more than one business unit in {environment} is named '{secureBuName}', so {subject} "
+                + "cannot be shown to be outside the Secure Record business unit.");
+        }
+
+        var secureBuId = matches[0].TryGetProperty("businessunitid", out var id)
+                         && id.ValueKind == JsonValueKind.String
+                         && Guid.TryParse(id.GetString(), out var parsed)
+            ? parsed
+            : Guid.Empty;
+
+        if (secureBuId == Guid.Empty || businessUnitId == Guid.Empty || businessUnitId == secureBuId)
+        {
+            _logger.LogCritical(
+                "REFUSED placing {Subject} in the Secure Record business unit '{SecureBuName}' ({SecureBuId}) in "
+                + "{Environment}. A user there reads every secure record by business-unit depth; a member of a team "
+                + "there reads every secure record it owns (task 144, #967). No systemuser or membership was created.",
+                subject, secureBuName, secureBuId, environment);
+            throw new SecureRecordPlacementRefusedException(
+                $"Refused: {subject} is in the Secure Record business unit '{secureBuName}' (or cannot be shown not "
+                + "to be). That business unit must hold no users and its owner team no members — anyone placed there "
+                + "reads every secure record. Configure a different business unit / team for this environment.");
+        }
+    }
+
+    /// <summary>A GET against the admin environment or, when given, another environment.</summary>
+    private async Task<HttpResponseMessage> SendGetAsync(
+        string relativePath, CancellationToken ct, string? targetDataverseUrl)
+    {
+        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        {
+            using var request = await CreateAuthenticatedRequestForUrlAsync(
+                HttpMethod.Get, targetDataverseUrl, relativePath, ct);
+            using var client = _httpClientFactory.CreateClient(HttpClientName);
+            return await client.SendAsync(request, ct);
+        }
+
+        using var adminRequest = await CreateAuthenticatedRequestAsync(HttpMethod.Get, relativePath, ct);
+        return await _httpClient.SendAsync(adminRequest, ct);
     }
 
     private static string EscapeODataValue(string value)
@@ -720,6 +1061,25 @@ public class RegistrationRequestRecord
     public bool ConsentAccepted { get; set; }
     public DateTimeOffset? ConsentDate { get; set; }
     public Guid? DataverseEnvironmentId { get; set; }
+}
+
+/// <summary>
+/// Registration refused to place a user — as a systemuser in a business unit, or as a member of a team — in the
+/// target environment's Secure Record business unit, or could not rule that out (unified-access-control-r2 task 144,
+/// #967). Distinct from a generic failure so the refusal is identifiable in logs and by callers: it is a security
+/// stop, not an outage, and retrying will not change it.
+/// </summary>
+public sealed class SecureRecordPlacementRefusedException : InvalidOperationException
+{
+    public SecureRecordPlacementRefusedException(string message)
+        : base(message)
+    {
+    }
+
+    public SecureRecordPlacementRefusedException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
 
 /// <summary>

@@ -1,0 +1,236 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="136" project="unified-access-control-r2">
+  <metadata>
+    <title>C2 — external read gates test RIGHTS, not key presence: a None-rights root stops admitting reads (including document content download) on both planes, and /me stops leaking None ids</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; contact-plane group, defect C2)</phase>
+    <gate>after-135-131</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization gates on live /api/v1/external read routes (.cs), including an app-only file stream; tags bff-api/auth/security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive: changes the admission rule on every external read route and removes access that null-level grant rows confer today; must not turn C3's cache-hit under-grant into a silent full denial.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hot-file rule: edits Infrastructure/ExternalAccess/CallerPrincipalResolver.cs and AccessibleRecordSetService.cs (same files as tasks 135, 137, 138 and 141 — sequence 135 → 136 → 137; serialize with 138/141) and Api/ExternalAccess/ExternalProjectDataEndpoints.cs (also consumed by task 140's contact-side grant, which depends on this task).</parallel-reason>
+    <deps>135, 131</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Session 26 verified defect C2 [HIGH] (notes/session26-uac-defects-and-synopsis.md § C2; UC5 "LIKELY DEFECT, OVER-GRANT"; cross-cutting finding 2). Session-26 cross-link: "Fix C3 with or before C2".</origin>
+  </metadata>
+
+  <prompt>The external read routes ask "is this record id in the caller's map?" instead of "does the caller hold Read on it?". Two live paths put ids in the map with no rights at all — a Secure-suppressed organization grant and a matter or work-assignment grant row with no level — and those ids still admit project reads, document lists and the app-only document content download. Make every external read gate rights-based, keep None-rights ids out of the principal entirely, and stop /me telling the client about records it holds nothing on.</prompt>
+
+  <role>SPAARKE BFF security engineer — CallerPrincipal, the evaluator's rights map, and the /api/v1/external read routes. You are removing access on purpose; count what is removed before it ships.</role>
+
+  <goal>On both planes a record reaches the caller's principal only with Read; every /api/v1/external read route and every module scope dimension admits a record only when the caller holds Read on it; `AccessibleRecordSet.Contains` and `IsRecordAccessibleAsync` mean "holds Read"; /me lists only records the caller can read; and the seam tests assert denial (absence), not merely `RightsFor == None`.</goal>
+
+  <context>
+    <background>🔴 LIVE, verified 2026-09-30 against source.
+
+THE PRESENCE GATES. `CallerPrincipal.HasProjectAccess` (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:161`) is `ProjectAccess.Any(p =&gt; p.ProjectId == projectId)`; `AccessibleMatterIds` / `AccessibleWorkAssignmentIds` (`:145-149`) and `GetAccessibleProjectIds` (`:152`) are key views. The module scope dimensions consume them unchanged (`Infrastructure/DI/ExternalAccessModule.cs:229`, `:250-252`, `:265-266`, `:279`, `:291`), so the module /fetch and /record admit None keys too. The legacy `ExternalCallerContext.HasProjectAccess` (`ExternalCallerContext.cs:43-44`) has the same shape.
+
+THE READ ROUTES THAT GATE ON PRESENCE ONLY (`Api/ExternalAccess/ExternalProjectDataEndpoints.cs`): GetProjects lists every key (`:256`); GetProjectById `:273`; GetDocuments `:290`; DownloadDocumentContent `:322`, which then resolves SPE pointers and streams APP-ONLY (`:346-363`); GetDocumentVersions `:694`; GetEvents `:766`; GetContacts `:823`; GetOrganizations `:840`. Contrast the to-do list, which already checks Read (`:399-401`), and the mutating routes, which check Create/Write after a presence check (`:562`/`:570`, `:792`/`:797`). The file header (`:31-34`) claims read routes verify Read; the code does not.
+
+HOW None KEYS GET IN.
+1. Workforce plane (and CIAM after task 135): Secure suppression of an organization-only grant. `GrantedRightsFor` maps a null `DirectAccessLevel` to None (`AccessibleRecordSetService.cs:232-234`, `:241-256`), and `AccumulateTerm` inserts the key regardless (`:308-318`); the vetoes remove keys only for deny and Restricted (`:375-406`). `WorkforcePrincipalStrategy` copies every key, None included (`CallerPrincipalResolver.cs:527-529`, `:545-546`).
+2. Both planes: matter and work-assignment grant rows with a null `sprk_accesslevel` are kept deliberately as None keys (`ExternalParticipationService.cs:884-907`; the comment calls dropping them a "SILENT REVOCATION"). This only happens for rows written outside the BFF (the BFF always writes a level).
+
+THE /me LEAK. `ExternalUserContextEndpoint.cs:72-76` returns every `ProjectAccess` entry, emitting the level string "None" for a record the caller holds nothing on — the client learns the GUID of a Secure project it cannot read.
+
+THE TESTS PIN THE WRONG THING. Several assertions check only `RightsFor(x).Should().Be(AccessRights.None)`, which is true both when the key is absent and when it is present-but-powerless: `AccessibleRecordSetServiceTests.cs:625, :1377, :1524`; `tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs:167, :397, :632`; `StandingGrantRuntimeUnionSeamTests.cs:163`. (The session-26 note cited :700/:787 and :300/:335; those anchors have drifted.)
+
+WHY C3 FIRST. The grant cache drops `DirectAccessLevel` (C3). Today a cache hit turns a direct grant on a Secure root into a None key that still passes presence reads; after this task it becomes a full denial. Task 131 (C3) must land first so that cannot happen.
+
+THE OWNER RULE THIS ENFORCES. A contact gets ONLY granted records at the granted level; a record with no rights is not a granted record. Task 042 already set the precedent on the standing term: "present but powerless is worse than not accessible" (`AccessibleRecordSetService.cs:1151-1157`).
+
+TASK 070. Its POML (`tasks/070-gate-semantic-search.poml:56`) names the ExternalProjectDataEndpoints project-access-plus-document-scoping check as the reference implementation to copy. Its shipped code does NOT spread the defect — it gates on a Read snapshot (`Api/Filters/SemanticSearchAuthorizationFilter.cs:500`, `Api/Ai/SemanticSearchEndpoints.cs:572`). ⚠️ 070 was ALREADY amended on 2026-09-30 (an amendments block: reference withdrawn, deps `046, 136`, "the reference to copy is task 136's rights-based gate"). This task does not add a second amendment; it re-verifies that block's claims and anchors once its own gate exists.
+
+TASKS 037 AND 039. Both were re-opened 2026-09-30; their status-notes return them to completed only when BOTH 135 and 136 are completed, and their amended acceptance criteria (including a manual CIAM live gate) name this task as the completing work for the C2 half. Closing them is part of this task.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalUserContextEndpoint.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalResolverTests.cs</file>
+      <file role="modify">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</file>
+      <file role="modify">tests/integration/seam/ExternalAccess/StandingGrantRuntimeUnionSeamTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalTests.cs (the /me projection test at :106-124 re-implements the handler's lambda and would stay green whatever the handler does)</file>
+      <file role="modify">tests/integration/contract/Api/ExternalAccess/ExternalAccessContractTests.cs (route-level 403 and /me assertions through the real handlers)</file>
+      <file role="reference">projects/unified-access-control-r2/tasks/070-gate-semantic-search.poml (existing 2026-09-30 amendment — verify, do not duplicate)</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/037-fr21-fr22-restricted-secure-vetoes.poml (close per its amendments)</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/039-fr23-deny-veto-wiring-pipeline-tests.poml (close per its amendments)</file>
+      <file role="modify">projects/unified-access-control-r2/notes/task-029-external-todo-parity.md (correct the now-false premise at :248-250)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="C2 fix direction / ADR-003">Scope: the principal (both strategies). A record enters `ProjectAccess`, `MatterAccess` or `WorkAssignmentAccess` only when its rights include Read. Prune at construction AND make `HasProjectAccess` and the three `GetAccessible*Ids` / `Accessible*Ids` views require Read — two independent layers, so a future construction path that forgets to prune still fails closed.</constraint>
+    <constraint source="C2 fix direction">Scope: the evaluator. `AccessibleRecordSet.Contains` (`AccessibleRecordSetService.cs:149`) and `IsRecordAccessibleAsync` (`:749-760`) answer "holds Read". Removing None-valued keys at the end of each composition (after the veto pipeline) is the preferred shape — a veto already removes keys, and absence is the only representation of no access. Do not introduce any value that means "denied".</constraint>
+    <constraint source="C2 fix direction">Scope: every /api/v1/external read route listed in the background (`:256`, `:273`, `:290`, `:322`, `:694`, `:766`, `:823`, `:840`). Each denies with the existing 403 ProblemDetails unless the caller holds Read on the record; GetProjects lists only Read-bearing projects. The content download must deny BEFORE any SPE pointer resolution or Graph read (keep the authz-before-stream order at `:320-346`). Mutating routes keep their existing Create/Write checks.</constraint>
+    <constraint source="hot-file coordination">Scope: the module seam. Do NOT edit `ExternalModuleRegistry.cs` or `ExternalAccessModule.cs` (task 134 owns them); the module dimensions become rights-based through the `CallerPrincipal` views they already read.</constraint>
+    <constraint source="owner model 2026-09-30">Scope: null-level matter/WA grant rows. They stop conferring access (no level = not granted). This REMOVES live access: count and list the affected rows in dev before merging (see escalation). Update the "SILENT REVOCATION" comment at `ExternalParticipationService.cs:884-889` so it records the owner decision instead of the old rationale; do not otherwise change the grant query (C12 and task 137 own that file's other changes).</constraint>
+    <constraint source="/me">Scope: `ExternalUserContextEndpoint.cs`. /me returns only Read-bearing projects; the "None" branch at `:75` becomes unreachable and a test pins that no entry with level "None" is ever emitted. The test drives the real handler (or the contract host), not a copy of its projection lambda — `CallerPrincipalTests.cs:116-118` is such a copy and proves nothing about the handler; replace it or delete it.</constraint>
+    <constraint source="ADR-038">Scope: tests. Every security-suppression and veto test that today asserts `RightsFor == None` must ALSO assert the record is absent (`Contains == false` / not in `RecordIds` / not in the principal). Reads must be asserted DENIED at the route (403), not inferred from the map. KEEP paths only; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="owner 2026-09-10 / spec">Scope: verification. No Dataverse test in CI; the live check is a MANUAL gate with existing test users and an existing CIAM test contact; no user relocation; Secure test records created through the provisioning endpoint.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing `.claude/constraints/bff-extensions.md`; publish size from fresh master and fresh branch worktrees at SHORT paths, Compress-Archive on both, equal file counts, both sizes and the delta reported; ≤60 MB; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/task-037-restricted-secure-vetoes.md</file>
+      <file>projects/unified-access-control-r2/tasks/135-ciam-plane-unified-veto-pipeline.poml</file>
+    </files>
+    <patterns>
+      <pattern name="rights-based read gate already in the file" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs">`ListTodosForRoot` (`:382-405`): resolve rights, `HasFlag(AccessRights.Read)`, deny with the root's 403. Apply the same test to every read route.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify every anchor. Confirm task 135 and the C3 cache task are merged; if the C3 task is not, fire the escalation.</step>
+    <step order="1">Measure the before-state in dev: count and list (a) matter/WA grant rows (contact AND organization rows) with a null `sprk_accesslevel` that are active and unexpired, and (b) organization-only grants on Secure roots. These are the records whose read access this task removes. Also enumerate, by grep, every consumer of `AccessibleRecordSet.Contains` / `.RecordIds` / `.Rights`, `IsRecordAccessibleAsync`, `CallerPrincipal.HasProjectAccess` and the `GetAccessible*Ids` / `Accessible*Ids` views across `src/server/**`, and record the list: each one's behaviour changes from presence to Read, and each must be covered by a test or named as unaffected in the notes.</step>
+    <step order="2">Make the evaluator and the principal rights-based (both layers, both strategies), then switch every read route listed to a Read test and GetProjects to Read-bearing ids only; fix /me.</step>
+    <step order="3">Update the tests that assert only `RightsFor == None` so they also assert absence; add route-level denial tests; add perturbations.</step>
+    <step order="4">Re-verify the existing 2026-09-30 amendment in `tasks/070-gate-semantic-search.poml` against the code after this task (its anchors into `CallerPrincipalResolver.cs` and `ExternalProjectDataEndpoints.cs` will have moved; correct line numbers in place and add one dated line "task 136 gate delivered DATE"). Correct the stale premise in `notes/task-029-external-todo-parity.md:248-250`. Then close tasks 037 and 039: confirm task 135 is completed, run each task's amended acceptance criteria (the manual CIAM live gate may reuse this task's and 135's recorded evidence where it is the same observation — cite it), append a dated completion line to each amendments block, set both POML statuses to completed and their TASK-INDEX rows to `✅ [done]`.</step>
+    <step order="5">Build, full suite, seam suite, ArchTests, publish size; MANUAL live gate; notes at `projects/unified-access-control-r2/notes/task-136-rights-based-read-gates.md`; TASK-INDEX and POML status; `check-task-status-drift.ps1`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Task 131 (C3 grant cache) has not merged. STOP — without it, a legitimate direct grant on a Secure root becomes a full denial on every cache hit once presence stops admitting reads.</trigger>
+    <trigger>OWNER DECISION if Step 1 finds ANY active, unexpired null-level matter/WA grant row that is not test data: STOP and report the list — back-fill a level (and which) or let them lapse. RECOMMENDATION: let them lapse (no level = not granted), consistent with the owner's C9 rule ("only those records to which granted access … the privileges … as set in the grant access") and with task 107's owner-approved precedent that an undated grant confers nothing; a back-fill would invent a level nobody chose. If every such row is test data, record that and proceed.</trigger>
+    <trigger>A read route turns out to need a right other than Read (for example a route that is really a mutation in disguise). STOP and name it rather than choosing the right silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalUserContextEndpoint.cs</output>
+    <output type="test">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-136-rights-based-read-gates.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Workforce contact with only an organization grant on Secure project P: P is absent from the composed set and the principal, and GET /projects/P, /projects/P/documents, /projects/P/documents/{d}/content, /projects/P/documents/{d}/versions, /projects/P/events, /projects/P/contacts and /projects/P/organizations each return 403 — and the content route makes no SPE pointer or Graph call (asserted).</criterion>
+    <criterion testable="true">The same scenario on the CIAM plane (after task 135) gives the same denials.</criterion>
+    <criterion testable="true">A matter or work-assignment grant row with a null level confers nothing: the record is absent from `MatterAccess` / `WorkAssignmentAccess` on both planes, and the module /fetch for its documents and invoices returns 0 rows for it, and /record for it returns 403.</criterion>
+    <criterion testable="true">Positive: a direct ViewOnly grant on a Secure record still admits every read route (Read is present) and still refuses the mutating routes (no Create/Write).</criterion>
+    <criterion testable="true">`AccessibleRecordSet.Contains` and `IsRecordAccessibleAsync` return false for a record whose composed rights lack Read; no composed set contains a None-valued key after composition (pinned by test).</criterion>
+    <criterion testable="true">Defence in depth: a `CallerPrincipal` constructed directly with a None-rights project (bypassing pruning) still fails `HasProjectAccess` and is excluded from `GetAccessibleProjectIds` / `GetAccessibleMatterIds` / `GetAccessibleWorkAssignmentIds`.</criterion>
+    <criterion testable="true">GET /me, driven through the real `ExternalUserContextEndpoint` handler, never returns a project the caller cannot read and never emits the level string "None" (fixture: one Read-bearing project and one None-rights project on the principal; only the first is returned).</criterion>
+    <criterion testable="true">Every previously `RightsFor == None`-only assertion for a Secure-suppressed, vetoed or null-level record now also asserts absence.</criterion>
+    <criterion testable="true">Regression: callers with ordinary grants and systemusers with membership keep every read they had; the to-do and mutating-route tests pass unmodified.</criterion>
+    <criterion testable="true">Perturbation: restoring presence-only `HasProjectAccess`, removing construction-time pruning, or removing the evaluator's end-of-composition pruning each turns at least one test red (the two layers are proven independent). All reverted before completion.</criterion>
+    <criterion testable="true">Step 1 before-state (both counts plus the row lists) is recorded in the task notes before merge.</criterion>
+    <criterion testable="true">MANUAL live gate (dev, no CI): with an existing CIAM test contact whose organization holds a grant on a Secure project (provisioned through the endpoint) and no direct grant, the external SPA does not list the project, /me does not return its id, and a direct request for one of its documents' content returns 403; adding a direct ViewOnly grant restores read-only access. Evidence in the task notes.</criterion>
+    <criterion testable="true">Task 070's existing amendment is re-verified with corrected anchors and a dated delivery line (no second amendments block); `notes/task-029-external-todo-parity.md:248-250` is corrected.</criterion>
+    <criterion testable="true">Every consumer found by the Step 1 grep is listed in the task notes with either the test that covers its new Read semantics or a one-line reason it is unaffected.</criterion>
+    <criterion testable="true">Tasks 037 and 039: their amended acceptance criteria are each evidenced in the task notes, their amendments blocks carry a dated completion line, their POML status is completed and their TASK-INDEX rows are `✅ [done]`; `check-task-status-drift.ps1` reports no drift for 037, 039 or 136. If task 135 is not completed, this criterion fails and 136 is not complete.</criterion>
+    <criterion testable="true">Build green; full BFF unit suite, seam suite and ArchTests green; publish size reported (both sizes, delta, zip tool, file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above; anything beyond that needs a one-line justification in the task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C2 [HIGH]. Pairs: C1 (task 135) must run first on the same files; C3 (cache) must land first or this task converts an intermittent under-grant into a hard one. After this task, the only remaining source of a None key is none at all — absence is the single representation of no access across evaluator, principal, module seam and /me.
+
+The header at `ExternalProjectDataEndpoints.cs:31-34` becomes true; keep it and cite this task.
+
+Related: tasks 029, 032, 037, 039, 042, 070, 107, 131, 135, 137, 138, 140 (contact-side grant depends on this task: a None-rights key must never read as a grantable root).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files first. FULL rigor — code-review and adr-check run at Step 9.5 unconditionally.</protocol>
+    <outcome date="2026-10-01" branch="task/uac-r2-136" base="task/uac-r2-135" status="code-complete; manual live gate pending; tasks 037/039 stay pending on their own live gates; publish size measured by the main session after merge">
+      Full record: projects/unified-access-control-r2/notes/task-136-rights-based-read-gates.md.
+      - Fix, three independent layers: (1) AccessibleRecordSetService.RemoveEntriesWithoutRead runs last in every
+        composition (systemuser path and the shared contact path, after ApplyVetoPipeline); AccessibleRecordSet
+        Contains / RecordIds / Count require Read. (2) Both strategies build the principal through
+        CallerPrincipal.FromReadBearing; HasProjectAccess, GetAccessibleProjectIds, Accessible*Ids and the new
+        ReadableProjects require Read on their own. (3) The seven project read routes test Read through
+        HoldsReadOnProject (RightsForRoot, the to-do list's expression); GET /projects lists Read-bearing ids only;
+        the content download still denies before any SPE pointer resolution. /me returns readable projects only and
+        never emits "None". Mutating routes unchanged (Read-gated HasProjectAccess, then Create). ExternalCallerContext
+        aligned. ExternalParticipationService: comment only (owner decision recorded; grant query unchanged).
+        ExternalAccessModule.cs / ExternalModuleRegistry.cs not edited.
+      - Step 1 (dev, READ-ONLY): 0 grant rows with a null level in any state (31 active, all levelled); 1 Secure
+        project, 0 grants on it; 0 Secure matters/WAs; 0 organization grants on Secure roots. Escalations 1-3 did not
+        fire. Consumer enumeration: 17 consumers, each with its covering test or reason (notes §3).
+      - Tests: unit (CallerPrincipalTests real-handler /me tests replace the lambda-copy test; defence-in-depth views;
+        strategy construction pruning both planes; AccessibleRecordSet direct-build views), seam (C2 on both contact
+        sign-ins, null-level matter/WA, no-entry-without-Read over five compositions; absence added at 15 None-only
+        sites (8 evaluator unit, 6 seam, 1 standing-grant seam); GrantCacheRoundTrip null-level criterion reversed per owner), contract (7 read routes x 2 planes 403
+        before any read + admitted with direct ViewOnly; 3 mutating routes x 2 planes 403 insufficient_rights; list and
+        /me; route layer isolated with a hand-built None principal; module /fetch documents+invoices 0 rows and /record
+        403 for null-level matter/WA, with levelled control). Six ExternalDataService read methods made virtual (test
+        seam, task 030 precedent) so positives assert 200.
+      - Perturbations (all restored byte-exact from a WIP commit): presence HasProjectAccess -> 1 red; no construction
+        pruning -> 3; no evaluator pruning -> 14; /me unfiltered with "None" -> 1; route helper back to presence -> 0,
+        then 7 after adding the isolated route-layer tests; Contains back to ContainsKey -> 1.
+      - Step 4: task 070 amendment re-verified (n=1 anchors unchanged; verdict anchors corrected; delivered line added;
+        negative grep 0). notes/task-029 §5 premise corrected. Tasks 037/039: dated amendment n=2 completion lines
+        added; amended criteria 1-4 evidenced; criterion 5 (MANUAL CIAM live gate) NOT met, so per their criterion 6 both
+        STAY PENDING. DEVIATION from this task's criterion "set both to completed": recorded, not improvised around.
+      - Step 9.5: code-review 0 Critical (1 low-confidence warning: the contract fixture re-registers the strategies,
+        so a future third production strategy would be dropped from those tests; 4 suggestions); adr-check 0
+        violations (1 low warning: read-route 403s carry no reasonCode, pre-existing, kept per the constraint).
+      - Placement (CLAUDE.md §10 / bff-extensions.md): in the BFF, inside the existing evaluator, principal and
+        endpoints — per-request authorization before an app-only read. No new service, endpoint, DI registration,
+        option, job or package. New surface: CallerPrincipal.ReadableProjects + FromReadBearing (members on an existing
+        type), two private helpers, virtual on six existing methods. §11: existing = RightsForRoot + the veto key
+        removal (reused); extension = yes (one helper, one step, one shared filter); cost of doing nothing = a Secure
+        project reached only through an organization grant lists and streams documents app-only to a caller holding
+        nothing (C2). No package change, so no new CVE.
+      - Not done (run rules): live writes / manual live gate (exact procedure in notes §10), publish size, TASK-INDEX
+        and current-task edits (main session).
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-136-f1" base="task/uac-r2-136" status="code-complete; verifier round 1 closed; manual live gate (criterion 12) pending; criterion 15 blocked on 037/039 live gates; publish size measured by the main session after merge">
+      Verifier round 1.
+      - Criterion 8 (NOT MET -> closed): GrantCacheRoundTripSeamTests' org-inherited-only Secure test asserted only
+        RightsFor == None. It now also asserts Contains == false and that Rights has no key for the record, on the
+        miss and the hit, and is renamed ComposeAsync_OrgInheritedOnlyGrantOnSecureRoot_IsAbsentOnMissAndOnHit.
+        Seeded both RemoveEntriesWithoutRead calls out: 3 of 3 cases red at the miss NotContainKey line; restored,
+        19 / 19. Re-swept all 16 RightsFor(..) == None sites in tests/: every one now asserts absence (notes §5).
+        Stale test names in notes/task-131 rows 2 and 5 updated to the renamed tests.
+      - Status: &lt;status&gt; moved from completed back to pending. The first outcome's own status said code-complete
+        with the live gate and 037/039 pending, and criterion 15 says 136 is not complete until 037 and 039 are
+        closed, so "completed" overstated it. It also now matches the TASK-INDEX 🔲 [open] row (no drift).
+      - Null-level trigger re-confirmed READ-ONLY (read_query, 2026-10-01): 0 sprk_externalrecordaccess rows with a
+        null sprk_accesslevel in any state. Lapses; nothing to list.
+      - No production code changed; no new service, endpoint, DI registration, option, job or package.
+      - Runs: GrantCacheRoundTripSeamTests 19 / 19; full BFF unit suite 13,300 passed / 0 failed / 54 skipped
+        (13,354); ArchTests 338 / 338; check-task-status-drift reports no drift for 136 (109 and 135 drift, not
+        this task's to resolve).
+      - Still not closed: criterion 12 (manual CIAM live gate, procedure in notes §10), criterion 15 (blocked on the
+        037/039 criterion-5 live gates), criterion 16 publish size (main session).
+    </outcome>
+    <outcome date="2026-10-01" branch="task/uac-r2-136-f2" base="task/uac-r2-136-f1" status="code-complete; verifier round 2 closed; manual live gate (criterion 12) pending; criterion 15 blocked on 037/039 live gates; publish size measured by the main session after merge">
+      Verifier round 2.
+      - Finding 1 / 14 (stale comment -> closed): AccessibleRecordSetServiceTests.ToAccessRights_NullLevel_IsNone_FailClosed
+        still carried task 032's "keeps its id ... silent revocation" rationale. Reworded: the row is read with a
+        null level, maps to None, and RemoveEntriesWithoutRead removes the record at the end of composition
+        (owner rule 2026-09-30, task 136). Comment-only; the assertion is unchanged, so there is no new guard to
+        seed. Re-grepped src/ and tests/ for "silent revocation" / "keeps its id" / "set membership preserved":
+        the only remaining hit is GrantCacheRoundTripSeamTests:190, which quotes 032's rule as the one task 136
+        reversed. That is accurate history, not a stale claim, so it stays.
+      - Null-level trigger re-run READ-ONLY (read_query, 2026-10-01): 0 sprk_externalrecordaccess rows with a null
+        sprk_accesslevel in any state. Lapses; nothing to list.
+      - Status stays pending (criterion 15). No production code changed; no new service, endpoint, DI
+        registration, option, job or package.
+      - Runs: AccessibleRecordSetServiceTests 65 / 65; full BFF unit suite 13,300 passed / 0 failed / 54 skipped
+        (13,354); ArchTests 338 / 338.
+      - Still not closed: criterion 12 (manual CIAM live gate, procedure in notes §10), criterion 15 (blocked on the
+        037/039 criterion-5 live gates), criterion 16 publish size (main session).
+    </outcome>
+  </execution>
+</task>

@@ -5,7 +5,7 @@
 > **Scope**: End-to-end chain — Azure infrastructure → Dataverse environment → `sprk_dataverseenvironment` record → BFF API integration
 > **Companion docs**:
 > - [`ENVIRONMENT-DEPLOYMENT-GUIDE.md`](../guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md) — first-environment setup (Azure-side)
-> - [`CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/CUSTOMER-DEPLOYMENT-GUIDE.md) — multi-tenant customer infrastructure model
+> - [`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — **authoritative** per-customer infrastructure model (supersedes `CUSTOMER-DEPLOYMENT-GUIDE.md`, now a stub)
 > - [`SPAARKE-SELF-SERVICE-USER-REGISTRATION.md`](../guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md) — registration / demo expiration architecture
 > - [`production-release.md`](production-release.md) — release orchestration, manual script execution path
 
@@ -50,9 +50,24 @@ When CI/CD workflows refer to `dev`, `staging`, `prod` (as in `deploy-promote.ym
 - Federated identity credentials in Entra (one per GitHub Environment)
 - Per-environment secrets (`DEV_APP_NAME`, `STAGING_APP_NAME`, `PROD_APP_NAME`)
 
-**The two are decoupled.** A single deployment target (`dev` for example) can host multiple Dataverse-level environments (e.g., "demo" and a "trial-A" customer environment running on the same Azure App Service). Or a single Dataverse-level environment may exist as its own deployment target. The choice depends on your isolation model — see `CUSTOMER-DEPLOYMENT-GUIDE.md` for the customer-dedicated infrastructure pattern.
+**The two are decoupled for Spaarke's own non-customer environments** (`dev`, `staging`), where one deployment target may register more than one Dataverse-level row.
 
-For this guide we assume one Dataverse environment per Azure deployment target. Adjust the substitutions accordingly if you're consolidating.
+> 🔴 **CORRECTED 2026-09-28 (owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)).**
+> This paragraph previously said a single deployment target *"can host multiple Dataverse-level environments
+> … running on the same Azure App Service"*. **For customers that is not an option, and it is not even
+> possible.** Every customer gets their own Dataverse environment **and their own Azure subscription and
+> resource group**, so a customer's BFF App Service cannot be shared with another customer's — an App
+> Service app cannot even use an App Service Plan in a different subscription.
+>
+> The reason the shared-app shape was rejected rather than merely disliked: under **Model 1** all customers
+> live in **Spaarke's** Azure tenant, so `tenantId` is the **same GUID for every Model 1 customer**. A shared
+> app would have to separate customers by a `tenantId`-keyed control — an AI Search filter, a Cosmos
+> partition, a Redis key prefix, an SPE container resolver — and **none of those can distinguish customers,
+> while all of their tests pass.**
+
+**For a customer environment: one Dataverse environment ↔ one Azure subscription ↔ one full dedicated
+Azure stack.** No consolidation. See `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` for the authoritative
+per-customer pattern.
 
 ## 3. Prerequisites
 
@@ -72,25 +87,43 @@ Before starting:
 
 Throughout this chain, `{name}` is the new environment's short name. For concreteness, examples below use `trial-a`.
 
-### Step 1 — Provision shared platform infrastructure (if not already)
+### Step 1 — Create the customer's Azure subscription and resource group
 
-Skip this step if the target subscription already has the Spaarke shared platform deployed (App Service Plan, OpenAI, AI Search, Key Vault, App Insights, Log Analytics).
+> 🔴 **REPLACED 2026-09-28 (owner decision [D-12](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)).**
+> Step 1 used to be *"Provision shared platform infrastructure"* — a shared App Service Plan, Azure OpenAI,
+> AI Search, Key Vault, App Insights and Log Analytics that customer stacks were then layered on top of.
+> **That layer is retired.** There is no shared-then-overlay shape: **every Azure resource is dedicated per
+> customer, in that customer's own Azure subscription and resource group, in both deployment models.**
+> `./scripts/Deploy-Platform.ps1` deploys Spaarke's own non-customer-serving platform resources and is
+> **not** a prerequisite for onboarding a customer.
 
-```pwsh
-./scripts/Deploy-Platform.ps1 -Subscription <subscription-id> -ResourceGroup spaarke-platform-rg -Location eastus
-```
+Each customer gets **their own Azure subscription and resource group** so that usage is segregable and
+billable per customer — and because Azure OpenAI TPM quota is per-subscription-per-region, this is what
+gives genuine quota isolation. It is also what forces the App Service Plan to be dedicated: **an App
+Service app cannot use a plan in a different subscription.**
 
-This wraps `infrastructure/bicep/platform.bicep`. Outputs Key Vault URI, App Service Plan ID, etc., which downstream steps reference.
+1. **Create the subscription** for this customer under the appropriate billing account:
+   - **Model 1** — in **Spaarke's** Azure tenant. No admin consent, no Azure Lighthouse delegation needed.
+   - **Model 2** — in the **customer's own** Azure tenant. Requires **H0.5 admin consent** *and* **Azure
+     Lighthouse delegation** before Spaarke can deploy into it. These two items are the *only* deployment
+     differences between the models.
+2. **Create the resource group** in that subscription (e.g. `spaarke-trial-a-rg`), in the customer's region.
+3. **Register the required resource providers** on the new subscription.
 
-**Idempotency**: yes — re-running is safe (Bicep deployments are idempotent on resource state; the script's state file is in `~/.spaarke/provision-state/`).
+**Idempotency**: yes — creating an existing subscription/resource group is a no-op; re-running is safe.
 
-### Step 2 — Run the customer-provisioning chain
+### Step 2 — Deploy the full per-customer stack
+
+This single chain deploys **everything** for the customer into the resource group from Step 1 — App Service
+Plan + BFF App Service, Key Vault, Redis (Standard), Service Bus, Storage, Cosmos, App Insights / Log
+Analytics, Azure OpenAI, AI Search, Document Intelligence — plus the Dataverse environment, solutions and
+SPE container. There is no per-customer "overlay" on a shared base, because there is no shared base.
 
 ```pwsh
 ./scripts/Provision-Customer.ps1 `
   -CustomerId trial-a `
   -EnvironmentName trial-a `
-  -Subscription <subscription-id> `
+  -Subscription <the customer's own subscription-id from Step 1> `
   -ResourceGroup spaarke-trial-a-rg `
   -Location eastus
 ```
@@ -203,8 +236,9 @@ These are documented gaps tracked by `github-actions-rationalization-r1` and its
 
 For each new environment `{name}`:
 
-- [ ] Step 1: shared platform infrastructure deployed (or already exists)
-- [ ] Step 2: `Provision-Customer.ps1 -CustomerId {name} -EnvironmentName {name}` ran to completion
+- [ ] Step 1a: the customer's **own Azure subscription** created (Model 1: in Spaarke's tenant · Model 2: in the customer's tenant) and resource providers registered
+- [ ] Step 1b (**Model 2 only**): H0.5 admin consent granted **and** Azure Lighthouse delegation established
+- [ ] Step 2: `Provision-Customer.ps1 -CustomerId {name} -EnvironmentName {name}` ran to completion against **that** subscription, deploying the full dedicated per-customer stack
 - [ ] Step 3: `sprk_dataverseenvironment` row created via PAC CLI with all required fields populated
 - [ ] Step 4a: GitHub Environment `{name}` created in repo settings (if CI/CD deploy desired)
 - [ ] Step 4b: Entra federated credential added for `repo:spaarke-dev/spaarke:environment:{name}`
@@ -218,12 +252,13 @@ For each new environment `{name}`:
 
 ## 8. References
 
-- [`scripts/Deploy-Platform.ps1`](../../scripts/Deploy-Platform.ps1) — Step 1 driver
-- [`scripts/Provision-Customer.ps1`](../../scripts/Provision-Customer.ps1) — Step 2 driver
+- [`scripts/Provision-Customer.ps1`](../../scripts/Provision-Customer.ps1) — Step 2 driver (the full per-customer stack)
+- [`scripts/Deploy-Platform.ps1`](../../scripts/Deploy-Platform.ps1) — Spaarke's own non-customer-serving platform resources. ⚠️ **No longer the Step 1 driver** (D-12, 2026-09-28)
+- [`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md) — the deployment-model decision this guide now follows
 - [`src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs) — runtime lookup
 - [`src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs`](../../src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs) — entity field reference
 - [`docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md`](../guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md) — original Azure setup
-- [`docs/guides/CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/CUSTOMER-DEPLOYMENT-GUIDE.md) — multi-tenant model
+- [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — authoritative per-customer deployment model
 - [`docs/guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md`](../guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md) — registration workflow architecture
 - [`docs/procedures/production-release.md`](production-release.md) — manual-script release path
 - [`docs/assessments/bff-warning-suppression-analysis-2026-06-01.md`](../assessments/bff-warning-suppression-analysis-2026-06-01.md) — multi-env migration gap

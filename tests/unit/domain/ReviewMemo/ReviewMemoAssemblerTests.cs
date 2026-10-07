@@ -172,4 +172,90 @@ public class ReviewMemoAssemblerTests
 
         memo.Sections.Select(s => s.Location).Should().ContainInOrder("Section 1", "Section 2", "Section 3");
     }
+
+    // -----------------------------------------------------------------------
+    // R8 §GAPS-5 decision D3 (2026-09-07) — partial grounding is RENDERED, never dropped.
+    // -----------------------------------------------------------------------
+
+    /// <summary>
+    /// The model does not always ground every finding, which is why the CLIENT's finding type has
+    /// always had these four optional. The server contract declared them <c>required</c>, so a
+    /// partially-grounded finding could not be sent at all. D3 relaxed them and renders an em dash:
+    /// silently excluding a flagged clause from a review summary is a worse failure than showing it
+    /// with one cell unfilled.
+    /// </summary>
+    [Fact]
+    public void Assemble_SectionMissingEveryOptionalGrounding_RendersPlaceholdersAndKeepsTheSection()
+    {
+        var request = new GenerateReviewMemoRequest
+        {
+            OverallRisk = "Medium",
+            Sections = new[]
+            {
+                new ReviewMemoSectionInput { QuotedText = "A clause with no other grounding." },
+            },
+        };
+
+        var memo = ReviewMemoAssembler.Assemble(request);
+
+        memo.Sections.Should().ContainSingle("a partially-grounded finding is never dropped");
+        var section = memo.Sections[0];
+        section.Before.Should().Be("A clause with no other grounding.");
+        section.After.Should().Be(section.Before, "no afterText ⇒ the original text stands (decision D2)");
+        section.Location.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+        section.Why.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+        section.FlaggedClause.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+        section.StandardRef.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+    }
+
+    /// <summary>An EMPTY cell reads as a rendering bug; the placeholder must be a visible mark.</summary>
+    [Fact]
+    public void Assemble_WhitespaceOnlyGrounding_IsTreatedAsAbsentNotAsContent()
+    {
+        var request = new GenerateReviewMemoRequest
+        {
+            OverallRisk = "Low",
+            Sections = new[]
+            {
+                new ReviewMemoSectionInput { QuotedText = "Clause.", SectionRef = "   ", StandardRef = "" },
+            },
+        };
+
+        var memo = ReviewMemoAssembler.Assemble(request);
+
+        memo.Sections[0].Location.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+        memo.Sections[0].StandardRef.Should().Be(ReviewMemoAssembler.MissingValuePlaceholder);
+        ReviewMemoAssembler.MissingValuePlaceholder.Should().NotBeNullOrWhiteSpace(
+            "an empty cell reads as a rendering bug — the absence must be visibly marked");
+    }
+
+    /// <summary>Present values are never touched by the placeholder logic.</summary>
+    [Fact]
+    public void Assemble_FullyGroundedSection_IsUnaffectedByThePlaceholderRule()
+    {
+        var request = new GenerateReviewMemoRequest
+        {
+            OverallRisk = "High",
+            Sections = new[]
+            {
+                new ReviewMemoSectionInput
+                {
+                    QuotedText = "Assignment without consent.",
+                    SectionRef = "4.2",
+                    Assessment = "Deviates from the firm standard.",
+                    StandardRef = "B5",
+                    FlaggedClause = "The clause permits assignment.",
+                    RiskLevel = "High",
+                },
+            },
+        };
+
+        var memo = ReviewMemoAssembler.Assemble(request);
+
+        var section = memo.Sections[0];
+        section.Location.Should().Be("4.2");
+        section.Why.Should().Be("Deviates from the firm standard.");
+        section.StandardRef.Should().Be("B5");
+        section.FlaggedClause.Should().Be("The clause permits assignment.");
+    }
 }

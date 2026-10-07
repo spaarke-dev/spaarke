@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Workers.Office;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Per ADR-001, this worker uses BackgroundService pattern (not Azure Functions).
+/// Runs in the BFF as a BackgroundService, governed by ADR-052 (ADR-004 A1 §6 named non-conforming consumer).
 /// Per ADR-004, handlers are idempotent using IdempotencyKey for duplicate detection.
 /// Per ADR-007, all SPE operations go through SpeFileStore facade.
 /// </para>
@@ -59,6 +59,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly IConfiguration _configuration;
 
+    /// <summary>Task 080 (write-path invariant I-6): the owner team for every document this worker creates.</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownershipResolver;
+
     private const string QueueName = "office-upload-finalization";
     private const string ProfileQueueName = "office-profile";
     private const string IndexingQueueName = "office-indexing";
@@ -87,7 +90,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IDocumentDataverseService documentService,
         IProcessingJobService processingJobService,
         JobSubmissionService jobSubmissionService,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
@@ -99,6 +103,46 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+        _ownershipResolver = ownershipResolver ?? throw new ArgumentNullException(nameof(ownershipResolver));
+    }
+
+    /// <summary>
+    /// The owner team for a document this save creates — the one <c>SaveAsync</c> resolved and carried on the
+    /// payload, or, when the payload predates task 080, the same resolver's answer for the save's association
+    /// and user. Returns <see langword="null"/> when neither yields a team: the caller MUST NOT create the
+    /// document, because an app-owned row lands in the ROOT business unit, unreachable by its own author.
+    /// </summary>
+    private Task<Guid?> ResolveDocumentOwnerTeamAsync(
+        UploadFinalizationPayload payload,
+        string userId,
+        CancellationToken cancellationToken)
+        => ResolveDocumentOwnerTeamAsync(_ownershipResolver, payload, userId, cancellationToken);
+
+    /// <summary>
+    /// The rule behind <see cref="ResolveDocumentOwnerTeamAsync(UploadFinalizationPayload, string, CancellationToken)"/>,
+    /// static so it is assertable without constructing a Service Bus worker: the CARRIED team wins (so an email's
+    /// attachment children match their parent), and only a payload without one asks the resolver.
+    /// </summary>
+    internal static async Task<Guid?> ResolveDocumentOwnerTeamAsync(
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
+        UploadFinalizationPayload payload,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        if (payload.OwningTeamId is { } carried && carried != Guid.Empty)
+        {
+            return carried;
+        }
+
+        return await ownershipResolver.ResolveOwningTeamAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                // AssociationType may be the friendly spelling ("matter"); the resolver normalizes it.
+                TargetEntityLogicalName = payload.AssociationType,
+                TargetRecordId = payload.AssociationId,
+                CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+            },
+            cancellationToken).ConfigureAwait(false);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -178,128 +222,82 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     retryable: false);
             }
 
-            // Step 3: Check if file is already uploaded to SPE (new direct flow)
-            // TempFileLocation format: spe://{driveId}/{itemId} means file is already in SPE
-            var isAlreadyInSpe = payload.TempFileLocation?.StartsWith("spe://", StringComparison.OrdinalIgnoreCase) ?? false;
+            // Step 3: The file is ALWAYS already in SPE by the time this job runs.
+            //
+            // ── THE "TRADITIONAL UPLOAD FLOW" BRANCH WAS DELETED 2026-08-28. Reachability evidence:
+            //    OfficeJobQueue.QueueUploadFinalizationAsync is the SOLE producer of
+            //    UploadFinalizationPayload anywhere in the repo (the only two references to the type are
+            //    that construction site and the record declaration itself), and it sets
+            //        TempFileLocation = $"spe://{driveId}/{itemId}"
+            //    unconditionally, from two non-nullable string parameters. So the old `isAlreadyInSpe`
+            //    test was invariably true and the `else` branch — which downloaded a temp file via
+            //    RetrieveTempFileAsync (itself only ever a stub returning an empty MemoryStream, GitHub
+            //    #231) and re-uploaded it via a local UploadToSpeAsync — could never execute. Deleting it
+            //    removed the LAST server-side upload path that prefixed a folder onto an SPE upload path
+            //    (it honoured payload.FolderPath); the only live Office-save upload is now
+            //    Services/Office/OfficeStorageUploader.UploadToSpeAsync, which writes flat.
+            //
+            //    RetrieveTempFileAsync, UploadToSpeAsync and the SpeUploadResult record went with it —
+            //    each had exactly one caller, inside that branch. UploadFinalizationPayload.FolderPath
+            //    went too; that branch was its only consumer.
+            //
+            //    A malformed or legacy queue message now FAILS EXPLICITLY here rather than silently
+            //    taking a path that could not have worked anyway.
+            if (payload.TempFileLocation is null
+                || !payload.TempFileLocation.StartsWith("spe://", StringComparison.OrdinalIgnoreCase))
+            {
+                return JobOutcome.Failure(
+                    "OFFICE_INTERNAL",
+                    "TempFileLocation must be an spe://{driveId}/{itemId} reference — the synchronous save "
+                    + $"path uploads to SPE before queueing. Got: '{payload.TempFileLocation ?? "(null)"}'.",
+                    retryable: false);
+            }
 
-            string driveId;
-            string itemId;
             Guid documentId;
 
-            if (isAlreadyInSpe)
+            // Parse the SPE reference: spe://{driveId}/{itemId}
+            var speRef = payload.TempFileLocation[6..]; // Remove "spe://" prefix
+            var parts = speRef.Split('/', 2);
+            if (parts.Length != 2)
             {
-                // File already uploaded to SPE and Document record created by SaveAsync
-                // Parse the SPE reference: spe://{driveId}/{itemId}
-                var speRef = payload.TempFileLocation![6..]; // Remove "spe://" prefix
-                var parts = speRef.Split('/', 2);
-                if (parts.Length != 2)
-                {
-                    return JobOutcome.Failure(
-                        "OFFICE_INTERNAL",
-                        $"Invalid SPE reference format: {payload.TempFileLocation}",
-                        retryable: false);
-                }
+                return JobOutcome.Failure(
+                    "OFFICE_INTERNAL",
+                    $"Invalid SPE reference format: {payload.TempFileLocation}",
+                    retryable: false);
+            }
 
-                driveId = parts[0];
-                itemId = parts[1];
+            var driveId = parts[0];
+            var itemId = parts[1];
 
+            _logger.LogInformation(
+                "File already uploaded to SPE, skipping upload. DriveId={DriveId}, ItemId={ItemId}",
+                driveId, itemId);
+
+            await UpdateJobStatusAsync(
+                message.JobId,
+                JobStatus.Running,
+                "FileAlreadyUploaded",
+                50,
+                cancellationToken);
+
+            // Document record was already created by SaveAsync - use the passed DocumentId
+            if (payload.DocumentId.HasValue && payload.DocumentId.Value != Guid.Empty)
+            {
+                documentId = payload.DocumentId.Value;
                 _logger.LogInformation(
-                    "File already uploaded to SPE, skipping upload. DriveId={DriveId}, ItemId={ItemId}",
-                    driveId, itemId);
-
-                await UpdateJobStatusAsync(
-                    message.JobId,
-                    JobStatus.Running,
-                    "FileAlreadyUploaded",
-                    50,
-                    cancellationToken);
-
-                // Document record was already created by SaveAsync - use the passed DocumentId
-                if (payload.DocumentId.HasValue && payload.DocumentId.Value != Guid.Empty)
-                {
-                    documentId = payload.DocumentId.Value;
-                    _logger.LogInformation(
-                        "Using Document ID from payload: {DocumentId}",
-                        documentId);
-                }
-                else
-                {
-                    // Fallback: should not happen in production, log warning
-                    _logger.LogWarning(
-                        "DocumentId not provided in payload for already-uploaded file, creating new Document record");
-                    documentId = await CreateDocumentRecordAsync(
-                        payload,
-                        driveId,
-                        itemId,
-                        webUrl: null, // Not available in fallback path
-                        message.UserId,
-                        cancellationToken);
-                }
+                    "Using Document ID from payload: {DocumentId}",
+                    documentId);
             }
             else
             {
-                // Traditional flow: download temp file and upload to SPE
-                await UpdateJobStatusAsync(
-                    message.JobId,
-                    JobStatus.Running,
-                    "FileUploading",
-                    10,
-                    cancellationToken);
-
-                // Step 4: Retrieve temporary file
-                if (string.IsNullOrEmpty(payload.TempFileLocation))
-                {
-                    return JobOutcome.Failure(
-                        "OFFICE_INTERNAL",
-                        "TempFileLocation is required for traditional upload flow",
-                        retryable: false);
-                }
-
-                using var fileStream = await RetrieveTempFileAsync(
-                    payload.TempFileLocation,
-                    cancellationToken);
-
-                if (fileStream == null)
-                {
-                    return JobOutcome.Failure(
-                        "OFFICE_012",
-                        "Failed to retrieve temporary file from storage",
-                        retryable: true);
-                }
-
-                // Step 5: Upload to SPE
-                var uploadResult = await UploadToSpeAsync(
-                    payload.ContainerId,
-                    payload.FolderPath,
-                    payload.FileName,
-                    fileStream,
-                    cancellationToken);
-
-                if (!uploadResult.Success)
-                {
-                    return JobOutcome.Failure(
-                        "OFFICE_012",
-                        uploadResult.ErrorMessage ?? "SPE upload failed",
-                        retryable: true);
-                }
-
-                driveId = uploadResult.DriveId!;
-                itemId = uploadResult.ItemId!;
-                var webUrl = uploadResult.WebUrl;
-
-                await UpdateJobStatusAsync(
-                    message.JobId,
-                    JobStatus.Running,
-                    "RecordsCreating",
-                    40,
-                    cancellationToken);
-
-                // Step 6: Create Document record in Dataverse
+                // Fallback: should not happen in production, log warning
+                _logger.LogWarning(
+                    "DocumentId not provided in payload for already-uploaded file, creating new Document record");
                 documentId = await CreateDocumentRecordAsync(
                     payload,
                     driveId,
                     itemId,
-                    webUrl,
+                    webUrl: null, // Not available in fallback path
                     message.UserId,
                     cancellationToken);
             }
@@ -308,6 +306,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             await CreateArtifactRecordsAsync(
                 payload,
                 documentId,
+                message.UserId,
                 cancellationToken);
 
             await UpdateJobStatusAsync(
@@ -325,6 +324,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                     itemId,
                     documentId,
                     payload,
+                    message.UserId,
                     cancellationToken);
 
                 await UpdateJobStatusAsync(
@@ -348,30 +348,36 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 documentId);
 
             // Step 10: Queue next stage (profile or indexing)
-            _logger.LogWarning(
-                "🔵 DIAGNOSTIC: About to check TriggerAiProcessing for job {JobId}. TriggerAiProcessing={TriggerAi}, AiOptions.ProfileSummary={ProfileSummary}, AiOptions.RagIndex={RagIndex}, AiOptions.DeepAnalysis={DeepAnalysis}",
-                message.JobId,
-                payload.TriggerAiProcessing,
-                payload.AiOptions?.ProfileSummary ?? false,
-                payload.AiOptions?.RagIndex ?? false,
-                payload.AiOptions?.DeepAnalysis ?? false);
-
             if (payload.TriggerAiProcessing)
             {
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: TriggerAiProcessing is TRUE - calling QueueNextStageAsync for job {JobId}",
-                    message.JobId);
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: QueueNextStageAsync completed successfully for job {JobId}",
-                    message.JobId);
+
+                // Task 093 (spaarkeai-word-add-in-r1, #1084 follow-on, found 2026-10-03): THIS job's work ends here. The
+                // follow-on AI work (profiling, and optionally RAG indexing / Insights ingest) runs on its own
+                // ADR-004 jobs and persists its OWN outcome on the DOCUMENT (sprk_filesummarystatus,
+                // sprk_searchindexed) via AppOnlyDocumentAnalysisJobHandler / RagIndexingJobHandler — never on
+                // this sprk_processingjob row. Before this fix nothing ever closed the row once this branch was
+                // taken (the only code that used to, ProfileSummaryWorker.CompleteJobAsync, is orphaned: it
+                // listens on the legacy "office-profile" queue, and this method has queued to "sdap-jobs" via
+                // JobSubmissionService since 2026-01-28 — see notes/093-job-row-and-telemetry.md §1). The row
+                // therefore read Running/FileUploaded/70 forever for every save with AI processing on, which is
+                // every real save (ribbon Quick Save always sends TriggerAiProcessing:true; the pane's default
+                // processing options also evaluate true). Marking it Completed here, with a stage that names
+                // what was handed on, makes ADR-017's "persist the final outcome" true at the ROW level. This
+                // does NOT touch sprk_result (task 060's save-time view, the pane's own outcome) — the update
+                // below carries the same five columns as the "no AI" branch, nothing more — so the pane's
+                // behaviour is byte-for-byte unchanged (constraint: do not change what the pane reads).
+                await UpdateJobStatusAsync(
+                    message.JobId,
+                    JobStatus.Completed,
+                    "AiAnalysisQueued",
+                    100,
+                    cancellationToken,
+                    documentId);
             }
             else
             {
                 // No AI processing - mark job as complete
-                _logger.LogWarning(
-                    "🔴 DIAGNOSTIC: TriggerAiProcessing is FALSE for job {JobId} - skipping AI processing",
-                    message.JobId);
                 await UpdateJobStatusAsync(
                     message.JobId,
                     JobStatus.Completed,
@@ -599,88 +605,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         }
     }
 
-    private async Task<Stream?> RetrieveTempFileAsync(string location, CancellationToken cancellationToken)
-    {
-        _logger.LogDebug("Retrieving temporary file from {Location}", location);
-
-        // TRACKED: GitHub #231 - Implement blob storage retrieval
-        // For now, return a stub that simulates file retrieval
-        // In production, this would:
-        // 1. Parse the location (blob URL or local path)
-        // 2. Download from Azure Blob Storage using BlobClient
-        // 3. Return the stream
-
-        // Stub implementation - return empty stream
-        await Task.Delay(100, cancellationToken);
-        return new MemoryStream();
-    }
-
-    private async Task<SpeUploadResult> UploadToSpeAsync(
-        string containerId,
-        string? folderPath,
-        string fileName,
-        Stream content,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogDebug(
-            "Uploading to SPE container {ContainerId}, path {FolderPath}/{FileName}",
-            containerId,
-            folderPath ?? "root",
-            fileName);
-
-        try
-        {
-            // SpeFileStore is Scoped — resolve it per-operation from a scope (R1).
-            using var scope = _scopeFactory.CreateScope();
-            var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
-
-            // Resolve container to drive ID
-            var driveId = await speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
-
-            // Build the path
-            var path = string.IsNullOrEmpty(folderPath)
-                ? fileName
-                : $"{folderPath.TrimEnd('/')}/{fileName}";
-
-            // Upload using SpeFileStore (ADR-007)
-            var result = await speFileStore.UploadSmallAsync(
-                driveId,
-                path,
-                content,
-                cancellationToken);
-
-            if (result != null)
-            {
-                _logger.LogInformation(
-                    "File uploaded to SPE: DriveId={DriveId}, ItemId={ItemId}",
-                    driveId,
-                    result.Id);
-
-                return new SpeUploadResult
-                {
-                    Success = true,
-                    DriveId = driveId,
-                    ItemId = result.Id,
-                    WebUrl = result.WebUrl
-                };
-            }
-
-            return new SpeUploadResult
-            {
-                Success = false,
-                ErrorMessage = "Upload returned null result"
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "SPE upload failed");
-            return new SpeUploadResult
-            {
-                Success = false,
-                ErrorMessage = ex.Message
-            };
-        }
-    }
+    // RetrieveTempFileAsync + UploadToSpeAsync DELETED 2026-08-28 — both had exactly one caller, inside
+    // the unreachable "traditional upload flow" branch removed from ProcessAsync (see the reachability
+    // note there). UploadToSpeAsync was also the last server-side upload site that prefixed a folder onto
+    // an SPE upload path; RetrieveTempFileAsync had never been implemented (GitHub #231) and returned an
+    // empty MemoryStream, so the branch could not have worked even if it had been reachable.
 
     private async Task<Guid> CreateDocumentRecordAsync(
         UploadFinalizationPayload payload,
@@ -698,6 +627,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             payload.AssociationType ?? "none",
             payload.AssociationId);
 
+        // Task 080: owned by a BU default owner team, never the app user. Refuse rather than create app-owned —
+        // this throw fails the message, the same outcome as any other failed create on this path.
+        var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No owner team could be resolved for this save's document; refusing to create it app-owned "
+                + "(task 080). See the preceding RecordOwnershipResolver warning for which link broke.");
+
         // Step 1: Create the base document record using IDataverseService
         var createRequest = new Spaarke.Dataverse.CreateDocumentRequest
         {
@@ -705,7 +641,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ContainerId = payload.ContainerId,
             Description = payload.ContentType == SaveContentType.Email
                 ? payload.EmailMetadata?.Subject
-                : payload.AttachmentMetadata?.OriginalFileName
+                : payload.AttachmentMetadata?.OriginalFileName,
+            OwningTeamId = owningTeamId,
+            // Task 146 c1-r1 (owner round 13 item 9): the saving user, carried by SaveAsync with the team.
+            CreatedByPersonId = payload.CreatedByPersonId,
         };
 
         var documentIdString = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -728,29 +667,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             HasFile = true
         };
 
-        // Set entity association lookup based on AssociationType
-        if (hasAssociation && payload.AssociationId.HasValue)
-        {
-            switch (payload.AssociationType?.ToLowerInvariant())
-            {
-                case "matter":
-                    updateRequest.MatterLookup = payload.AssociationId.Value;
-                    break;
-                case "project":
-                    updateRequest.ProjectLookup = payload.AssociationId.Value;
-                    break;
-                case "invoice":
-                    updateRequest.InvoiceLookup = payload.AssociationId.Value;
-                    break;
-                // Account and Contact associations would need additional lookup fields
-                // added to UpdateDocumentRequest if needed
-                default:
-                    _logger.LogWarning(
-                        "Unknown association type {AssociationType}, skipping association",
-                        payload.AssociationType);
-                    break;
-            }
-        }
+        // Set entity association lookup based on AssociationType (shared with attachment children
+        // so they inherit the same "File to" association).
+        ApplyAssociationLookup(updateRequest, payload.AssociationType, payload.AssociationId);
 
         // Set email-specific fields if this is an email save
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
@@ -779,35 +698,59 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateArtifactRecordsAsync(
         UploadFinalizationPayload payload,
         Guid documentId,
+        string userId,
         CancellationToken cancellationToken)
     {
+        if (!(payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
+            && !(payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null))
+        {
+            return;
+        }
+
+        // Task 146: an artifact is content of its document — owned by the same team (the carried team wins, exactly
+        // as for the document itself). Refuse rather than create it app-owned in the root business unit.
+        var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "No owner team could be resolved for this save's artifact record; refusing to create it app-owned "
+                + "(task 146). See the preceding RecordOwnershipResolver warning for which link broke.");
+
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
         {
-            await CreateEmailArtifactAsync(payload.EmailMetadata, documentId, cancellationToken);
+            await CreateEmailArtifactAsync(
+                payload.EmailMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
         else if (payload.ContentType == SaveContentType.Attachment && payload.AttachmentMetadata != null)
         {
-            await CreateAttachmentArtifactAsync(payload.AttachmentMetadata, documentId, cancellationToken);
+            await CreateAttachmentArtifactAsync(
+                payload.AttachmentMetadata, documentId, owningTeamId, cancellationToken, payload.CreatedByPersonId);
         }
     }
 
     private async Task CreateEmailArtifactAsync(
         EmailArtifactPayload metadata,
         Guid documentId,
-        CancellationToken cancellationToken)
+        Guid owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating EmailArtifact for document {DocumentId}, subject: {Subject}",
             documentId,
             metadata.Subject);
 
-        // Map importance (0=Low, 1=Normal, 2=High) to Dataverse priority option values
+        // Map importance (0=Low, 1=Normal, 2=High) to sprk_emailartifact.sprk_priority
+        // option values. These MUST match the live option set — Urgent(100000000),
+        // High(100000001), Medium(100000002), Low(100000003). The prior values
+        // (192350001-3) are not in the option set, so Dataverse rejected every
+        // EmailArtifact create with AADSTS-style "outside the valid range", aborting
+        // the save job (no .eml document, no SPE file). Confirmed via App Insights
+        // 2026-08-31 (job 237a5c8d). Pre-existing on master.
         var priorityValue = metadata.Importance switch
         {
-            0 => 192350003, // Low
-            1 => 192350002, // Medium (Normal)
-            2 => 192350001, // Important (High)
-            _ => 192350002  // Default to Medium
+            0 => 100000003, // Low
+            1 => 100000002, // Medium (Normal)
+            2 => 100000001, // High
+            _ => 100000002  // Default to Medium
         };
 
         var request = new
@@ -823,7 +766,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             BodyPreview = metadata.BodyPreview,
             HasAttachments = metadata.HasAttachments,
             Priority = priorityValue, // Changed from Importance to Priority per Dataverse schema
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var emailArtifactId = await _processingJobService.CreateEmailArtifactAsync(request, cancellationToken);
@@ -837,7 +782,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private async Task CreateAttachmentArtifactAsync(
         AttachmentArtifactPayload metadata,
         Guid documentId,
-        CancellationToken cancellationToken)
+        Guid owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Creating AttachmentArtifact for document {DocumentId}, filename: {FileName}",
@@ -852,7 +799,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             Size = (int)metadata.Size, // Convert long to int for Dataverse
             IsInline = metadata.IsInline,
             EmailArtifactId = metadata.EmailArtifactId,
-            DocumentId = documentId
+            DocumentId = documentId,
+            OwningTeamId = owningTeamId, // task 146 → ownerid
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 → sprk_createdbyperson (the seam skips null)
         };
 
         var attachmentArtifactId = await _processingJobService.CreateAttachmentArtifactAsync(request, cancellationToken);
@@ -934,12 +883,24 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     {
         var aiOptions = payload.AiOptions ?? new AiProcessingOptions();
 
+        // Task 029 (spaarkeai-word-add-in-r1): a VERSION save must re-profile and re-index. It keeps the first save's
+        // document id and drive item, so the per-document / per-item keys would be answered "already processed" by
+        // the handlers (7-day marks) and de-duplicated by Service Bus (MessageId = key) — the new version would never
+        // be analysed or indexed. Its keys therefore carry THIS save's discriminator (its ProcessingJob id, stamped
+        // only by the version-save path): a redelivery or retry of the same save repeats it and still skips; every
+        // new save — even one whose bytes repeat an earlier version — has its own. Every other save carries none and
+        // keeps its key string byte-for-byte. The format lives on the handler that reads it (task 068 shares it with
+        // the Generate Profile request).
+        var versionSaveJobId = payload.VersionSaveJobId;
+        var analysisIdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId, versionSaveJobId);
+
         _logger.LogWarning(
-            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}",
+            "🔵 Queueing AI analysis to sdap-jobs queue (AppOnlyDocumentAnalysis) for job {JobId}, document {DocumentId}. ProfileSummary={ProfileSummary}, RagIndex={RagIndex}, VersionSaveJobId={VersionSaveJobId}",
             originalMessage.JobId,
             documentId,
             aiOptions.ProfileSummary,
-            aiOptions.RagIndex);
+            aiOptions.RagIndex,
+            versionSaveJobId?.ToString() ?? "(none)");
 
         // Use the EXACT SAME pattern as EmailToDocumentJobHandler.EnqueueAiAnalysisJobAsync()
         // This ensures correct camelCase serialization via JobSubmissionService
@@ -949,7 +910,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName, // Use constant, same as EmailToDocumentJobHandler
             SubjectId = documentId.ToString(),
             CorrelationId = Activity.Current?.Id ?? originalMessage.CorrelationId ?? Guid.NewGuid().ToString(),
-            IdempotencyKey = $"analysis-{documentId}-documentprofile",
+            IdempotencyKey = analysisIdempotencyKey,
             Attempt = 1,
             MaxAttempts = 3,
             CreatedAt = DateTimeOffset.UtcNow,
@@ -973,7 +934,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // Also queue RAG indexing if requested (same pattern as EmailToDocumentJobHandler)
         if (aiOptions.RagIndex)
         {
-            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, cancellationToken);
+            await EnqueueRagIndexingAsync(driveId, itemId, documentId, payload.FileName, versionSaveJobId, cancellationToken);
         }
 
         // Insights Engine Phase 1 — D-P8 SPE-upload consumer (task 050).
@@ -1020,6 +981,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string itemId,
         Guid parentDocumentId,
         UploadFinalizationPayload payload,
+        string userId,
         CancellationToken cancellationToken)
     {
         _logger.LogInformation(
@@ -1115,6 +1077,25 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Get container ID from drive ID
             var containerId = driveId;
 
+            // Task 080: every child gets the PARENT's owner team, so an email and its attachments can never land in
+            // different business units. Resolved once, only once there is something to create. Unresolvable →
+            // no children at all: attachment failures never fail the main job (see remarks), and an app-owned
+            // child would sit in the ROOT business unit where nobody who can read the parent could read it.
+            var owningTeamId = await ResolveDocumentOwnerTeamAsync(payload, userId, cancellationToken);
+            if (owningTeamId is null)
+            {
+                _logger.LogError(
+                    "No owner team could be resolved for the attachments of document {DocumentId}; creating none of "
+                    + "the {Count} attachment document(s) rather than creating them app-owned (task 080).",
+                    parentDocumentId, filteredAttachments.Count);
+                foreach (var att in attachments)
+                {
+                    att.Content?.Dispose(); // nothing below will consume them
+                }
+
+                return;
+            }
+
             // Process each attachment (sequential to avoid overwhelming SPE)
             var uploadedCount = 0;
             var failedCount = 0;
@@ -1132,7 +1113,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         containerId,
                         payload.EmailMetadata?.ConversationId,
                         payload.EmailMetadata?.InternetMessageId,
-                        cancellationToken);
+                        payload.AssociationType,
+                        payload.AssociationId,
+                        owningTeamId.Value,
+                        cancellationToken,
+                        payload.CreatedByPersonId); // task 146 c1-r1 — the saving user
 
                     uploadedCount++;
                 }
@@ -1172,6 +1157,34 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// <summary>
     /// Process a single attachment: upload to SPE and create child Document record.
     /// </summary>
+    /// <summary>
+    /// Applies the Matter/Project/Invoice association lookup (from the save's AssociationType +
+    /// AssociationId) onto an <see cref="Spaarke.Dataverse.UpdateDocumentRequest"/>. Shared by the
+    /// parent email document and its attachment children so attachments inherit the same "File to"
+    /// association as the email. No-op when there is no association. Account/Contact have no document
+    /// lookup field yet (see UpdateDocumentRequest).
+    /// </summary>
+    private void ApplyAssociationLookup(
+        Spaarke.Dataverse.UpdateDocumentRequest request,
+        string? associationType,
+        Guid? associationId)
+    {
+        if (!associationId.HasValue || string.IsNullOrEmpty(associationType))
+            return;
+
+        // ONE map (Spaarke.Dataverse.DocumentAssociationMap) rather than this method's own switch,
+        // which accepted only the FRIENDLY spellings — so an "sprk_matter" reaching here dropped the
+        // association while the very same token applied fine in OfficeDocumentPersistence.
+        if (!DocumentAssociationMap.TryApply(request, associationType, associationId))
+        {
+            _logger.LogWarning(
+                "Association type {AssociationType} has no sprk_document lookup — document {DocumentId} " +
+                "will be created UNASSOCIATED. Known gap: account (no column exists).",
+                associationType,
+                request.GraphItemId);
+        }
+    }
+
     private async Task ProcessSingleAttachmentAsync(
         EmailAttachmentInfo attachment,
         Guid parentDocumentId,
@@ -1181,7 +1194,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string containerId,
         string? conversationIndex,
         string? internetMessageId,
-        CancellationToken cancellationToken)
+        string? associationType,
+        Guid? associationId,
+        Guid owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
         {
@@ -1195,8 +1212,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             attachment.Content.Position = 0;
         }
 
-        // Upload attachment to SPE in a subfolder of the parent email
-        var attachmentPath = $"/emails/attachments/{parentDocumentId:N}/{attachment.FileName}";
+        // Upload the attachment FLAT into the container root, with the parent document id folded into the
+        // FILENAME. This used to be "/emails/attachments/{parentDocumentId:N}/{name}", which made Graph
+        // implicitly create three folder levels per email (in SPE, an upload path's folder segments are
+        // created as a side effect of the upload). The {parentDocumentId} segment was simultaneously the
+        // only thing keeping two emails' identically-named attachments apart — image001.png being the
+        // canonical case — because UploadSmallAsync is Graph's path-keyed simple PUT, which accepts no
+        // @microsoft.graph.conflictBehavior and therefore replaces silently and unconditionally. So the id
+        // moves into the name rather than being dropped (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+        //
+        // SANITIZED 2026-08-29: attachment.FileName originates in an email the mailbox RECEIVED, so it is
+        // attacker-influenced. A '/' in it makes Graph create that folder; folding the parent id in front
+        // does not stop it ("{id}_a/b.png" mints "{id}_a").
+        var attachmentPath = $"{parentDocumentId:N}_{SpeUploadPath.SanitizeFileName(attachment.FileName)}";
 
         // SpeFileStore is Scoped — resolve it per-operation from a scope (R1).
         using var scope = _scopeFactory.CreateScope();
@@ -1218,7 +1246,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         {
             Name = attachment.FileName,
             ContainerId = containerId,
-            Description = $"Email attachment from {parentFileName}"
+            Description = $"Email attachment from {parentFileName}",
+            OwningTeamId = owningTeamId, // task 080 — the parent email's team
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — the person who saved the parent email
         };
 
         var childDocumentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);
@@ -1257,6 +1287,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             EmailParentId = internetMessageId
         };
 
+        // Inherit the parent email's "File to" association (Matter/Project/Invoice) so the attachment
+        // Documents file to the same record as the .eml.
+        ApplyAssociationLookup(updateRequest, associationType, associationId);
+
         await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 
         _logger.LogInformation(
@@ -1266,8 +1300,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // Enqueue AI analysis for attachment document (same pattern as EmailToDocumentJobHandler)
         await EnqueueAiAnalysisForAttachmentAsync(childDocumentId, cancellationToken);
 
-        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler)
-        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, cancellationToken);
+        // Enqueue RAG indexing for attachment document (same pattern as EmailToDocumentJobHandler).
+        // A new child item, never a version: no version discriminator, so today's key.
+        await EnqueueRagIndexingAsync(driveId, fileHandle.Id, childDocumentId, attachment.FileName, versionSaveJobId: null, cancellationToken);
     }
 
     /// <summary>
@@ -1285,7 +1320,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = Activity.Current?.Id ?? Guid.NewGuid().ToString(),
-                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
                 MaxAttempts = 3,
                 CreatedAt = DateTimeOffset.UtcNow,
@@ -1329,12 +1364,18 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// the helper), same idempotency key (<c>rag-index-{driveId}-{itemId}</c>),
     /// same payload shape, same <c>Source="OfficeAddin"</c> tag for telemetry.
     /// </para>
+    /// <para>
+    /// Task 029: <paramref name="versionSaveJobId"/> is non-null only for a version save. It becomes the request's
+    /// <see cref="PostUploadIndexingRequest.VersionDiscriminator"/>, which makes the key per-save and asks the index
+    /// job to replace the file's previous chunks. Null keeps both exactly as above.
+    /// </para>
     /// </remarks>
     private async Task EnqueueRagIndexingAsync(
         string driveId,
         string itemId,
         Guid documentId,
         string fileName,
+        Guid? versionSaveJobId,
         CancellationToken cancellationToken)
     {
         var tenantId = _configuration["TENANT_ID"] ?? _configuration["AzureAd:TenantId"] ?? "";
@@ -1351,7 +1392,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             ParentEntity: null,
             SearchIndexName: null, // handler runs the ISearchIndexNameResolver chain
             Source: "OfficeAddin",
-            CorrelationId: correlationId);
+            CorrelationId: correlationId,
+            VersionDiscriminator: versionSaveJobId?.ToString("N"));
 
         // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
         // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
@@ -1472,15 +1514,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         return ext.TrimStart('.').ToLowerInvariant();
     }
 
-    /// <summary>
-    /// Result of SPE upload operation.
-    /// </summary>
-    private record SpeUploadResult
-    {
-        public bool Success { get; init; }
-        public string? DriveId { get; init; }
-        public string? ItemId { get; init; }
-        public string? WebUrl { get; init; }
-        public string? ErrorMessage { get; init; }
-    }
+    // SpeUploadResult DELETED 2026-08-28 — it existed solely as UploadToSpeAsync's return type, and that
+    // method was deleted with the unreachable branch that was its only caller.
 }

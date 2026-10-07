@@ -32,6 +32,8 @@ import {
   sendCommunication,
   type ITimelineComposeBoxProps,
   type ITimelineSendPayload,
+  cleanGuid,
+  getXrm,
 } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
@@ -62,24 +64,14 @@ const useStyles = makeStyles({
   },
 });
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). Mirrors CommunicationActions. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -87,7 +79,10 @@ function getHostRecordId(): string | undefined {
 }
 
 function getHostEntityName(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const name = xrm?.Page?.data?.entity?.getEntityName?.();
     if (typeof name === 'string' && name.length > 0) return name;
@@ -98,7 +93,10 @@ function getHostEntityName(): string | undefined {
 }
 
 async function refreshHostForm(): Promise<void> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const refresh = xrm?.Page?.data?.refresh;
     if (typeof refresh === 'function') {

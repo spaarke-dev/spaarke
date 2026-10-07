@@ -4,8 +4,14 @@
  * ITokenProvider implementations for the DocumentUploadWizard Code Page.
  *
  * Provides two token providers:
- *   1. BFF API token provider — for SPE file operations (via SdapApiClient / NavMapClient)
+ *   1. BFF API token provider — for NavMap lookups (via NavMapClient)
  *   2. Dataverse token provider — for OData record operations (via ODataDataverseClient)
+ *
+ * ⚠️ **No longer covers SPE file upload** (changed 2026-09-03). Upload moved to
+ * `@spaarke/sdap-client`, which authenticates through `authenticatedFetch` (ADR-028) rather than an
+ * `ITokenProvider`. Both ultimately call the same `SpaarkeAuthProvider`, so this is a change of
+ * plumbing, not of identity — but do not re-derive "SdapApiClient takes a token provider" from this
+ * file. See `uploadOrchestrator.ts`.
  *
  * Both use @spaarke/auth's SpaarkeAuthProvider (initialized via initAuth() in main.tsx)
  * which chains 5 strategies: bridge -> cache -> Xrm -> MSAL silent -> MSAL popup.
@@ -16,6 +22,7 @@
 
 import { getAuthProvider } from "@spaarke/auth";
 import type { ITokenProvider } from "@spaarke/ui-components/services/document-upload";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 // ---------------------------------------------------------------------------
 // BFF API Token Provider
@@ -28,7 +35,7 @@ import type { ITokenProvider } from "@spaarke/ui-components/services/document-up
  * The scope is configured via initAuth() in main.tsx (defaults to
  * api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation).
  *
- * @returns ITokenProvider function compatible with SdapApiClient and NavMapClient
+ * @returns ITokenProvider function compatible with NavMapClient
  */
 export function createBffTokenProvider(): ITokenProvider {
     return async (): Promise<string> => {
@@ -51,29 +58,20 @@ export function createBffTokenProvider(): ITokenProvider {
 /**
  * Dataverse organization URL resolved from Xrm context.
  *
- * Frame-walks through window -> parent -> top to find Xrm.Utility.getGlobalContext().
- * Falls back to known dev environment if Xrm is not available.
+ * Resolves Xrm.Utility.getGlobalContext() via the shared cross-frame walker.
+ * Throws if Xrm is not available.
  */
 export function resolveDataverseUrl(): string {
-    // Try Xrm global context via frame-walk
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const xrm = (frame as any).Xrm;
-            const clientUrl: string | undefined =
-                xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-            /* eslint-enable @typescript-eslint/no-explicit-any */
-            if (clientUrl) {
-                // Strip trailing slash
-                return clientUrl.endsWith("/") ? clientUrl.slice(0, -1) : clientUrl;
-            }
-        } catch {
-            // Cross-origin frame — skip
+    // Shared cross-frame walker (task 081 / C-8).
+    try {
+        const clientUrl: string | undefined =
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+        if (clientUrl) {
+            // Strip trailing slash
+            return clientUrl.endsWith("/") ? clientUrl.slice(0, -1) : clientUrl;
         }
+    } catch {
+        // getGlobalContext() unavailable — fall through to the error below
     }
 
     // No fallback — fail loudly if Xrm context is unavailable.

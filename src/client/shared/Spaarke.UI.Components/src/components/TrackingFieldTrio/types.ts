@@ -3,12 +3,13 @@
  *
  * Lifted from the `TrackingFieldTrio` PCF (`TrackingFieldTrioApp.tsx`) into
  * `@spaarke/ui-components` per task 023 (email-communication-solution-r5).
- * The shared core carries NO `sprk_communication`-specific option integers,
- * labels, or colors — every access-permission segment (value + label +
- * color) and every field display label is supplied by the caller. The PCF
- * caller injects its `sprk_communication` OptionSet metadata via
- * `getAccessPermissionOptions()`; a future consumer (e.g. the Phase-3
- * reading-pane tracking view, task 035) injects its own.
+ * The shared core carries NO entity-specific option integers, labels, or
+ * colors — every access-permission segment (value + label + color) and every
+ * field display label is supplied by the caller. The PCF caller injects the
+ * bound record's OptionSet metadata via `getAccessPermissionOptions()` (the
+ * project / matter / work-assignment `sprk_accesspermission`; the
+ * `sprk_communication` copy is retired — task 138, owner Q6: a communication
+ * inherits its parent's permission).
  */
 
 /** A single access-permission segment: the option's raw value, display label,
@@ -56,6 +57,36 @@ export interface ITrackingFieldTrioProps {
   onHighPriorityChange: (value: boolean) => void;
   onAccessPermissionChange: (value: number) => void;
 
+  /** The control is read-only — the host's form is disabled or read-only (task
+   * 138; the PCF passes `context.mode.isControlDisabled`). Disables ALL THREE
+   * controls: the Monitor and High Priority switches and the access-permission
+   * pill, whose menu then cannot open — so no `on*Change` callback can fire and
+   * no write that the form would refuse is offered. Default `false`. */
+  disabled?: boolean;
+  /** Disables the access-permission pill ONLY — e.g. the bound column is not
+   * editable for this user (the PCF passes the attribute's
+   * `security.editable === false`). Default `false`. */
+  accessPermissionDisabled?: boolean;
+  /** Whether the access-permission pill is shown at all (task 138). `false`
+   * when the host has no access-permission column bound (the property is
+   * optional in the PCF manifest) — the third column then stays empty, keeping
+   * the grid aligned. Default `true`. */
+  showAccessPermission?: boolean;
+  /** Secure-record display for the pill (task 138; owner O1 FINAL, 2026-10-01).
+   * When supplied — the host knows the record is SECURE — the CLOSED pill reads
+   * `label` in red for every underlying value (both "secure" and "secure +
+   * Restricted": "Secure – Restricted" would not fit the pill without changing
+   * the trio's spacing). It changes the closed label ONLY: the open menu still
+   * lists {@link accessPermissionOptions} unchanged (Standard / Limited /
+   * Restricted), and selecting one calls {@link onAccessPermissionChange} with
+   * that option's own value — the secure display never rewrites the stored
+   * value. O1 FINAL specifies the closed label and the Manage Access bar, not a
+   * different menu. Securing and unsecuring the record is NOT done here (task
+   * 150's ribbon command). */
+  secureAccessPermission?: {
+    label: string;
+  };
+
   // ---------------------------------------------------------------------
   // Governance toolbar (person + email icons — task 040, teams-app-r1).
   // Toolbar shell + callback wiring only; the modal (task 041) and the
@@ -74,11 +105,20 @@ export interface ITrackingFieldTrioProps {
    * ADR-045 — this component MUST NOT implement ad hoc send logic). When
    * omitted, the email icon is NOT rendered. */
   onOpenEmailMembers?: () => void;
-  /** Gates the person icon's enabled state. Defaults to `true` (enabled)
-   * when `onOpenGrantModal` is supplied and this prop is omitted. Pass
-   * `false` when the current user lacks grant privilege — the icon then
-   * renders genuinely disabled (native Fluent `disabled`, no attached
-   * click handler), never merely dimmed with a live handler, so there is
-   * no dead click. */
+  /** Gates the person icon's enabled state: `true` enables it, anything else
+   * — `false`, or the prop omitted — disables it.
+   *
+   * 🔴 The default INVERTED in task 118 (unified-access-control-r2, FR-07 /
+   * owner decision D-1 option C). It was `true`, so a host that had not wired
+   * an access decision at all offered the affordance to everyone; it is now
+   * `false`, so an unanswered access question is a denial. The host's job is
+   * to pass the server's answer — see `TrackingFieldTrio`'s PCF `index.ts`
+   * `evaluateGrantGate()`, which asks `GET /api/v1/external-access/
+   * can-manage-access` (Write on THIS record, evaluated as the caller over
+   * OBO) and passes `false` on every path that does not produce that answer.
+   *
+   * A disabled icon is genuinely disabled — native Fluent `disabled`, with no
+   * click handler attached — never merely dimmed with a live handler, so
+   * there is no dead click. */
   canGrantAccess?: boolean;
 }

@@ -54,17 +54,29 @@ public class ComposeRouteSurfaceContractTests : IClassFixture<CustomWebAppFactor
         "GET api/compose/sessions/{sessionId}/annotations | name=ComposeGetAnnotations | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,500 | sizeLimit=default",
         "POST api/compose/active-document | name=ComposeRegisterActiveDocument | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/document/{documentId:guid}/heartbeat | name=ComposeRefreshHeartbeat | auth=authorize | rateLimit=ai-context | tags=Compose | produces=204,401,404,500 | sizeLimit=default",
-        "POST api/compose/document/{documentSpeId}/check-changes | name=ComposeCheckDocumentChanges | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,500 | sizeLimit=default",
+        // produces +404 (uac-r2 task 166, S-65): the OBO visibility refusal — an item the caller cannot see in the
+        // named container — is a declared 404 ("Document Not Found", sdap.compose.deny.document_not_visible).
+        "POST api/compose/document/{documentSpeId}/check-changes | name=ComposeCheckDocumentChanges | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/document/{documentSpeId}/pull-annotations | name=ComposePullAnnotations | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,403,404,500 | sizeLimit=default",
         "POST api/compose/document/{documentSpeId}/reanchor-annotations | name=ComposeReanchorAnnotations | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,403,404,500 | sizeLimit=default",
-        "POST api/compose/documents/create-on-save | name=ComposeCreateOnSaveDocument | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,404,500 | sizeLimit=raised",
+        "POST api/compose/documents/create-on-save | name=ComposeCreateOnSaveDocument | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,404,500,503 | sizeLimit=raised",
         "POST api/compose/documents/{documentId:guid}/checkin | name=ComposeCheckinDocument | auth=authorize | rateLimit=ai-context | tags=Compose | produces=401,501 | sizeLimit=default",
         "POST api/compose/documents/{documentId:guid}/checkout | name=ComposeCheckoutDocument | auth=authorize | rateLimit=ai-context | tags=Compose | produces=401,501 | sizeLimit=default",
-        "POST api/compose/documents/{documentRecordId:guid}/refresh-profile | name=ComposeRefreshProfile | auth=authorize | rateLimit=ai-context | tags=Compose | produces=202,400,401,500 | sizeLimit=default",
+        // uac-r2 task 166 r1: the route parameter is named {documentId} so the document Write filter reads it (the
+        // URL is unchanged), and the filter's 403 is declared.
+        "POST api/compose/documents/{documentId:guid}/refresh-profile | name=ComposeRefreshProfile | auth=authorize | rateLimit=ai-context | tags=Compose | produces=202,400,401,403,500 | sizeLimit=default",
         "POST api/compose/documents/{documentSpeId}/apply-template | name=ComposeApplyTemplate | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,403,404,500 | sizeLimit=default",
-        "POST api/compose/documents/{documentSpeId}/promote | name=ComposePromoteDocument | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,500 | sizeLimit=default",
-        "POST api/compose/documents/{documentSpeId}/save | name=ComposeSaveDocument | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,404,500 | sizeLimit=raised",
-        "POST api/compose/project | name=ComposeProject | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401 | sizeLimit=default",
+        // "POST api/compose/documents/{documentSpeId}/promote" REMOVED (uac-r2 task 166, S-63) — the route was
+        // retired: no client, body tenant + session, no owner check. DeadRouteRetirementTests keeps it gone.
+        "POST api/compose/documents/{documentSpeId}/save | name=ComposeSaveDocument | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,404,500,503 | sizeLimit=raised",
+        // sizeLimit default -> raised (#696, 2026-09-01): this door runs synchronous OOXML projection on
+        // caller-supplied bytes and had only Kestrel's implicit ~28.6 MB cap. Now bounded on the same two
+        // levels as the save routes, from the same ComposeSaveLimits constants. `raised` here means the
+        // transport cap is MaxRequestBodyBytes (1.5x the document limit) — LARGER than the default, so a
+        // legal 25 MB document reaches the handler and is refused, if at all, by a 400 ProblemDetails that
+        // names the limit. `produces` is unchanged for the same reason the save routes leave it unchanged:
+        // 413 is a transport backstop, not a declared outcome.
+        "POST api/compose/project | name=ComposeProject | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401 | sizeLimit=raised",
         "POST api/compose/sessions/{sessionId}/annotations | name=ComposeSaveAnnotations | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/upload | name=ComposeUpload | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/webhooks/spe-doc-changed | name=ComposeSpeDocChangedWebhook | auth=anonymous | rateLimit=webhook-graph | tags=Compose | produces=200,202,400,401,429,500 | sizeLimit=default",

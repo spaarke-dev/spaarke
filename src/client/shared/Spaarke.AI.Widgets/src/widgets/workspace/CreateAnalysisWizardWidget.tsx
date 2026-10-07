@@ -18,7 +18,8 @@
  *
  * On Finish:
  *   1. Resolves the Step-1 document — either the shared `EntityCreationService`
- *      upload path (`uploadFilesToSpe` → `PUT /api/obo/containers/{id}/files/{path}`
+ *      upload path (here `uploadFilesWithoutRecord` → `PUT /api/obo/me/files/{path}`,
+ *      because the `sprk_analysis` row does not exist yet when the bytes move
  *      → `createDocumentRecords` → durable `sprk_document` + Document Profile), the
  *      SAME proven path every Create*Wizard uses (WORKSPACE-ENTITY-CREATION-GUIDE.md),
  *      OR the Step-1 existing-record pick.
@@ -110,9 +111,11 @@ import {
   SprkAnalysisWorkType,
   applyFieldMappings,
   applyResolverFields,
+  cleanGuid,
   createTodoRegardingChild,
   discoverNavProps,
   resolveAnalysisFilePreview,
+  withBffChildWrites,
 } from '@spaarke/ui-components';
 import type {
   AssociationResult,
@@ -760,22 +763,29 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           if (!authFetch || !bffBaseUrl || !webApiAdapter) {
             throw new Error('Document upload is not available right now. Please try again shortly.');
           }
-          if (!context.speContainerId) {
-            throw new Error(
-              'No storage container is configured for your business unit — the document could not be uploaded.'
-            );
-          }
-
+          // 🔴 PARENTLESS UPLOAD. Task 076: the `sprk_analysis` row does not exist yet — it is
+          // created further down, and the document it needs must exist first. So this uses the
+          // record-LESS route (`PUT /api/obo/me/files/{path}`) and the SERVER derives the container
+          // from the acting user's business unit. Task 076's classification (project notes
+          // `task-076-client-cutover-and-supplier-classification.md:54-55`) reads this as legitimately
+          // parentless, alongside EmailComposer's local-attachment flow — the only other caller of
+          // `uploadFilesWithoutRecord` at HEAD.
+          //
+          // The client-side `context.speContainerId` guard is GONE: the client no longer resolves a
+          // container, so it is not in a position to report one missing. If none can be derived the
+          // server refuses with its own explanation, which surfaces through `uploadResult.errors`
+          // below.
+          //
           // Reuse the shared EntityCreationService — the SAME proven upload path every other
           // Create*Wizard uses (Matter/Project/Event/Invoice/WorkAssignment). See
           // docs/guides/WORKSPACE-ENTITY-CREATION-GUIDE.md §Step 4:
-          //   uploadFilesToSpe  → PUT /api/obo/containers/{id}/files/{path}  (real endpoint)
-          //   createDocumentRecords → durable sprk_document + Document Profile analysis (auto)
+          //   uploadFilesWithoutRecord → PUT /api/obo/me/files/{path}   (record-less)
+          //   createDocumentRecords    → durable sprk_document + Document Profile analysis (auto)
           // This REPLACES a bespoke POST /api/documents/upload call that targeted a NON-EXISTENT
           // BFF endpoint (§11 reuse violation caught in the 2026-07-29 duplicate-component audit).
           const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
-          const uploadResult = await entityService.uploadFilesToSpe(context.speContainerId, context.uploadedFiles);
+          const uploadResult = await entityService.uploadFilesWithoutRecord(context.uploadedFiles);
           if (uploadResult.uploadedFiles.length === 0) {
             const firstErr = uploadResult.errors[0]?.error ?? 'unknown error';
             throw new Error(`Document upload failed: ${firstErr}`);
@@ -788,9 +798,9 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // Create a STANDALONE sprk_document (empty navigationProperty → createDocumentRecords
           // skips the parent @odata.bind). The Analysis is the SUBJECT-owner via its
           // sprk_documentid lookup (ADR-007), not a parent of the document — so no child binding.
-          const docResult = await entityService.createDocumentRecords('', '', '', uploadResult.uploadedFiles, {
-            containerId: context.speContainerId,
-          });
+          // No `containerId` option — `sprk_graphdriveid` is taken from the drive the SERVER
+          // reported on the upload response (the same value `speDriveId` above already reads).
+          const docResult = await entityService.createDocumentRecords('', '', '', uploadResult.uploadedFiles);
           documentId = docResult.createdDocumentIds[0] ?? null;
           if (!documentId) {
             const firstWarn = docResult.warnings[0] ?? 'the document record could not be created';
@@ -835,11 +845,11 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
             assignNavProps.find(e => e.columnName === col)?.navPropName ?? fallback;
           if (attorneyPick?.id) {
             payload[`${navPropFor('sprk_assignedattorney1', 'sprk_AssignedAttorney1')}@odata.bind`] =
-              `/contacts(${attorneyPick.id.replace(/[{}]/g, '')})`;
+              `/contacts(${cleanGuid(attorneyPick.id)})`;
           }
           if (paralegalPick?.id) {
             payload[`${navPropFor('sprk_assignedparalegal1', 'sprk_AssignedParalegal1')}@odata.bind`] =
-              `/contacts(${paralegalPick.id.replace(/[{}]/g, '')})`;
+              `/contacts(${cleanGuid(paralegalPick.id)})`;
           }
         }
 
@@ -860,7 +870,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
           // discoverNavProps keys on the attribute logical name; fallback = PascalCase nav-prop.
           const atNavProp =
             atNavProps.find(e => e.columnName === 'sprk_agreementtype')?.navPropName ?? 'sprk_AgreementType';
-          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${agreementTypeId.replace(/[{}]/g, '')})`;
+          payload[`${atNavProp}@odata.bind`] = `/sprk_agreementtypes(${cleanGuid(agreementTypeId)})`;
         }
 
         // -- Associate-to: ADR-024 resolver fields + Field-Mapping inheritance --
@@ -907,17 +917,26 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         }
 
         // -- Create the sprk_analysis record ---------------------------------
-        const analysisId = await dataService.createRecord('sprk_analysis', payload);
+        // UAC-r2 task 147 r1 (owner round 28 item 1): the analysis (and its follow-on To Do) is created through the BFF
+        // (G5) — the server decides the owner; nothing is created as the user. A refusal surfaces the server's message.
+        const childWrites = withBffChildWrites(dataService, authFetch, bffBaseUrl);
+        const analysisId = await childWrites.createRecord('sprk_analysis', payload);
 
         // -- Follow-on: Create To Do (Field-Mapping-driven internally via
         //    TodoService.createTodo — task 021) --------------------------------
         if (context.selectedActions.includes('add-todo') && todoFormRef.current.title.trim()) {
           try {
-            const todoResult = await createTodoRegardingChild(dataService, todoFormRef.current, {
-              entityType: 'sprk_analysis',
-              recordId: analysisId,
-              recordName: finishName,
-            });
+            const todoResult = await createTodoRegardingChild(
+              childWrites,
+              todoFormRef.current,
+              {
+                entityType: 'sprk_analysis',
+                recordId: analysisId,
+                recordName: finishName,
+              },
+              authFetch,
+              bffBaseUrl
+            );
             if (!todoResult.success) {
               warnings.push(
                 `To do could not be created (${todoResult.errorMessage ?? 'Unknown error'}). ` +
@@ -1010,8 +1029,8 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
         if (analysisActiveWorkType && speDriveItemId && speDriveId && authFetch && bffBaseUrl) {
           // ADR-044: bare-lowercase GUIDs. The session's DocumentId must ORDINAL-match the
           // server's resume bindingId (`DocumentRecordId.Value.ToString()` — "D" lowercase).
-          const cleanDocumentId = documentId.replace(/[{}]/g, '').toLowerCase();
-          const cleanAnalysisId = analysisId.replace(/[{}]/g, '').toLowerCase();
+          const cleanDocumentId = cleanGuid(documentId);
+          const cleanAnalysisId = cleanGuid(analysisId);
           try {
             const sessionResp = await authFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
               method: 'POST',
@@ -1063,7 +1082,7 @@ const CreateAnalysisWizardWidget: React.FC<WorkspaceWidgetProps<CreateAnalysisWi
                 ...(composeSessionId
                   ? {
                       composeSessionId,
-                      analysisId: analysisId.replace(/[{}]/g, '').toLowerCase(),
+                      analysisId: cleanGuid(analysisId),
                       // ai-advanced-capabilities-agreements-r1 task 070 (UAT2 review-depth selector):
                       // `reviewDepth` rides alongside `autoRunReview` so ConversationPane's wizard
                       // hand-off listener can call `runExplicit` with the depth already decided —

@@ -12,14 +12,14 @@
     6. Verifies health check on production after swap
     7. Rolls back via swap-back if post-swap health check fails
 
-    Supports dev, staging, and production environments.
+    Supports dev, staging, production and demo environments. Targets the az CLI's current subscription — for demo (its own subscription) run it with AZURE_CONFIG_DIR pointing at a private copy of the az config set to that subscription, rather than `az account set` on the shared context.
     Default parameters preserve backward compatibility with existing dev workflow.
 
 .PARAMETER SkipBuild
     Skip the build step (use existing publish folder).
 
 .PARAMETER Environment
-    Target environment name (dev, staging, production). Used for display and publish configuration.
+    Target environment name (dev, staging, production, demo — demo is declared in config/environments.json; task 242b). Used for display and publish configuration.
     Default: dev
 
 .PARAMETER ResourceGroupName
@@ -86,7 +86,7 @@
 param(
     [switch]$SkipBuild,
 
-    [ValidateSet("dev", "staging", "production")]
+    [ValidateSet("dev", "staging", "production", "demo")]
     [string]$Environment = "dev",
 
     [string]$ResourceGroupName = "rg-spaarke-dev",
@@ -114,6 +114,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The resource-group and app-name defaults are dev's. For any other environment they must be passed
+# explicitly, or a "-Environment demo" deploy would silently land on spaarke-bff-dev (T242b review W8).
+if ($Environment -ne 'dev' -and -not ($PSBoundParameters.ContainsKey('ResourceGroupName') -and $PSBoundParameters.ContainsKey('AppServiceName'))) {
+    Write-Host "ERROR: -Environment $Environment requires explicit -ResourceGroupName and -AppServiceName (the defaults are dev's: rg-spaarke-dev / spaarke-bff-dev)." -ForegroundColor Red
+    exit 2
+}
 
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
@@ -266,6 +273,81 @@ if ($zipSize -gt 100) {
     Write-Host "  This may indicate stale publish artifacts. Consider a clean build." -ForegroundColor Yellow
 }
 
+# --- Pre-deploy: the SPE admin Spaarke-operator marker (unified-access-control-r2 task 165, owner round 49 item 1) ---
+# SpeAdmin__PlatformOperatorEnvironment=true lets the BFF's SPE admin routes that span the whole SharePoint Embedded
+# tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register)
+# serve a root-unit admin. It is a DEPLOYMENT setting — never a Dataverse column a customer admin could edit — and it is
+# set ONLY for a Spaarke-operated environment: config/environments.json -> environments.<Environment>
+# .speAdminPlatformOperatorEnvironment = true (today only 'dev' — owner round 57 item 1; Spaarke's production operator
+# environment adds it in the change that stands it up). Declared true: the setting is made true (slot and production — a
+# swap carries it). Declared false or absent: a live 'true' FAILS the deploy — a customer environment must never carry it.
+# The declaration must be a JSON BOOLEAN: any other type FAILS the deploy (round 57 item 3 — a [bool] cast made the string
+# "false" true). The parse lives in scripts/common/SpeAdminOperatorMarker.ps1, which Spaarke.ArchTests runs.
+Write-Host ""
+Write-Host "[pre-deploy] SPE admin Spaarke-operator marker..." -ForegroundColor Cyan
+. (Join-Path $PSScriptRoot "common/SpeAdminOperatorMarker.ps1")
+$markerName = "SpeAdmin__PlatformOperatorEnvironment"
+$markerConfigPath = Join-Path $RepoRoot "config/environments.json"
+try {
+    $markerDeclared = Get-SpeAdminOperatorMarkerDeclaration -RegistryPath $markerConfigPath -Environment $Environment
+} catch {
+    Write-Host ""
+    Write-Host "  OPERATOR MARKER DECLARATION INVALID — $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Write true only for a Spaarke-operated environment, false (or leave the key out) for every other one." -ForegroundColor Yellow
+    exit 1
+}
+
+# Round 62 item 1: a declared marker is bound to the App Service its registry entry names. The declaration is read by
+# the -Environment LABEL (default 'dev'), so a deploy naming another App Service must not inherit dev's marker.
+if ($markerDeclared) {
+    try {
+        Assert-SpeAdminOperatorMarkerTarget -RegistryPath $markerConfigPath -Environment $Environment `
+            -AppServiceName $AppServiceName -ResourceGroupName $ResourceGroupName
+    } catch {
+        Write-Host ""
+        Write-Host "  OPERATOR MARKER TARGET REFUSED — $($_.Exception.Message)" -ForegroundColor Red
+        exit 1
+    }
+}
+
+$markerSlots = @($null)
+if ($UseSlotDeploy) { $markerSlots += $SlotName }
+foreach ($markerSlot in $markerSlots) {
+    $slotArgs = if ($markerSlot) { @('--slot', $markerSlot) } else { @() }
+    $slotLabel = if ($markerSlot) { "slot '$markerSlot'" } else { "production slot" }
+    $ErrorActionPreference = "Continue"
+    $markerJson = az webapp config appsettings list --resource-group $ResourceGroupName --name $AppServiceName @slotArgs -o json 2>$null
+    $ErrorActionPreference = "Stop"
+    $markerLive = $null
+    if ($markerJson) {
+        $markerLive = @($markerJson | ConvertFrom-Json | Where-Object { $_.name -eq $markerName } | ForEach-Object { "$($_.value)" }) | Select-Object -First 1
+    }
+
+    if ($markerDeclared) {
+        if ("$markerLive".Trim() -ne 'true') {
+            az webapp config appsettings set --resource-group $ResourceGroupName --name $AppServiceName @slotArgs `
+                --settings "$markerName=true" --output none
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  FAILED to set $markerName=true on $slotLabel of '$AppServiceName'." -ForegroundColor Red
+                exit 1
+            }
+            Write-Host "  $markerName set to true on $slotLabel ('$Environment' is declared a Spaarke-operated environment)." -ForegroundColor Green
+        } else {
+            Write-Host "  $markerName is true on $slotLabel, as declared." -ForegroundColor Green
+        }
+    } elseif ("$markerLive".Trim() -eq 'true') {
+        Write-Host ""
+        Write-Host "  OPERATOR MARKER CHECK FAILED — '$AppServiceName' ($slotLabel) carries $markerName=true, but" -ForegroundColor Red
+        Write-Host "  '$Environment' is not declared a Spaarke-operated environment in config/environments.json." -ForegroundColor Red
+        Write-Host "  A customer environment must never carry it (it opens tenant-wide and type-wide SPE admin routes" -ForegroundColor Yellow
+        Write-Host "  to that environment's root admin). Remove it, or declare the environment if it IS Spaarke's own:" -ForegroundColor Yellow
+        Write-Host "    az webapp config appsettings delete -g $ResourceGroupName -n $AppServiceName $($slotArgs -join ' ') --setting-names $markerName" -ForegroundColor Gray
+        exit 1
+    } else {
+        Write-Host "  $markerName not set on $slotLabel — '$Environment' is not a Spaarke-operated environment (the routes refuse)." -ForegroundColor Gray
+    }
+}
+
 # --- Step 3: Deploy ---
 $stepNum++
 
@@ -273,6 +355,22 @@ if ($UseSlotDeploy) {
     # Deploy to staging slot
     Write-Host "[$stepNum/$totalSteps] Deploying to staging slot '$SlotName'..." -ForegroundColor Yellow
     Write-Host "  This may take 30-60 seconds..."
+
+    # ADR-036 A1 rule 2: a non-production slot runs no scheduled jobs. Set the guard on the slot and mark it
+    # slot-sticky (--slot-settings), so a swap never carries it into production. Idempotent.
+    $ErrorActionPreference = "Continue"
+    $guardOutput = az webapp config appsettings set `
+        --resource-group $ResourceGroupName `
+        --name $AppServiceName `
+        --slot $SlotName `
+        --slot-settings "Scheduling__RunScheduledJobs=false" `
+        --output none 2>&1 | Out-String
+    $ErrorActionPreference = "Stop"
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host $guardOutput
+        throw "Could not set the scheduled-jobs slot guard on slot '$SlotName'"
+    }
+    Write-Host "  Slot guard set: Scheduling__RunScheduledJobs=false (slot-sticky)" -ForegroundColor Gray
 
     $ErrorActionPreference = "Continue"
     $deployOutput = az webapp deploy `

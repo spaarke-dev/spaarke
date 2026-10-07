@@ -1,5 +1,7 @@
 # AI Document Summary
 
+> **Portfolio**: [Project #1253](https://github.com/spaarke-dev/spaarke/issues/1253) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 ## Overview
 
 AI-powered document summarization for Spaarke. When users upload documents via the Universal Quick Create dialog, an AI summary is automatically generated and streamed in real-time, then stored in the `sprk_document` record.

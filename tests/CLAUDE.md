@@ -174,7 +174,7 @@ response.StatusCode.Should().Be(HttpStatusCode.Created);
 (await db.Orders.FindAsync(orderId)).Status.Should().Be(OrderStatus.Confirmed);
 ```
 
-#### B8. Internal/private method tests via `[InternalsVisibleTo]` or reflection
+#### B8. Reflection into non-public members (`InternalsVisibleTo` is permitted — ADR-038 Amendment A2)
 
 ```csharp
 // ❌ BAD

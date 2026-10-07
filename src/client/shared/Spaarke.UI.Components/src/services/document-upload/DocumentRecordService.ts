@@ -2,9 +2,10 @@
  * Document Record Service
  *
  * Creates Document records in Dataverse using an IDataverseClient abstraction.
- * Supports two implementations via strategy pattern:
- * - PcfDataverseClient: wraps ComponentFramework.WebApi (PCF controls)
+ * Current implementation (strategy pattern):
  * - ODataDataverseClient: direct OData fetch calls with token auth (Code Pages)
+ * (The PCF-side PcfDataverseClient had zero instantiation sites and was deleted
+ * 2026-10-03, reuse audit C-26.)
  *
  * Queries navigation property metadata dynamically via NavMapClient -> BFF API -> Dataverse.
  *
@@ -26,6 +27,7 @@ import type {
   EntityDocumentConfig,
 } from './types';
 import { consoleLogger } from './types';
+import { cleanGuid } from '../../utils/guid';
 
 /**
  * Function that resolves an EntityDocumentConfig for a given entity name.
@@ -35,11 +37,25 @@ import { consoleLogger } from './types';
 export type EntityConfigResolver = (entityName: string) => EntityDocumentConfig | null;
 
 /**
+ * Attaches an uploaded file to the document that owns it, through the BFF
+ * (`POST /api/v1/documents/{id}/file` — `SdapApiClient.attachDocumentFile`). The BFF verifies the file
+ * and stamps the document's SPE pointer server-side (unified-access-control-r2 task 166 f1).
+ */
+export type DocumentFileAttacher = (documentId: string, file: SpeFileMetadata) => Promise<unknown>;
+
+/**
  * Configuration for DocumentRecordService.
  */
 export interface DocumentRecordServiceOptions {
   /** Dataverse client implementation (PCF or OData) */
   dataverseClient: IDataverseClient;
+
+  /**
+   * Attaches each uploaded file to its new document through the BFF. REQUIRED: the client never writes a
+   * document's SPE pointer (`sprk_graphdriveid` / `sprk_graphitemid`) — those columns are field-secured and
+   * writable by the BFF identity only (owner round 21 item 1).
+   */
+  attachFile: DocumentFileAttacher;
 
   /** NavMap client for dynamic navigation property discovery */
   navMapClient: NavMapClient;
@@ -58,13 +74,40 @@ export class DocumentRecordService {
   private readonly dataverseClient: IDataverseClient;
   private readonly navMapClient: NavMapClient;
   private readonly getEntityConfig: EntityConfigResolver;
+  private readonly attachFile: DocumentFileAttacher;
   private readonly logger: ILogger;
 
   constructor(options: DocumentRecordServiceOptions) {
     this.dataverseClient = options.dataverseClient;
     this.navMapClient = options.navMapClient;
     this.getEntityConfig = options.getEntityConfig;
+    this.attachFile = options.attachFile;
     this.logger = options.logger ?? consoleLogger;
+  }
+
+  /**
+   * Create the row, then have the BFF attach its file (task 166 f1). A row whose file the BFF refuses is removed
+   * (best effort — `deleteRecord` when the client offers it) so no "document" is left without its file, and the
+   * refusal propagates to the caller's per-file error.
+   */
+  private async createAndAttach(
+    payload: Record<string, unknown>,
+    file: SpeFileMetadata
+  ): Promise<{ id: string }> {
+    const result = await this.dataverseClient.createRecord('sprk_document', payload);
+    try {
+      await this.attachFile(result.id, file);
+    } catch (attachError) {
+      if (typeof this.dataverseClient.deleteRecord === 'function') {
+        try {
+          await this.dataverseClient.deleteRecord('sprk_document', result.id);
+        } catch (deleteError) {
+          this.logger.warn('DocumentRecordService', `Could not remove document ${result.id} whose file was not attached`, deleteError);
+        }
+      }
+      throw attachError;
+    }
+    return result;
   }
 
   /**
@@ -128,7 +171,7 @@ export class DocumentRecordService {
    */
   async updateSummary(documentId: string, summary: string): Promise<boolean> {
     try {
-      const sanitizedGuid = documentId.replace(/[{}]/g, '').toLowerCase();
+      const sanitizedGuid = cleanGuid(documentId);
 
       const payload: Record<string, unknown> = {
         sprk_filesummary: summary,
@@ -168,20 +211,13 @@ export class DocumentRecordService {
       // Unassociated mode: create document without parent lookup binding
       const isUnassociated = !parentContext.parentEntityName || !parentContext.parentRecordId;
       if (isUnassociated) {
+        // NO SPE pointer, sprk_hasfile or sprk_filepath: the BFF stamps them when it attaches the file
+        // (task 166 f1 — see buildRecordPayload). sprk_containerid stays NULL on sprk_document (design.md INV).
         const payload: Record<string, unknown> = {
           sprk_documentname: formData.documentName || file.name,
           sprk_filename: file.name,
           sprk_filesize: file.size,
-          sprk_graphitemid: file.id,
-          // Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL
-          // on sprk_document (design.md INV — Phase F backfill audit depends on this).
-          sprk_graphdriveid: parentContext.containerId,
-          sprk_filepath: file.webUrl || null,
           sprk_documentdescription: formData.description || null,
-          // Upload to SPE succeeded by the time we reach here — mark the file flag.
-          // BFF treats DriveId/ItemId as authoritative, but downstream consumers
-          // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
-          sprk_hasfile: true,
         };
         // FR-WIZ-07: include sprk_searchindexname when the caller resolved a non-empty value
         // via the FR-WIZ-06 3-step chain (parent record → parent's BU → empty). Empty / undefined
@@ -196,14 +232,14 @@ export class DocumentRecordService {
           payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${searchIndexId.trim()})`;
         }
         this.logger.info('DocumentRecordService', `Creating unassociated Document: ${file.name}`);
-        const result = await this.dataverseClient.createRecord('sprk_document', payload);
+        const result = await this.createAndAttach(payload, file);
         this.logger.info('DocumentRecordService', `Created unassociated Document record: ${result.id}`);
         return {
           success: true,
           fileName: file.name,
           recordId: result.id,
           documentId: result.id,
-          driveId: parentContext.containerId,
+          driveId: file.driveId,
           itemId: file.id,
         };
       }
@@ -256,8 +292,8 @@ export class DocumentRecordService {
 
       this.logger.info('DocumentRecordService', `Creating Document: ${file.name}`);
 
-      // Create record using IDataverseClient
-      const result = await this.dataverseClient.createRecord('sprk_document', payload);
+      // Create record using IDataverseClient, then have the BFF attach its file (task 166 f1)
+      const result = await this.createAndAttach(payload, file);
 
       this.logger.info('DocumentRecordService', `Created Document record: ${result.id}`);
 
@@ -266,7 +302,7 @@ export class DocumentRecordService {
         fileName: file.name,
         recordId: result.id,
         documentId: result.id,
-        driveId: parentContext.containerId,
+        driveId: file.driveId,
         itemId: file.id,
       };
     } catch (error: unknown) {
@@ -311,7 +347,7 @@ export class DocumentRecordService {
     searchIndexId?: string
   ): Record<string, unknown> {
     // Sanitize GUID (remove curly braces, convert to lowercase)
-    const sanitizedGuid = parentContext.parentRecordId.replace(/[{}]/g, '').toLowerCase();
+    const sanitizedGuid = cleanGuid(parentContext.parentRecordId);
 
     const payload: Record<string, unknown> = {
       // Document name (use form input or file name as fallback)
@@ -321,22 +357,16 @@ export class DocumentRecordService {
       sprk_filename: file.name,
       sprk_filesize: file.size,
 
-      // SharePoint Embedded metadata.
-      // Canonical Document container field is sprk_graphdriveid; sprk_containerid stays NULL
-      // on sprk_document (design.md INV — Phase F backfill audit depends on this).
-      sprk_graphitemid: file.id,
-      sprk_graphdriveid: parentContext.containerId,
-
-      // SharePoint file URL
-      sprk_filepath: file.webUrl || null,
+      // 🔴 NO SharePoint Embedded POINTER here (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i)).
+      // `sprk_graphdriveid` / `sprk_graphitemid` are the pointer every later download and RAG index-file call
+      // follows AS THE APPLICATION, so they are field-secured and writable by the BFF identity only. The row is
+      // created without them; createAndAttach then asks the BFF to attach the file, and the BFF stamps the pointer
+      // (from the SERVER's upload answer — task 076), `sprk_hasfile` and `sprk_filepath` after verifying that the
+      // caller created the row and uploaded the file, and that the file sits in the container derived for the row.
+      // sprk_containerid stays NULL on sprk_document (design.md INV — Phase F backfill audit depends on this).
 
       // Optional description
       sprk_documentdescription: formData.description || null,
-
-      // Upload to SPE succeeded by the time we reach here — mark the file flag.
-      // BFF treats DriveId/ItemId as authoritative, but downstream consumers
-      // (RAG indexing filter, scheduled jobs, form ribbon visibility) read this flag.
-      sprk_hasfile: true,
 
       // Parent lookup using @odata.bind with single-valued navigation property
       [`${navigationPropertyName}@odata.bind`]: `/${entitySetName}(${sanitizedGuid})`,

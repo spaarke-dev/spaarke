@@ -51,7 +51,7 @@ import type {
   ISmartToDoProps as IPackageSmartToDoProps,
   ITodoMutationResult,
 } from '@spaarke/smart-todo-components';
-import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
 import { DataverseService } from '../services/DataverseService';
 import type { ITodo } from '../types/entities';
 import type { IWebApi } from '../types/xrm';
@@ -183,8 +183,9 @@ export function useSmartToDoBridge(
 
   const onOpenTodo = React.useCallback((todoId?: string) => {
     try {
+      // Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = (window as any).Xrm || (window.parent as any)?.Xrm;
+      const xrm: any = getXrm('navigation');
       if (xrm?.Navigation?.navigateTo) {
         // Param name kept as `eventId` for SmartTodo Code Page compatibility;
         // the value carried is a `sprk_todoid` GUID post R3 FR-29.

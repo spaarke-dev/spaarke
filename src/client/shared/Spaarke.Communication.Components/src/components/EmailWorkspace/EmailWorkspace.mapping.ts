@@ -13,8 +13,7 @@
  * No React import (this file is safe to unit-test without a DOM/provider).
  */
 import type { IDataService } from '@spaarke/ui-components';
-import { sanitizeEmailHtml } from '@spaarke/ui-components';
-import type { IAccessPermissionOption } from '@spaarke/ui-components';
+import { sanitizeEmailHtml, cleanGuid } from '@spaarke/ui-components';
 import {
   COMMUNICATION_REGARDING_FIELDS,
   derivePrimaryReview,
@@ -30,29 +29,23 @@ export const COMMUNICATION_ENTITY = 'sprk_communication';
 /**
  * ⚠️ PLACEHOLDER pending Dataverse schema creation. `docs/data-model/
  * sprk_communication.md` (reviewed 2026-07-21) does NOT yet document a
- * Monitor / High Priority / Access Permission field on `sprk_communication` —
- * design.md (Lens 2/4) flags the `TrackingFieldTrio` placement on this form as
- * "net-new to the form." These three logical names are the best-available
- * placeholders (matching the `TrackingFieldTrio` PCF's own Standard(100000000)/
- * Limited(100000001)/Restricted(100000002) fallback for Access Permission);
- * update this ONE constant once the columns exist and are confirmed via live
+ * Monitor / High Priority field on `sprk_communication` — design.md (Lens 2/4)
+ * flags the `TrackingFieldTrio` placement on this form as "net-new to the
+ * form." These two logical names are the best-available placeholders; update
+ * this ONE constant once the columns exist and are confirmed via live
  * Dataverse metadata — no other file in this component needs to change.
  * Filed as a defer/issue (see `projects/email-communication-solution-r5/
- * notes/defer-issues.md`) rather than invented as new schema in this task
- * (out of scope — this task's outputs are code-only, no `dataverse` tag).
+ * notes/defer-issues.md`) rather than invented as new schema in this task.
+ *
+ * There is deliberately NO access-permission field here (unified-access-control-r2
+ * task 138, owner Q6): a communication INHERITS its parent record's Access
+ * Permission, its own `sprk_accesspermission` copy is retired, and no client or
+ * server code may read or write it. The parent's pill is the one place to change it.
  */
 export const EMAIL_TRACKING_FIELDS = {
   monitor: 'sprk_ismonitored',
   highPriority: 'sprk_ishighpriority',
-  accessPermission: 'sprk_accesspermission',
 } as const;
-
-/** Same fallback triple the `TrackingFieldTrio` PCF caller uses when live OptionSet metadata isn't available (task 023 `index.ts`). */
-export const DEFAULT_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
-  { value: 100000000, label: 'Standard' },
-  { value: 100000001, label: 'Limited' },
-  { value: 100000002, label: 'Restricted' },
-];
 
 /** Envelope + tracking + association columns this workspace reads per selection (no `$select` — mirrors `CommunicationConnectionsApp`'s "an unknown regarding field name makes the whole $select throw" note; the regarding lookups vary by deployment). */
 export interface RawCommunicationRecord {
@@ -177,8 +170,8 @@ export function readFiledAssociations(raw: RawCommunicationRecord): FiledAssocia
       const nm = raw[`_${field}_value@OData.Community.Display.V1.FormattedValue`];
       filed.push({
         entityType,
-        recordId: val.replace(/[{}]/g, '').toLowerCase(),
-        recordName: typeof nm === 'string' && nm ? nm : val.replace(/[{}]/g, '').toLowerCase(),
+        recordId: cleanGuid(val),
+        recordName: typeof nm === 'string' && nm ? nm : cleanGuid(val),
       });
     }
   }
@@ -217,7 +210,6 @@ export interface EmailWorkspaceRecordState {
   filedAssociations: FiledAssociation[];
   monitor: boolean;
   highPriority: boolean;
-  accessPermission: number | null;
 }
 
 /** Derive the full workspace record state from one raw `retrieveRecord` payload. */
@@ -244,7 +236,6 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
     filedAssociations: readFiledAssociations(raw),
     monitor: asBoolean(raw[EMAIL_TRACKING_FIELDS.monitor]),
     highPriority: asBoolean(raw[EMAIL_TRACKING_FIELDS.highPriority]),
-    accessPermission: asNullableNumber(raw[EMAIL_TRACKING_FIELDS.accessPermission]),
   };
 }
 
@@ -254,11 +245,11 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
 // ---------------------------------------------------------------------------
 
 /**
- * Char cap for the derived body snippet. Mirrors the agent-visible
- * `EMAIL_SNIPPET_CAP_CHARS` (200, `pillar9-visibility.ts`) so a pre-capped
- * snippet never surprises the downstream `emailWidgetVisibility` derivation
- * (which re-caps at 200 anyway — being consistent keeps the persisted carrier
- * and the derived agent-visible state the same length).
+ * Char cap for the derived body snippet. Mirrors the server-side agent-visible
+ * cap (200, `SprkChatAgentFactory.TruncateEmailSnippet`) so a pre-capped
+ * snippet never surprises the downstream derivation (which re-caps at 200
+ * anyway — being consistent keeps the persisted carrier and the derived
+ * agent-visible state the same length).
  */
 export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
 
@@ -267,11 +258,10 @@ export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
  * per-selection record read (`useEmailWorkspaceRecord`). This is the shape the
  * SpaarkeAi `email` workspace tab persists into its `WorkspaceTab.widgetData`
  * as an `EmailTabWidgetData` (task 042b, FR-C1). The server's
- * `TryDeriveVisibleState` and the client registry `getVisibleState('email')`
- * both read the compact shape from `widgetData`.
+ * `TryDeriveVisibleState` reads the compact shape from `widgetData`.
  *
  * `emlDocumentId` is a FETCH HANDLE ONLY (on-demand `eml-render`, FR-C4) — it
- * is never projected into the agent-visible `SerializedEmailState`; only
+ * is never projected into the server-derived agent-visible Email state; only
  * `subject`/`from`/`date`/`threadId`/`snippet` are agent-visible (ADR-015 data
  * minimization). `threadId` is intentionally absent: `sprk_communication`
  * surfaces no conversation/thread column today (verified against
@@ -307,9 +297,9 @@ function deriveBodySnippet(rawBody: string): string | undefined {
  * `null` when nothing is selected, the read is loading/failed
  * (`recordState === null`), `communicationId` is absent, or the identity
  * minimum (`subject`/`from`/`date`) is not fully present — mirroring the
- * required-field gate in the agent-visible `emailWidgetVisibility`
- * derivation so we never persist a carrier the derivation would reject
- * anyway. `date` prefers the received timestamp, falling back to the sent
+ * required-field gate of the former client-side `emailWidgetVisibility`
+ * derivation (deleted 2026-10-03, C-21) so the persisted carrier always has
+ * an identity to label the tab with. `date` prefers the received timestamp, falling back to the sent
  * timestamp (matching `mapRowToEmailCardItem`'s date precedence). Pure — no
  * React, no I/O.
  *

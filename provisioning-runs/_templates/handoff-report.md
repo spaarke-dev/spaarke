@@ -28,7 +28,7 @@
 | Solutions imported | `{8}` | per §11.1a dep-order |
 | SPE container | 1 | container-type `{containerTypeId}` |
 | Graph app permissions | `{R}` | admin-consent granted at Gate {n} |
-| Optional users provisioned | `{U}` | at H11 gate |
+| Users provisioned (H11) | `{U}` | count only — names / emails stay in the L2 run document (D15) |
 
 ## Endpoints (for consumer teams)
 

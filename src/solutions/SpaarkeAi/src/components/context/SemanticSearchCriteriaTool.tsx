@@ -114,6 +114,7 @@ import {
   SEARCH_CRITERIA_RESULT_WIDGET_TYPE,
 } from '@spaarke/ai-widgets';
 import type { SearchCriteriaResultWidgetData } from '@spaarke/ai-widgets';
+import { getXrm } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -299,26 +300,6 @@ function writePersistedCriteria(criteria: PersistedCriteria): void {
 }
 
 // ---------------------------------------------------------------------------
-// Xrm frame-walk — same shape as wizardLaunchers.ts (proven across iframes)
-// ---------------------------------------------------------------------------
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-function resolveXrmNavigation(): { navigateTo: (...args: unknown[]) => Promise<unknown> } | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    const w = window as any;
-    const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
-    if (!xrm?.Navigation?.navigateTo) return null;
-    return xrm.Navigation;
-  } catch {
-    return null;
-  }
-}
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-// ---------------------------------------------------------------------------
 // Modal launch — Xrm.Navigation.navigateTo to sprk_semanticsearch
 // ---------------------------------------------------------------------------
 
@@ -368,8 +349,9 @@ function buildSearchDataParams(criteria: PersistedCriteria): string {
  * controller level).
  */
 function launchSemanticSearch(criteria: PersistedCriteria): void {
-  const nav = resolveXrmNavigation();
-  if (nav === null) {
+  // Shared cross-frame walker (task 081 / C-8).
+  const nav = getXrm('navigation')?.Navigation;
+  if (!nav?.navigateTo) {
     console.warn(
       '[SemanticSearchCriteriaTool] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Search launch is a no-op.',
     );

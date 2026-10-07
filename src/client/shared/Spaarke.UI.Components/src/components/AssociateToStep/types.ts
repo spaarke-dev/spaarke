@@ -124,12 +124,18 @@ export const TODO_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
  * (spaarkedev1, 2026-07-08) — every `lookupAttribute` below is a real column on
  * `sprk_event` today.
  *
- * **Note the typo in `sprk_regardingorganziation`** (transposed "z"/"i" — NOT
- * "organization"): this is the REAL live lookup-attribute name on `sprk_event`.
- * Do not "fix" it — pointing at the corrected spelling would target a
- * nonexistent column and silently fail to bind. The `label` is spelled
- * correctly ("Organization"); only the `lookupAttribute` value carries the
- * typo, matching the live column name exactly.
+ * **2026-09-04 — the `sprk_regardingorganziation` typo is GONE.** The column was
+ * renamed in Dataverse to the correctly-spelled `sprk_regardingorganization`
+ * and the misspelled one deleted (confirmed via `describe('tables/sprk_event')`).
+ * The former "do not fix it — the corrected spelling targets a nonexistent
+ * column" warning that stood here is now INVERTED: the typo'd name is what
+ * would silently fail to bind.
+ *
+ * Fixed while pre-deployment, when a Dataverse logical name is still cheap to
+ * change. It mattered because `sprk_document` spells the same concept
+ * correctly (`sprk_relatedorganization`), so both spellings were live in one
+ * codebase — cross-entity code naturally writes the correct one and silently
+ * misses.
  *
  * `Account` and `Contact` use the OOB `account`/`contact` logical names (not
  * `sprk_account`/`sprk_contact`), confirmed via the same schema query.
@@ -146,8 +152,7 @@ export const EVENT_REGARDING_TARGETS: ReadonlyArray<RegardingTarget> = [
   { label: 'Work Assignment', entityType: 'sprk_workassignment', lookupAttribute: 'sprk_regardingworkassignment' },
   { label: 'Analysis', entityType: 'sprk_analysis', lookupAttribute: 'sprk_regardinganalysis' },
   { label: 'Budget', entityType: 'sprk_budget', lookupAttribute: 'sprk_regardingbudget' },
-  // NOTE: intentional typo — see doc comment above.
-  { label: 'Organization', entityType: 'sprk_organization', lookupAttribute: 'sprk_regardingorganziation' },
+  { label: 'Organization', entityType: 'sprk_organization', lookupAttribute: 'sprk_regardingorganization' },
 ] as const;
 
 // ---------------------------------------------------------------------------

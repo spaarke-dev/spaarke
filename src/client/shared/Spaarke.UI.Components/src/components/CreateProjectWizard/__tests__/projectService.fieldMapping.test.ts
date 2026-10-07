@@ -130,7 +130,8 @@ describe('ProjectService — Field Mapping Framework engine wiring (task 020)', 
     const result = await projectService.createProject(EMPTY_FORM);
 
     expect(result.success).toBe(true);
-    expect(authFetch).not.toHaveBeenCalled();
+    // Task 142: the only BFF call is the Assigned-To sync every create now makes — never the field-mapping engine.
+    expect(authFetch.mock.calls.filter(([url]) => !String(url).includes('/assigned-access/sync'))).toEqual([]);
     expect(result.warnings).toEqual([]);
   });
 

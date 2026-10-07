@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="119" project="unified-access-control-r2">
+  <metadata>
+    <title>ISS-027 — the Create To Do wizard must actually upload the files it asks for (owner-decided: "Fix; To Do needs files")</title>
+    <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts in the shared component library and adds a Dataverse write plus an SPE upload to a user-facing create path. Tags include frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One component, one service, and a canonical reference implementation to copy (matterService.ts). The judgment points — the link column and the container — are pinned by constraints and an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only components/CreateTodoWizard/** plus its __tests__. The shared shell CreateRecordWizard.tsx is READ, not edited. 🔴 If implementation concludes the shell must change, this task becomes parallel-UNSAFE (six wizards share it) — stop, run /conflict-check, and say so before editing it.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, react, code-page, testing</tags>
+    <estimated-effort>3–5 hours</estimated-effort>
+    <origin>Register ISS-027 (GitHub #1007), filed 2026-09-18 while verifying task 093's scope — the wizard census asked "does it upload?" and this one answered "it shows a files step". Owner decision received 2026-09-18; queued by the same directive.</origin>
+  </metadata>
+
+  <owner-decision date="2026-09-18">"Fix; To Do needs files." The only one of the three 2026-09-18 findings a USER can notice: they attach documents, click through, see "To Do created!", and the files are gone — no warning, no error. From the user's point of view this is silent data loss.</owner-decision>
+
+  <prompt>The Create To Do wizard shows a file-upload step, captions it as associating the files with the to do, and then discards them. Make the promise true: after the sprk_todo row exists, upload the attached files against it and create the sprk_document rows that link them. A failed upload must degrade to a warning on the success panel — never to a discarded to do, and never to silence.</prompt>
+  <role>SPAARKE frontend developer — React 18 / Fluent UI v9, the Spaarke.UI.Components create-wizard family, EntityCreationService, Dataverse @odata.bind.</role>
+  <goal>Files attached in the wizard's "Add file(s)" step end up in SharePoint Embedded against the new to do, with one sprk_document row per file linked through sprk_relatedtodo and readable afterwards. The zero-files path is byte-for-byte the behaviour it is today. Every partial failure is visible to the user as a warning, with the to do intact.</goal>
+
+  <context>
+    <background>Verified 2026-09-19 against the code, not the register. The files step is configured and captioned at TodoWizardDialog.tsx:178 ("Upload documents to associate with this to do, or click Next to skip."). Its onFinish spans :236-305 and reads context.association (:245), context.selectedActions and context.followOn (:255) — and never context.uploadedFiles. A grep of the ENTIRE CreateTodoWizard directory for uploadedFiles, uploadFilesToSpe, createDocumentRecords and uploadFilesWithoutRecord returns zero matches. The shell does not upload either: CreateRecordWizard.tsx owns the file reducer and hands the array to onFinish (:612) and to infoStep.renderContent (:746), but imports no upload service at all — every wizard uploads in its own finish path.
+
+The canonical reference is the matter flow: CreateMatterWizard.tsx:501-508 passes context.uploadedFiles into MatterService.createMatter, which at matterService.ts:356-408 does upload → link → index and pushes WARNINGS on failure rather than failing the create. ⚠️ The register's citation of "matterService.ts:243-248" for this is WRONG — those lines are the business-unit cascade comment. The real sequence is :357 (uploadFilesToSpe), :375 (createDocumentRecords), :394 (indexUploadedFiles).
+
+Two facts that decide the shape. (1) uploadFilesToSpe(entityLogicalName, recordId, files, onProgress?) REQUIRES the record id — EntityCreationService.ts:479-484, whose own comment at :467-469 says the 2026-09-03 arity change "makes every un-migrated call site a COMPILE ERROR". Create-first is therefore compiler-enforced. (2) sprk_document CAN reference a to do: sprk_relatedtodo → sprk_todo, registered in DocumentLinkFields.All at Models.cs:214 with nav-prop sprk_RelatedToDo.
+
+Two facts the implementer will not find by grepping the client: sprk_relatedtodo has ZERO TypeScript call sites anywhere in src/ (so the nav-prop must be discovered, exactly as matterService does for sprk_matter — discoverNavProps('sprk_document') then resolve, with a literal fallback), and the sprk_todo entity SET is sprk_todos (external-spa/src/api/web-api-client.ts:113; office-addins useLinkedTodosForCommunication.ts:20).
+
+Server side, the upload route is PUT /api/obo/records/{entityLogicalName}/{recordId}/files/{path} (OBOEndpoints.cs:94) and takes NO container: RecordContainerResolver.ResolveForRecordAsync is entity-generic — a non-securable entity short-circuits to the fallback (:151-155), which derives from the RECORD's own owningbusinessunit (:236-240). 🔴 That fallback can legitimately be empty — the resolver's own comment at :283-286 records that three of six live business units have sprk_containerid unset — in which case the route returns 409 "No storage container is configured" (OBOEndpoints.cs:121-136). That is a real, reachable outcome for a to do, and it must land as a warning, not an unhandled throw.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/TodoWizardDialog.tsx (onFinish :236-305 — the finish path that currently drops the files)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts (TodoService.createTodo :105-246 — the alternative home for the sequence, matching the matter reference)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts:349-408 — COPY THIS SEQUENCE (upload → discover nav-prop → createDocumentRecords → warnings). Omit the indexUploadedFiles leg; see the RAG constraint.</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts:455-500 (uploadFilesToSpe + why uploadFilesWithoutRecord is wrong here) and :641-771 (createDocumentRecords, its options, and the Document Profile side effect at :760-763)</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/Models.cs:196-221 (DocumentLinkFields.All — the sprk_related* family) and :392-402 (TodoLookup, and the record of the three prior wrong conclusions)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx:610-646 — the finish context the files arrive on. READ ONLY; do not edit the shared shell in this task.</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner decision 2026-09-18">Scope: outcome. Fix the upload. Removing the files step, or keeping it and merely warning that files are ignored, does NOT satisfy this decision — "To Do needs files".</constraint>
+    <constraint source="task 076 / EntityCreationService.ts:455-523">Scope: call shape. createTodo(...) → uploadFilesToSpe('sprk_todo', todoId, files) → createDocumentRecords(...). Create-first, always. Do NOT reach for uploadFilesWithoutRecord — a to-do record exists by that point, and that method stores bytes in the ACTING USER's business-unit container instead of the record's. Do NOT pass or resolve a client-side container: the server derives it from the same record it authorizes against, and that is the point of the contract.</constraint>
+    <constraint source="ISS-027 register / matterService.ts:364-368">Scope: failure handling. This is a DECISION, not a suggestion. A failed or partial upload, and a failed document-record create, surface as entries in the warnings array that onFinish already returns (TodoWizardDialog.tsx:252, :303) and render on the existing "To Do created with warnings" panel. They must NEVER throw, never roll back, and never discard a created to do. A silent success is the defect being fixed — do not replace it with a silent failure.</constraint>
+    <constraint source="Models.cs:214 + Models.cs:392-402">Scope: the link column. The column is sprk_relatedtodo (nav-prop sprk_RelatedToDo), entity set sprk_todos. 🔴 CONFIRM IT THE RIGHT WAY: look for the sprk_related* FAMILY in DocumentLinkFields.All, not for a bare sprk_todo column on sprk_document — there is no such column, and three prior records in this repo concluded from its absence that a document was unmappable to a to do. Do not make that a fourth time. Discover the nav-prop at runtime via discoverNavProps('sprk_document') with a literal fallback, as matterService.ts:371-372 does; there is no existing TypeScript call site to copy the string from.</constraint>
+    <constraint source="CLAUDE.md §11">Scope: surface. MODIFY ONLY. No new service, hook, wrapper or abstraction: EntityCreationService already owns both calls, the shell already owns the file state, and TodoService already owns the create. Adding a "TodoDocumentService" would be a fifth partially-overlapping upload path.</constraint>
+    <constraint source="verified 2026-09-19">Scope: RAG indexing. OUT OF SCOPE, by construction: indexUploadedFiles needs a tenantId, and ICreateTodoWizardProps (TodoWizardDialog.tsx:51-112) has no tenantId prop. Do NOT add one to make indexing fit — note the gap in task notes instead. createDocumentRecords already queues Document Profile analysis per created document (EntityCreationService.ts:760-763); that happens for free and is expected.</constraint>
+    <constraint source="ADR-012 / src/client/shared/CLAUDE.md">Scope: components. Context-agnostic: dependencies arrive via props (dataService, authenticatedFetch, bffBaseUrl). No PCF or solution-specific imports in the shared library.</constraint>
+    <constraint source="ADR-021">Scope: UI. Fluent UI v9 only, semantic tokens, dark mode must hold. Any new warning or progress affordance follows the existing success-panel styling — no hex colours.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Pair every positive with a negative. Perturbation is mandatory: deleting the upload call, or the document-record call, must fail at least one test — otherwise the tests do not cover the thing this task exists to fix.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Re-verify the four premises in the background against the code at head (caption, onFinish's reads, the empty grep, the shell's non-participation), and confirm the link column the RIGHT way per the Models.cs constraint. Resolve the sprk_document → sprk_todo nav-prop and record how you resolved it.</step>
+    <step order="1">Decide where the sequence lives — inside TodoService (mirroring MatterService, which keeps the wizard thin) or inside TodoWizardDialog.onFinish — and state the choice with one sentence of reasoning in task notes. Thread context.uploadedFiles to it.</step>
+    <step order="2">Implement create → upload → link, accumulating warnings: skip both calls entirely when there are no files; on upload failure push a warning naming the count; on document-record failure push createDocumentRecords' own warnings through unchanged.</step>
+    <step order="3">Tests per the closed set below, including the negatives and the perturbations. Keep the existing CreateTodoWizard tests green.</step>
+    <step order="4">Build the shared library, run its test suite and lint. Write notes to the output path; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>STOP and escalate if sprk_relatedtodo turns out not to be writable from this path — the nav-prop is absent from sprk_document's metadata, or the create call rejects the bind. Do NOT invent a different column, do NOT fall back to an unbound document row, and do NOT re-derive the retired "a document cannot reference a to do" conclusion: report what the metadata actually returned.</trigger>
+    <trigger>STOP and escalate if the container cannot be resolved server-side for sprk_todo — a 409 "No storage container is configured" (the to-do's owning business unit has no sprk_containerid) or secure_record_container_missing. That is a provisioning/data answer and it is NOT fixable here; reintroducing a client-supplied container id would undo task 076. Ship the warning path, report the finding, and let the owner decide whether business-unit container coverage is a separate task.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/{TodoWizardDialog.tsx,todoService.ts}</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/__tests__/ (alongside the existing todoService.test.ts and initialRegarding.test.tsx)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-119-iss027-todo-wizard-uploads-files.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">With files attached, the finish path calls uploadFilesToSpe('sprk_todo', todoId, files) AFTER the sprk_todo create succeeds and with the real todoId — never before it, never with an empty id.</criterion>
+    <criterion testable="true">Each successfully uploaded file yields one sprk_document row bound to the to do through the discovered sprk_relatedtodo nav-prop against the sprk_todos entity set.</criterion>
+    <criterion testable="true">NEGATIVE — zero files: neither uploadFilesToSpe nor createDocumentRecords is called, no document rows are created, and the success panel reads exactly as it does today ("To Do created!", no warnings).</criterion>
+    <criterion testable="true">NEGATIVE — upload fails (wholly or partly): the success panel reports it as a warning, the to do still exists with its id returned, and onFinish does not throw.</criterion>
+    <criterion testable="true">NEGATIVE — document-record create fails after a successful upload: the per-file warning from createDocumentRecords reaches the panel, and the to do still exists.</criterion>
+    <criterion testable="true">NEGATIVE — no container could be derived for the to do (the 409 path): it surfaces as a warning, not an unhandled rejection, and the to do survives.</criterion>
+    <criterion testable="true">A created document is genuinely linked and readable afterwards: the row carries the sprk_relatedtodo bind (queryable by _sprk_relatedtodo_value) together with sprk_graphitemid, sprk_graphdriveid and sprk_hasfile from the upload result.</criterion>
+    <criterion testable="true">No regression to the wizards sharing CreateRecordWizard.tsx (matter, project, invoice, event, work assignment, analysis): the shell is unmodified, and their existing tests stay green. If the shell HAD to change, every one of those suites is run and reported.</criterion>
+    <criterion testable="true">Existing CreateTodoWizard tests (todoService.test.ts, initialRegarding.test.tsx) stay green.</criterion>
+    <criterion testable="true">Perturbation: removing the uploadFilesToSpe call, or the createDocumentRecords call, or the warning push, each fails at least one test.</criterion>
+    <criterion testable="true">Shared-library build, test suite and lint all green.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Files attached to a new To Do are uploaded and linked">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entitylist&amp;etn=sprk_todo</url>
+      <steps>
+        <step>Open the Create To Do wizard (the To Do list "New"/"Add To Do" command, or the Smart To Do page's Add To Do control)</step>
+        <step>On "Add file(s)", drop two small files and confirm both appear in the uploaded-file list</step>
+        <step>Advance, fill Title (and leave the regarding step skipped), and click Finish</step>
+        <step>Verify the success panel reads "To Do created!" with NO warnings, and check the console for JavaScript errors</step>
+        <step>Open the created sprk_todo record and verify two sprk_document rows are associated with it, each with a file name matching what was attached</step>
+        <step>Open one of those documents and confirm the file opens (the bytes landed in a container the record can read)</step>
+      </steps>
+      <expected>Two documents linked to the new to do, both openable, no console errors, no warnings on the panel.</expected>
+    </test>
+
+    <test name="Zero-files path is unchanged">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entitylist&amp;etn=sprk_todo</url>
+      <steps>
+        <step>Open the Create To Do wizard and click Skip (or Next) past "Add file(s)" without attaching anything</step>
+        <step>Fill Title and click Finish</step>
+        <step>Verify the success panel reads "To Do created!" with no warnings section</step>
+        <step>Open the created to do and verify it has NO associated documents</step>
+      </steps>
+      <expected>To do created with zero documents and zero warnings — identical to today's behaviour.</expected>
+    </test>
+
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the D365 personalization settings</step>
+        <step>Reopen the Create To Do wizard and reach the "Add file(s)" step with a file attached</step>
+        <step>Verify the upload zone, the uploaded-file list and any progress affordance adapt (no white panels, no black text in dark mode)</step>
+        <step>Finish the wizard and verify the success panel — including the warnings region when warnings are present — adapts</step>
+        <step>Verify icons use currentColor</step>
+      </steps>
+      <expected>All colours come from Fluent UI v9 semantic tokens per ADR-021; nothing is hard-coded.</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Register: notes/defer-issues.md § ISS-027. GitHub #1007. Owner decision 2026-09-18. Sibling 2026-09-18 findings: ISS-026 (task 117) and ISS-028 (folds into task 113).
+
+Premise corrections found while authoring (2026-09-19) — the register's ISS-027 entry carries two inaccuracies, and the task above uses the corrected facts:
+1. "matterService.ts:243-248" for the upload precedent is WRONG — those lines are the business-unit cascade comment. The real sequence is matterService.ts:357 / :375 / :394, reached from CreateMatterWizard.tsx:501-508. The register's substance (every other wizard uploads in its own finish path) holds.
+2. "resolveSpeContainerId … vestigial" needs a nuance: the HOSTS do supply it (solutions/CreateTodoWizard/src/main.tsx:162 + :194; solutions/SmartTodo/src/SmartTodoApp.tsx:640 + :673). What is vestigial is its VALUE on this path — context.speContainerId has no consumer in the to-do onFinish, and under task 076 uploadFilesToSpe takes no container at all. Leave the prop alone; this task neither needs it nor should remove it.
+
+Also verified for the implementer: sprk_relatedtodo has zero TypeScript call sites in src/ (discover the nav-prop, do not copy a string that does not exist); the entity set is sprk_todos; createDocumentRecords queues Document Profile analysis per document as a side effect; and the 409 no-container outcome is live-reachable because three of six business units have sprk_containerid unset.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

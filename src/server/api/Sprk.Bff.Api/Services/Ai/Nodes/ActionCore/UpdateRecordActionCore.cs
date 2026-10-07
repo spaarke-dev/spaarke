@@ -41,8 +41,9 @@ internal sealed record RenderedLookup(
 /// <summary>Session-agnostic input for a record update — all values pre-rendered/typed.</summary>
 /// <remarks>
 /// <paramref name="ImpersonateSystemUserId"/> (task 031): OPTIONAL Dataverse <c>systemuserid</c> to run the PATCH
-/// AS (MSCRMCallerID impersonation). Null/empty = app-only — the executor path and every pre-031 caller leave it
-/// null, so their write is byte-unchanged. Only the Job B apply seam supplies it (the confirming user).
+/// AS (MSCRMCallerID impersonation). Null = app-only: the executor path and every pre-031 caller leave it null, so
+/// their write is byte-unchanged. <see cref="Guid.Empty"/> is refused with an <see cref="ArgumentException"/> before
+/// the PATCH is sent (task 104, fail closed). Only the Job B apply seam supplies it (the confirming user).
 /// </remarks>
 internal sealed record UpdateRecordActionInput(
     string EntityLogicalName,
@@ -132,14 +133,165 @@ internal sealed class UpdateRecordActionCore
             }
         }
 
-        await _fieldMappingService.UpdateRecordFieldsAsync(
+        Task Patch(CancellationToken ct) => _fieldMappingService.UpdateRecordFieldsAsync(
             input.EntityLogicalName,
             input.RecordId,
             updatePayload,
-            cancellationToken,
+            ct,
             input.ImpersonateSystemUserId);
 
+        // Task 146: a lookup that FILES a child table under a record (a document onto a matter, an event onto a
+        // secure project) is a reparent — the child's owner is re-derived over every parent it will have
+        // (secure-if-any) BEFORE the PATCH, and reassigned when it moves. A refusal writes nothing and throws
+        // RecordOwnerUnresolvedException (ActionSeam returns it as a typed failure; the node executor fails the node).
+        // The resolver is a singleton; it is resolved from the scope factory because this core's constructor is
+        // frozen (task 031).
+        // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
+        // the record this update files it under is secure must be readable, or nothing is written — the same refusal as an
+        // unresolved owner (ActionSeam returns it as a typed failure; the node executor fails the node).
+        if (Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(input.EntityLogicalName))
+        {
+            using var gateScope = _scopeFactory.CreateScope();
+            var gate = gateScope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
+            var refusal = gate is null
+                ? (Sprk.Bff.Api.Services.Access.SecureRootInheritance.FilingColumnsOf(input.EntityLogicalName.Trim().ToLowerInvariant())
+                        .Overlaps(updatePayload.Keys.Select(Sprk.Bff.Api.Services.Access.SecureRootInheritance.NormalizeColumn))
+                    ? RecordOwnerResolution.Refused(RecordOwnerRefusal.ParentUndetermined,
+                        "whether the record it would be filed under is secure cannot be checked here, so it was not written")
+                    : null)
+                : await gate.CheckAsync(input.EntityLogicalName, input.RecordId, updatePayload, cancellationToken).ConfigureAwait(false);
+            if (refusal is not null)
+                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, refusal);
+        }
+
+        var parentChanges = ParentChangesOf(input, updatePayload);
+        if (parentChanges.Count == 0)
+        {
+            await Patch(cancellationToken);
+        }
+        else
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var ownership = scope.ServiceProvider.GetRequiredService<IRecordOwnershipResolver>();
+            var reparent = await ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = input.EntityLogicalName,
+                    RecordId = input.RecordId,
+                    ParentChanges = parentChanges,
+                    CallerSystemUserId = input.ImpersonateSystemUserId,
+                    // Task 146 c1-r1, owner round 13 item 8: a move out of a secure root (F3) is asked of the user this
+                    // update IMPERSONATES — the person it acts for — with RetrievePrincipalAccess asked as that user. An
+                    // update that impersonates nobody (a playbook node acting for no person) passes no caller and is
+                    // refused such a move.
+                    SecureExitCaller = input.ImpersonateSystemUserId is { } person
+                        ? Sprk.Bff.Api.Services.Access.SecureRemovalCaller.ForImpersonatedUser(
+                            person, scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>())
+                        : null,
+                },
+                Patch,
+                cancellationToken).ConfigureAwait(false);
+            if (reparent.IsRefused)
+            {
+                throw new RecordOwnerUnresolvedException(input.EntityLogicalName, reparent);
+            }
+        }
+
+        // After whichever path wrote the record (the plain PATCH or the re-file): task 156's re-stamp, then task 142's
+        // Assigned-To materializer (batch 4 integration — the write, then the restamp, then the materializer).
+        await RestampAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
+        await SecureFiledRootAfterWriteAsync(input.EntityLogicalName, input.RecordId, updatePayload.Keys).ConfigureAwait(false);
+
+        // Task 142 (L1, owner Q5 + A4): a PATCH that wrote a root's "Assigned *" column (as a value or an @odata.bind)
+        // materializes the Assigned-To access now. After the PATCH committed; never throws and never fails this update.
+        await Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer.RunAfterWriteAsync(
+            _scopeFactory, input.EntityLogicalName, input.RecordId, updatePayload.Keys, grantorOid: null, _logger,
+            cancellationToken).ConfigureAwait(false);
+
         return updatePayload.Keys.ToArray();
+    }
+
+    /// <summary>
+    /// Task 156 (owner round 4 item 5, option b): an UpdateRecord node can write ANY column — including what a to-do /
+    /// event / communication / analysis is filed under, or the matter / project of a record others are filed under. Such a
+    /// write re-stamps the affected copies in the same operation (<see cref="CoreAncestorRestamper"/>). A write that cannot
+    /// move a stamp resolves nothing. Never thrown: a child that fails is logged and the reconciliation job repairs it;
+    /// this record's own update stands. Runs to completion once the record is written (no caller token).
+    /// </summary>
+    private async Task RestampAfterWriteAsync(string entityLogicalName, Guid recordId, IEnumerable<string> writtenKeys)
+    {
+        if (!CoreAncestorRestamper.WriteCanMoveAStamp(entityLogicalName, writtenKeys))
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        await scope.ServiceProvider.GetRequiredService<CoreAncestorRestamper>()
+            .AfterWriteAsync(entityLogicalName, recordId, writtenKeys, CancellationToken.None)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The parent lookups this update writes, as <c>column → parent</c>, when the target is a child table whose
+    /// owner follows its parents (<see cref="RecordOwnershipResolver.IsReparentableChild"/>). The column is the
+    /// lookup's attribute name, lower-cased (the navigation-property spelling the bind uses differs only in case).
+    /// </summary>
+    /// <remarks>
+    /// Every value the PATCH writes as <c>null</c> is a candidate CLEAR (task 146 verifier item 8): a field mapping can
+    /// clear a lookup (<c>"sprk_Matter@odata.bind": null</c>, or an empty rendered value), which moves the child OUT of
+    /// that parent and must re-derive its owner like a move to another parent. This core cannot tell a cleared lookup
+    /// from a cleared text column, so it passes them all; the resolver reads the row and ignores a null for a column
+    /// that holds no parent.
+    /// </remarks>
+    private static IReadOnlyDictionary<string, Microsoft.Xrm.Sdk.EntityReference?> ParentChangesOf(
+        UpdateRecordActionInput input, IReadOnlyDictionary<string, object?> payload)
+    {
+        var changes = new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>(StringComparer.OrdinalIgnoreCase);
+        if (!RecordOwnershipResolver.IsReparentableChild(input.EntityLogicalName))
+            return changes;
+
+        foreach (var lookup in input.Lookups ?? [])
+        {
+            if (RecordOwnershipResolver.IsOwnershipParent(lookup.TargetEntity)
+                && Guid.TryParse(lookup.RenderedTargetId, out var targetId) && targetId != Guid.Empty)
+            {
+                changes[lookup.Field.ToLowerInvariant()] = new Microsoft.Xrm.Sdk.EntityReference(lookup.TargetEntity, targetId);
+            }
+        }
+
+        const string bindSuffix = "@odata.bind";
+        foreach (var (key, value) in payload)
+        {
+            if (value is not null || string.IsNullOrWhiteSpace(key))
+                continue;
+
+            var column = key.EndsWith(bindSuffix, StringComparison.OrdinalIgnoreCase)
+                ? key[..^bindSuffix.Length]
+                : key;
+            changes.TryAdd(column.ToLowerInvariant(), null);
+        }
+
+        return changes;
+    }
+
+    /// <summary>
+    /// Task 158 (owner round 6): a work assignment or project this update filed under a secure matter or project is secured
+    /// now, through provisioning's own steps (<see cref="Sprk.Bff.Api.Services.Access.SecureRootFilingGate"/>). Never thrown:
+    /// an incomplete securing is logged and the secure-root inheritance job completes it. Costs nothing for any other table.
+    /// </summary>
+    private async Task SecureFiledRootAfterWriteAsync(string entityLogicalName, Guid recordId, IEnumerable<string> writtenKeys)
+    {
+        if (!Sprk.Bff.Api.Services.Access.SecureRootInheritance.Inherits(entityLogicalName))
+        {
+            return;
+        }
+
+        using var scope = _scopeFactory.CreateScope();
+        var gate = scope.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureRootFilingGate>();
+        if (gate is not null)
+        {
+            await gate.SecureAfterWriteAsync(entityLogicalName, recordId, writtenKeys, traceId: null).ConfigureAwait(false);
+        }
     }
 
     // ---------------------------------------------------------------------------

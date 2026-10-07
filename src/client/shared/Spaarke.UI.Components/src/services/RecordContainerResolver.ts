@@ -48,6 +48,7 @@
  */
 
 import type { IWebApiLike } from '../types/WebApiLike';
+import { cleanGuid } from '../utils/guid';
 
 /** The Dataverse column whose presence makes an entity securable. */
 export const SECURE_FLAG_ATTRIBUTE = 'sprk_issecure';
@@ -258,7 +259,7 @@ export async function resolveContainerForRecord(args: ResolveContainerArgs): Pro
     );
   }
 
-  const id = (recordId ?? '').replace(/^\{|\}$/g, '').trim();
+  const id = cleanGuid(recordId);
   if (id === '') {
     // A securable entity with no usable id is an indeterminate-securability case: refuse rather
     // than fall through to the shared fallback.

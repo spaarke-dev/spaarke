@@ -101,6 +101,8 @@ public class CommunicationServiceEmailSendThreadTests
             null!, // JobSubmissionService — not exercised (ArchiveToSpe = false)
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             threadResolver);
     }

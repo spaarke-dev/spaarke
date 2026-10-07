@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-A10 - close the never-silent hole: an edited block with NO base counterpart reports no construct loss</title>
     <phase>4 Track A - Fidelity</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>The never-silent guarantee is what makes the published residual-loss list trustworthy. A loss that is real but unreported invalidates the list rather than merely extending it.</rigor-reason>
     <model-tier>opus</model-tier>

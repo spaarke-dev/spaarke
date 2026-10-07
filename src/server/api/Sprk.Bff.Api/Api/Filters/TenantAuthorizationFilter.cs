@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -70,22 +71,26 @@ public class TenantAuthorizationFilter : IEndpointFilter
                 detail: "Tenant identity not found in authentication token");
         }
 
-        // Extract requested tenant ID from request
-        var requestedTenantId = ExtractTenantId(context, httpContext);
+        // Extract EVERY tenant the request names. A batch names one per item, and each one is a partition
+        // the request would write to — so each one is checked, not just the first (task 163: the old
+        // first-item-only check let items 2..N of a batch land in another tenant's partition).
+        var requestedTenantIds = ExtractTenantIds(context, httpContext);
 
-        if (string.IsNullOrEmpty(requestedTenantId))
+        if (requestedTenantIds.Count == 0)
         {
             // If no tenant specified in request, pass through - service should handle defaults
             _logger?.LogDebug("No tenantId found in request, allowing service to apply defaults");
             return await next(context);
         }
 
-        // Validate tenant match
-        if (!string.Equals(userTenantId, requestedTenantId, StringComparison.OrdinalIgnoreCase))
+        // Validate tenant match — an EMPTY entry (a batch item with no tenant) is a mismatch, not a default.
+        if (requestedTenantIds.Any(requested =>
+                string.IsNullOrEmpty(requested)
+                || !string.Equals(userTenantId, requested, StringComparison.OrdinalIgnoreCase)))
         {
             _logger?.LogWarning(
-                "Tenant authorization denied: User tenant {UserTenantId} does not match requested tenant {RequestedTenantId}",
-                userTenantId, requestedTenantId);
+                "Tenant authorization denied: User tenant {UserTenantId} does not match every requested tenant ({RequestedCount} named)",
+                userTenantId, requestedTenantIds.Count);
 
             return Results.Problem(
                 statusCode: 403,
@@ -101,9 +106,11 @@ public class TenantAuthorizationFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Extract tenant ID from request arguments (body) or query parameters.
+    /// Extract every tenant ID the request names, from request arguments (body) or query parameters. An
+    /// empty list means the request names no tenant (pass-through). A batch contributes one entry per item,
+    /// INCLUDING empty ones, so an item with no tenant is rejected rather than defaulted.
     /// </summary>
-    private static string? ExtractTenantId(EndpointFilterInvocationContext context, HttpContext httpContext)
+    private static IReadOnlyList<string?> ExtractTenantIds(EndpointFilterInvocationContext context, HttpContext httpContext)
     {
         // Check request body arguments for tenantId
         foreach (var argument in context.Arguments)
@@ -112,31 +119,59 @@ public class TenantAuthorizationFilter : IEndpointFilter
             {
                 // RAG search request
                 case RagSearchRequest request when !string.IsNullOrEmpty(request.Options?.TenantId):
-                    return request.Options.TenantId;
+                    return [request.Options.TenantId];
 
                 // Knowledge document (index operations)
                 case KnowledgeDocument document when !string.IsNullOrEmpty(document.TenantId):
-                    return document.TenantId;
+                    return [document.TenantId];
 
-                // Batch of knowledge documents
+                // Batch of knowledge documents — EVERY item is a partition write, so every item is checked
+                // (task 163). Before, only the first item's tenant was compared and items 2..N could carry
+                // another tenant's partition. No route binds this type after task 163 deleted POST
+                // /api/ai/rag/index/batch; the case stays correct so a future batch body cannot pass through.
                 case IEnumerable<KnowledgeDocument> documents:
-                    var firstTenantId = documents.FirstOrDefault()?.TenantId;
-                    if (!string.IsNullOrEmpty(firstTenantId))
-                        return firstTenantId;
+                    var batchTenantIds = documents.Select(d => (string?)d?.TenantId).ToList();
+                    if (batchTenantIds.Count > 0)
+                        return batchTenantIds;
                     break;
+
+                // File index request (POST /api/ai/rag/index-file) — added by task 163 (sweep finding #4,
+                // GitHub #1041). This type was MISSING, so the filter found no tenant and passed the request
+                // through, and the handler used the body TenantId verbatim as the AI Search partition. The
+                // handler now derives the partition from the token and rejects a mismatch itself as well.
+                case FileIndexRequest fileIndex when !string.IsNullOrEmpty(fileIndex.TenantId):
+                    return [fileIndex.TenantId];
+
+                // Send-to-index (the Dataverse ribbon button and the Word add-in's Find "Run Index").
+                //
+                // Added by spaarkeai-word-add-in-r1 task 063, finding F2. This type was MISSING from
+                // the match list, and an unmatched body is indistinguishable here from "the caller
+                // named no tenant": ExtractTenantId returns null and InvokeAsync's pass-through at the
+                // top of this file lets the request run unexamined. The handler then used the body's
+                // TenantId verbatim as the AI Search partition key, so any authenticated caller could
+                // write chunks into any tenant partition string they chose.
+                //
+                // The handler no longer reads this field for the partition either — it derives it from
+                // the 'tid' claim via TenantResolution and rejects a mismatch itself. Both halves are
+                // deliberate: this case gives the rejection its canonical home (ADR-008: resource
+                // authorization belongs in an endpoint filter), and the handler's own check means
+                // detaching AddTenantAuthorizationFilter cannot re-open a caller-chosen partition.
+                case SendToIndexRequest sendToIndex when !string.IsNullOrEmpty(sendToIndex.TenantId):
+                    return [sendToIndex.TenantId];
 
                 // Embedding request doesn't have tenant - no isolation needed
                 case EmbeddingRequest:
-                    return null;
+                    return [];
             }
         }
 
         // Check query parameters for tenantId (used in DELETE operations)
-        if (httpContext.Request.Query.TryGetValue("tenantId", out var tenantIdQuery))
+        if (httpContext.Request.Query.TryGetValue("tenantId", out var tenantIdQuery)
+            && !string.IsNullOrEmpty(tenantIdQuery.FirstOrDefault()))
         {
-            return tenantIdQuery.FirstOrDefault();
+            return [tenantIdQuery.FirstOrDefault()];
         }
 
-        return null;
+        return [];
     }
 }

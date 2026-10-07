@@ -101,8 +101,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// CRUD-side callers route through <c>PublicContracts</c> facades, never
 /// directly into this handler.</item>
 /// <item><strong>ADR-014</strong>: per-tenant safety — handler validates
-/// <c>TenantId</c> on chat path. The <see cref="AgentServiceClient"/> thread cache is
-/// tenant-keyed via its <c>BuildThreadCacheKey</c> helper.</item>
+/// <c>TenantId</c> on chat path. The <see cref="AgentServiceClient"/> thread cache is keyed by
+/// tenant AND by the caller's chat session, so two users never share a Foundry conversation
+/// (task 122 — this handler previously passed a literal into the tenant argument).</item>
 /// <item><strong>ADR-015</strong>: PII sanitization BEFORE every Bing call (binding);
 /// telemetry emits handler name + outcome + IDs + method discriminator + query LENGTH
 /// + result count + duration ONLY. NEVER the raw or sanitized query, NEVER result
@@ -128,9 +129,6 @@ public partial class LegalResearchHandler : IToolHandler
         MethodResearchLegal,
         MethodLookupCase
     };
-
-    /// <summary>Thread key used for AgentServiceClient cache isolation of legal-research threads.</summary>
-    private const string LegalResearchThreadKey = "legal-research-grounding";
 
     /// <summary>
     /// User-readable degradation message returned when the BingGrounding kill switch is off
@@ -311,6 +309,8 @@ public partial class LegalResearchHandler : IToolHandler
                     startedAt: startedAt,
                     stopwatch: stopwatch,
                     correlationLogId: correlationLogId,
+                    tenantId: context.TenantId!,
+                    conversationScope: context.ChatSessionId.ToString(),
                     cancellationToken: cancellationToken)
                 : await ExecuteLookupCaseAsync(
                     tool: tool,
@@ -318,6 +318,8 @@ public partial class LegalResearchHandler : IToolHandler
                     startedAt: startedAt,
                     stopwatch: stopwatch,
                     correlationLogId: correlationLogId,
+                    tenantId: context.TenantId!,
+                    conversationScope: context.ChatSessionId.ToString(),
                     cancellationToken: cancellationToken);
         }
         catch (OperationCanceledException)
@@ -347,6 +349,8 @@ public partial class LegalResearchHandler : IToolHandler
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
         string correlationLogId,
+        string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(rawTopic))
@@ -386,6 +390,8 @@ public partial class LegalResearchHandler : IToolHandler
             startedAt: startedAt,
             stopwatch: stopwatch,
             correlationLogId: correlationLogId,
+            tenantId: tenantId,
+            conversationScope: conversationScope,
             cancellationToken: cancellationToken);
     }
 
@@ -399,6 +405,8 @@ public partial class LegalResearchHandler : IToolHandler
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
         string correlationLogId,
+        string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(rawCitation))
@@ -441,6 +449,8 @@ public partial class LegalResearchHandler : IToolHandler
             startedAt: startedAt,
             stopwatch: stopwatch,
             correlationLogId: correlationLogId,
+            tenantId: tenantId,
+            conversationScope: conversationScope,
             cancellationToken: cancellationToken);
     }
 
@@ -457,12 +467,14 @@ public partial class LegalResearchHandler : IToolHandler
         DateTimeOffset startedAt,
         Stopwatch stopwatch,
         string correlationLogId,
+        string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken)
     {
         List<GroundingResult> results;
         try
         {
-            results = await RunBingGroundingAsync(sanitizedQuery, cancellationToken).ConfigureAwait(false);
+            results = await RunBingGroundingAsync(sanitizedQuery, tenantId, conversationScope, cancellationToken).ConfigureAwait(false);
         }
         catch (FeatureDisabledException)
         {
@@ -550,6 +562,8 @@ public partial class LegalResearchHandler : IToolHandler
     /// </remarks>
     internal virtual async Task<List<GroundingResult>> RunBingGroundingAsync(
         string sanitizedQuery,
+        string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken)
     {
         // Use-site validation (R6 Wave B-G8 hardening 2026-06-09): BingConnectionName is
@@ -567,8 +581,13 @@ public partial class LegalResearchHandler : IToolHandler
                 "Key Vault (BingGrounding__BingConnectionName).");
         }
 
+        // 🔴 FIXED 2026-09-29 (task 122). The first argument is the TENANT, and this passed the constant
+        // LegalResearchThreadKey into it — so the on-wire key was
+        // `spaarke:tenant:legal-research-grounding:agent-thread:thread:v1`: ONE thread shared by every
+        // user in every tenant, accumulating each caller's research queries as context for the next.
+        // Now: the caller's real tenant, scoped to the caller's own chat session.
         var threadId = await _agentServiceClient
-            .CreateOrResumeThreadAsync(LegalResearchThreadKey, cancellationToken)
+            .CreateOrResumeThreadAsync(tenantId, conversationScope, cancellationToken)
             .ConfigureAwait(false);
 
         await _agentServiceClient

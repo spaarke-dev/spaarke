@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT-1/5/6/7: the Save tab keeps its form after a save (Saved state, Open Document, View Document opens the Spaarke record in the Spaarke app) and the name-collision prompt offers Open</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts`/`.tsx` (`SaveFlow.tsx`, `useSaveFlow.ts`, `openRecordLauncher.ts`) and BFF `.cs` (`OfficeService.cs` collision refusal, `OfficeEndpoints.cs` redaction), plus tests on both sides.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The collision change widens what a 409 carries (the existing document's id) — an information-disclosure judgment that must stay behind the existing Read gate; and the post-save state machine touches the save spine (version vs create).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT3-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave W1 with 092 (client-only Find). Disjoint files: 088 owns `SaveFlow.tsx`, `useSaveFlow.ts`, `errorMessages.ts`, `DocumentProfileSection.tsx`, `openRecordLauncher.ts`, the build setting, and the BFF collision code; it MUST NOT edit `App.tsx`, `FindView.tsx`, `FindResultsList.tsx` (092's). 088 is the only W1 task that runs `dotnet`.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, office-addins, typescript, bff-api, save-flow, unit-test, integration-test</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 3 (2026-10-03), items UAT-1, UAT-5, UAT-6 and UAT-7, plus the owner's answers the same day: "Keep the form" after a save, and record links must open in the Spaarke app. Record: `notes/042-uat-round3-2026-10-03.md` §1, §2, §3a.</prompt>
+
+  <role>SPAARKE full-stack developer on the Office add-in: React 19 + Fluent UI v9 task pane, Office.js, and the BFF Office save path.</role>
+
+  <goal>After a save, the Save tab stays on the form: a confirmation bar at the top (View Document opens the Spaarke record in the Spaarke app; Copy Link), the profile below, and a footer with Open Document to the left of a gray "Saved" button that becomes "Save version" when the name changes or the profile is re-generated. A name collision offers Open when the user can read the other document.</goal>
+
+  <context>
+    <background>
+      - **Design chosen by the owner (2026-10-03, "Keep the form")**:
+        ```
+        [✔ Saved to Spaarke · {record}   [View Document] [Copy Link]]
+        Document name [..........]
+        Profile  (type, TL;DR, summary, keywords)  [Generate Profile]
+        [Cancel]                    [Open Document] [Saved (gray, disabled)]
+        name edited / profile re-generated  →  [Open Document] [Save version]
+        ```
+      - **Today**: a successful save replaces the whole form with `renderSuccessState` (`SaveFlow.tsx:1151-1182`);
+        "View Document" (1171-1173, `handleViewDocument` 1077-1081) opens `savedDocumentUrl`, the stored file's
+        Graph `webUrl` (Word for the web; server `OfficeService.cs:1044`, `:1705`, `DocumentResult` 1193-1203).
+        `App.tsx` passes no `onViewDocument`, so `SaveView.tsx:235-245` does `window.open`. The hook already exposes
+        `savedDocumentId` (`useSaveFlow.ts:297/488/654/793`).
+      - **Open document record** today: `SaveFlow.tsx:754-764` (handler), 1437-1447 (a subtle button inside the
+        Profile section), shown when `openRecordAvailable` (739: `canOpenRecord &amp;&amp; process.env.ORG_URL`) and a
+        resolved document id. It calls `openRecord` (`services/openRecordLauncher.ts:125-142`) →
+        `buildOpenRecordUrl` (90-92): `${ORG_URL}/main.aspx?etn=…&amp;id=…&amp;pagetype=entityrecord&amp;navbar=off`.
+      - **Which app (owner question, answered in `042-uat-round3` §3a)**: the URL names no app, so a record opens in
+        the user's DEFAULT model-driven app. The Spaarke user app is **Matter Management**, unique name
+        `sprk_MatterManagement` (dev, read live). Name it with `appname=&lt;unique name&gt;` — stable across environments,
+        unlike the app GUID — from a new build setting `SPAARKE_APP_NAME` (default `sprk_MatterManagement`) injected
+        exactly like `ORG_URL`: `.github/workflows/deploy-office-addins.yml:72` and `webpack.config.js:361`.
+        `buildOpenRecordUrl` is also used by `sendEmailService.ts:144`; that consumer gets the app name too.
+      - **Save button**: `SaveFlow.tsx:1477-1486` (footer style 214-220, space-between: Cancel left, Save right).
+        `isValid` is always true (`useSaveFlow.ts:521`). Reuse CreateTodoView's existing gray "Saved" style
+        (`CreateTodoView.tsx:200-204`, `514-518`) — copy it, do not import across views if that couples them.
+      - **Profile re-run signal**: `DocumentProfileSection.tsx:173-183` (Generate Profile) has props `documentId` and
+        `refreshSignal` only (104-118) — add a callback (e.g. `onProfileGenerated`).
+      - **"Save version" after a save**: once saved, the open document IS that Spaarke document, so the next save is a
+        version of `savedDocumentId` (FR-11 path, `existingDocumentId` + `isNewVersion`, task 023/024) — reuse the
+        existing version-save mode, do not build a second one.
+      - **Collision (UAT-5)**: banner `renderCollisionState` `SaveFlow.tsx:1251-1292`; client fields
+        `collisionFileName` / `collisionExistingDocumentId` / `collisionExistingDocumentName` (`errorMessages.ts:75-88`,
+        386-401). The server sends the existing document's id and name **only if** (a) it is filed to the record this
+        save targets (`OfficeService.cs:1469-1494`) **and** (b) the caller can Read it (redaction
+        `OfficeEndpoints.cs:552-597`; payload 657-673). The client uses the id's PRESENCE to decide whether to offer
+        "Save as new version" (`SaveFlow.tsx:1273`, `1282`). The owner saw only Keep both + Dismiss because (a) failed.
+      - **Open the other file**: `GET /api/documents/{id}/open-links` (`FileAccessEndpoints.cs:106-115`, handler
+        623-743) — requires Read — returns `DesktopUrl` (`ms-word:https://…`, `DesktopUrlBuilder.FromMime`) and
+        `WebUrl`. No add-in code calls it yet; `Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts:66-67,123-128`
+        is the precedent (`window.open(desktopUrl)`).
+      - **Existing bug**: "View Existing Document" on the duplicate card (`SaveFlow.tsx:1194-1200`) passes a document
+        **id** to `onViewDocument`, which expects a URL → a broken link. Fix it with the same record-open.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-03">The layout is the one in the background block. Do not keep the full-screen success card for a successful save. Copy Link keeps copying what it copies today (owner did not ask to change it).</constraint>
+    <constraint source="NFR-10">Gate on capabilities (`canOpenBrowserWindow`, the existing `canOpenRecord`), never `hostType`. Outlook uses the same shared SaveFlow: after an Outlook save the same form state applies; nothing may become Word-only by branching on host.</constraint>
+    <constraint source="ADR-021">Fluent UI v9, semantic tokens, dark mode. Disabled "Saved" must still meet contrast.</constraint>
+    <constraint source="security">The collision payload may carry the existing document's id and name ONLY when the existing Read redaction (`OfficeEndpoints.cs:552-597`) passes. Add a SEPARATE boolean (e.g. `canSaveAsVersion`) carrying today's "filed to the target record" rule, and make the client offer "Save as new version" from that flag, not from the id's presence. A caller who cannot Read the other document gets exactly today's payload.</constraint>
+    <constraint source="this task">Open on the collision prompt calls `GET /api/documents/{id}/open-links` (no new route). Use `DesktopUrl` where the host can launch it, else `WebUrl`; decide by capability, not by `hostType`. If the open-links call fails, show its reason inline; never fall back to building a URL client-side.</constraint>
+    <constraint source="this task">`SPAARKE_APP_NAME` is a build setting injected like `ORG_URL`, default `sprk_MatterManagement`; when it is empty, record links are built WITHOUT `appname` (today's behaviour), never with a guessed value. Encode it.</constraint>
+    <constraint source="CLAUDE.md §10">BFF obligations: placement stated (extends `OfficeService`/`OfficeEndpoints`, no new service); publish size measured against a FRESH master build with Compress-Archive, file counts equal on both sides; `dotnet list package --vulnerable --include-transitive` clean.</constraint>
+    <constraint source="ADR-038">Client tests in `shared/taskpane/**/__tests__/` and listed in `ci-gated-suites.txt`; server tests in the existing collision contract/unit classes (`OfficeCreateCollisionTests` or the class that owns the 409 payload). No `Mock&lt;HttpMessageHandler&gt;`.</constraint>
+    <constraint source="parallel wave">Do NOT edit `App.tsx`, `FindView.tsx`, `FindResultsList.tsx`, `useFindRecordMatches.ts` (task 092, running beside you). Do NOT run `npm run build` (the main session runs it after the wave); run jest, lint and typecheck.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a successful save (create or version), the form stays: a confirmation bar names the record it was filed to (or says it was saved without a record) with View Document and Copy Link; the footer shows Open Document immediately left of a disabled "Saved" button.</criterion>
+    <criterion testable="true">Editing the document name, or a completed Generate Profile, re-enables the button as "Save version", and that save sends `existingDocumentId` = the saved document and `isNewVersion` true. Reverting the name to the saved value returns it to "Saved".</criterion>
+    <criterion testable="true">View Document, Open Document and the duplicate card's "View Existing Document" all open `{ORG_URL}/main.aspx?appname=sprk_MatterManagement&amp;etn=sprk_document&amp;id={id}&amp;pagetype=entityrecord&amp;navbar=off` (default build setting); with `SPAARKE_APP_NAME` empty, the same URL without `appname`. No path opens the Graph `webUrl` any more.</criterion>
+    <criterion testable="true">With `canOpenBrowserWindow` false or `ORG_URL` empty, View Document and Open Document are not rendered (not rendered-and-disabled).</criterion>
+    <criterion testable="true">409 collision, caller CAN Read the other document, it is NOT filed to the target record: the payload carries its id and name and `canSaveAsVersion` false; the prompt shows Keep both, Open and Dismiss — not "Save as new version".</criterion>
+    <criterion testable="true">409 collision, filed to the target record and readable: `canSaveAsVersion` true; the prompt shows Keep both, Save as new version, Open and Dismiss (today's behaviour plus Open).</criterion>
+    <criterion testable="true">Negative: 409 collision where the caller CANNOT Read the other document: the payload carries no id, no name and no `canSaveAsVersion` true; the prompt shows Keep both and Dismiss only. A server test pins it.</criterion>
+    <criterion testable="true">Open calls `GET /api/documents/{id}/open-links` and launches `DesktopUrl` or `WebUrl` per capability; a failed call shows its reason in the prompt.</criterion>
+    <criterion testable="true">Gates: gated jest green with new/changed suites listed; lint 0; typecheck 0 production; the BFF Office test scope and ArchTests green; publish delta reported vs fresh master (same tool, equal file counts); CVE check clean.</criterion>
+    <criterion testable="true">Live (after a deploy): a Word save shows the form with "Saved"; View Document opens the record in Matter Management; a collision on a readable, unfiled document offers Open and it opens the file. If no deploy or host is available, leave this open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>`ms-word:` links cannot be launched from the task pane by any supported call (`window.open`, `Office.context.ui.openBrowserWindow`) — record what was tried and use `WebUrl` everywhere; do not invent a third mechanism.</trigger>
+    <trigger>Keeping the form after an Outlook save breaks an Outlook flow the gated suites pin (e.g. saving attachments one after another via "Save Another") — STOP and report the conflict rather than branching on host.</trigger>
+    <trigger>The Read redaction cannot be evaluated for the collision's other document without a new Dataverse round trip per 409 that the existing code does not already make — report the cost before adding it.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read the files named in the background; trace today's success, collision and Open document record paths end to end, client and server.</step>
+    <step>Server: carry the readable existing document's id + name on every collision and add `canSaveAsVersion`; tests for the three cases (readable+filed, readable+unfiled, unreadable).</step>
+    <step>Build setting + `appname` in `buildOpenRecordUrl`; tests for both values.</step>
+    <step>Client: replace the success card with the saved-form state; Saved / Save version logic; Open Document in the footer; confirmation bar; fix View Existing Document; Open on the collision prompt; tests.</step>
+    <step>Gates, publish-size measurement, conflict-check; record in `notes/088-save-tab-after-save.md`; TASK-INDEX 088 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>The saved document id (`useSaveFlow`), the record opener (`openRecordLauncher`), the version-save mode (tasks 023/024), the collision payload and its Read redaction, and `GET /api/documents/{id}/open-links` all exist.</existing>
+    <extension>Yes — extends `SaveFlow`'s post-save rendering, `buildOpenRecordUrl` (one parameter), the existing collision payload (one flag) and calls an existing route; no new service, route or component library entry.</extension>
+    <cost-of-doing-nothing>View Document opens Word for the web instead of Spaarke (UAT-1); after a save the user cannot see or re-save the document they are on (UAT-6/7); a collision gives no way to reach the other file (UAT-5); record links open in whatever app the user last used.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Saved form (Word)">
+      <steps>
+        <step>Save a new document filed to a matter: the form stays, the bar names the matter, the footer reads [Open Document][Saved] with Saved gray.</step>
+        <step>Change the name: the button reads "Save version"; save: a new version of the same document, no new row.</step>
+        <step>View Document and Open Document open the document record in Matter Management, without the app navigation.</step>
+      </steps>
+    </test>
+    <test name="Collision Open">
+      <steps>
+        <step>Save a document under the name of an existing, readable document filed elsewhere: the prompt shows Keep both, Open, Dismiss; Open opens that file in Word.</step>
+      </steps>
+    </test>
+    <test name="Outlook unchanged in spirit">
+      <steps>
+        <step>Save an email in Outlook: the same saved-form state appears; nothing is Word-only.</step>
+      </steps>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Office dark theme: the bar, the disabled Saved button and the prompt are readable.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/utils/errorMessages.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+    <file role="edit">src/client/office-addins/webpack.config.js</file>
+    <file role="edit">.github/workflows/deploy-office-addins.yml</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    <file role="read">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/024-save-mode-and-deviations.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/025-residual-collision-surface.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file>src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-10-03 in wave UAT3-W1 (uncommitted; main session commits). Full record: notes/088-save-tab-after-save.md.
+    - Saved state replaces the success card: bar (record / "Not filed to a record.", View Document, Copy Link), name, profile,
+      footer [Cancel] [Open Document][Saved]. Name edit or accepted Generate Profile -> "Save version" (FR-11 version of the saved doc).
+    - All record links name the app (appname= from SPAARKE_APP_NAME, default sprk_MatterManagement; empty -> none). openRecord
+      defaults to the setting, so task 092's Find opens get it too. View Existing Document fixed (id passed as URL).
+    - Server: every owned collision carries id + name; new CanSaveAsVersion flag (editable AND filed to target); the Read gate
+      strips id, name and flag; flag written only with an id. Pane offers Save as new version from the flag only; Open uses
+      GET /api/documents/{id}/open-links.
+    - ESCALATION 1 FIRED: ms-word: cannot be launched by a supported call (openBrowserWindow is http/https only, office-js #2820
+      by design; window.open of Office URIs undocumented) -> webUrl everywhere, mechanism chosen by canOpenBrowserWindow.
+      Trigger 2 not fired (only gated "Save Another" pin was a Word capture test, rewritten, invariant kept). Trigger 3 judged
+      not fired: same existing access check, now also on filed-elsewhere collisions (at most 1 OBO access query per refused save).
+    - Gates: gated jest 63 suites / 886 tests green (baseline 62/836); lint 0; typecheck 0 production (68 accepted test-file);
+      BFF Office scope 467 passed / 8 skipped (pre-existing) / 0 failed; ArchTests 346/346; CVE check clean.
+      Publish size OWED (worktree iterated; commit-less branch copy disallowed by the wave rules). Live AC (Word host) OPEN.
+    - Owner questions: a version save does not rename (task 023 D-5) though a name edit enables "Save version"; saved state is
+      lost on tab remount (App.tsx owns persistence); deploy BFF before the add-in (flag-only version offer).
+  </notes>
+</task>

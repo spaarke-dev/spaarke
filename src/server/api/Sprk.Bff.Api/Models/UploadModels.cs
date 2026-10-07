@@ -32,7 +32,9 @@ public static class ConflictBehaviorExtensions
             "replace" => ConflictBehavior.Replace,
             "rename" => ConflictBehavior.Rename,
             "fail" => ConflictBehavior.Fail,
-            _ => ConflictBehavior.Replace // Default
+            // Unknown values are FAIL (task 171, adversarial finding 1): an unrecognised value must never widen into an
+            // overwrite of an existing file.
+            _ => ConflictBehavior.Fail
         };
     }
 

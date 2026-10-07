@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="unified-access-control-r2">
+  <metadata>
+    <title>Create-first cutover CLOSE-OUT: retire the three stale task-093 comments, pin the ordering by test, re-home the residue</title>
+    <phase>0c Secure Documents — upload path decomposition</phase>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>RE-TIERED 2026-09-21 from FULL. The reorder this task was written to perform ALREADY SHIPPED (task 076) and is compiler-enforced. What remains is comment hygiene plus one regression test. No authorization path, no schema, no ordering change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>RE-TIERED from opus. The judgement this task was tiered for — sequencing 7 wizards against a provisioning step, and picking between two Secure UI components — no longer exists: the sequencing shipped and there is only ONE Secure section component left.</model-tier-reason>
+    <effort>medium</effort>
+    <effort-reason>RE-TIERED from xhigh. Three comment sites, one test, two re-homings. The care required is in NOT over-reaching (see the 🔴 comment-collision warning), not in volume.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Narrowed 2026-09-21. No longer "all 7 wizards" — it now edits comments in `EntityCreationService.ts`, which task **094** also touches (094's own parallel-reason names 093). Keep them serial. Everything else it touches is disjoint.</parallel-reason>
+    <deps>076</deps>
+    <tags>frontend, documentation, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <origin>notes/plan-upload-path-decomposition-2026-08-31.md §3. 🔴 RESCOPED 2026-09-21 per owner instruction ("review and rescope so that it aligns with current solution") and plan §6.2 / D-8, which found this task closes as delivered. The ORIGINAL scope — reorder 7 wizards to create-before-upload — shipped via task 076 and is now enforced by the compiler.</origin>
+  </metadata>
+
+  <prompt>🔴 DO NOT REORDER ANYTHING. THE REORDER ALREADY SHIPPED. This task was written to change `EntityCreationService` from upload→create→link to create→upload→link across 7 wizards. Task **076** did that, and the new contract is enforced by the TYPE SYSTEM, not by convention.
+
+This task is now a CLOSE-OUT: retire three stale comments that still advertise work as pending, pin the shipped ordering with a regression test so it cannot silently revert, and re-home two residual items to the tasks that can actually discharge them.</prompt>
+  <role>SPAARKE frontend engineer. Comment hygiene on a shipped cutover, plus one ordering regression test.</role>
+  <goal>No comment in this repo still tells a reader that the create-first reorder is pending work belonging to this task; the shipped ordering is pinned by a test that fails if anyone reverts it; and the two items this task cannot discharge itself are recorded against the tasks that can.</goal>
+
+  <context>
+    <background>🔴 **ALL FOUR OF THIS TASK'S ORIGINAL PREMISES WERE FALSE AT HEAD.** Re-verified 2026-09-21 against the code, not against the plan note:
+
+1. **"`EntityCreationService.ts` orders upload → create → link."** FALSE. The file's own usage example (`:27-31`) now reads: *"Create the record FIRST — the upload is keyed on it, and the server resolves the storage container from that same record (task 076). There is no container parameter."*
+
+2. **Create-first is COMPILER-ENFORCED, which is stronger than "by convention".** `uploadFilesToSpe(entityLogicalName, recordId, files, onProgress?)` (`:479-484`) takes the record as a required parameter. The old `(containerId, files, onProgress)` shape cannot compile, so every un-migrated call site is a BUILD ERROR rather than a silent pass-through. There is no container parameter to get wrong.
+
+3. **"The Secure Project step exists in TWO implementations."** FALSE — there is exactly ONE: `Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx`. The `src/solutions/LegalWorkspace` copy was deleted in `144ef43c4` on **2026-09-01**; this task was filed **2026-09-03**, so it was BORN STALE. The escalation trigger about "both components being live" therefore cannot fire, and the 068 sequencing decision this task was told to make has no subject.
+
+4. **"There are exactly three such flows."** FALSE — there are **TWO**. `uploadFilesWithoutRecord` has exactly two callers at HEAD (ripgrep over `src/**/*.{ts,tsx}`): `createXrmEmailComposeHandlers.ts:262` (EmailComposer local attachment) and `CreateAnalysisWizardWidget.tsx:783` (Analysis wizard standalone document). The third — DocumentUploadWizard's "skip associate" — was cut over by task **076**.
+
+**THE CLASSIFICATION CONFLICT, AND WHY IT IS NOT THIS TASK'S TO INVENT.** `EntityCreationService.ts:511-513` calls the two survivors debt: *"reordering them so the record exists first is task 093, after which this method should lose callers."* Task 076's own notes (`notes/task-076-client-cutover-and-supplier-classification.md:54-55`) classify BOTH as legitimately **"parentless"** — an email attachment on an unsent draft and a standalone analysis document have no record to belong to yet. Both cannot be right.
+
+Two of three sources favour 076: its classification is later, it performed the cutover, and the comment is *demonstrably wrong about the count* (three vs two) in the same sentence. So the comment is the stale artifact. ⚠️ Record that reasoning explicitly and flag it for owner confirmation — do NOT present it as a decision this task made on its own authority.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts — the `uploadFilesWithoutRecord` doc comment (~:503-517): wrong count AND wrong attribution</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx — ~:772 "Reordering this wizard to create the analysis first is task 093."</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/createXrmEmailComposeHandlers.ts — ~:247 "…removing the need for the record-less route at all — is task 093."</file>
+      <file role="new">a jest test pinning create-before-upload in EntityCreationService (path per the package's existing __tests__ convention)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/task-076-client-cutover-and-supplier-classification.md — the "parentless" classification (read, do not modify)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-093 rescope 2026-09-21">🔴 SCOPE: do NOT reorder any wizard, do NOT change `EntityCreationService`'s ordering, and do NOT author or modify any Secure Project UI. All of that either shipped or never existed. Touching it re-opens a closed, compiler-enforced contract.</constraint>
+    <constraint source="measured 2026-09-21">🔴 COMMENT COLLISION — THE ONE REAL HAZARD IN THIS TASK. A repo-wide search for "task 093" returns ~24 hits, and **only THREE belong to this project**. The rest are same-numbered tasks in OTHER projects — `spaarkeai-compose-r1` task 093 (`LegalWorkspace/vite.config.ts`, `composeEditor.registration.ts`, `Spaarke.Compose.Components/**`, `ThreePaneShell.tsx`), SpaarkeAi's task 093 (`ManageWorkspacesPane.tsx`, `workspaceLayoutMutations.ts`, `workspaceTemplateFilter.ts`, `App.tsx`), and others. Task numbers are per-project and they COLLIDE. Edit ONLY the three files named in relevant-files. A blanket sweep would corrupt four other projects' records.</constraint>
+    <constraint source="plan D-8">Scope: the classification. State 076's "parentless" reading as the resolution WITH its evidence, and flag it for owner confirmation. If the owner instead confirms the comment's "debt" reading, that becomes a NEW small task — it is not this one, and it must not be improvised in.</constraint>
+    <constraint source="ADR-038">The new test goes at a KEEP path and must be a real regression pin: it fails if `uploadFilesToSpe` loses its record parameter or if a wizard calls upload before create. A test that merely restates the current signature is scaffolding, not a pin.</constraint>
+    <constraint source="review-2026-08-24">Perturbation is mandatory: break the ordering the new test pins and confirm it reddens; then restore.</constraint>
+    <constraint source="main-session ownership">Do NOT edit `tasks/TASK-INDEX.md` or `current-task.md`; do not set this POML's own `&lt;status&gt;`. Do not touch anything under `.claude/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>create-first upload contract; comment hygiene after a shipped cutover</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-076-client-cutover-and-supplier-classification.md</file>
+      <file>projects/unified-access-control-r2/notes/plan-upload-path-decomposition-2026-08-31.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify all four premises above at HEAD before editing — they were wrong once and the point of this rescope is not to trust a note. Confirm the caller count with ripgrep, not `grep -rn` (which times out on this tree).</step>
+    <step order="1">Correct the `EntityCreationService.ts` comment: two callers not three, both classified parentless by 076, and DROP the "is task 093, after which this method should lose callers" clause — that sentence is what makes a reader think the method is on its way out. Keep the genuinely load-bearing warning that this route stores bytes in the caller's BU container and is not reversible for a secure record.</step>
+    <step order="2">Correct the two call-site comments (`CreateAnalysisWizardWidget.tsx`, `createXrmEmailComposeHandlers.ts`) the same way. ONLY these two — see the collision constraint.</step>
+    <step order="3">Add the ordering regression test and perturb it to prove it bites.</step>
+    <step order="4">Re-home the residue, in writing: (a) the live "files land in the project's own container" assertion belongs to task **047**, which has the environment to run it; (b) secure **MATTER** provisioning is owner-deferred (`provision-project` is project-only) and needs its own task if the owner wants it. Record both in notes/task-093-close-out.md rather than leaving them implicit in a closed task.</step>
+    <step order="5">Write notes/task-093-close-out.md: the four false premises with their evidence, the classification resolution + its owner flag, and the two re-homings.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the ordering regression test cannot be made to fail when the ordering is broken — e.g. because the type system already makes the broken form unrepresentable — say so and pin the contract at the type level instead (a compile-fail fixture or a signature assertion). Do NOT ship a test that passes both before and after the break; that is the decorative-test failure mode this project keeps finding.</trigger>
+    <trigger>If any of the four premises turns out to be TRUE at HEAD after all — in particular if a second `SecureProjectSection.tsx` exists, or `uploadFilesWithoutRecord` has a third caller — STOP and report. That would mean the rescope itself was built on a stale reading, and the original scope may still be live.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`EntityCreationService` already enforces create-first by signature; task 076 already performed the cutover; the single `SecureProjectSection.tsx` already renders the secure choice.</existing>
+    <extension>Nothing new is built. This retires stale prose and adds one regression pin to an existing contract.</extension>
+    <cost-of-doing-nothing>Three comments in shipped code tell every future reader that a reorder is still pending and assigned to this task. One of them also says a live, deliberate API "should lose callers", which invites someone to delete a route that 076 classified as correct. The stale comment outliving its mechanism is this project's single most repeated defect — 19 instances and counting.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">3 corrected comments (EntityCreationService.ts, CreateAnalysisWizardWidget.tsx, createXrmEmailComposeHandlers.ts)</output>
+    <output type="test">ordering regression pin for create-before-upload</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-093-close-out.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No comment in the three named files still says the reorder "is task 093" or that `uploadFilesWithoutRecord` "should lose callers".</criterion>
+    <criterion testable="true">The `EntityCreationService` comment names TWO callers, not three, and cites 076's parentless classification.</criterion>
+    <criterion testable="true">🔴 The ~21 "task 093" comments belonging to OTHER projects are UNTOUCHED — verified by diff. Only the three named files changed.</criterion>
+    <criterion testable="true">A regression test pins create-before-upload and FAILS when the ordering is broken (perturbation shown, with counts, then reverted).</criterion>
+    <criterion testable="true">notes/task-093-close-out.md records the four false premises with evidence, the classification resolution flagged for owner confirmation, and the two re-homings (047; a future secure-matter task).</criterion>
+    <criterion testable="true">No wizard ordering changed, no Secure Project UI added or modified, `EntityCreationService`'s method signatures unchanged — verified by diff.</criterion>
+    <criterion testable="true">Build green; package typecheck clean; exact test counts reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>🔴 RESCOPED 2026-09-21 at owner instruction, after task 115's nine-file repair and task 107's rescope established that this project's POMLs go stale faster than they are executed. 093 is the ELEVENTH such instance found.
+
+This file previously specified: reorder 7 Create wizards, move the IsSecure collection point, and decide between two Secure UI components. The reorder shipped via 076 and is compiler-enforced; the second Secure component was deleted two days BEFORE this task was filed. Executing it as written would have rebuilt working behaviour and risked regressing a closed tenant-isolation fix.
+
+Closing this UNBLOCKS task **047** (its only other dependant is 090).
+
+Owner-deferred and deliberately NOT folded in: secure **matter** provisioning — `provision-project` is project-only, and the owner set matters as a later add-on.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

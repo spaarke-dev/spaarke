@@ -51,6 +51,78 @@ public record ShareLinkResponse(
     string Scope
 );
 
+/// <summary>
+/// Request body for POST /api/documents/resolve-identity (spaarkeai-word-add-in-r1 task 012, FR-01).
+/// </summary>
+/// <remarks>
+/// A body, not a query string, on purpose: the URL's path carries the file name, and request URLs are what
+/// telemetry records.
+/// </remarks>
+public record ResolveDocumentIdentityRequest(
+    /// <summary>The open document's absolute URL — <c>Office.context.document.url</c>, sent exactly as returned.</summary>
+    string? DocumentUrl
+);
+
+/// <summary>
+/// Response for POST /api/documents/resolve-identity. <see cref="Resolved"/> = <c>false</c> is a SUCCESSFUL
+/// answer, not an error. For every <see cref="Reason"/> except <c>identity_conflict</c> the open document is not a
+/// Spaarke document and the pane treats it as new. A 503 means "could not determine" — never treat it as new.
+/// </summary>
+public record DocumentIdentityResponse(
+    /// <summary><c>true</c> when the URL resolved to a <c>sprk_document</c> the caller may read.</summary>
+    bool Resolved,
+    /// <summary>The <c>sprk_documentid</c>, bare lowercase (ADR-044). Null when not resolved.</summary>
+    string? DocumentId,
+    /// <summary><c>sprk_documentname</c>.</summary>
+    string? DocumentName,
+    /// <summary><c>sprk_filename</c>.</summary>
+    string? FileName,
+    /// <summary>The record the document belongs to, from its direct association slot. Null when unassociated.</summary>
+    RelatedRecordIdentity? RelatedRecord,
+    /// <summary>
+    /// Why there is no identity, when <see cref="Resolved"/> is false: <c>not_cloud_document</c> (a local file),
+    /// <c>not_resolvable</c> (Graph will not resolve the URL for this caller — no such item, or not visible to them;
+    /// SharePoint does not distinguish the two), <c>not_spaarke_document</c> (the file exists but no
+    /// <c>sprk_document</c> tracks it), or <c>identity_conflict</c> (a row holds this file's item id under a different
+    /// drive — NOT a new document; do not offer save-as-new). Null when resolved.
+    /// </summary>
+    string? Reason
+)
+{
+    public static DocumentIdentityResponse NoIdentity(string reason) => new(false, null, null, null, null, reason);
+}
+
+/// <summary>The record a resolved document is associated with (spaarkeai-word-add-in-r1 task 012).</summary>
+public record RelatedRecordIdentity(
+    /// <summary>Dataverse logical name, e.g. <c>sprk_matter</c>.</summary>
+    string EntityType,
+    /// <summary>Record id, bare lowercase (ADR-044).</summary>
+    string Id,
+    /// <summary>
+    /// The record's PRIMARY NAME attribute value, unchanged since task 012 (existing consumers — e.g. the
+    /// Create-To-Do "regarding" fields — read this). NOT reliable as a display name on its own: for
+    /// <c>sprk_matter</c>/<c>sprk_project</c> the primary name attribute IS the record's NUMBER, so this is a
+    /// number for those two types and a descriptive name for Invoice/WorkAssignment. New callers that need
+    /// BOTH a descriptive name and a number (task 026's related-record card) should use
+    /// <see cref="DisplayName"/> and <see cref="Number"/> instead, which are correctly labeled regardless of
+    /// entity type.
+    /// </summary>
+    string? Name,
+    /// <summary>
+    /// The record's DESCRIPTIVE name (task 026 / FR-09) — always the human-readable name, never a number,
+    /// regardless of which attribute happens to be the entity's Dataverse primary name. Null when the related
+    /// record could not supply one.
+    /// </summary>
+    string? DisplayName = null,
+    /// <summary>
+    /// The record's NUMBER (task 026 / FR-09) — e.g. <c>sprk_matternumber</c>, <c>sprk_invoicenumber</c>.
+    /// Null when the entity type has no number field, or the record has none set (a pane-created Matter has no
+    /// number until the separate numbering project ships — <c>notes/030-numbering-handoff.md</c>). The card
+    /// MUST render this blank gracefully, never as an error.
+    /// </summary>
+    string? Number = null
+);
+
 public record UpdateFileRequest(
     string? Name = null,
     string? ParentReferenceId = null

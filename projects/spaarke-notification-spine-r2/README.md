@@ -1,5 +1,7 @@
 # Spaarke Notification & Action Spine — R2 (Proactive OOB Notifications)
 
+> **Portfolio**: [Project #1226](https://github.com/spaarke-dev/spaarke/issues/1226) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-08-20
 >
 > **Status**: **Investigation hydrated — pre-spec.** No spec/plan/tasks yet; run `design-to-spec` next.

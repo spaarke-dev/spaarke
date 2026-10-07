@@ -53,6 +53,7 @@
 /// <reference path="./xrm-globals.d.ts" />
 
 import { openSpaarkeAiCompose } from "../utils/launch-resolver";
+import { cleanGuid } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // `sprk_document` field constants
@@ -105,7 +106,7 @@ export async function openInCompose(
   }
 
   // Strip braces (Xrm.WebApi expects no braces).
-  const normalizedDocumentId = documentId.replace(/^\{|\}$/g, "");
+  const normalizedDocumentId = cleanGuid(documentId);
   if (!normalizedDocumentId) {
     console.warn(
       "[DocumentComposeLaunch] Record id is empty (likely an unsaved form). Opening empty Compose.",

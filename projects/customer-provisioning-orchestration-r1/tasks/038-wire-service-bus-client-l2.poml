@@ -4,7 +4,7 @@
     <title>Wire Service Bus client for L2 — handler enqueue path per §4.2 (reuse BFF IJobHandler infrastructure patterns)</title>
     <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>l2-controlplane tag + auth-adjacent (UAMI Service Bus Data Sender role) + FR-22 handler-execution-model foundation (fire-and-forget via Service Bus is the R20 mitigation). task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream reconciler + all handler dispatch depend).</rigor-reason>
     <model-tier>opus</model-tier>

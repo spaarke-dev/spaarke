@@ -19,6 +19,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
 using Xunit.Abstractions;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Eval.GoldenUtterances;
 
@@ -587,20 +588,24 @@ public class P2LoopInjectionEvalSuiteTests
 
         var createdId = Guid.NewGuid();
         string? postedBody = null;
-        var dataverse = new Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>(MockBehavior.Strict);
+        var dataverse = new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient>(MockBehavior.Strict);
         dataverse
             .Setup(c => c.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(
                 200, JsonDocument.Parse("""{"EntitySetName":"sprk_events","PrimaryIdAttribute":"sprk_eventid"}""").RootElement.Clone()));
         dataverse
             .Setup(c => c.PostAsync("/api/data/v9.2/sprk_events", It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
             .Callback((string _, string body, bool _, CancellationToken _) => postedBody = body)
-            .ReturnsAsync(() => Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(
+            .ReturnsAsync(() => Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(
                 201, JsonDocument.Parse($$"""{"sprk_eventid":"{{createdId:D}}"}""").RootElement.Clone()));
+        // Task 133: the last argument is the app-only creator-stamp seam. Strict: an sprk_event create stamps nothing.
         var handler = new Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler(
             dataverse.Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"));
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,

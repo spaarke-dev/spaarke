@@ -133,6 +133,8 @@ public sealed class Phase2EndToEndTests : IClassFixture<Phase2EndToEndFixture>
         _fixture.DataverseState.SeedParentEntity(
             "sprk_matter", matterId,
             ("ownerid", personId));
+        // The owner is a HUMAN systemuser (task 152: the job reads applicationid per owner).
+        _fixture.DataverseState.SeedSystemUserRow(personId);
 
         // ── Invoke the recon job directly (not via HTTP — recon is a
         // background job, not an endpoint). The fixture's service provider
@@ -154,6 +156,44 @@ public sealed class Phase2EndToEndTests : IClassFixture<Phase2EndToEndFixture>
                 EntityLogicalName = "sprk_matter",
                 EntityRecordId = matterId,
             }, opts => opts.ExcludingMissingMembers());
+    }
+
+    [Fact]
+    public async Task ReconJob_ApplicationUserOwner_GetsNoJunctionRow_Task152()
+    {
+        // unified-access-control-r2 task 152 (ADR-034 A3): an APPLICATION user is not a person, so an
+        // app-owned matter produces no junction row — the same rule the create-time publishers apply.
+        var appUserId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        _fixture.DataverseState.SeedParentEntity("sprk_matter", matterId, ("ownerid", appUserId));
+        _fixture.DataverseState.SeedSystemUserRow(appUserId, applicationId: Guid.NewGuid());
+
+        var result = await ExecuteReconAsync(targetEntityType: "sprk_matter");
+
+        result.Success.Should().BeTrue($"Recon should succeed; result.ErrorMessage={result.ErrorMessage}");
+        _fixture.DataverseState.Junction.Should().BeEmpty(
+            "an application-user owner is not a membership subject (task 152)");
+    }
+
+    [Fact]
+    public async Task ReconJob_UnreadableOwner_KeepsExistingRow_AndCreatesNothing_Task152()
+    {
+        // Task 152: when the owner's systemuser row cannot be read, the job neither creates a row nor
+        // deletes an existing one — a read fault must never remove a person's membership.
+        var personId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var otherMatterId = Guid.NewGuid();
+        _fixture.DataverseState.SeedParentEntity("sprk_matter", matterId, ("ownerid", personId));
+        _fixture.DataverseState.SeedParentEntity("sprk_matter", otherMatterId, ("ownerid", personId));
+        _fixture.DataverseState.SeedJunctionRow(
+            personId, PersonIdentityType.User, "sprk_matter", matterId, "ownerid", "owner");
+        // No SeedSystemUserRow: the per-owner read throws "not found".
+
+        await ExecuteReconAsync(targetEntityType: "sprk_matter");
+
+        _fixture.DataverseState.Junction.Should().ContainSingle(
+            "the existing row is kept and no row is created for the unreadable owner")
+            .Which.EntityRecordId.Should().Be(matterId);
     }
 
     [Fact]
@@ -452,6 +492,7 @@ public sealed class Phase2EndToEndTests : IClassFixture<Phase2EndToEndFixture>
 
         _fixture.DataverseState.SeedParentEntity("sprk_matter", matterIdA, ("ownerid", personId));
         _fixture.DataverseState.SeedParentEntity("sprk_matter", matterIdB, ("ownerid", personId));
+        _fixture.DataverseState.SeedSystemUserRow(personId);
 
         var result = await ExecuteReconAsync(targetEntityType: "sprk_matter");
 

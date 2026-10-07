@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 
@@ -11,6 +12,14 @@ namespace Sprk.Bff.Api.Api;
 /// Follows ADR-001: Minimal API pattern (no controllers).
 /// Follows ADR-008: Endpoint filters for authorization.
 /// Follows ADR-019: ProblemDetails for error responses.
+///
+/// <para><b>Per-record authorization (unified-access-control-r2 task 130, defect C8).</b> These routes had
+/// the same shape as FinanceRollupEndpoints (which was copied from this file): a bare RequireAuthorization()
+/// in front of an APP-ONLY read of the parent's KPI assessments and an APP-ONLY write of six grade fields, so
+/// any signed-in user could recalculate — and read the grades of — any matter or project. Each route now
+/// carries a FinanceAuthorizationFilter requiring Read on the parent record AS THE CALLER before any
+/// Dataverse call, and denies with the uniform 404 shared with the finance recalculate routes, so the status
+/// cannot be used to probe for record existence.</para>
 /// </remarks>
 public static class ScorecardCalculatorEndpoints
 {
@@ -28,6 +37,9 @@ public static class ScorecardCalculatorEndpoints
             .RequireAuthorization();
 
         matterGroup.MapPost("/{matterId:guid}/recalculate-grades", RecalculateMatterGradesAsync)
+            .AddFinanceAuthorizationFilter(
+                "finance.read", FinanceAuthorizationFilter.MatterEntitySet, routeKey: "matterId",
+                FinanceDenial.UniformNotFound)
             .WithName("RecalculateMatterGrades")
             .WithSummary("Recalculate performance scorecard grades for a matter")
             .WithDescription(
@@ -46,6 +58,9 @@ public static class ScorecardCalculatorEndpoints
             .RequireAuthorization();
 
         projectGroup.MapPost("/{projectId:guid}/recalculate-grades", RecalculateProjectGradesAsync)
+            .AddFinanceAuthorizationFilter(
+                "finance.read", FinanceAuthorizationFilter.ProjectEntitySet, routeKey: "projectId",
+                FinanceDenial.UniformNotFound)
             .WithName("RecalculateProjectGrades")
             .WithSummary("Recalculate performance scorecard grades for a project")
             .WithDescription(
@@ -111,12 +126,10 @@ public static class ScorecardCalculatorEndpoints
         }
         catch (KeyNotFoundException)
         {
-            return Results.Problem(
-                detail: $"{entityLabel} with ID '{entityId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                title: $"{entityLabel} Not Found",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = traceId });
+            // The record vanished between the authorization check and the compute (the no-create write
+            // refused to recreate it). Same response as "absent" and "unreadable" — see
+            // FinanceAuthorizationFilter.UniformRecordNotFound. Neither the id nor the entity label is echoed.
+            return FinanceAuthorizationFilter.UniformRecordNotFound(context);
         }
         catch (Exception ex)
         {

@@ -4,7 +4,7 @@
     <title>Refactor app-service.bicep to consume UAMI + bind BOTH production and staging slots (T5 structural fix)</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth-tag (UAMI is the App Service identity) + azure-deployment scope + T5 slot-swap trap structural fix. Blast radius: every customer BFF App Service. task-create Step 3.5.5 FULL (auth tag; deploy tag; azure-deployment.md constraints apply).</rigor-reason>
     <model-tier>opus</model-tier>

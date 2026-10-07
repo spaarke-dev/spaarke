@@ -59,7 +59,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) �
 | `CommunicationAuthorizationFilter` | Email/communication endpoints | Communication permissions |
 | `EntityAccessFilter` | Office save endpoints | Entity association permissions |
 | `ExternalCallerAuthorizationFilter` | External-facing endpoints | External caller validation |
-| `FinanceAuthorizationFilter` | Finance endpoints | Finance feature access |
+| `FinanceAuthorizationFilter` | Finance + scorecard endpoints | Per-record caller rights on the exact id each route acts on (task 130) |
 | `JobOwnershipFilter` | Background job endpoints | Job ownership verification |
 | `OfficeAuthFilter` | Office add-in endpoints | Office token validation |
 | `PlaybookAuthorizationFilter` | Playbook endpoints | Playbook access |
@@ -225,7 +225,7 @@ Every Spaarke-internal browser surface routes through one library: **`@spaarke/a
 | External Workspace SPA (`src/client/external-spa/`) | B2B portal | Per-tab `sessionStorage` MSAL config | ⚠️ **Intentional exception** — B2B users, different cookie/auth model |
 | Dataverse JS webresources (legacy) | `sprk_DocumentOperations.js` etc. | `Xrm.WebApi` only | ✅ No new ones (ADR-006); existing use Xrm not MSAL |
 | BFF API server-side | `Sprk.Bff.Api` | MSAL.NET `ConfidentialClientApplication` + OBO | N/A — different runtime, see Pattern 2 |
-| Dataverse plugins | `Sprk.Plugins.*` | `IOrganizationService` (built-in plugin identity) | N/A — plugin runtime, no token acquisition |
+| ~~Dataverse plugins~~ | — | — | N/A — Spaarke ships no Dataverse plugins (ADR-002, updated 2026-09-25) |
 
 **Rule for new components**: any new browser-side Spaarke surface that calls the BFF MUST consume `@spaarke/auth`. Exceptions require an ADR.
 

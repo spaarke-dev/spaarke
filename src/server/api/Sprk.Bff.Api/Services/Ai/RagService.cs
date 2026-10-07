@@ -51,8 +51,8 @@ public partial class RagService : IRagService
     /// </summary>
     private readonly Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? _contextEventEmitter;
     // B8 (task 011 Phase 1b Tier 3, D-09 §2 B8): direct Azure SDK access for knowledge-base
-    // index administration. Used only by GetIndexHealthAsync / GetIndexedDocumentsAsync /
-    // DeleteIndexedDocumentAsync which absorb the calls previously made by KnowledgeBaseEndpoints.
+    // index administration. Used only by GetIndexHealthAsync, which absorbs the call previously made by
+    // KnowledgeBaseEndpoints (its list/delete siblings were removed with their retired routes, task 163).
     private readonly SearchIndexClient _searchIndexClient;
     private readonly AiSearchOptions _aiSearchOptions;
 
@@ -559,6 +559,19 @@ public partial class RagService : IRagService
         var tenantId = documentList[0].TenantId;
         ArgumentException.ThrowIfNullOrEmpty(tenantId);
 
+        // unified-access-control-r2 task 163 (sweep finding #6): the search client is picked from the FIRST
+        // document's tenant, but every document is written with its OWN TenantId. Under the Shared deployment
+        // model all tenants share one physical index partitioned by that field, so a mixed list would land
+        // items 2..N in another tenant's partition. Refuse it before any embedding or write. Both internal
+        // callers (FileIndexingService, RagIndexingPipeline) build single-tenant lists, so this never fires
+        // for them; it closes the shape, not a live caller.
+        if (documentList.Any(d => !string.Equals(d.TenantId, tenantId, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException(
+                "All documents in a batch must carry the same TenantId; a batch is written to one tenant partition.",
+                nameof(documents));
+        }
+
         // Validate all documents have speFileId (required)
         foreach (var doc in documentList)
         {
@@ -719,6 +732,50 @@ public partial class RagService : IRagService
         _logger.LogDebug("Deleting document {DocumentId} for tenant {TenantId}", documentId, tenantId);
 
         var searchClient = await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken);
+
+        // unified-access-control-r2 task 163 (sweep finding #30): a delete by key alone has no tenant
+        // predicate, and under the Shared deployment model every tenant's chunks live in one physical index —
+        // so a key from another tenant's partition was deletable. Delete only a chunk that carries THIS
+        // tenant: look it up by (id, tenantId) first. A chunk of another tenant and an absent chunk both
+        // return false and delete nothing, so the caller cannot tell them apart.
+        var ownershipQuery = new SearchOptions
+        {
+            Filter = $"id eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'",
+            Size = 1,
+            Select = { "id" }
+        };
+
+        SearchResults<KnowledgeDocument> ownedChunk;
+        if (_resilientClient != null)
+        {
+            ownedChunk = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                searchClient, "*", ownershipQuery, cancellationToken);
+        }
+        else
+        {
+            var ownershipResponse = await searchClient.SearchAsync<KnowledgeDocument>(
+                "*", ownershipQuery, cancellationToken);
+            ownedChunk = ownershipResponse.Value;
+        }
+
+        var ownedByTenant = false;
+        await foreach (var hit in ownedChunk.GetResultsAsync().WithCancellation(cancellationToken))
+        {
+            if (string.Equals(hit.Document?.Id, documentId, StringComparison.Ordinal))
+            {
+                ownedByTenant = true;
+                break;
+            }
+        }
+
+        if (!ownedByTenant)
+        {
+            _logger.LogInformation(
+                "Delete skipped: no chunk with key {DocumentId} in the partition of tenant {TenantId}",
+                documentId, tenantId);
+            return false;
+        }
+
         IndexDocumentsResult deleteResult;
 
         if (_resilientClient != null)
@@ -821,6 +878,165 @@ public partial class RagService : IRagService
     }
 
     /// <inheritdoc />
+    public Task<int> DeleteChunksBeyondCountAsync(
+        string tenantId,
+        string speFileId,
+        int keepChunkCount,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+        ArgumentException.ThrowIfNullOrEmpty(speFileId);
+        // Structural form of the owner rule "the document must never be left without chunks" (task 029):
+        // this method can only remove a TAIL, never the whole file.
+        ArgumentOutOfRangeException.ThrowIfLessThan(keepChunkCount, 1);
+
+        return DeleteFileChunksWhereAsync(
+            tenantId, speFileId, keepChunkCount, onlyForDocumentId: null, searchIndexName,
+            "leftover chunk(s)", cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public Task<int> DeleteSupersededFileChunksAsync(
+        string tenantId,
+        string speFileId,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(tenantId);
+        ArgumentException.ThrowIfNullOrEmpty(speFileId);
+
+        var document = string.IsNullOrWhiteSpace(onlyForDocumentId) ? null : onlyForDocumentId.Trim().ToLowerInvariant();
+        return DeleteFileChunksWhereAsync(
+            tenantId, speFileId, fromChunkIndex: 0, document, searchIndexName,
+            document is null ? "superseded chunks" : $"superseded chunks of document {document}", cancellationToken);
+    }
+
+    /// <summary>
+    /// The one deletion of a file's chunks by <c>speFileId</c> (shared by <see cref="DeleteChunksBeyondCountAsync"/> and
+    /// <see cref="DeleteSupersededFileChunksAsync"/>): chunks at or beyond <paramref name="fromChunkIndex"/>, optionally
+    /// only those attributed to <paramref name="onlyForDocumentId"/>, of THIS pipeline's id shape
+    /// (<c>{speFileId}_{chunkIndex}</c>), from the index <paramref name="searchIndexName"/> routes to. Throws when any
+    /// matching chunk could not be deleted.
+    /// </summary>
+    private async Task<int> DeleteFileChunksWhereAsync(
+        string tenantId,
+        string speFileId,
+        int fromChunkIndex,
+        string? onlyForDocumentId,
+        string? searchIndexName,
+        string what,
+        CancellationToken cancellationToken)
+    {
+        // The SAME routing as IndexDocumentsBatchAsync, so the trim reaches the index the new chunks were written
+        // to (the per-record index, or the tenant default) — not DeleteBySourceDocumentAsync's default-only client.
+        var searchClient = string.IsNullOrWhiteSpace(searchIndexName)
+            ? await _deploymentService.GetSearchClientAsync(tenantId, cancellationToken)
+            : await _deploymentService.GetSearchClientAsync(tenantId, searchIndexName, cancellationToken);
+
+        var filter =
+            $"tenantId eq '{EscapeFilterValue(tenantId)}' and speFileId eq '{EscapeFilterValue(speFileId)}' and chunkIndex ge {fromChunkIndex}";
+        if (onlyForDocumentId is not null)
+        {
+            filter += $" and documentId eq '{EscapeFilterValue(onlyForDocumentId)}'";
+        }
+
+        // Collect every id first and delete afterwards: paging with Skip over a set this method is deleting from
+        // would silently step over rows.
+        const int pageSize = 1000;
+        var idsToDelete = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        for (var skip = 0; ; skip += pageSize)
+        {
+            var searchOptions = new SearchOptions
+            {
+                Filter = filter,
+                Size = pageSize,
+                Skip = skip,
+                Select = { "id", "chunkIndex" }
+            };
+
+            SearchResults<KnowledgeDocument> page;
+            if (_resilientClient != null)
+            {
+                page = await _resilientClient.SearchAsync<KnowledgeDocument>(
+                    searchClient, "*", searchOptions, cancellationToken);
+            }
+            else
+            {
+                var response = await searchClient.SearchAsync<KnowledgeDocument>(
+                    "*", searchOptions, cancellationToken);
+                page = response.Value;
+            }
+
+            var returned = 0;
+            await foreach (var result in page.GetResultsAsync().WithCancellation(cancellationToken))
+            {
+                returned++;
+                var chunk = result.Document;
+
+                // Only ids of THIS pipeline's shape ({speFileId}_{chunkIndex}, FileIndexingService). Other writers
+                // store chunks for the same file under their own schemes (RagIndexingPipeline
+                // "{documentId}_{suffix}_{index}", the reference indexer "{sourceId}_ref_{index}"); those are not
+                // this file's chunks and are never touched here.
+                if (chunk is not null
+                    && chunk.ChunkIndex >= fromChunkIndex
+                    && string.Equals(chunk.Id, $"{speFileId}_{chunk.ChunkIndex}", StringComparison.Ordinal)
+                    && seen.Add(chunk.Id))
+                {
+                    idsToDelete.Add(chunk.Id);
+                }
+            }
+
+            if (returned < pageSize)
+            {
+                break;
+            }
+        }
+
+        if (idsToDelete.Count == 0)
+        {
+            _logger.LogDebug(
+                "No {What} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+                what, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+            return 0;
+        }
+
+        var deletedCount = 0;
+        foreach (var batch in idsToDelete.Chunk(pageSize))
+        {
+            IndexDocumentsResult deleteResult;
+            if (_resilientClient != null)
+            {
+                deleteResult = await _resilientClient.DeleteDocumentsAsync(
+                    searchClient, "id", batch, cancellationToken);
+            }
+            else
+            {
+                var deleteResponse = await searchClient.DeleteDocumentsAsync(
+                    "id", batch, cancellationToken: cancellationToken);
+                deleteResult = deleteResponse.Value;
+            }
+
+            deletedCount += deleteResult.Results.Count(r => r.Succeeded);
+        }
+
+        _logger.LogInformation(
+            "Deleted {DeletedCount}/{TotalCount} {What} for speFileId {SpeFileId} (tenant {TenantId}) in {IndexName}",
+            deletedCount, idsToDelete.Count, what, speFileId, tenantId, searchIndexName ?? "(tenant-default)");
+
+        if (deletedCount < idsToDelete.Count)
+        {
+            throw new InvalidOperationException(
+                $"{idsToDelete.Count - deletedCount} of {idsToDelete.Count} {what} could not be deleted " +
+                $"from index {searchIndexName ?? "(tenant-default)"}.");
+        }
+
+        return deletedCount;
+    }
+
+    /// <inheritdoc />
     public async Task<ReadOnlyMemory<float>> GetEmbeddingAsync(
         string text,
         CancellationToken cancellationToken = default)
@@ -842,11 +1058,12 @@ public partial class RagService : IRagService
     }
 
     // ── B8: Knowledge-base index administration (task 011 Phase 1b Tier 3, D-09 §2 B8) ────
-    // The 3 methods below absorb the direct SearchIndexClient calls that
-    // KnowledgeBaseEndpoints (GetIndexHealth, GetIndexedDocuments, DeleteIndexedDocument)
-    // previously made. Behavior is preserved 1:1 (verbatim move) per D-09 §8 Risks; this
-    // is a facade refactor (ADR-007), not a redesign. The Null-Object path is
-    // NullRagService which throws FeatureDisabledException for these methods.
+    // The method below absorbs the direct SearchIndexClient call that KnowledgeBaseEndpoints
+    // (GetIndexHealth) previously made. Behavior is preserved 1:1 (verbatim move) per D-09 §8
+    // Risks; this is a facade refactor (ADR-007), not a redesign. The Null-Object path is
+    // NullRagService which throws FeatureDisabledException. Its GetIndexedDocuments /
+    // DeleteIndexedDocument siblings were removed with their retired routes (unified-access-control-r2
+    // task 163, owner round 10 item 1).
 
     /// <inheritdoc />
     public async Task<KnowledgeIndexHealth> GetIndexHealthAsync(
@@ -880,112 +1097,6 @@ public partial class RagService : IRagService
         return health;
     }
 
-    /// <inheritdoc />
-    public async Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-        string indexName,
-        string tenantId,
-        int page,
-        int pageSize,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(indexName);
-        ArgumentException.ThrowIfNullOrEmpty(tenantId);
-
-        EnsureKnownIndex(indexName);
-
-        if (page < 1) page = 1;
-        if (pageSize < 1 || pageSize > 200) pageSize = 50;
-
-        var searchClient = _searchIndexClient.GetSearchClient(indexName);
-        var filter = $"tenantId eq '{EscapeFilterValue(tenantId)}'";
-        var skip = (page - 1) * pageSize;
-
-        var searchOptions = new SearchOptions
-        {
-            Filter = filter,
-            Size = pageSize,
-            Skip = skip,
-            Select = { "id", "documentId", "fileName", "createdAt", "updatedAt" },
-            IncludeTotalCount = true
-        };
-
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", searchOptions, cancellationToken);
-        var results = new List<IndexedDocumentSummary>();
-
-        await foreach (var item in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
-        {
-            if (item.Document != null)
-            {
-                results.Add(new IndexedDocumentSummary(
-                    ChunkId: item.Document.Id,
-                    DocumentId: item.Document.DocumentId,
-                    FileName: item.Document.FileName,
-                    CreatedAt: item.Document.CreatedAt,
-                    UpdatedAt: item.Document.UpdatedAt));
-            }
-        }
-
-        return new IndexedDocumentsPage(
-            IndexName: indexName,
-            Documents: results,
-            Page: page,
-            PageSize: pageSize,
-            TotalCount: response.Value.TotalCount ?? 0);
-    }
-
-    /// <inheritdoc />
-    public async Task<int> DeleteIndexedDocumentAsync(
-        string indexName,
-        string documentId,
-        string tenantId,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentException.ThrowIfNullOrEmpty(indexName);
-        ArgumentException.ThrowIfNullOrEmpty(documentId);
-        ArgumentException.ThrowIfNullOrEmpty(tenantId);
-
-        EnsureKnownIndex(indexName);
-
-        _logger.LogInformation(
-            "Deleting document {DocumentId} from index {IndexName} for tenant {TenantId}",
-            documentId, indexName, tenantId);
-
-        int chunksDeleted;
-
-        // Route to appropriate deletion method based on index
-        if (indexName.Equals(_aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase))
-        {
-            // Use the existing knowledge-index deletion path (handles deployment routing)
-            chunksDeleted = await DeleteBySourceDocumentAsync(documentId, tenantId, cancellationToken);
-        }
-        else
-        {
-            // Delete directly from the discovery index using the named SearchClient
-            var searchClient = _searchIndexClient.GetSearchClient(indexName);
-            chunksDeleted = await DeleteChunksFromIndexAsync(
-                searchClient, documentId, tenantId, cancellationToken);
-        }
-
-        return chunksDeleted;
-    }
-
-    /// <summary>
-    /// Throws <see cref="ArgumentException"/> when <paramref name="indexName"/> is not one of
-    /// the two admin-allowed indexes (knowledge or discovery). Used by B8 endpoints to surface
-    /// a 400 / 404 ProblemDetails when an unknown index is targeted.
-    /// </summary>
-    private void EnsureKnownIndex(string indexName)
-    {
-        if (!string.Equals(indexName, _aiSearchOptions.KnowledgeIndexName, StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(indexName, _aiSearchOptions.DiscoveryIndexName, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ArgumentException(
-                $"Index '{indexName}' is not recognized. Valid indexes: " +
-                $"{_aiSearchOptions.KnowledgeIndexName}, {_aiSearchOptions.DiscoveryIndexName}",
-                nameof(indexName));
-        }
-    }
-
     /// <summary>
     /// Gets the count of documents in an index that match the given OData filter.
     /// Moved verbatim from <c>KnowledgeBaseEndpoints.GetTenantDocumentCountAsync</c> per
@@ -1005,46 +1116,6 @@ public partial class RagService : IRagService
 
         var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
         return response.Value.TotalCount ?? 0;
-    }
-
-    /// <summary>
-    /// Deletes all chunks for <paramref name="documentId"/> from the specified search client,
-    /// scoped to <paramref name="tenantId"/>. Moved verbatim from
-    /// <c>KnowledgeBaseEndpoints.DeleteChunksFromIndexAsync</c> per D-09 §2 B8.
-    /// </summary>
-    private static async Task<int> DeleteChunksFromIndexAsync(
-        SearchClient searchClient,
-        string documentId,
-        string tenantId,
-        CancellationToken cancellationToken)
-    {
-        var filter = $"documentId eq '{EscapeFilterValue(documentId)}' and tenantId eq '{EscapeFilterValue(tenantId)}'";
-        var options = new SearchOptions
-        {
-            Filter = filter,
-            Size = 1000,
-            Select = { "id" }
-        };
-
-        var response = await searchClient.SearchAsync<KnowledgeDocument>("*", options, cancellationToken);
-        var idsToDelete = new List<string>();
-
-        await foreach (var result in response.Value.GetResultsAsync().WithCancellation(cancellationToken))
-        {
-            if (!string.IsNullOrEmpty(result.Document?.Id))
-            {
-                idsToDelete.Add(result.Document.Id);
-            }
-        }
-
-        if (idsToDelete.Count == 0)
-        {
-            return 0;
-        }
-
-        var deleteResponse = await searchClient.DeleteDocumentsAsync(
-            "id", idsToDelete, cancellationToken: cancellationToken);
-        return deleteResponse.Value.Results.Count(r => r.Succeeded);
     }
 
     #region Private Methods

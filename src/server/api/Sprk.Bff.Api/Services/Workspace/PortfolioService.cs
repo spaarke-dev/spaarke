@@ -1,9 +1,9 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Distributed;
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
-using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
+using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -14,8 +14,8 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// <param name="TotalSpend">Sum of all invoiced amounts across active matters.</param>
 /// <param name="TotalBudget">Sum of all budget amounts across active matters.</param>
 /// <param name="UtilizationPercent">TotalSpend / TotalBudget expressed as a percentage (0 when TotalBudget is 0).</param>
-/// <param name="MattersAtRisk">Count of matters where overdueeventcount > 0 or utilizationpercent > 85.</param>
-/// <param name="OverdueEvents">Total count of overdue events across all active matters.</param>
+/// <param name="MattersAtRisk">Count of matters with at least one overdue open task, or utilization above 85%.</param>
+/// <param name="OverdueEvents">Total count of overdue open tasks (<c>sprk_event</c>, type Task) across all active matters.</param>
 /// <param name="ActiveMatters">Count of matters with an active/open status.</param>
 /// <param name="CachedAt">Timestamp when this data was generated and cached.</param>
 public record PortfolioSummaryResponse(
@@ -28,7 +28,7 @@ public record PortfolioSummaryResponse(
     DateTimeOffset CachedAt);
 
 /// <summary>
-/// Internal model representing a matter record returned from Dataverse.
+/// Internal model representing an active matter the user's portfolio is built from (read as the caller).
 /// </summary>
 internal sealed class MatterRecord
 {
@@ -41,26 +41,65 @@ internal sealed class MatterRecord
 }
 
 /// <summary>
+/// The active matters FOR a user, read under the user's Dataverse security — or the fact that they could not be
+/// determined. <see cref="Unavailable"/> is never an empty list in disguise.
+/// </summary>
+internal sealed record PortfolioMatterRead(IReadOnlyList<MatterRecord> Matters, bool Unavailable)
+{
+    public static PortfolioMatterRead None { get; } = new(Array.Empty<MatterRecord>(), false);
+    public static PortfolioMatterRead UnavailableRead { get; } = new(Array.Empty<MatterRecord>(), true);
+}
+
+/// <summary>
 /// Aggregates portfolio data for the Legal Operations Workspace.
-/// Queries Dataverse for matter records and caches results in Redis.
+/// Selects the matters FOR the user, reads them as the user, and caches the aggregate in Redis.
 /// </summary>
 /// <remarks>
 /// Follows ADR-009: Redis-first caching with a 5-minute TTL.
 /// Cache key pattern: "workspace:{userId}:portfolio"
 ///
 /// At-risk definition:
-/// - Matter has OverdueEventCount > 0, OR
+/// - Matter has at least one overdue open task, OR
 /// - Matter's individual utilization (InvoicedAmount / BudgetAmount) > 85%
+///
+/// <para>
+/// <b>Which matters (unified-access-control-r2 task 152, verifier round 1 item 5; ADR-034 Amendment A3).</b> The
+/// portfolio is the matters FOR the user — the people-targeting surface (<see cref="MembershipResolveOptions.People"/>:
+/// human Created By, personal ownership, "Assigned *" through the linked contact) — read to completion
+/// (<see cref="PeopleTargetedSet"/>). Before task 152 it filtered app-only on <c>ownerid</c> = the caller: an ad-hoc
+/// owner condition on an attention surface (the A1/D5 anti-pattern ADR-034 forbids), which also counted no team-owned
+/// matter at all, and it selected <c>sprk_name</c>, <c>sprk_totalspend</c> and <c>sprk_overdueeventcount</c> — none of
+/// which exist on <c>sprk_matter</c> (verified live, read-only, 2026-10-02) — so the query failed and every metric was
+/// zero.
+/// </para>
+/// <para>
+/// <b>What the user may see.</b> The detail rows and the overdue-task counts are read AS THE USER through the existing
+/// <see cref="IImpersonatedCommunicationQuery"/> seam (MSCRMCallerID), chunked, so Dataverse drops any matter the user
+/// cannot open. There is no app-only read and no app-only fallback.
+/// </para>
 /// </remarks>
 public class PortfolioService
 {
     private readonly IDistributedCache _cache;
-    private readonly IGenericEntityService _genericEntityService;
-    // Translates the caller's Entra oid into the Dataverse systemuserid that `ownerid` holds.
-    // Reused (already a registered singleton) rather than re-implemented — root CLAUDE.md section 11.
+    private readonly IMembershipResolverService _membershipResolver;
+    private readonly IImpersonatedCommunicationQuery _callerQuery;
+    // Translates the caller's Entra oid into the Dataverse systemuserid the people surface and the caller-context
+    // reads take. Reused (already a registered singleton) rather than re-implemented — root CLAUDE.md section 11.
     private readonly ISystemUserIdentityResolver _systemUserIdentityResolver;
     private readonly ILogger<PortfolioService> _logger;
     private readonly TimeProvider _timeProvider;
+
+    /// <summary>
+    /// The most candidate ids bound into ONE caller-context GET (task 152) — keeps each query near 4 KB, far under the
+    /// Web API URL limit. A failed chunk fails the whole read (it never shrinks the candidate set).
+    /// </summary>
+    internal const int MaxIdsPerImpersonatedRequest = 50;
+
+    /// <summary>sprk_event type id for Task — same constant the Daily Briefing collector and TaskActionCore use.</summary>
+    private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
+
+    /// <summary>The Dataverse logical name of the portfolio's entity (ADR-034 canonical name).</summary>
+    private const string MatterEntityLogicalName = "sprk_matter";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -71,7 +110,15 @@ public class PortfolioService
     /// Initializes a new instance of <see cref="PortfolioService"/>.
     /// </summary>
     /// <param name="cache">Distributed cache (Redis) for portfolio data.</param>
-    /// <param name="genericEntityService">Dataverse service for querying matter records.</param>
+    /// <param name="membershipResolver">
+    /// Canonical user-record membership resolver (ADR-034). Its people-targeting surface selects the matters FOR the
+    /// user (task 152).
+    /// </param>
+    /// <param name="callerQuery">
+    /// The existing caller-context read seam (MSCRMCallerID = the user): every matter row and overdue-task count is
+    /// read AS THE USER, so Dataverse trims a matter the user cannot open (task 152).
+    /// </param>
+    /// <param name="systemUserIdentityResolver">Entra oid → Dataverse systemuserid.</param>
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="timeProvider">
     /// BCL clock abstraction (.NET 8 <see cref="TimeProvider"/>) used to stamp <c>CachedAt</c> and
@@ -83,13 +130,15 @@ public class PortfolioService
     /// </param>
     public PortfolioService(
         IDistributedCache cache,
-        IGenericEntityService genericEntityService,
+        IMembershipResolverService membershipResolver,
+        IImpersonatedCommunicationQuery callerQuery,
         ISystemUserIdentityResolver systemUserIdentityResolver,
         ILogger<PortfolioService> logger,
         TimeProvider? timeProvider = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
-        _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _membershipResolver = membershipResolver ?? throw new ArgumentNullException(nameof(membershipResolver));
+        _callerQuery = callerQuery ?? throw new ArgumentNullException(nameof(callerQuery));
         _systemUserIdentityResolver = systemUserIdentityResolver ?? throw new ArgumentNullException(nameof(systemUserIdentityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -267,57 +316,25 @@ public class PortfolioService
     }
 
     /// <summary>
-    /// Queries matter records from Dataverse for the specified user.
+    /// The active matters in the caller's portfolio, for the aggregate. A caller that cannot be resolved, or a read
+    /// that fails, yields no matters — the pre-existing graceful empty state of this endpoint (logged) — and never an
+    /// unfiltered or app-only answer.
     /// </summary>
-    /// <remarks>
-    /// Queries sprk_matter with explicit column selection (ADR-002 efficiency):
-    ///   sprk_matterid, sprk_name, sprk_totalspend, sprk_totalbudget, sprk_overdueeventcount, statecode
-    /// Filters: statecode eq 0 (Active) and _ownerid_value eq userId.
-    /// </remarks>
     private async Task<IReadOnlyList<MatterRecord>> QueryMattersFromDataverseAsync(
         string userId,
         CancellationToken ct)
     {
         _logger.LogDebug(
-            "Querying matters from Dataverse. UserId={UserId}",
+            "Querying portfolio matters. UserId={UserId}",
             userId);
 
-        var query = new QueryExpression("sprk_matter")
-        {
-            ColumnSet = new ColumnSet(
-                "sprk_matterid",
-                "sprk_name",
-                "sprk_totalspend",
-                "sprk_totalbudget",
-                "sprk_overdueeventcount",
-                "statecode")
-        };
-
-        // Active matters only
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-
-        // Owned by the specified user.
-        //
-        // TWO defects lived in the three lines this replaces, and the second survived the first's fix.
-        //
-        // (1) `userId` used to arrive as the Entra `sub` (a pairwise, non-GUID identifier — see
-        //     CallerResolution). Guid.TryParse therefore ALWAYS failed, and because the parse guarded
-        //     the FILTER rather than the query, failing silently DROPPED the ownership condition. This
-        //     query runs on the app identity (IGenericEntityService is a singleton, so Dataverse
-        //     row-level security never trims it), so every caller received EVERY active matter in the
-        //     org. A guard meant to scope the result removed the scoping instead.
-        //
-        // (2) `ownerid` holds a Dataverse **systemuserid**, NOT an Entra oid — a different id space.
-        //     So merely fixing (1) would make the filter match ZERO rows: an empty portfolio instead of
-        //     an over-shared one. Still wrong, just quieter. The oid must be translated first.
-        //
-        // Fail CLOSED: an unresolvable caller yields no rows rather than an unfiltered query. That is
-        // the opposite of the original behaviour and is the point.
+        // `userId` is the Entra oid; the people surface and the caller-context reads take the Dataverse systemuserid
+        // (a different id space — see CallerResolution). Fail CLOSED: an unresolvable caller yields no rows.
         var systemUserId = await _systemUserIdentityResolver
             .ResolveSystemUserIdAsync(userId, ct)
             .ConfigureAwait(false);
 
-        if (systemUserId is not { } ownerSystemUserId)
+        if (systemUserId is not { } callerSystemUserId)
         {
             _logger.LogWarning(
                 "PortfolioService: caller {UserId} could not be resolved to a systemuser; returning no matters "
@@ -326,49 +343,173 @@ public class PortfolioService
             return Array.Empty<MatterRecord>();
         }
 
-        query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, ownerSystemUserId);
-
-        EntityCollection results;
-        try
+        var read = await ReadMattersForSystemUserAsync(callerSystemUserId, ct).ConfigureAwait(false);
+        if (read.Unavailable)
         {
-            results = await _genericEntityService.RetrieveMultipleAsync(query, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "Failed to query matters from Dataverse. UserId={UserId}",
+            // Return empty list on failure — graceful empty state (pre-existing endpoint constraint). The read above
+            // already logged WHY; nothing here is answered app-only.
+            _logger.LogError(
+                "PortfolioService: the portfolio matters could not be determined for UserId={UserId}; returning the "
+                + "empty portfolio.",
                 userId);
-
-            // Return empty list on failure — graceful empty state (constraint)
             return Array.Empty<MatterRecord>();
         }
 
-        var matters = new List<MatterRecord>(results.Entities.Count);
+        _logger.LogDebug(
+            "Read {Count} portfolio matters as the caller. UserId={UserId}",
+            read.Matters.Count,
+            userId);
 
-        foreach (var entity in results.Entities)
+        return read.Matters;
+    }
+
+    /// <summary>
+    /// The active matters FOR <paramref name="systemUserId"/> (ADR-034 A3 people-targeting surface, read to
+    /// completion), with their spend, budget and overdue open-task counts — every row read AS THE USER.
+    /// </summary>
+    /// <remarks>
+    /// <para>Shared by the portfolio aggregate and <see cref="BriefingService"/>'s top-priority matter, so the two can
+    /// never disagree about which matters are the user's.</para>
+    /// <para>Failure semantics (ADR-003 fail closed): a failed people resolution, a people set larger than the
+    /// resolver's ceiling, or any failed caller-context read (any chunk) returns
+    /// <see cref="PortfolioMatterRead.Unavailable"/> = <see langword="true"/> — never a shrunk list and never an
+    /// app-only answer. Cancellation is always propagated.</para>
+    /// <para>Columns verified against live <c>sprk_matter</c> metadata (read-only, 2026-10-02): <c>sprk_mattername</c>,
+    /// <c>sprk_totalspendtodate</c>, <c>sprk_totalbudget</c>. There is no stored overdue count; overdue open Task
+    /// events (due on or before yesterday, UTC) are counted from <c>sprk_event</c>.</para>
+    /// </remarks>
+    internal async Task<PortfolioMatterRead> ReadMattersForSystemUserAsync(Guid systemUserId, CancellationToken ct)
+    {
+        PeopleTargetedSet.Result candidates;
+        try
         {
-            var totalSpend = entity.GetAttributeValue<Money>("sprk_totalspend")?.Value ?? 0m;
-            var totalBudget = entity.GetAttributeValue<Money>("sprk_totalbudget")?.Value ?? 0m;
-            var overdueCount = entity.GetAttributeValue<int?>("sprk_overdueeventcount") ?? 0;
-            var stateCode = entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0;
-
-            matters.Add(new MatterRecord
-            {
-                Id = entity.Id,
-                Name = entity.GetAttributeValue<string>("sprk_name") ?? string.Empty,
-                InvoicedAmount = totalSpend,
-                BudgetAmount = totalBudget,
-                OverdueEventCount = overdueCount,
-                IsActive = stateCode == 0
-            });
+            candidates = await PeopleTargetedSet
+                .ResolveAsync(_membershipResolver, systemUserId, MatterEntityLogicalName, _logger, ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "PortfolioService: people-targeting resolution failed for SystemUserId={SystemUserId}. Unavailable "
+                + "(fail closed, no app-only fallback).",
+                systemUserId);
+            return PortfolioMatterRead.UnavailableRead;
         }
 
-        _logger.LogDebug(
-            "Queried {Count} matters from Dataverse. UserId={UserId}",
-            matters.Count,
-            userId);
+        if (!candidates.Complete)
+        {
+            // PeopleTargetedSet logged people_targeting_set_incomplete — an arbitrary subset is never aggregated.
+            return PortfolioMatterRead.UnavailableRead;
+        }
+
+        if (candidates.Ids.Count == 0)
+        {
+            return PortfolioMatterRead.None;
+        }
+
+        try
+        {
+            return new PortfolioMatterRead(
+                await QueryMatterDetailsAsCallerAsync(candidates.Ids, systemUserId, ct).ConfigureAwait(false),
+                Unavailable: false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "PortfolioService: the caller-context read of matter details failed for SystemUserId={SystemUserId} "
+                + "(candidate count={Count}). Unavailable — never answered app-only.",
+                systemUserId, candidates.Ids.Count);
+            return PortfolioMatterRead.UnavailableRead;
+        }
+    }
+
+    /// <summary>
+    /// Reads the candidate matters' detail rows and their overdue open-task counts AS THE CALLER, chunked. Matters the
+    /// caller cannot read are absent from the result (Dataverse trims them). Throws on any failed read.
+    /// </summary>
+    private async Task<IReadOnlyList<MatterRecord>> QueryMatterDetailsAsCallerAsync(
+        IReadOnlyList<Guid> matterIds,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var details = new Dictionary<Guid, Dictionary<string, JsonElement>>();
+        var overdue = new Dictionary<Guid, int>();
+        // "Overdue" = due before today (on or before yesterday), UTC.
+        var yesterday = _timeProvider.GetUtcNow().UtcDateTime.Date.AddDays(-1)
+            .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+
+        foreach (var chunk in matterIds.Distinct().Chunk(MaxIdsPerImpersonatedRequest))
+        {
+            // Active candidate matters, as the caller.
+            var matterClause = string.Join(" or ", chunk.Select(id => $"sprk_matterid eq {id:D}"));
+            var matterRows = await _callerQuery.QueryAsync(
+                "sprk_matters",
+                "$select=sprk_matterid,sprk_mattername,sprk_totalspendtodate,sprk_totalbudget"
+                + $"&$filter=statecode eq 0 and ({matterClause})",
+                callerSystemUserId,
+                ct).ConfigureAwait(false);
+
+            foreach (var row in matterRows)
+            {
+                if (ReadGuid(row, "sprk_matterid") is { } id)
+                {
+                    details.TryAdd(id, row);
+                }
+            }
+
+            // Open Task events on those matters whose due date has passed, as the caller. Counted here — sprk_matter
+            // has no stored overdue count.
+            var regardingClause = string.Join(" or ", chunk.Select(id => $"_sprk_regardingmatter_value eq {id:D}"));
+            var eventRows = await _callerQuery.QueryAsync(
+                "sprk_events",
+                "$select=sprk_eventid,_sprk_regardingmatter_value"
+                + $"&$filter=_sprk_eventtype_ref_value eq {EventTypeTask} and statecode eq 0"
+                + $" and Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{yesterday}')"
+                + $" and ({regardingClause})",
+                callerSystemUserId,
+                ct).ConfigureAwait(false);
+
+            foreach (var row in eventRows)
+            {
+                if (ReadGuid(row, "_sprk_regardingmatter_value") is { } matterId)
+                {
+                    overdue[matterId] = overdue.TryGetValue(matterId, out var n) ? n + 1 : 1;
+                }
+            }
+        }
+
+        var matters = new List<MatterRecord>(details.Count);
+        foreach (var (id, row) in details)
+        {
+            matters.Add(new MatterRecord
+            {
+                Id = id,
+                Name = ReadString(row, "sprk_mattername") ?? string.Empty,
+                InvoicedAmount = ReadDecimal(row, "sprk_totalspendtodate"),
+                BudgetAmount = ReadDecimal(row, "sprk_totalbudget"),
+                OverdueEventCount = overdue.TryGetValue(id, out var count) ? count : 0,
+                // The read filters statecode eq 0, so every returned matter is active.
+                IsActive = true,
+            });
+        }
 
         return matters;
     }
 
+    private static string? ReadString(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+
+    private static Guid? ReadGuid(Dictionary<string, JsonElement> row, string key) =>
+        Guid.TryParse(ReadString(row, key), out var g) && g != Guid.Empty ? g : null;
+
+    private static decimal ReadDecimal(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetDecimal(out var d) ? d : 0m;
 }

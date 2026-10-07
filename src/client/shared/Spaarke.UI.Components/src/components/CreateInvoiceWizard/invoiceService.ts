@@ -21,6 +21,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateInvoiceFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
@@ -35,6 +36,7 @@ import {
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -86,40 +88,9 @@ function _resolveLookupHint(entityLogicalName: string): string {
 // ---------------------------------------------------------------------------
 
 function _getCurrentUserId(): string {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 // ---------------------------------------------------------------------------
@@ -144,13 +115,15 @@ export class InvoiceService {
     private readonly _getCurrentUserIdOverride?: () => string | null
   ) {
     this._tenantId = tenantId ?? '';
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
+    // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
+        const id = await this._dataService.createRecord(entityName, data);
         return { id };
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
@@ -158,7 +131,7 @@ export class InvoiceService {
       retrieveMultipleRecords: (entityName: string, options?: string) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
+        await this._dataService.updateRecord(entityName, id, data);
         return { id };
       },
       deleteRecord: async (entityName: string, id: string) => {
@@ -212,11 +185,10 @@ export class InvoiceService {
     // but guard here too so a programmatic caller that omits it still gets a value).
     entity['sprk_invoicedate'] = form.invoiceDate?.trim() ? form.invoiceDate.trim() : todayIsoDateFallback();
 
-    // Store the host-resolved SPE container ID on the invoice record (enables Documents tab).
-    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 DELETED 2026-09-03 by task 076 (harmful write "W1", second half). Its own comment stated
+    // the mechanism plainly — "applied FIRST so it acts as an explicit override during the
+    // subsequent BU cascade (INV-5)" — which is exactly why deleting `applyDefaultContainerId`
+    // alone would NOT have removed the write. See the CreateMatterWizard twin for full reasoning.
 
     // Vendor Org lookup (sprk_vendororg -> sprk_organization)
     if (form.vendorOrgId) {
@@ -310,9 +282,13 @@ export class InvoiceService {
     }
 
     // -- Step 2: Upload files to SPE + dual-bind sprk_document ---------------
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: keyed on the INVOICE; the server derives the container from it. The former
+    // `&& this._containerId` guard is gone with the client-side resolution it depended on.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_invoice',
+        invoiceId,
         uploadedFiles,
         onUploadProgress
       );
@@ -360,7 +336,7 @@ export class InvoiceService {
             invoiceNavProp ?? 'sprk_Invoice',
             uploadResult.uploadedFiles,
             {
-              containerId: this._containerId,
+              // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
               parentRecordName: form.name.trim(),
               additionalBinds: additionalBinds.length > 0 ? additionalBinds : undefined,
             }

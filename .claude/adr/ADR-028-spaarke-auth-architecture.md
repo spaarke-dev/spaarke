@@ -70,7 +70,7 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 - **MUST** authenticate Teams-host collaboration users with their **workforce Microsoft Entra identity** via Teams SSO / NAA against a **multitenant** app registration (per-customer admin consent). CIAM is not used inside Teams.
 - **MUST** serve both the external SPA (CIAM) and the Teams host (workforce) from **one shared standalone-MSAL module** whose **authority is config-driven / pluggable**; the module is exempt from the `@spaarke/auth`-only rule exactly as the A1 SPA is.
 - **MUST** keep the collaboration surface **broker-only** in both hosts (A1 invariant): the user token authenticates to the BFF **only** and **MUST NOT** be exchanged for a downstream Graph/SPE/Dataverse token (**no OBO on the collaboration path**). Document content streams **app-only**.
-- **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
+- **MUST** resolve the workforce-authenticated caller to a **principal** — a `systemuser` (→ ADR-034 membership; ⚠️ **the systemuser derivation is SUPERSEDED by [Amendment A5](#amendment-a5-2026-09-04-workforce-systemuser-root-sets-derive-from-dataverses-impersonated-answer)** — root sets now come from Dataverse's own answer via app-only impersonated read, ∪ contact grants) or, for a non-systemuser, a `contact` (→ **contact-anchored membership**, see the ADR-034 cross-reference below) — and enforce authorization server-side via the **accessible-record-set** check. No Dataverse seat / OBO is required for read/download.
 
 ### New MUST NOT rules
 
@@ -84,7 +84,16 @@ Adopt **function-based auth as the only public contract** at every consumer boun
 
 ### ADR-034 cross-reference (contact-anchored membership entry)
 
-The non-systemuser (contact) principal resolves to membership via an **additive contact-anchored entry** on the existing membership engine (ADR-034 resolution **Path C**): the resolver reuses `MembershipResolverService` / `BuildFetchXml` (which already binds a `ContactId` for Contact-typed descriptors), filtered to the access-conferring `sprk_assigned*` role allowlist. This is a new *entry* path, not a second membership model — ADR-034 is complied with, not amended.
+The non-systemuser (contact) principal resolves to membership via an **additive contact-anchored entry** on the existing membership engine (ADR-034 resolution **Path C**): the resolver reuses `MembershipResolverService` / `BuildFetchXml` (which already binds a `ContactId` for Contact-typed descriptors, and — since `unified-access-control-r2` task 043 — the contact's active organizations for org-typed ones), filtered to the **access-conferring column registry**.
+
+> ⚠️ **Corrected 2026-09-17 (`unified-access-control-r2` task 043).** This paragraph previously said
+> "filtered to the access-conferring **`sprk_assigned*` role allowlist**". That naming convention was
+> **DELETED** by task 041 under ADR-034 Amendment A1 — it is not layered beneath the registry, it is
+> gone — so a reader trusting this sentence would conclude that naming a new column `sprk_assigned*`
+> still confers access. It does not; only an explicit, reviewed entry in
+> `MembershipOptions.AccessConferringRoles` does, which is the entire point of FR-24. **No ADR-028 rule
+> changes here** — this is a factual correction to a cross-reference describing ADR-034's mechanism, and
+> the identical stale sentence was fixed in `IMembershipResolverService`'s own XML doc in the same task.
 
 ### Alternatives considered (and rejected)
 
@@ -147,7 +156,7 @@ The non-systemuser (contact) principal resolves to membership via an **additive 
 > | **Negative control** | an assertion minted for the wrong identity **fails loudly** at minting time |
 >
 > **MI-FIC is the adopted credential. The KV-certificate alternative was NOT taken** — it remains sanctioned for
-> cases where the same-tenant rule cannot hold (e.g. a cross-tenant Model 2 shape, still unresolved).
+> cases where the same-tenant rule cannot hold (a shape whose app registration and OBO identity sit in different tenants). *Amended 2026-09-28: D-12 leaves **no such shape** — both models are intra-tenant — so this is a standing guard, not an open gap.*
 >
 > Evidence: [`notes/decisions/002-spike-results.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md) ·
 > decision: [`notes/decisions/003-credential-decision.md`](../../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/003-credential-decision.md).
@@ -208,7 +217,8 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 - **MUST** obtain the confidential credential from the **single shared credential provider** (extending `Infrastructure/Auth/ManagedIdentityCredentialFactory`) rather than constructing credentials per call site. Rationale: seven call sites each rolling their own credential handling is what made the previous state unfixable in one place.
 - **MUST** cache `IConfidentialClientApplication` instances at **singleton/process scope**, keyed by `(tenant|client)`. Client assertions require shared clients; per-request construction discards the MSAL token cache. Reference implementation: `DataverseUserClient` static CCA cache.
 - **MUST** use a **user-assigned** managed identity for MI-FIC (Entra supports UAMI only as a FIC issuer).
-- **MUST NOT** call `.WithClientSecret(...)` for any client authenticating as the BFF identity. **E-3 is closed (2026-08-24) and its site list is empty** — the only remaining carve-out is **E-1** (per-customer owning apps, which are *other* applications' identities).
+- **MUST NOT** call `.WithClientSecret(...)` for any client authenticating as the BFF identity. **E-3 is closed (2026-08-24) and its site list is empty on master** — the only remaining carve-out is **E-1** (per-customer owning apps, which are *other* applications' identities).
+  > 🟡 **Downstream post-master narrow exception (added 2026-09-29, task 220)**: the `customer-provisioning-orchestration-r1` branch introduces exactly ONE Path A exception on the r1 code path — `WorkerDataverseCredentialFactory.cs`'s `CredentialKind.ClientSecret` branch (L2 Worker's FR-39 credential-type seam, prong-3 transitional fallback for unmigrated environments). Scope narrowly bounded to `spaarkedev1` only per owner Q7 narrowing 2026-08-25; sunset **2026-11-23**; documented at `projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md`; enforced by allowlist entry in `tests/Spaarke.ArchTests/CredentialGuardTests.cs`. The MI-FIC branch of the same seam is the default; the ClientSecret branch is dead code in `spaarke-bff-dev` (live order = `[ManagedIdentityFederated]`) and only selected for prong-3. On master (auth-v4 completion state), the "empty site list" claim above still holds; the r1 exception retires when auth-v4's obligation 051-E retirement runbook executes against the unmigrated environments. **Do not cite this note as license to add other new sites** — the exception is scoped to the one existing FR-39 seam and its documented purpose.
 - **MUST NOT** treat `DefaultAzureCredential` as a substitute for the confidential credential on OBO paths — it cannot perform the exchange.
 
 ### Platform constraints this rule must respect
@@ -226,9 +236,12 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 | Deployment | App registration | UAMI performing OBO | Credential |
 |---|---|---|---|
-| **Model 1** — shared Spaarke environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI `sprk-{env}-shared-bff-uami`) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
-| **Model 2 — Spaarke tenant** (dedicated stamp) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
-| **Model 2 — customer tenant** (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 1** — dedicated stamp in **Spaarke's** Azure tenant, one per customer (own subscription, own BFF App Service, own BFF UAMI) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 2** — dedicated stamp in the **customer's** Azure tenant (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
+
+> 🟡 **Amended 2026-09-28 (D-12).** This table had **three** rows: a shared Model 1 environment (*"20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI"*), plus *"Model 2 — Spaarke tenant"* and *"Model 2 — customer tenant"*. D-12 retires the shared tier and collapses the 2a/2b split onto the model axis: old *"Model 2 — Spaarke tenant"* **is** the new Model 1, old *"Model 2 — customer tenant"* **is** the new Model 2, and the shared row is deleted.
+>
+> ✅ **The conclusion below is unchanged — and strengthened.** Removing the shared row removes nothing from *"every shape is intra-tenant"*; it deletes the shape that had the most moving parts. MI-FIC still covers every case, with one fewer special case than before.
 
 **Every Spaarke deployment shape is intra-tenant, so MI-FIC covers all of them** — one mechanism, no special cases. The app registration **MUST** be created in the tenant that hosts the deployment.
 
@@ -236,7 +249,7 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 **MUST (standing guard)**: if any future shape cannot satisfy the same-tenant rule, fall back to a Key Vault certificate — **not** to a client secret. A client secret is the one credential a hardened customer tenant can refuse outright via Entra app-management policy. No such shape exists today, so **no certificate provisioning automation is required**.
 
-**Open (provisioning's call, does not affect feasibility)**: whether the shared Model 1 BFF authenticates as ONE shared multitenant app registration or one per customer — this decides whether onboarding creates a FIC per customer or none. See `TENANCY-AND-CREDENTIALS.md` §4.
+🔴 **CLOSED — BINDING. ONE APP REGISTRATION PER CUSTOMER, both models.** (Owner decision, re-affirmed 2026-09-28. Full mechanism and rejected counter-arguments: `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.) This was recorded here as an open question, which is why it kept being re-opened; it is not open.
 
 ### Adoption status (as of 2026-08-17)
 
@@ -246,9 +259,126 @@ A4 states the target shape; adoption is staged by `spaarke-auth-v4-dataverse-MI`
 
 - **Path A only (document the secret as an exception and stop)** — rejected as the primary path: it entrenches the credential type Microsoft designates dev/test-only, keeps per-customer secret rotation as a permanent operating cost, and leaves Spaarke exposed to customer-tenant app-management policies that can block or time-limit secrets on a service principal. Retained as the **transitional** mechanism only (E-3).
 - **Path C (comply with the pre-A4 rule as written)** — not viable: the rule was literally unsatisfiable for OBO.
-- **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite (Model 2b/2c), where it is not a fallback but the correct answer.
+- **Certificate as the default instead of MI-FIC** — rejected as the default because it preserves a rotation lifecycle Microsoft's ranking explicitly treats as inferior; retained as the **sanctioned alternative** precisely where MI-FIC's tenancy constraints bite — i.e. any shape where the app registration and the OBO managed identity sit in **different tenants**, where it is not a fallback but the correct answer. (*Amended 2026-09-28: previously named "Model 2b/2c". D-12 retires the 2a/2b split and has no "2c" at all; the condition is stated directly so it does not depend on a retired vocabulary. **No current shape meets it.***)
 
 > **Note (A4)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists). This concise ADR now carries Amendments **A1–A4**. A4 changes **server-side credential mechanism only** — it introduces no new IdP or client surface, and **does not weaken the A1/A2/A3 "no OBO on the external, collaboration, or module-host planes" invariants**, which remain in force.
+
+## Amendment A5 (2026-09-04): Workforce `systemuser` root sets derive from Dataverse's impersonated answer
+
+> **Status**: Accepted (resolution path **B — narrow amendment**, per root CLAUDE.md §6.5). **Driver project**: `unified-access-control-r2` (spec ADR Tensions row 3; FR-20). **Amends one clause of A2.** Mechanism + rejected alternatives: [`projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md`](../../projects/unified-access-control-r2/notes/investigation/08-option-b-feasibility.md) §5–§6.
+
+**What changes — exactly one clause.** A2's fourth MUST requires the workforce-authenticated caller to
+resolve to a principal, "a `systemuser` (**→ ADR-034 membership**)". A5 replaces **only** the
+parenthesised derivation for the systemuser branch:
+
+> `systemuser` → **Dataverse's own answer via app-only impersonated read** ∪ contact grants.
+
+**The token model does not change. The client does not change. The plane does not change.** A5 changes
+*how the server computes what a workforce systemuser may see*, nothing else.
+
+**Why**: ADR-034 membership derivation approximates Dataverse's answer by pattern-matching columns, and
+it is wrong in **both** directions — it grants BU-matched records to users whose role depth does not
+cover them, and it hides records that were explicitly shared. Dataverse already computes this exactly,
+applying ownership, role depth, business unit, teams, POA shares and hierarchy. Asking it is both more
+correct and cheaper than approximating it (3 round trips per request — the same as today's membership
+queries, cacheable per `(systemUserId, entityType)`). It also **removes the need for a systemuser
+allow-list**: there is no approximation left to tame.
+
+### New MUST rules (workforce `systemuser` plane only)
+
+- **MUST** derive a workforce `systemuser` caller's record root set from an **app-only impersonated
+  read** — `DataverseWebApiService.RetrieveMultipleImpersonatedAsync(entitySet, query, callerSystemUserId)`,
+  which sets the `MSCRMCallerID` header (`Spaarke.Dataverse/DataverseImpersonation.cs`).
+- **MUST** pass the Dataverse **`systemuserid`** in `MSCRMCallerID` — **not** the AAD `oid`. These are
+  different identifiers. (`notes/access-model-decision.md` pairs the header with the AAD oid; that
+  pairing is **incorrect** per MS Learn, and the helper's own XML doc says so. The live code uses the
+  correct one.)
+- **MUST** keep the **contact-grants union term**. Grants live in `sprk_externalrecordaccess`, a Spaarke
+  table, not in POA — **Dataverse cannot see them**, so its answer is necessarily incomplete without the
+  union (register B-17).
+- **MUST** fail **closed** on an absent caller id. `RetrieveMultipleImpersonatedAsync` throws on
+  `Guid.Empty` — *"refusing to issue an app-only query on the access-scoped read path"*
+  (`DataverseWebApiService.cs`). **Since `unified-access-control-r2` task 104 (#990, 2026-09-15) the
+  helper refuses too.** `DataverseImpersonation.ApplyAsSystemUser` / `ApplyAsEntraUser` take a non-nullable
+  id and throw on `Guid.Empty` (the Entra-oid path also on a tenant mismatch), and a request carries exactly
+  one impersonation header. Until then the helper silently added no header for an empty id, so a call site
+  that skipped the read method degraded to an app-only (unscoped) query. Any new access-scoped impersonated
+  path MUST carry its own equivalent refusal.
+- **MUST** keep the **NFR-04 negative canary** (task 034) as the standing guard: an impersonated
+  low-privilege read must return a **strict subset** of the app-only result **and strictly fewer rows**.
+  **Equality means impersonation is inert and MUST fail the build** — that is the exact signature of a
+  silent degradation to app-only.
+
+### Broker-only compliance (the reading this amendment records)
+
+**Impersonation is not OBO, and A5 does not weaken the no-OBO invariant.**
+
+Broker-only is defined in the code that implements it — `AccessibleRecordSetService.cs:22-24`:
+*"reads … APP-ONLY against the already-resolved principal. **No caller-token exchange (no OBO)**."*
+
+An impersonated read uses the **BFF's own app-only credential** and adds a **header naming which user
+Dataverse should scope the query to**. The caller's token is never exchanged, never forwarded, and is
+not required to exist at Dataverse at all. The BFF acts as itself and asks Dataverse to answer a
+narrower question. That satisfies broker-only as written.
+
+This reading is recorded **here**, in the ADR, rather than only in project notes — because a future
+reader encountering "impersonation" on a plane whose defining invariant is "no OBO" will otherwise have
+to re-derive whether the two conflict, and may reasonably guess wrong.
+
+### Scope + preserved invariants
+
+- **`WorkforcePrincipalKind.SystemUser` only.** The **CIAM / contact plane derivation is untouched** —
+  contact-anchored membership (A2's ADR-034 cross-reference) is unchanged, and impersonation is not
+  available to it in any case: a `contact` is not a security principal and cannot be impersonated.
+- **No OBO is sanctioned anywhere by A5.** The A1/A2/A3 prohibition on exchanging the caller's token
+  for a downstream Graph/SPE/Dataverse token is **textually unchanged and still in force**. Investigation
+  08 §6 ranked and *rejected* OBO for this plane; A5 does not revisit that.
+- **A2's token rules, client surface, plane selection, and Tier-1/Tier-2 split are all unchanged.**
+- **ADR-034 is not amended by A5.** Membership resolution remains canonical for the contact plane and
+  for every non-root-set use. A5 changes which *source* answers "which records may this systemuser see",
+  not the membership engine.
+
+### Scope extension (2026-09-15, owner-accepted): work a user started through the BFF
+
+A5's impersonated read was scoped to **a BFF request**. It now also covers **a job the BFF enqueued for that
+user** — a BFF `IJobHandler` or an Azure Function (ADR-052 §6) — because running such work app-only would ignore
+the user's row-level security, and OBO would need stored refresh tokens. Impersonation cannot widen what the app
+identity can already do; the effective rights are the overlap of both. The conditions are ADR-052 §6's, in short:
+- only for work the user started through an authenticated BFF request — never timer, webhook or system-triggered work;
+- the caller id from a typed requester field the BFF writes from the validated token, on a channel only the stamp
+  identity can write (Entra-only Service Bus) — never from a client payload, a webhook body or Dataverse data;
+- the impersonated user is the one the output is delivered or attributed to;
+- only through the shared, fail-closed `Spaarke.Dataverse` helper (`CallerObjectId` + `oid` preferred);
+- **not usable until prerequisites P1–P3 land** (ADR-052 §6 lists the issues).
+
+OBO, user tokens and confidential clients remain forbidden everywhere this extension applies. Evidence:
+`projects/unified-access-control-r2/notes/decisions/function-impersonation-proposal.md`.
+
+### Deployment prerequisites (register E-2 / E-3)
+
+Both are **blocking** — without them the impersonated read cannot work correctly:
+
+1. **`prvActOnBehalfOfAnotherUser`** on the BFF application user, with a runbook entry recording it.
+2. **The BFF app user stays Organization-scoped.** Impersonation returns *the impersonated user's*
+   scope, so the app user's own breadth is not a shortcut — but narrowing it breaks the app-only paths
+   that legitimately need org breadth.
+
+### Alternatives considered (and rejected)
+
+- **OBO for the systemuser plane** — rejected: forbidden by A2/A3's broker-only invariant, impossible
+  for CIAM contacts, and unnecessary — impersonation obtains the same correctness without a token
+  exchange. Ranked and rejected in investigation 08 §6.
+- **Keep ADR-034 pattern-matching and tune the allow-list** (path C, comply as written) — rejected: the
+  approximation is wrong in both directions, and no allow-list makes a column-name convention equal to
+  role depth × ownership × teams × sharing. Tuning it indefinitely is the cost this amendment removes.
+- **Widen the amendment to cover the contact plane too** — rejected as out of scope and impossible: a
+  contact is not a security principal and cannot be impersonated, which is precisely *why* the contact
+  plane must compute access rather than ask for it.
+
+> **Note (A5)**: Applied **concise-only** (no full `docs/adr/ADR-028-*.md` exists — confirmed again
+> 2026-09-04, consistent with the A2/A3/A4 notes). This concise ADR now carries Amendments **A1–A5**.
+> A5 is a **server-side derivation-policy change on one plane**: no new IdP, no new client surface, no
+> new token exchange, and **no weakening of the no-OBO invariant**.
 
 ## Documented MI exceptions
 
@@ -261,6 +391,7 @@ When MI is genuinely unworkable for a specific outbound surface, the **only** sa
 - **Scope**: SpeAdmin endpoints performing per-customer container-type management.
 - **Why**: Per-customer secrets; the BFF MI cannot impersonate per-customer admin identities.
 - **Remediation TODO**: None (architectural). Tracked as a known design exception.
+- **Note (2026-10-03, customer-provisioning-orchestration-r1 T248 — informational, no rule change)**: a managed identity CAN act as a *same-tenant* owning app through a federated identity credential (A4's default). L2 now does so for the `Spaarke Model 1` owning app — verified live (FIC token `appidacr` 2; Graph accepted it for the registration GET and the app-only containers listing) — so L2 needs no E-1 secret. The BFF's `SpeAdminGraphService` still uses E-1 secrets; moving it to MI-FIC is tracked as T250 (that project's plan §7).
 
 ### E-2: Azure OpenAI / AI Services data plane (2026-05-28)
 
@@ -329,7 +460,7 @@ E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, an
 - **Rotation**: per `docs/guides/SECRET-ROTATION-PROCEDURES.md` while E-3 is open. Rotation must update **all six paths**, including the lowercase alias.
 - **Restore-to-compliance**: complete `spaarke-auth-v4-dataverse-MI` — migrate all listed clients to the A4 credential provider, verify OBO per environment, then remove the secret from app settings and Key Vault and relax `DataverseOptions.ClientSecret` `[Required]` (+ `GraphOptionsValidator`, `AgentTokenOptions`).
 - **Remediation TODO**: ~~OPEN~~ — ✅ **DONE 2026-08-24** (task 033). E-3 was time-boxed to `spaarke-auth-v4-dataverse-MI` and that project discharged it. It is **not** a standing exception and must not be cited for new code; see the closure banner above.
-- **Not covered by E-3**: E-1 per-customer SpeAdmin owning-app secrets (different applications' identities, architectural); non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search — inventoried, out of A4 scope); plaintext secrets in Dataverse columns used by `BaseProxyPlugin` (separate defect, filed).
+- **Not covered by E-3**: E-1 per-customer SpeAdmin owning-app secrets (different applications' identities, architectural); non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search — inventoried, out of A4 scope); plaintext secrets in Dataverse columns used by `BaseProxyPlugin` (separate defect, filed — **resolved 2026-09-25**: the plugin was deleted from source per the ADR-002 review; the `sprk_externalserviceconfig` table and any live registration must still be removed from environments).
 
 ## Key Patterns
 

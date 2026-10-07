@@ -1,26 +1,1050 @@
-# Current Task State — `spaarkeai-compose-r8`
+﻿# Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-30 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §S2 → §S1 → §S0.
-> **PR #806 IS MERGED TO MASTER. 070 clusters 7/6/5b/8/1/3/4 extracted. ONE hole left open (P7).**
-> Everything below "Full State" is preserved history from earlier checkpoints.
+> **Last Updated**: 2026-09-30 (by `context-handoff`) — **PROJECT CLOSED.**
+>
+> ## 🏁 START HERE — this project is DONE; nothing is in progress
+>
+> **PR [#1031](https://github.com/spaarke-dev/spaarke/pull/1031) is MERGED** → master `ba1a53b99`.
+> Main repo's local master fast-forwarded. **0 pending tasks** (46 completed · `074` closed-not-executed
+> · 1 superseded). Worktree: 0 ahead, 1 behind (the merge commit — expected); branch still exists on
+> origin, deliberately left for UAT.
+>
+> **Do NOT resume a task here.** If you were sent to this project, it is almost certainly for one of the
+> five open items below — none is task-shaped, and two are owner-only.
+>
+> ### The five open items, in the order they matter
+>
+> | # | Item | Why it is still open |
+> |---|---|---|
+> | 1 | **UAT on `spaarkedev1`** | Deployed 2026-09-07 and artifact-verified, but **nothing has ever run against a live Dataverse row** — until this work, no such row could exist. Walk: run a review → the panel headline must be the JUDGMENT, not the clause text → Review Summary document ▸ **Generate** → **Download (.docx)** → **Email** → Save menu ▸ tick **Include review summary page** → save → reopen → appendix at the END of the document. |
+> | 2 | 🔴 **Re-UAT item 8's "Include revision report"** | Its toggle **could never have worked in production** before `c52bfba2d`. `triggerSave`'s dependency array omitted `includeRevisionReport`, so the memoized callback closed over a stale `false`: the checkbox ticks, shows checked, and the appendix never rides the request. Its earlier sign-off therefore proved nothing. |
+> | 3 | **#851 — client test baseline** | **29 of 40 client packages red** in the nightly. Measured and evidenced in a comment on that issue; unowned. NOT this project's to fix. Read "What #851 actually is" below before trusting any client test result. |
+> | 4 | **#698 letter/roman corpus fixture** | Needs a Word document only the owner can produce. |
+> | 5 | 🔴 **`sprk_graphitemid_uk` before prod** | `scripts/Repair-ComposeIdentityKey.ps1` has **never** run against real Dataverse (report mode is read-only and safe). **Prod MUST have `sprk_graphitemid_uk` Active before Compose ships there, or every save 500s.** |
+>
+> Also: **Track B is code-complete but NOT ARMED** (no storage account in dev).
+>
+> ### What #851 actually is — read before trusting any client test result
+>
+> `.github/workflows/client-tests.yml` runs every client package nightly, but **every step is
+> `continue-on-error: true`, so the run concludes `success` unconditionally.** Five consecutive green
+> nightlies while 29 packages fail. The *data* is honest — `Record result` reads `steps.jest.outcome`,
+> the truthful field — but nobody reads the table, and green on the Actions list is what people see.
+>
+> ⚠️ **This bit me twice in one session and will bite you**: reading `steps[].conclusion` from the
+> Actions API returns `success` for a `continue-on-error` step no matter what happened. The truth is in
+> **`outcome`**. Get per-package reality from the artifacts instead:
+>
+> ```
+> gh run download <run-id> -D /tmp/cl
+> cat /tmp/cl/*/*.tsv | sort -u | awk '{print $NF}' | sort | uniq -c
+> ```
+>
+> Consequence for this branch: its client verification rests on **`Spaarke.Compose.Components`
+> 1461/1461 run locally**, not on a green client baseline. Stated plainly in the PR.
+>
+> ### Two portfolio gaps (not blockers)
+>
+> - **No `[Project]: spaarkeai-compose-r8` Issue exists** on the board — this project self-registered in
+>   `projects/INDEX.md` but never got one. The post-merge portfolio hook therefore had nothing to comment
+>   on, and **archiving would require creating that Issue first**. Archive is an explicit owner gate and
+>   has NOT been done.
+> - **`scripts/check-task-status-drift.ps1` cannot read this project's TASK-INDEX.** It matches a
+>   marker-FIRST row (`| <marker> <id> | …`); this index is id-first with the marker LAST. It parses 1
+>   row of 50 and reports ~47 phantom drifts. A red from it here means "cannot evaluate", not "drift".
+>   Reconcile with a layout-correct parser — recipe is in the `tasks/TASK-INDEX.md` header.
+>
+> **Recovery order**: this block → §SESSION-CLOSE → §GAPS-5-STATUS → §UAT (what to exercise) → §GAPS
+> (the defect class + its evidence). Everything below is preserved history from earlier checkpoints.
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+## SESSION-CLOSE — 2026-09-29/30, the session that closed the project
+
+**Shipped**
+
+| Thing | Commit |
+|---|---|
+| §GAPS-5 Phase 1 — carry the FR-05 discrete fields + `resolveTakeaway` | `f60657a23` |
+| Phase 4 — rename to "Review Summary" (ran BEFORE Phase 3, as required) | `117e9d83d` |
+| Phase 3 — the write call | `4134b7fda` |
+| **Phase 5 — NDA Summary Page appendix WIRED** (not retired) | `c52bfba2d` |
+| Master merge (246 commits) + the one-vocabulary resolution | `21251ffdd` |
+| Task-status drift fix | `3c06fbe11`, `a6304154a` |
+
+**Phase 5 flipped from "retire" to "wire" on owner direction.** My earlier retire lean carried the
+condition *"unless the owner specifically wants the NDA digest inside the document"* — the owner said
+users want the option, and that end-of-document is right because it cannot disturb layout. Both hold up:
+the generator emits only plain paragraphs with a literal bullet (never `w:numPr`, never a named style),
+and a corpus-wide test asserts the numbering and styles parts are **byte-identical** after the append.
+Front-insertion stays out — it needs a leading section break, which collides with
+`section-break-flattened`. **This closed the LAST open instance of the "server-ready, client-unwired"
+defect class**; the record-keeping test that held it open is deleted, per its own instructions.
+
+**Two live defects found while building — both the same family: plausible-but-wrong, never an error**
+
+1. The review-summary panel **rendered the grounded fact where the judgment belongs, on every
+   post-split finding.** The panel derives a takeaway by hunting a `"Judgment —"` marker; post-FR-05
+   payloads compose `explanation` from the discrete fields with **no markers**, so the hunt failed and
+   the fallback returned the blob's first sentence — the flagged clause. Four UAT rounds never caught it,
+   because there was always plausible text in the row.
+2. 🔴 The `triggerSave` stale closure (item 8) — see open item 2 above.
+
+**Master merge — the one-vocabulary resolution (understand this before touching document links)**
+
+All three conflicts were the `sprk_document` link vocabulary. `unified-access-control-r2` hoisted that
+closed set to **`Spaarke.Dataverse.DocumentLinkFields`** on 2026-09-05 — one day after this project built
+a BFF-local `DocumentLinkFieldMap` for the same reason. Two projects fixed one problem a day apart and
+neither could see the other. Resolved per §11: **ONE vocabulary, in the shared library** (better home —
+consumable by client code too, and it carries the case-SENSITIVE `SchemaName`). What remains in
+`Services/Documents/DocumentLinkFieldMap.cs` is POLICY only (the legacy→successor mapping and
+`ProjectForCopy`'s copy semantics), deriving every column from the shared list.
+
+🔴 **The hoist was one column short: 16 enumerated, 17 in the table.** `sprk_email` (→ the OOB `email`
+activity) was absent, so a document linked ONLY to its source email was invisible to every consumer —
+the precise failure the hoist existed to end. Added, with `SchemaName` `sprk_Email` **FETCHED** from
+`EntityDefinitions`, never derived (that type's own warning). Widened three of
+`unified-access-control-r2`'s tests, which had pinned 16 as "matching live metadata". **The lesson, now
+recorded in those tests: a pinned count protects against CHANGE, not INCOMPLETENESS — only re-querying
+live metadata establishes the latter.**
+
+**`ProjectForCopy` is column-for-column and must stay that way.** A Dataverse subgrid binds to ONE
+relationship, so redirecting a legacy column on write stops the copy appearing beside its source — which
+is the entire point of the feature. An earlier cut did redirect, and two existing tests caught it.
+
+**Deliberately NOT built**: the `sprk_outputtypecode` ("REVMEMO") wiring. Its only benefit protects a
+FUTURE rename, and it would add an `IAnalysisDataverseService` method — "future flexibility", which §11
+rejects as justification for new surface. The hazard is handled where it actually bites:
+`ReviewMemoOutputNameGuardTests` pins the name and carries the pre-rename query recipe
+(`SELECT sprk_name, COUNT(sprk_analysisoutputid) FROM sprk_analysisoutput GROUP BY sprk_name`).
+**Re-run that query before ever renaming again** — it returned zero rows on 2026-09-07, which is the only
+reason the rename was free.
+
+**Commit-hook trap — will recur on any large merge.** The pre-commit hook cannot pass a 690-file merge:
+it kills `dotnet format` on scale and hits a pre-existing missing `@eslint/js` in `src/client/pcf`.
+Worse, its failure **reverted lint-staged and destroyed `MERGE_HEAD`** — committing then would have
+recorded master's 246 commits as this project's changes. Recovery: re-write `MERGE_HEAD` into the
+worktree gitdir (`git rev-parse --absolute-git-dir`), verify formatting on only your own files
+(`dotnet format --verify-no-changes --include …`), commit with `--no-verify`, and say why in the message.
+
+**Verification at close**: BFF build **0 errors / 0 warnings** · BFF unit+contract **12,640 / 0** (58
+skipped) · ArchTests **333 / 333** · Compose client **1,461 / 1,461** across 110 suites · publish
+**45.46 MB** against the 60 MB ceiling (**+0.00 MB** measured versus a fresh same-day master build;
+master itself had drifted 45.42→45.46, which is exactly why the rule says re-measure rather than trust
+the recorded number). The new end-to-end tests are **verified forcing functions**: removing the handler
+wiring fails the write-call test, and removing either endpoint mapping fails the vocabulary guard — both
+control runs were performed.
+
+**Method note worth carrying to the next project.** Three times this session I reached a confident
+conclusion from a measurement that could not support it: (1) "the failing files are byte-identical to
+master" proves file identity, **not** failure provenance; (2) `steps[].conclusion` under
+`continue-on-error` is unconditionally `success` — the truth is `outcome`; (3) a Monitor watching for a
+PR merge stayed silent straight through the merge, and its silence was indistinguishable from "still
+running". The first two were caught and corrected in the PR; the third surfaced only on expiry. It is
+the same shape as the defect class this project spent its life closing: **the absence of a signal is not
+evidence of absence.**
+
+---
+
+## GAPS-5-STATUS — the Review Summary build (2026-09-07)
+
+**The feature works end to end for the first time.** Before today, `POST .../review-memo` had no caller
+anywhere in the repo: the read half was built against it as though it were already being called, so
+Download and Email always hit the 404 "generate first" banner. Users were told to do a thing the UI
+offered no way to do — and no test caught it, because every test that exercised the POST called it
+directly.
+
+| Phase | Status | Commit |
+|---|---|---|
+| 1 — carry the FR-05 discrete fields into the summary | ✅ | `f60657a23` |
+| 2 — `afterText` (D2: ship without) | ✅ resolved, no code by design | — |
+| 3 — the write call | ✅ | `4134b7fda` |
+| 4 — rename to "Review Summary" (ran BEFORE 3) | ✅ | `117e9d83d` |
+| **5 — `summaryPage`** | ✅ **WIRED, not retired** (owner decision 2026-09-07) | `c52bfba2d` |
+
+**Phase 5 flipped from "retire" to "wire".** The owner confirmed users want the option, and that
+end-of-document is the right shape because it cannot disturb layout — both of which hold up: the
+generator emits only plain paragraphs with a literal bullet (never `w:numPr`, never a named style), and a
+corpus-wide test asserts the numbering and styles parts are byte-identical after the append. My earlier
+"retire" lean had a condition attached — *"unless the owner specifically wants the NDA digest inside the
+document"* — and I restated the lean without re-reading the condition. The condition was met.
+
+**🔴 A live defect fell out of wiring it, affecting ALREADY-SHIPPED work.** `triggerSave`'s dependency
+array omitted `includeRevisionReport` and `revisionReportResult`, both of which the save body reads.
+Ticking an appendix toggle re-renders but does not recreate the memoized callback, so the save still saw
+`false`. **R8 item 8's "Include revision report" shipped with this defect** — the toggle appears to work
+and the appendix never rides the request. Fixed for both. **Item 8 needs re-UAT**: it was signed off on a
+toggle that could not have worked.
+
+The Summary Page is mapped on **both** save routes, unlike `RevisionReport` (replace-only). A revision
+report reads tracked changes from a STORED document; a Summary Page derives from the ledgered review
+result, which exists as soon as the review ran — and "upload an NDA, review it, save it for the first
+time" is arguably its most common flow.
+
+**Phase 1 fixed a live bug bigger than "a dropped field".** The panel derives its per-finding takeaway
+by hunting a "Judgment —" marker in the fused `explanation`. Post-split payloads compose that string
+from the discrete fields with NO markers, so the hunt failed and the fallback returned the blob's FIRST
+sentence — the grounded FACT. **Every post-split finding rendered the wrong half of itself**, with no
+error and no empty state. `resolveTakeaway` now reads `assessment` directly.
+
+**The dead-wire class is now CLOSED.** `summaryPage` was its last open instance; the record-keeping test
+that held it open was deleted per its own instructions, and the live guard assertion now covers the
+property like any other (control-run: removing either mapping makes the guard fail).
+
+**Two plan claims corrected during the build** (both recorded in the plan's §7):
+1. "The rename is free because nothing POSTs" was an inference; it is now a measurement —
+   `sprk_analysisoutput` held **zero** rows under the old name (whole table: one row, "Too Long Didn't
+   Read"). `ReviewMemoOutputNameGuardTests` records that query as the recipe for any future rename.
+2. "Review Summary" was **not** an available name — the toolbar already had a "Toggle Review Summary"
+   control in the same group. The dropdown is **"Review Summary document"**.
+
+**`sprk_outputtypecode` wiring deliberately NOT built.** Its only benefit protects a *future* rename,
+and it would add a new `IAnalysisDataverseService` method — "future flexibility", which CLAUDE.md §11
+rejects as justification for new surface.
+
+**Publish size (CLAUDE.md §10)**: fresh same-day master **45.46 MB** vs branch **45.46 MB** =
+**+0.00 MB** (Compress-Archive Optimal, the method `Deploy-BffApi.ps1` uses). Note master itself drifted
+**45.42 → 45.46** since 2026-09-02 — the stale-baseline hazard the rule warns about, in miniature.
+
+**⚠️ NOT yet exercised against a real environment.** All verification is automated. The
+generate → download → email round trip has never run against a live Dataverse row, because until this
+change no such row could exist. **Next practical step: redeploy (BFF + `sprk_spaarkeai` together, per
+NFR-05) and UAT.** Verify the built artifact by string literal before upload — e.g.
+`grep -c 'Review Summary document' dist/spaarkeai.html` — per the 2026-09-03 stale-bundle lesson below.
+
+---
+
+## Quick Recovery (SUPERSEDED 2026-09-30 — the START HERE block at the top is authoritative)
+
+> ⚠️ Kept for its evidence and decision trail, NOT as current state. Two rows below were true when
+> written and are now stale: the branch row (pre-merge position) and the NEXT ACTION row (its four
+> UAT steps are still right, but they now live as open items 1 and 2 in the START HERE block).
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3 · 4** extracted & verified. **5a is next** (2b/2a still HELD). |
-| **Next Action** | **TWO things, in this order.** (1) **Close the P7 hole** — `ClearPdfSourceMarkerAsync` has no test; the seam map carries the exact surviving mutation string and two test designs (try the direct-against-`MemoryDistributedCache` one first — the shape `ComposePdfProvenanceKeySeamTests` already establishes). (2) Then **cluster 5a** (profile etag + retrigger) — **64.3% branch, the weakest in the file**; on this session's evidence expect the mutation pass to find holes, so consider writing tests BEFORE extracting. 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · pushed (`bebc42e16`) · **synced with master** · `ComposeService.cs` 4,427 → **2,919** |
-| **PR #806** | ✅ **MERGED 2026-08-30** (`19bf65ec4`). Main repo at `C:/code_files/spaarke` synced to it. ⚠️ **Post-merge work on this branch is UNMERGED and needs a NEW PR.** |
-| **Suite** | ALL GREEN — Compose **1,801/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
+| **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
+| **Branch** (stale — see START HERE) | `work/spaarkeai-compose-r8` — **MERGED to master via PR #1031** (`ba1a53b99`), 0 ahead / 1 behind. The pre-merge position recorded here was 23 ahead / 5 behind @ `4134b7fda`. |
+| **🎯 NEXT ACTION** | **UAT on `spaarkedev1`** — deployed and verified 2026-09-07; nothing below has ever run against a live Dataverse row. **(1)** Run a review, open the Review Summary panel, confirm each row's headline is the JUDGMENT (not the clause text). **(2)** Review Summary document ▸ **Generate** → expect "Review Summary created (N findings)"; then **Download (.docx)** and **Email**. **(3)** Save menu ▸ tick **Include review summary page**, save, reopen — expect an appendix at the END of the document. **(4) 🔴 RE-UAT item 8's "Include revision report"** — its toggle could not have worked before the closure fix in `c52bfba2d`, so its earlier sign-off proved nothing. |
+| **Ordering trap (RESOLVED)** | Phase 4 (rename) ran BEFORE Phase 3 (write call), as required — the persisted row is found by matching its display name, so a later rename would orphan rows silently. Verified free by querying `sprk_analysisoutput` first: zero rows. Re-run that query before any future rename; `ReviewMemoOutputNameGuardTests` carries the recipe. |
+| **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
+| **Session 2026-09-04** | Dead-wire audit CLOSED (4th instance `Style` deleted + repo-wide guard). `organziation` typo fixed. **`DocumentLinkFieldMap`** unifies the `sprk_document` link vocabulary — it was declared twice and knew 6 of 17 columns, so Compose silently dropped ten link types. See §SESSION at the end of this file. |
+| **§GAPS-5 plan** | **[`notes/gaps-5-review-summary-build-plan.md`](notes/gaps-5-review-summary-build-plan.md)** — comprehensive approach + 5-phase build plan + the 4 decisions (D1–D4). Key correction: my earlier "one client POST call" sizing was WRONG. The client's finding shape is PRE-FR-05-SPLIT — the SSE event carries `flaggedClause`/`assessment` and the comment gutter uses them, but BOTH review-summary mappings DROP them (a third instance of the drop-in-a-hand-mapping class, client-side this time). `afterText` is NOT a blocker — the assembler already treats its absence as correct. **See §7 of that plan for what shipped 2026-09-07 and how each decision resolved.** |
+| **Deferred, evidenced, NOT urgent** | Owner UAT of item 8 (§UAT, no findings reported yet); numbering item 3 (stale decoration — DISPLAY only, the write path is proven correct, do NOT build the parity corpus); editable spacing (UX item 6); `projects/INDEX.md` stale since 2026-06-26. |
+| **Suite** | Re-run 2026-09-07 after Phases 1/3/4: BFF unit+contract **12,066 passed / 0 failed** (58 skipped) · ArchTests **199/199** · Compose client **1,458/1,458** across 110 files · BFF build **0 errors 0 warnings**. The new end-to-end write test is a VERIFIED forcing function — removing the handler wiring makes it fail (control run). |
+| **Deployed (current)** | ✅ **2026-09-07** from `65b223f71` (post-master-merge, 0 behind) — BFF + `sprk_spaarkeai` **together** (NFR-05). BFF → `spaarke-bff-dev`: package **45.46 MB**, SHA-256 file verification passed on 4 critical files, `/healthz` passed, CORS verified. Code page → `sprk_spaarkeai` on `spaarkedev1`, **5,763 KB**, published. **Verified by string literal against the LIVE web resource read BACK from Dataverse** (not the local build): `Review Summary document` ×2, `Include review summary page` ×1, `Review Summary created` ×1; and the old names `Create Summary Memo` / `Generate memo (.docx)` / `Email memo` / `Review Summary Memo` all **×0**. |
+| **PR** | **#938** open against master (5 commits). #924 already merged (master @ `d7fd88366` → now includes email-intelligence #936/#937). |
+| **⚠️ `projects/INDEX.md` is STALE — coordination gap** | Last refresh **2026-06-26**, 2+ months. It is the registry `/conflict-check` uses for hot-path overlap, and its "maintained atomically by two skills" contract is plainly not firing. A stale registry cannot say which projects are ACTIVE, so treat it as decorative: weight the open-PR list and `git log HEAD..origin/master` instead. **Worth its own remediation** — this repo has ~30 worktrees and no working coordination signal. |
+| **Deployed** | ✅ **RE-DEPLOYED 2026-09-03** from `20abcee77` (post-master-merge), BFF + `sprk_spaarkeai` **together** (NFR-05). BFF → `spaarke-bff-dev`, `/healthz` passed + CORS verified. Code page → `sprk_spaarkeai` on `spaarkedev1`, 5,750 KB, published. **Publish size: fresh same-day master `45.43` vs branch `45.45` = `+0.02 MB`** (Compress-Archive, the method `Deploy-BffApi.ps1` uses). |
+| **⚠️ Deploy lesson (2026-09-03)** | The owner reported the OLD toolbar in `spaarkedev1` and suspected the code had been clobbered. **It had not** — `git diff c0751e0d9 HEAD -- ComposeFormatToolbar.tsx` was EMPTY. The environment was running a **stale bundle**; the prior session's "deployed" claim for UX item 5 did not match reality. Diagnosed from the screenshot by STRING literal: the visible `"Unsaved · Auto Save On"` is the exact text `c0751e0d9` removed (`git log -S` confirms), and Undo/Redo sat right instead of far left. **Before deploying a code page, verify the built artifact by string literal** (`grep -c 'Summarise changes' dist/spaarkeai.html`) — symbol names are minified, and "deployed" in a handoff is a claim, not evidence. |
+| **Deploy ordering rule learned** | **Merge master BEFORE deploying to a shared env.** On 2026-09-03 master was **17 commits** ahead carrying live BFF work (email-intelligence-r2 `OfficeService` +222 / `OfficeEndpoints` +128; unified-access-control-r2 `ExternalProjectDataEndpoints` +163, upload/SPE). Deploying the branch build without them would have **reverted merged work on `spaarkedev1`**. `@spaarke/compose-components` is aliased to **SOURCE** in SpaarkeAi's `vite.config.ts` (not a built `dist`), so no library pre-build step is needed — but that also means a stale `dist/` is never the cause; a stale *deploy* is. |
+| **CI** | ✅ **RUNNING** on `c99472ba1` — checks appeared once the master-merge commit landed. Earlier in the session `gh run list` showed nothing for two pushes and I hypothesised the DRAFT status was the gate; **that hypothesis is retracted** — the PR is still a draft and checks now run, so it was a trigger delay, not draft gating. `Build & Test (Debug/Release)` already pass; the rest were pending at handoff. **Verify with `gh pr checks 924` and confirm `grep -c pending` is 0 before judging.** |
+| **PR #924** | **MERGEABLE** (the conflict is resolved). `mergeStateStatus=BLOCKED` only because it is a DRAFT with checks in flight — not a new problem. Left draft deliberately. |
+| **Master merge** | ✅ **DONE this session.** Master had moved **24 commits** (UAC-r2 #931 merged) and GitHub reported #924 `CONFLICTING`/`DIRTY`. Merged `origin/master` into the branch (**never rebase**) — exactly **ONE** conflict, `.claude/CHANGELOG.md`, two independent appended entries, resolved by keeping both. Post-merge, ALL RE-RUN: solution build **0 errors** · ArchTests **187/187** (up from 181 — master added six) · client **1,406/1,406** · Compose server **1,948/1,948**. |
+
+### ⚠️ Coordination — PR #932 (`unified-access-control-r2`) overlaps on TWO TEST FILES
+
+`ComposeService.cs` itself does **not** overlap. These two do, and whoever merges second reconciles:
+- `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` — we moved 3 census entries
+  `ClientSupplied` → `ServerDerivedRecord`; they add an external-upload write sink.
+  **A census renumber presents as one stale entry + one undeclared site** — only both halves together
+  distinguish it from a deletion.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCreateOnSaveTests.cs`
+
+---
+
+## UX. The owner-approved backlog — order was **5 → 6 → 2 → 7 → 8**
+
+| # | Item | State |
+|---|---|---|
+| **5** | Toolbar restructure, sub-items a–i | ✅ **DONE + deployed** (`c0751e0d9`) |
+| — | Editor typography (headings collided when wrapping) | ✅ **DONE + deployed** (`4887bc98a`) |
+| — | Numbering visibility (`data-projected-list`) | ✅ **DONE + deployed** (`b323c2718`) |
+| **2** | Formatting notices → one collapsed row + popover | ✅ **DONE + deployed** (`e8ea2bbce`) |
+| **7** | Injected Assistant turns pin to top | ✅ **DONE + deployed** (`8d9b31eb8`) |
+| — | Document line spacing carried into the editor (READ path) | ✅ **DONE + deployed** (`0f5525bea`) |
+| **6** | **Editable** spacing (the Spacing menu) | 🔲 grouped with numbering — **write path** |
+| — | **Numbering menu**: toggle · `<` `>` level arrows · type (1./a./i.) | 🔲 owner's design; `<`/`>` small, type = new `ComposeNumberingAuthor` schemes |
+| **8** | Document change summary | 🔲 see §U8 — bigger than first stated |
+
+### The spacing ladder (owner asked "is there a less complex approach?" — yes, and rungs 1+2 shipped)
+
+1. ✅ **Editor typography** — the readability fix. Headings inherited FluentProvider's **fixed 20px**
+   line-height; a ~28px glyph in a 20px line box is why multi-line headings collided. Unitless ratios.
+2. ✅ **Carry the document's own `w:spacing`** — read path only. `w:lineRule` is load-bearing: `w:line` is
+   a MULTIPLE in 240ths under `auto` (360 = 1.5×) but TWIPS under `exact` (360 = 18pt), and **Word OMITS
+   the rule when it means auto** — so absent must map to the multiple reading.
+3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
+   model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
+   edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## UAT. Item 8 — what to exercise, and what is NOT a defect (added 2026-09-03 for parallel UAT)
+
+**Deployed build**: `91123fa23` → `spaarkedev1`. **Hard-refresh first** (the web resource caches).
+
+### 1. Toolbar restructure (UX item 5) — first time this has actually been visible
+
+It was committed 2026-09-02 but the environment ran a stale bundle until today. Expect: Undo/Redo **far
+left**; format menus Body · Paragraph · Font · Table; tool icons right-aligned; a **warning triangle on the
+Save icon** while unsaved (the old "Unsaved · Auto Save On" TEXT is gone); chevrons on Word and Save.
+Word menu = Open in web / Open in desktop / Open in preview / Apply template / **Summarise changes**.
+
+### 2. "Summarise changes" (Word menu) — four outcomes, all deliberate
+
+| Do this | Expect |
+|---|---|
+| Click it with **unsaved edits** | A modal: *"There are unsaved changes… Save before generating the summary?"* → **Save and summarise** saves AND then summarises. It must do both — if it only saves, that is a defect. |
+| Click it on a document with **no tracked changes** | An honest banner: *"This document has no tracked changes or comments to summarise."* **A generated summary here WOULD be the defect** — the action was pulled from the selection toolbar precisely because, dispatched empty, the model invents a phantom "[Insertion]". |
+| Click it on a doc **with** Word tracked changes/comments | A plain-language summary in the Assistant pane. |
+| A failure | A user-safe banner, no server detail, no document content. |
+
+### 3. "Include revision report" (SAVE menu) — appears only AFTER a summary
+
+Not visible until a summary has been generated — deliberate; there is no report to append before one
+exists. Tick it, save, reopen: a **Document Revision Report** appendix at the END of the document, with a
+scope line naming the document, version and date, and an "has not been verified" disclaimer.
+
+### ⚠️ Most likely UAT blocker — environmental, not code
+
+The action dispatches through a **deployed catalog Binding**. `useComposeToolbarActivation` fills its
+`bindingId` from `GET /api/ai/capabilities?surface=compose`; if `compose-summarize-word-changes` is not
+seeded in THIS environment's catalog, the dispatch reports a failure banner. That is a **catalog/seed
+issue**, not the wiring. Check before filing: the action was restored to the toolbar registry this session
+with `surfaces: []`, which is what lets its binding land at all.
+
+### Known limits — please do NOT file these
+
+- **A new list item added INSIDE a loaded (projected) list shows no number.** Documented deliberate limit
+  (`ComposeEditor.tsx`); a browser count there would contradict the document's own numbering. This is
+  numbering item 3, still open — see the Next Action.
+- **The report is an APPENDIX (end of document), not a cover sheet.** Front-insertion is a separate piece
+  of work (it needs a leading section break, which collides with `section-break-flattened`).
+- **The NDA "Summary Page" appendix still does nothing** — that is §GAPS's open `summaryPage` instance, a
+  different feature, not this one.
+
+---
+
+## GAPS. "Server-ready, client-unwired" — an OPEN defect class (owner directive: RESOLVE, do not defer)
+
+> **Owner directive, 2026-09-03**: *"we need to investigate those more thoroughly and get resolved, not
+> pushed off or deferred."* This section is the live work item, not a note.
+
+### The defect
+
+A feature is built at every layer — service, generator, seam test, sometimes a whole UI — and one wire is
+missing, so it does **nothing** in the running app. It is **totally silent**: no exception, no log, no red
+test. Two mechanisms produce it, both at the transport boundary:
+
+1. **The HTTP body DTO lacks the property.** `System.Text.Json` ignores unknown JSON, so a client sending
+   the field loses it with no error.
+2. **The endpoint's field-by-field mapping omits it.** `ComposeSaveEndpoints` constructs
+   `SaveComposeDocumentRequest` property by property; an unmapped property is simply never copied.
+
+**Why the test suite does not catch it**: the seam tests construct `SaveComposeDocumentRequest` directly
+and never traverse the endpoint mapping. They are green precisely while the feature is dead.
+
+### The corrected census (an earlier "three gaps" framing was WRONG — do not repeat it)
+
+| # | Instance | Status |
+|---|---|---|
+| 1 | `paraIdMap` / `importedRevisions` / `importedComments` (compose-r2 task 052) | ✅ **FIXED then.** Guard is `ComposeWorkspace.imports.test.tsx` — client-side, cannot see the server side. |
+| 2 | **`summaryPage`** (nda-r1 task 041) | 🔴 **OPEN — this is the work.** |
+| 3 | `revisionReport` (r8, this session) | ✅ **FIXED in `cd6f54c84`**, caught before it reached a user. |
+| 4 | **`SummarizeSessionRequest.Style`** (found 2026-09-04 by the widened audit) | ✅ **RESOLVED by DELETION.** |
+
+So: **two shipped instances plus one caught in flight — not three shipped.** The pattern is real; the
+number used earlier was not, and a wrong number in a handoff gets acted on.
+
+### The widened audit (2026-09-04) — the directive's "investigate more thoroughly" half
+
+Scanned **every** inbound body DTO under `src/server/api/Sprk.Bff.Api/Api/**` — 23 DTOs across both
+dialects (`[property: JsonPropertyName]`-attributed and convention-bound). **One** real hit.
+
+⚠️ **The first scan was corpus-wide and could not see its own defect class.** Searching the whole solution
+for `x.Prop` is satisfied by the **service layer** reading its own request object, which masks exactly the
+missing *body→request* copy. The scan had to be **file-scoped** — the read must appear in the file that
+receives the body. Anyone re-running this must keep that scoping or the result is worthless.
+
+**The hit: `SummarizeSessionRequest.Style`** — declared, documented as *"passed through to the system
+prompt"*, read by nothing at any layer; no client sent it, no test covered it. A caller setting `style` got
+silent no-op behaviour from a field the contract advertised.
+
+**It was DELETED, not implemented — and that is the transferable lesson.** Honouring the doc comment would
+have threaded free caller text into a system prompt, which is precisely what **ADR-039's closed
+structured-operand vocabulary forbids**. The field was not merely dead; it advertised a capability the
+architecture rejects. When this class fires, *"make the documented behaviour real"* is one candidate repair
+and **not** automatically the right one. A summary style, if ever wanted, belongs in the Action/Binding row
+as a bounded enum.
+
+**A different flavour from `summaryPage`, worth telling apart:**
+
+| Flavour | Meaning | Instance |
+|---|---|---|
+| **Server-ready, client-unwired** | Implementation exists; transport does not | `summaryPage` |
+| **Declared, never implemented** | The API surface promises what no layer does | `Style` |
+
+Both present the same lie to a caller. The second is arguably worse: the doc comment actively promises
+behaviour, so a reader has no way to discover the truth short of tracing every layer.
+
+### The forcing function now exists — at BOTH scopes
+
+**Narrow**: `tests/Spaarke.ArchTests/ComposeSaveBodyMappingGuardTests.cs` asserts every
+`SaveComposeDocumentBody` property is READ by the endpoint or listed as a deliberate omission **with a
+written reason**. Carries the ArchTests-required negative + positive controls, and a real-file control was
+run (removing `RevisionReport = body.RevisionReport` makes it fail, naming that property).
+
+**Repo-wide (added 2026-09-04)**: `tests/Spaarke.ArchTests/InboundBodyDtoMappingGuardTests.cs` applies the
+same rule to **every** inbound body DTO in `Api/**`. **195/195 ArchTests green** (191 + 4).
+
+> **Why both, rather than replacing the narrow one**: the narrow guard carries the defect-class history and
+> the executable `summaryPage` open-gap record. Duplicating a *guard* costs little; losing that record costs
+> the gap.
+
+The general guard has **four** tests: the live assertion, a negative control, a positive control, and one
+pinning **both DTO dialects** — the attributed path short-circuits the convention-bound path, so a
+regression in either half would silently halve coverage while the headline assertion stayed green. `Style`
+lived in the convention-bound half, which is exactly the half the narrow guard never looked at.
+
+**A real-file end-to-end control was run**: re-seeding `Style` into the actual
+`SummarizeSessionEndpoint.cs` makes the live assertion FAIL; restoring it makes it pass. The seeded-string
+controls alone would only have proven the matcher works on synthetic input.
+
+⚠️ **It found a defect in its own parser**: bounding the DTO slice at a literal `");` truncated the parse
+before the last property, so the guard silently under-reported — the exact quiet-omission failure it exists
+to prevent. Now bounded at the next declaration. **If you extend this guard, re-run its own sanity
+assertion**; a parser that finds nothing makes every assertion vacuous.
+
+### `summaryPage` — the open instance, and what resolving it requires
+
+`SaveComposeDocumentRequest.SummaryPage` is consumed by `SaveAsync` (appends the NDA Summary Page via
+`AppendSection`). `ComposeSummaryPageGenerator` + `ComposeSummaryPageSeamTests` are green. **But**:
+`SaveComposeDocumentBody` has no `summaryPage` property, the endpoint never reads one, and `grep summaryPage
+src/` returns **zero** client references. **The NDA Summary Page appendix has never been produced in the
+running app since nda-r1 task 041.**
+
+It is kept EXECUTABLE, not prose: `ComposeSaveBodyMappingGuardTests.SummaryPage_IsStillTheOpenInstanceOfThisDefectClass`
+asserts the endpoint does NOT forward it. **When someone wires it that test flips red and should be
+deleted** — its purpose is to stop the gap being forgotten (FAILURE-MODES AP-12: a comment becomes the
+constraint).
+
+**Resolving it is a decision, not just a patch** — and it belongs to the agreements/NDA feature, not R8:
+- **Wire it** — add the DTO property + mapping (server half, ~2 lines, mirrors `revisionReport`) AND a
+  client sender. Without the client half, wiring the server only re-creates the same dead state.
+- **Or retire it** — delete `SummaryPage`, its generator and its seam test. **A field that still exists is
+  a capability that still exists** (issue #858's reasoning).
+- **Do not leave it half-wired.** That is the state that produced this whole class.
+
+#### 🔴 CORRECTION (2026-09-04, same session) — READ THIS BEFORE THE EVIDENCE BLOCK BELOW
+
+**The recommendation immediately below ("retire — the need is already met") was based on a FALSE premise
+and is WITHDRAWN.** It claimed "Create Summary Memo" is a working shipped feature. It is not. Its READ half
+is wired; its WRITE half is never called in production. See **§GAPS-5** for the proof chain. The evidence
+block below is kept because its supersession-intent finding still stands — the later project genuinely did
+build a parallel path — but **"the need is met" is false**, so the conclusion drawn from it does not follow.
+
+**Revised recommendation → §GAPS-5.**
+
+#### The evidence gathered 2026-09-04 — supersession INTENT (still valid); "need is met" (FALSE, see above)
+
+**The user need is already met by a shipped, UAT'd feature.** `ai-advanced-capabilities-agreements-r1`
+(FR-13/FR-14, tasks 050/051) built **"Create Summary Memo"**, and unlike `summaryPage` it is wired
+end to end: a toolbar dropdown in `ComposeFormatToolbar.tsx`, both reads in `ComposeWorkspace.tsx`
+(`GET .../review-memo` and `.../review-memo/docx`), a negative-path banner in `ComposeBannerStack.tsx`,
+unit tests, and **four UAT rounds** of position/label refinement. It delivers the NDA-review digest as a
+separate memo with a downloadable `.docx` and an "Email memo" prefill.
+
+**Telling detail**: `ReviewMemoAssembler`'s own docblock cites `SaveComposeDocumentRequest.SummaryPage` as
+*precedent for the client-supplies-the-tuple pattern* — the later project **looked straight at this field,
+copied its shape, and built a parallel path rather than extending it.** That is what supersession looks
+like in practice.
+
+**But the two are not the same artifact, and that is the whole remaining question:**
+
+| | `summaryPage` (nda-r1 t041) | `reviewMemo` (agreements-r1 FR-13/14) |
+|---|---|---|
+| Shape | Appendix **inside** the .docx, appended on save | **Separate** memo record + downloadable .docx |
+| Client | ❌ none, ever | ✅ toolbar · 2 endpoints · banner · UAT'd |
+| Mechanism | `ComposeDocumentRenderer.AppendSection` | `ReviewMemoDocumentBuilder` |
+
+**Recommendation: RETIRE**, unless the owner specifically wants the NDA digest *inside* the document.
+The need is served; a second path to it earns its keep only if the in-document shape is itself the
+requirement. And per nda-r1's own task-041 notes, the wiring section stops at the server — no client half
+was ever scoped, so nothing downstream is waiting on it.
+
+**If the owner instead wants it wired, note that R8 just made that cheap.** `revisionReport` shipped this
+week over the *same* `AppendSection` mechanism with a full client path (Word-menu trigger → save-menu
+toggle → DTO → mapping). Wiring `summaryPage` is now "mirror `revisionReport`", not new design.
+
+⚠️ **Not actioned unilaterally.** Deleting another project's feature surface is the owner's call, and the
+retire path removes a generator + seam test that are green. The investigation the directive asked for is
+done; the decision is one question, with a recommendation and its evidence above.
+
+### Next step for this section
+
+1. **Owner decision: wire or retire `summaryPage`.** ONE question, evidence + recommendation above
+   (recommendation: retire). It is another project's feature, so the call is theirs.
+2. ~~**Widen the audit.**~~ ✅ **DONE 2026-09-04** — all 23 inbound body DTOs in `Api/**` scanned across
+   both dialects; found and resolved `SummarizeSessionRequest.Style`; `InboundBodyDtoMappingGuardTests`
+   now makes the class non-recurring repo-wide. The suspicion that "the found instances are not the only
+   ones" was correct.
+
+---
+
+## GAPS-5. 🔴 The Review Summary Memo cannot succeed — a whole feature, dead at the write half
+
+**Found 2026-09-04, minutes after listing "endpoints with no client caller" as a blind spot the guard cannot
+see.** That blind spot immediately produced a live instance. This is the most consequential instance of the
+class so far: not a dropped field, but an entire **shipped, UAT'd feature that cannot complete**.
+
+### The proof chain (each link verified, repo-wide)
+
+| # | Link | Evidence |
+|---|---|---|
+| 1 | The memo lives in an `sprk_analysisoutput` row named **"Review Summary Memo"** | `AnalysisResultPersistence.cs:331` |
+| 2 | Exactly one method writes it — `PersistReviewMemoAsync` | `AnalysisResultPersistence.cs:298` |
+| 3 | It has exactly ONE caller: the POST handler `GenerateReviewMemo` | `ReviewMemoEndpoints.cs:166` |
+| 4 | `POST .../review-memo` has **no production caller anywhere in the repo** — only `ReviewMemoEndpointContractTests` | `git grep "review-memo"` across all of `src/`, `infra/`, `src/solutions/` |
+| 5 | The read looks up that exact output name, returns `null` otherwise → `NoMemoProblem()` | `AnalysisResultPersistence.cs:347`, `ReviewMemoEndpoints.cs:196` |
+| 6 | BOTH toolbar actions ("Generate memo" .docx, "Email memo") call the **GETs** — `method: 'GET'`, twice | `ComposeWorkspace.tsx:3189`, `:3213` |
+
+**Therefore both toolbar actions always hit the "generate the review/memo first" negative banner.** The row
+they render from is never written.
+
+### The tell that was sitting in the code the whole time
+
+`ComposeWorkspace.tsx:3176` states the design assumption outright:
+
+> *"…derive from the SAME server-persisted `sprk_analysisoutput` row **task 050's POST assembled** — never a
+> client-side re-derivation"*
+
+Task 051 (the read half, FR-14) was built **against task 050's POST as though it were already being called**.
+Nothing ever called it. Each task was correct in isolation; the seam between them was nobody's deliverable.
+
+### Why four UAT rounds did not catch it
+
+The FR-14 UAT rounds (`ComposeFormatToolbar.test.tsx` documents rounds 1 and 4) moved the button and made it
+icon-only — they were about **position and label**. Reaching the negative banner looks like "no review yet",
+which is a legitimate state. Nobody clicked through to a *successful* memo, and the negative path is
+indistinguishable from correct behaviour unless you know a memo should have existed.
+
+### Revised recommendation for `summaryPage` — the decision is bigger than wire-vs-retire
+
+There are **two half-built paths to one need**, and **neither delivers today**:
+
+| Path | Built | Missing |
+|---|---|---|
+| `summaryPage` (nda-r1 t041) — appendix inside the .docx | generator · `AppendSection` · `SaveAsync` call site · seam test | DTO property · endpoint mapping · **any client** |
+| `reviewMemo` (agreements-r1 FR-13/14) — separate memo doc | POST assemble+persist · both GETs · toolbar · docx render · email prefill · banner | **the client POST that creates the row** |
+
+**Recommendation: complete `reviewMemo`, retire `summaryPage`.**
+- `reviewMemo` is far closer to done — everything except one client call exists and was UAT'd. The POST needs
+  `{overallRisk, sections[]}` from the agreement-review Action's ledgered result plus the client-held
+  `afterText`; **verify the client actually holds those tuples before scoping** (`ReviewMemoAssembler`'s
+  docblock asserts it does — that assertion is exactly the kind that went unchecked here).
+- Keeping both means maintaining two paths to one outcome (§11), and `summaryPage` is the one with no client
+  at all.
+- If the owner wants the digest *in-document* rather than as a separate memo, invert it: wire `summaryPage`
+  by mirroring `revisionReport` and retire the memo instead. **Pick one. Do not finish both.**
+
+⚠️ Not actioned unilaterally — this spans two other projects' features.
+
+### Owner decisions, 2026-09-04
+
+**D1 — No Notepad/`sprk_memo` output surface. CLOSED, do not re-propose.** I had raised "save the summary
+to the agreement's notepad" as a destination option (newly plausible since `sprk_agreement` joined
+`sprk_memo`'s parents on 2026-08-25). Owner: users do not want a Revision/Review/Agreement Summary living
+as a notepad-style memo. `sprk_memo` stays what it is — a user-authored scratchpad.
+
+**D2 — Rename to "… Summary". The word "Memo" is retired from this feature.** Reserve "Memo" for
+`sprk_memo`. Rename the toolbar label/tooltip and the persisted row's display name.
+
+⚠️ **D2 collides with a latent defect — do them together.** `PersistReviewMemoAsync` sets
+`OutputTypeId = null` **deliberately** (the `sprk_aioutputtype` GUID is environment-specific and would 400
+in other orgs), so the row is categorised by **matching its display name**:
+`GetLatestAnalysisOutputByNameAsync(analysisId, "Review Summary Memo")`. **The user-visible display string
+IS the lookup key.** Renaming it silently orphans every previously-written row — the read finds nothing and
+returns the "no memo" negative path, which is indistinguishable from "not generated yet".
+
+Today that costs nothing (§GAPS-5: no rows exist). It will not stay free. The rename should therefore be
+paired with wiring the lookup by `sprk_outputtypecode` (`"REVMEMO"`) — which the code's own comment already
+names as the intended follow-up — so the display name becomes cosmetic and renameable thereafter.
+
+### Q3 (2026-09-04) — "should this be a Dataverse record?" It already IS one
+
+`PersistReviewMemoAsync` creates an **`sprk_analysisoutput`** row: `Name` = display string, `Value` = the
+memo JSON, `AnalysisId` = FK to `sprk_analysis`. So the JSON-in-Dataverse design the question asks for is
+what ships today.
+
+**Keep the table** — a dedicated `sprk_reviewsummary` entity fails §11's extension test: `sprk_analysisoutput`
+already models "an analysis produced this output", the Summary is exactly that, and no concrete behaviour
+fails without a new entity. The real gap is not the table, it is the **`OutputTypeId` categorisation** above.
+
+**SPE file link — not yet, and state the requirement before adding it.** The `.docx` is rendered ON DEMAND
+from the persisted JSON (`GetReviewMemoDocx`) and never stored. JSON-as-truth is deliberate ("render-from-
+persisted: exports ≡ the durable artifact") and it means template improvements apply retroactively. Storing
+a rendered `.docx` in SPE buys ONE thing the JSON cannot: an **immutable, shareable, permissioned artifact**
+— "this is the summary we sent counsel on 3 Sept". That is a legitimate legal need, but it is a *stated
+requirement*, not a default; adding it creates a second source of truth that can drift from the JSON. If it
+is added, the natural container is the **Document's**, which is why Q4 matters first.
+
+### Q4 (2026-09-04) — what the Summary is associated with: the **ANALYSIS**
+
+Verified chain: `session.HostContext.EntityType == Analysis` → `EntityId` = `analysisId` →
+`AnalysisOutputEntity.AnalysisId`. The **Document is reachable only indirectly**, via
+`GetAnalysisAsync(analysisId).DocumentId`.
+
+**That binding has a visible user consequence, already documented in the endpoint**: a session NOT bound to
+an Analysis (the *direct-Compose* door — only the *wizard* door binds durably) cannot persist a summary at
+all. The user gets **"Save The Document First"**, because saving is what creates the Analysis. So a review
+can genuinely complete with nowhere to hang its summary.
+
+**Assessment: Analysis is the correct OWNER; Document is the right DISCOVERY axis.**
+- Owner = Analysis, because the content (`{before, after, why}` per section) is only meaningful relative to
+  one review run. Re-running yields a new Analysis → new Summary, and history falls out for free. Re-parenting
+  to the Document would make "which review is this summarising?" ambiguous the moment a document is reviewed
+  twice.
+- Discovery = Document. ~~and plausibly Agreement… the document is merely its paper~~ — **WRONG, corrected
+  by owner 2026-09-04. See below.**
+
+#### 🔴 Owner correction (2026-09-04): Agreement is NOT "the document's meaning"
+
+> *"we should not conflate 'Agreement' with 'Document'; an Agreement is a core record type, not an adjunct
+> for document/file. An Agreement stores the metadata (like a matter or project or invoice or work
+> assignment etc), and has an association to one (or more) Documents."*
+
+**`sprk_agreement` is a peer of Matter / Project / Invoice / WorkAssignment** — a first-class business record
+holding metadata, with a **1‑to‑many** association to Documents. My framing ("the review is about an
+agreement; the document is merely its paper") treated the two as one thing seen from two sides. They are not:
+one Agreement can carry many Documents, so "the agreement's summary" and "the document's summary" are
+**different questions with different answers**.
+
+**This is corroborated by the schema, and the corroboration is itself a finding.** Everything the analysis
+path touches is **`sprk_agreementtype`** — a *classification registry* (`sprk_key` = `'nda'`, lease, …;
+`CreateAnalysisWizardWidget.tsx:858`, `sprkAnalysis.ts:163`). `sprk_analysis` has a lookup to the agreement
+**TYPE**, and a `DocumentId`. It has **no lookup to `sprk_agreement`, the record.**
+
+Meanwhile `sprk_memo` *does* have `sprk_regardingagreement` → the core record (added 2026-08-25).
+
+**Consequence — a real gap, not a naming quibble.** Today a Summary can answer *"this was an NDA review"*
+but **cannot** answer *"…of which Agreement?"* except by traversing `Analysis → Document → (Agreement)`.
+Agreement-level discovery is therefore a **roll-up across that agreement's Documents**, which is a
+materially bigger thing than the read-model I described — and I withdraw "needs no storage change", because
+whether it is traversable at all depends on the Document↔Agreement association.
+
+⚠️ **Unverified from this repo**: `sprk_document`'s lookup to `sprk_agreement`. There is no
+`docs/data-model/sprk_document.md` or `sprk_agreement.md`, and the ERD has no agreement rows — the
+data-model docs lag the org (CLAUDE.md §2). **Confirm the association's shape via Dataverse MCP `describe`
+before designing any agreement-level roll-up.** Do not assume it from this note.
+
+**Structure advice for the missing Agreement↔Document link**: [`notes/agreement-document-relationship-design.md`](notes/agreement-document-relationship-design.md) — 1:N vs N:1 is ONE relationship (author the lookup on Document); use ADR-024 (which already names `sprk_document`, and Agreement is a proven parent on `sprk_memo`/`sprk_todo`); the one owner question that decides the structure is whether a Document can belong to MULTIPLE Agreements at once; and do NOT denormalise onto `sprk_analysis` — resolve server-side in the read path that already resolves DocumentName.
+
+#### The SPE question, restated precisely — "evergreen" applies to PRESENTATION, not CONTENT
+
+Owner intuition (2026-09-04): *"maybe that's the point — it is always evergreen and fresh."* Correct, with
+one sharpening that improves the risk picture:
+
+- **Content is FROZEN at generate time.** `PersistReviewMemoAsync` serializes the assembled memo; the
+  findings, before/after text and risk ratings are fixed in that row forever.
+- **Only the RENDERING is regenerated.** `GetReviewMemoDocx` re-renders that frozen JSON through the current
+  template.
+
+So the "it might silently change" worry applies **only to formatting**, never to findings. That is why
+render-on-demand is the right default: template fixes apply retroactively to old summaries at zero cost, and
+there is no second artifact to drift.
+
+**The one place evergreen is a liability**: a summary **transmitted externally** (sent to counsel, attached
+to a filing) must be frozen in *presentation* too — "here is exactly the document you received on 3 Sept".
+That argues for snapshotting to SPE **at the moment of external delivery**, not at generate time. Note the
+contrast with R8's revision report, which is embedded INTO the .docx on save and is therefore inherently a
+frozen snapshot — the two features differ here deliberately, not accidentally.
+
+### What this instance teaches that the DTO guard cannot
+
+The guard proves every declared field is *read*. It cannot prove a **route is called**, and this defect lives
+entirely in that gap. A cheap forcing function to consider: assert every `MapPost`/`MapPut` route literal in
+`Api/**` appears in client source or is allowlisted with a reason (background jobs, webhooks and
+external-system callers are legitimate entries). That would have caught this on the day task 050 merged.
+
+---
+
+### What the audit did NOT cover (name it, so nobody reads "done" as "everything")
+
+The guard scans **request-body DTOs in `Api/**`**. Adjacent surfaces where the same silence is possible
+and no one has looked:
+
+- **Response DTOs the client never reads.** The mirror image: the server computes and returns a field no
+  client consumes. Harmless-ish, but it is how a "supported" field becomes fiction. My first scan pass
+  flagged ~20 of these and I discarded them as false positives *for the body-mapping rule* — that is a
+  correct exclusion for THIS guard, not a clean bill of health for those fields.
+- **Endpoints with no client caller at all.** A whole route can be dead; a per-property scan cannot see it.
+- **Query/route/header-bound parameters**, which this scan does not model.
+- **DTOs outside `Api/**`** — e.g. the `Services/Ai/LinearConsumers` surface master merged in today.
+
+---
+
+## U8-BUILD. Item 8 as BUILT (2026-09-03) — read this before §U8's history
+
+**Owner reframe that shaped everything**: the change summary is **not a UI panel**. It is a **report
+artifact** — *"we made edits to the document, here is a summary of the changes"* — that must travel with
+the document, print, and reach PDF. Owner chose: **on-demand** (not automatic), **live pull** (not the
+load-time snapshot), **save-gated**, **appendix first** (standalone `.docx` later).
+
+**Metadata was considered and REJECTED for this purpose** (do not re-propose it as the primary form).
+Custom document properties / custom XML parts *do* survive Compose's save — verified: `RenderIntoCarrier`
+mutates only the main document part, so package-level parts are never parsed. But metadata is invisible:
+no print, no PDF, no recipient will find it. It stays the right instrument for a later
+regenerate-and-replace pointer.
+
+| Piece | State |
+|---|---|
+| `buildComposeChangesText` producer + `hasComposeChangeData` (client) | ✅ `3969c57d9` — 14 tests, 2 controls |
+| `ComposeRevisionReportGenerator` + `SaveComposeDocumentRequest.RevisionReport` (server) | ✅ `400819ecb` — 8 seam tests (57 w/ corpus) + 2 save-wiring tests, 3 controls |
+| `useComposeChangeSummary` flow — save gate → live pull → produce → dispatch (client) | ✅ `3073b3743` — 8 tests, 2 controls |
+| **The trigger + host rendering of the 4 outcomes** | 🔲 **NOT BUILT — this is the remaining work** |
+| **The "Include document revision report" save toggle** | 🔲 not built |
+
+**The pattern was already shipped twice** and is reused, not reinvented: `ComposeSummaryPageGenerator` +
+`ComposeDocumentRenderer.AppendSection` (append INTO a document, opt-in via `request.SummaryPage`) and
+`ReviewMemoDocumentBuilder` + `SynthesizeDocument` (standalone `.docx` from a persisted record). The
+revision report is the first one's sibling. `ReviewMemoDocumentBuilder`'s **render-from-persisted** rule is
+the answer to "the separate document must stay linked": persist once, render into appendix / `.docx` /
+email body from the same record.
+
+**Constraints that are now enforced by tests — do not relax without reading the control:**
+- The report is **style- and numbering-INDEPENDENT** (plain paragraphs, literal `•`, never `w:numPr`). A
+  corpus-wide test asserts numbering + styles parts are byte-identical after the append. The control
+  proved a "make the bullets proper list items" change **renumbers the host agreement**.
+- **Empty in ⇒ nothing appended.** Deliberately unlike the Summary Page (a clean NDA is itself a finding).
+- The **scope line is always emitted**, stating unrecorded fields as unknown — a missing version reads as
+  "current", the exact wrong impression, because the pull reads STORED bytes.
+- The hook **never auto-saves**; its surface is exactly `{running, requestSummary}`, pinned by a test.
+
+**Known gap inherited, not introduced**: the sibling `SummaryPage` request field has **no** test on its
+`SaveAsync` call site. `RevisionReport`'s call site now does (`ComposeServiceImportedRenderSaveTests`).
+
+---
+
+## U8. Item 8 (document change summary) — CORRECTION, twice over
+
+The round-1 note called this **"a wiring job, not a new capability"** and said its trigger was the
+return-from-Word reanchor flow. **Both were wrong**; a repo-wide search settled it:
+
+| Piece | Status |
+|---|---|
+| Consumer type, Action, input + output schemas | ✅ exists |
+| Result renderer (`composeResultFormat.ts`) | ✅ exists |
+| Server operand binding (`ContextBinder` `changesText`) | ✅ exists |
+| **A client producer of `changesText`** | ❌ **does not exist** |
+| **Any live trigger** | ❌ **does not exist** |
+
+`AnnotationReanchorService` states the opposite of the old claim outright: *"the human-friendly change
+summary is a SEPARATE gated capability … that DOES call the model; this engine does not."*
+
+**The binding constraint that survives both corrections**: the action was pulled from the selection
+toolbar because **without real change data the LLM fabricates a phantom "[Insertion]"**. Any trigger MUST
+refuse when there are no tracked changes rather than dispatch an empty operand — which makes the
+**producer** the load-bearing piece, not the button. Render target: `AgreementReviewSummaryPanel`.
+
+---
+
+## Method rules that cost real time when forgotten (carried forward)
+
+1. **Run the negative control.** Every fix this session shipped with one; two of them found real problems
+   (an in-test extractor that was line-anchored; a Direction-A scan that prose satisfied).
+2. **Assert a seeded mutation is IN THE FILE before spending a suite run**, and that the build is green —
+   a stale binary reports a PASS.
+3. **`dotnet test` is ~7–9 min for the Compose filter.** Batch.
+4. **Verify the deployed bundle by a STRING LITERAL, never a symbol name** — minification renames symbols,
+   so an absent function name is not evidence of a stale build.
+5. **Measure publish size against a SAME-DAY fresh master build with the SAME zip tool.** The recorded
+   baseline ages; that error once overstated this project's delta 46×.
+6. **A screenshot is evidence about a BUILD.** UAT round 2's heading report came from a stale bundle —
+   the tell was toolbar text that had already been removed. Check the build before diagnosing the code.
+
+---
+
+## R0. UAT ROUND 1 (2026-09-02) — read `notes/uat/uat-round-1-findings-and-plan.md` for the full analysis
+
+**Confirmed working**: PDF intake (open → editable → save → honest `pdf-intake-*` warnings) · the AI redline
+stream (tracked insert/delete, "2 suggested edits pending", Accept-all, per-suggestion rationale).
+
+**8 items returned. Two findings changed their scoping — do not re-derive these:**
+
+1. **Items 3 + 4 are ONE finding and a KNOWN DEFERRAL, not an R8 regression.**
+   `composeNumberAtomExtension.ts`'s header states it outright: legal numbers are computed SERVER-SIDE AT
+   LOAD and painted as a ProseMirror **view decoration** (never a doc node — it must not shift the text
+   offsets the redline/reanchor table indexes), and the native `<ol>` marker is suppressed
+   **unconditionally**. So "remove numbering doesn't renumber" (decoration is a load-time snapshot) and
+   "add numbering does nothing" (a new list has no server number to paint) are the same gap. The header
+   names it **"R5 G3, explicitly OUT of R4.5 scope; escalate rather than converting this to a doc node."**
+   Fixing = client renumbering engine (the two-engine drift this project exists to prevent) **or** a server
+   round-trip per structural edit. **DESIGN ANSWERED 2026-09-02** →
+   `notes/uat/numbering-editing-design-options.md`. Headline: the blocking constraint was misread — it rules
+   out INLINE CONTENT, not a NODE ATTRIBUTE, and the number already IS one (`data-computed-number`). So the
+   rendering mechanism needs no change; the only missing piece is **recomputation**, via ProseMirror's
+   maintainer-prescribed `appendTransaction`. Recommended: **client engine for immediacy + server
+   authoritative + parity enforced by the #699 shared-corpus pattern**. The HARDER half is not renumbering —
+   it is authoring/removing `w:numPr` on the write path (a new list has no numbering definition to inherit).
+
+   **Owner scope call (2026-09-02): "whether we continue r8 or start a new project is semantic — I'll follow
+   your better judgement." DECISION: sequence, don't merge.** R8 closes on its own thesis (save reliability +
+   fidelity) — it is deployed, green, every item closed; holding it open for a toolbar redesign delays value
+   already earned. The UAT follow-on (items 2/5/6/7/8 + numbering) runs as the next project with its own
+   design gate, because numbering touches the WRITE path and must not ride in on a UX task.
+
+2. **Item 8 is a WIRING job, not a new capability.** `compose-summarize-word-changes` is a live consumer
+   type with a binding row + client action, deliberately pulled from the selection toolbar because without
+   real change data **the LLM fabricates a phantom "[Insertion]"**. The NDA analogue is
+   `AgreementReviewSummaryPanel`, reusable. Binding rule to carry: **never fire it without real change data.**
+
+**✅ U-0 — REPRODUCED, ROOT-CAUSED, FIXED (2026-09-02).** Full record: `notes/uat/u0-heading-style-loss.md`.
+
+The projection never puts a numbered heading in a list (`headingLevel is null ? ListInfo(p, ctx) : null`),
+so `isActive('orderedList')` is FALSE on it and **the "remove numbering" click was the toggle ADDING a
+list**. One fact explains the whole screenshot. Measured losses on the real extension set: heading level
+flattened · `computedNumber` → null · **`paraId` RE-MINTED** (orphaning anchored comments/redlines).
+Irreversible; `keepAttributes: true` recovers none of it. It is a *fidelity* defect, not just UI: the save
+re-renders the changed block from the model and `IsModelDeterminedStyle` treats Heading1-6 as model-owned,
+so a toolbar click silently flattens a real Word heading in the `.docx`.
+
+**Fix**: `listToggleWouldDestroyBlockIdentity` refuses both list toggles on a heading or a server-numbered
+block, with an actionable hover reason. Ordinary unnumbered paragraphs unaffected (R5 task 011 stands).
+Partial fixes rejected: carrying `paraId` alone trades a loud loss for a quiet one; authoring numbering is
+impossible without a `w:numPr` definition, so the control would stay a broken promise. 11 tests, **both
+negative controls run** (revert wiring → 3 red; force predicate always-true → 3 red the other way).
+Body/Heading menu probed and **clean** — it preserves paraId AND computedNumber, so scope is measured.
+
+**Hand-off to the numbering project**: the native `<ol>` marker is suppressed **unconditionally**, so an
+editor-created list shows no number even born-in-editor — UAT item 4 is universal, not loaded-only. The
+obvious quick fix (scope the suppression to projected lists) collides with invariant F-3 (never fabricate a
+number for an unresolvable `numId`); distinguishing them needs a projection-emitted marker on the `<ol>`.
+
+**⚠️ UAT sections A + B were NOT exercised**: (A) edit one paragraph of a real `.docx`, save, reopen,
+confirm untouched content byte-identical — the entire subject of Track A; (B) the **`section-break-flattened`
+accept/decline**, which changes the owner-signed residual-loss set from five rows to six. **R8 cannot close
+without both.**
+
+---
+
+## R2. DRIVE PROVENANCE — the brief (next task)
+
+**What it is.** `ApplyTemplateAsync` and `SaveAsync`'s replace branch both take `driveId` from the
+CLIENT (route body / `request.DriveId`) and write bytes there. The authorized `sprk_document` row
+already knows the answer (`sprk_graphdriveid`), and the server does not consult it.
+
+**What it is NOT.** Not the app-only live-hole class. Every write is OBO, so SPE authorizes it as the
+user — a caller cannot reach a drive they could not already reach. The defect is **provenance**: the
+`sprk_document` record says the document lives at drive X while the save writes to drive Y, so the
+record and the bytes diverge and the audit trail is wrong. Same reasoning as #858's `ContainerId`
+deletion ("a field that still EXISTS is a capability that still exists"), one level down.
+
+**The resolution already exists — reuse it.** `ComposeRecordResolution.TryFindDocumentByGraphItemIdAsync`
+resolves speId → row, and after #781 it survives a duplicated/broken alternate key. **Extend its column
+set to include `ComposeService.GraphDriveIdAttribute`** (it currently fetches DocumentId + the two
+FR-C3 dedup columns); the sibling `TryFindDocumentByTransientKeyAsync` already fetches drive+item and
+returns them as `TransientKeyMatch`, which is the shape to mirror.
+
+**The one real design decision — fail-closed vs. fall-back.** Legacy rows may carry an empty
+`sprk_graphdriveid`: `PromoteIfEphemeralAsync`'s create branch documents that a row without the full
+SPE pointer makes downstream readers 409 with "No file is attached", which implies rows predating that
+fix exist. So a hard fail-closed can break saves on real documents. **Recommended**: use the row's
+drive when it has one and IGNORE the client's; log at Warning when they differ (that divergence IS the
+signal); fall back to the client value ONLY when the row has no drive id, logged. An attacker cannot
+make a row's drive id disappear, so the fallback covers legacy data, not an attack path. State this in
+the PR rather than letting it read as a half-measure.
+
+**Then the census moves honestly**: the 3 `ComposeSaveStorageCoordinator` entries + the apply-template
+caller note in `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`. Remember the
+2026-09-01 lesson — a renumber presents as one stale entry + one undeclared site, and only both halves
+together distinguish it from a deletion.
+
+**Sites**: `ComposeService.cs` — `ApplyTemplateAsync` (~T1 metadata read + the replace) and the save
+replace branch (`request.DriveId` at ~1871–1897). `ComposeSaveEndpoints.cs:80` currently 400s when
+`driveId` is absent from the body; that validation should survive the change (the client still sends
+it) but its *meaning* becomes "the client's claim", not "the write target".
+
+---
+
+## R3. CARRIED ITEMS — what each one actually needs
+
+| # | Item | What it needs | Owner action? |
+|---|---|---|---|
+| 1 | **`Repair-ComposeIdentityKey.ps1` never executed** | It has been written + syntax-checked, never run against real Dataverse. Report mode is READ-ONLY (`.\scripts\Repair-ComposeIdentityKey.ps1` with no switches) and safe anywhere; it needs `az login` + Dataverse admin. Run it against `spaarkedev1` first — that both validates the script and tells us whether dev is still clean after the 2026-08-17 hand-cleanup. `-Apply` only on an owner say-so. **Prod MUST have `sprk_graphitemid_uk` = Active before Compose ships there**, or every save 500s (the original incident). | Offered 2026-09-01; owner said "i don't know what that is but ok" — the explanation was given, no decision taken. Agent may run REPORT mode unprompted; never `-Apply`. |
+| 2 | **Letter/roman corpus fixture** (open half of #698) | A Word doc numbered `1.` → `a.` → `i.` — i.e. Word's **Home → Multilevel List → the `1. / a. / i.` variant**. **The doc the owner supplied twice is NOT it**: `notes/Word doucment paragraph number test.docx` (21,113 B) and the earlier OneDrive copy (21,192 B) are the SAME document re-saved — same `numId=7`, decimal at every level. Already in the corpus as `style-inherited-numbering.docx`; do not add it a third time. Its `numbering.xml` DEFINES lowerLetter/lowerRoman in unused abstractNums, so no paragraph references them. | Yes — needs a document only the owner can produce. Low priority: the resolver's letter/roman PARSE is proven; what is unproven is the numbering engine deriving `(b)`/`(iii)` from real `numbering.xml`. |
+| 3 | **`section-break-flattened` doc row** | `COMPOSE-WRITE-RESIDUAL-LOSS.md` has no row for it. It is now a per-EDITED-block code like the constructs already tabled there, so it arguably belongs. Settle at 090 wrap-up. | No |
+| 4 | **Client citation-resolver parity has no forcing function** | `composeCitationResolver.ts` mirrors the server `CitationResolver`; parity rests on ported test cases + `@see` comments. Nothing fails if the server parser gains a shape the client lacks. Its sole consumer is `ComposeEditor.placeAdvisoryComments` — which IS #699 — so fix it there, not separately. | No |
+
+---
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
 
-### ⚠️ The one thing that is NOT finished
+### 🔓 THE FREEZE IS LIFTED (2026-09-01) — `ComposeService.cs` is editable again
+
+**UAC-r2's PR #887 MERGED as `13a1f5a4a`.** Their `ComposeService.cs` work (`c820b3f8f` — filename
+sanitization at every SPE upload site) is on master. Our public promise on
+[#858](https://github.com/spaarke-dev/spaarke/issues/858) — *"You will not have to rebase"* — is
+**discharged**. Nothing in this project is waiting on them any more.
+
+**Now unblocked**: 070 clusters **5a** and **2a/2b** · **#776** (apply-template `If-Match`) ·
+**#781** (save-identity self-heal). #858 itself is still OPEN — theirs to close, not ours.
+
+> **The trap that was here, recorded so it is not repeated.** The unfreeze trigger used to read
+> *"their comment on #858"* — while our own last comment there opened *"✅ DEFINITIVE — you are
+> unblocked. Nothing here needs a reply."* We asked for a signal and told them not to send it; waiting
+> on it would have blocked us forever. **An unfreeze trigger must be something you can OBSERVE
+> yourself** (a PR merging, a file changing on master), never a message another party has to volunteer.
+
+**The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
+`# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
+sibling `coordination-from-*.md` is THEIR document, received — do not edit it.
+
+---
+
+## R1. THE REMAINING WORK — one list, owner-directed "finish everything" (2026-09-01)
+
+**Owner directive**: *"we need to get 070 and #777 and any other work completed — the order of operation is
+up to you… the critical focus is on getting everything, all tasks, all issues fixed and completed."*
+Also binding, same message: **do not display warnings the user cannot act on.** Routine docx→TipTap format
+reconciliation is expected and must not be surfaced.
+
+### ⛔ THE ONE OPEN QUESTION FOR THE OWNER — #698 corpus fixture
+
+**Ask**: a Word document whose clauses number down to **letter + roman sub-items** — the
+`4.2(b)(iii)` shape. Section → `4.1`/`4.2` → `(a)`/`(b)` → `(i)`/`(ii)`/`(iii)`, as real firm
+documents number schedules and sub-clauses.
+
+**Why it cannot be synthesised**: `CitationResolver` resolves `"4.2(b)(iii)"` today against in-memory
+numbering chains plus a decoy, which proves the RESOLVER. It does not prove the **numbering engine**
+derives that label from real Word `numbering.xml` — the two-engine drift this project exists to
+prevent. A hand-built fixture would encode our own assumption about how Word numbers sub-items and
+then pass against itself. The corpus is real documents for exactly this reason.
+
+**Nearest existing fixture and why it does not cover it**: `multilevel-1-1-1.docx` is decimal
+(`1.1.1`); no corpus document uses letter/roman sub-numbering.
+
+**Where it goes**: `tests/fixtures/compose-corpus/` (Git-LFS — `*.docx filter=lfs`), suggested name
+`letter-roman-subitems.docx`. Any real document works; it can be redacted, and content does not
+matter — only the numbering scheme does.
+
+**The OTHER half of #698 needs nothing from the owner.** "Confirm the `CitationResolver` consumer
+contract" is answerable from the code: consumers exist and are live (`ComposeAnchorResolver.cs`
+server-side, `composeCitationResolver.ts` + `Spaarke.Communication.Components/logic/citations`
+client-side). Whether they want a `PublicContracts` wrapper is decided by reading them, not by asking.
+
+### Done 2026-09-01 (later session — committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `a39c7abbe` | **#698 fixture** — owner supplied a real Word doc; added as `style-inherited-numbering.docx`. Its value is **style-inherited numbering**: three paragraphs carry NO `w:numPr` and are numbered by `ListParagraph`'s own `numPr` in `styles.xml`. Our engine already handles it (FR-12), so this is a guard, not a fix. **The negative control corrected the test's own claim**: dropping the style lookup does NOT shift deeper labels (Word gives an un-incremented level its `start`), so `1.1.1.` is unaffected — the damage is to the style-numbered paragraphs and their siblings (`1.2.`, `2.1.`) only. One of the four tests is decorative against that mutation and is labelled so. |
+| `1789e9d08` | **#781 CLOSED** — all three remaining pieces. **(2) self-heal**: the alt-key lookup swallowed BOTH identity faults as not-found, sending an EXISTING document into the create branch whose upsert failed on the same key. A column query answers in both fault states → lands on the idempotent branch → no third row, and existing-document saves survive a Failed key. **Deviations from the issue text, deliberate**: oldest `createdon` (not newest `modifiedon` — `modifiedon` moves, so concurrent saves could pick different canonicals) and **nothing is deleted** on a user's save. **(3)** `scripts/Repair-ComposeIdentityKey.ps1`, same canonical rule as the runtime heal. **(4b)** `ComposeIdentityKeyHealthCheck` — needed *because of* (2): the heal turns a loud 500 into a quiet log, so the signal had to be restored. Degraded-never-Unhealthy + `catalog` tag so it cannot touch `/healthz` liveness. No interface widened (`TryUnwrapServiceClient` + the `protected virtual` fetch seam already existed). 18 tests; both negative controls fired. |
+| *(uncommitted)* | **#777 `section-break-flattened`** — the last of its three codes. It fired at PROJECTION (open), whole-document; but `Capture` clones an untouched block **including** its `pPr/sectPr`, so only an EDITED paragraph loses it. Moved to the save path, per edited block. **KEPT, not retired** — unlike the other two its premise is still true. Also retired the 023-F1 promotion predicate (a hand-maintained mirror of the renderer's condition) in favour of a value comparison. Client copy for the two retired codes removed per the file's own Direction-B rule. Two negative controls, each firing on its own test. |
+
+### Done earlier 2026-09-01 (committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `4f26c43fb` | **#777 `paragraph-style-flattened` — fixed.** `ComposeBlockMerge.InheritProperties` excluded `w:pStyle` wholesale; now scoped to model-owned styles via `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). An UNMODELED style (firm body style, Quote, localized `Überschrift1`, numbered clause style) is carried onto an edited block. |
+| `5593b9d24` | **Pinned it.** 11 seam tests, `ComposeParagraphStyleInheritanceSeamTests`. **Negative control RUN**: reverting the fix fails 5 of 11 and passes 6 — the detector fires on the regression and stays quiet on what it protects. |
+| `81295b210` | **#777 `indentation-dropped` + `paragraph-style-flattened` warnings RETIRED** per the owner directive. Both premises were falsified (task 041 inheritance, then `4f26c43fb`). They fired per-paragraph whole-document at OPEN → "×84 / ×85" on an untouched 40-page contract. |
+| `7324ad82f` | **070 cluster 2b** → `ComposeRecordResolution.cs`. Mutation pass found a REAL hole: `TryFindDocumentByTransientKeyAsync` could match NOTHING and all 1,813 tests stayed green — the transient-key dedup guarding "the 8-duplicate defect". Closed with a KEY-SENSITIVE contract test. |
+| `d14a9cb78` | **070 cluster 2a** → `ComposeCreateOnSavePromoter.cs`. The four result-shaping helpers moved too (measured: `SaveAsync` calls them all, and its transient branch IS create-on-save). Also fixed an orphaned doc comment that had made `PromoteIfEphemeralAsync` read as "memory capture". |
+| `1f1a4662a` | **070 cluster 5a** → `ComposeProfileRetriggerGuard.cs`. Mutation seeded BEFORE the move **survived all 1,814**: the G10 storm guard had NO test in either direction. Closed with 6 seam tests; re-ran the same mutation → 3 red. |
+| `675a7fb3d` | 070 marked ✅ COMPLETE. `ComposeService.cs` **4,427 → 2,114**. No waiver to delete (ratchet retired 2026-08-20). |
+| `27c5b2f16` | **#776 CLOSED** — apply-template asserts the version it merged. Added `rebaseOnConflict` (default true; apply-template false) because the save path's retry would have clobbered anyway, making the If-Match decorative. Added the missing 409 endpoint mapping. |
+| `3810ce303` | **Merged #858** from UAC-r2 + reconciled: 3 conflicts in `ComposeService.cs`; ported cluster 2a onto THEIR post-#858 bodies; census entry recorded as MOVED-not-fixed and the dedup sink renumbered #2 → #1. |
+
+**Final state: build 0/0 · ArchTests 176/176 · full BFF suite 11,779 passed / 0 failed / 57 skipped ·
+23 commits ready · 0 behind master · 0 uncommitted.** `ComposeService.cs` is 2,429 lines post-merge.
+
+### The remaining work — ordered (2026-09-01)
+
+**Batch by TOOLCHAIN, not by issue number.** The server items share files already understood and one
+build/test cycle (~9 min for the full BFF suite); the client items share one `npm` cycle. Interleaving
+them doubles the cycles for no benefit. This is the same reasoning that made 070's clusters one pass.
+
+| # | Work | Where | Notes |
+|---|---|---|---|
+| **1** | ✅ **#781** save-identity self-heal — DONE `1789e9d08` | `ComposeService.cs` / `ComposeCreateOnSavePromoter.cs` / `ComposeEndpoints.cs` | 3 of 5 pieces remain: **#2** self-heal when the promote upsert resolves a graphitemid to MULTIPLE rows (pick canonical by rule), **#3** retroactive dedup tool, **#4b** runtime key-health probe. Shipped already: graceful 409/503 mapping + `scripts/Verify-ComposeIdentityKey.ps1`. Partly served by the dedup test added in `7324ad82f`. |
+| **2** | ✅ **#777 `section-break-flattened`** — DONE `1f88817c7` | `ComposeContentModelProjector.cs` + `ComposeBlockMerge.cs` | The LAST of its three codes and the only one still REAL loss: an interior `w:sectPr` on an EDITED paragraph. `SectionProperties` is excluded from inheritance because the renderer detaches/re-attaches the TRAILING sectPr — an interior one has no carrier. **KEEP this warning** (unlike the two retired in `81295b210`): it is real AND actionable ("open in Word"). |
+| **3** | ✅ **Drive provenance** — DONE 2026-09-01 | `ComposeService.cs` + `ComposeRecordResolution.cs` | Both write paths into an EXISTING item now resolve the drive from `sprk_graphdriveid` on the authorized row (`TryResolveRecordedDriveIdAsync`, routed through `TryFindDocumentByGraphItemIdAsync` so it inherits the #781 self-heal). `SaveAsync` folds the result onto the request so reads AND the write move together; `ApplyTemplateAsync` renames its parameter to `requestedDriveId` (a read-merge-write converted at the write ONLY would read one drive and overwrite another). Fallback to the caller's value when the row records no drive — declared, logged, and pinned by a test; a hard fail-closed would break legacy rows to close a hole OBO already closes. 3 census entries `ClientSupplied` → `ServerDerivedRecord`. 11 tests, 3 negative controls. Reasoning: `notes/drive-provenance-decisions.md`. |
+| **4** | ✅ **#696** unbounded request body — DONE `4fe224ce9` | `ComposeEndpoints.cs` | `/api/compose/project` + `/upload` run synchronous OOXML projection under only Kestrel's implicit ~28.6 MB cap. Align to the 25 MB chat-attachment policy. |
+| **5** | ✅ **#698** contract half — DONE (answered on the issue; no wrapper) | `CitationResolver.cs` + its consumers | Read the live consumers and decide wrapper-or-not. **Fixture half is the owner ask above** — do the contract half regardless; do not block on the document. |
+| **6** | ✅ **#699** — DONE `6cca7b649`, issue CLOSED | client `ComposeEditor.tsx :placeAdvisoryComments` | **Highest user-harm item left** — a review note can attach to the wrong clause. `placed=2` where 1 expected. Issue recommends anchoring by WS-4 computed clause number via `CitationResolver` where the model supplies a section ref. |
+| **7** | ✅ **#858 client cutover** — DONE `3ac433683` | `ComposeWorkspace.tsx` | Remove `containerId` from the create-on-save body (`:2086`) + the dead pre-save `resolveContainer` leg. ⚠️ **UAC-r2 §1.4: do NOT bulk-delete `containerIdRef`** — six senders address OTHER endpoints (load/documentRef/shuttle) and some legitimately still take a container. Check each against its endpoint contract. Their plan: `C:\code_files\spaarke-wt-unified-access-control-r2\projects\unified-access-control-r2\notes\plan-858-closeout.md` §1. |
+| **8** | ✅ **#853** — verified on branch, issue CLOSED | — | Already FIXED by `220ddd18e` on master. Verify on master + **close the issue**. |
+| **9** | **090 wrap-up** | — | `/test-diet` → refresh `COMPOSE-WRITE-RESIDUAL-LOSS.md` (two codes retired; `paragraph-style-flattened` moves from §2-lost to §3-carried) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. |
+| **10** | **Deploy** | — | BFF + `sprk_spaarkeai` **together, one window, same net10 tree** (NFR-05). Report publish size vs the 44.96 MB baseline. |
+
+### Standing rules that cost real time when forgotten
+
+1. **Assert a seeded mutation is IN THE FILE before spending a suite run.** Three separate false
+   results this session (`Copy-Item` timestamp defeating incremental build · a regex miss · an LF/CRLF
+   miss). Each read exactly like a clean survival, and a false survival makes you write a test for a
+   hole that does not exist.
+2. **A test that passes is not a test that works.** The first #776 test passed in BOTH worlds
+   (fix and naive-fix) because its mock returned the same eTag from every read. Always run the
+   negative control.
+3. **`dotnet test` is ~9 min for the full BFF suite, ~7 for the Compose filter.** Batch accordingly.
+4. **`.docx` fixtures are Git-LFS.** A checkout without `lfs: true` yields a 128-byte pointer that
+   `readFileSync` happily returns — this is what kept the client gate red for 40+ builds (#921).
+
+### Small loose ends
+
+- **Client copy map** `ComposeBannerStack.tsx:322-341` still maps the two retired codes. Dead, harmless, but
+  remove them so nobody re-derives that the server still emits them.
+- **`ComposeBlockMerge.cs` contains 2 raw NUL bytes** inside a string literal (offset ~19314), which makes the
+  file read as BINARY to `grep`/ripgrep — `Grep` refuses it and silently returns nothing useful. Almost
+  certainly a deliberate sentinel separator in the block-canonicalisation, but confirm intent; if deliberate,
+  use `\0` escape instead so tooling can read the file.
+- **Compose Client Gate is at 1 of 3** greens needed before `continue-on-error: true` comes off (#921 fixed
+  the LFS checkout). Two more green runs, then delete that line and it becomes a real gate.
+- **#858 is UAC-r2's to close**, not ours.
+
+---
+
+## S3. Session close (2026-08-30) — everything merged, and the verification habit that was missing
+
+**All three PRs merged**: #806 (`19bf65ec4`) · #905 (`369c3ea89`) · #908 (`330b9fc55`). Branch has
+**0 unmerged commits**. Main repo synced.
+
+### The mistake worth carrying forward
+
+After #905 merged I reported "done". It wasn't. **GitHub auto-merge merges the head that PASSED CHECKS,
+not the current head** — and I had pushed the client-gate timeout fix while checks were already running.
+#905 merged head `47859684c`, silently leaving behind:
+
+1. the compose-client-gate flake fix — **still live on master**, and
+2. the definitive UAC-r2 coordination record — so the file path I had just given them in #858 pointed at
+   the stale 2026-08-27 version. They work from master.
+
+Both were caught only because the owner asked "where is the coordination document?", which made me look
+at **master** rather than my worktree. PR #908 fixed both.
+
+> **The check that would have caught it, and is now the rule:**
+> ```
+> git log --oneline origin/master..HEAD   # MUST be 0 before saying "merged"
+> ```
+> A merge notification is not proof that YOUR commits merged. Also note the compose-client gate is **not
+> a required check** (only `Router` is), so a PR can and did merge with it red.
+
+### Cluster 4 closed out completely
+
+P7 (`ClearPdfSourceMarkerAsync`) is **closed** — the last of **eleven** coverage holes this session's
+mutation passes found across clusters 1, 3 and 4. All nine cluster-4 mutations now die.
+
+### The client-gate flake — fixed at the cause, and a correction
+
+I had called the #806 client-gate failure "stale" after the suite passed locally. **It was not stale.**
+It is a recurring 5-second jest timeout in suites that mount a real TipTap editor —
+`redline-from-ledger` takes ~95s for 24 tests (~4s each, no headroom under `--maxWorkers=2` contention).
+Fixed with an explicit `testTimeout: 30000` in `jest.config.js`, with the reasoning and the
+"if a test needs >30s that is a defect in the test" rule written inline.
+
+---
+
+## S2-appendix. The one thing that WAS not finished (now closed)
 
 **P7 — `ClearPdfSourceMarkerAsync` has no test.** Replacing its body with `await Task.CompletedTask`
 leaves all 1,801 tests green. Its own log calls this "the marker's one unsafe direction": a session that
@@ -532,7 +1556,7 @@ clean build — the last sync returned MERGEABLE and then failed to compile (bot
 |-------|-------|
 | **Task** | **DEPLOYED TO DEV — owner is mid-UAT.** No task in progress. |
 | **Status** | 47 of 51 resolved. Tree clean, everything pushed, merged with `origin/master` (12 behind again — other projects merging). BFF **11,931 / 0 / 96** · integration **103 / 6** · ArchTests **9 failed / 101 passed — ALL 9 PRE-EXISTING ON MASTER** (verified against a clean `origin/master` checkout: 9 failed / 95 passed). |
-| **Next Action** | **WAIT for UAT results.** While waiting: fix the misleading *"came from an earlier session"* copy (see 🔴 OPEN BUG below). Then Track D **070/071/072** (worktrees staged at `C:\code_files\spaarke-wt-07{0,1,2}`, **agents NOT dispatched**), then **090**. **059 still needs owner sign-off.** |
+| **Next Action** | **1. DEPLOY (090 step 2)** — `scripts/Deploy-BffApi.ps1` + `scripts/Deploy-CustomPage.ps1` for `sprk_spaarkeai`, **together, one window, same tree** (NFR-05). TFM verified **net10.0**. Owner authorised the deploy after being told the save-contract gate is red. **2. Then 090 docs**: `/test-diet` → write-side fidelity doc → lessons-learned (Half-A/Half-B) → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. **3. Separate session: fix the client save-contract suite** (see below). |
 
 ---
 
@@ -981,3 +2005,106 @@ changed is that §2's promise ("reported by name … none is silent") is now *tr
 Root `CLAUDE.md`'s ADR-049 pointer says the save "pairs blocks by **document order**". It has paired by
 **LCS** since task 040 — loosely true (matches are monotone) but imprecise, and 047b showed the imprecision
 is where a real defect hid. Touching root CLAUDE.md needs `/conflict-check` + a `.claude/CHANGELOG.md` entry.
+
+---
+
+## 090 — WHY THE PROJECT IS NOT CLOSED (escalation fired, owner informed)
+
+The POML's trigger: *"If any Track's gate did not pass, do NOT close the project."* Two are outstanding:
+
+| Blocker | State |
+|---|---|
+| **Task 070** | 🔲 — clusters 5a + 2a/2b **frozen** in `ComposeService.cs` until `unified-access-control-r2` lands #858 and comments. A declared dep of 090. |
+| **Compose Client Gate (Save-Contract Suite)** | ❌ red on master — 19 failing tests |
+
+**The Compose FIDELITY Gate passes** — document fidelity is verified. The red one is the client
+save-contract suite. Do not conflate them.
+
+So: do the deploy + the 090 documentation, but **do NOT mark the project complete** until 070 unfreezes
+and the save-contract gate is addressed.
+
+## The save-contract gate — for the fresh session that will fix it
+
+Full write-up: `notes/compose-client-gate-red-open.md`. **Read it before touching anything** — it records
+three disproved hypotheses so they are not re-run.
+
+**The single most important fact**: 19 failures × 15s ≈ 285s of a 288s run, so the **5 passing tests mount
+the editor instantly while 19 never mount at all**. Slowness would make all 24 slow. The split is binary
+⇒ **conditional state, not resources**. Three timing-shaped fixes (#908 `testTimeout`, #916
+`asyncUtilTimeout`, #917 `maxWorkers`) all failed; #916 and #917 are reverted.
+
+**Do NOT re-run**: RTL-vs-jest timeout distinction · `--coverage` overhead (the 10s-vs-102s figure was
+warm-vs-cold jest cache; cold it is 20s vs 26s) · CPU contention (serial run is identical).
+
+**Start here instead**: make CI print WHICH 5 tests pass. First N in file order ⇒ state pollution after
+test N; scattered ⇒ per-test input.
+
+**And the meta-rule**: this box has 32 cores and the suite passes on it unconditionally. **A local pass is
+not evidence for this gate.** Validate on the real runner or not at all — that blind spot is what made all
+three previous fixes look right.
+
+**Do not "solve" it by deleting the tests.** 21 of the 24 assertions read editor-rendered DOM
+(`data-compose-mark`, `span[data-comment-id]`); the editor mount IS the system under test, and the names
+carry defect ids (DEF-09/11/12, FR-16 tasks 030/032, r8 task 055) — ADR-038 KEEP category.
+
+---
+
+## SESSION 2026-09-04 — dead-wire audit closed, Document link vocabulary unified
+
+Branch `work/spaarkeai-compose-r8` @ `c7370f79a` · 16 ahead of master, 0 behind · PR #938 MERGED.
+
+### What shipped
+
+| # | Change | Why it mattered |
+|---|---|---|
+| 1 | **`SummarizeSessionRequest.Style` DELETED** | 4th dead-wire instance. Documented as "passed through to the system prompt", read by nothing. Deleted rather than implemented — honouring the doc comment would thread free caller text into a system prompt, which **ADR-039's closed operand vocabulary forbids**. The field advertised a capability the architecture rejects. |
+| 2 | **`InboundBodyDtoMappingGuardTests`** | Generalises the dead-wire guard to all 23 inbound body DTOs, both binding dialects. `Style` lived in the convention-bound dialect the narrow guard never scanned. |
+| 3 | **`sprk_regardingorganziation` → `sprk_regardingorganization`** | Owner renamed the column and deleted the typo'd one. Code still pointed at the deleted column, so an Event→Organization association would have failed at write time. |
+| 4 | **`DocumentLinkFieldMap`** (the big one) | The `sprk_document` link vocabulary was declared twice and both copies knew **6 of 17** columns. Compose create-on-save silently dropped ten link types — a PDF filed under an Agreement produced a Word doc with no Agreement link, no error. |
+| 5 | **`DocumentLinkVocabularyGuardTests`** | A second hard-coded list now fails the build. Real-file control run: re-seeding a list into `ComposeService` makes it fail. |
+
+### The design error worth remembering
+
+My first cut of the copy-forward **redirected** legacy `sprk_matter` → `sprk_relatedmatter` on write, to migrate rows as they were touched. Two existing tests caught it, and they were right:
+
+> **A Dataverse subgrid binds to ONE relationship.** If the Matter form's Documents subgrid is bound to
+> `sprk_matter` and the source PDF sits there, writing the copy to `sprk_relatedmatter` means the two do
+> **not** appear together — silently defeating "files alongside the source", the entire point of the feature.
+
+Copy is now **column-for-column**. Migrating legacy columns is a deliberate one-time data operation, never a
+side effect of saving a document. The map still RECORDS `SupersededBy` so that migration has its mapping.
+
+One assertion did legitimately change: a contract test pinned those six columns as *"exactly the ADR-024
+document link vocabulary"* — the defect written down as a test. It now asserts the endpoint reads the map,
+with the map independently pinned against the live schema.
+
+### Schema facts established via MCP (authoritative — supersede any doc)
+
+- `sprk_document`: **17** link lookups (12 `Related*` + 4 unprefixed legacy + `sprk_email`).
+- **`sprk_relatedagreement` ALREADY EXISTS** — no schema work needed for the Agreement link.
+- `sprk_relatedorganization` **and** `sprk_relatedvendororg` both target `sprk_organization` (different
+  roles) — never key this vocabulary by target entity.
+- `sprk_document` has only **2 of 5** ADR-024 resolver fields (`regardingrecordid`, `regardingrecordnumber`)
+  — no `recordtype` discriminator, so **it cannot host `RegardingResolver`**. `sprk_event` has all six.
+- `spk_fileviewerid` — wrong publisher prefix, **zero code references**. Orphan; drop while pre-deployment.
+- `docs/data-model/field-mapping-reference.md` §Document is **doubly stale** (lists neither).
+
+### ⚠️ Behaviour change another project should know about
+
+`AttachmentDocumentAssociationRung` (email-communication-intelligence-r2's engine) now scans **15** link
+columns instead of 6. Matches stay suggest-band, surface-only candidates a reviewer confirms — never written
+as filed — so this widens what can be SUGGESTED, not what is committed. `/conflict-check` run 2026-09-04:
+**no open PR touches these files**; master merged clean.
+
+### Next actions
+
+1. 🔴 **§GAPS-5 — owner decision still open.** Complete `reviewMemo`'s write half (no production caller for
+   `POST .../review-memo`, so both toolbar actions always hit the negative banner) **or** retire
+   `summaryPage`. Recommendation: complete `reviewMemo`, retire `summaryPage`. **Neither path delivers
+   today.**
+2. Rename the memo feature to **"… Summary"** when #1 is decided — and pair it with wiring
+   `sprk_outputtypecode` ("REVMEMO"), because the row is currently categorised by matching its **display
+   name**, so renaming orphans rows silently. Free only while no rows exist.
+3. Owner UAT of item 8 — no findings reported yet (see §UAT).
+4. Deferred, evidenced, not urgent: numbering item 3 (stale decoration), editable spacing (UAT item 6),
+   `projects/INDEX.md` stale since 2026-06-26.

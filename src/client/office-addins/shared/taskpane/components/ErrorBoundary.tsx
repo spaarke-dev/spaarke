@@ -186,7 +186,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           error={this.state.error}
           errorInfo={this.state.errorInfo}
           onReset={this.handleReset}
-          showDetails={this.props.showDetails}
+          {...(this.props.showDetails !== undefined ? { showDetails: this.props.showDetails } : {})}
         />
       );
     }

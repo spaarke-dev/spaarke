@@ -87,8 +87,8 @@
 //     continues to the next entity type.
 //
 // ADR-013 (placement under Services/Ai/Membership/); ADR-010 (Singleton +
-// IServiceScopeFactory.CreateScope per execution); ADR-001 (pure in-process
-// scheduling; no Azure Functions); bff-extensions.md §A pre-merge
+// IServiceScopeFactory.CreateScope per execution); ADR-036 (in-BFF
+// scheduling; placement per ADR-052); bff-extensions.md §A pre-merge
 // checklist applied in notes/bff-publish-size-task085.md.
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md FR-2P2.7,
@@ -348,7 +348,16 @@ public sealed class MembershipReconciliationJob : IScheduledJob
         try
         {
             var discoveryResult = await discovery.DiscoverAsync(entityType, ct).ConfigureAwait(false);
-            descriptors = discoveryResult.DiscoveredFields;
+            // Task 172 (GitHub #1011): discovery emits one descriptor per matched identity type of a
+            // polymorphic column (ownerid → SystemUser AND Team). This job works PER FIELD — it projects the
+            // column once, keys the orphan scan by field, and types each value from its own
+            // EntityReference.LogicalName (ReadLookupAsIdentity) — so it keeps ONE descriptor per field (the
+            // first, in discovery's stable order). Without this, ToDictionary below threw on the duplicate
+            // key and every value of a polymorphic column was dispatched twice.
+            descriptors = discoveryResult.DiscoveredFields
+                .GroupBy(d => d.Field, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.First())
+                .ToList();
         }
         catch (OperationCanceledException)
         {
@@ -469,6 +478,11 @@ public sealed class MembershipReconciliationJob : IScheduledJob
         var errors = 0;
         var expectedKeys = new HashSet<JunctionKey>();
 
+        // Task 152 (ADR-034 A3): an APPLICATION user is not a person and gets no junction row — the same rule the
+        // create-time publishers apply (MembershipOwnerEvents), so the two writers agree. One read per distinct user
+        // per entity pass.
+        var applicationUsers = new Dictionary<Guid, bool?>();
+
         // Columns we want from each parent: the row id (always projected by
         // QueryExpression) + each discovered lookup field. The id column is
         // implicitly returned via Entity.Id; we add the lookup columns.
@@ -540,6 +554,32 @@ public sealed class MembershipReconciliationJob : IScheduledJob
                         EntityLogicalName: entityType,
                         EntityRecordId: parent.Id,
                         SourceField: descriptor.Field);
+
+                    if (personIdType == PersonIdentityType.User)
+                    {
+                        if (!applicationUsers.TryGetValue(personId.Value, out var isApplicationUser))
+                        {
+                            isApplicationUser = await ApplicationUserCheck
+                                .IsApplicationUserAsync(entityService, personId.Value, _logger, ct)
+                                .ConfigureAwait(false);
+                            applicationUsers[personId.Value] = isApplicationUser;
+                        }
+
+                        if (isApplicationUser == true)
+                        {
+                            // Not expected → an existing row for it is removed by the orphan scan below.
+                            continue;
+                        }
+
+                        if (isApplicationUser is null)
+                        {
+                            // Unknown: leave any existing row exactly as it is (expected, not re-dispatched) and count
+                            // it — never delete a person's membership on a read fault.
+                            expectedKeys.Add(key);
+                            errors++;
+                            continue;
+                        }
+                    }
 
                     expectedKeys.Add(key);
 
@@ -734,11 +774,16 @@ public sealed class MembershipReconciliationJob : IScheduledJob
     /// <summary>
     /// Reads a lookup attribute from a parent entity and resolves it to
     /// (PersonId, PersonIdentityType). Returns (null, null) when the
-    /// lookup is not populated OR the target entity is not a recognized
-    /// identity type (the descriptor's IdentityType string maps to the
-    /// closed <see cref="PersonIdentityType"/> enum via
-    /// <see cref="TryParseIdentityType"/>).
+    /// lookup is not populated OR the target is not a recognized identity type.
     /// </summary>
+    /// <remarks>
+    /// Task 152 (ADR-034 A3): an <see cref="EntityReference"/> value is typed from its OWN
+    /// <see cref="EntityReference.LogicalName"/> — a team-valued <c>ownerid</c> is a Team, a user-valued one a User.
+    /// The descriptor's type is only the fallback for a bare <see cref="Guid"/> value. Typing from the descriptor
+    /// recorded every team-owned row's team id as a User, because the polymorphic Owner column then DISCOVERED as
+    /// SystemUser only (ADR-034 A1.1; since task 172 it discovers as SystemUser AND Team, and this job keeps the first)
+    /// — and it made this writer and the create-time publishers key one membership two ways.
+    /// </remarks>
     internal static (Guid? personId, PersonIdentityType? personIdType)
         ReadLookupAsIdentity(Entity parent, MembershipDescriptor descriptor)
     {
@@ -756,23 +801,33 @@ public sealed class MembershipReconciliationJob : IScheduledJob
             return (null, null);
         }
 
-        Guid? id = raw switch
+        if (raw is EntityReference reference)
         {
-            EntityReference er => er.Id == Guid.Empty ? null : er.Id,
-            Guid g => g == Guid.Empty ? null : g,
-            _ => null,
-        };
-        if (id is null)
-        {
-            return (null, null);
+            if (reference.Id == Guid.Empty)
+            {
+                return (null, null);
+            }
+
+            if (!string.IsNullOrWhiteSpace(reference.LogicalName))
+            {
+                return ApplicationUserCheck.TryMapLogicalName(reference.LogicalName, out var valueType)
+                    ? (reference.Id, valueType)
+                    : (null, null);
+            }
+
+            return TryParseIdentityType(descriptor.IdentityType, out var declaredType)
+                ? (reference.Id, declaredType)
+                : (null, null);
         }
 
-        if (!TryParseIdentityType(descriptor.IdentityType, out var identityType))
+        if (raw is Guid g && g != Guid.Empty)
         {
-            return (null, null);
+            return TryParseIdentityType(descriptor.IdentityType, out var identityType)
+                ? (g, identityType)
+                : (null, null);
         }
 
-        return (id, identityType);
+        return (null, null);
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 # Spaarke Redis Cache Remediation (R1)
 
+> **Portfolio**: [Project #1230](https://github.com/spaarke-dev/spaarke/issues/1230) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-06-26 (closed)
 >
 > **Status**: ✅ **CLOSED** — all 5 phases + R7-S7 telemetry pipeline closure shipped. 6 defer items filed as GitHub Issues #462–#467; #466 DEF-005 (Managed Redis) closed Won't Fix; #462 DEF-001 (Entra ID) superseded by R2 Theme B. Follow-on work scoped in [`spaarke-redis-cache-remediation-r2`](../spaarke-redis-cache-remediation-r2/). Code review sign-off complete 2026-06-26.

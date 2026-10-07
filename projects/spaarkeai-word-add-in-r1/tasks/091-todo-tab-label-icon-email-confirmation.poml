@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT-2/4: the "To Do" tab — label, the blue Microsoft To Do check icon, tab spacing, Assigned To shows email, a clear confirmation and an Open-in-Spaarke link after creating</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` in the task pane and BFF `.cs` (`OfficeSearchService` contact projection + its response DTO), with tests on both sides.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI adaptation plus one additive response field; every pattern copied from existing code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT3-W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave W3, alone: it builds the BFF and edits `App.tsx` (092's in W1). Owns `TaskPaneToolbar.tsx`, `TaskPaneNavigation.tsx`, `CreateTodoView.tsx`, `App.tsx` (To Do + contact search handlers only), a new local icon file, and the BFF search code.</parallel-reason>
+    <deps>088, 092, 093</deps>
+    <tags>frontend, office-addins, typescript, bff-api, todo, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 3 (2026-10-03), UAT-2: "Create To Do, change label to 'To Do'; use the blue check icon not the current icon; the Smart To Do (matches Microsoft To Do app icon); for the Assigned To pick include the person's email so can differentiate if multiple contact records; after saved need more obvious confirmation that the To Do was created; navigation link to open in Spaarke". UAT-4: "add space between the Save, Create To Do, Find". Record: `notes/042-uat-round3-2026-10-03.md` §1.</prompt>
+
+  <role>SPAARKE full-stack developer on the Office add-in (React 19, Fluent UI v9) and the BFF Office search.</role>
+
+  <goal>The pane's tab reads "To Do" with the blue Microsoft To Do check icon and the tabs are visibly spaced; a user picking an assignee sees each contact's email; after creating a To Do the user sees an unmistakable confirmation and can open it in Spaarke.</goal>
+
+  <context>
+    <background>
+      - **Tabs**: the rendered tab row is `TaskPaneToolbar.tsx:131-146` (size "small", no gap; bar styles 42-69); the
+        label/icon come from `TaskPaneNavigation.tsx:100-104` (`'Create To Do'`, `TaskListAddRegular`). The toolbar
+        announces the label (136-137). `TaskPaneNavigation`'s own styles (38-52) are dead — the component is not
+        rendered (comment 18-26). Tests: `TaskPaneNavigation.test.tsx`, `TaskPaneShell.test.tsx`.
+      - **Icon**: the Smart To Do surfaces use `MicrosoftToDoIcon` (`src/client/shared/Spaarke.UI.Components/src/icons/MicrosoftToDoIcon.tsx:29-50`
+        — the Microsoft To Do checkmark; `active` = brand blue), e.g. `src/solutions/SmartTodo/src/components/KanbanHeader.tsx:36,169`.
+        The add-in cannot import `@spaarke/ui-components`; copy the SVG into a local component (the precedent for a
+        local copy is `FindResultsList.tsx:85-88`), with a comment naming the source file so the two can be kept in step.
+      - **Assigned To**: `CreateTodoView.tsx:410-464` (rows: name + `displayInfo`, 439-458; chip: name only, 411-426).
+        Search: `App.tsx` `handleSearchContacts` (449-484) → `GET /api/office/search/entities?q=…&amp;type=Contact&amp;top=10`,
+        mapping id/name/displayInfo (471-478); `ContactOption` (`CreateTodoView.tsx:90-94`). Server: contact config
+        `OfficeSearchService.cs:296` (`fullname` + `jobtitle`), selected columns 355-357, display text 405, DTO
+        `EntitySearchResponse.cs:48-115` (its `PrimaryField` doc says "e.g., email for contacts", 87-91, but is set to
+        the reference value or name at 406). Today a row reads "Attorney" (job title) or "contact" (none).
+      - **After create**: `handleCreate` (`CreateTodoView.tsx:281-310`) sets `'created'`, shows a disabled gray "Saved"
+        (514-518, style 200-204) and disables the fields (231). No message, no announcement, no link. The server
+        returns 201 `{todoId, name}` (`OfficeEndpoints.cs:1430`; `Models/Office/CreateTodoRequest.cs:87-94`) but
+        `App.handleCreateTodo` (398-446) returns `{ok:true}` and drops it; `CreateTodoResult` is `{ok, error}` (107-110).
+      - **Open in Spaarke**: `openRecord({ entityType: 'sprk_todo', recordId })` via `openRecordLauncher` — which, after
+        task 088, carries `appname` (the Spaarke app). Show it only with `canOpenBrowserWindow` and `ORG_URL`.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-03">Tab label exactly "To Do". The view heading may stay "Create a To Do"; its icon becomes the same blue check.</constraint>
+    <constraint source="this task">Email is DISPLAY data: add `emailaddress1` to the contact projection and a dedicated response field (e.g. `secondaryText`/`email`), additive and optional; do NOT add it to the searched columns and do not repurpose `PrimaryField`'s existing value. Other entity types' responses are unchanged.</constraint>
+    <constraint source="security">The contact search keeps its existing per-user trim (task 062). The added column is read in the same query, under the same trim — no second query, no app-only read.</constraint>
+    <constraint source="ADR-021">Fluent v9 `MessageBar` (intent success) for the confirmation, semantic tokens, dark mode; the confirmation is also announced to screen readers (the pane's existing `useAnnounce`).</constraint>
+    <constraint source="NFR-10">The Open link is gated by capability, not host.</constraint>
+    <constraint source="CLAUDE.md §10">BFF obligations: placement stated; publish size vs a FRESH master build (Compress-Archive, equal file counts); CVE check.</constraint>
+    <constraint source="ADR-038">Client tests listed in `ci-gated-suites.txt`; server test in the existing Office search test class.</constraint>
+    <constraint source="scope">Do NOT edit 089's files (`WordAdapter.ts`, `adapters/types.ts`, `useSaveFlow.ts`, `word/commands/**`, `quickSaveHelpers.ts`, manifests, `packaging/**`, `webpack.config.js`, `word/taskpane/index.tsx`); they are done and out of scope.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The tab reads "To Do" with the blue check icon in both hosts; the screen-reader announcement says "To Do"; the updated tests pin it.</criterion>
+    <criterion testable="true">The three tabs have visible spacing (a gap on the tab list); the tab bar does not wrap or clip at the pane's minimum width (320 px).</criterion>
+    <criterion testable="true">Assigned To search rows show name, and email when the contact has one (job title kept as a third, quieter line when present); the selected chip shows name and email. A contact with no email shows name only — no literal "contact".</criterion>
+    <criterion testable="true">Server: the contact search response carries the email field; a test asserts it is selected in the same query and that `emailaddress1` is not in the searched columns; non-contact responses are unchanged.</criterion>
+    <criterion testable="true">After a successful create: a success MessageBar "To Do created: {name}" with an "Open in Spaarke" link that opens the new `sprk_todo` via `openRecord`; the confirmation is announced; with `canOpenBrowserWindow` false or no `ORG_URL`, the message shows without the link.</criterion>
+    <criterion testable="true">Negative: a failed create shows the server's reason (not only "Create failed (status)") and no success message.</criterion>
+    <criterion testable="true">Gates: gated jest green; lint 0; typecheck 0 production; Office search tests and ArchTests green; publish delta reported vs fresh master; CVE clean.</criterion>
+    <criterion testable="true">Live (after a deploy): two contacts with the same name are told apart by email; creating a To Do shows the message and the link opens it in Matter Management. If unavailable, leave open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The contact search's per-user trim is applied in a way that adding a column to the projection would bypass (e.g. a second, app-only fetch) — STOP and report.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read the files in the background; confirm the 201 body shape and the search query path.</step>
+    <step>Server: email in the contact projection + DTO field; test.</step>
+    <step>Client: tab label/icon/spacing; contact rows and chip; `handleCreateTodo` returns `todoId`; confirmation + Open link; tests.</step>
+    <step>Gates, publish size, conflict-check; record in `notes/091-todo-tab.md`; TASK-INDEX 091 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>`MicrosoftToDoIcon` (shared library), the contact search route and DTO, the 201 body with `todoId`, `openRecordLauncher` and `useAnnounce` all exist.</existing>
+    <extension>Yes — a local copy of an existing icon, one additive response field, and wiring of data the server already returns. No new route or service.</extension>
+    <cost-of-doing-nothing>Users cannot tell same-named contacts apart and may assign a To Do to the wrong person record; a created To Do gives no visible confirmation and cannot be reached from the pane.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="To Do tab">
+      <steps>
+        <step>Open the pane in Word and Outlook: tabs "Save · To Do · Find", spaced, the To Do tab with the blue check.</step>
+        <step>Assigned To: type a name shared by two contacts — each row shows its email.</step>
+        <step>Create: a green confirmation with "Open in Spaarke"; the link opens the To Do in Matter Management.</step>
+      </steps>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Office dark theme: icon, rows and confirmation are readable.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/icons/MicrosoftToDoIcon.tsx</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeSearchService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Models/Office/EntitySearchResponse.cs</file>
+    <file role="read">src/client/shared/Spaarke.UI.Components/src/icons/MicrosoftToDoIcon.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/091-todo-tab.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/062-entity-search-trim.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/049-todo-tab-parity.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeSearchService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/091-todo-tab.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-10-04. Full detail: projects/spaarkeai-word-add-in-r1/notes/091-todo-tab.md.
+    Server: OfficeSearchService.cs's EntitySearchMeta gained an optional EmailField (Contact only,
+    "emailaddress1"); selected in the SAME impersonated query, never added to the $filter predicate;
+    EntitySearchResponse.cs gained an additive, nullable Email field. Client: tab label "Create To Do" ->
+    "To Do" with a new local MicrosoftToDoIcon.tsx (copied from Spaarke.UI.Components per the add-in's
+    ADR-012 exception); TabList gap for visible tab spacing; Assigned-To rows/chip show email + a quieter
+    job-title line (never the server's literal "contact" fallback); handleCreateTodo now returns todoId
+    and uses describeFetchFailure for honest error text; CreateTodoView shows a success MessageBar
+    ("To Do created: {name}") with an "Open in Spaarke" link gated on canOpenRecord + ORG_URL (NFR-10).
+    Gates: 70/70 gated jest suites green (969 tests, incl. new CreateTodoView.test.tsx, 7 tests); lint 0;
+    typecheck 68 total / 0 production (pre-existing baseline, none in task files); dotnet build 0 errors;
+    Office search unit+contract tests 6+11 passed; ArchTests 349/349; CVE clean (no package changes). A
+    full ~12,400-test BFF suite run was attempted beyond the POML's own required gate and stopped after
+    25+ min with no output signal (not required by acceptance criterion 7 — see notes file §5); not an
+    independent full-suite confirmation, flagged as open for the main session.
+    Publish size: owed to the main session per CLAUDE.md §10 hazard three (this worktree built repeatedly).
+    Live UAT (criterion 8): open — no deployed host in this session.
+    code-review: PASS, 0 critical (a few non-blocking observations, see notes file).
+    adr-check: 0 violations across ADR-021, ADR-008, ADR-012, ADR-038, ADR-019.
+  </notes>
+</task>

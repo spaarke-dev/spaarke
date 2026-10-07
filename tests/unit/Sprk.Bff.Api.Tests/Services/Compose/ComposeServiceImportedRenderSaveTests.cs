@@ -67,6 +67,10 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
+
+        // No acting-user container setup here: this fixture exercises the REPLACE path (a document that
+        // already has a drive-item), which never reaches issue #858's create-on-save container
+        // derivation. Adding the setup would arrange a call that is never made.
     }
 
     private ComposeService CreateSut() => new(
@@ -74,7 +78,9 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions.Object,
         _dataverse.Object,
         _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     /// <summary>A retained-original carrier whose STYLES PART carries a distinctive custom style —
     /// the oracle that the save rendered INTO the carrier (parts preserved) rather than synthesizing a
@@ -588,4 +594,69 @@ public sealed class ComposeServiceImportedRenderSaveTests
             "a fact that carries an author keeps it — imported revisions round-trip their true authors");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Document Revision Report appendix (spaarkeai-compose-r8, UAT item 8) — the SAVE-PATH WIRING.
+    //
+    // ComposeRevisionReportSeamTests proves the generator and AppendSection agree over real corpus bytes.
+    // What it cannot reach is whether SaveAsync actually CALLS them, which is the half that silently does
+    // nothing if the request field is added and the call site is not. Worth noting: the sibling
+    // `SummaryPage` field has no equivalent wiring test — this closes that gap for the new field rather
+    // than matching a weak precedent.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReport_AppendsTheReportToThePersistedBytes()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(
+                Summary: "The reviewer added a liability cap.",
+                Changes: new[]
+                {
+                    new ComposeRevisionChangeInput("insertion", "Section 7.4", "Added a 12-month cap on aggregate liability."),
+                },
+                DocumentName: "Master Services Agreement.docx",
+                DocumentVersion: "7",
+                AsOf: new DateTimeOffset(2026, 9, 3, 14, 30, 0, TimeSpan.Zero)),
+        };
+
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().Contain("Document Revision Report", "the appendix must reach the PERSISTED bytes, not just the generator");
+        text.Should().Contain("The reviewer added a liability cap.");
+        text.Should().Contain("Section 7.4");
+        text.Should().Contain("version 7", "the scope line travels with the report into the document");
+        text.Should().Contain("Edited body text.", "appending the report must not disturb the document it describes");
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReportCarryingNothingToReport_AppendsNothing()
+    {
+        // The branch the sibling SummaryPage path does not have. A report over no changes would append a
+        // heading with nothing under it — the document-shaped version of the phantom change the client
+        // producer refuses to dispatch.
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(string.Empty, Array.Empty<ComposeRevisionChangeInput>()),
+        };
+
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty("the save itself still succeeds — an empty report is not a failure");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().NotContain("Document Revision Report", "nothing to report means nothing appended");
+        text.Should().Contain("Edited body text.", "the ordinary save is unaffected");
+    }
 }

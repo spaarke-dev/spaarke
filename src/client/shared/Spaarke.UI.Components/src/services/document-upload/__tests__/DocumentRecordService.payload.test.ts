@@ -13,9 +13,12 @@
  * regression by asserting `sprk_containerid` is NOT in the payload under any
  * code path (associated, unassociated, with index, without index).
  *
- * **Regression guard**: `sprk_graphdriveid` must still be populated from
- * `parentContext.containerId` exactly as before (regression coverage for the
- * pre-existing behavior).
+ * **Pointer guard (unified-access-control-r2 task 166 f1, owner round 21 item 1)**: the create
+ * payload carries NO SPE pointer (`sprk_graphdriveid` / `sprk_graphitemid`), and no `sprk_hasfile`
+ * / `sprk_filepath` either. Those columns are field-secured and writable by the BFF identity only:
+ * the service hands the SERVER's upload answer (task 076 — `SpeFileMetadata.driveId` + `id`) to the
+ * BFF attach (`attachFile`), which verifies it and stamps the pointer. A row whose file the BFF
+ * refuses is removed and reported.
  *
  * @see spec.md FR-WIZ-07
  * @see design.md INV (Document container field)
@@ -46,18 +49,21 @@ const silentLogger: ILogger = {
   debug: () => undefined,
 };
 
-/** Captures every create/update call so tests can assert on the exact payload. */
+/** Captures every create/update/delete call so tests can assert on the exact payload. */
 interface CapturingDataverseClient extends IDataverseClient {
   createCalls: Array<{ entityLogicalName: string; data: Record<string, unknown> }>;
   updateCalls: Array<{ entityLogicalName: string; id: string; data: Record<string, unknown> }>;
+  deleteCalls: Array<{ entityLogicalName: string; id: string }>;
 }
 
 function makeCapturingClient(): CapturingDataverseClient {
   const createCalls: CapturingDataverseClient['createCalls'] = [];
   const updateCalls: CapturingDataverseClient['updateCalls'] = [];
+  const deleteCalls: CapturingDataverseClient['deleteCalls'] = [];
   return {
     createCalls,
     updateCalls,
+    deleteCalls,
     createRecord: async (entityLogicalName, data): Promise<DataverseRecordRef> => {
       createCalls.push({ entityLogicalName, data });
       return { id: 'created-doc-id-' + createCalls.length };
@@ -65,7 +71,23 @@ function makeCapturingClient(): CapturingDataverseClient {
     updateRecord: async (entityLogicalName, id, data): Promise<void> => {
       updateCalls.push({ entityLogicalName, id, data });
     },
+    deleteRecord: async (entityLogicalName, id): Promise<void> => {
+      deleteCalls.push({ entityLogicalName, id });
+    },
   };
+}
+
+/** The pointer columns only the BFF writes (task 166 f1) — never in a client create payload. */
+const BFF_ONLY_COLUMNS = ['sprk_graphdriveid', 'sprk_graphitemid', 'sprk_hasfile', 'sprk_filepath'];
+
+/** Records every attach the service asks the BFF for; `refuse` makes the BFF refuse. */
+function makeAttacher(refuse?: Error) {
+  const calls: Array<{ documentId: string; file: SpeFileMetadata }> = [];
+  const attach = async (documentId: string, file: SpeFileMetadata): Promise<void> => {
+    calls.push({ documentId, file });
+    if (refuse) throw refuse;
+  };
+  return { calls, attach };
 }
 
 /** NavMapClient stub — returns a deterministic navigation property + entity set name. */
@@ -96,11 +118,14 @@ function makeMatterConfig(): EntityDocumentConfig {
   };
 }
 
-function makeFile(name = 'contract.pdf', size = 12345): SpeFileMetadata {
+function makeFile(name = 'contract.pdf', size = 12345, driveId = 'drive-id-abc'): SpeFileMetadata {
   return {
     id: 'graph-item-id-001',
     name,
     size,
+    // The SERVER's answer for where these bytes went (task 076). This, not the parent context,
+    // is what `sprk_graphdriveid` must be built from.
+    driveId,
     createdDateTime: '2026-06-07T00:00:00Z',
     lastModifiedDateTime: '2026-06-07T00:00:00Z',
     isFolder: false,
@@ -112,7 +137,6 @@ function makeParentContext(overrides: Partial<ParentContext> = {}): ParentContex
   return {
     parentEntityName: 'sprk_matter',
     parentRecordId: '11111111-1111-1111-1111-111111111111',
-    containerId: 'drive-id-abc',
     parentDisplayName: 'MAT-2026-001',
     ...overrides,
   };
@@ -127,12 +151,14 @@ function makeFormData(): DocumentFormData {
 
 function makeService(
   client: IDataverseClient,
-  config: EntityDocumentConfig | null = makeMatterConfig()
+  config: EntityDocumentConfig | null = makeMatterConfig(),
+  attacher = makeAttacher()
 ): DocumentRecordService {
   return new DocumentRecordService({
     dataverseClient: client,
     navMapClient: makeNavMapStub(config?.navigationPropertyName, 'sprk_matter'),
     getEntityConfig: _name => config,
+    attachFile: attacher.attach,
     logger: silentLogger,
   });
 }
@@ -225,19 +251,40 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
 
-  it('STILL populates sprk_graphdriveid from parentContext.containerId (regression guard — pre-existing behavior preserved)', async () => {
+  it('hands the SERVER-reported file to the BFF attach, and never writes the pointer itself (task 166 f1)', async () => {
     const client = makeCapturingClient();
-    const svc = makeService(client);
+    const attacher = makeAttacher();
+    const svc = makeService(client, makeMatterConfig(), attacher);
 
-    await svc.createDocuments(
-      [makeFile()],
-      makeParentContext({ containerId: 'drive-id-abc' }),
+    const results = await svc.createDocuments(
+      // A secure record's own container — the value only the server knows (task 076).
+      [makeFile('contract.pdf', 12345, 'b!secure-record-own-container')],
+      makeParentContext(),
       makeFormData(),
       'spaarke-knowledge-index-v2'
     );
 
+    expect(results[0].success).toBe(true);
     const payload = client.createCalls[0].data;
-    expect(payload.sprk_graphdriveid).toBe('drive-id-abc');
+    for (const column of BFF_ONLY_COLUMNS) {
+      expect(column in payload).toBe(false);
+    }
+    expect(attacher.calls).toHaveLength(1);
+    expect(attacher.calls[0].documentId).toBe('created-doc-id-1');
+    expect(attacher.calls[0].file.driveId).toBe('b!secure-record-own-container');
+    expect(attacher.calls[0].file.id).toBe('graph-item-id-001');
+  });
+
+  it('removes the row and reports the file when the BFF refuses to attach it', async () => {
+    const client = makeCapturingClient();
+    const attacher = makeAttacher(new Error("The file is not stored where this document's files belong."));
+    const svc = makeService(client, makeMatterConfig(), attacher);
+
+    const results = await svc.createDocuments([makeFile()], makeParentContext(), makeFormData());
+
+    expect(results[0].success).toBe(false);
+    expect(results[0].error).toContain('not stored where');
+    expect(client.deleteCalls).toEqual([{ entityLogicalName: 'sprk_document', id: 'created-doc-id-1' }]);
   });
 
   it('preserves all pre-existing Document fields alongside the new sprk_searchindexname', async () => {
@@ -255,12 +302,12 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     expect(payload.sprk_documentname).toBe('Q1 Report');
     expect(payload.sprk_filename).toBe('report.docx');
     expect(payload.sprk_filesize).toBe(9876);
-    expect(payload.sprk_graphitemid).toBe('graph-item-id-001');
-    expect(payload.sprk_graphdriveid).toBe('drive-id-abc');
-    expect(payload.sprk_filepath).toBe('https://example.sharepoint.com/Documents/report.docx');
     expect(payload.sprk_documentdescription).toBe('Final');
-    expect(payload.sprk_hasfile).toBe(true);
     expect(payload.sprk_searchindexname).toBe('spaarke-file-index');
+    // The pointer, the file flag and the path are the BFF's to write (task 166 f1).
+    for (const column of BFF_ONLY_COLUMNS) {
+      expect(column in payload).toBe(false);
+    }
     // Parent @odata.bind — sanitized GUID (braces stripped, lowercased)
     expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(22222222-2222-2222-2222-222222222222)');
     // INV
@@ -282,7 +329,7 @@ describe('DocumentRecordService.buildRecordPayload — FR-WIZ-07 (associated mod
     for (const call of client.createCalls) {
       expect(call.data.sprk_searchindexname).toBe('spaarke-knowledge-index-v2');
       expect('sprk_containerid' in call.data).toBe(false);
-      expect(call.data.sprk_graphdriveid).toBe('drive-id-abc');
+      expect('sprk_graphdriveid' in call.data).toBe(false);
     }
   });
 });
@@ -296,7 +343,6 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     return {
       parentEntityName: '',
       parentRecordId: '',
-      containerId: 'drive-id-unassoc',
       parentDisplayName: '',
     };
   }
@@ -330,12 +376,23 @@ describe('DocumentRecordService — FR-WIZ-07 (unassociated mode)', () => {
     expect('sprk_containerid' in client.createCalls[0].data).toBe(false);
   });
 
-  it('STILL populates sprk_graphdriveid in unassociated payload (regression guard)', async () => {
+  it("attaches the unassociated document's file through the BFF too, from file.driveId", async () => {
     const client = makeCapturingClient();
-    const svc = makeService(client);
+    const attacher = makeAttacher();
+    const svc = makeService(client, makeMatterConfig(), attacher);
 
-    await svc.createDocuments([makeFile()], unassociatedParent(), makeFormData(), 'spaarke-knowledge-index-v2');
+    await svc.createDocuments(
+      [makeFile('contract.pdf', 12345, 'drive-id-unassoc')],
+      unassociatedParent(),
+      makeFormData(),
+      'spaarke-knowledge-index-v2'
+    );
 
-    expect(client.createCalls[0].data.sprk_graphdriveid).toBe('drive-id-unassoc');
+    // Both code paths take the SAME route. They diverged historically, and a divergence here is how
+    // "unassociated documents carry a client-written pointer" would come back.
+    for (const column of BFF_ONLY_COLUMNS) {
+      expect(column in client.createCalls[0].data).toBe(false);
+    }
+    expect(attacher.calls[0].file.driveId).toBe('drive-id-unassoc');
   });
 });

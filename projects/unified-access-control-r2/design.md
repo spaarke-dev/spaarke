@@ -35,9 +35,9 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 
 ```xml
 <hot-path-declaration>
-  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints -->
+  <bff>Y</bff>                 <!-- evaluator, impersonated read source, delegation checks, grant/share endpoints; scheduler lease + admin jobs trigger (task 103) -->
   <spaarke-ai>N</spaarke-ai>
-  <ci-workflows>N</ci-workflows>
+  <ci-workflows>Y</ci-workflows>       <!-- 2026-10-03 task 157 residual 4 (owner rounds 10 and 13): ci-tier1-blocking.yml gains the datagrid-external-host-gate job, ADVISORY until three green runs on ubuntu-latest, then blocking (round 13 item 11), classified in classify-tier1. ci-router.yml is NOT changed (round 13 item 12). GATE REPAIR under the shadow-window carve-out. Earlier tier1 touches: tasks 024/074/080 and #969 -->
   <skill-directives>N</skill-directives>
   <root-claude-md>N</root-claude-md>
 </hot-path-declaration>
@@ -52,7 +52,7 @@ A CIAM contact can never transit the first; internal BFF endpoints never transit
 | Access evaluator | `AccessibleRecordSetService` (fail-closed, principal-agnostic, ADR-sanctioned decision point) | **Extend in place** — change return type to carry rights; add veto terms | Two evaluators keep diverging; the broader one guards the weaker surface |
 | Impersonated root-set source | `DataverseWebApiService.RetrieveMultipleImpersonatedAsync` + `DataverseImpersonation` — **already built and live** | **Reuse** — new thin `ImpersonatedRootSetSource` calling it | Type 1 SPA access keeps disagreeing with the MDA in both directions |
 | POA share seam | `IDataverseAccessGrantService` (systemuser-only, no revoke) **and** a duplicate client in `PlaybookSharingService` (does teams + revoke) | **Consolidate the two**, parameterize principal | A third POA client; internal shares unrevocable from the UI |
-| Membership resolver | `MembershipResolverService` (ADR-034) | **Reuse unchanged** for the contact term; other consumers need `byRole` | — |
+| Membership resolver | `MembershipResolverService` (ADR-034) | **Extend additively** (was "Reuse unchanged" — corrected 2026-09-17, task 043): task 041 added the `AccessConferringOnly` registry gate and task 043 added `OrganizationIds` binding plus the `HashOptions` cache-key fix. Both are backward-compatible additions inside the canonical resolver (ADR-034 M1 — no parallel engine), so the *spirit* of "reuse" holds, but the row as written contradicted the diff | — |
 | Attestation log | none | **New** — smallest possible append-only table | "Who could see this matter on 3 March?" is unanswerable; required for privilege logs and breach inquiry |
 
 No new NuGet packages. Publish-size delta expected ≈0; measured per CLAUDE.md §10 bullet 4 (ceiling 60 MB, baseline ~44.96 MB incl. PDBs).
@@ -100,10 +100,30 @@ Types 2 and 3 are **identical** on record permission; they differ only by creden
 
 ### 4.3 Records: core vs child
 
-| Class | Entities | Access |
-|---|---|---|
-| **Core** | `sprk_project`, `sprk_matter`, `sprk_workassignment`, `sprk_servicerequest` | Direct grants required |
-| **Child** | `sprk_invoice`, `sprk_communication`, `sprk_document`, `sprk_event`, `sprk_todo`, analysis | **Inherit** from parent |
+| Class | Entities | Access | Externally grantable? |
+|---|---|---|---|
+| **Core** | `sprk_project`, `sprk_matter`, `sprk_workassignment` | Direct grants required | **Yes** — `sprk_externalrecordaccess` carries a lookup for each |
+| **Core, internal-only** | `sprk_servicerequest` | Direct access required; **scoped by REQUESTER, not by grant** | 🔴 **No — never** |
+| **Child** | `sprk_invoice`, `sprk_communication`, `sprk_document`, `sprk_event`, `sprk_todo`, analysis | **Inherit** from parent | n/a |
+
+🔴 **The row split above is the correction, and it matters** (owner-confirmed 2026-09-09, task 028).
+This table previously listed all four core types in one row, which read as *"all four are externally
+grantable"*. **Service requests are submitted by internal workforce users through the SPA and must
+never be reachable by an external contact** (a law firm, opposing counsel, a vendor). Accordingly:
+
+- `sprk_externalrecordaccess` carries lookups for **project, matter, work assignment, invoice and
+  organization — and deliberately NO service request** (verified live 2026-09-09). There is no way to
+  grant one, by construction.
+- `CallerPrincipal` therefore composes exactly **three** externally-grantable root sets. A fourth
+  would compose from grants that cannot exist — an always-empty set that *looks* like a fix.
+- Service-request scoping **already exists**, by a different and correct mechanism: the
+  `service-requests` external module scopes on `sprk_requestedby == caller contact` and returns an
+  empty set for any non-workforce plane (server-side fail-closed, not reliant on the client hiding
+  the tab). Shipped by `spaarke-SPA-external-access-platform-r2` #028, 2026-08-10.
+
+Note also that the grant table's lookup list is **not** the root-set list in either direction: it
+carries `sprk_invoice` (a *child*) and `sprk_organization` (which drives the org-expansion term).
+"Grantable type" and "accessible root" were never the same concept.
 
 **One hop, by construction.** `RegardingResolver` denormalizes the *ultimate core-record ancestor* onto each child, so a To Do regarding an Email regarding a Matter carries `sprk_regardingmatter` directly. Chains never need traversal; ADR-034's 1-hop cap holds unamended. The ancestor stamp must be re-applied on reparent.
 
@@ -447,7 +467,7 @@ resolution strategies in the codebase today, not one:
 
 | # | Strategy | Where | Secure-project behaviour needed |
 |---|---|---|---|
-| 1 | Acting **user's BU** → `businessunit.sprk_containerid` | 7 client sites; canonical resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. The BFF deliberately does not resolve this server-side (INV-7) | **special case** → project's own `sprk_containerid` |
+| 1 | Acting **user's BU** → `businessunit.sprk_containerid` | 7 client sites; canonical resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. ⚠️ **Row corrected 2026-08-27 — see the INV-7 note below.** Strategy 1 is the DEFECT, not the design, and the BFF now DOES resolve server-side | **special case** → project's own `sprk_containerid` |
 | 2 | A single global `ArchiveContainerId` from config | server-side email/communication ingest (`IncomingCommunicationProcessor:868, 991`) | **special case** → the parent secure project's container, else secure attachments land in the shared archive |
 | 3 | The document's own `GraphDriveId` / `GraphItemId` | every read/download path once a document exists | ✅ no change — already per-document |
 
@@ -455,9 +475,65 @@ Strategy 3 needs nothing. Strategies 1 and 2 both need the special case, and **2
 forget** because it has no client involved and no wizard to put a resolver in.
 
 **Implementation rule**: one shared, record-aware resolver — *if the context record is a secure project,
-use its `sprk_containerid`; otherwise the existing BU cascade* — and route **every** call site through
-it. Do not add the `issecure` test at seven client sites; that is seven places to drift. This respects
-INV-7 (the resolver stays client-side for strategy 1) while giving strategy 2 a server-side equivalent.
+use its `sprk_containerid`; otherwise the BU cascade* — and route **every** call site through it. Do not
+add the `issecure` test at seven client sites; that is seven places to drift.
+
+> ### ⚠️ CORRECTION 2026-08-27 (tasks 075/076/083) — INV-7 was MISREAD, and it already specifies this model
+>
+> This section previously said *"the BFF deliberately does not resolve this server-side (INV-7)"* and
+> *"this respects INV-7 (the resolver stays client-side for strategy 1)"*. **Both statements are
+> withdrawn.** Two things were wrong:
+>
+> **1. INV-7 does not say that — it says the opposite, and we were violating it.** Read the source,
+> [`spaarke-multi-container-multi-index-r1/design.md` §3 INV-7](../spaarke-multi-container-multi-index-r1/design.md#inv-7--resolution-chain-canonical-order):
+>
+> > **INV-7 — Resolution chain (canonical order).** For any record needing a container/index:
+> > 1. **Record's own field** (if set) — wins
+> > 2. **Parent's BU's field** (*for Documents: parent record's BU; for Matters etc.: own BU*) — cascading default
+> > 3. **Tenant-level default** (*server fallback, defined in BFF config*) — last resort
+>
+> That is, line for line, the model below: secure record → its own container; otherwise **the record's**
+> business unit; otherwise a **server-side** config default. INV-7 is a *resolution-order* invariant. It
+> never prohibited server-side resolution — clause 3 explicitly names a server fallback in BFF config —
+> and it explicitly sources the BU from the **parent record**, not the acting user. **The seven client
+> sites were in breach of INV-7, and this document cited INV-7 as the reason to leave them that way.**
+>
+> Where the "client-side" reading came from: INV-7's next sentence says the chain *"is implemented at
+> create-time (plugins + wizard)"* — a statement about **where the chain runs**, not about what the BFF
+> may do. That project's own `CLAUDE.md` forbids introducing Dataverse plugins, so "plugins + wizard"
+> collapsed to "wizard" in practice, which is how the comment on `SaveComposeDocumentRequest.ContainerId`
+> (`Services/Compose/IComposeService.cs:743-751`) came to read *"the resolver stays in the wizards"*. That
+> comment is a note on implementation location; it was then cited downstream as a constraint on
+> capability. Nothing ever prevented server-side resolution — the BFF already reads Dataverse and already
+> reads and writes `sprk_containerid` during provisioning.
+>
+> ⚠️ **Beware the label.** At least four unrelated invariants in this repo are numbered "INV-7" —
+> ADR-028's single-`PublicClientApplication` rule, SpaarkeAi's `buildBffApiUrl` rule, this container/index
+> resolution chain, and others. Cite the source project when referring to one.
+>
+> **2. "Acting user's BU" is the defect, not the design.** Every client site resolved
+> `getUserId() → systemuser.businessunitid → businessunit.sprk_containerid` — *the person uploading, not
+> the thing being uploaded to.* Two users uploading to the same matter split its documents across two
+> containers. Worse for isolation: users sit in the Operations subtree while secure records are owned in
+> `Secure Projects`, so acting-user resolution writes a secure record's content into the general
+> **Operations** container — and because SPE permissions are additive-only, no later permission change
+> retracts it.
+>
+> **The model, settled by the owner 2026-08-27 and implemented in `RecordContainerResolver`:**
+> ```
+> secure record   -> its OWN sprk_containerid, or FAIL CLOSED (never a fallback)
+> everything else -> the RECORD's owningbusinessunit -> businessunit.sprk_containerid
+> server ingest   -> Communication:ArchiveContainerId (no owning record exists — strategy 2 below)
+> ```
+> The container follows the **record**, never the acting user. Verified live against Dataverse on
+> 2026-08-27: `owningbusinessunit` is populated on every `sprk_project` row; `businessunit.sprk_containerid`
+> on 3 of 6 BUs; the `Secure Project` BU has **no** container (correct — secure records use their own);
+> the root `Spaarke` BU **shares** its container with `Spaarke Business Unit 1`, so **a BU container is not
+> itself an isolation boundary**; and `sprk_issecure` is **NULL on 5 of 10 rows** — the "absent is not
+> false" case, in real data.
+>
+> Strategy 2 (`ArchiveContainerId`) is unaffected and remains correct: server-side ingest has no owning
+> record at the moment the bytes move.
 
 **Also required**: the wizard's BU cascade (`EntityCreationService.applyUserBuDefaults`) must **not**
 apply `sprk_containerid` to a secure project. Today it does, which both defeats isolation and collides
@@ -606,7 +682,7 @@ The Secure Project step must be reworked to §5. Independently, its current copy
 
 ## 7. Attestation
 
-Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model.
+Do **not** materialize derived access into rows — that reintroduces every staleness and reconciliation problem of a push model. The one exception is Assigned-To access (ADR-034 A4, task 142): the owner requires it to be a removable entry on the grant-access list, so it is written as ordinary grants/shares, each grant change captured by the FR-32 event log; the ledger `sprk_assignedaccess` records why each exists.
 
 - **Append-only access event log** for grant/deny state changes — few, exact, legally defensible.
 - **Evaluator replay** for derived access: it is a pure function of record lookups, org junctions, flags and deny entries, all already covered by Dataverse field audit. No new storage; the evaluator must be **versioned** so historical answers remain reproducible.
@@ -635,6 +711,8 @@ Do **not** materialize derived access into rows — that reintroduces every stal
 | **ADR-034** | Resolver is canonical for membership; the allow-list becomes a first-class per-surface concept; record→members inverse read | **B — amend**. 1-hop cap needs no exception (§4.3) |
 | **ADR-028 A2** | A2 mandates workforce callers resolve to systemuser→ADR-034 membership. §4.4 replaces the derivation with Dataverse's real answer | **B — narrow amendment.** The token stays workforce; only the derivation policy changes |
 | **ADR-028 A4** | A4 forbids `.WithClientSecret(...)` on a BFF-identity client (use MI-FIC or a KV certificate); exception E-3 covers enumerated transitional sites and *"does not license expansion"*. Task 008's `CallerRecordAccessProbe` performs an OBO exchange, which A4 itself notes `DefaultAzureCredential` cannot do — and there is **no `WithClientAssertion` anywhere in the repository** (all 7 pre-existing OBO/confidential sites use a client secret). Complying would mean building the shared MI-FIC provider inside an authorization filter | **A — project-scoped exception. ACCEPTED by the owner 2026-08-23**, to be resolved as part of the broader MI migration. The new site reads the *same* `AzureAd:ClientSecret` as the other seven and uses the identical shape to its nearest precedents (`DataverseUserClient`, `DataverseAccessDataSource`), so all **8** migrate together. Net operational impact today: none — one more site on the E-3 migration list |
+| **Owner rule C9 (plane parity) with ADR-028 A2 / task 036** | Task 143: on a SECURE record a walled internal user whose access Dataverse confers through a TEAM share, team ownership, a role or the business unit cannot be un-shared per person (removing a team share strips every other member). The systemuser-plane veto hides the record on Teams/SPA while MDA still admits the user — Teams/SPA and MDA disagree for exactly these cases, which task 036's escalation trigger names | **A — project-scoped exception. ACCEPTED by the owner 2026-10-01 (round 3b, N2: "hide the record in Teams/SPA")**. Bounded: secure records only; only access the enforcer reports as `NoAccessNotEnforceable` (mechanism `team-share` / `team-ownership` / `role-or-business-unit`), logged at Warning, in the enforce response and the job result, and surfaced on the Manage Access deny row by task 067. Direct shares are removed, so for them the planes agree. Cite in the task-143 PR |
+| **ADR-036 A1-7 / ADR-052 §5 (scheduled-job host neutrality)** | Task 143 r1 serializes owner S5's "someone else keeps access" check per record with `IScheduledJobLease` — the scheduler's dispatch-lease STORE, reused as a keyed mutex (`no-access-enforce:{table}:{id}`, landing in the `{prefix}scheduler:lease:` key family). `NoAccessShareReconciliationJob` resolves `NoAccessShareEnforcer` from a scope, so the job depends on the lease TRANSITIVELY; A1-7 says jobs do not depend on `IScheduledJobLease`, and the interface's own remarks say it belongs to the host. `WorkloadPlacementGuardTests.ScheduledJobsAreHostNeutral` checks direct dependencies only, so it passes. Raised by the task-143 r1 verifier (finding 2) | **A — project-scoped exception. PROPOSED by task 143 r2 (2026-10-03); needs the reviewer's explicit acceptance (§6.5) — not yet accepted.** Why not C: the only other cross-instance lock in the BFF, `IIdempotencyService.TryAcquireProcessingLockAsync`, is check-then-set (not atomic) and fails OPEN on a cache fault, so it cannot protect S5; complying means a new lock abstraction with Redis + process-local implementations that duplicates `RedisScheduledJobLease` (§11: extend, do not duplicate). Why not B: the rule's intent — a job never touches the host's dispatch of ITSELF — holds; only the letter (the type) is crossed. Bounded: the enforcer only (endpoint + job share it); keys `no-access-enforce:*` only, never a job id (no job id has that prefix); `occurrenceUtc` always null; fails closed (held → `record-busy`, unreachable → `record-lock-unavailable`, expired before the revoke → `record-lock-lost`); catalogued as the second site of `SystemCacheKeys.SchedulerLease`. Retire it if a general keyed-mutex primitive ever lands (the enforcer switches; the job is untouched). If the reviewer declines, path C is a new `Spaarke.Scheduling`-independent lock type. Cite in the task-143 PR |
 
 ## 10. Open decisions
 

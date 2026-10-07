@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Models.Ai.SemanticSearch;
+
 namespace Sprk.Bff.Api.Services.Ai.Visualization;
 
 /// <summary>
@@ -511,4 +513,18 @@ public record GraphMetadata
     /// Set when the source document cannot be found or other issues occur.
     /// </summary>
     public string? DiagnosticMessage { get; set; }
+
+    /// <summary>
+    /// Warnings generated during graph construction/authorization (spaarkeai-word-add-in-r1 task 033,
+    /// D-032-2). Reuses the SAME <see cref="SearchWarning"/> / <see cref="SearchWarningCode"/> shape
+    /// cross-record document search already emits (<c>SemanticSearchEndpoints.AuthorizeRowsByParentAsync</c>)
+    /// rather than inventing a parallel warnings channel — per CLAUDE.md §11, extend the existing shape.
+    /// <c>null</c> when nothing was withheld silently. See
+    /// <c>VisualizationEndpoints.AuthorizeRowsAsync</c> for the one producer: rows dropped past
+    /// <c>MaxDocumentAuthorizationChecks</c> get a <see cref="SearchWarningCode.PartialResults"/> entry
+    /// here so a truncated page is distinguishable from "nothing matched" — task 032 §6 item 5 recorded
+    /// this gap and deferred adding the channel out of a security-hardening task; this is that deferred
+    /// response-contract change, made explicitly rather than folded silently into 032.
+    /// </summary>
+    public IReadOnlyList<SearchWarning>? Warnings { get; init; }
 }

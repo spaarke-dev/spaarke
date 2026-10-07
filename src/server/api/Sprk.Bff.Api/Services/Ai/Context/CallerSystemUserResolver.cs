@@ -8,10 +8,11 @@
 //       but that helper is PRIVATE to its endpoint file and not reusable as an injectable service. The
 //       sibling ICallerContactResolver (task 055) resolves oid→CONTACT, a DIFFERENT key — user memory is
 //       keyed by systemuserid, not contactid, so it cannot be reused.
-//   (2) Extension — per ADR-028 the AAD oid claim is the cross-reference key on BOTH systemuser AND
-//       contact (same azureactivedirectoryobjectid populated by the same AAD sync). This resolver mirrors
-//       ICallerContactResolver's one-hop QueryExpression pattern EXACTLY (same IDataverseService facade,
-//       same oid-claim extraction, same fail-honestly posture) — additive, no second Dataverse client.
+//   (2) Extension — the AAD oid claim is the key on BOTH sides: systemuser.azureactivedirectoryobjectid
+//       (directory-synced) here, and contact.sprk_externalobjectid (the oid binding, task 141) for
+//       ICallerContactResolver. This resolver mirrors ICallerContactResolver's one-hop QueryExpression
+//       pattern (same IDataverseService facade, same oid-claim extraction, same fail-honestly posture) —
+//       additive, no second Dataverse client.
 //   (3) Cost-of-doing-nothing — without a systemuserid for the caller, F-2 user-scope memory has NO recall
 //       key: an AI-captured user preference (memory.write scope=user) is persisted but never read back into
 //       any prompt (the exact capture-only gap this task closes).

@@ -1,7 +1,10 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -34,7 +37,19 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     private readonly IToolHandlerRegistry _toolHandlerRegistry;
     private readonly INodeService _nodeService;
     private readonly IPlaybookOrchestrationService _playbookOrchestrator;
+    // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): every app-only download below follows a
+    // sprk_document row's pointer, so the pointer's container is verified first (fail closed).
+    private readonly RecordContainerResolver _containerResolver;
+    // Direct-Action (ADR-043) profiling seams — optional so unit construction without them falls
+    // back to the legacy node path; present at runtime whenever the compound AI gate that also
+    // constructs this service is on (GitHub #919 convergence / Fix Option 3).
+    private readonly IActionResolver? _actionResolver;
+    private readonly IActionRunner? _actionRunner;
     private readonly ILogger<AppOnlyAnalysisService> _logger;
+
+    // unified-access-control-r2 task 146: the analysis rows this service creates are owned by the analysed document's
+    // team (record-first; the named Secure team for a document of a secure record), never by the application user.
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
 
     // Summary status values (Dataverse OptionSet)
     private const int SummaryStatusPending = 100000001;
@@ -72,8 +87,13 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         IToolHandlerRegistry toolHandlerRegistry,
         INodeService nodeService,
         IPlaybookOrchestrationService playbookOrchestrator,
-        ILogger<AppOnlyAnalysisService> logger)
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        ILogger<AppOnlyAnalysisService> logger,
+        RecordContainerResolver containerResolver,
+        IActionResolver? actionResolver = null,
+        IActionRunner? actionRunner = null)
     {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _documentService = documentService;
         _analysisService = analysisService;
         _speFileOperations = speFileOperations;
@@ -85,7 +105,37 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         _toolHandlerRegistry = toolHandlerRegistry;
         _nodeService = nodeService;
         _playbookOrchestrator = playbookOrchestrator;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
+        _actionResolver = actionResolver;
+        _actionRunner = actionRunner;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Creates the analysis record OWNED by the analysed document's team (unified-access-control-r2 task 146) — the
+    /// named Secure team for a document of a secure record. Returns <c>null</c> on a REFUSAL (logged): analysis creation
+    /// here is best-effort, so a refusal is a skipped row, never a failed profile (word-add-in-r1 note 080 §6.6). A
+    /// Dataverse fault propagates to the caller's existing best-effort catch, which logs it as a write failure.
+    /// </summary>
+    private async Task<Guid?> TryCreateOwnedAnalysisAsync(
+        Guid documentId, string name, Guid? playbookId, CancellationToken cancellationToken)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(
+                new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", documentId) }),
+            cancellationToken);
+
+        if (!owner.IsOwned)
+        {
+            _logger.LogWarning(
+                "[OWNERSHIP-REFUSED] Analysis record NOT created for document {DocumentId}: {Reason} ({Code}). "
+                + "The analysis itself continues (task 146).",
+                documentId, owner.Reason, owner.RefusalCode);
+            return null;
+        }
+
+        return await _analysisService.CreateAnalysisAsync(
+            documentId, name, playbookId, owningTeamId: owner.OwningTeamId, ct: cancellationToken);
     }
 
     /// <summary>
@@ -227,7 +277,15 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             // Mark as pending before processing
             await UpdateSummaryStatusAsync(documentId, SummaryStatusPending, cancellationToken);
 
-            // 4. Download file from SPE using app-only auth
+            // 4. Verify the row's pointer names a container this document may use (task 166 r1, fail closed),
+            //    then download file from SPE using app-only auth
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    documentId, document.GraphDriveId, document.GraphItemId, cancellationToken))
+            {
+                await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
+                return AppOnlyDocumentAnalysisResult.Failed(documentId, "Document storage could not be verified");
+            }
+
             _logger.LogInformation(
                 "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId})",
                 documentId, document.GraphDriveId, document.GraphItemId);
@@ -283,15 +341,18 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
+                dataverseAnalysisId = await TryCreateOwnedAnalysisAsync(
                     documentId,
                     $"Document Profile - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId,
-                    ct: cancellationToken);
+                    cancellationToken);
 
-                _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
-                    dataverseAnalysisId, documentId, playbookId);
+                if (dataverseAnalysisId is not null)
+                {
+                    _logger.LogInformation(
+                        "Created Analysis record {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
+                        dataverseAnalysisId, documentId, playbookId);
+                }
             }
             catch (Exception ex)
             {
@@ -456,6 +517,82 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
     }
 
     /// <summary>
+    /// Profiles a document via the direct-Action (ADR-043 completion-engine) spine, app-only — the
+    /// SAME "Document Profiler" Action (ACT-011) and output mapper the interactive wizard
+    /// (<c>AnalysisEndpoints.ExecuteDocumentProfilePipelineAsync</c>) and Compose/OBO path
+    /// (<c>DocumentProfileAi.ProfileDocumentAsUserAsync</c>) use. Converges all three profiling
+    /// surfaces onto one spine and removes the app-only path from the node engine's
+    /// <c>UpdateRecordNodeExecutor.ParseConfig</c> "0x0A" failure class (GitHub #919;
+    /// <c>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</c> Part 4, Fix Option 3).
+    /// The text is ALREADY extracted app-only by the caller (<c>ISpeFileOperations</c> +
+    /// <c>ITextExtractor</c>), so this wraps it as the Document operand and never touches the
+    /// OBO-only <c>IDocumentTextSource</c>. Stamps status itself so BOTH callers stay correct.
+    /// </summary>
+    private async Task<AppOnlyDocumentAnalysisResult> ProfileViaLinearActionAsync(
+        Guid documentId,
+        string fileName,
+        string extractedText,
+        string? graphDriveId,
+        string? graphItemId,
+        Guid? dataverseAnalysisId,
+        CancellationToken cancellationToken)
+    {
+        // Resolve the "Document Profiler" Action (ACT-011) via the document-profile Binding — the
+        // SAME single routing surface (sprk_playbookconsumer) the wizard + Compose paths use.
+        var action = await _actionResolver!.ResolveAsync(ConsumerTypes.DocumentProfile, cancellationToken);
+
+        // Wrap the already-extracted text as the Document-channel operand (no OBO text source).
+        var documentText = new DocumentText
+        {
+            DocumentId = documentId,
+            FileName = fileName,
+            ExtractedText = extractedText,
+            GraphDriveId = graphDriveId,
+            GraphItemId = graphItemId,
+        };
+
+        var runContext = new LinearRunContext
+        {
+            ConsumerType = ConsumerTypes.DocumentProfile,
+            CorrelationId = Activity.Current?.Id,
+            // App-only has no user tenant claim; ACT-011 is not knowledge-grounded, so this is unused.
+            TenantId = null,
+        };
+
+        _logger.LogInformation(
+            "App-only document-profile (linear ADR-043 spine): running action '{ActionName}' for {DocumentId} ({CharCount} chars).",
+            action.Name, documentId, extractedText.Length);
+
+        // One structured LLM call on the completion engine (auth-agnostic; wraps IOpenAiClient).
+        JsonElement aiOutput = await _actionRunner!.RunAsync(action, documentText, runContext, cancellationToken);
+
+        // Shared mapper — identical to the wizard + Compose paths (one source of truth, no drift).
+        var fields = DocumentProfileOutputMapper.BuildFields(aiOutput, fileName, parentEntity: null, _logger);
+        if (fields.Count == 0)
+        {
+            _logger.LogWarning(
+                "App-only document-profile: action produced no mappable fields for {DocumentId}.", documentId);
+            await UpdateSummaryStatusAsync(documentId, SummaryStatusFailed, cancellationToken);
+            return AppOnlyDocumentAnalysisResult.Failed(documentId, "action produced no mappable profile fields");
+        }
+
+        // Persist app-only via the SDK-based document service (same interface the node path writes with).
+        await _documentService.UpdateDocumentFieldsAsync(documentId.ToString(), fields, cancellationToken);
+
+        // Stamp Completed here so BOTH callers converge: AnalyzeDocumentAsync also stamps Completed
+        // when ProfileUpdate is null (redundant, harmless), but AnalyzeDocumentFromStreamAsync does
+        // NOT — so a self-contained stamp is required for the stream / email-attachment path.
+        await UpdateSummaryStatusAsync(documentId, SummaryStatusCompleted, cancellationToken);
+
+        _logger.LogInformation(
+            "App-only document-profile: {DocumentId} profiled + {FieldCount} fields written [{Fields}].",
+            documentId, fields.Count, string.Join(",", fields.Keys));
+
+        // ProfileUpdate=null → success without a typed profile-update (fields already persisted above).
+        return AppOnlyDocumentAnalysisResult.Success(documentId, profileUpdate: null, dataverseAnalysisId);
+    }
+
+    /// <summary>
     /// Execute playbook-based analysis using tools from the specified playbook.
     /// </summary>
     /// <param name="documentId">The Dataverse Document ID.</param>
@@ -476,6 +613,26 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         string? graphDriveId = null,
         string? graphItemId = null)
     {
+        // Convergence (GitHub #919 / Fix Option 3): the document-profile consumer runs on the
+        // direct-Action (ADR-043) completion-engine spine — the SAME ACT-011 "Document Profiler"
+        // Action + DocumentProfileOutputMapper the interactive wizard
+        // (AnalysisEndpoints.ExecuteDocumentProfilePipelineAsync) and Compose/OBO path
+        // (DocumentProfileAi) use — instead of the node-based "Document Profile" playbook. This
+        // removes the app-only path from the UpdateRecord ConfigJson re-parse "0x0A" failure class.
+        // Gated on the AI seams being present (they are whenever the compound AI gate that also
+        // constructs this service is on); if absent (e.g. a unit test constructing without them),
+        // fall through to the legacy node/tool path unchanged.
+        if (string.Equals(playbookName, DefaultPlaybookName, StringComparison.Ordinal)
+            && _actionResolver is not null && _actionRunner is not null)
+        {
+            _logger.LogInformation(
+                "Playbook '{PlaybookName}' routed to the direct-Action profiling spine (ADR-043) for document {DocumentId}.",
+                playbookName, documentId);
+            return await ProfileViaLinearActionAsync(
+                documentId, fileName, documentText, graphDriveId, graphItemId,
+                dataverseAnalysisId, cancellationToken);
+        }
+
         // 1. Load playbook — FR-P3-01: well-known names resolve via the
         //    sprk_playbookconsumer Binding table; custom names fall back to legacy by-name.
         Models.Ai.PlaybookResponse playbook;
@@ -639,6 +796,20 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
         {
             try
             {
+                // Task 146: outputs are owned like their analysis (record-first from it). A refusal skips the outputs
+                // — best-effort, never a failed profile; the document update below still runs.
+                var outputOwner = await _ownership.ResolveOwnerAsync(
+                    new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                    {
+                        TargetEntityLogicalName = "sprk_analysis",
+                        TargetRecordId = dataverseAnalysisId.Value,
+                    },
+                    cancellationToken);
+                if (!outputOwner.IsOwned)
+                {
+                    throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_analysisoutput", outputOwner);
+                }
+
                 var sortOrder = 0;
                 foreach (var (outputTypeName, value) in structuredOutputs)
                 {
@@ -653,7 +824,8 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
                         Value = value,
                         AnalysisId = dataverseAnalysisId.Value,
                         OutputTypeId = null, // Output type lookup optional for Phase 1
-                        SortOrder = sortOrder++
+                        SortOrder = sortOrder++,
+                        OwningTeamId = outputOwner.OwningTeamId,
                     };
 
                     await _analysisService.CreateAnalysisOutputAsync(output, cancellationToken);
@@ -1257,15 +1429,18 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
             Guid? dataverseAnalysisId = null;
             try
             {
-                dataverseAnalysisId = await _analysisService.CreateAnalysisAsync(
+                dataverseAnalysisId = await TryCreateOwnedAnalysisAsync(
                     mainDocumentId,
                     $"Email Analysis - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
                     playbookId: null,
-                    ct: cancellationToken);
+                    cancellationToken);
 
-                _logger.LogInformation(
-                    "Created Analysis record {AnalysisId} for email document {DocumentId}",
-                    dataverseAnalysisId, mainDocumentId);
+                if (dataverseAnalysisId is not null)
+                {
+                    _logger.LogInformation(
+                        "Created Analysis record {AnalysisId} for email document {DocumentId}",
+                        dataverseAnalysisId, mainDocumentId);
+                }
             }
             catch (Exception ex)
             {
@@ -1362,6 +1537,13 @@ public class AppOnlyAnalysisService : IAppOnlyAnalysisService
 
         try
         {
+            // task 166 r1 (owner round 21 item 1b): verify the row's pointer before following it app-only.
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
+            {
+                return string.Empty;
+            }
+
             using var fileStream = await _speFileOperations.DownloadFileAsync(
                 document.GraphDriveId,
                 document.GraphItemId,

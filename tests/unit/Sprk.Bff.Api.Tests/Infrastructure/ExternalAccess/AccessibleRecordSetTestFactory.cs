@@ -1,0 +1,108 @@
+using Moq;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+
+namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
+
+/// <summary>
+/// Construction helpers for the task-032 <c>(recordId → rights)</c> shapes.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Before task 032, <c>AccessibleRecordSet.RecordIds</c> and <c>ExternalGrantSet.Matters</c> /
+/// <c>.WorkAssignments</c> were settable id collections, so a test said "these records are accessible"
+/// by assigning a <c>HashSet&lt;Guid&gt;</c>. They are now DERIVED VIEWS over the rights map / the
+/// level-carrying grant lists, so they cannot be assigned. These helpers keep the tests reading the
+/// same way rather than scattering dictionary-building over five files.
+/// </para>
+/// <para>
+/// <b>Why <see cref="MembershipRights"/> is the default for a bare id list.</b> A bare id set carried no
+/// level at all; downstream, the workforce strategy blanket-stamped Collaborate over everything it
+/// contained (register A-8). So Read|Write|Create is the FAITHFUL translation of what those ids meant
+/// before this task — not a new grant. Tests that care about level fidelity build the map explicitly
+/// instead of using these helpers.
+/// </para>
+/// </remarks>
+internal static class AccessibleRecordSetTestFactory
+{
+    /// <summary>The membership term level — the rights a bare id previously resolved to. </summary>
+    public const AccessRights MembershipRights =
+        AccessRights.Read | AccessRights.Write | AccessRights.Create;
+
+    /// <summary>A rights map over <paramref name="ids"/>, all at <see cref="MembershipRights"/>.</summary>
+    public static IReadOnlyDictionary<Guid, AccessRights> RightsOf(params Guid[] ids) =>
+        ids.ToDictionary(id => id, _ => MembershipRights);
+
+    /// <summary>A rights map over <paramref name="ids"/>, all at <see cref="MembershipRights"/>.</summary>
+    public static IReadOnlyDictionary<Guid, AccessRights> RightsOf(IEnumerable<Guid> ids) =>
+        ids.ToDictionary(id => id, _ => MembershipRights);
+
+    /// <summary>Level-carrying root grants at one level (default <c>Collaborate</c>).</summary>
+    public static IReadOnlyList<ExternalRootGrant> RootGrants(
+        ExternalAccessLevel level, params Guid[] ids) =>
+        ids.Select(id => new ExternalRootGrant { RecordId = id, AccessLevel = level }).ToList();
+
+    /// <summary>Level-carrying root grants at <c>Collaborate</c> — the neutral default for tests that predate levels.</summary>
+    public static IReadOnlyList<ExternalRootGrant> RootGrants(params Guid[] ids) =>
+        RootGrants(ExternalAccessLevel.Collaborate, ids);
+
+    /// <summary>The empty root-grant list (replaces <c>new HashSet&lt;Guid&gt;()</c> at grant-set sites).</summary>
+    public static IReadOnlyList<ExternalRootGrant> NoRootGrants { get; } = Array.Empty<ExternalRootGrant>();
+
+    /// <summary>
+    /// An <see cref="IContactIdentityStore"/> that reads every systemuser as linked to NO contact and bound to no oid
+    /// (task 143 r1) — the honest default for tests authored before the systemuser-plane veto resolved a secure record's
+    /// subjects through the link reads. The veto still adds the principal's derived contact, so those tests keep the
+    /// subjects they had. Tests of the link reads use <c>InMemoryContactIdentityStore</c> instead.
+    /// </summary>
+    public static IContactIdentityStore UnlinkedIdentityStore()
+    {
+        var store = new Mock<IContactIdentityStore>(MockBehavior.Strict);
+        store
+            .Setup(s => s.GetSystemUserAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) =>
+                new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
+        return store.Object;
+    }
+
+    /// <summary>
+    /// An <see cref="Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver"/> answering <c>sprk_isexternal</c> for the
+    /// systemuser plane's Restricted survivor (task 114 verifier K1): every user is internal except
+    /// <paramref name="externalUsers"/> — the honest default for tests authored before the flag entered composition.
+    /// </summary>
+    public static Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver InternalSystemUsers(params Guid[] externalUsers)
+    {
+        var resolver = new Mock<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(MockBehavior.Strict);
+        resolver
+            .Setup(r => r.IsExternalAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => externalUsers.Contains(id));
+        return resolver.Object;
+    }
+
+    /// <summary>
+    /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
+    /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
+    /// setup per test file) so the three call sites that directly construct
+    /// <see cref="AccessibleRecordSetService"/> share ONE definition of "inert reader" instead of three
+    /// that could silently drift.
+    /// </summary>
+    public static INoAccessListReader NeverDeniesReader()
+    {
+        var reader = new Mock<INoAccessListReader>();
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<Guid?>(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
+        // Task 143: the three-subject overload the systemuser plane calls — inert too.
+        reader
+            .Setup(r => r.GetDeniedRecordsAsync(
+                It.IsAny<NoAccessSubjects>(),
+                It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NoAccessListResult.Empty);
+        return reader.Object;
+    }
+}

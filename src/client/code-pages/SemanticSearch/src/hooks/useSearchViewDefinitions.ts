@@ -12,6 +12,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import type { SearchDomain, GridColumnDef } from '../types';
 import { getColumnsForDomain } from '../config/domainColumns';
+// Deep import (not the main barrel) — same style as EntityRecordDialog.ts's
+// oobModalSizes import; xrmContext.ts has zero dependencies.
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
 // =============================================
 // Types
@@ -131,8 +134,8 @@ function fallbackToDatasetColumn(col: GridColumnDef): IDatasetColumn {
 /** Try to get the Dataverse org URL from Xrm context. */
 function getOrgUrl(): string | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl');
     const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     return url || null;
   } catch {

@@ -62,10 +62,7 @@ public class ADR010_DITests
         // Verify IHttpClientFactory is used (not new HttpClient()) in service registrations
         // Check across all server source for direct HttpClient construction
         var serverSourcePath = Path.Combine(SourceRoot, "src", "server", "api", "Sprk.Bff.Api");
-        var serverCsFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
-
-        // Exclude the plugin project from this check
-        var bffFiles = serverCsFiles.Where(f => !f.Contains("CustomApiProxy")).ToList();
+        var bffFiles = Directory.GetFiles(serverSourcePath, "*.cs", SearchOption.AllDirectories);
 
         // Check that IHttpClientFactory is registered somewhere
         var hasHttpClientFactory = allDiSource.Contains("AddHttpClient") ||
@@ -216,10 +213,80 @@ public class ADR010_DITests
         // states an implementation contract the interface exists to impose — "Implementations MUST
         // throw rather than return an empty or partial set when the answer cannot be determined",
         // because "I could not find out whether this entity is securable" read as "it is not
-        // securable" places content in a shared container, which SPE's additive-only permission
-        // model makes irreversible. That is a contract, not indirection. Worth noting as the
+        // securable" places content in a shared container, where SPE's CONTAINER-level permission
+        // model exposes it to every member with no per-file deny available — and does so silently.
+        // (Corrected 2026-09-02: this said "makes irreversible". Removing the item from the container
+        // does end the access; the hazard is silent exposure until someone notices, not permanence.)
+        // That is a contract, not indirection. Worth noting as the
         // ratchet behaving correctly: the count moved for a real reason and named the interface.
-        const int knownOneToOneCeiling = 156;
+        //
+        // ───────── Ceiling raised 156 → 157, 2026-09-09 (unified-access-control-r2) ─────────
+        // IImpersonatedRootSetSource -> ImpersonatedRootSetSource.
+        //
+        // ⚠️ ADDED BY TASK 035, WHICH DID NOT RAISE THE CEILING. Found by task 024 — the branch had
+        // been red here since e38548ce5. It survived CI because Tier 1 runs only the MUST-NOT subset
+        // of Arch Tests and Tier 2 is advisory by design, so nothing blocking ever executed this
+        // test. Worth knowing: this ratchet is effectively local-only enforcement today.
+        //
+        // The seam, assessed honestly rather than asserted:
+        //   FOR  — it mirrors IImpersonatedCommunicationQuery, which is a GENUINE seam (one impl,
+        //          and a real double, StubImpersonatedQuery, in ImpersonatedRootSetSourceTests).
+        //          Task 035's POML mandated the interface explicitly as the ADR-010 testing seam.
+        //   AGAINST — as of today it has ONE implementation, ZERO test doubles and ZERO consumers.
+        //          Its justification is a FUTURE substitution, and "future flexibility" is exactly
+        //          what CLAUDE.md §11 question 3 rejects. It is accepted on the strength of a NAMED
+        //          IMMINENT consumer, not on a general principle.
+        //
+        // 🔴 FALSIFIABLE CONDITION — this is the point of writing it down. Task 036's whole job is
+        // the flag-gated swap that substitutes this interface in the evaluator. If 036 lands and
+        // does NOT substitute it (no double, no second implementation), the interface has no seam,
+        // and the correct action is to register the concrete per ADR-010 and drop this ceiling back
+        // to 156 — NOT to leave it grandfathered because the number already moved.
+        // ───────── Ceiling raised 157 → 158, 2026-09-28 (spaarkeai-word-add-in-r1 task 080) ─────────
+        // IRecordOwnershipResolver -> RecordOwnershipResolver.
+        //
+        // Surfaced by merging master (229 commits) rather than by a new commit here: the interface
+        // has existed on this branch since db046e534, and the ratchet only saw it once master's
+        // ceiling of 157 arrived. The addition is genuinely ours, confirmed by the printed list.
+        //
+        // SEAM JUSTIFICATION, against ADR-010's "unless seam required" exception:
+        //   1. It is a NAMED architectural seam, not incidental indirection. The ADR-002 server-side
+        //      write-path guidance (now on master via #1012) designates
+        //      `Services/Dataverse/RecordOwnershipResolver.cs` the single BFF owner of invariant I-6
+        //      (owner = a business-unit default owner team). WP-1 requires exactly one owner per
+        //      invariant, so the seam is where that ownership is expressed and enforced.
+        //   2. It is a TEST seam with real doubles. The resolution order it implements is
+        //      record-first → REFUSE on a named-but-unreadable target → acting-user fallback →
+        //      REFUSE, and the two refuse branches are secure-record isolation. Those branches must
+        //      be provable without a live Dataverse, which is ADR-010's own testing-seam exception.
+        //   3. Consumers take it as an OPTIONAL dependency so the shared `Spaarke.Dataverse` library
+        //      never depends on a BFF service (create paths there receive an already-resolved team
+        //      id). Registering the concrete instead would push a BFF type across that boundary.
+        //
+        // Not grandfathering a mistake: if task 080 is ever abandoned and the resolver deleted, drop
+        // this ceiling back to 157 rather than leaving the headroom for an unreviewed interface.
+        //
+        // ───────── Reviewed at 158, 2026-10-05 (unified-access-control-r2 task 166 f1-v1) ─────────
+        // IRelocatedFileIndexing -> RelocatedFileIndexing. The branch measured 157 before it (an
+        // interface had been removed since the 158 above, leaving one slot of headroom), so the
+        // addition consumed headroom and the ratchet stayed green — recorded here so it is not an
+        // unreviewed one (the list was printed with the ceiling at 0 and diffed).
+        // SEAM JUSTIFICATION: it is a Services/Ai/PublicContracts facade (ADR-013 / CLAUDE.md §10
+        // bullet 3) that owner round 37 item 1 MANDATES by name ("ONE Services/Ai/PublicContracts
+        // facade method"): CRUD code (DocumentContainerRelocator) may reach AI indexing only through
+        // such an interface, never IRagService / IPostUploadIndexingEnqueuer. It is also a real test
+        // seam: DocumentContainerRelocatorTests.RecordingIndexing is its double (index-pending and
+        // retry are proven through it). Same category as IFileSummarizeAi / IPreferenceMemoryCapture.
+        //
+        // ───────── Ceiling raised 158 → 159, 2026-10-05 (batch-4 integration of unified-access-control-r2 task 165) ─────────
+        // ISpeAdminContainerScopedRequest -> SearchItemsRequest. Surfaced by the merge, not a new commit: on task 165's own
+        // branch the count stayed within 158. SEAM JUSTIFICATION: it is how SpeAdminTenantScopeFilter — an endpoint filter,
+        // which sees route arguments only as object — finds a container id in a BOUND BODY (owner round 20 item 2, the
+        // per-container rule; SpeAdminTenantScopeFilter.cs, the bound-body read). Its sibling ISpeAdminConfigScopedRequest has
+        // two implementations and is not counted; this one has one today because only the item search names a container in
+        // its body. Registering a concrete would mean the filter naming each request type, so a new container-scoped body
+        // would silently skip the rule. It is a request contract, not a service, and never registered in DI.
+        const int knownOneToOneCeiling = 159;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

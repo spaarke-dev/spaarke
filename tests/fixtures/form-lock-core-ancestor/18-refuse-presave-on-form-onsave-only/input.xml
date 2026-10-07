@@ -1,0 +1,38 @@
+<form>
+  <tabs>
+    <tab id="{10000000-0000-0000-0000-000000000001}" name="tab_general" verticallayout="true">
+      <labels><label description="General" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section id="{20000000-0000-0000-0000-000000000001}" name='sec_regarding' showlabel="true" columns="1">
+              <labels><label description='Regarding &amp; filing' languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000001}">
+                    <labels><label description="Related record" languagecode="1033" /></labels>
+                    <control id="sprk_regardingrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingrecordtype" uniqueid="{aaaaaaaa-0000-0000-0000-000000000001}" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000002}" locklevel="0" colspan="1" rowspan="1">
+                    <labels><label description="Regarding Matter" languagecode="1033" /></labels>
+                    <control id="sprk_regardingmatter" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_regardingmatter" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <controlDescriptions>
+    <controlDescription forControl="{aaaaaaaa-0000-0000-0000-000000000001}">
+      <customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}"><parameters><datafieldname>sprk_regardingrecordtype</datafieldname></parameters></customControl>
+      <customControl formFactor="2" name="sprk_Spaarke.Controls.RegardingResolver"><parameters><regardingRecordType>sprk_regardingrecordtype</regardingRecordType><entity static="true" type="SingleLine.Text">sprk_todo</entity></parameters></customControl>
+    </controlDescription>
+  </controlDescriptions>
+  <events><event name="onsave" application="false" active="false"><Handlers><Handler functionName="Spaarke.SmartTodo.RegardingPreSave.onLoad" libraryName="sprk_todo_regarding_presave" handlerUniqueId="{bbbbbbbb-0000-0000-0000-000000000002}" enabled="true" parameters="" passExecutionContext="true" /></Handlers></event></events>
+  <formLibraries><Library name="sprk_todo_regarding_presave" libraryUniqueId="{cccccccc-0000-0000-0000-000000000001}" /></formLibraries>
+</form>

@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="138" project="unified-access-control-r2">
+  <metadata>
+    <title>Make the Access Permission levels real — Standard / Limited / Restricted enforced at read AND write time on every plane; Limited implemented; communications inherit the parent's permission</title>
+    <phase>Register-driven (authored 2026-09-30, session 27 — owner decisions round 2, grant-model group)</phase>
+    <gate>after-135 (CIAM plane routed through the shared veto pipeline)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path change in the unified evaluator (pre-max suppression), new write-time refusals on the grant endpoints, an ADR-003 contract amendment, a shared UI component, a PCF, and a Dataverse column retirement. Tags bff-api/auth/pcf.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security semantics across three planes plus an ADR amendment (path B). A wrong predicate here either over-grants on Limited records or silently removes direct grants the owner wants kept.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (after task 135 changes it; 136, 137, 141, 142, 143 and 036 also edit it), GrantExternalAccessEndpoint.cs (task 139 changes it next; 137 and 142 also edit it), ExternalParticipationService.cs (131, 132, 137), and AccessGrantModal.tsx + the TrackingFieldTrio PCF (tasks 139 and 140 also bump them; 066/067 edit the modal). Merge serially and run /conflict-check first.</parallel-reason>
+    <deps>135 (and, through 135, 131)</deps>
+    <tags>bff-api, auth, security, dataverse, pcf, fluent-ui, testing</tags>
+    <estimated-effort>12-18 hours</estimated-effort>
+    <origin>Session 27 C4 research, "Access-permission misalignments" 1-8 (notes/session27-owner-decisions-and-research.md:65-73). Owner round-2 decisions 3 (Restricted vs Secure clarified) and Q6 (communications inherit the parent's permission; their own field is retired).</origin>
+  </metadata>
+
+  <prompt>The record-level Access Permission choice (Standard / Limited / Restricted on sprk_project, sprk_matter and sprk_workassignment) is half-implemented. Restricted is enforced only at read time on the workforce plane. Limited does nothing anywhere. The Manage Access dialog contradicts itself on Restricted, and sprk_communication carries its own copy of the field that nothing enforces. Make all three levels mean exactly what the owner decided, at read time and at write time, on every plane. Then retire the communication copy in favour of inheriting the parent's permission.</prompt>
+
+  <role>SPAARKE platform developer: the unified evaluator (AccessibleRecordSetService), the external-grant write path, and the shared Fluent v9 AccessGrantModal. Follow ADRs strictly. An ADR contract change here is path B, surfaced, not implemented silently.</role>
+
+  <goal>After this task:
+(1) Standard admits every grant type.
+(2) Limited admits only named, direct contact grants. Org-inherited grants, standing-grant membership and org-expansion contribute nothing. This reuses the FR-22 Secure pre-max suppression, on the workforce contact plane, the systemuser plane's contact-grants term, and the CIAM plane.
+(3) A Secure record behaves as Limited for contacts. Where both flags are present, Restricted wins.
+(4) Restricted removes all contact-sourced access and leaves internal (systemuser) access untouched.
+(5) The grant endpoints refuse, BEFORE any side effect and with a readable ProblemDetails message rather than a bare 500:
+  - contact and organization grants on Restricted records;
+  - organization-wide grants on Secure or Limited records.
+(6) The Manage Access dialog hides the options that do not apply, and keeps "+ User" enabled on Restricted.
+(7) The access-permission pill honours the control's disabled state.
+(8) No code reads or writes sprk_communication.sprk_accesspermission. An operator-run, dry-run-default script retires the column.
+(9) ADR-003's evaluator contract is amended to name Limited alongside Secure.
+(10) Every one of the above is proven live on spaarkedev1 at a manual gate.</goal>
+
+  <context>
+    <background>THE OWNER'S MODEL (round 2, 2026-09-30, binding; notes/session27-owner-decisions-and-research.md:20-22):
+- **Restricted** is a grant-access level on ANY record. It means no contact-based (non-systemuser) access at all, while internal users are unaffected. This includes workforce contact-only callers (Type-2 unlicensed employees) and CIAM contacts.
+- **Secure** is a separate flag. A secure record MAY have contact access as long as it is not Restricted, but only named, direct grants count. That is why Secure implies Limited for contacts.
+- **Limited** is what teams-app-r1 FR-14 "Option A" always said it was (projects/teams-app-r1/spec.md:63, :180): named grants only, no standing and no auto grants. Its meaning is exactly what FR-22 Secure suppression already does.
+- A Write-holder changing sprk_accesspermission and then adding external users is ACCEPTABLE (owner, C4). Do not lock or FLS the field; that is the separate sprk_issecure decision owned by another task.
+
+THE EIGHT MISALIGNMENTS (verified 2026-09-30 against current code):
+1. **Limited does nothing anywhere.** RootRecordFlags carries only IsSecure and IsRestricted (Infrastructure/ExternalAccess/ExternalCallerContext.cs:139-153). ExternalParticipationService reads sprk_accesspermission but only compares it to Restricted (ExternalParticipationService.cs:521, :574, :603-608). The evaluator's suppression predicate is IsSecure only (AccessibleRecordSetService.cs:1042 systemuser plane, :1258 contact plane). It feeds GrantedRightsFor (:238-256: isSecure ? DirectAccessLevel : AccessLevel), the standing term (:1270-1277) and the org-expansion term (:1283-1290).
+2. **Limited's intended meaning is the FR-22 path above.** Extend the predicate; do not build a second one.
+3. **The dialog contradicts itself on Restricted.**
+   - `grantsBlocked = accessPermissionState === 'restricted'` (Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx:538) feeds actionsBlocked (:1083).
+   - actionsBlocked disables "+ Contact" (:1197), "+ Organization" (:1211), "+ User" (:1225), every row checkbox (:1248), the level dropdown (:1284) and Add (:1307).
+   - Meanwhile the banner (:1146-1153) says system users may have access, and the server's Restricted veto keeps internal access (AccessibleRecordSetService.cs:1044-1051 membership term survives; the veto is at :393). "+ User" is an internal POA share and must stay enabled.
+4. **Restricted is not checked at grant-WRITE time.**
+   - /grant validates the grantee kind, the root, the level and the expiry only (GrantExternalAccessEndpoint.cs:84-103), then upserts (:186-383).
+   - /invite-and-grant onboards a CIAM account BEFORE it grants (InviteAndGrantExternalUserEndpoint.cs:92-108), so a refused grant must be refused before :92.
+   - /invite (InviteExternalUserEndpoint.cs:39) creates a contact and a CIAM identity against a named root with no grant at all.
+   - On CIAM, Restricted is not applied at READ time either. That is C1, owned by task 135, which this task depends on.
+5. **The dialog allows "+ Organization" on secure records.** The workforce plane suppresses such grants; before task 135, the CIAM plane honours them.
+6. **The Manage Access gate ignores both flags** (RecordAccessGateEndpoint.cs:105-107). This is BY DESIGN. The gate answers the delegation question (Write) and task 139 keeps it that way. The flags govern WHICH grant types apply, and they are enforced at write time here. Record that reasoning in the endpoint remarks. Do not change the gate.
+7. **sprk_communication has its own sprk_accesspermission that the BFF never reads.** RootFlagSources lists only the three roots (ExternalParticipationService.cs:502-508), and any other entity type returns "no vetoes" at :549-553. Readers and writers found 2026-09-30:
+   - EmailWorkspace.mapping.ts:30-55 (EMAIL_TRACKING_FIELDS.accessPermission, DEFAULT_ACCESS_PERMISSION_OPTIONS), :220 and :247 (mapped into recordState);
+   - useEmailWorkspaceRecord.ts:40, :115-118, :129 (updateAccessPermission writes the column);
+   - EmailWorkspace.types.ts:87 and EmailWorkspace/index.ts:15 (the options export);
+   - EmailTrackingPanel.tsx:41-48, :78, :95-103 and EmailAssociationsAndTracking.types.ts:121-132 (renders and changes it);
+   - the TrackingFieldTrio PCF's comments that call these values "sprk_communication" values (pcf/TrackingFieldTrio/index.ts:15, :170-175). The same integers are verified live on the three roots.
+   Owner Q6: communications inherit the parent's access permission. Their own field is retired.
+8. **The access-permission pill is never disabled** (Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx:335-367). A user on a read-only form is offered a menu whose write then fails. The shared component has no disabled/read-only prop at all, and the PCF never reads `context.mode.isControlDisabled` or the bound attribute's `security.editable`, so there is nothing to wire yet. Its siblings in the same row share the defect: the Monitor Switch (:315-320) and the High Priority Switch (:323-328) also ignore a read-only form.
+
+STANDING GRANTS ARE SUBJECT-LEVEL, NOT PER-RECORD.
+- contact.sprk_standinggrant is written on the Contact, not on the record. sprk_organization.sprk_standinggrant is written on the organization.
+- ⚠️ The modal has NO standing-grant control any more. `onSetStandingGrant` stays in the props contract but is unused (AccessGrantModal.tsx:524-525, task 073 UAT v1.0.24 #5: "the standing grant is now set on the Contact record itself"); the PCF still passes a handler (pcf/TrackingFieldTrio/index.ts:978, :1200) that nothing calls. The module doc's claim that "Limited ... hides the standing-grant option" (AccessGrantModal.tsx:58-59) describes nothing the code does. So there is nothing to "hide" in the modal, and no per-record standing write to refuse.
+- On Secure/Limited/Restricted, the standing term is suppressed at READ time (item 1). What the modal still shows is standing ROWS in Current Access (AccessGrantModal.tsx:658-667, :1327-1369, labelled "Standing grant — ongoing access to assigned records"). On such records those rows confer nothing. Rendering them as suppressed is task 066's scope (Current Access provenance + suppressed rendering, FR-30), and 066 as written names only Secure and Restricted. The main session must amend 066 (and its report source, 064) to include Limited; this task supplies the Limited signal they consume.
+
+LIVE FACTS (session 27): Standard 100000000 / Limited 100000001 / Restricted 100000002 are identical on sprk_project, sprk_matter and sprk_workassignment. No FLS covers sprk_accesspermission or sprk_issecure (0 fieldpermission rows).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs (RootRecordFlags :139-153 — add the Limited signal; Unreadable stays the most restrictive combination)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (:510-521 option constants, :541-624 GetRootRecordFlagsAsync, :603-608 flag construction, :627-646 RootFlagRow)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (:1042, :1258 suppression predicates; :1053-1062, :1260-1290 terms; comments naming "Secure" only)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalGrantLifecycle.cs (preferred home for the one write-time grant-policy check — see justification)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (:79-103 validation; :186-383 CreateGrantAsync)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs (:58-83 — policy refusal before onboarding at :92)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs (/invite at :39 — refuse on Restricted)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RecordAccessGateEndpoint.cs (remarks only: why the gate ignores the flags)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx (:53-65 doc, :538, :1079-1089, :1145-1153, :1188-1313)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts (:119-147 AccessPermissionState doc, :297-305)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/TrackingFieldTrio.tsx (:335-367 pill) and its types.ts</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/index.ts (:170-185 constants + comment, :330/:373 accessPermission read, :697-706 mapAccessPermissionToState, :945-963 the sprk_issecure read, :1204 prop wiring; NEW: read context.mode.isControlDisabled and the bound attribute's security.editable, which the control ignores today) + the PCF version in all four locations (see pcf-deploy)</file>
+      <file role="modify">src/client/pcf/TrackingFieldTrio/ControlManifest.Input.xml (:32-37 — `accessPermission` is a REQUIRED bound OptionSet today, so the control cannot sit on a form whose table has no such column; it must become optional (required="false") with the pill hidden when unbound, or the trio must be removed from the communication form — whichever the live form scan shows keeps the project/matter/WA forms unchanged)</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspace.mapping.ts, useEmailWorkspaceRecord.ts, EmailWorkspace.types.ts, index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailTrackingPanel.tsx, EmailAssociationsAndTracking.types.ts</file>
+      <file role="create">scripts/Retire-CommunicationAccessPermission.ps1 (name indicative; dry-run default, idempotent — see justification)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs (FakeParticipationService :1841, ThrowingFlagParticipationService :1952)</file>
+      <file role="modify">tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/CallerPrincipalResolverTests.cs (the CIAM Limited case, on task 135's pipeline)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/PolymorphicGrantWriteTests.cs (write-time refusals)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/AccessGrantModal.gating.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/TrackingFieldTrio/__tests__/TrackingFieldTrio.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/__tests__/*, EmailAssociationsAndTracking/__tests__/EmailAssociationsAndTracking.test.tsx</file>
+      <file role="modify">docs/adr/ADR-003-lean-authorization-seams.md (:156-163 evaluator contract, item 8)</file>
+      <file role="modify">.claude/adr/ADR-003-authorization-seams.md (:38-40, :53) — MAIN SESSION applies this edit (sub-agent write boundary, root CLAUDE.md §3)</file>
+      <file role="modify">docs/data-model/sprk_communication.md (retired column + inheritance rule)</file>
+      <file role="modify">docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md (a Standard/Limited/Restricted × Secure section)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="135" status="pending">C1: CIAM is routed through the same veto/suppression pipeline as the workforce contact plane. Without it, Limited and Restricted cannot be made real on CIAM from this task's single change point. Re-derive 135's status from its own POML.</dependency>
+      <dependency task="131" status="pending">C3: the grant cache drops DirectAccessLevel, so on a cache HIT a direct grant on a Secure (and, after this task, Limited) root reads as None. That fails closed, but it makes Limited's "direct grants count" intermittently false. Task 135 already depends on 131, so this is satisfied transitively; see escalation trigger 2.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner round 2 item 3">Scope: every plane (workforce contact, the systemuser plane's contact-grants term, CIAM).
+- Effective contact-access mode per root: RESTRICTED if sprk_accesspermission = 100000002. Otherwise DIRECT-ONLY if sprk_accesspermission = 100000001 OR sprk_issecure = true. Otherwise STANDARD.
+- An unreadable or unreturned row is RESTRICTED + DIRECT-ONLY (the existing RootRecordFlags.Unreadable direction, NFR-01).
+- A null sprk_accesspermission is Standard. That is today's behaviour and is unchanged.</constraint>
+    <constraint source="ADR-003 A1 / FR-22">Scope: AccessibleRecordSetService.
+- Limited MUST reuse the existing pre-max structural suppression: the same predicate that feeds GrantedRightsFor, the standing term and the org-expansion term.
+- Do NOT add a post-max subtraction, and do NOT add a second suppression code path.
+- The systemuser membership term (ADR-034) is NOT suppressed by Limited, exactly as it is not suppressed by Secure. Internal access is unaffected.</constraint>
+    <constraint source="owner binding: failed-operation messages">Scope: /grant, /invite-and-grant, /invite. Every policy refusal returns ProblemDetails with a stable reasonCode, a human-readable detail and the traceId.
+- Policy refusals are HTTP 422 with these BINDING reason codes (tasks 139, 140 and 142 and the modal depend on them): `sdap.access.grant.record_restricted` (a contact or organization grantee, or /invite, on a Restricted record) and `sdap.access.grant.org_grant_direct_only_record` (an organization-wide grant on a Secure or Limited record).
+- A flag-read fault is HTTP 503 `sdap.access.grant.policy_unreadable` with a message ("the record's access settings could not be read; nothing was granted"). It is never an unhandled 500, and never reported as record_restricted.
+- ⚠️ Today a fault is indistinguishable from a real Secure+Restricted record: GetRootRecordFlagsAsync folds it into the VALUE RootRecordFlags.Unreadable = (true, true) (ExternalParticipationService.cs:591, :608, :619). The write-time check must know which happened. Carry an explicit unreadable marker on RootRecordFlags (the read path keeps treating it as the most restrictive combination), so the refusal message is true.
+- A refusal writes no row, creates no contact, provisions no CIAM account and sends no email.</constraint>
+    <constraint source="ADR-008 / DelegationRuleFilter">Scope: ordering. The policy check runs INSIDE the handler, after DelegationRuleFilter has established Write. A caller without Write still gets the filter's 403, so the record's access policy is never disclosed to a non-Write caller. The Write rule itself is not changed (task 139 owns the grant model).</constraint>
+    <constraint source="CLAUDE.md §11 / WP-1">Scope: the write-time check.
+- There is exactly ONE policy decision function, shared by /grant, /invite-and-grant and /invite.
+- CreateGrantAsync (the shared grant core) MUST NOT write a row for a root whose policy refuses the grantee kind. Future writers therefore cannot bypass it: task 140's contact-side route, and the "Assigned To" auto-grant function from owner Q5, which is owned by another task.
+- The flags come from the existing ExternalParticipationService.GetRootRecordFlagsAsync (batched, fail-closed). Do not add a second flag reader.
+- ⚠️ ABSENT KEY = UNREADABLE at write time. GetRootRecordFlagsAsync returns an EMPTY map for any entity type that is not a key of RootFlagSources (`ExternalParticipationService.cs:549-553`, keyed by LOGICAL name: sprk_project / sprk_matter / sprk_workassignment). The evaluator reads flags as `flags.TryGetValue(id, out var f) &amp;&amp; f.IsSecure`, so a missing key means "no veto". If the write-time check passes the wrong name (for example "project", or an entity-set name), or copies that TryGetValue shape, the policy silently allows everything. The check MUST treat a root id missing from the returned map as unreadable (503 policy_unreadable). A test MUST pin that each ExternalGrantRootType maps (via ExternalGrantRoot.LogicalNameFor) to a flag-bearing entity type.
+- The refusal is a TYPED result of the core (for example a refusal member on GrantUpsertOutcome, `GrantExternalAccessEndpoint.cs:394`), never an exception. /grant wraps CreateGrantAsync in a catch-all that answers a bare 500 "Failed to create external access record" (`:114-128`), and /invite-and-grant answers 500 after onboarding (`:144-160`). A thrown refusal would become exactly the bare 500 the owner forbade, and on /invite-and-grant it would follow an onboarding the pre-check should have prevented.</constraint>
+    <constraint source="D-1 / ADR-002 / WP-5">Scope: direct Dataverse writes. Rows created directly in Dataverse (MDA grid, import) bypass the BFF write-time check. The read-time evaluator is the backstop and MUST stay authoritative. Do not weaken or skip any read-time veto or suppression because a write-time check now exists.</constraint>
+    <constraint source="ADR-012 / FR-14">Scope: the shared modal stays entity-agnostic. Only pcf/TrackingFieldTrio/index.ts knows the raw option integers and the sprk_issecure column. The modal receives the semantic AccessPermissionState only.
+- The sprk_issecure read used for GATING fails CLOSED (unreadable → 'limited').
+- The existing fetchSecureOwnerInfo DISPLAY read (:945-963) stays fail-soft.</constraint>
+    <constraint source="owner round 2 item 3 / misalignment 3">Scope: AccessGrantModal.
+- Restricted: hide "+ Contact", "+ Organization" and the role-based candidate (contact) rows. "+ User", user rows, their level dropdowns and Add stay ENABLED. Revoke of existing grants stays available (unchanged, :1084-1089). The delegation/auth deny state still blocks everything (unchanged).
+- Limited or Secure: hide "+ Organization". "+ Contact", candidates and "+ User" stay enabled.
+- There is no standing-grant control in the modal to hide (see background). Correct the module doc comment (:53-64) to describe the actual per-state behaviour, and remove the dead `onSetStandingGrant` wiring (types.ts prop + PCF handler at index.ts:978/:1200) or document why it stays. Leave standing-ROW rendering to task 066.
+- Standard: unchanged.
+- Each non-standard state shows one MessageBar that explains the rule, following the existing Restricted banner pattern (:1145-1153).
+- When the server refuses anyway, the dialog shows the server's detail text, not a generic error.</constraint>
+    <constraint source="owner Q6">Scope: sprk_communication.
+- Remove every code reader and writer of sprk_communication.sprk_accesspermission.
+- A communication's effective permission is its parent's (via the sprk_regarding{core} ancestor that CoreAncestorResolver stamps, CoreAncestorResolver.cs:77, :96-99). No client or server code may substitute the communication's own value.
+- The column is retired by an operator-run script: dry-run by default, idempotent. It removes form, view and PCF-binding references first, then deletes the column.
+- The TrackingFieldTrio manifest declares `accessPermission` as a REQUIRED bound property (ControlManifest.Input.xml:32-37). Before the column can go, either the property becomes optional (the pill is hidden when unbound) and the communication form's control binding is updated, or the trio is removed from the communication form. The project, matter and work-assignment forms must keep binding and writing their own sprk_accesspermission unchanged.
+- Contact coverage of communications (task 056, amended) must take the effective permission from the parent root's flags. This task records that rule in docs/data-model/sprk_communication.md, and the main session cross-links it into 056.
+- The agent does NOT mutate live schema: code + docs + script only (owner directive recorded at task 038 / FAILURE-MODES AP-13).</constraint>
+    <constraint source="ADR-038">Scope: tests. No Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no ctor null-check tests. Use the existing subclass-override doubles (FakeParticipationService, ThrowingFlagParticipationService) and the real NoAccessListReader / SubjectStandingGrantReader, as the task 044 seam suite does.</constraint>
+    <constraint source="owner binding: no Dataverse test in CI">Scope: live verification. It is a MANUAL gate run by hand on spaarkedev1 with the existing non-admin test users in the correct BU. Do NOT propose relocating users. No CI job gains a Dataverse credential.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR.
+- State the placement decision (in the BFF: the evaluator and the grant core live there), citing .claude/constraints/bff-extensions.md.
+- Measure the publish-size delta against a FRESH master worktree using the short-path procedure (Compress-Archive; equal file counts on both sides). Report both sizes and the delta. Ceiling 60 MB.
+- Run dotnet list package --vulnerable --include-transitive: no new HIGH.</constraint>
+    <constraint source="owner binding">Scope: whole task. No scope cuts and nothing deferred. Scope discovered during execution is added to this task, not pushed to a follow-up.</constraint>
+  </constraints>
+
+  <adr-tensions>
+    <tension adr="ADR-003 (Amendment A1 evaluator contract)" path="B — amendment">
+      <rule>"MUST let Secure (sprk_issecure) suppress derived-member + org-expansion BEFORE the max, for every principal kind" (.claude/adr/ADR-003-authorization-seams.md:39-40); full ADR item 8 (docs/adr/ADR-003-lean-authorization-seams.md:160-162).</rule>
+      <conflict>The contract names Secure as the only pre-max suppressor. The owner's decision makes Limited suppress the same terms. Implementing it without amending the ADR would put a binding MUST out of step with the code.</conflict>
+      <proposed>Amend item 8 to "Secure OR Limited (sprk_accesspermission = Limited) suppresses terms 3 and 4 and org-inherited grants BEFORE the max". Restricted stays a post-max veto. The concise edit is applied by the main session (sub-agent write boundary).</proposed>
+      <rejected>Path A, a project-scoped exception: rejected, because Limited is permanent product semantics, not a project deviation. Path C, "comply by leaving Limited inert": rejected, because the owner has decided Limited must be real.</rejected>
+    </tension>
+  </adr-tensions>
+
+  <justification>
+    <existing>The write-time check: grep "GetRootRecordFlagsAsync" shows the only flag reader (ExternalParticipationService.cs:541). No write-time policy check exists anywhere in Api/ExternalAccess (GrantExternalAccessEndpoint.cs:84-103 validates shape only). The retirement script: grep of scripts/ for "sprk_accesspermission" finds no retirement or column-delete script. The nearest pattern is scripts/Deploy-AccessEventEntity.ps1 (idempotent, -DryRun default, MSCRM.SolutionUniqueName).</existing>
+    <extension>The check is a METHOD on the existing ExternalGrantLifecycle (the grant-lifecycle home), consuming the existing flag reader. It is not a new service or DI registration. The script follows Deploy-AccessEventEntity.ps1's shape. No existing script deletes a column or removes form references, so a new file is required.</extension>
+    <cost-of-doing-nothing>Without the check, a Write-holder can mint a contact or org grant on a Restricted record, or an org-wide grant on a Secure record. /invite-and-grant also provisions a CIAM account and emails a person who can never get access. Without the script, the dead sprk_communication column stays on the form, where users can set a value that governs nothing, which contradicts owner Q6.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/teams-app-r1/spec.md (FR-14 :63, :172, :180)</file>
+      <file>projects/unified-access-control-r2/notes/task-037-restricted-secure-vetoes.md</file>
+      <file>projects/unified-access-control-r2/notes/task-044-unified-evaluator-seam-suite.md</file>
+    </files>
+    <patterns>
+      <pattern name="structural pre-max suppression" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:1258-1290">Extend the predicate; every term that consults it inherits Limited.</pattern>
+      <pattern name="refusal before side effect" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs:66-83">Root and expiry are validated before onboarding. The policy check joins them there.</pattern>
+      <pattern name="designed banner state" location="src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx:1145-1168">Fluent v9 MessageBar with MessageBarTitle. Reuse for the Limited/Secure explanation (load the fluent-v9-component skill).</pattern>
+      <pattern name="dry-run schema script" location="scripts/Deploy-AccessEventEntity.ps1">Idempotent, -DryRun default, solution-scoped, prefix-asserting.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Verify task 135 has merged, and that the CIAM strategy now consults GetRootRecordFlagsAsync and the shared veto pipeline. If it has not, STOP (escalation 1). Establish whether the C3 fix has landed (escalation 2).</step>
+    <step order="1">Evaluator:
+- Add the Limited signal to RootRecordFlags and populate it in GetRootRecordFlagsAsync.
+- Replace the IsSecure-only suppression predicate with the direct-only predicate (Secure OR Limited) at both composition sites and in whatever CIAM composition task 135 left.
+- Keep Unreadable as the most restrictive combination.
+- Update comments that say "Secure" where the rule is now "Secure or Limited".</step>
+    <step order="2">Write time:
+- Add the one policy check (a method on ExternalGrantLifecycle). Call it before any side effect in /grant, /invite-and-grant and /invite.
+- Make CreateGrantAsync refuse to write for a refused root.
+- Return 422 ProblemDetails for refusals and a message-bearing ProblemDetails for a flag-read fault.
+- Add the RecordAccessGateEndpoint remark explaining why the gate ignores the flags.</step>
+    <step order="3">Dialog + PCF:
+- Implement the effective-state mapping in pcf/TrackingFieldTrio/index.ts: accesspermission + sprk_issecure, with the gating read failing closed.
+- Implement the per-state visibility rules in AccessGrantModal. Fix the Restricted contradiction so "+ User" stays enabled.
+- Add the Limited/Secure banner, and surface the server's refusal detail.
+- Make the pill honour the control's disabled state.
+- Bump the PCF version in all four locations.</step>
+    <step order="4">Communications:
+- Enumerate EVERY reader and writer again (grep src/ plus a read-only live query of systemform formxml and savedquery layoutxml/fetchxml for sprk_communication.sprk_accesspermission and the TrackingFieldTrio control).
+- Remove the code readers and writers. Update the Communication component tests.
+- Make the TrackingFieldTrio manifest's accessPermission binding optional (or remove the trio from the communication form, per the scan), keeping the three root forms unchanged.
+- Author the retirement script and run it with -DryRun only; record the output in notes.
+- Update docs/data-model/sprk_communication.md.</step>
+    <step order="5">ADR-003 amendment text for the full doc. Hand the concise edit to the main session with the exact replacement text in notes.</step>
+    <step order="6">Tests per the acceptance criteria. Perturbation-check each new BFF assertion: disable the Limited predicate and the write-time check, and record which tests go red.</step>
+    <step order="7">Build, unit + arch suites, jest for the two component libraries, PCF build:prod. Measure publish size (§10 procedure). Run the CVE scan.</step>
+    <step order="8">Deploy the BFF to dev (bff-deploy skill) and the PCF (pcf-deploy skill), then run the manual live gate (acceptance criterion 16). Record results, including the two-user evidence, in projects/unified-access-control-r2/notes/task-138-access-permission-levels.md.</step>
+    <step order="9">Update TASK-INDEX.md: set this task to `✅ [done]`. Document every deviation in the notes file.</step>
+  </steps>
+
+  <escalation>
+    <trigger>1. Task 135 has not merged, or its CIAM composition does not pass through the shared suppression/veto pipeline. STOP and do not add a CIAM-only Limited branch here; a second implementation is the drift C1 exists to remove. Escalate per CLAUDE.md §6.</trigger>
+    <trigger>2. The C3 fix (grant cache round-trips DirectAccessLevel) has not landed. Direct grants on Limited or Secure roots then read as None on cache hits, and the live gate will show intermittent 403s for legitimately granted contacts. Do not work around it in this task (for example by bypassing the cache). Report the dependency and hold the live-gate sign-off until C3 is in.</trigger>
+    <trigger>3. Owner Q5's "Assigned To" auto-grant function is owned by another task. If it writes grants on Limited or Secure records, it writes direct named contact grants, which this task ALLOWS; on Restricted it is refused. If the owner intends auto-grants to be suppressed on Limited (teams-app-r1 FR-14 said "no standing/auto"), that is a product decision. Surface it and do not guess. Recommendation: ALLOW them on Limited and Secure. They are named, direct grant rows an operator can see and remove (owner Q5), which is exactly what Limited admits; teams-app-r1's "no auto" meant derived membership, which this task suppresses. On Restricted the core refuses them with record_restricted; task 142 must treat that refusal as "skip and log", not as an error.</trigger>
+    <trigger>4. The live form/view scan finds sprk_communication.sprk_accesspermission used by a managed-layer component, a business rule, a workflow or a plugin step that the script cannot remove. STOP before writing the delete step, and report the dependency with its solution layer.</trigger>
+    <trigger>5. A communication surface turns out to need to DISPLAY the inherited parent permission (not merely stop writing its own). The recommended answer is to remove the control, since the parent's pill is the one place to change it. Adding an inherited read-only display is a product choice; ask before building it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/{ExternalCallerContext,ExternalParticipationService,AccessibleRecordSetService,ExternalGrantLifecycle}.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/{GrantExternalAccessEndpoint,InviteAndGrantExternalUserEndpoint,InviteExternalUserEndpoint,RecordAccessGateEndpoint}.cs</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/{AccessGrantModal,TrackingFieldTrio}/**</output>
+    <output type="code">src/client/pcf/TrackingFieldTrio/index.ts (+ version bump)</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/{EmailWorkspace,EmailAssociationsAndTracking}/**</output>
+    <output type="code">scripts/Retire-CommunicationAccessPermission.ps1</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs, CallerPrincipalResolverTests.cs; tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/PolymorphicGrantWriteTests.cs; tests/integration/seam/ExternalAccess/UnifiedEvaluatorSeamTests.cs</output>
+    <output type="docs">docs/adr/ADR-003-lean-authorization-seams.md; docs/data-model/sprk_communication.md; docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md; projects/unified-access-control-r2/notes/task-138-access-permission-levels.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">1. Evaluator, Limited, contact plane. On a Limited, non-secure, non-restricted root:
+- a contact's org-inherited grant contributes nothing;
+- its standing-grant membership contributes nothing;
+- org expansion contributes nothing;
+- its DIRECT grant contributes exactly its own level.
+Asserted on the workforce contact plane and on the systemuser plane's contact-grants term, with the systemuser's ADR-034 membership term unaffected.</criterion>
+    <criterion testable="true">2. Evaluator, Limited, CIAM plane. The same Limited root gives the same answer for a CIAM contact holding a direct grant, an org-inherited grant, or both. Asserted in CallerPrincipalResolverTests on task 135's pipeline.</criterion>
+    <criterion testable="true">3. Secure behaviour is unchanged. Every pre-existing Secure/FR-22 seam and unit test passes. A root with BOTH Secure and Limited behaves identically to Secure.</criterion>
+    <criterion testable="true">4. Restricted wins. A root that is Restricted (with or without Secure/Limited) gives ALL contact principals nothing, on the workforce contact plane, the CIAM plane and the systemuser plane's contact-grants term. The systemuser membership term survives.</criterion>
+    <criterion testable="true">5. Fail closed. A flag row that is unreadable or not returned is treated as Restricted + direct-only (test through ThrowingFlagParticipationService). A null sprk_accesspermission is Standard (regression test). At WRITE time, a root id ABSENT from the returned flag map (for example, the flag read was called with an entity type that is not a RootFlagSources key) refuses with 503 `sdap.access.grant.policy_unreadable` and writes nothing. A table test pins ExternalGrantRootType → ExternalGrantRoot.LogicalNameFor → a flag-bearing entity type for project, matter and work assignment.</criterion>
+    <criterion testable="true">6. Write time, Restricted. A caller WITH Write:
+- /grant for a contact → 422 `sdap.access.grant.record_restricted` with a readable detail, and no sprk_externalrecordaccess row written;
+- /grant for an organization → the same;
+- /invite-and-grant → 422 before any contact create or CIAM provision (asserted: the provisioning seam is not reached);
+- /invite → 422 with no contact or CIAM account created.</criterion>
+    <criterion testable="true">7. Write time, Secure or Limited. An organization-wide grant (empty ContactId + OrganizationId) → 422 `sdap.access.grant.org_grant_direct_only_record` and no row. The positive twin, a named contact grant on the same root, succeeds. Both are asserted for a Secure root and for a Limited root.</criterion>
+    <criterion testable="true">8. Shared core. Calling CreateGrantAsync directly for a Restricted root writes no row AND returns the typed refusal without throwing, so a future writer cannot bypass the check. The same call through the /grant route yields the 422 ProblemDetails, not the catch-all 500.</criterion>
+    <criterion testable="true">9. Flag-read fault at write time. The request is refused with 503 `sdap.access.grant.policy_unreadable` and a human-readable detail. It is NOT reported as record_restricted, and it is distinguishable from a real Secure+Restricted record, which still gets 422 record_restricted (twin test). Nothing is written or provisioned. It is never an unhandled 500. The read path still treats the unreadable row as the most restrictive combination (criterion 5 stays green).</criterion>
+    <criterion testable="true">10. Authorization ordering (negative). A caller WITHOUT Write on a Restricted root receives the DelegationRuleFilter 403 (delegation_write_required), not the 422, so the record's access policy is not disclosed. /share-user by a Write-holder on Restricted, Limited and Secure roots still succeeds (positive), because internal access is unaffected.</criterion>
+    <criterion testable="true">11. Dialog. Asserted by jest:
+- Restricted: "+ Contact", "+ Organization" and candidate contact rows are NOT rendered. "+ User" is rendered and ENABLED. A staged user row's level dropdown and Add are enabled, and Add issues POST /share-user (asserted on the fetch mock's call list). Revoke on existing rows is enabled.
+- Limited (which is also what a Secure record maps to): "+ Organization" is not rendered, and "+ Contact" and "+ User" are enabled.
+- Standard: everything as before; the existing gating tests stay green, edited only where they pinned the old Restricted "+ User" block.
+- Each non-standard state renders its explanatory MessageBar.
+- A server 422 surfaces its detail text in the notice.
+- The module doc comment no longer claims a standing-grant option is hidden.</criterion>
+    <criterion testable="true">12. PCF mapping. Asserted as a pure-function test:
+- accesspermission Restricted → 'restricted' (regardless of sprk_issecure);
+- Limited → 'limited';
+- Standard or null with sprk_issecure true → 'limited';
+- Standard or null with sprk_issecure unreadable → 'limited';
+- Standard or null with sprk_issecure false → 'standard'.</criterion>
+    <criterion testable="true">13. Read-only honoured.
+- The shared TrackingFieldTrio gains a disabled prop.
+- The PCF sets it from `context.mode.isControlDisabled`, OR from the bound accessPermission attribute's `security.editable === false` (pill only), in init and in updateView.
+- When disabled, the access-permission pill renders disabled and its menu cannot open, and onAccessPermissionChange is never called (jest, with the prop both true and false). The High Priority and Monitor controls in the same row honour the same prop (the same defect, fixed here).
+- Enabled behaviour is unchanged.</criterion>
+    <criterion testable="true">14. Communications, code. grep over src/ finds no reader or writer of sprk_communication.sprk_accesspermission: EMAIL_TRACKING_FIELDS.accessPermission, updateAccessPermission and the EmailTrackingPanel access props are removed, with their tests updated. The PCF comments no longer call the root option values "sprk_communication" values. docs/data-model/sprk_communication.md records the retirement and the inherit-from-parent rule.</criterion>
+    <criterion testable="true">15. Communications, schema.
+- The retirement script exists and defaults to -DryRun.
+- It is idempotent: a second run reports nothing to do.
+- It removes form, view and PCF-binding references before the column delete.
+- Its dry-run output against spaarkedev1 is recorded in the notes.
+- The operator's real run is part of the manual gate (criterion 16).
+- The TrackingFieldTrio manifest no longer REQUIRES an accessPermission binding (or the trio is gone from the communication form, per the live scan). A jest/PCF test shows the control rendering without the pill when the property is unbound. Project, matter and work-assignment forms still bind, read and write their own sprk_accesspermission (asserted by the existing TrackingFieldTrio tests plus one new unbound case).</criterion>
+    <criterion testable="false">16. MANUAL LIVE GATE on spaarkedev1, run by hand with existing non-admin test users in the correct BU and an existing test contact identity, results recorded in notes:
+(a) Restricted project: "+ User" shares a colleague; the contact/org options are absent; a forced /grant returns the 422 message; a contact holding a prior grant loses access on Teams and on the external SPA; an internal user with role access keeps it.
+(b) Limited project: an org-inherited-only contact loses access; a directly granted contact keeps its level; "+ Organization" is absent.
+(c) Secure non-restricted project: behaves as (b).
+(d) Standard project: unchanged. Plus (verifier r1 finding 7): on the project, matter AND work-assignment main forms under PCF v1.0.32 the access-permission pill still renders and still writes (change the value, save, confirm sprk_accesspermission round-trips on each form); on a secure record the closed pill reads "Secure" in red and its menu is Standard / Limited / Restricted.
+(e) The communication form no longer shows an access-permission control after the operator runs the retirement script.</criterion>
+    <criterion testable="true">17. The ADR-003 amendment text (full doc) is merged in this PR and names Limited alongside Secure. The concise-ADR replacement text is recorded in the notes and handed to the main session. The PR description carries the §6.5 path-B citation. The owner's approval of the amendment is recorded in the PR before merge (§6.5: the human reviewer chooses the path).</criterion>
+    <criterion testable="true">18. docs/guides/EXTERNAL-ACCESS-ADMIN-SETUP.md carries the Standard / Limited / Restricted × Secure matrix, stating which grant types each admits and which plane enforces it.</criterion>
+    <criterion testable="true">19. Build green. BFF unit + integration (seam) + NetArchTest green. jest green for Spaarke.UI.Components and Spaarke.Communication.Components. The Communication.Components consumers still type-check and build after the hook/export removals (src/solutions/EmailPage and Spaarke.AI.Widgets' EmailWorkspaceWidget). PCF build:prod green. Publish-size delta reported per §10 (fresh master worktree, short path, equal file counts), ≤ 60 MB. No new HIGH CVE.</criterion>
+    <criterion testable="true">20. Test scope: cover the stated contract plus the edge cases named above (Limited × each term × each plane, Restricted precedence, fail-closed flags, write-time refusals incl. ordering, dialog state matrix, PCF mapping). Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+Defect/decision links:
+- Session 27 C4 research: "Access-permission misalignments" 1-8 (notes/session27-owner-decisions-and-research.md:65-73).
+- Owner round 2, item 3 and Q6 (:20-22, :36).
+- Session 26 C4 fix direction, "refuse org-grant and Restricted targets at write time" (notes/session26-uac-defects-and-synopsis.md:128), and the C4+C1 compound (:14, :352).
+
+Related tasks:
+- 135 (C1 CIAM veto parity; dependency).
+- 136 (C2 rights-based read gates).
+- 139 (grant model; next on GrantExternalAccessEndpoint and the modal).
+- 140 (contact-side grants; reuses this task's check).
+- 066 (open; owns "suppressed" rendering of Current Access rows, e.g. an org grant or a standing row that confers nothing on a Limited record; not duplicated here). 066 and 064 as written name only Secure and Restricted: the main session must amend them to include Limited.
+- 056 (amended; contact coverage of communications/memos): must read the parent root's flags for a communication (the Q6 inheritance rule recorded here).
+- 131 (C3 grant cache; transitive dependency via 135).
+- 142 (Q5 auto-grants through the shared core; refused on Restricted, allowed on Limited/Secure; see escalation 3).
+- 150 (locks sprk_issecure; sprk_accesspermission deliberately stays editable by any Write-holder, per owner C4).
+
+Hot-path: BFF Y, SpaarkeAi N (Spaarke.AI.Widgets consumes Communication.Components and must still build; no SpaarkeAi source changes), ci-workflows N, skill-directives N, root-CLAUDE.md N.
+
+Review 2026-09-30 (adversarial):
+- bound the reason codes;
+- made the fault refusal truthful (explicit unreadable marker);
+- replaced a vacuous "standing option" criterion (the modal has no such control);
+- added the manifest required-binding blocker for the column retirement;
+- made the read-only criterion name its inputs;
+- added the C3 = 131 dependency, the auto-grant recommendation, owner approval of the ADR amendment, and the consumer build check.
+
+Anchors verified 2026-09-30 against the working tree:
+- ExternalParticipationService.cs:502-521, :541-646
+- AccessibleRecordSetService.cs:238-256, :393, :1042, :1258-1290
+- ExternalCallerContext.cs:139-153
+- GrantExternalAccessEndpoint.cs:84-103, :186-383
+- InviteAndGrantExternalUserEndpoint.cs:58-108
+- AccessGrantModal.tsx:538, :1083, :1145-1313
+- TrackingFieldTrio.tsx:335-367
+- pcf/TrackingFieldTrio/index.ts:170-185, :697-706, :945-963
+- The EmailWorkspace/EmailTrackingPanel lines listed in background item 7.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; code-review and adr-check at Step 9.5.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-138" base="integ/uac-r2-batch2 @ 2a9b4b26c" status="code-complete; BFF + PCF deploy, the retirement script -Apply and the criterion-16 live gate are PENDING MANUAL GATES; owner approval of the ADR-003 path-B amendment is required in the PR; publish size measured by the main session">
+      Full record: projects/unified-access-control-r2/notes/task-138-access-permission-levels.md.
+      - Preconditions: 135 (CIAM through the shared contact plane) and 131 (C3) merged — escalations 1 and 2 do not fire.
+      - Read time: RootRecordFlags gains IsLimited + an explicit IsUnreadable marker; IsDirectOnly = IsSecure || IsLimited is
+        the ONE pre-max predicate (AccessibleRecordSetService.DirectOnlyPredicate), consulted by the grant term, the standing
+        term and org expansion on the workforce contact plane, the systemuser contact-grants term and CIAM (no CIAM code).
+        Membership never consults it; Restricted stays the post-max veto and wins.
+      - Write time: ONE decision, ExternalGrantLifecycle.DecideGrantPolicy (absent key = unreadable), run first by the shared
+        core CreateGrantAsync (typed GrantUpsertOutcome.Refusal, never an exception) and before any side effect by
+        /invite-and-grant and /invite. 422 sdap.access.grant.record_restricted / sdap.access.grant.org_grant_direct_only_record;
+        503 sdap.access.grant.policy_unreadable. Runs after DelegationRuleFilter (non-Write caller: 403, policy never read).
+        RecordAccessGateEndpoint remarks record why the gate ignores the flags.
+      - Client: AccessGrantModal hides per state (Restricted: contact/org/candidates hidden, + User enabled; Limited/Secure:
+        + Organization hidden), one bar per state incl. owner O1 FINAL "Secure – Restricted", server refusal detail shown,
+        dead onSetStandingGrant removed; pure resolveAccessPermissionState (fail closed). TrackingFieldTrio: disabled /
+        accessPermissionDisabled / showAccessPermission / secureAccessPermission ("Secure" red pill). PCF v1.0.32 (five
+        version locations, rebuilt bundle): isControlDisabled + security.editable, fail-closed sprk_issecure gating read,
+        accessPermission optional. Communication components: every reader/writer of the column removed.
+      - Communications (owner Q6): live READ-ONLY scan — no form/view/workflow/plugin reference; one unmanaged aiskillconfig
+        (FormFillFieldOptOut) dependency; 99 rows at Standard. scripts/Retire-CommunicationAccessPermission.ps1 written (dry run
+        default, idempotent, refuses managed/workflow/filtering references) and run WITHOUT -Apply (output in the notes).
+        Escalations 4 and 5 do not fire.
+      - Escalation 3 SURFACED (not fired): the core admits named contact auto-grants on Limited/Secure (the recommendation);
+        refused on Restricted — task 142 must treat that refusal as skip-and-log.
+      - ADR-003 item 8 amended in docs/adr (path B); concise .claude/adr replacement text handed to the main session (notes §5).
+      - Placement (CLAUDE.md §10): in the BFF; no new service, endpoint, DI registration, option, job or package. §11:
+        methods on the existing ExternalGrantLifecycle / ExternalParticipationService (no write-time policy existed; extends the
+        lifecycle home and the one flag reader; without it a Write-holder mints contact/org grants on Restricted records and org
+        grants on Secure ones, and /invite-and-grant provisions an account that can never get access). New script: no existing
+        column-retirement script (nearest pattern Deploy-AccessEventEntity.ps1); without it the dead column and its Copilot
+        dependency stay. New shared pure function: the PCF has no jest harness; the host keeps its integers (ADR-012).
+      - Tests: perturbation-checked (Limited predicate off: 16 red; policy off: 32 red; core check off: 17 red; modal gating
+        off: 3 red). Counts for the full suites are in the notes.
+      - Deviations: "Secure" in the pill menu writes Limited; a NULL sprk_issecure reads as Limited in the dialog until task
+        153's Q1 cleanup; criterion 12's pure test lives in the shared lib's jest.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-138-r1" base="task/uac-r2-138 @ 367a6209c" status="verifier round 1 addressed; criterion 16 live gate, owner approval of the ADR-003 path-B amendment (criterion 17), the concise .claude/adr edit and the publish-size measurement (criterion 19) remain with the main session / owner">
+      Full record: notes/task-138-access-permission-levels.md §10.
+      - Finding 5 (two-item secure menu beyond O1 FINAL): REVERTED. secureAccessPermission is a closed-label change only
+        ({ label }); the menu is the record's own Standard / Limited / Restricted list and each item writes its own value.
+        The "Secure" writes Limited deviation above is withdrawn. PCF SECURE_ACCESS_PERMISSION_OPTIONS deleted; bundle rebuilt
+        (still v1.0.32, never deployed). New jest pins the menu and the three writes; perturbation 2 red + 2 red, restored green.
+      - Finding 6 (NULL sprk_issecure maps to Limited in the dialog): kept, fail closed; flagged to the owner with task 153 —
+        the Q1 cleanup must run in every environment, production included, not only dev.
+      - Finding 7: isAccessPermissionBound() also accepts a numeric raw value as proof of a binding; criterion 16(d) now checks
+        render + write-back on the three root forms under v1.0.32.
+      - Finding 8: the retirement script refuses (exit 2) a personal view that filters on the column, and one that references it
+        without -IncludeUserViews — the same rule as system views. Proven with an offline fake-Invoke-Dv harness, and seeded
+        against the pre-fix script (both scenarios exit 0 there).
+      - Finding 9: stale GrantPolicyWriteTimeTests doc reference now names the real test classes.
+      - Finding 10: merge sequencing with task/uac-r2-141-f3 recorded for the main session (keep both the 138 pre-checks and the
+        141 changes).
+      - Placement / justification (CLAUDE.md §10/§11): no new service, DI registration, endpoint, option, job or package; no BFF
+        production code changed in r1.
+    </outcome>
+  </execution>
+  <ui-tests>
+    <test name="Restricted keeps + User and blocks contact grants">
+      <steps>
+        <step>At https://{org}.crm.dynamics.com, as a non-admin test user with Write on a non-secure project, set Access Permission to Restricted and save.</step>
+        <step>Open Manage Access.</step>
+      </steps>
+      <expected>"+ User" is enabled; "+ Contact" and "+ Organization" are disabled and show the reason (record is Restricted). The banner and the enabled controls agree.</expected>
+    </test>
+    <test name="Limited hides organization-wide and standing grants">
+      <steps>
+        <step>Set Access Permission to Limited on a project and open Manage Access.</step>
+      </steps>
+      <expected>Only named direct grants can be added ("+ Contact", "+ User"); "+ Organization" is disabled with the reason. Existing organization grants are listed as having no effect on this record.</expected>
+    </test>
+    <test name="A refused grant shows the server's message">
+      <steps>
+        <step>On a Restricted record, submit a contact grant through any remaining path (e.g. a stale modal opened before the change).</step>
+      </steps>
+      <expected>The modal shows the server's reason (record_restricted), not a generic error, and no grant appears in Current Access.</expected>
+    </test>
+  </ui-tests>
+</task>

@@ -25,9 +25,10 @@
  *
  * @see src/solutions/EmailPage/src/main.tsx — the receiving code page (compose mode).
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { EMAIL_PAGE_WEBRESOURCE_NAME } from './openEmailRecord';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
 
 /** Compose entry points. `new` needs no source; the rest require a source communication. */
 export type OpenEmailComposeMode = 'new' | 'reply' | 'replyAll' | 'forward';
@@ -52,14 +53,14 @@ export interface OpenEmailComposeOptions {
  */
 export async function openEmailCompose(options?: OpenEmailComposeOptions): Promise<void> {
   const mode: OpenEmailComposeMode = options?.mode ?? 'new';
-  const sourceId = (options?.sourceCommunicationId ?? '').replace(/[{}]/g, '').trim().toLowerCase();
+  const sourceId = cleanGuid(options?.sourceCommunicationId);
 
   if (mode !== 'new' && !sourceId) {
     console.warn(`[openEmailCompose] mode "${mode}" requires a sourceCommunicationId — nothing to open.`);
     return;
   }
 
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   if (typeof xrm?.Navigation?.navigateTo !== 'function') {
     console.warn(
       '[openEmailCompose] Xrm.Navigation.navigateTo is unavailable — this launcher only works inside a Model-Driven App host. No-op.'

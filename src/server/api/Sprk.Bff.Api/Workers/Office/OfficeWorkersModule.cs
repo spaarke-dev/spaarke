@@ -15,7 +15,7 @@ public static class OfficeWorkersModule
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Per ADR-001, workers use BackgroundService (not Azure Functions).
+    /// These workers run in the BFF as BackgroundServices, governed by ADR-052 (ADR-004 A1 §6 named non-conforming consumers).
     /// Per ADR-010, we minimize DI registrations and use concretes.
     /// </para>
     /// <para>

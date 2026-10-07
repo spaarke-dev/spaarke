@@ -81,7 +81,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
     private readonly InsightEndpointsTestFixture _fixture;
     private readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Guid SampleQuestion = Guid.Parse("11111111-2222-3333-4444-555555555555");
-    private const string SampleSubject = "matter:M-1234";
+    // Task 163: the subject id must now be a GUID — the route's declaration filter parses it and asks
+    // Dataverse, as the caller, for Read on sprk_matters(id) before the handler runs. "matter:M-1234"
+    // (a display number, never a record id) is refused 400 there.
+    private const string SampleSubject = "matter:6a1c0f3e-1234-4cde-8f00-000000001234";
 
     public InsightEndpointsContractTests(InsightEndpointsTestFixture fixture)
     {
@@ -107,7 +110,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
         {
             question = SampleQuestion.ToString(),
             subject = SampleSubject,
-            parameters = new Dictionary<string, string> { ["lookBackYears"] = "3" }
+            // Task 163 (owner round 16 item 3): parameters go through the SHARED playbook-parameter policy, a declared
+            // allow-list. "lookBackYears" is on none of its lists (no Insights playbook node references it), so it is
+            // now a 400; "matterDescription" is a declared text key and must pass through unchanged.
+            parameters = new Dictionary<string, string> { ["matterDescription"] = "IP licensing dispute" }
         };
 
         // Act
@@ -136,7 +142,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
                 && r.TenantId == InsightEndpointsTestFixture.TestTenantId
                 && !string.IsNullOrWhiteSpace(r.AccessibleScopeHash)
                 && r.Parameters != null
-                && r.Parameters["lookBackYears"] == "3"),
+                && r.Parameters["matterDescription"] == "IP licensing dispute"),
             It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -768,6 +774,26 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
             services.RemoveAll<IConsumerRoutingService>();
             services.AddSingleton(ConsumerRoutingMock.Object);
 
+            // Task 163: a raw playbook GUID is accepted only when it is bound as insights-ask. The base
+            // client models "every GUID these tests send is a bound insights-ask playbook".
+            ConsumerRoutingMock
+                .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                    new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
+
+            // Task 163: the route now asks Dataverse, as the caller, for Read on the subject matter. These
+            // tests cover the authorized caller, so the caller reads everything (deny paths:
+            // InsightsRouteAuthorizationContractTests).
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
+            // Task 163 (owner round 16 item 1): the route reads the playbook's node list to decide whether the run
+            // can write to the subject (then Write is asked, not Read). These wire-contract tests drive a reader, so
+            // every playbook here is non-persisting (the predict-matter-cost shape); the Write rule is pinned by
+            // InsightsRouteAuthorizationContractTests.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.INodeService>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.Api.Ai.RouteSweepNodeShapes.NonPersistingNodeService());
+
             // Remove background hosted services that depend on external infrastructure.
             services.RemoveAll<IHostedService>();
 
@@ -813,6 +839,11 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
     public HttpClient CreateAuthenticatedTenantClientWithInsightsAskBindings(Dictionary<string, Guid> bindings)
     {
         var routingMock = new Mock<IConsumerRoutingService>();
+        // Task 163: raw playbook GUIDs must be bound as insights-ask (see the base fixture).
+        routingMock
+            .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, string? _, CancellationToken _) =>
+                new Binding { BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, PlaybookId = id });
         routingMock
             .Setup(r => r.ResolveBindingAsync(
                 ConsumerTypes.InsightsAsk,

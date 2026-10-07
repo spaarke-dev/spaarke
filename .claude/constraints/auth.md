@@ -53,16 +53,18 @@ Load when:
 
 ### Authorization Architecture (ADR-003)
 
-- ✅ **MUST** implement new auth logic as `IAuthorizationRule`
+- ✅ **MAY** implement new auth logic as an `IAuthorizationRule` **or** as an evaluator term (ADR-003 Amendment A1, 2026-09-04 — the rule shape is no longer mandated)
 - ✅ **MUST** call authorization before `SpeFileStore` operations
-- ✅ **MUST** cache UAC snapshots per-request only (not across requests)
+- ✅ **MUST** key any cached access **data** by caller identity **and** credential mode (SP vs OBO); a short explicit cross-request TTL is permitted (A1 retired "per-request only")
+- ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
-### SPE File Access — Writer-Identity Matching (binding — Pattern 4, 2026-06-08)
+### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)
 
-- ✅ **MUST** match the identity that reads an SPE file with the identity that wrote it. The Spaarke MI is intentionally NOT registered as a guest app on the SPE container type — it is on its own writes' ACLs only.
-- ✅ **MUST** dispatch post-upload RAG indexing synchronously in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` for **any user-OBO-uploaded file** (Create* wizard uploads, SprkChat persist, PCF/Code Page uploads). A Service Bus job that runs under MI later will 403 on the SPE download.
-- ✅ **MUST** use `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus enqueue) ONLY when the file was written by MI itself (Office Add-in finalize, Email-to-Document, post-analysis re-index).
+- ✅ **MUST** read and write SPE bytes app-only, behind a Dataverse decision and the document-pointer check, whenever a `sprk_document` (or record) stands behind them (task 171, owner rounds 69/70).
+- ✅ **MUST NOT** add a new caller of a user-identity byte member (`*AsUserAsync`). `SpeBrokerOnlyByteIdentityGuardTests` pins the allowed list (only record-less paths, such as staging and Compose items with no row).
+- ✅ **MUST** grant users SPE container roles only through `SpeContainerMembershipService.GrantMarkedWriterAsync` (guarded by `OnlyThreeTypesCreateContainerPermissions`).
+- ✅ **MUST** use `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus enqueue) ONLY when the file was written by MI itself (Office Add-in finalize, Email-to-Document, post-analysis re-index). An app-only job can read user-uploaded files since task 171.
 - ❌ **MUST NOT** enqueue a Service Bus job that reads an SPE file written by a different identity than the job handler runs under. Background-job handlers run under MI (`_factory.ForApp()`); they cannot read user-OBO-uploaded files.
 - ❌ **MUST NOT** wire new post-upload pipelines through `JobSubmissionService.SubmitJobAsync(RagIndexingJobPayload)` from request-scoped endpoints. Use the helper's OBO method.
 
@@ -92,10 +94,9 @@ Load when:
 
 ### Authorization Architecture (ADR-003)
 
-- ❌ **MUST NOT** create new service layers for auth (use rules instead)
+- ❌ **MUST NOT** create a new auth service layer **unless it is the evaluator or an evaluator term**, and then only with root CLAUDE.md §11's three-question justification (ADR-003 A1)
 - ❌ **MUST NOT** make direct Graph/SPE calls outside `SpeFileStore`
-- ❌ **MUST NOT** cache authorization decisions (cache data only)
-- ❌ **MUST NOT** reuse UAC snapshots across requests/jobs
+- ❌ **MUST NOT** cache authorization **decisions** (cache data only — unchanged by A1)
 
 ### @spaarke/auth Shared Library
 
@@ -240,6 +241,44 @@ if (!result.IsAllowed)
 > `RetrievePrincipalAccess` is used in app-only contexts. **It is not — it has zero call sites in the
 > repository.** Both modes run the same direct query `GET sprk_documents({id})` and grant at most
 > `AccessRights.Read` (`Spaarke.Dataverse/DataverseAccessDataSource.cs:323,368-372`).
+>
+> > 🔴 **SUPERSEDED 2026-09-21** (`spaarkeai-word-add-in-r1` task 063). **Both sentences above are now
+> > false, and code written against them will be wrong.** They were **accurate when written on 2026-08-20**
+> > and went stale two days later — this is drift, not an error by the investigation that wrote them.
+> >
+> > | Claim above | Status today | Evidence |
+> > |---|---|---|
+> > | "zero call sites" | **FALSE** — `RetrievePrincipalAccess` appears in **dozens** of files under `src/server` (22 on 2026-09-21, 23 on 2026-09-29) | `grep -rl RetrievePrincipalAccess --include=*.cs src/server \| wc -l` |
+> > | "grant at most `AccessRights.Read`" | **FALSE** — the probe returns the caller's actual rights, `Write` included, and `send-to-index` now gates on `AccessRights.Write` | `Api/Ai/RagEndpoints.cs` (task 063) |
+> >
+> > **What changed**: `Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs` was **added 2026-08-22**
+> > (`7270a3ba0`, external-access task 008) — *two days after* the note above. It calls
+> > `RetrievePrincipalAccess` **OBO, as the caller**, and is now the shared per-record access primitive
+> > behind `QuickCreateSourceAccessFilter`, `EntityAccessFilter`, `RecordRouteAccessAuthorizationFilter`,
+> > `ContainerDocumentAuthorizationFilter`, `DelegationRuleFilter` and `TodoSourceAccessFilter` (task 064).
+> > It fails closed: every failure mode yields `AccessRights.None`.
+> >
+> > **The paragraph below about `AuthorizationService` passing `userAccessToken: null` was NOT re-verified
+> > by this correction** — it was left explicitly open rather than assumed.
+> >
+> > ✅ **CLOSED 2026-09-29 by `unified-access-control-r2` task 006** (their finding **A-4**, spec FR-05),
+> > verified after their merge landed on master. `Api/PermissionsEndpoints.cs` no longer calls
+> > `GetUserAccessAsync` with `userAccessToken: null` — which had reported what the **application** could
+> > do to any authenticated caller. Note *why* their fix is durable, because it is the interesting part:
+> > they identified that the defect was never a missing null check but the **`= null` default** on
+> > `IAccessDataSource.GetUserAccessAsync`, which let any new direct caller inherit app-only evaluation
+> > simply by not thinking about it. The replacement method takes the token as a **mandatory positional
+> > parameter with no default**, so it cannot be called without stating intent. The `= null` defaults that
+> > remain on the lower-level `IAccessDataSource` signature are the original shape, now fenced by that
+> > forcing function rather than relied upon.
+> >
+> > Left in place rather than deleted, for the same reason the rest of this block is stacked: a reader
+> > needs to see that the gap was named, carried openly, and then closed by someone else — not that it
+> > silently disappeared.
+> >
+> > **Why the correction is stacked rather than rewritten**: the 08-20 finding is a true record of the
+> > repository at that date, and a project reading this file needs to know the claim existed, was right,
+> > and was overtaken — not merely that today's text says something different.
 >
 > Further, `Spaarke.Core/Auth/AuthorizationService.cs:48-52` always passes `userAccessToken: null`, so on
 > that path the probe runs **as the application, not as the caller** — it answers "can the app see this

@@ -95,5 +95,5 @@ Error responses follow RFC 7807 ProblemDetails throughout, with domain-specific 
 ## Related
 
 - [Configuration Architecture](configuration-architecture.md) — Resilience options classes
-- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API architecture (no Azure Functions)
+- [ADR-001](../../.claude/adr/ADR-001-minimal-api.md) — Minimal API architecture; where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md)
 - [ADR-009](../../.claude/adr/ADR-009-redis-caching.md) — Redis-first caching (rate limit storage)

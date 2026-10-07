@@ -30,8 +30,8 @@
       <file role="canonical-reference">docs/procedures/test-fixture-contracts.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="061" status="pending">Secure provisioning behaviour.</dependency>
-      <dependency task="063" status="pending">Share endpoints.</dependency>
+      <dependency task="061" status="completed">Secure provisioning behaviour.</dependency>
+      <dependency task="063" status="completed">Share endpoints.</dependency>
       <dependency task="064" status="pending">Report + deny endpoints.</dependency>
     </dependencies>
   </context>

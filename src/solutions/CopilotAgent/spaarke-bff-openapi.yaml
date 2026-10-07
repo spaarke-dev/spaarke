@@ -452,7 +452,7 @@ paths:
       parameters:
         - name: regardingRecordType
           in: query
-          description: "Entity type code (1=Matter, 2=Project)"
+          description: "Regarding entity type (0=Project, 1=Matter, 2=Invoice, 3=Analysis, 4=Account, 5=Contact, 6=Work Assignment, 7=Budget)"
           schema:
             type: integer
         - name: regardingRecordId
@@ -469,7 +469,7 @@ paths:
             default: open
         - name: priority
           in: query
-          description: "Priority filter (100000000=High, 100000001=Medium, 100000002=Low, 100000003=None)"
+          description: "Priority filter — live sprk_event.sprk_priority (100000000=Low, 100000001=Normal, 100000002=High, 100000003=Urgent)"
           schema:
             type: integer
         - name: dueDateFrom

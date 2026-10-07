@@ -64,8 +64,6 @@ export type {
   IUserBuCascadeDefaults,
   AuthenticatedFetchFn,
 } from './EntityCreationService';
-export * from './CommandRegistry';
-export * from './CommandExecutor';
 // Field-mapping engine (context-agnostic, ADR-012). `applyFieldMappings` is the
 // single public entrypoint the Create*Wizard services call (tasks 012+). The
 // former `FieldMappingService` class (PCF-WebApi-bound dead code) was replaced
@@ -272,3 +270,16 @@ export type {
   AnalysisFilePreviewResolved,
   AnalysisFilePreviewNoDocument,
 } from './analysisFileResolution';
+
+// UAC-r2 task 147 r1 (owner round 28 item 1): child-record creates and re-files go through the BFF (G5). Re-exported on
+// the services subpath for packages that consume `@spaarke/ui-components/services` (Daily Briefing, SmartTodo).
+export {
+  createChildRecordViaBff,
+  updateChildRecordViaBff,
+  withBffChildWrites,
+  routesChildWritesThroughBff,
+  isBffChildCreateTable,
+  isBffChildRefileTable,
+  ChildRecordWriteError,
+  BFF_CHILD_CREATE_TABLES,
+} from '../utils/adapters/bffChildWriteAdapter';

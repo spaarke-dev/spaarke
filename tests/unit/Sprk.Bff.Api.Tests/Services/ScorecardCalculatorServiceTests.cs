@@ -444,27 +444,25 @@ public class ScorecardCalculatorServiceTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
-                (_, _, fields, _, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
+                (_, _, fields, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act
         await _service.RecalculateGradesAsync(matterId);
 
-        // Assert - UpdateRecordFieldsAsync was called
+        // Assert - UpdateExistingRecordFieldsAsync (update-only, task 130) was called
         _dataverseServiceMock.Verify(
-            s => s.UpdateRecordFieldsAsync(
+            s => s.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()),
+                It.IsAny<CancellationToken>()),
             Times.Once);
 
         // Assert - all 6 fields are present with correct values
@@ -490,12 +488,11 @@ public class ScorecardCalculatorServiceTests
 
         // Assert - verifies entity name is "sprk_matter"
         _dataverseServiceMock.Verify(
-            s => s.UpdateRecordFieldsAsync(
+            s => s.UpdateExistingRecordFieldsAsync(
                 "sprk_matter",
                 matterId,
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()),
+                It.IsAny<CancellationToken>()),
             Times.Once);
     }
 
@@ -508,14 +505,13 @@ public class ScorecardCalculatorServiceTests
 
         Dictionary<string, object?>? capturedFields = null;
         _dataverseServiceMock
-            .Setup(s => s.UpdateRecordFieldsAsync(
+            .Setup(s => s.UpdateExistingRecordFieldsAsync(
                 It.IsAny<string>(),
                 It.IsAny<Guid>(),
                 It.IsAny<Dictionary<string, object?>>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<Guid?>()))
-            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken, Guid?>(
-                (_, _, fields, _, _) => capturedFields = fields)
+                It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object?>, CancellationToken>(
+                (_, _, fields, _) => capturedFields = fields)
             .Returns(Task.CompletedTask);
 
         // Act

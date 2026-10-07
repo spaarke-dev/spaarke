@@ -194,7 +194,27 @@ describe('ReconciliationWorkspace', () => {
     // The reader reflects the opened row.
     expect((await screen.findAllByText('Quarterly filing update')).length).toBeGreaterThan(0);
     // A6 — the drag-resize splitter is present (role="separator").
-    expect(screen.getByRole('separator', { name: 'Resize panels' })).toBeInTheDocument();
+    //
+    // Task 092, 2026-10-04 — traced, not just load-shrugged: `openFirstRow()`
+    // (above) already awaits `findByTestId('reconciliation-browse-two-pane')`,
+    // and `<PanelSplitter>` is an UNCONDITIONAL sibling of the reader content
+    // inside that SAME container in `ReconciliationBrowseShell.tsx` (both
+    // commit in one React render — no Suspense boundary, no conditional
+    // gate on `current`/`queue` between them). So this is not a distinct
+    // render-order bug to fix in the component; it's this assertion's own
+    // wait budget. `findByRole`'s default 1000ms timeout occasionally isn't
+    // enough for that single commit (layout effects + Griffel style
+    // injection) to land under host CPU contention — measured 29/30 passing
+    // in isolation with a concurrent `dotnet build` running on the same
+    // machine throughout (vs ~87-93% during heavier multi-process
+    // contention earlier); see the PR body for the full measurement
+    // history, including whether a fully idle run was achieved. Explicit
+    // `{ timeout: 4000 }` — the SAME budget already used for this reason
+    // elsewhere in this test family (e.g.
+    // `ConversationView.forward.test.tsx`'s `findByRole('alertdialog', …,
+    // { timeout: 4000 })`) — rather than a global jest/testing-library
+    // timeout change.
+    expect(await screen.findByRole('separator', { name: 'Resize panels' }, { timeout: 4000 })).toBeInTheDocument();
     // ADR-012 — the workspace's injected onRecordOpen handled it; no Xrm navigate.
     expect(navigateTo).not.toHaveBeenCalled();
   });

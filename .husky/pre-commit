@@ -2,4 +2,31 @@
 # Skip pre-commit hooks in CI environments
 [ "$CI" = "true" ] && exit 0
 
+# Skip during a MERGE commit (added 2026-09-28 by spaarkeai-word-add-in-r1).
+#
+# A merge commit stages the union of both sides. For a large upstream merge that is
+# hundreds of files nobody in THIS commit authored, and formatting them here is wrong
+# on two counts:
+#
+#   Principle — it rewrites another branch's content inside the merge, which makes the
+#   merge unreviewable (formatting noise indistinguishable from conflict resolution) and
+#   can silently revert formatting choices the other branch made deliberately.
+#
+#   Practice — it does not work. Observed on a 229-commit master merge: lint-staged
+#   chunked 587 staged files into 17 groups and ran `dotnet format` concurrently, and
+#   every group was SIGKILLed on resource exhaustion, so the merge could not be
+#   committed at all. The hook did not report a defect; it died.
+#
+# Nothing is lost: the merged content was already formatted on the branch that authored
+# it, formatting still runs on every ordinary commit (which is where authored changes
+# actually arrive), and CI's own format check is unaffected.
+#
+# `git rev-parse --git-path` rather than a literal `.git/MERGE_HEAD` — in a WORKTREE the
+# real path is `.git/worktrees/<name>/MERGE_HEAD`, so the literal check silently never
+# fires, which is exactly the false negative this guard must not have.
+if [ -f "$(git rev-parse --git-path MERGE_HEAD)" ]; then
+  echo "pre-commit: merge commit detected -- skipping lint-staged (see .husky/pre-commit)."
+  exit 0
+fi
+
 npx lint-staged

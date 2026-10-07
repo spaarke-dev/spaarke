@@ -4,7 +4,8 @@
     <title>FR-20 negative canary (NFR-04) — impersonation-inertness merge gate, authored BEFORE the swap</title>
     <phase>1 One evaluator</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <status-note>2026-10-03 — COMPLETED. The manual live gate PASSED on dev: all four live tests green with SPAARKE_CANARY_REQUIRED=true and the existing non-admin user uac.child.user (impersonated 59 vs app-only 61; expected set derived app-only from Deep BU1 ownership plus POA); the inversion check against an admin user FAILED as designed (INERT, 61 = 61); the README records the manual-gate decision, the existing-user variant and the two credential variables the run needs; the 005/007/008 checklist is recorded in note section 5. Evidence: notes/task-034-negative-canary.md section 8. Task 036 is unblocked. 2026-09-30 — DECISION BLOCK LIFTED (see the amendments block at the end of this file): both owner decisions below are now resolved by standing owner directives. The status stays blocked-shipped ONLY until the manual live run passes; nothing is waiting on an owner decision any more. 2026-09-03 — mechanism SHIPPED and perturbation-proven; the LIVE run is blocked on two owner decisions (provision a non-admin canary user; choose scheduled-canary vs CI-secrets). Both POML escalation triggers fired legitimately. Decision record: notes/task-034-negative-canary.md. Task 036 MUST NOT proceed until the canary runs truthfully against a provisioned user.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (modifies tests/**, tags testing/integration-test) — code-review + adr-check unconditional; also auth tags.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -95,4 +96,61 @@
   <notes>Spec NFR-04 + investigation 08 §3d (verbatim design) + register E-4. RESIDUAL (not this task): the RUNTIME canary variant (startup/scheduled strict-fewer check emitting a metric + alarm, guarding production config drift) — recommended by investigation 08, not mandated by NFR-04; file via project-defer-issue-tracking when this task closes.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+
+  <amendments date="2026-09-30" source="owner standing directives, session 27 (notes/session27-owner-decisions-and-research.md, round 2 BINDING)">
+    <verdict>THE TWO OPEN DECISIONS ARE RESOLVED. The status stays blocked-shipped until the manual live run
+    passes; the DECISION block is lifted. Both escalation triggers fired legitimately on 2026-09-03 and both
+    are now answered by the owner, so neither may be re-raised as a reason to wait. The only remaining
+    obligation is to perform the manual run truthfully and record it.</verdict>
+    <amendment n="1" resolves="escalation trigger 2 (CI mechanism) + step 3 + the CI half of the blocking-gate criterion">
+    The live run is a MANUAL gate. No Dataverse test runs in CI (owner 2026-09-10, reaffirmed as a standing
+    directive 2026-09-30). Option (A) "scheduled canary with federated credential" and option (B) "Dataverse
+    secrets in CI" are both declined; neither may be built under this task. The tenant-free layers that
+    already run in CI (the perturbation tests and the config tripwire
+    Fr20ImpersonatedRootSetFlag_WhenEnabledInCheckedInConfiguration_RequiresAProvisionedCanary) stay exactly
+    as shipped and remain the mechanical half of the gate. The live layer is run by hand, with
+    SPAARKE_CANARY_REQUIRED=true, before task 036 merges. Update the section "What is NOT yet wired (open
+    decision)" of tests/integration/auth/README.md to record this decision and the manual procedure,
+    replacing the open-decision wording.</amendment>
+    <amendment n="2" resolves="escalation trigger 1 (no non-admin canary user)">
+    Use an EXISTING non-admin test user who already sits in the correct business unit as the canary. Do NOT
+    create a new systemuser, do NOT relocate any user between business units, and do NOT build the
+    dedicated "Spaarke Impersonation Canary" role. Set SPAARKE_CANARY_SYSTEMUSERID to that user's
+    systemuserid (the Dataverse row id, not the Entra oid).
+    Consequence for the fixture contract: that user's roles are broader than "User-level Read on
+    sprk_matter only", so the provisioning section of the README must be rewritten to describe the
+    existing-user variant. Test 1 (strict subset AND strictly fewer) is unchanged and remains the gate.
+    Test 2 (exactness) needs SPAARKE_CANARY_SEEDED_MATTER_IDS to equal the set Dataverse should return
+    for that user. Derive that expected set independently of the impersonated read (for example from the
+    matters that user owns or has shared to them, when the user's sprk_matter read depth is User-level).
+    Record in notes how it was derived.</amendment>
+    <amendment n="3">The 2026-09-09 hazard still applies: until then every root-BU user inherited System
+    Administrator through the root BU's default owner team, so both reads compared equal, which is a
+    confident false pass. Before the run, confirm the chosen user holds no role (direct or team-inherited)
+    that grants Organization-depth Read on sprk_matter. Record both set sizes (impersonated, app-only) in
+    notes/task-034-negative-canary.md.</amendment>
+    <amendment n="4">prvActOnBehalfOfAnotherUser: in dev it is held through the System Administrator role on
+    the BFF application users "# mi-bff-api-dev", "SDAP-BFF-SPE-API" and "# Spaarke DMS-SPE Dev 1".
+    This was verified by role on 2026-09-30, not by a live call, and no Spaarke role holds it. The manual
+    run is the first live proof. A run that fails on the privilege is a failed gate. Do not grant the
+    privilege to a Spaarke role as a workaround.</amendment>
+    <amendment n="5">The live-tenant checklist carried by the task-005, task-007 and task-008 constraints (RPA
+    flags beyond Read; the RPA-FALLBACK and DELEGATION-RPA-UNAVAILABLE log markers; WhoAmI under OBO; RPA on
+    a sprk_project target; grant-expiry past, today and none) is executed during the same manual session.
+    notes/task-034-negative-canary.md section 5 lists it as NOT PERFORMED. Record each observation there.</amendment>
+    <acceptance-criteria-amended>
+      <criterion testable="true">MANUAL LIVE GATE: all four live tests (ImpersonatedMatterRead_..._ReturnsAStrictSubsetAndStrictlyFewerRows, ImpersonatedMatterRead_..._ReturnsExactlyTheSeededMatters, RetrieveMultipleImpersonatedAsync_..._RefusesAnEmptyCaller, HelperStampedMatterRead_..._ReturnsAStrictSubsetAndStrictlyFewerRows) run against dev with SPAARKE_CANARY_REQUIRED=true and the existing non-admin test user, and ALL FOUR PASS. None halts as NOT RUN. Both set sizes, the user's role list (direct and team-inherited) and the derivation of SPAARKE_CANARY_SEEDED_MATTER_IDS are recorded in notes/task-034-negative-canary.md.</criterion>
+      <criterion testable="true">Negative (exactness is independent): the expected matter set for Test 2 was derived WITHOUT the impersonated read (for example an app-only query of owner, owning team and principal-object-access rows for that user, filtered by the user's recorded sprk_matter read depth). Setting it by copying the impersonated result is a failed gate.</criterion>
+      <criterion testable="true">Negative: equal sets are recorded as a FAILED gate, never a pass. Task 036 does not merge on that result.</criterion>
+      <criterion testable="true">tests/integration/auth/README.md records the manual-gate decision and the existing-user fixture variant. The "open decision" wording is removed. The CI-blocking tenant-free layers are unchanged.</criterion>
+      <criterion testable="true">No user was created, relocated between business units or re-roled for this run, and no Dataverse credential was added to any .github workflow.</criterion>
+      <criterion testable="true">The task-005, task-007 and task-008 live checklist items each have a recorded observation in notes/task-034-negative-canary.md section 5.</criterion>
+      <criterion testable="true">Once all of the above hold, this task's status is set to completed and the TASK-INDEX marker is updated to match (scripts/check-task-status-drift.ps1 clean for this id).</criterion>
+    </acceptance-criteria-amended>
+    <escalation-amended>
+      <trigger>If no existing non-admin test user in the correct BU can make Test 1 satisfiable (the user can already read every matter, or the org holds no matter outside the user's read scope), STOP and report the user's roles and the two counts. Do not create or relocate a user to fix it, because that contradicts the standing directive.</trigger>
+      <trigger>If the existing user's sprk_matter read depth is Business Unit or deeper, or the user reaches matters through team or hierarchy access, so that the Test 2 expected set cannot be derived independently with confidence, STOP and report the roles and the candidate derivation. Recommendation to put to the owner: keep Test 1 (strictly fewer) as the gate and record Test 2 against the best independent derivation, rather than weakening Test 2's assertion. Do not edit the test to pass.</trigger>
+      <trigger>If the impersonated set equals the app-only set, STOP. That means impersonation is inert. Escalate with the counts and do not flip any flag.</trigger>
+    </escalation-amended>
+  </amendments>
 </task>

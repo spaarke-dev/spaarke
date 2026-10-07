@@ -109,7 +109,7 @@ internal sealed class ComposeReanchorCoordinator
         Stream? stream;
         try
         {
-            stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
+            stream = await _spe.DownloadForComposeAsync(httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)

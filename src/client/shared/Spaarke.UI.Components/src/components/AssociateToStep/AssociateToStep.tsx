@@ -49,6 +49,7 @@ import { CheckmarkCircleRegular, DismissRegular, SearchRegular } from '@fluentui
 
 import type { AssociateToStepProps, AssociationResult, EntityTypeOption } from './types';
 import { useAssociateToStepStyles } from './AssociateToStep.styles';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // AssociateToStep
@@ -136,7 +137,7 @@ export const AssociateToStep: React.FC<AssociateToStepProps> = ({
       }
 
       const picked = results[0];
-      const cleanId = picked.id.replace(/[{}]/g, '').toLowerCase();
+      const cleanId = cleanGuid(picked.id);
 
       const result: AssociationResult = {
         entityType: picked.entityType || selectedEntityType,

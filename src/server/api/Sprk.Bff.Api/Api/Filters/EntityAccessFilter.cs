@@ -83,30 +83,115 @@ public class EntityAccessFilter : IEndpointFilter
     private readonly CallerRecordAccessProbe _probe;
     private readonly ILogger<EntityAccessFilter>? _logger;
 
-    // Operation constant for entity association
-    private const string AssociateOperation = "entity.associate_document";
+    /// <summary>
+    /// The <see cref="OperationAccessPolicy"/> operation this filter enforces: filing a document TO the target.
+    /// </summary>
+    /// <remarks>
+    /// Internal (task 084) so the Office picker's per-row <c>canFile</c> flag is decided by the SAME operation,
+    /// and therefore the same right, as this filter. "Pickable" and "savable" cannot drift apart while both
+    /// read this one constant.
+    /// </remarks>
+    internal const string AssociateOperation = "entity.associate_document";
 
     /// <summary>
     /// Association target type → Dataverse entity SET (plural collection) name.
     /// </summary>
     /// <remarks>
-    /// A closed map with a fail-closed miss, replacing the previous <c>IsValidEntityType</c> boolean:
+    /// <para>A closed map with a fail-closed miss, replacing the previous <c>IsValidEntityType</c> boolean:
     /// validating a type and then resolving its collection are the same question, and keeping them in
     /// one table means a type can never be accepted without a collection to check it against. Short
-    /// aliases are retained because the previous implementation accepted them.
+    /// aliases are retained because the previous implementation accepted them.</para>
+    ///
+    /// <para><b>This is THE map for logical-name → entity-set on the caller-rights path</b>
+    /// (unified-access-control-r2 task 076). It is read by this filter AND by
+    /// <see cref="RecordRouteAccessAuthorizationFilter"/> through <see cref="TryResolveEntitySet"/>.
+    /// The codebase already carried three logical/short-name → entity-set maps before 076
+    /// (here, <c>SemanticSearchAuthorizationFilter.AuthorizableEntitySets</c>, and
+    /// <c>RecordSearchAuthorizationFilter</c>'s dynamically-built one), which is already over the
+    /// CLAUDE.md §11 line. A FOURTH is not acceptable, so the record-keyed upload route reuses this
+    /// one rather than declaring its own — the two filters differ in where they read the target from
+    /// and which right they demand, not in what an entity's collection is called.</para>
     /// </remarks>
     private static readonly IReadOnlyDictionary<string, string> EntitySetByType =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
-            ["account"] = "accounts",
+            // ⚠️ LOCKSTEP INVARIANT (unified-access-control-r2, 2026-09-04): a type belongs in THIS
+            // map and in Spaarke.Dataverse.DocumentAssociationMap, or in NEITHER. A type authorized
+            // here but with no sprk_document lookup column authorizes an upload that can only ever
+            // land unassociated — the user believes the file is filed and it is not. Three consumers
+            // depend on this table: EntityAccessFilter itself, RecordRouteAccessAuthorizationFilter
+            // (the record-keyed upload route), and ComposeService.
+            //
+            // "account" REMOVED 2026-09-04 (owner decision). sprk_document has NO account lookup in
+            // either column family, so account was the one entry that violated the invariant. Removal
+            // is a NARROWING — the safe direction — and costs nothing at the other call sites: the
+            // Office save endpoint already refuses "account", and ComposeService resolves a constant.
+            // Spaarke's organization analogue is sprk_organization; do not re-add "account".
             ["contact"] = "contacts",
             ["sprk_matter"] = "sprk_matters",
             ["matter"] = "sprk_matters",
             ["sprk_project"] = "sprk_projects",
             ["project"] = "sprk_projects",
             ["sprk_invoice"] = "sprk_invoices",
-            ["invoice"] = "sprk_invoices"
+            ["invoice"] = "sprk_invoices",
+            // Added 2026-09-03 (unified-access-control-r2 item 7 / Q4 widening — owner: "it is file
+            // access"). Both have a real lookup column on sprk_document (verified against live
+            // Dataverse metadata), so a document CAN actually be filed to them; widening the access
+            // map without that column would authorize a route that then silently drops the
+            // association. Plural forms attested in live Web API URLs.
+            ["sprk_workassignment"] = "sprk_workassignments",
+            ["workassignment"] = "sprk_workassignments",
+            ["sprk_event"] = "sprk_events",
+            ["event"] = "sprk_events",
+            // sprk_todo ADDED 2026-09-04, correcting the note that used to sit here. That note said
+            // "sprk_document has NO sprk_todo lookup column ... needs a schema change first" — and the
+            // Q4 note and the inbound email-r2 coordination doc said the same. All three were wrong in
+            // the same way: they searched the bare `sprk_{type}` family and never looked at
+            // `sprk_related*`. `SELECT sprk_relatedtodo FROM sprk_document` SUCCEEDS; the column always
+            // existed, so this needed CODE, not schema. The lockstep invariant is now satisfied — todo
+            // is in this map AND in DocumentAssociationMap.
+            ["sprk_todo"] = "sprk_todos",
+            ["todo"] = "sprk_todos"
         };
+
+    /// <summary>
+    /// Resolve an entity logical name (or short alias) to its Dataverse entity SET, for
+    /// <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, which needs the PLURAL collection.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> and the collection name when the type is one whose per-record access
+    /// this codebase can evaluate; <see langword="false"/> otherwise. A <see langword="false"/> return
+    /// is a DENIAL at every call site, never a pass-through — see
+    /// <see cref="RecordRouteAccessAuthorizationFilter"/>.
+    /// </returns>
+    /// <remarks>
+    /// Exposed (task 076) so the record-keyed upload route can share this table instead of adding a
+    /// fourth copy of it. Deliberately a <c>TryResolve</c> rather than an exposed dictionary: handing
+    /// out the map would let a caller enumerate it and then decide for itself what a miss means, and
+    /// the whole point of the closed-map-with-fail-closed-miss shape is that a miss has exactly one
+    /// legal interpretation.
+    /// </remarks>
+    internal static bool TryResolveEntitySet(string? entityLogicalNameOrAlias, out string entitySet)
+    {
+        if (!string.IsNullOrWhiteSpace(entityLogicalNameOrAlias)
+            && EntitySetByType.TryGetValue(entityLogicalNameOrAlias.Trim(), out var resolved))
+        {
+            entitySet = resolved;
+            return true;
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Every type spelling this table accepts — for the LOCKSTEP guard only
+    /// (<c>AssociationTypeLockstepTests</c>, task 151 review), which must enumerate the keys to prove each one is
+    /// also a <c>DocumentAssociationMap</c> spelling naming the SAME entity. Internal (test assembly via
+    /// <c>InternalsVisibleTo</c>, ADR-038 Amendment A2): production callers keep the <see cref="TryResolveEntitySet"/>
+    /// shape, so a miss still has exactly one legal interpretation.
+    /// </summary>
+    internal static IEnumerable<string> SupportedEntityTypes => EntitySetByType.Keys;
 
     public EntityAccessFilter(
         CallerRecordAccessProbe probe,
@@ -160,7 +245,7 @@ public class EntityAccessFilter : IEndpointFilter
 
         // Resolve the target's Dataverse collection. A type with no entry is rejected — validating the
         // type and knowing where to look it up are the same question (see EntitySetByType).
-        if (!EntitySetByType.TryGetValue(targetEntity.EntityType, out var entitySet))
+        if (!TryResolveEntitySet(targetEntity.EntityType, out var entitySet))
         {
             _logger?.LogWarning(
                 "Entity access check failed: Invalid entity type '{EntityType}'. " +
@@ -196,8 +281,6 @@ public class EntityAccessFilter : IEndpointFilter
 
             if (!OperationAccessPolicy.HasRequiredRights(rights, AssociateOperation))
             {
-                var (statusCode, errorCode, detail) = MapAuthorizationDenial("insufficient_rights");
-
                 _logger?.LogWarning(
                     "Entity access denied: User {UserId} cannot associate documents with {EntityType} {EntityId} " +
                     "({EntitySet}). Holds {Rights}; requires {Required}. CorrelationId: {CorrelationId}",
@@ -205,13 +288,13 @@ public class EntityAccessFilter : IEndpointFilter
                     OperationAccessPolicy.GetRequiredRights(AssociateOperation), httpContext.TraceIdentifier);
 
                 return Results.Problem(
-                    statusCode: statusCode,
+                    statusCode: 403,
                     title: "Forbidden",
-                    detail: detail,
+                    detail: InsufficientRightsDetail,
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.3",
                     extensions: new Dictionary<string, object?>
                     {
-                        ["errorCode"] = errorCode,
+                        ["errorCode"] = AccessDeniedErrorCode,
                         ["reasonCode"] = "insufficient_rights",
                         ["entityType"] = targetEntity.EntityType,
                         ["correlationId"] = httpContext.TraceIdentifier
@@ -250,9 +333,24 @@ public class EntityAccessFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Extract target entity from request arguments.
-    /// Supports SaveRequest with TargetEntity property.
+    /// Extract the record this request will act against, from whichever request shape carries it.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 THIS METHOD IS THE FILTER'S REACH. A request shape it does not recognise yields null, and a
+    /// null target makes the filter PASS THROUGH (see the caller) — so adding a route to
+    /// <c>AddEntityAccessFilter</c> without teaching this method its request type produces a filter
+    /// that is present, credited as a gate by <c>RouteAuthorizationGuardTests</c>' Rule A, and checks
+    /// nothing. Extend this method in the same change, and add a guard that pins the pairing.
+    /// </para>
+    /// <para>
+    /// Today only <c>SaveRequest</c> reaches this filter (<c>POST /api/office/save</c>). For
+    /// <c>POST /api/office/todo</c>, see <c>TodoSourceAccessFilter</c> (spaarkeai-word-add-in-r1 task
+    /// 064), which gates all four caller-supplied ids; a <c>CreateTodoRequest</c> branch that once lived
+    /// here (unified-access-control-r2 task 128, gating only the regarding id) was superseded by it and
+    /// removed at merge, 2026-09-30.
+    /// </para>
+    /// </remarks>
     private static SaveEntityReference? ExtractTargetEntity(EndpointFilterInvocationContext context)
     {
         foreach (var argument in context.Arguments)
@@ -269,24 +367,46 @@ public class EntityAccessFilter : IEndpointFilter
     /// <summary>
     /// Maps authorization denial reason to appropriate HTTP status and error code.
     /// </summary>
-    private static (int statusCode, string errorCode, string detail) MapAuthorizationDenial(string? reasonCode)
-    {
-        return reasonCode?.ToLowerInvariant() switch
-        {
-            "entity_not_found" or "resource_not_found" =>
-                (404, "OFFICE_007", "Association target not found"),
+    /// <summary>
+    /// The Office error-code taxonomy's "access denied" code. The Outlook/Word task pane keys its
+    /// notification TITLE off this (<c>errorMessages.ts</c> <c>ERROR_CODE_MAP</c> → "Access Denied");
+    /// the BODY comes from <see cref="InsufficientRightsDetail"/> below.
+    /// </summary>
+    private const string AccessDeniedErrorCode = "OFFICE_009";
 
-            "inactive" or "deleted" =>
-                (404, "OFFICE_007", "Association target is inactive or deleted"),
-
-            "team_mismatch" or "tenant_mismatch" =>
-                (403, "OFFICE_009", "Access denied to this entity"),
-
-            "permission_denied" or "insufficient_role" =>
-                (403, "OFFICE_009", "You do not have permission to associate documents with this entity"),
-
-            _ =>
-                (403, "OFFICE_009", "Access denied to association target")
-        };
-    }
+    /// <summary>
+    /// What the USER is shown when the association is refused for want of rights.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is a written sentence and not a code lookup</b> (unified-access-control-r2,
+    /// 2026-08-31, owner-directed). This replaced <c>MapAuthorizationDenial</c>, a five-arm switch on a
+    /// <c>reasonCode</c> string. That switch had exactly ONE call site passing exactly ONE literal —
+    /// <c>"insufficient_rights"</c> — which matched NONE of its named arms, so every real denial fell to
+    /// the default and the user was told <i>"Access denied to association target"</i>: internal jargon
+    /// that names no record, no missing capability and no remedy. The switch's own better sentence (for
+    /// <c>"permission_denied"</c>) was unreachable from that call site. A lookup table with one input and
+    /// four dead arms is not a mapping; the message is written here directly instead.</para>
+    ///
+    /// <para><b>The dead arms were not merely dead — one was a latent disclosure.</b> Its
+    /// <c>entity_not_found → 404</c> arm would, if it ever became reachable, have separated "no such
+    /// record" from "no access to that record". <see cref="CallerRecordAccessProbe"/> conflates those two
+    /// deliberately ("both mean not authorized"), and task 022 removed exactly that separation from bulk
+    /// download because it is a record-enumeration oracle. So restoring reason-code branching here needs a
+    /// disclosure argument, not just a caller.</para>
+    ///
+    /// <para><b>Why naming the permission is safe.</b> Record EXISTENCE is not disclosed by this text —
+    /// the filter answers 403 whether or not the record exists, precisely because the probe conflates
+    /// them. And the caller supplied the record id from a picker that already required access to it. So
+    /// naming "Append To" costs no information and is the one word an administrator can act on.</para>
+    ///
+    /// <para><b>The entity type is deliberately NOT interpolated.</b> It is a logical name
+    /// (<c>sprk_matter</c>), not a label, and mapping logical names to display names would be a FOURTH
+    /// entity-name table (CLAUDE.md §11 — see <see cref="EntitySetByType"/>'s remarks). The type travels
+    /// in the <c>entityType</c> extension for support and telemetry instead of in prose.</para>
+    /// </remarks>
+    private const string InsufficientRightsDetail =
+        "You do not have permission to file documents against this record. Filing a document to a record "
+        + "requires the \"Append To\" permission on it, and your security role does not currently grant "
+        + "that. Ask an administrator to grant Append To for this record type, or ask the record's owner "
+        + "to share the record with you.";
 }

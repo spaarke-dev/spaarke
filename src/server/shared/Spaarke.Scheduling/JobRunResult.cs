@@ -26,9 +26,14 @@ namespace Spaarke.Scheduling;
 /// Optional handler-specific output JSON blob (NFR-08 / FR-2.8). <c>null</c> if the handler doesn't
 /// surface structured output. Persisted to <c>sprk_backgroundjobrun.sprk_resultjson</c>.
 /// </param>
+/// <param name="Skipped">
+/// Set by the host, never by a job: the tick was not dispatched because another run holds the job's lease, or another
+/// instance already dispatched this occurrence (ADR-036 A1 rule 1). Surfaced as status <c>"Skipped"</c>, not a failure.
+/// </param>
 public record JobRunResult(
     bool Success,
     string? ErrorMessage,
     int? ProcessedItems,
     TimeSpan Duration,
-    string? ResultJson = null);
+    string? ResultJson = null,
+    bool Skipped = false);

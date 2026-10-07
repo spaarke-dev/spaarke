@@ -4,7 +4,7 @@
     <title>NFR-05 standing assertion: no role depth reaches the Secure Projects BU (FR-28)</title>
     <phase>4 Secure Project, Manage Access, wizard</phase>
     <gate>startable after Phase 1 merges; LIVE evaluation self-gates on the UAT BU existing</gate>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override); the assertion is itself a security control.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -30,7 +30,7 @@
       <file role="canonical-reference">projects/unified-access-control-r2/design.md (§5.2 role table + root-cause)</file>
     </relevant-files>
     <dependencies>
-      <dependency task="034" status="pending">FR-20/NFR-04 negative-canary merge gate — the live-gated CI wiring pattern this assertion reuses.</dependency>
+      <dependency task="034" status="blocked-shipped">FR-20/NFR-04 negative-canary merge gate — the live-gated CI wiring pattern this assertion reuses.</dependency>
     </dependencies>
   </context>
 

@@ -186,12 +186,14 @@ public class CosmosProvisioningSecretGuardTests
     /// in any vault yet — writing it there is what this record is for.
     /// </para>
     /// <para>
-    /// <b>ExchangePolicySidecarClient+SharedSecretResolution</b> and
-    /// <b>ExchangePolicySidecarReadClient+SharedSecretResolution</b> — a <c>private readonly struct</c>
-    /// returned by <c>ResolveSharedSecretAsync</c>, holding either the resolved sidecar shared secret
-    /// or a failure. Private, nested, method-local, never serialized; it exists to make
-    /// "resolved-or-failed" a single return value instead of an out-parameter. Two entries because
-    /// the read and write clients each declare their own nested copy.
+    /// <b>ExchangePolicySidecarClient+Headers</b> — a <c>private readonly record struct</c> returned by
+    /// <c>ResolveHeadersAsync</c>, holding either the two sidecar request credentials (the resolved
+    /// shared secret and the Exchange access token) or a failure. Private, nested, method-local, never
+    /// serialized; it exists to make "resolved-or-failed" a single return value. Task 251 (2026-10-04)
+    /// replaced the former <c>ExchangePolicySidecarClient+SharedSecretResolution</c> /
+    /// <c>ExchangePolicySidecarReadClient+SharedSecretResolution</c> pair with this one type when the
+    /// read client merged into the apply client and the request gained the Exchange token — same
+    /// rationale, same exclusion, one entry instead of two.
     /// </para>
     /// <para>
     /// <b>SolutionVerificationRequest</b> — transient record carrying the plaintext client secret
@@ -210,6 +212,32 @@ public class CosmosProvisioningSecretGuardTests
     /// <c>LiteralValue</c> or by lookup in <c>envelope.Parameters.NonSecret</c>, which is
     /// non-secret by construction and by name.
     /// </para>
+    /// <para>
+    /// ─────────── Added 2026-09-28, task 220 (customer-provisioning-orchestration-r1) ───────────
+    /// </para>
+    /// <para>
+    /// <b>OrgSettingsContractApplyRequest</b> and <b>RequiredApplicationsInstallRequest</b> — H6-scoped
+    /// transient records carrying the plaintext client secret from H6 to a <c>pac</c> CLI shell-out
+    /// (<c>pac org update-settings</c> / <c>pac application install</c>). Exact structural parity with
+    /// <c>SolutionImportRequest</c> and <c>SolutionVerificationRequest</c> above: same handler, same
+    /// run, same <c>pac auth create --clientSecret</c> constraint (the CLI requires the raw value).
+    /// Their absence from the original exclusion list is the same oversight pattern the 2026-08-27
+    /// adjudication cited when adding <c>SolutionVerificationRequest</c> — task 049 added the siblings
+    /// but not the exclusions. Path C (<see cref="Models.KeyVaultSecretRef"/> shape) would force
+    /// artificial wrap-then-unwrap at the handler boundary; Path A restores the intended parity.
+    /// Owner-approved 2026-09-28 as a deviation from task 220's POML-recommended Path C.
+    /// </para>
+    /// <para>
+    /// <b>RegistryCredentialModeUpdate</b> — the flagged property is <c>CredentialMode</c>: an enum
+    /// discriminator string (values: <c>secret-free</c> per <c>SecretFreeMarker.CredentialModeSecretFree</c>,
+    /// <c>client-secret</c>, <c>managed-identity-federated</c>, etc.) that names WHICH credential family
+    /// is in use on a given environment. It is NOT a secret material carrier — no secret bytes flow
+    /// through it. Analog of the day-1 <c>KeyVaultSecretRef.SecretName</c> exclusion (matches
+    /// secret-shape regex but holds a name/discriminator, not a value). Persisted to Dataverse column
+    /// <c>sprk_credentialmode</c> via PATCH — the value is a public enum label. Renaming the property
+    /// to appease the regex (Path C) would sacrifice a semantically correct name; Path A is the
+    /// structural precedent. Owner-approved 2026-09-28.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
     {
@@ -222,13 +250,21 @@ public class CosmosProvisioningSecretGuardTests
 
         // #839 (2026-08-27) — genuine cleartext, provably transient. Rationale per type above.
         "Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg.PendingKvSecretWrite",
-        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarClient+SharedSecretResolution",
-        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarReadClient+SharedSecretResolution",
+        "Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring.ExchangePolicySidecarClient+Headers",   // task 251 (was +SharedSecretResolution x2)
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionVerificationRequest",
 
         // #839 (2026-08-27) — `Key` is an app-setting NAME on both. Rationale per type above.
         "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.FilePerEnvSettingsManifest+PerEnvYamlEntry",
         "Sprk.Provisioning.ControlPlane.Handlers.BulkAppSettings.PerEnvSettingEntry",
+
+        // task 220 (2026-09-28, §6.5 Path A — owner-approved) — H6 pac-CLI shell-out parity with
+        // SolutionImportRequest / SolutionVerificationRequest exclusions above. Rationale per type above.
+        "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.OrgSettingsContractApplyRequest",
+        "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.RequiredApplicationsInstallRequest",
+
+        // task 220 (2026-09-28, §6.5 Path A — owner-approved) — FR-39 enum discriminator, not a secret
+        // material carrier. Analog of the KeyVaultSecretRef.SecretName exclusion. Rationale per type above.
+        "Sprk.Provisioning.ControlPlane.Registry.RegistryCredentialModeUpdate",
     };
 
     /// <summary>

@@ -423,7 +423,7 @@ All three default to `false`. Each independently gates one Phase 2 component. Un
 ```
 
 | When to flip to `true` | When `Redis:Enabled=true` in this environment AND a Redis connection string is configured. Without Redis, leave this `false`. |
-| When to leave `false` | No Redis (local dev, CI, environments without Redis). The per-user membership cache still works via its 5-minute TTL — pub/sub invalidation is a latency optimization, NOT a correctness requirement. |
+| When to leave `false` | No junction writer publishing (the default). The per-user membership cache still expires on its 2-minute TTL (task 132), and the BFF's own team / BU / owner writes evict it directly whether or not this switch is on — pub/sub invalidation is a latency optimization for junction writes, NOT a correctness requirement. |
 
 > **Correctness backstop**: even if all three Phase 2 flags are `false` AND no recon job ever runs, the user endpoint still returns correct results because the per-request FetchXML always reads source-of-truth Lookups directly.
 
@@ -489,7 +489,7 @@ Phase 2 lights up incrementally. You can run any subset of the three components:
 |---|---|---|---|---|
 | **Default ship state** | `false` | `false` | `false` | Phase 1A only. Per-request FetchXML. Recon job populates junction directly (independent of topic). Correct results, no Azure dependencies beyond Dataverse. |
 | **Cache-only** | `false` | `false` | `true` (when Redis enabled) | Phase 1A + Redis pub/sub for any cache invalidations that DO happen (e.g., recon-triggered ones via the shared handler). |
-| **Topic deployed, no Redis** | `true` | `true` | `false` | Phase 2 sync via Service Bus. Cache invalidation falls back to 5-min TTL. |
+| **Topic deployed, no Redis** | `true` | `true` | `false` | Phase 2 sync via Service Bus. Cache invalidation falls back to the 2-min TTL. |
 | **Full Phase 2** | `true` | `true` | `true` | Real-time event sync + sub-second cache invalidation across instances. |
 
 ---
@@ -588,12 +588,12 @@ Authorization: Bearer <SystemAdmin token>
 
 **Symptom**: User changes `sprk_assignedattorney1` on a matter. The new assignee still sees the OLD matter list for several minutes.
 
-**Cause (Phase 1A)**: The per-user membership cache has a 5-minute TTL. Without Phase 2 pub/sub invalidation, the cache simply expires.
+**Cause (Phase 1A)**: The per-user membership cache has a 2-minute TTL (5 before task 132). A change made outside the BFF waits for it; the BFF's own team / BU / owner writes evict it at once.
 
-**Cause (Phase 2 partial)**: If `EventPublisher` is enabled but `CacheInvalidator` is not, the junction table updates in seconds but the user-facing cache still waits for its 5-min TTL.
+**Cause (Phase 2 partial)**: If `EventPublisher` is enabled but `CacheInvalidator` is not, the junction table updates in seconds but the user-facing cache still waits for its 2-min TTL.
 
 **Fixes (pick one)**:
-- Wait up to 5 minutes (correctness backstop).
+- Wait up to 2 minutes (correctness backstop; identity + membership stacked: 4 minutes).
 - Enable `Membership:CacheInvalidator:Enabled = true` (requires Redis) for sub-second invalidation.
 - Restart the BFF to flush all caches immediately (drastic — only for testing).
 
@@ -617,7 +617,7 @@ Authorization: Bearer <SystemAdmin token>
 
 1. Check BFF App Insights for the request duration distribution. Look for outliers.
 2. Check if discovery cache is warm. First request after BFF restart hits Dataverse `EntityDefinitions` (60-min TTL on the cache). Repeat calls should be fast.
-3. Check if per-user identity cache is warm (10-min TTL). First call per user hits Dataverse 4-6 times in parallel for identity normalization.
+3. Check if per-user identity cache is warm (2-min TTL since task 132; 10 before). First call per user hits Dataverse 4-6 times in parallel for identity normalization.
 4. If consistently slow after caches warm, consider enabling Phase 2 — the junction-table-backed read path is faster than the OR-joined FetchXML.
 
 ### `transitive-chain-too-deep` 400 error
@@ -634,11 +634,11 @@ Authorization: Bearer <SystemAdmin token>
 
 | Cadence | What happens |
 |---|---|
-| **On every authenticated request** | User endpoint resolves identity (cached 10 min) → discovery (cached 60 min) → FetchXML against the target entity. Phase 1A: query runs every time (5-min cache on the resolved IDs). Phase 2: query against the junction table. |
+| **On every authenticated request** | User endpoint resolves identity (cached 2 min) → discovery (cached 60 min) → FetchXML against the target entity. Phase 1A: query runs every time (2-min cache on the resolved IDs). Phase 2: query against the junction table. |
 | **Event-driven (Phase 2)** | When a BFF endpoint mutates an identity Lookup, an event is published to `sprk-membership-changes` topic. Subscription consumer updates the junction within seconds. Cache invalidator publishes to Redis channel; subscribers on every BFF instance evict matching entries. End-to-end: ~1-5 seconds. |
 | **Nightly recon (02:00 UTC default)** | Background job re-scans source-of-truth Lookups for every entity in `Reconciliation:EntityTypes`. Self-heals any drift (max 24h staleness). LOAD-BEARING for entities mutated outside the BFF (maker portal, Power Automate, plugins). |
 | **Metadata cache TTL** | 60 minutes. Schema changes propagate automatically within an hour, or immediately via `POST /api/admin/membership/refresh-metadata`. |
-| **Per-user membership cache TTL** | 5 minutes Phase 1A. Auto-invalidated via Redis pub/sub on Phase 2 junction write (typically sub-second across all instances when enabled). |
+| **Per-user membership cache TTL** | 2 minutes (5 before task 132). Evicted directly by the BFF's own team / BU / owner writes (task 132), and auto-invalidated via Redis pub/sub on Phase 2 junction write (typically sub-second across all instances when enabled). |
 | **AAD-oid → systemuserid cache TTL** | 10 minutes. A freshly disabled user continues to look authenticated for at most 10 minutes, at which point the next request re-resolves and surfaces the row's absence as 401. |
 
 ---
@@ -651,7 +651,8 @@ Authorization: Bearer <SystemAdmin token>
 - **Null-Object kill-switch pattern** (the three Phase 2 feature flags use this): [`.claude/adr/ADR-032-bff-nullobject-kill-switch.md`](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md)
 - **Spaarke Auth v2** (how caller identity is established): [`docs/guides/auth-deployment-setup.md`](auth-deployment-setup.md), [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md)
 - **Configuration matrix** (all BFF settings in one place): [`docs/guides/CONFIGURATION-MATRIX.md`](CONFIGURATION-MATRIX.md)
-- **`LookupUserMembership` playbook node** (AI playbook authors): see playbook-architecture docs and the executor at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs` (`ActionType=52`)
+- **`LookupUserMembership` playbook node** (AI playbook authors): see playbook-architecture docs and the executor at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs` (`ActionType=52`). Config key **`targeting`**: `"people"` selects the people-targeting surface (below) and is REQUIRED on every node feeding a notification, email or briefing node.
+- **People-targeting surface** (task 152, ADR-034 Amendment A3): `MembershipResolveOptions.People` / `PeopleTargeting: true` answers "which records are FOR this person" — a human Created By, the user-valued owner, and the registry "Assigned *" contact columns through the caller's linked contact; never `owningteam`, `owningbusinessunit` or any team/BU/organization/account-typed lookup. Mutually exclusive with `AccessConferringOnly`. Consumers read the rows they show under the caller's Dataverse security. Full rules: [`docs/architecture/membership-resolution-pattern.md` § Three Consumption Surfaces](../architecture/membership-resolution-pattern.md#three-consumption-surfaces-adr-034-a1--a3).
 - **Junction entity schema** (when published): `docs/data-model/sprk_userentityassociation.md`
 - **Naming-collision warning** — do NOT confuse this with the `AssociationResolver` PCF: see the Naming-Collision Register in the architecture page
 

@@ -14,15 +14,30 @@
 //   the artifact manifest (pure C# metadata check — the r3-era gates already
 //   ran in CI; this handler only READS their recorded results, hard-blocking
 //   if missing/red) → (2) download the artifact blob (Azure.Storage.Blobs,
-//   UAMI RBAC, no stored key) → (3) Kudu zip-deploy to the staging slot →
-//   (4) health-probe staging (EXISTING HttpHealthProbe, reused unchanged) →
-//   (5) NFR-01 publish-size measurement against the downloaded zip →
-//   (6) swap staging→production (Azure.ResourceManager.AppService
-//   WebSiteSlotResource.SwapSlotAsync — a proper LRO) → (7) verify
-//   production → (8) rollback re-swap on failure (EXISTING logic, PRESERVED
+//   UAMI RBAC, no stored key) → (3) set the scheduled-jobs slot guard on the
+//   staging slot (Scheduling__RunScheduledJobs=false, slot-sticky — ADR-036
+//   A1 rule 2, GitHub #987; merge, never replace; FAIL CLOSED: no guard, no
+//   deploy) → (4) Kudu zip-deploy to the staging slot →
+//   (5) health-probe staging (EXISTING HttpHealthProbe, reused unchanged) →
+//   (6) NFR-01 publish-size measurement against the downloaded zip →
+//   (7) swap staging→production (Azure.ResourceManager.AppService
+//   WebSiteSlotResource.SwapSlotAsync — a proper LRO) → (8) verify
+//   production → (9) rollback re-swap on failure (EXISTING logic, PRESERVED
 //   unchanged). ZERO dotnet-publish build step, ZERO repo checkout, ZERO dotnet SDK
 //   dependency at provision time — DeployBffApiScriptRunner and
 //   DotnetR3GateVerifier's shell-outs are RETIRED (kept on disk unregistered).
+//
+// RUN CONTEXT (task 245a, G25 — see Models/InterStepState.cs):
+//   - Intake values, read from run.Parameters.NonSecret (written ONLY by
+//     intake at POST /api/runs): tenantId, subscriptionId, buildId
+//     (optional), healthCheckPath (optional).
+//   - H2a outputs, read from run.InterStepState: ResourceGroupName,
+//     AppServiceName, AppServiceStagingSlotName (optional — blank falls back
+//     to BffDeployOptions.DefaultStagingSlotName). These were previously
+//     read from NonSecret, where nothing ever wrote them.
+//   - Outputs (task 245b), written on success: InterStepState.BffApiUrl (the
+//     production slot URL it health-probed) and InterStepState.BffBuildId (the
+//     build it deployed) — read by H7, H13 and H14.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-12 (H9
@@ -48,16 +63,18 @@
 //     every sibling Class-A handler uses — no stored keys, no operator az
 //     login chain.
 //   - .claude/adr/ADR-036: reuse background-job infrastructure; fire-and-
-//     forget; return 202 at endpoint layer.
+//     forget; return 202 at endpoint layer. A1 rule 2 (non-production slots
+//     run no scheduled jobs): H9 sets the slot-sticky guard on the staging
+//     slot before deploying to it (GitHub #987) — step (8) below.
 //
 // ROLLBACK CLASSIFICATION (§4C mapping — declared at code level):
 //   ┌───────────────────────────────────────────────┬───────────────────────────┐
 //   │ Failure mode                                  │ §4C class                 │
 //   ├───────────────────────────────────────────────┼───────────────────────────┤
-//   │ Missing tenantId/subscriptionId/              │ Resumable                 │
-//   │ resourceGroupName/appServiceName               │ (external precondition —  │
-//   │ (§4D I1 no-hardcoded-tenant)                  │ operator fixes params +   │
-//   │                                               │ resumes)                  │
+//   │ Missing tenantId/subscriptionId (intake run   │ Resumable                 │
+//   │ parameters, §4D I1 no-hardcoded-tenant) OR    │ (external precondition —  │
+//   │ resourceGroupName/appServiceName (H2a's       │ operator fixes params /   │
+//   │ InterStepState output — task 245a, G25)       │ re-runs H2a + resumes)    │
 //   │ Run not found in Cosmos partition             │ Resumable                 │
 //   │ spaarkedev1 hardcode detected in script       │ QuarantineRequired        │
 //   │ (Gap 2 assertion — script REGRESSION is a     │ (script regression must   │
@@ -69,6 +86,14 @@
 //   │ (blob container unreachable, auth failure)    │ (no external side effect) │
 //   │ Artifact download failed (blob not found)     │ Resumable                 │
 //   │ Artifact download infra fault                 │ Resumable                 │
+//   │ Scheduled-jobs slot guard Failure (ARM        │ RetryableWithCleanup      │
+//   │ 4xx/5xx) — ADR-036 A1 rule 2, #987            │ (fail closed — no zip-    │
+//   │                                               │ deploy; production        │
+//   │                                               │ untouched; the guard is a │
+//   │                                               │ merge — retry converges;  │
+//   │                                               │ same class as the swap)   │
+//   │ Scheduled-jobs slot guard infra fault         │ RetryableWithCleanup      │
+//   │ (ARM SDK call threw / timed out)              │                           │
 //   │ Kudu zip-deploy failed (non-2xx)              │ Resumable                 │
 //   │                                               │ (staging is dedicated;    │
 //   │                                               │ re-deploy is safe)        │
@@ -117,8 +142,9 @@
 //   H9 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
 //   AI-internal types (ADR-013 forcing-function rule — no IActionResolver,
 //   IActionRunner, IOpenAiClient, IPlaybookService injection). Uses
-//   IProvisioningRunRepository (task 037) + six dedicated seams
-//   (IArtifactManifestVerifier, IBffArtifactDownloader, IKuduZipDeployer,
+//   IProvisioningRunRepository (task 037) + seven dedicated seams
+//   (IArtifactManifestVerifier, IBffArtifactDownloader,
+//   ISlotStickyAppSettingWriter [#987], IKuduZipDeployer,
 //   IAppServiceSlotSwapper, IHealthProbe, IBffPublishSizeReporter); no BFF-
 //   facade dependencies. Deployed by the L2 App Service using its OWN UAMI —
 //   the handler itself never handles BFF secrets or KV refs (BFF app-only
@@ -168,12 +194,6 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the App Service resource group name.</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the BFF App Service name (production slot binds to <c>https://{name}.azurewebsites.net</c>).</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
     /// <summary>
     /// Non-secret parameter key carrying the desired BFF CI build number —
     /// feeds the idempotency key <c>bff-{customerId}-{buildId}</c>. OPTIONAL
@@ -184,15 +204,27 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
     /// </summary>
     public const string BuildIdParameterKey = "buildId";
 
-    /// <summary>Non-secret parameter key carrying the staging slot name. Optional — defaults to <see cref="BffDeployOptions.DefaultStagingSlotName"/>.</summary>
-    public const string StagingSlotNameParameterKey = "stagingSlotName";
-
     /// <summary>Non-secret parameter key carrying the /health probe path. Optional — defaults to <see cref="BffDeployOptions.DefaultHealthCheckPath"/>.</summary>
     public const string HealthCheckPathParameterKey = "healthCheckPath";
+
+    /// <summary>
+    /// ADR-036 A1 rule 2 scheduled-jobs slot guard — the BFF app setting that
+    /// turns scheduled dispatch off on a host, in App Service form (<c>:</c> →
+    /// <c>__</c>). MUST match <c>Sprk.Bff.Api</c>'s
+    /// <c>SchedulingModule.RunScheduledJobsSetting</c> (<c>Scheduling:RunScheduledJobs</c>)
+    /// and the name <c>scripts/Deploy-BffApi.ps1</c>,
+    /// <c>.github/workflows/deploy-bff-api.yml</c> and
+    /// <c>infrastructure/bicep/modules/deployment-slot.bicep</c> set.
+    /// </summary>
+    public const string ScheduledJobsSlotGuardSettingName = "Scheduling__RunScheduledJobs";
+
+    /// <summary>Value of <see cref="ScheduledJobsSlotGuardSettingName"/> on the staging slot: scheduled dispatch OFF.</summary>
+    public const string ScheduledJobsSlotGuardSettingValue = "false";
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IArtifactManifestVerifier _manifestVerifier;
     private readonly IBffArtifactDownloader _artifactDownloader;
+    private readonly ISlotStickyAppSettingWriter _slotGuard;
     private readonly IKuduZipDeployer _kuduDeployer;
     private readonly IAppServiceSlotSwapper _slotSwapper;
     private readonly IHealthProbe _healthProbe;
@@ -207,6 +239,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         IProvisioningRunRepository repository,
         IArtifactManifestVerifier manifestVerifier,
         IBffArtifactDownloader artifactDownloader,
+        ISlotStickyAppSettingWriter slotGuard,
         IKuduZipDeployer kuduDeployer,
         IAppServiceSlotSwapper slotSwapper,
         IHealthProbe healthProbe,
@@ -217,6 +250,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(manifestVerifier);
         ArgumentNullException.ThrowIfNull(artifactDownloader);
+        ArgumentNullException.ThrowIfNull(slotGuard);
         ArgumentNullException.ThrowIfNull(kuduDeployer);
         ArgumentNullException.ThrowIfNull(slotSwapper);
         ArgumentNullException.ThrowIfNull(healthProbe);
@@ -227,6 +261,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         _repository = repository;
         _manifestVerifier = manifestVerifier;
         _artifactDownloader = artifactDownloader;
+        _slotGuard = slotGuard;
         _kuduDeployer = kuduDeployer;
         _slotSwapper = slotSwapper;
         _healthProbe = healthProbe;
@@ -274,9 +309,15 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         var run = read.Run;
         var etag = read.ETag;
         var parameters = run.Parameters.NonSecret;
+        var interStepState = run.InterStepState;
 
-        // (2) Parameter guards — every field H9 needs must be non-empty
-        //     BEFORE any external side effect (§4C Resumable classification).
+        // (2) Input guards — every field H9 needs must be non-empty BEFORE
+        //     any external side effect (§4C Resumable classification).
+        //     Intake values (tenantId, subscriptionId, buildId,
+        //     healthCheckPath) come from run.Parameters.NonSecret; H2a's
+        //     outputs (resource group, App Service, staging slot) come from
+        //     run.InterStepState (task 245a, G25 — NonSecret is written only
+        //     by intake, so reading them there always failed).
         //     buildId is now OPTIONAL (task 132, DS-4 §5 item 1) — resolved
         //     from the manifest below if the run parameter is absent.
         if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
@@ -294,26 +335,36 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H9 (ADR-027 D4 — App Service lives in the customer sub).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName))
+        var resourceGroupName = interStepState.ResourceGroupName;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BffDeployRejectionCodes.MissingResourceGroupName,
-                "Run parameter 'resourceGroupName' is required by H9 (ARM targeting for deploy + swap ops).",
+                "InterStepState.ResourceGroupName is required by H9 (ARM targeting for deploy + swap ops) and is " +
+                "H2a's output. H2a must complete before H9 — if it already has, it did not record the value " +
+                "(a defect to fix, not a retry).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName))
+        var appServiceName = interStepState.AppServiceName;
+        if (string.IsNullOrWhiteSpace(appServiceName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BffDeployRejectionCodes.MissingAppServiceName,
-                "Run parameter 'appServiceName' is required by H9 (BFF App Service name — deploy + swap targeting).",
+                "InterStepState.AppServiceName is required by H9 (BFF App Service name — deploy + swap targeting) and is " +
+                "H2a's output. H2a must complete before H9 — if it already has, it did not record the value " +
+                "(a defect to fix, not a retry).",
                 cancellationToken).ConfigureAwait(false);
         }
 
         var hasRequestedBuildId = TryGetNonEmpty(parameters, BuildIdParameterKey, out var requestedBuildIdRaw);
         var requestedBuildId = hasRequestedBuildId ? requestedBuildIdRaw : null;
 
-        var stagingSlotName = TryGetNonEmpty(parameters, StagingSlotNameParameterKey, out var slotRaw)
-            ? slotRaw : _options.DefaultStagingSlotName;
+        // Staging slot: H2a's output; blank (e.g. a run whose H2a predates
+        // the field) falls back to the configured default.
+        var stagingSlotRaw = interStepState.AppServiceStagingSlotName;
+        var stagingSlotName = string.IsNullOrWhiteSpace(stagingSlotRaw)
+            ? _options.DefaultStagingSlotName
+            : stagingSlotRaw;
         var healthCheckPath = TryGetNonEmpty(parameters, HealthCheckPathParameterKey, out var pathRaw)
             ? pathRaw : _options.DefaultHealthCheckPath;
 
@@ -434,7 +485,71 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
 
         var localZipPath = ((ArtifactDownloadResult.Success)downloadResult).LocalZipPath;
 
-        // (8) Kudu zip-deploy the downloaded artifact to the STAGING slot.
+        // (8) Scheduled-jobs slot guard (ADR-036 A1 rule 2, GitHub #987) —
+        //     BEFORE the zip-deploy, so the new build never boots on the
+        //     staging slot with scheduled dispatch on. Sets
+        //     Scheduling__RunScheduledJobs=false on the slot and makes it
+        //     slot-sticky on the site (merge, never replace; idempotent) — the
+        //     ARM equivalent of the `az webapp config appsettings set
+        //     --slot-settings` step Deploy-BffApi.ps1 -UseSlotDeploy and
+        //     deploy-bff-api.yml run before their own staging deploys.
+        //     FAIL CLOSED: if the guard cannot be confirmed, no zip-deploy — a
+        //     slot without it runs the BFF's scheduled jobs against the
+        //     customer's production data. Placed after the manifest + download
+        //     steps so a rejected or missing artifact never touches the
+        //     customer's App Service.
+        //
+        //     FAILURE CLASS — RetryableWithCleanup for both the ARM rejection
+        //     and the infra fault: the same class as the slot swap, the other
+        //     ARM App Service write in this handler. Not Resumable — that class
+        //     promises no external side effect, and a guard that failed half-way
+        //     may already have made the name sticky. That partial state is safe
+        //     (a sticky name with no value moves nothing on a swap; production
+        //     is untouched) and the merge converges on re-run, which is exactly
+        //     RetryableWithCleanup's contract. Not QuarantineRequired — nothing
+        //     is left that an operator must repair.
+        SlotStickyAppSettingResult guardResult;
+        try
+        {
+            guardResult = await _slotGuard.EnsureAsync(
+                new SlotStickyAppSettingRequest(
+                    SubscriptionId: subscriptionId,
+                    ResourceGroupName: resourceGroupName,
+                    AppServiceName: appServiceName,
+                    SlotName: stagingSlotName,
+                    SettingName: ScheduledJobsSlotGuardSettingName,
+                    SettingValue: ScheduledJobsSlotGuardSettingValue),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H9 scheduled-jobs slot guard infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                BffDeployRejectionCodes.ScheduledJobsSlotGuardInfraFault,
+                $"Scheduled-jobs slot guard infrastructure error on slot '{stagingSlotName}': {ex.GetType().Name}: {ex.Message}. " +
+                "No zip-deploy attempted (fail closed — ADR-036 A1 rule 2); production untouched. The guard is a merge — retry is safe.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (guardResult is SlotStickyAppSettingResult.Failure guardFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.RetryableWithCleanup,
+                BffDeployRejectionCodes.ScheduledJobsSlotGuardFailed,
+                $"Could not set the scheduled-jobs slot guard ({ScheduledJobsSlotGuardSettingName}={ScheduledJobsSlotGuardSettingValue}, " +
+                $"slot-sticky) on slot '{stagingSlotName}' — zip-deploy BLOCKED (fail closed — ADR-036 A1 rule 2); production untouched. " +
+                $"Diagnostic: {guardFailure.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var guardSuccess = (SlotStickyAppSettingResult.Success)guardResult;
+        _logger.LogInformation(
+            "H9 scheduled-jobs slot guard in place: runId={RunId} slot={Slot} stickyNameAdded={StickyNameAdded} settingWritten={SettingWritten}",
+            envelope.RunId, stagingSlotName, guardSuccess.StickyNameAdded, guardSuccess.SettingWritten);
+
+        // (9) Kudu zip-deploy the downloaded artifact to the STAGING slot (the
+        //     slot guard above is in place).
         KuduZipDeployResult kuduResult;
         try
         {
@@ -462,9 +577,9 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (9) Health-probe STAGING post-deploy (EXISTING HttpHealthProbe,
-        //     reused unchanged — no new health-check code, per DS-4 §5
-        //     item 3 / POML step 4).
+        // (10) Health-probe STAGING post-deploy (EXISTING HttpHealthProbe,
+        //      reused unchanged — no new health-check code, per DS-4 §5
+        //      item 3 / POML step 4).
         var stagingUrl = $"https://{appServiceName}-{stagingSlotName}.azurewebsites.net";
         var productionUrl = $"https://{appServiceName}.azurewebsites.net";
         var stagingHealthUrl = CombineUrl(stagingUrl, healthCheckPath);
@@ -499,7 +614,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (10) NFR-01 publish-size measurement + threshold check. RUNS
+        // (11) NFR-01 publish-size measurement + threshold check. RUNS
         //      BEFORE the slot-swap so a bloated build cannot reach
         //      production. Measures the DOWNLOADED artifact zip (task 132 —
         //      the blob download itself is the publish artifact this metric
@@ -540,7 +655,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (11) Slot swap staging → production. First swap of the two-swap
+        // (12) Slot swap staging → production. First swap of the two-swap
         //      blue-green protocol. UNCHANGED from the pre-task-132 handler
         //      (only the underlying IAppServiceSlotSwapper impl changed —
         //      DI-swapped from AzCliAppServiceSlotSwapper to ArmSlotSwapper).
@@ -576,7 +691,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (12) Post-swap production /health smoke test (NFR-05). BFF's
+        // (13) Post-swap production /health smoke test (NFR-05). BFF's
         //      ValidateOnStart (r3 task 061) throws at boot on missing
         //      Tier-1 KV refs, so a 200 IS the KV-ref-resolution proof.
         //      UNCHANGED from the pre-task-132 handler.
@@ -606,7 +721,7 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
 
         if (probeResult is HealthProbeResult.Failure probeFailure)
         {
-            // (13) Rollback: re-swap production ← prior version (staging holds
+            // (14) Rollback: re-swap production ← prior version (staging holds
             //      the previous production version after the first swap).
             //      UNCHANGED from the pre-task-132 handler — this is the
             //      "PRESERVE the existing rollback-re-swap logic unchanged"
@@ -668,13 +783,19 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
 
         var probeSuccess = (HealthProbeResult.Success)probeResult;
 
-        // (14) All post-conditions cleared — advance Cosmos state.
+        // (15) All post-conditions cleared — advance Cosmos state.
         stopwatch.Stop();
         _logger.LogInformation(
             "H9 BFF deploy succeeded: runId={RunId} customerId={CustomerId} durationMs={DurationMs} " +
             "healthProbeAttempts={Attempts} nfr01Summary={Nfr01Summary}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds,
             probeSuccess.AttemptsUsed, sizeReport.Summary);
+
+        // Task 245b: publish what H7 (sprk_BffApiBaseUrl), H13 (health/E2E target + registry
+        // sprk_bffversion + its idempotency key) and H14 (webhook receiver base) need — the URL just
+        // probed and the build just deployed.
+        run.InterStepState.BffApiUrl = productionUrl;
+        run.InterStepState.BffBuildId = manifest.BuildId;
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, sizeReport, cancellationToken)
             .ConfigureAwait(false);

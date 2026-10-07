@@ -22,7 +22,6 @@ jest.mock('@spaarke/auth', () => ({
 import {
   useComposePullAnnotations,
   useComposeCheckChanges,
-  anchoredAnnotationsToDocxAnnotations,
   anchoredAnnotationsToPriorAnchors,
   redlineMarksToDocxAnnotations,
   selectSaveRedlineAnnotations,
@@ -50,59 +49,10 @@ function okJson(payload: unknown): typeof fetch {
   }) as unknown as typeof fetch;
 }
 
-describe('anchoredAnnotationsToDocxAnnotations (gap 3.1 mapping)', () => {
-  it('maps each annotation kind to its native track-change kind + fields', () => {
-    const result = anchoredAnnotationsToDocxAnnotations([
-      anchor({ id: 'c1', type: 'comment', body: 'please revise' }),
-      anchor({ id: 'i1', type: 'insertion-suggestion', body: 'inserted text' }),
-      anchor({ id: 'd1', type: 'deletion-suggestion' }),
-    ]);
-
-    expect(result).toHaveLength(3);
-    expect(result[0]).toMatchObject({
-      kind: DocxTrackChangeKind.Comment,
-      commentText: 'please revise',
-      targetText: 'the target clause',
-    });
-    expect(result[1]).toMatchObject({ kind: DocxTrackChangeKind.Insertion, newText: 'inserted text' });
-    expect(result[2]).toMatchObject({ kind: DocxTrackChangeKind.Deletion, targetText: 'the target clause' });
-  });
-
-  it('drops annotations missing the fields the server requires (no 400-inducing payloads)', () => {
-    const result = anchoredAnnotationsToDocxAnnotations([
-      anchor({ id: 'c-empty', type: 'comment', body: '' }), // comment with no body → dropped
-      anchor({ id: 'i-empty', type: 'insertion-suggestion', body: '' }), // insertion with no text → dropped
-    ]);
-    expect(result).toHaveLength(0);
-  });
-
-  it('DEF-13: maps an AI edit-REASON comment annotation to a native w:comment push entry anchored to the change', () => {
-    // The reason ComposeWorkspace registers on a redline (registerAiEditReasonComment): a Compose
-    // AnchoredAnnotation of type 'comment', source 'ai', body = the model rationale, anchored to the
-    // edit's target_text. It must map to a Comment DocxAnnotationInput so DocxAnnotationWriter emits a
-    // real w:comment on Push/Save.
-    const result = anchoredAnnotationsToDocxAnnotations([
-      {
-        id: 'ai-edit-reason:binding-1@t1',
-        type: 'comment',
-        anchor: { textPattern: 'the prior clause', paragraphHint: -1, spanId: 'binding-1@t1' },
-        body: 'clearer indemnity language',
-        author: 'Spaarke Assistant',
-        timestamp: '2026-07-12T00:00:00.000Z',
-        source: 'ai',
-        provenance: { bindingId: 'binding-1', ledgerRef: 'binding-1@t1' },
-      },
-    ]);
-
-    expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({
-      kind: DocxTrackChangeKind.Comment,
-      commentText: 'clearer indemnity language',
-      targetText: 'the prior clause',
-      author: 'Spaarke Assistant',
-    });
-  });
-});
+// `anchoredAnnotationsToDocxAnnotations` and its coverage here were DELETED
+// (spaarke-ontology-platform-r1 task 080 / C-5, 2026-10-03) — see useComposeWordShuttle.ts's
+// deletion note. The live comment-export path (composeSessionCommentThreadsToAnchoredComments) and
+// the live redline path (redlineMarksToDocxAnnotations, covered below) are unaffected.
 
 describe('anchoredAnnotationsToPriorAnchors (gap 3.5 mapping)', () => {
   it('maps anchor textPattern + paragraphHint and truncates the preview', () => {

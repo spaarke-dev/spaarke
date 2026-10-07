@@ -37,7 +37,8 @@ export interface UseEmailWorkspaceRecordResult {
   retry: () => void;
   updateMonitor: (value: boolean) => Promise<void>;
   updateHighPriority: (value: boolean) => Promise<void>;
-  updateAccessPermission: (value: number) => Promise<void>;
+  // No updateAccessPermission (task 138, owner Q6): a communication inherits its parent's Access
+  // Permission; its own column is retired and never written.
 }
 
 /**
@@ -96,7 +97,7 @@ export function useEmailWorkspaceRecord(
   const retry = reload;
 
   const updateField = React.useCallback(
-    async (field: string, value: boolean | number) => {
+    async (field: string, value: boolean) => {
       if (!communicationId) return;
       await dataService.updateRecord(COMMUNICATION_ENTITY, communicationId, { [field]: value });
       reload();
@@ -112,10 +113,6 @@ export function useEmailWorkspaceRecord(
     (value: boolean) => updateField(EMAIL_TRACKING_FIELDS.highPriority, value),
     [updateField]
   );
-  const updateAccessPermission = React.useCallback(
-    (value: number) => updateField(EMAIL_TRACKING_FIELDS.accessPermission, value),
-    [updateField]
-  );
 
   return {
     recordState,
@@ -126,6 +123,5 @@ export function useEmailWorkspaceRecord(
     retry,
     updateMonitor,
     updateHighPriority,
-    updateAccessPermission,
   };
 }

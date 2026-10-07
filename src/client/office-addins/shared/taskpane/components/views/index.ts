@@ -1,5 +1,5 @@
 export { SaveView } from './SaveView';
-export type { SaveViewProps, SaveOptions } from './SaveView';
+export type { SaveViewProps } from './SaveView';
 
 export { ShareView } from './ShareView';
 export type { ShareViewProps, DocumentSearchResult, SharePermissions } from './ShareView';
@@ -10,6 +10,16 @@ export type { StatusViewProps, ProcessingJob } from './StatusView';
 export { SignInView } from './SignInView';
 export type { SignInViewProps } from './SignInView';
 
-// Outlook "Create To Do" ribbon entry-point view (smart-todo-decoupling-r3 FR-27 / task 070).
+// Inline "Create To Do" tool — creates a first-class sprk_todo via the BFF `POST /api/office/todo`,
+// right in the pane, regarding the filed record (email-communication-intelligence-r2, owner 2026-09-02).
 export { CreateTodoView } from './CreateTodoView';
-export type { CreateTodoViewProps } from './CreateTodoView';
+export type {
+  CreateTodoViewProps,
+  SavedTodoContext,
+  CreateTodoInput,
+  CreateTodoResult,
+  ContactOption,
+} from './CreateTodoView';
+
+// Find tab frame (task 015 / FR-03) — placeholder mount point; the real view is Phase 3.
+export { FindView } from './FindView';

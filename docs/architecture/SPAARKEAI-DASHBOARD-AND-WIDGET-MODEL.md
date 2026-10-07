@@ -103,9 +103,8 @@ The interface is **deliberately narrow** — it accepts only what `LegalWorkspac
 **Source files**:
 - Interface: `src/client/shared/Spaarke.UI.Components/src/workspace/WorkspaceRenderer.ts`
 - Default-renderer slot: `src/client/shared/Spaarke.UI.Components/src/workspace/defaultWorkspaceRenderer.ts`
-- Renderer binding: `src/solutions/LegalWorkspace/src/index.ts` exports `LegalWorkspaceRenderer`
 - Widget consumer: `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx`
-- Default registration: `src/solutions/SpaarkeAi/src/main.tsx` calls `setDefaultWorkspaceRenderer(LegalWorkspaceRenderer)` at bootstrap
+- Default registration: `src/solutions/SpaarkeAi/src/main.tsx` calls `setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer)` at bootstrap — a wrapper rendering `<LegalWorkspaceApp sections={createLegalWorkspaceSectionRegistry(...)} />` inside a tab-scoped `ComposeLaunchContext`. Register a wrapper like this, never bare `LegalWorkspaceApp`. (The former `LegalWorkspaceRenderer` alias, whose docstring prescribed the bare route, had zero call sites and was deleted 2026-10-03 — reuse audit C-6.)
 
 ### 2.2 The Direct widget wrapper — `WorkspaceWidgetRegistry`
 

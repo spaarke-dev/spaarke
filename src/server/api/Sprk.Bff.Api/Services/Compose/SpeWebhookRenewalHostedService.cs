@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// tracked subscription that has entered the <see cref="SpeSyncOrchestrator.RenewalMargin"/>.
 ///
 /// <para>
-/// <b>ADR-001</b> BackgroundService pattern (in-process async loop; NOT an Azure Function).
+/// <b>Hand-rolled timer BackgroundService</b> (in-process async loop; existing debt — migrates to an IScheduledJob when next touched, ADR-052 §1).
 /// Modeled directly on <see cref="StaleCheckoutSweeperHostedService"/>: static
 /// <see cref="ScanInterval"/>, <see cref="TimeProvider"/>-driven <c>Task.Delay</c>,
 /// per-iteration try/catch, and a per-iteration <see cref="IServiceProvider.CreateScope"/>

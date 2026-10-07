@@ -4,7 +4,7 @@
     <title>Implement H9 BFF Deploy Handler (blue-green slot-swap; hardened Deploy-Release.ps1 Phase 4)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','deploy'; modifies .cs files; owns BFF deploy handler with blue-green slot-swap semantics; deployment-touching (irreversible during swap window).</rigor-reason>
     <model-tier>sonnet</model-tier>

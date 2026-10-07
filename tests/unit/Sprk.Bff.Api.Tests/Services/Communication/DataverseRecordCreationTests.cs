@@ -88,6 +88,8 @@ public class DataverseRecordCreationTests
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object,
             scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }

@@ -37,6 +37,7 @@ import * as React from 'react';
 import { makeStyles, tokens, Text, Badge, Skeleton, SkeletonItem, Link } from '@fluentui/react-components';
 import { InfoRegular, SparkleRegular, ArrowRightRegular } from '@fluentui/react-icons';
 import { buildSegments } from './NarrativeCitedText';
+import { formatRelativeTime } from '@spaarke/ui-components';
 import type { NarrativeBulletReferenceResult, TldrItemRefResult } from '../services/briefingService';
 
 // ---------------------------------------------------------------------------
@@ -240,19 +241,10 @@ function pickTldrEmoji(seed: string | null): string {
   return FUN_EMOJI_POOL[Math.abs(hash) % FUN_EMOJI_POOL.length];
 }
 
-function formatRelativeTime(isoTimestamp: string): string {
-  const now = Date.now();
-  const generated = new Date(isoTimestamp).getTime();
-  const diffMs = now - generated;
-  const diffMin = Math.floor(diffMs / 60_000);
-
-  if (diffMin < 1) return 'just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  const diffHrs = Math.floor(diffMin / 60);
-  if (diffHrs < 24) return `${diffHrs}h ago`;
-  const diffDays = Math.floor(diffHrs / 24);
-  return `${diffDays}d ago`;
-}
+// formatRelativeTime hoisted to @spaarke/ui-components (task 081 / C-13) —
+// this previously hand-rolled a past-tense-only "just now / Nm ago / Nh ago /
+// Nd ago" form with no week/month cap and no future handling; the shared
+// formatter's `style: 'compact'` renders the same abbreviated form.
 
 /**
  * R5 task 014 (FR-A5) — BINARY anchor resolution. Filters `itemRefs` down to the subset
@@ -458,7 +450,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
         </div>
       )}
       <div className={styles.footer}>
-        {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt)}</Text>}
+        {generatedAt && <Text size={200}>Generated {formatRelativeTime(generatedAt, { style: 'compact' })}</Text>}
         <Text size={200}>
           {tldr.categoryCount} categories, {tldr.priorityItemCount} priority items
         </Text>

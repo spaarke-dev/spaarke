@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Xunit;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
@@ -37,7 +38,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
     private readonly FakeTimeProvider _timeProvider = new(DeterministicNow);
     // R4-2 (2026-07-07): user-OBO Dataverse client for the Compose pre-seed
     // sprk_document → SPE pointer resolution.
-    private readonly Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient> _dataverse = new();
+    private readonly Mock<Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient> _dataverse = new();
     // D-F3 UI-action truthfulness (FR-A1-08 / task AIR2-037): defaults to immediate
     // Acknowledged so every pre-existing success-path test (authored before ack-gating
     // landed) keeps passing without per-test setup. Ack-timeout behavior is exercised by
@@ -311,7 +312,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         var documentId = Guid.Parse("d0c00000-1111-2222-3333-444444444444");
         _dataverse
             .Setup(d => d.GetAsync(It.Is<string>(p => p.Contains($"sprk_documents({documentId:D})")), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(200,
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(200,
                 JsonSerializer.SerializeToElement(new
                 {
                     sprk_documentid = documentId.ToString("D"),
@@ -439,7 +440,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         var documentId = Guid.NewGuid();
         _dataverse
             .Setup(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(200,
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(200,
                 JsonSerializer.SerializeToElement(new
                 {
                     sprk_documentid = documentId.ToString("D"),
@@ -474,7 +475,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         SeedComposeSystemLayout();
         _dataverse
             .Setup(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Fail(
+            .ReturnsAsync(Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Fail(
                 404, "DATAVERSE_NOT_FOUND", "The record was not found (or you lack access)."));
 
         var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();

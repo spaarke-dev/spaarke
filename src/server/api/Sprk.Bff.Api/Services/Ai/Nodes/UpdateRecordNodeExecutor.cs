@@ -322,7 +322,7 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     ///   1. Direct: top-level entityLogicalName, recordId, fields (Code Page sync)
     ///   2. Nested: configJson property contains a JSON string with the config (PCF sync)
     /// </summary>
-    private static UpdateRecordNodeConfig? ParseConfig(string? configJson)
+    internal static UpdateRecordNodeConfig? ParseConfig(string? configJson)
     {
         if (string.IsNullOrWhiteSpace(configJson))
             return null;

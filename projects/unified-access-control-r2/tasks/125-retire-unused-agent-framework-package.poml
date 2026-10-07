@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="125" project="unified-access-control-r2">
+  <metadata>
+    <title>Retire the unused Microsoft.Agents.AI rc1 package from the BFF, and correct the comment that claims it is used</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; GitHub #1027)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Removes a PackageReference from the BFF csproj — a publish-size and dependency-graph change on the hot path, and the package may be a transitive requirement of one that IS used.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical once the transitive question is answered: remove, build, publish-size check, fix a comment. No design judgement.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Sprk.Bff.Api.csproj, a hot-path file per the conflict-check watchlist.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, config, docs</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <origin>GitHub #1027, found during task 122 while establishing which of the three agent stacks in the BFF is the Foundry Agent Service. Owner 2026-09-29: "let's ensure this is not lost or buried in the issues list and has a task link to resolve it."</origin>
+  </metadata>
+
+  <prompt>A pre-release package ships in every BFF publish with no consumer, and the one comment that says otherwise describes a design that was replaced. Confirm it is genuinely unreferenced, remove it, and fix the comment.</prompt>
+
+  <role>SPAARKE platform developer — BFF dependencies. You are removing a package; the risk is that it is required transitively by one that is used.</role>
+
+  <goal>`Microsoft.Agents.AI` is gone from the BFF csproj (or its retention is documented with the transitive reason), the build and publish are verified, and `AiModule.cs` no longer claims a call that does not exist.</goal>
+
+  <context>
+    <background>🔴 THREE AGENT STACKS EXIST IN THIS REPO AND ARE EASY TO CONFLATE. Verified 2026-09-29:
+
+| Package | Used? | Where |
+|---|---|---|
+| `Azure.AI.Projects` — Azure AI Foundry **Agent Service** | ✅ | `Services/Ai/Foundry/AgentServiceClient.cs`, `CodeInterpreterBridge.cs` |
+| `Microsoft.Agents.Builder` / `.Core.Models` — **M365 Agents SDK** | ✅ | `Api/Agent/SpaarkeAgentHandler.cs` ONLY (the Copilot/Teams channel) |
+| `Microsoft.Agents.AI` 1.0.0-rc1 — **Microsoft Agent Framework** | ❌ | nowhere |
+
+THE EVIDENCE. `Sprk.Bff.Api.csproj:62` has the PackageReference. A search of `src/` finds **no `using
+Microsoft.Agents.AI`** and no type from it. The only claim to the contrary is a COMMENT,
+`Infrastructure/DI/AiModule.cs:93`: *"The IChatClient is consumed by SprkChatAgentFactory (AIPL-051) via
+`chatClient.AsAIAgent()`."*
+
+`AsAIAgent()` is the Agent Framework extension that wraps an `IChatClient` into an `AIAgent` — the
+framework's agent abstraction with its own thread/run/tool-calling loop. **That call does not exist.**
+`Services/Ai/Chat/SprkChatAgentFactory.cs:1092` passes `_chatClient` straight into the hand-written
+`SprkChatAgent`, which is then wrapped in Spaarke's own middleware pipeline (ContentSafety → CostControl →
+Telemetry → Routing → PromptShield). The comment documents a plan (AIPL-050/051) that the shipped design
+replaced, and was never updated — the same premise-rot shape task 122 corrected on the agent-thread key.
+
+⚠️ NOT A BLIND DELETE. `Sprk.Bff.Api.csproj:56` carries the note *"Microsoft.Agents.AI 1.0.0-rc1 requires
+Microsoft.Extensions.AI >= 10.3.0"*, and `Microsoft.Agents.Hosting.AspNetCore` (which IS used) may depend on
+it. Establish whether the reference is transitive BEFORE removing, and whether removal changes the resolved
+`Microsoft.Extensions.AI` version — a silent downgrade there would affect `IChatClient`, which the chat path
+does use.
+
+⚠️ PUBLISH-SIZE RULE APPLIES (root CLAUDE.md §10 bullet 4). Removing a package changes the publish, so measure
+it — and measure master from a FRESH worktree at a SHORT path, per the hazards enumerated there. A reduction
+still has to be reported, not assumed.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Establish the transitive question before removing. `dotnet list package --include-transitive` answers it.</constraint>
+    <constraint>Verify the resolved `Microsoft.Extensions.AI` version does not change — `IChatClient` comes from it and the chat path depends on it.</constraint>
+    <constraint>Fix the AiModule comment whether or not the package is removed. It is wrong either way.</constraint>
+    <constraint>Measure publish size per root CLAUDE.md §10 bullet 4, from fresh worktrees at short paths, and report both absolute sizes and the delta with the zip tool named.</constraint>
+    <constraint>If the package turns out to be required, document WHY in the csproj rather than leaving it unexplained — an unexplained reference is what produced this issue.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Confirm zero call sites independently — do not trust this POML's claim.</step>
+    <step>Determine whether the reference is transitively required, and what removal does to the resolved Microsoft.Extensions.AI version.</step>
+    <step>Remove it (or document the retention reason), build, and run the BFF unit suite.</step>
+    <step>Correct the AiModule comment to describe what the factory actually does.</step>
+    <step>Measure and report the publish-size delta.</step>
+    <step>Close #1027 with the outcome.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Removal changes the resolved Microsoft.Extensions.AI version — that affects IChatClient on the live chat path and is not a dependency-cleanup decision.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>`Microsoft.Agents.AI` is removed, OR retained with a written reason in the csproj.</criterion>
+    <criterion>`AiModule.cs` no longer claims `chatClient.AsAIAgent()` is used.</criterion>
+    <criterion>The resolved `Microsoft.Extensions.AI` version is unchanged, shown before and after.</criterion>
+    <criterion>Publish-size delta reported with both absolute sizes and the zip tool named.</criterion>
+    <criterion>BFF unit suite green; `dotnet build src/server/api/Sprk.Bff.Api/` clean.</criterion>
+    <criterion>#1027 closed with the outcome recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25). Exists so #1027 is not buried in the issues list — the owner asked specifically for a task link. Filed as sonnet/high because it is mechanical once the transitive question is settled.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. `Microsoft.Agents.AI` 1.0.0-rc1 REMOVED from `Sprk.Bff.Api.csproj`
+    (taking `Microsoft.Agents.AI.Abstractions` with it). Zero call sites confirmed independently, not
+    taken from this POML: the only two occurrences in `src/` were the PackageReference itself and the
+    `AiModule.cs` comment. Build clean (0 warnings, 0 errors), BFF unit suite 12,667 pass / 0 fail,
+    NetArchTest 330/330, `dotnet list package --vulnerable --include-transitive` reports no vulnerable
+    packages.</outcome>
+
+    <finding>THE TRANSITIVE QUESTION IS SETTLED, and `dotnet nuget why` is what settled it —
+    `dotnet list package --include-transitive` alone cannot, because it shows no parentage.
+    `Microsoft.Agents.AI` had NO parent: `Microsoft.Agents.Hosting.AspNetCore` does not depend on it,
+    so the removal was safe. And `Microsoft.Extensions.AI` was reachable by TWO paths — via
+    `Microsoft.Agents.AI` AND as a DIRECT PackageReference — so removing one path could not move the
+    resolved version. Verified before/after: **10.3.0 → 10.3.0, unchanged.** The escalation trigger's
+    condition (a version change affecting `IChatClient` on the live chat path) was therefore never met;
+    not firing it is a verified result, not a skipped step. `Microsoft.Agents.Builder` / `.Core` 1.0.1
+    survive transitively via the Hosting package, as required by `Api/Agent/SpaarkeAgentHandler.cs`.</finding>
+
+    <finding>The `AiModule.cs` comment was PREMISE ROT of the same shape task 122 corrected. It claimed
+    the `IChatClient` is consumed "via `chatClient.AsAIAgent()`" — the Agent Framework extension that
+    wraps a chat client in that framework's own agent/thread/run + tool-calling loop. Verified against
+    source: `SprkChatAgentFactory` passes `_chatClient` DIRECTLY into the hand-written `SprkChatAgent`
+    (~:1092), which is then wrapped in Spaarke's own middleware pipeline
+    (ContentSafety → CostControl → Telemetry → Routing → PromptShield). The comment documented the
+    AIPL-050/051 PLAN; the shipped design replaced it. That single comment was the only evidence the
+    package was used at all — which is exactly how an unused pre-release package survived in every
+    publish. Both the comment and the csproj now name all THREE agent stacks so they cannot be
+    conflated again.</finding>
+  </execution>
+</task>

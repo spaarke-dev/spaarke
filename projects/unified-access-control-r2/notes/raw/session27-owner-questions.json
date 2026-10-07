@@ -1,0 +1,686 @@
+{
+  "themes": [
+    {
+      "theme": "1. Identity: linking employees to contacts (unblocks 141, then 143, 152 and peer task 083)",
+      "questions": [
+        {
+          "id": "I1",
+          "question": "Which setting is the authoritative list of a deployment's customer workforce tenants, used to decide which signed-in employees may be auto-linked to a contact?",
+          "context": "Round 2 Q3/C7 approved the first-sign-in link by Entra oid, but did not say where the list of trusted tenants comes from. Only 1 of 8 dev users is linked today, so task 141 is the prerequisite for No Access on internal users (143), Assigned-To matching in the briefing (152) and the peer's task 083.",
+          "options": "(a) Reuse TenantRouting:Tenants[] (keyed by caller tenant id, deny-by-default, ops-owned). (b) A new explicit per-deployment list that provisioning writes; empty means deny. (c) AzureAd:TenantId. Rejected: in Model 1 it refuses every customer employee and binds Spaarke staff.",
+          "recommendation": "(b), a new explicit per-deployment list, empty = deny, never defaulting to AzureAd:TenantId. (a) is acceptable only if you confirm the routing list is authoritative for this purpose and matches the Model-1 layout.",
+          "why": "It decides which employees can be auto-bound, and it touches provisioning, which customer-provisioning-orchestration owns. Task 141 needs the answer at step 1.",
+          "tasks": "141",
+          "blocksStart": true,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "I2",
+          "question": "Collision rows: round 2 item 4 says 'refuse and flag', and 141 follows it. But 141 is also forbidden to clear or re-point an existing sprk_primarycontact. So ralph.schroeder@spaarke.com keeps its existing link to a contact that carries a CIAM oid. Do you accept that one retained link, or should an operator resolve it before 141 ships?",
+          "context": "141 rejects option (b), 'keep or create a primarycontact link while the oid stays unbound', because it mixes a CIAM-bound contact's grants into an internal user's accessible set. The one existing link does exactly that, and 141's default keeps it so that Assigned-To matching keeps working (round 2 item 5). Dev has 3 such collisions, all described as test artefacts.",
+          "options": "(1) Keep the existing link, list it as a flagged collision and let an operator decide which identity keeps the contact. (2) Treat it like (b) and require it to be resolved first. Resolving it cuts that user's Assigned-To matching until an operator re-links.",
+          "recommendation": "(1). Keep it, flag it and make it visible, and let an operator resolve it. The refuse-and-flag rule itself is already answered (round 2 item 4) and is not re-asked.",
+          "why": "Keeping the link retains a cross-plane grant mix that the POML itself calls unacceptable. That is a small, named exposure the agent should not accept alone.",
+          "tasks": "141",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        }
+      ]
+    },
+    {
+      "theme": "2. Secure isolation: who creates child records of secure records",
+      "questions": [
+        {
+          "id": "S1",
+          "question": "When server-side and wizard creates of child records (to-do, event, memo, document, analysis, AI email draft, AI create-record) move to app-only creation owned by the Secure team, do you accept that 'Created By' becomes the application, with the person recorded in 'Assigned To' (or an equivalent 'for' column) and defaulted to the caller's contact?",
+          "context": "The #1044 agreement (session 27, 2026-09-30) already accepted this for BFF-created to-dos and rejected impersonated creates because they widen roles. This question extends the pattern to every other child table and to BFF-posted events. The alternatives are an exposure window, or granting prvAssign to user roles, which is forbidden. Note that some child tables (documents, memos, analyses) may have no existing 'for' column, and adding one is new schema that needs a §11 justification. Defaulting to the caller's contact also depends on 141's link.",
+          "options": "(1) App-only create, owned by the Secure team from the start, with the person in Assigned To or the 'for' column (defaulted to the caller's contact when blank). Recorded as a §6.5 path A/B decision; task 152 targets Assigned To. (2) Create as the user, then reassign with the app. Created By stays human, but the row is readable in an ordinary BU for the gap. (3) Widen user roles with prvAssign (forbidden).",
+          "recommendation": "(1). Extend the #1044 rule to all child tables and to events. Where a table has no 'for' column, name it per table (existing column, or new with §11 justification) in the task note.",
+          "why": "It is the only option with no exposure window and no role widening. It departs from the ADR/Created-By assumption, so it must be recorded under §6.5. Task 147 cannot start without it, and neither can 146's run-as-user writers.",
+          "tasks": "146, 147, 152",
+          "blocksStart": true,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "S2",
+          "question": "For browser-side features that create child records, must every one move onto the server? Where that proves impossible, will you accept each remaining window one feature at a time?",
+          "context": "If a browser-side create stays in the browser, the record is briefly user-owned in the user's own BU until a follow-up server fix-up call (seconds) or the next reconciliation run. 147 requires the window to be stated per writer and your acceptance before that writer ships.",
+          "options": "(A) Route the create through the BFF (no window). (B) Client create, then an immediate BFF fix-up call (a window of seconds), with reconciliation as backstop. (C) Reconciliation only (a window of up to one job interval).",
+          "recommendation": "Require (A) for every product writer. Do not pre-accept (B) as a class: any writer the executor shows cannot use (A) comes back to you individually, with its window, before it ships (147 trigger 1). Never use (C) for product writers.",
+          "why": "Any window exposes secure-record children, so the fail-closed directive requires your explicit acceptance of each one. A blanket pre-acceptance would bypass the per-writer gate the POML sets.",
+          "tasks": "147",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "S3",
+          "question": "Records created, or shares removed, OUTSIDE the product (MDA forms, quick create, grids, imports, flows, the OOB Share screen) can only be corrected by the scheduled reconciliation job. What maximum interval do you accept, and should MDA 'New' on child subgrids of secure parents be hidden?",
+          "context": "Until the job runs, a child created outside the product is visible in its creator's BU, and a person whose share on the secure parent was removed keeps access to its children. C4 protects OOB sharing, so removing Share is not an option.",
+          "options": "(1) Accept a stated watermark interval (e.g. 5 min) as the only control. (2) Hide Create for child tables on secure-parent forms and subgrids via form/ribbon rules, plus reconciliation for imports and flows. (3) Both.",
+          "recommendation": "(3). Hide MDA Create on child subgrids of secure parents where possible, and run the reconcile at the shortest sustainable interval (target 5 min or less). Use the same interval for 149's unshare fallback if the platform cascade (S4) is not adopted. If an in-BFF job cannot meet the interval, 147 presents the ADR-052 placement alternatives rather than a longer interval.",
+          "why": "Ribbon rules alone do not stop Web API, import or flow writes, and reconciliation alone leaves a bounded exposure. The 146+149 deployment gate requires either a scheduled reconcile or an accepted window.",
+          "tasks": "147, 149",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "S4",
+          "question": "Should the platform's automatic share cascade from project, matter and work assignment to their children be switched on table-wide? It would also apply to ordinary records: sharing any project would also share all its children.",
+          "context": "If Part A of task 149 proves the cascade covers share, modify and unshare, it removes the OOB-unshare window (S3) entirely. It is a table-wide setting, so it cannot be limited to secure records. If the cascade covers some relationships but cannot cover sprk_document's several root lookups, 149 must also justify running cascade and synchronizer side by side (§11).",
+          "options": "(1) Enable it table-wide, accepting the widening for non-secure records. This matches C10's 'same access as the main record'. (2) Do not enable it; use the BFF synchronizer for secure roots only, with a reconcile window for OOB unshares. (3) Mixed: cascade where it covers, synchronizer for documents.",
+          "recommendation": "(1), if Part A proves it, announced as a product-wide behaviour change. If documents need the synchronizer anyway, take (3) with the §11 justification written down.",
+          "why": "It is a product-wide change to who can see children of ordinary records, which the agent must not make alone.",
+          "tasks": "149",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "S5",
+          "question": "Suppose an inbound email is tied to a record whose owning secure team cannot be determined (for example, the parent lookup or its secure flag cannot be read). May it be created owned by the memberless Secure owner team, so that nobody sees it, then flagged and picked up by reconciliation or an operator report?",
+          "context": "146 only says: if a writer cannot refuse without breaking a contract the owner fixed (its example is 'inbound email must never be dropped'), surface it under §6.5. The quarantine design here was proposed by the consolidation, not by the POML. It applies only when the Secure team itself resolves; if the team cannot be resolved, only a retry is possible.",
+          "options": "(1) Quarantine by ownership (plus a retry where the failure is transient). (2) Owned by the app or by the caller's BU (fail-open, rejected). (3) Refuse and drop (breaks never-drop). (4) Retry queue only.",
+          "recommendation": "(1), with option 4's retry for transient failures and whenever the Secure team cannot be resolved, recorded as a §6.5 path-A exception for inbound email only.",
+          "why": "It is the only shape that satisfies both never-drop and fail-closed: nobody gains access and nothing is lost. A §6.5 exception needs explicit sign-off. Deciding now avoids a mid-task stop.",
+          "tasks": "146",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "S6",
+          "question": "Please confirm that the C10 rule 'every child of a secure record is secure' also covers (a) record-level conversation threads filed against a secure root, and (b) an ordinary work assignment filed under a secure project.",
+          "context": "C10 named documents, communications, memos, events and to-dos. It did not name threads, or a work assignment nested under a secure project. A thread's subject and regarding disclose the record just as a communication does. design.md §5.1d lists the work assignment as a child of the project.",
+          "options": "(a) Threads: a record thread regarding a secure root is owned by the Secure team, with sharee access mirrored by 149, while the per-user master thread stays with its user. Or it stays caller-owned, accepting the disclosure. (b) Work assignment: provisioned secure through 144's endpoint (never a bare re-own), including at creation under a secure project. Or it keeps its own flag as set.",
+          "recommendation": "Yes to both. Record threads regarding a secure root are secure children, and a work assignment under a secure project is provisioned secure.",
+          "why": "Both follow directly from C10 and round 2 item 6. Leaving either ordinary exposes the record through ordinary BU depth.",
+          "tasks": "146",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "S7",
+          "question": "Should people holding Collaborate or Full on a secure record also be able to share individual child items (single documents or to-dos) with people who are not shared on the record itself?",
+          "context": "C4 grants sharing on the record. It does not address sharing a single child item with someone who is not shared on the record. Interaction with S4: a platform share cascade gives children the same rights as the root share, including Share. So if S4(1) is adopted, answer (1) here can only apply to relationships served by the BFF synchronizer.",
+          "options": "(1) No. Omit the share right from child mirrors, so sharing happens only at the record and fans out to its children. (2) Yes. Mirror the share right, in which case reconciliation keeps revoking such shares.",
+          "recommendation": "(1), knowing that it only binds where the synchronizer, not the platform cascade, writes the child shares.",
+          "why": "Child-level shares to non-sharees would be revoked by reconciliation and would look like a bug. Omitting the right keeps one place to manage access.",
+          "tasks": "149",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    },
+    {
+      "theme": "3. Assigned-To auto-grants (round 2 Q5)",
+      "questions": [
+        {
+          "id": "A1",
+          "question": "Q1 (cap every grant at the grantor's own level) and Q5 (Assigned contacts automatically get Collaborate) collide. Which one governs auto-grants?",
+          "context": "Once Collaborate includes the right to share (task 139), a user who can edit a record but lacks Share will trigger a Collaborate grant that includes a right they do not hold. Both answers are binding, so the agent cannot choose between them.",
+          "options": "(a) Q5 governs auto-grants: the grantor is your rule, not a person. 'Granted by' = the saving user, or empty for job-created grants. (b) Q1 governs: cap at the saving user's level, so the grant can come out below Collaborate. (c) Q5 governs, but strip the share right when the saving user lacks it.",
+          "recommendation": "(a). Record the saving user as 'granted by' so that expiry reminders reach a person. For job-created grants leave it empty, so reminders go to the record owner.",
+          "why": "This reconciles two binding owner answers, so no auto-grant may be written until you pick one.",
+          "tasks": "142",
+          "blocksStart": true,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "A2",
+          "question": "Once auto-grants are real grant rows, should the two read-time access rules that contacts get today (standing-grant membership and organization expansion) be retired, so that removing a grant in Manage Access actually removes access?",
+          "context": "Today these rules apply only on the workforce plane, which leaves a permanent difference between planes. Live data: 2 standing contacts, both at Collaborate, and 0 standing orgs. Retiring them amends approved spec FR-25/FR-24: a View Only standing contact would receive Collaborate, and org access would no longer be standing-gated.",
+          "options": "(i) CIAM also gains the derived terms. (ii) The workforce plane keeps them as a documented, owner-signed exception. (iii) Retire both on both planes after 142's backfill proves that every subject they served holds an equal-or-higher materialized grant, and record the FR-25/FR-24 amendment.",
+          "recommendation": "(iii), gated on the backfill proof, which protects the round-2 item 5 requirement that Assigned-To access is not lost.",
+          "why": "It amends approved spec behaviour. Keeping the rules contradicts C9 ('a contact only has access to records granted via grant access') and leaves 'removed' grants in effect.",
+          "tasks": "135, 142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "A3",
+          "question": "On SECURE records, should an Assigned field create the grant automatically, or prompt an operator in Manage Access to Grant/Dismiss? And when a record becomes secure, should its existing auto-grants stay?",
+          "context": "Q5 does not address secure records, where access is granted only explicitly (C10). Only the Secure branch of 142 is blocked. On Restricted records auto-grants are refused by round 2 item 3 (no contact access); 142 skips and logs them.",
+          "options": "(1) Auto-create, or prompt (a pending entry in the existing Manage Access candidate section; Dismiss = declined). (2) Keep existing auto-grants, or remove them when the record becomes secure.",
+          "recommendation": "(1) Prompt. (2) Keep them: they are direct named grants, which count on secure records and are visible and removable.",
+          "why": "Secure records are deliberately tightly controlled, so an automatic grant on them is a policy choice.",
+          "tasks": "142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "A8",
+          "question": "On LIMITED records, should Assigned-field auto-grants be written, or suppressed?",
+          "context": "Task 138 makes Limited real ('direct named grants only'). teams-app-r1 FR-14 described Limited as 'no standing/auto'. 138 reads that as meaning derived membership, which it suppresses, and not named grant rows. If you meant auto-grants to be suppressed on Limited, that is a product decision the POML says must be surfaced, not guessed.",
+          "options": "(1) Allow them: they are named, direct grant rows an operator can see and remove (Q5). (2) Suppress them on Limited, per a literal reading of teams-app-r1 FR-14.",
+          "recommendation": "(1), on Limited and Secure alike (subject to A3's prompt on Secure). Restricted stays refused.",
+          "why": "Allowing them may reverse a prior owner reading of FR-14, so it needs your explicit word.",
+          "tasks": "138, 142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "A4",
+          "question": "When an Assigned field is changed or cleared, should the previous person's auto-grant be revoked automatically if it is still the unmodified auto-created one?",
+          "context": "'Unmodified' means: same level and expiry (apart from the job's own renewal), not adopted or declined, and no other Assigned column on the record still names the person. Q5 covers creation but not reassignment.",
+          "options": "(a) Yes, revoke it if unmodified. (b) No, leave it for an operator to remove.",
+          "recommendation": "(a). Declined and adopted entries are never revoked.",
+          "why": "Removing access automatically is a policy choice.",
+          "tasks": "142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "A5",
+          "question": "Should the job automatically renew an auto-grant (to today + 90 days) while the person is still assigned, so they do not lose access at day 90 on a long matter?",
+          "context": "Auto-grants get the default 90-day expiry.",
+          "options": "(a) Auto-renew a still-assigned, unmodified auto-grant inside the reminder window. (b) Let it expire, and rely on reminders plus manual renewal.",
+          "recommendation": "(a). Every row stays finite, but the feature does not lapse under an active assignment.",
+          "why": "It trades access continuity against bounded exposure. Round 2 item 5 requires that the Assigned-To feature keeps working.",
+          "tasks": "142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "A6",
+          "question": "If a contact is assigned on a child item (event, invoice, to-do, analysis), should that give them a grant on the parent matter or project?",
+          "context": "This confirms the scope of Q5, which named 'Assigned *' fields without saying whether child tables count. It also settles 152 trigger (d): defaulting sprk_todo.sprk_assignedto on external creates issues no grant if child entries confer nothing.",
+          "options": "(a) No root grant from child-entity Assigned fields. (b) Yes, grant on the parent root.",
+          "recommendation": "(a). A contact assigned to one event is not assigned to the matter.",
+          "why": "It sets the scope of Q5.",
+          "tasks": "142, 152",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "A7",
+          "question": "Should quick-create matters from Office (created by the app, so with no human Created By) automatically set an Assigned field to the person who made them?",
+          "context": "On a root record, Assigned is grant-bearing: under task 142 it would also GRANT that person Collaborate. Events and to-dos are covered by S1; this question is only about roots.",
+          "options": "(1) Default an Assigned column to the maker, which issues a grant (coordinate with 142 and word-add-in-r1). (2) No default, and record the gap.",
+          "recommendation": "(2), unless you explicitly want the maker assigned.",
+          "why": "Defaulting a grant-bearing column changes access, not just attention.",
+          "tasks": "152, 142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    },
+    {
+      "theme": "4. No Access List for internal users (round 2 Q4)",
+      "questions": [
+        {
+          "id": "N1",
+          "question": "How should an internal user be named on the No Access List: add a systemuser column to the No Access entry, or rely only on the user's linked contact?",
+          "context": "Only 1 of 8 dev users is linked to a contact today, so relying on the link alone makes the wall fail OPEN for every unlinked user. Adding the column is a schema change on a security table, and it is needed before 143 step 2.",
+          "options": "(a) Add a systemuser subject column (sprk_subjectsystemuser) and match it directly, AND also honour contact-keyed entries through the 141 link. (b) Rely only on the linked contact.",
+          "recommendation": "(a).",
+          "why": "It is a schema addition on a security table, and it defines how Q4 is enforced.",
+          "tasks": "143",
+          "blocksStart": true,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "N2",
+          "question": "Some of a walled user's access cannot be removed for one person: a team share, team ownership, the Secure Record Owner role, or Secure BU membership. For those cases, do you accept that Teams/SPA denies them while MDA still admits them? Or should such walls be refused until an administrator removes that access?",
+          "context": "Accepting this is a §6.5 path-A exception to your C9 rule ('access in Dataverse = access in Teams/SPA'). The gap would be reported on the Manage Access deny row and in the job result. Option (b) keeps plane parity, but only because the user stays admitted on BOTH planes until an administrator acts. It is not the stricter option. The agent will never revoke a team share (that would strip every other member) and will not propose moving a user out of the Secure BU. That case is only reported.",
+          "options": "(a) Accept the wall. The SPA veto denies, the result is reported as 'wall not enforceable in Dataverse', and MDA remains exposed and visible. (b) Refuse such a wall until an administrator removes the team or role access, leaving the user admitted on both planes meanwhile.",
+          "recommendation": "(a), recorded as a §6.5 path-A exception. It is the more restrictive of the two, since (b) leaves Teams/SPA open as well.",
+          "why": "It deliberately breaks C9 and leaves a residual MDA exposure, which only you can accept.",
+          "tasks": "143, 036",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "N3",
+          "question": "On NON-secure records, should a No Access entry remove only the access a user gets through their linked contact and keep their own internal access, instead of hiding the whole record in Teams/SPA as it does today?",
+          "context": "Q4 scopes the internal wall to secure records. Today the record is hidden in SPA while MDA still shows it, which breaks plane parity once 036 lands.",
+          "options": "(a) Remove only the contact-sourced contribution on non-secure records (plane parity with MDA). (b) Keep today's behaviour.",
+          "recommendation": "(a). It matches Q4's secure-only scope and C9.",
+          "why": "It loosens an existing security behaviour, which needs your word.",
+          "tasks": "143",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "N4",
+          "question": "If a No Access entry names an organization, should it also wall off internal users whose linked contact is an active member of that organization?",
+          "context": "FR-23 says it 'denies every active member'. If the organization is the customer's own firm, every linked internal user would be walled off from every secure record that references it.",
+          "options": "(a) Yes, with the blast radius shown in the response and in the confirm dialog. (b) No, organization entries apply only to external contacts.",
+          "recommendation": "(a), with an explicit warning when the organization is the customer's own firm.",
+          "why": "The blast radius is a risk choice that Q4 does not settle.",
+          "tasks": "143",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "N5",
+          "question": "Who may author a No Access entry that actually removes a user's shares?",
+          "context": "Today anyone with create/write on the No Access table can name any internal user against any secure record. After 143 that would remove shares, which makes it a lever for denying people access. The answer is needed before the enforcer is wired.",
+          "options": "(a) Enforce only when the entry's last human modifier holds Write on that record (checked app-only); otherwise remove nothing and report 'not enforced'. The read-time veto is unchanged. (b) Restrict create/write on the No Access table to a named governance role.",
+          "recommendation": "(a), reviewing the step-1 live privilege list in case (b) is cleaner.",
+          "why": "Without a check, people with no rights on a record can remove others' access to it.",
+          "tasks": "143",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "N6",
+          "question": "What happens when a user provisions a secure project whose referenced organizations wall off that same user?",
+          "context": "This decides whether a wall blocks record creation or only access. It interacts with the creator lock-out fix (133).",
+          "options": "(a) Refuse before the ownership move, with a clear message, and skip walled colleagues with a per-person warning. (b) Provision, then remove the creator's access. (c) Provision and exempt the creator.",
+          "recommendation": "(a), coordinated with 133's pre-validation.",
+          "why": "It is a product choice about whether a wall blocks creation.",
+          "tasks": "143, 133",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    },
+    {
+      "theme": "5. ADR amendments (§6.5 sign-off; block merge)",
+      "questions": [
+        {
+          "id": "D1",
+          "question": "Do you approve two amendments to ADR-034 (membership rule)? (1) Remove business-unit ownership as a column that grants access. (2) Let a human 'Created By' count as membership for briefings and notifications only, not for access or AI scoping.",
+          "context": "(1) Today a record owned by your BU counts as 'yours', which gives everyone in the unit access regardless of role depth; C9 ('do the full fix') is the basis. With the flag off this does NOT close the BU over-grant by itself, because owningteam (the BU default team) still confers until the flag is on. It also under-grants Deep-read users until then. (2) ADR-034 says Created By never counts, but round 2 item 9 targets Created By. Your earlier answers are the basis for each amendment, not its §6.5 sign-off.",
+          "options": "For each: (B) Amend ADR-034, concise and full versions, merged with or before the PR (036 first, then 152). (A) A project-scoped exception (rejected for (1), because the rule is wrong in general). (C) Keep the ADR as is: for (1) this leaves the BU over-grant; for (2) it drops Created By and contradicts round 2 item 9.",
+          "recommendation": "Path B for both, presented in the §6.5 'ADR Conflict — Resolution Required' format.",
+          "why": "CLAUDE.md §6.5 requires your explicit acceptance of an ADR amendment. Neither 036 nor 152 can merge without it.",
+          "tasks": "036, 152",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        }
+      ]
+    },
+    {
+      "theme": "6. Background jobs, caches and revocation windows (accepted exposure)",
+      "questions": [
+        {
+          "id": "R1",
+          "question": "Do you accept these delays before changes made OUTSIDE the BFF (admin UI, MDA assign/BU change, flows, imports) reach Teams/SPA? External grants 60 s; identity 2 min (was 10); membership 2 min (was 5; up to 4 min worst case when stacked with identity); access snapshots 60 s; impersonated root sets 2 min (was 5); faults never cached (at most 10 s for throttling).",
+          "context": "After a removal, old access can linger for up to the bound. The numbers comply with the existing 2-minute authorization-cache rule (caching-architecture.md:335). Your sign-off is an explicit merge gate in 132. If the read-volume estimate more than doubles, 132 comes back with a trade-off.",
+          "options": "(a) Accept the bounds. (b) Different numbers (anything above 2 min also amends caching-architecture.md:335). (c) Reject any outside-BFF bound, which requires a new Dataverse change-detection job (ADR-036/052).",
+          "recommendation": "(a).",
+          "why": "It is a residual-risk acceptance.",
+          "tasks": "132",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "R2",
+          "question": "External-access reconciliation job: turn on its schedule in report-only mode first, and enable writes (deactivating grants) only after you review one report? And should inactive contacts and inactive records remain read-time guards only, rather than having writer rules that deactivate grants?",
+          "context": "Enabling writes removes access (D-2 part 3 makes this your decision). The executor may do step 1 but must not change the job's registration or WritesEnabled until you answer.",
+          "options": "(a) Schedule on, report-only first, writes after one reviewed report; inactive contacts/records stay read guards only. (b) Writes on immediately. (c) Leave disabled. (d) Add writer rules for inactive contacts/roots.",
+          "recommendation": "(a). With read guards only, reactivating a contact or record restores access with no data repair.",
+          "why": "Enabling writes removes access, and leaving the job disabled leaves stale grants.",
+          "tasks": "137",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "R3",
+          "question": "Auto-grant job: enable it with writes on for create/convert/renew, run it hourly, and put revoke-on-change behind a switch that defaults to report-only in code and is turned on in dev once the live gate passes?",
+          "context": "This departs from the D-2 part 3 default that removal rules ship disabled. While the switch is report-only, a stale grant left by a field change made outside the product can survive indefinitely, not just for one cycle. The switch governs only the job; the sync endpoint and client triggers always revoke on change.",
+          "options": "(a) As described, hourly. (b) Everything report-only until you flip it. (c) A different cadence.",
+          "recommendation": "(a), hourly, with the PR stating the unbounded window while the switch is report-only.",
+          "why": "It sets an accepted residual-exposure window.",
+          "tasks": "142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "R4",
+          "question": "No Access enforcement job: ship it enabled with writes on (removing shares to walled users), running every 15 minutes?",
+          "context": "The cadence bounds how long an MDA share to a walled user survives. This departs from the D-2 part 3 'removal rules ship disabled' default.",
+          "options": "(a) Enabled, writes on, every 15 min. (b) Report-only first. (c) A different cadence.",
+          "recommendation": "(a), because you explicitly required the wall (round 2 item 5, Q4).",
+          "why": "It sets an accepted exposure window, and it removes access.",
+          "tasks": "143",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        }
+      ]
+    },
+    {
+      "theme": "7. Grant model and contact-side grants (round 2 Q1/Q2, C4)",
+      "questions": [
+        {
+          "id": "G1",
+          "question": "May an external contact bring in a colleague who is not yet a known member of their organization, or otherwise create or change organization memberships?",
+          "context": "Q2 lets a contact grant only to existing contacts of their own organization. A new membership would silently widen every organization-wide grant to that organization, on every record, and it feeds org expansion and the deny list. The existing-member branch ships regardless.",
+          "options": "(a) No: refuse with '{email} is not yet a member of your organization in this system; ask the record's team to add them'. Memberships stay an internal/admin action. (b) Yes, on the CIAM plane only, when the email domain matches the organization's recorded domain: create the contact and membership and onboard them.",
+          "recommendation": "(a). The task asserts that no code path writes memberships.",
+          "why": "(b) lets one contact multiply access far beyond 'at or below their own level on this record', which goes past Q1/Q2.",
+          "tasks": "140",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "G2",
+          "question": "For a grant issued by a contact: (i) may it expire later than the grantor's own grant? (ii) should it be removed if the grantor later loses access? (iii) may a contact raise a colleague's grant that someone else issued?",
+          "context": "Q1 caps the level but says nothing about duration or survival. The task implements (ii) and (iii) as recommended by default; (i) must be answered before shipping.",
+          "options": "(i) Cap at the grantor's own expiry, or allow up to the +90-day default. (ii) No cascade (visible and revocable in Manage Access), or cascade-revoke. (iii) Refuse ('managed elsewhere'), or allow.",
+          "recommendation": "(i) Cap at the grantor's effective expiry when their access rests on a dated grant (the time version of Q1). (ii) No cascade. (iii) Refuse.",
+          "why": "These decide how long access issued by an external party lasts.",
+          "tasks": "140",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "G3",
+          "question": "When deciding whether a contact 'holds Collaborate or Full' and may grant, which of their access counts: their effective level after all vetoes (including organization and standing access), or direct named grants only?",
+          "context": "On a Standard record a contact may hold Collaborate through a direct grant, an organization grant, or standing access. On Secure/Limited records only direct grants count anyway. The task implements (a) by default.",
+          "options": "(a) Effective post-veto level. (b) Direct named grants only.",
+          "recommendation": "(a). Your rule is about the level a contact HOLDS.",
+          "why": "Q1/Q2 did not name the source of the grantor's access.",
+          "tasks": "140",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "G4",
+          "question": "When the backfill upgrades existing shares to the new Collaborate/Full levels, should shares whose rights match no level (for example hand-made MDA shares with Delete or Assign) be left untouched and reported?",
+          "context": "The backfill rewrites live shares, which changes who can re-share on real records. Team shares at the old Collaborate level are not asked here: C4 makes the grant ability a property of the level, so they are upgraded like user shares (see droppedAsAnswered).",
+          "options": "(a) Leave non-standard masks untouched and report them per record. (b) Normalize them to the nearest level.",
+          "recommendation": "(a). Non-standard masks are deliberate hand-made MDA shares.",
+          "why": "Rewriting live shares that nobody set through the product is a policy choice.",
+          "tasks": "139",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "G5",
+          "question": "When a user confirms an invoice, should the invoice be created under the user's own (OBO) token so that Dataverse enforces Create + AppendTo? Or should it stay app-only, with the decision recorded?",
+          "context": "Today the app creates it, so Dataverse never checks whether the user may create invoices. The earlier 'no Create' decision was about documents, not invoices.",
+          "options": "(a) Create under the caller's OBO token (not impersonation); the BFF pre-checks become confirmatory. (b) Keep app-only and record an ADR tension in the PR, accepting the exposure.",
+          "recommendation": "(a).",
+          "why": "The fail-closed directive favours (a). Strictly, the trigger fires only if the live gate finds such a user, but deciding now avoids a mid-task stop.",
+          "tasks": "130",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        }
+      ]
+    },
+    {
+      "theme": "8. Secure flag, secure setup and the Secure Record Owner role",
+      "questions": [
+        {
+          "id": "F11",
+          "question": "The live NFR-05 census FAILS clause 1: the account ralph.schroeder_hotmail.com#EXT# holds 'Spaarke Basic User', whose Read on project and matter reaches down into the Secure Record BU by depth, so it can read secure projects and matters. How should this be closed without relocating anyone?",
+          "context": "No POML owns this finding (peer census, 2026-09-30), yet 144's live gate requires 'the NFR-05 assertion passes'. Any root-BU user whose role has Deep/Global Read on a root table reaches every descendant BU, including the Secure Record BU. So this may be structural, not limited to one account. 036 also notes that dev 'Basic User' holds Deep Read on sprk_project.",
+          "options": "(a) Remove 'Spaarke Basic User' (or its root-table Read) from the affected account(s). This is a role change, not a relocation. (b) Reduce that role's Read depth on sprk_project/sprk_matter/sprk_workassignment so it cannot reach the Secure BU. This is a product-wide change to every holder's MDA reach on ordinary records. (c) Accept it as a documented exception, with the census naming the accepted principals.",
+          "recommendation": "First have the census list EVERY principal whose role depth reaches the Secure BU. If it is only your own guest account, (a). If it is structural (root-BU users with Deep/Global Read), bring (a) vs (b) back as a design decision before 144's live cutover. Do not relocate anyone.",
+          "why": "It is a live exposure of every secure record, and it blocks 144's live gate. Every fix changes roles on live users, which is reserved to you.",
+          "tasks": "144, 145",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "F1",
+          "question": "Should the drifted privileges on the live Secure Record Owner role be removed? These are 28 non-Read privileges (Write, Delete, Share, Assign...) on project, matter, work assignment and document, plus the SharePoint four at Global depth.",
+          "context": "The setup guide never granted these; session 27 recorded 'removal is an owner call' with no answer. After peer task 082 the role holds 40 privileges. It does not block the grant work. 145 must not remove anything without your answer, and the question is asked only once (with 082).",
+          "options": "(a) Remove all drifted privileges, keeping only the Read-at-User set in config/secure-record-owner-role.json, after probes prove Read alone suffices for every re-own. (b) Remove the 28 non-Read table privileges now; keep the SharePoint four until their need is investigated. (c) Keep everything.",
+          "recommendation": "(b) now, then (a) once the SharePoint four are shown to be unneeded. Record before/after lists, apply once through 082's script, and ask once, jointly with 082.",
+          "why": "Removing privileges from a live security role is reserved to you (CLAUDE.md §6). This is least privilege on the isolation anchor.",
+          "tasks": "145 (with peer 082 / #1046)",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "F2",
+          "question": "Should task 144 add a read-only scheduled BFF job that runs the Secure BU census (zero members, zero users, role-depth reach) and logs a CRITICAL finding? It would catch an admin moving a user into the Secure Record BU, or a role reaching into it, between provisioning calls.",
+          "context": "Without plugins nothing prevents such a move, and it exposes every secure record until the next check. The census already finds a live clause-1 FAIL (see F11).",
+          "options": "(a) Build it in 144: a read-only ADR-036 job, no Dataverse writes, no CI involvement, with a §10 placement statement. (b) Rely on provisioning-time assertions plus manual NFR-05 runs, accepting the gap.",
+          "recommendation": "(a), in line with the no-scope-cut and fail-closed directives.",
+          "why": "It adds BFF surface (§10/§11), and the alternative accepts an unbounded exposure window. The answer is needed before 144 step 3 is finished.",
+          "tasks": "144",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "F3",
+          "question": "Who may REMOVE the Secure designation from a record?",
+          "context": "The wizard promises that 'an administrator can remove the secure designation later', but the endpoint lets anyone with Write do it. Round 2 item 2 locked the field behind the endpoint but did not say who may use it.",
+          "options": "(1) Anyone with Write (and change the wizard's promise). (2) A named role or administrators, enforced server-side in the unsecure endpoint. (3) The record's Full-access holders.",
+          "recommendation": "(2). Securing stays open to Write-holders.",
+          "why": "Unsecuring widens exposure, and hiding a button without server enforcement is not a control.",
+          "tasks": "150",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F4",
+          "question": "Do you accept that System Administrators remain able to change the locked Secure flag, because the platform always gives them full field access?",
+          "context": "A System Administrator can already reassign, share or delete any secure record, so this adds no new power. The BFF app users need System Administrator for prvActOnBehalfOfAnotherUser.",
+          "options": "(1) Accept it as the platform boundary: document it, and list every System Administrator holder in the census assertion. (2) Strip System Administrator from users (forbidden by the POML).",
+          "recommendation": "(1).",
+          "why": "It is a residual exposure you must accept; making the set of writers visible is the mitigation.",
+          "tasks": "150",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "F5",
+          "question": "How should users secure or unsecure a matter or work assignment once the field is locked: the existing 'Secure' section from the Create Project wizard placed on the forms, or a command-bar button?",
+          "context": "This is a product UX choice. Deciding it now avoids a stop at 150 step 5.",
+          "options": "(1) Reuse/extend SecureProjectSection on the project, matter and work-assignment forms. (2) A command-bar Secure/Unsecure button via ribbon-edit. (3) Both.",
+          "recommendation": "(1) where the control can be reused; otherwise (2), with a sketch shown to you before building.",
+          "why": "It is a product UX decision.",
+          "tasks": "150",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F6",
+          "question": "The wizard will no longer upload files to shared storage when secure setup fails, so the old wording ('marked Secure but could not be provisioned', 'an administrator can secure it') no longer fits. May the agent draft two or three wording options for you to approve before merge?",
+          "context": "The POML forbids the agent from writing new user-facing wording on its own. Affected branches: SummarizeFilesDialog and CreateProjectWizard.",
+          "options": "(1) You author the copy. (2) The agent drafts options and you pick. (3) Keep the old, inaccurate copy.",
+          "recommendation": "(2).",
+          "why": "The old wording would misdescribe the fail-closed behaviour.",
+          "tasks": "150",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F7",
+          "question": "Should 'secure an existing record' be enabled only in the same release as task 148's backfill (which re-owns its children and moves its files)?",
+          "context": "Without 148, securing an existing record leaves its documents, events and to-dos exposed and its files in shared storage. This is sequencing within the release, not a scope cut.",
+          "options": "(1) Ship the lock, create-time secure and unsecure now; enable 'secure an existing record' together with 148. (2) Ship everything now, with wording saying existing content is not moved.",
+          "recommendation": "(1).",
+          "why": "(2) gives a false sense of isolation.",
+          "tasks": "150, 148",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F8",
+          "question": "For secure records created by the app (Office quick-create, and other server creates once 144 extends provisioning to matters and work assignments), who counts as the creator who must keep access when provisioning resumes?",
+          "context": "'Created By' is the app for these rows, so the creator lock-out fix needs a trustworthy human identity. The interim default is: createdby for human-created rows, and refusal with its own reason code for app-created rows. createdonbehalfby is expected to be filled only when the app impersonates, which the #1044 agreement rejected. On roots, the Assigned columns are grant-bearing (A7), and S1's 'for' columns are on child tables, not roots.",
+          "options": "(a) A new server-stamped creator column (schema change, needs §11 justification). (b) createdonbehalfby. (c) Another existing column.",
+          "recommendation": "Ship the interim default now and never share to whoever calls resume. Pick a persistent source before 144 lands app-created secure roots. The executor verifies (b) live; if it is empty for app-only creates, (a) is the remaining option.",
+          "why": "This is expected to fire once 144 lands, and it decides who keeps access to a secure record.",
+          "tasks": "133, 144",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F9",
+          "question": "What should the new named team that owns secure records be called?",
+          "context": "The name becomes a fail-closed lookup key shared by code, the live team, a pinning test and the guide. It must be fixed before the live team is created in 144 step 9.",
+          "options": "(a) 'Secure Record Owners'. (b) Another name.",
+          "recommendation": "(a). It is distinct from the BU's default team ('Secure Record'), so the two cannot be confused.",
+          "why": "It is a fixed, cross-referenced key.",
+          "tasks": "144",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "F10",
+          "question": "How should a new customer environment get the Secure Record BU, named owner team, role and privileges: as a control-plane provisioning handler step, or as a manual runbook step?",
+          "context": "This changes another project's pipeline (a new handler id in customer-provisioning-orchestration's DAG). It blocks only 145 step 6, and the design must be shown to you first.",
+          "options": "(a) A new control-plane handler step, coordinated with customer-provisioning-orchestration. (b) An operator-runbook step in SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §12.",
+          "recommendation": "(a). The hand-edited runbook path is what produced today's role drift.",
+          "why": "It is a cross-project design change.",
+          "tasks": "145",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    },
+    {
+      "theme": "9. Test identities for live gates (no user relocation)",
+      "questions": [
+        {
+          "id": "T1",
+          "question": "For the 131 and 142 live gates, may the executor create fresh test RECORDS that the test user cannot already open, and use the product's grant flow to add and later revoke grants, instead of changing any existing user?",
+          "context": "131 needs a user who resolves to a contact and has no other membership on a non-Restricted secure record. 142 needs a linked internal user with no existing access to the chosen record. Only 1 of 8 dev users has sprk_primarycontact set. Relocating, re-roling, relinking or creating users is forbidden to the executor (131, 034), so any new test USER comes only from you (see T2).",
+          "options": "(a) You name existing user/record pairs now. (b) You pre-authorize the executor to create fresh test records (a non-Restricted secure project for 131, an ordinary root for 142) and to add/revoke grants through the product's flow, all recorded in notes.",
+          "recommendation": "(b). For 131, use the one linked user, or a user linked by 141, against a fresh secure record.",
+          "why": "Supplying test identities is your call. Answering now avoids stalls mid-task.",
+          "tasks": "131, 142",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "T2",
+          "question": "Can you create (or name) an unlicensed MEMBER (not guest) account in the dev Entra tenant for the 141 live gate?",
+          "context": "Existing users must not be relocated or converted to guests. It blocks only the live gate (141, and 013's amended gate).",
+          "options": "(a) Create a dedicated new unlicensed member test account. (b) Name an existing unlicensed member account.",
+          "recommendation": "(a), so no existing user's licence, BU or type changes.",
+          "why": "Only you can supply test identities.",
+          "tasks": "141, 013",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "T3",
+          "question": "If the only available test user can see matters BU-wide (dev 'Basic User' holds Deep Read), may the 034 negative canary keep 'strictly fewer rows' as the merge gate, and record the exact-list check against the best independent derivation, with its method noted?",
+          "context": "With a broad-role user, the exact expected list cannot be derived independently. This is likely to fire. Weakening the assertion is forbidden, and getting a User-level user would need a user change, which 034's amended criteria forbid (no user created, relocated or re-roled).",
+          "options": "(1) Keep Test 1 as the gate and record Test 2 with its method noted. (2) Require a User-level-read user (needs a user change). (3) Weaken Test 2 (forbidden).",
+          "recommendation": "(1).",
+          "why": "It keeps the real inertness catcher strict and respects the no-relocation directive.",
+          "tasks": "034",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        }
+      ]
+    },
+    {
+      "theme": "10. Notifications and Daily Briefing (round 2 item 9)",
+      "questions": [
+        {
+          "id": "B1",
+          "question": "Should records personally owned by a user also count as 'for' that user in the Daily Briefing and notifications, as a third term alongside Created By and Assigned To?",
+          "context": "Round 2 item 9 named only Created By and Assigned To. Personal ownership names exactly one person, so it does not bring back team fan-out; dropping it hides records reassigned to the user in MDA.",
+          "options": "(1) Keep personal user ownership as a third term. (2) Use only Created By and Assigned To.",
+          "recommendation": "(1), confirmed before merge.",
+          "why": "It adds a term beyond the ones you named.",
+          "tasks": "152",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        },
+        {
+          "id": "B2",
+          "question": "If the briefing targeting fix (152) cannot deploy with or before the child-record ownership fix (146), do you accept that some to-dos temporarily drop out of people's Daily Briefing?",
+          "context": "The alternative is to hold 146, which leaves secure-record children readable in ordinary BUs for longer. Isolation is CRITICAL (C10); notifications were rated low priority.",
+          "options": "(1) Accept the interim drop-out, announce it and record it in the PR. (2) Hold 146 until 152 can deploy with it.",
+          "recommendation": "(1).",
+          "why": "It trades a temporarily missing briefing item against a continued disclosure. Fail closed and your stated priorities favour shipping isolation.",
+          "tasks": "146, 152",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    },
+    {
+      "theme": "11. API contracts and list behaviour",
+      "questions": [
+        {
+          "id": "C1",
+          "question": "When an upload names something that is not a real record type, may clients get a 400 with a new stable reason code?",
+          "context": "The new code would be distinct from 404 container_record_not_found and 409 secure_record_container_missing. Strictly, the trigger fires only if the agent's grep of the Office add-in and OBO upload clients finds them branching on those statuses; the result is recorded either way.",
+          "options": "(1) 400 with a new reason code. (2) Reuse 404. (3) Reuse 409.",
+          "recommendation": "(1).",
+          "why": "Changing an API error contract is a CLAUDE.md §6 breaking-change escalation.",
+          "tasks": "151",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": true
+        },
+        {
+          "id": "C2",
+          "question": "When a broad-role user can access more than about 5,000 records, the list is capped with an 'Only 5,000 records displayed' banner. Which 5,000 should be shown?",
+          "context": "Open register item C-1 (design.md) marks this as an explicit product decision; the POML forbids choosing silently.",
+          "options": "(1) Most recently modified first (modifiedon desc, stable tiebreak on id). (2) Most recently created. (3) Alphabetical. (4) Server paging beyond the cap (a larger change).",
+          "recommendation": "(1), with the Truncated flag and banner (NFR-03). If you want paging, say so and it is added to scope, not deferred silently.",
+          "why": "It decides what broad-role users see.",
+          "tasks": "036",
+          "blocksStart": false,
+          "reversible": true,
+          "mustAnswerExplicitly": false
+        }
+      ]
+    }
+  ],
+  "droppedAsAnswered": [
+    "136 (active matter/work-assignment grants with no access level): answered by C9 ('the privileges should be the same as set in the grant access') plus 'We do not have customers so do the full fix'. A grant with no level confers nothing, so these rows lapse; no back-fill. The executor still lists the affected rows before merging (136 constraint).",
+    "148 (move existing SPE content into the secure root's own container) and 144 trigger 3 (secure matter/WA with children already in a shared container): answered by round 2 item 6 (Part 2 extended to 'backfill and transitions' and 'secure matters and work assignments') plus the no-scope-cut / no-deferral directive. Provisioning them and moving the content are both in scope (148, cross-referenced with 144).",
+    "149 (a child linked to two secure parents: union vs intersection of share lists): answered by the standing fail-closed directive, so intersection. Record the cases where a legitimate sharee loses sight.",
+    "149 option 3 (remove prvShare on secure roots from ordinary roles): ruled out by C4 ('if the user has write access, then they can share (OOB functionality)'). The rest of that trigger is merged into S3/S4.",
+    "152(b) (Daily Briefing High Priority section: people-targeted vs every readable flagged record): answered by round 2 item 9 (target Created By and Assigned To; team-owned records do not fan out). Show only flagged records in the user's people-targeted set that they can read.",
+    "139 trigger 3, team half (team shares at the old Collaborate level): answered by C4 ('Collaborate and Full Access carry grant-access ability'), which is a level rule regardless of who holds the share. Team shares are upgraded like user shares. Only the non-standard-mask half remains, as G4.",
+    "141 collision rule itself: answered by round 2 item 4 ('A collision is refused and flagged') = 141 option (a). Only the retained existing link is asked, as I2.",
+    "034 triggers (no non-admin canary user; no CI mechanism for live Dataverse tests): answered by the standing directives 'no Dataverse tests in CI (manual gates)' and 'do not relocate users', recorded in 034's 2026-09-30 amendments 1-2 (manual gate, existing non-admin user in the correct BU). Only the Test-2 derivation question remains, as T3.",
+    "145 trigger 1 (who applies the five-table grant, 082 or 145): moot. Word-add-in-r1 task 082 is LIVE in dev (session27 note: role 36 to 40 privileges, 2026-09-30). 145 only verifies and extends 082's codified set.",
+    "150 ABSENT branch (backfill NULL sprk_issecure to false, then make an absent value fail closed on uploads): answered by the standing fail-closed directive (and ADR-003). NULL and false already route identically today, so the backfill changes no behaviour; making ABSENT refuse is the fail-closed direction.",
+    "133 trigger 1 / 144 trigger 1 (organization.sharetopreviousowneronassign true): runtime condition, verified FALSE in spaarkedev1 on 2026-09-30 (read-only query). It needs a decision only if another environment has it on.",
+    "Runtime conditions, not owner decisions now: Assign-cascade on root to child relationships (133 T4, 144 T5, 148 T3, 149 T1) fires only if Part A finds it; 138 T5 (show the inherited permission on communications) defaults to removing the control per Q6 and is asked only if a display is proposed; 056 amendment 6 (sprk_relatedproject semantics) only if ambiguous; 137 T4 (tenant-agnostic grant-cache key) has recommended path C (comply) and fires only if it is chosen; 132's ADR-009 and auth.md tensions are path C.",
+    "Near-duplicates merged rather than dropped: 135 + 142(d) -> A2; 140 triggers 1 + 6 -> G1; 146 (app-only create) + 147 (Created By) + 152(c) (events default) -> S1; 147 (outside-product interval) + 149 (OOB unshare window) -> S3; 149 (mixed cascade + synchronizer) -> S4; 036 + 152 ADR-034 amendments -> D1; 146 (threads) + 146 (nested work assignment) -> S6; 131 + 142(j) test pairs -> T1; 143(d) + 036 amended trigger (BFF deny veto vs Dataverse disagreement) -> N2; 152(d) (external to-do default) -> A6."
+  ]
+}

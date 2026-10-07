@@ -186,6 +186,30 @@ For any 2026-05-30+ question about Insights, answer-order is:
 
 ---
 
+## 0b. ⚠️ Decision-ID disambiguation — "D-12" (added 2026-09-28)
+
+This document's **local** decision log (§19) numbers its decisions `D-01`…`D-63`. One of them used to be
+called **`D-12`** and means *"`tenantId` is a first-class top-level field on every new index."* That
+identifier **collided with the platform-level owner decision D-12**
+([`projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md`](../../projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md)),
+which redefines the Spaarke deployment models — and which says something close to the **opposite** about
+what a `tenantId` field guarantees.
+
+**The local decision is therefore renamed `D-IE-12`** (Insights Engine 12) at every occurrence in this
+file. `D-12` unqualified now always means the platform deployment-model decision.
+
+**The substantive point, so the two are never confused again:**
+
+- `tenantId` is an **Entra tenant GUID**. Under platform **Model 1**, every customer's environment lives in
+  **Spaarke's** Azure tenant, so **`tenantId` is identical for every Model 1 customer** and a
+  `tenantId eq '…'` filter **cannot separate customers** — while its tests pass.
+- Customer isolation comes from the **dedicated per-customer resource in a per-customer Azure subscription**
+  (AI Search service, Cosmos account, Storage, Key Vault, …) — a **boundary**, not a filter.
+- `D-IE-12` remains in force as **belt-and-braces**: carry `tenantId`, filter on it, and never treat it as
+  the thing that keeps one customer's material away from another.
+
+---
+
 ## Table of contents
 
 1. [Overview](#1-overview)
@@ -317,8 +341,8 @@ Asynchronously, when Dataverse mutates, the sync pipeline keeps the substrate fr
 
 | | New for the Engine | Reused from existing Spaarke |
 |---|---|---|
-| **Code** | `InsightsResolverService`, `Insights Agent`, `IInsightGraph` + `CosmosNoSqlInsightGraph`, `LiveFactResolverService`, `IInsightArtifactStore`, Sync/Reconciliation/Extraction Functions | `IChatClient`, `UseFunctionInvocation` pipeline, `IAiToolHandler` + `IToolHandlerRegistry`, `RagIndexingPipeline`, `ReferenceIndexingService` patterns, `EmbeddingCache`, `SemanticDocumentChunker`, `IOpenAiClient`, `PlaybookExecutionEngine`, `DataverseService`, `DeliverToIndexNodeExecutor` |
-| **Azure** | Cosmos NoSQL account (new), Function App (new — narrowed ADR-001 permits), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
+| **Code** | `InsightsResolverService`, `Insights Agent`, `IInsightGraph` + `CosmosNoSqlInsightGraph`, `LiveFactResolverService`, `IInsightArtifactStore`, Sync/Reconciliation/Extraction Functions | `IChatClient`, `UseFunctionInvocation` pipeline, `IAiToolHandler` + `IToolHandlerRegistry`, `RagIndexingPipeline`, the former `ReferenceIndexingService` idempotent re-index pattern (the class was removed by unified-access-control-r2 task 163; the pattern is recorded in its history), `EmbeddingCache`, `SemanticDocumentChunker`, `IOpenAiClient`, `PlaybookExecutionEngine`, `DataverseService`, `DeliverToIndexNodeExecutor` |
+| **Azure** | Cosmos NoSQL account (new), Function App (new — placement per ADR-052), Service Bus topic for Dataverse changes (new), `insight-*` indexes in existing AI Search service | AI Search service, Azure OpenAI account, Redis, Key Vault, App Insights, Log Analytics, Managed Identity |
 | **Schema** | `InsightArtifact` envelope (C# types), 4 new AI Search index schemas, Cosmos graph schema (vertex types + edge types), question catalog with evidence-sufficiency rules | JPS playbook schema (existing) — closure-extraction is a JPS playbook |
 
 The Engine is intentionally additive. It does not replace any existing AI subsystem; it sits beside them and consumes their primitives.
@@ -388,7 +412,7 @@ Every artifact uses the same envelope so surfaces can render uniformly. Fields l
 ```
 
 Notes:
-- `tenantId` is a **top-level field** (not just nested in `scope`) so it is a filterable index field. Per D-12 it is first-class on every new index — the existing `spaarke-records-index` omits this and the Engine MUST NOT repeat that gap.
+- `tenantId` is a **top-level field** (not just nested in `scope`) so it is a filterable index field. Per D-IE-12 it is first-class on every new index — the existing `spaarke-records-index` omits this and the Engine MUST NOT repeat that gap. ⚠️ `tenantId` separates **Entra tenants**, not **customers** — under the platform Model 1 every customer presents Spaarke's tenant GUID, so this field is belt-and-braces on top of the dedicated per-customer AI Search service, never the customer boundary itself (see the disambiguation note in §0b).
 - `producedBy.version` is **mandatory for Observations** (D-05) — enables selective re-extraction when a playbook ships v2.
 - `embedding` is populated for Observations and Inferences; null for Facts (which are retrieved by direct filter, not similarity).
 - `validFrom` / `validTo` model temporal validity (e.g., "total spend as of 2026-05-19" differs from "total spend as of 2026-06-30").
@@ -583,7 +607,7 @@ The Engine spans the BFF API, a new Function App, and three substrate stores. Th
 | `Insights Agent` factory | `Sprk.Bff.Api/Services/Insights/Agent/` | Tool-driven grounded synthesis using existing `IChatClient` + `UseFunctionInvocation` | Reuses `SprkChatAgentFactory` plumbing without conversational session/history overhead |
 | `LiveFactResolverService` | `Sprk.Bff.Api/Services/Insights/Facts/LiveFactResolverService.cs` | Typed Dataverse queries for deterministic Facts; 5-min Redis cache | Wraps existing `IDataverseService` |
 | `IInsightGraph` + `CosmosNoSqlInsightGraph` | `Sprk.Bff.Api/Services/Insights/Graph/` | Adjacency-list graph over Cosmos NoSQL with named traversals | NEW — no existing graph |
-| `IInsightArtifactStore` | `Sprk.Bff.Api/Services/Insights/Index/` | Wraps `SearchClient` for Insight-specific operations (envelope serialization, idempotent upsert, evidence preservation) | Wraps existing AI Search SDK; pattern from `ReferenceIndexingService` |
+| `IInsightArtifactStore` | `Sprk.Bff.Api/Services/Insights/Index/` | Wraps `SearchClient` for Insight-specific operations (envelope serialization, idempotent upsert, evidence preservation) | Wraps existing AI Search SDK; pattern from the former `ReferenceIndexingService` (removed by unified-access-control-r2 task 163) |
 | Insight tool handlers | `Sprk.Bff.Api/Services/Insights/Tools/` | `IFindComparableMattersTool`, `IGetMatterFactsTool`, `IRetrieveByGraphTool`, `IGetObservationsTool`, `IAssessEvidenceSufficiencyTool`, `IComposeInferenceTool`, **`ISearchPrecedentsTool`** (D-A26), **`ICitePrecedentTool`** (D-A26), **`IDeclineToFindTool`** (D-A24, D-49) | Implements existing `IAiToolHandler` pattern |
 | **`IPrecedentBoard`** + stub `DataversePrecedentBoard` | `Sprk.Bff.Api/Services/Insights/Precedents/` | Phase 1 scaffold for 4th tier (D-A26, D-46). CRUD over `sprk_precedent` entity + Cosmos `Precedent` vertex + `insight-precedents` AI Search index. Lifecycle methods (decay, promotion, drift) declared but `NotImplementedException` until Phase 1.5. | NEW |
 | **`GroundingVerifier`** | `Sprk.Bff.Api/Services/Ai/CitationVerification/GroundingVerifier.cs` | Mechanical post-Agent citation check (D-A22, D-47). Runs in `InsightsResolverService` before returning. Platform primitive shared with Action Engine (coordination assessment §4.7). | NEW (platform primitive) |
@@ -595,7 +619,7 @@ The Engine spans the BFF API, a new Function App, and three substrate stores. Th
 
 ### 5.2 Function App components (new)
 
-A new Function App, permitted by the narrowed ADR-001 (commit `84cec9f9` permits Functions for narrow out-of-band integration). Hosted on Flex Consumption per D-17 and the Microsoft ISV pattern.
+A new Function App. Its placement is governed by [ADR-052](../adr/ADR-052-workload-placement.md) (first permitted by the 2026-05 ADR-001 narrowing, D-38 — see §11.1). Hosted on Flex Consumption per D-17 and the Microsoft ISV pattern.
 
 | Function | Trigger | Responsibility |
 |---|---|---|
@@ -620,7 +644,7 @@ From [`ai-inventory.md`](../../projects/ai-spaarke-insights-engine-r1/ai-invento
 | `EmbeddingCache` | `Services/Ai/EmbeddingCache.cs` | Reduces OpenAI cost on Insight artifact embedding |
 | `SemanticDocumentChunker` + `TextChunkingService` | `Services/Ai/` | Reuse for chunking long Observation content |
 | `RagIndexingPipeline` | `Services/Ai/RagIndexingPipeline.cs` | Pattern reference; content-chunked Observations flow through similar pipeline |
-| `ReferenceIndexingService` | `Services/Ai/ReferenceIndexingService.cs` | Pattern reference for idempotent re-indexing of structured artifacts |
+| `ReferenceIndexingService` (removed) | formerly `Services/Ai/ReferenceIndexingService.cs` — deleted by unified-access-control-r2 task 163 with its unused `/api/admin/knowledge/*` routes; recover the pattern with `git log --diff-filter=D -- src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` | Pattern reference for idempotent re-indexing of structured artifacts |
 | `RagService` + `RagQueryBuilder` | `Services/Ai/RagService.cs` | Hybrid keyword + vector + semantic-reranker search wrapped by `IInsightArtifactStore` |
 | `PlaybookExecutionEngine` + `INodeExecutor` registry | `Services/Ai/` | Closure-extraction is a JPS playbook ending in `DeliverToIndexNodeExecutor` |
 | `DeliverToIndexNodeExecutor` | `Services/Ai/Nodes/` | Writes playbook output (Observations) to AI Search indexes |
@@ -854,7 +878,13 @@ This builds a real graph data model on a document database. What it lacks is gra
 }
 ```
 
-**Partition key**: `tenantId` (per knowledge research recommendation — supports per-tenant cost attribution and clean physical isolation).
+**Partition key**: `tenantId` (per knowledge research recommendation — supports per-tenant cost attribution).
+
+> 🔴 **Do not read this as customer isolation** (added 2026-09-28, D-12 §3; cf. the ADR-015 amendment).
+> A `/tenantId` partition holds the **same value for every Model 1 customer** — Spaarke's tenant GUID — so
+> it is one partition, not one per customer, and it separates nothing. It is also a **hot-partition**
+> shape in dedicated-per-customer environments. **The Cosmos account is dedicated per customer**; that is
+> the isolation. Pick a partition key for throughput distribution, not for tenancy.
 
 **Domain schema**:
 
@@ -1089,15 +1119,19 @@ These are cheap to design now and expensive to retrofit later.
 
 (Most details consolidated in §6; this section captures the implementation specifics and ADR-001 rationale.)
 
-### 11.1 Why Functions (ADR-001 narrowed)
+### 11.1 Why Functions (placement — ADR-052)
 
-The original ADR-001 said "no Azure Functions" — that constraint was kept to prevent fragmenting the BFF runtime. The narrowed ADR-001 (commit `84cec9f9`, D-38) permits Functions for **narrow out-of-band integration**:
+Where this work runs is decided under [ADR-052](../adr/ADR-052-workload-placement.md). The sync/extraction pipeline is event intake that should not depend on the BFF's availability and scales independently of API load (ADR-052 §3 signals F1 and F2; §9 worked example), so it runs in Azure Functions.
+
+<!-- adr052-drift:allow reason="records the 2026-05 ADR-001 narrowing (D-38) that first permitted these Functions; superseded by ADR-052 on 2026-09-12" -->
+**History (2026-05).** The original ADR-001 said "no Azure Functions" — that constraint was kept to prevent fragmenting the BFF runtime. The narrowed ADR-001 (commit `84cec9f9`, D-38) permits Functions for **narrow out-of-band integration**:
 
 > ADR-001 narrowed: BFF endpoints MUST be Minimal API (no Functions hosting BFF endpoints); Azure Functions permitted for narrow out-of-band integration; Durable Functions still rejected.
 
 The Engine's sync/extraction Functions fit this exactly — they are out-of-band integration with Dataverse (event-driven, can't be hosted in a BFF that doesn't accept Dataverse webhooks directly).
+<!-- /adr052-drift:allow -->
 
-**Durable Functions remain rejected** (D-20). Multi-step orchestration uses Service Bus + state machine, not Durable.
+**Orchestration.** D-20 chose Service Bus + a state machine for multi-step orchestration; [ADR-052 §7](../adr/ADR-052-workload-placement.md) now also permits Durable Task in its own host.
 
 ### 11.2 Flex Consumption (D-17)
 
@@ -1201,19 +1235,28 @@ In Bicep, the Function's UAMI gets role assignments to each target resource (Ser
 
 The artifact envelope's `value.displayHint` signals which category an artifact is in.
 
-### 13.2 Per-tenant isolation (physical)
+### 13.2 Per-customer isolation (physical)
 
-**Decision (D-31)**: Physical per-tenant isolation. Legal data privilege boundaries are physical, not just logical.
+**Decision (D-31)**: Physical per-**customer** isolation. Legal data privilege boundaries are physical, not just logical.
 
-| Resource | Per-tenant deployment |
+> 🟡 **AMENDED 2026-09-28 (platform decision D-12 §3 / §3a).** This section previously said "per-tenant" and
+> offered *"per-tenant indexes in a shared service (acceptable with strict `tenantId` preFilter)"* as an
+> alternative. That alternative is **withdrawn**. Under Model 1 every customer presents **Spaarke's** tenant
+> GUID, so a `tenantId` preFilter separates Entra tenants, **not customers** — it would have sanctioned
+> putting several customers' indexed document text and embeddings in one AI Search service behind a filter
+> that cannot tell them apart. The unit of isolation is the **customer**, and it is a resource boundary.
+
+| Resource | Per-**customer** deployment |
 |---|---|
-| AI Search service | Per-tenant service (preferred for legal clients) OR per-tenant indexes in a shared service (acceptable with strict `tenantId` preFilter) |
-| Cosmos account | Per-tenant account (clean partition + cost attribution) |
-| Function App | Per-tenant app with per-tenant UAMI |
-| Service Bus topic | Per-tenant topic |
-| App Insights | Shared with workspace-based separation; correlation IDs include `tenantId` |
+| AI Search service | **Dedicated service per customer.** Not "or per-customer indexes in a shared service" — that option is withdrawn (see the amendment note above). This index holds document text and embeddings, the highest-value segregation case. |
+| Cosmos account | Dedicated account per customer (clean separation + cost attribution). ⚠️ Do **not** rely on a `/tenantId` partition for customer separation — the partition value is identical for every Model 1 customer. |
+| Function App | Dedicated app per customer with its own UAMI |
+| Service Bus topic | Dedicated namespace/topic per customer |
+| App Insights / Log Analytics | **Dedicated workspace per customer** (promoted from "shared" 2026-09-28 — telemetry legitimately carries user and record identifiers, and per-workspace billing makes per-customer cost attributable). Correlation IDs still include `tenantId`. |
 
-Cross-tenant data leakage is structurally impossible because there is no path between the resources.
+Cross-**customer** data leakage is prevented because each customer's resources sit in **their own Azure
+subscription and resource group**, with no path between them. Cross-**tenant** filters (`tenantId eq …`)
+remain in place as belt-and-braces, but they are not what delivers this guarantee.
 
 ### 13.3 In-tenant access trimming
 
@@ -1436,7 +1479,7 @@ This section consolidates the Engine's resource footprint per environment. Autho
 |---|---|---|---|
 | **Cosmos DB account (NoSQL/SQL API)** | `Microsoft.DocumentDB/databaseAccounts` | Serverless or autoscale 400–4000 RU/s (start serverless for Phase 1; promote to autoscale at ~1M vertices) | `cosmos-graph.bicep` |
 | **Cosmos DB database** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases` | — | `cosmos-graph.bicep` |
-| **Cosmos DB container** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers` | Partition key: `/tenantId`; indexing policy excludes `embedding` field from default index path | `cosmos-graph.bicep` |
+| **Cosmos DB container** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers` | Partition key: `/tenantId` (⚠️ **not** a customer boundary, and a hot-partition shape in a dedicated-per-customer account — see §8.2); indexing policy excludes `embedding` field from default index path | `cosmos-graph.bicep` |
 | **Function App (Flex Consumption)** | `Microsoft.Web/sites` (kind: functionapp,linux) | Flex Consumption plan; per-tenant scale; .NET 10 isolated | `functions.bicep` |
 | **Function App Hosting Plan** | `Microsoft.Web/serverfarms` | Flex Consumption SKU | `functions.bicep` |
 | **AI Search indexes (×4)** | `Microsoft.Search/searchServices/indexes` (deployed via deployment script — Management API, not Bicep-native for index schema) | `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions` — JSON schemas in `infra/insights/schemas/` | `search-indexes.bicep` + deployment script |
@@ -1550,7 +1593,7 @@ These curated knowledge documents informed the Engine's design and are reference
 
 | ADR | Relevance |
 |---|---|
-| [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | BFF runtime + narrowed Functions permission (commit `84cec9f9`) |
+| [ADR-001](../adr/ADR-001-minimal-api-and-workers.md) | BFF runtime (Minimal API endpoints); Functions placement is now [ADR-052](../adr/ADR-052-workload-placement.md) |
 | [ADR-008](../adr/ADR-008-endpoint-filter-authorization.md) | Endpoint filter authorization on `POST /api/insights/ask` |
 | [ADR-009](../adr/ADR-009-redis-first-caching.md) | Redis-first caching applied to two-tier memory and per-question TTL |
 | [ADR-010](../adr/ADR-010-di-minimalism.md) | DI minimalism; `InsightsModule.cs` follows the registration-audit pattern |
@@ -1613,7 +1656,7 @@ infra/insights/
 
 ```
 1. Validate Bicep parameters (tenant ID, region availability)
-2. Provision resources (AI Search service if not shared, Cosmos, Functions, SBus)
+2. Provision resources (AI Search service — **dedicated per customer**, see §13.2 — Cosmos, Functions, SBus)
 3. Deploy AI Search indexes from schema JSONs (deployment script — Management API)
 4. Set up Cosmos containers + indexing policies
 5. Configure Function App settings + secrets via Key Vault refs
@@ -1663,7 +1706,7 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 | Graph | Cosmos NoSQL with adjacency-list documents — D-09 | Traversals are 2–3 hops with filters; vector co-location is a real benefit; MS strategic direction. | — |
 | Graph abstraction | `IInsightGraph` exposes named traversals — D-10 | Preserves swap path. | — |
 | Live Facts | Direct Dataverse queries; expensive aggregates materialized in `insight-matters` — D-11 | Cheap, fresh; fast retrieval for expensive aggregates. | — |
-| `tenantId` first-class on every new index | D-12 | Existing `spaarke-records-index` omits this (acknowledged gap); MUST NOT repeat. | — |
+| `tenantId` first-class on every new index | D-IE-12 (⚠️ renamed from "D-12" 2026-09-28 — see §0b; NOT the platform deployment-model decision) | Existing `spaarke-records-index` omits this (acknowledged gap); MUST NOT repeat. Belt-and-braces only — `tenantId` separates Entra tenants, not customers. | — |
 
 ### 19.4 Synthesis
 
@@ -1676,6 +1719,7 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 ### 19.5 Sync architecture
 
+<!-- adr052-drift:allow reason="decision log D-17..D-21 as recorded 2026-05 under the narrowed ADR-001; current placement is ADR-052, see the note below the table" -->
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
 | Compute | Azure Functions on Flex Consumption — D-17 | MS current default; Bicep-deployable per tenant with UAMI; permitted by narrowed ADR-001. | ADR-001 |
@@ -1683,6 +1727,9 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 | No plugins / no Power Automate | D-19 | Plugins have same SAS limitation; Power Automate adds complexity without solving auth. Webhook registration via plugin registration tool is acceptable. | — |
 | No Durable Functions | D-20 | ADR-001. Orchestration via Service Bus + state machine. | ADR-001 |
 | Closure-extraction | JPS playbook ending in `DeliverToIndexNodeExecutor`; Function triggers via BFF API endpoint — D-21 | Single playbook execution path; no duplicate orchestration in Function. | — |
+<!-- /adr052-drift:allow -->
+
+> **2026-09-12**: compute placement (D-17) is now governed by [ADR-052](../adr/ADR-052-workload-placement.md), including its §6 identity guardrail (reuse the stamp's managed identity). D-20 chose Service Bus + a state machine; ADR-052 §7 now also permits Durable Task in its own host.
 
 ### 19.6 Auth (CRITICAL)
 
@@ -1712,9 +1759,13 @@ The Engine's decisions are formally tracked in [`projects/ai-spaarke-insights-en
 
 ### 19.8 Repo governance
 
+<!-- adr052-drift:allow reason="decision log D-38 records the 2026-05 ADR-001 narrowing as decided at the time; superseded by ADR-052 on 2026-09-12" -->
 | Decision | Choice | Rationale | ADR |
 |---|---|---|---|
 | ADR-001 narrowed | BFF endpoints MUST be Minimal API; Functions permitted for narrow out-of-band integration; Durable Functions still rejected — D-38 | Original concern (don't fragment BFF runtime) preserved; new scope unblocks Insights Engine sync. | ADR-001 |
+<!-- /adr052-drift:allow -->
+
+> **2026-09-12**: D-38 is superseded by [ADR-052](../adr/ADR-052-workload-placement.md) (workload placement), which keeps the BFF-endpoint rule and permits Durable Task in its own host.
 
 ### 19.9 r2 additions — data, evaluation, surfacing, MCP, refinements
 
@@ -1744,14 +1795,14 @@ These six decisions are responses to the LAVERN analysis (`projects/ai-advanced-
 ### 19.11 Explicit "do not do"
 
 - Do not host the Insights Agent in Foundry (D-13).
-- Do not use Durable Functions (D-20).
+- <!-- adr052-drift:allow reason="Insights Engine project decision D-20: this project's own choice, not a platform rule (ADR-052 §7)" -->Do not use Durable Functions<!-- /adr052-drift:allow --> (D-20 — this project's choice of Service Bus + a state machine; ADR-052 §7 no longer forbids Durable Task in its own host, so revisiting D-20 is a design decision, not an ADR exception).
 - Do not use Dataverse plugin assemblies or Power Automate flows for sync integration (D-19).
 - Do not put SAS keys on Service Bus (D-22, D-24).
 - Do not use `ClientSecretCredential` in new Function code (D-27).
 - Do not call a separate "auth service" for JWT validation (D-28).
 - Do not use `common` or `organizations` as `TenantId` (D-26).
 - Do not use `@spaarke/auth` for server-side inbound validation (D-25).
-- Do not create any new index without `tenantId` as a first-class field (D-12).
+- Do not create any new index without `tenantId` as a first-class field (D-IE-12). ⚠️ This is a defence-in-depth field, **not** the customer boundary — see §0b.
 - Do not require human curation of identity resolution (D-29).
 - Do not return generic AI hedging when Inference evidence is insufficient — return structured `insufficient_evidence` (D-06).
 - Do not put document content into cross-matter aggregates (privilege leakage — §13.4).
@@ -1778,7 +1829,7 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 
 ### 20.1 MUST
 
-- **MUST** carry `tenantId` as a first-class top-level field on every Insight artifact and on every new index schema (D-12).
+- **MUST** carry `tenantId` as a first-class top-level field on every Insight artifact and on every new index schema (D-IE-12). ⚠️ This MUST is defence-in-depth. Customer isolation is delivered by the **dedicated per-customer AI Search service** (§13.2), not by this field — `tenantId` separates Entra tenants and is identical for every Model 1 customer. See §0b.
 - **MUST** carry `producedBy.version` on every Observation; never write an Observation without it (D-05).
 - **MUST** apply `accessibleMatterSet` trimming at every AI Search query (with `filter: tenantId eq '{tenantId}' and search.in(scope_matterId, '{accessibleMatterCsv}', ',')`) AND every graph traversal vertex-touch.
 - **MUST** use `vectorFilterMode=preFilter` on every vector query (D-33).
@@ -1813,7 +1864,7 @@ This section lists the MUST / MUST NOT rules that govern modifications to the En
 - **MUST NOT** use SAS keys anywhere in the production sync pipeline (D-22, D-24). The transitional `clientState` is the only allowed shared secret and is gone post Phase C #044.
 - **MUST NOT** introduce `ClientSecretCredential` in new Function code (D-27).
 - **MUST NOT** use Dataverse plugin assemblies or Power Automate flows for sync integration (D-19) — webhook registration via the plugin registration tool is acceptable; custom plugin code is not.
-- **MUST NOT** use Durable Functions (D-20).
+- <!-- adr052-drift:allow reason="Insights Engine project decision D-20: this project's own choice, not a platform rule (ADR-052 §7)" -->**MUST NOT** use Durable Functions<!-- /adr052-drift:allow --> (D-20 — a project decision; ADR-052 §7 now permits Durable Task in its own host, so revisit D-20 rather than treat it as ADR-mandated).
 - **MUST NOT** host the Insights Agent in Foundry (D-13).
 - **MUST NOT** use `@spaarke/auth` for server-side inbound validation — it's client-side TypeScript only (D-25).
 - **MUST NOT** call a separate "auth service" for JWT validation (D-28).
@@ -2197,7 +2248,8 @@ This requires the production metrics infrastructure to be running and the corpus
 
 ### 23.3 ADRs
 
-- [ADR-001 — Minimal API and Workers](../adr/ADR-001-minimal-api-and-workers.md) (narrowed in commit `84cec9f9` — permits Functions for narrow out-of-band integration)
+- [ADR-001 — Minimal API and Workers](../adr/ADR-001-minimal-api-and-workers.md) (BFF endpoints; its Functions provisions are superseded by ADR-052)
+- [ADR-052 — Workload placement](../adr/ADR-052-workload-placement.md) (where this engine's Functions and any Durable Task orchestration run)
 - [ADR-008 — Endpoint Filter Authorization](../adr/ADR-008-endpoint-filter-authorization.md)
 - [ADR-009 — Redis-First Caching](../adr/ADR-009-redis-first-caching.md)
 - [ADR-010 — DI Minimalism](../adr/ADR-010-di-minimalism.md)
@@ -2222,7 +2274,7 @@ This requires the production metrics infrastructure to be running and the corpus
 - [`Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs) — feature module pattern (Insights module follows)
 - [`Sprk.Bff.Api/Infrastructure/DI/AiModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs) — `IChatClient` + tool framework + registration audit
 - [`Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs`](../../src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs) — existing Dataverse → AI Search sync (template for Track B Functions)
-- [`Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) — existing idempotent indexer pattern (template for InsightArtifact indexing)
+- `Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` (removed by unified-access-control-r2 task 163; in git history) — the idempotent indexer pattern (template for InsightArtifact indexing)
 - `Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs` *(deleted 2026-07, ai-architecture-redesign-r1 task 044 — see terminology note at top)* — the Insights playbook engine is [`Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs) + the `INodeExecutor` registry
 - [`Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs) — terminal node for closure-extraction playbook
 

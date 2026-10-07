@@ -24,7 +24,23 @@
  * `src/solutions/SmartTodo` — and importing across that package boundary
  * would violate ADR-012's "no src/solutions/… reach-in" rule for this
  * shared-lib package).
+ *
+ * Mocks `@spaarke/ui-components` (spaarke-ontology-platform-r1 task 080 / C-10, 2026-10-03): this
+ * package's dist entry (`dist/services/index.js`) unconditionally requires `@spaarke/sdap-client`,
+ * which is not built as a dist package in this worktree. `useKanbanColumns.ts` now imports the real,
+ * local-midnight-safe `parseDueDate` from `@spaarke/ui-components` (the C-10 fix — converging the
+ * Kanban-bucketing date parse on the same implementation `todoScoring.ts` uses) — the mock delegates
+ * to that SOURCE file directly (bypassing the broken dist) so this suite exercises real date-parsing
+ * behavior, not a stub, while staying hermetic to the unrelated SDAP dependency chain. Mirrors the
+ * established pattern in `SmartTodoWidget.test.tsx` / `Header.test.tsx`.
  */
+
+jest.mock('@spaarke/ui-components', () => ({
+  // The REAL shared date primitives (parseDueDate, daysBetweenLocalMidnight and
+  // the task-081 tier function dueUrgencyForDays) from source — the whole
+  // module, so a newly used export cannot silently arrive as undefined.
+  ...jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal'),
+}));
 
 import { tokens } from '@fluentui/react-components';
 import { bucketTodoItems } from '../src/hooks/useKanbanColumns';

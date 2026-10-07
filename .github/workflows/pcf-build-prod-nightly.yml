@@ -1,0 +1,513 @@
+# ============================================================================
+# PCF Production Build (Nightly, Advisory)
+# ============================================================================
+# spaarke-ontology-platform-r1 · task 093 · owner decision 2026-10-04
+#
+# WHY THIS EXISTS
+# ----------------
+# Task 092 (PR #1123) found that no GitHub Actions workflow ran
+# `npm run build:prod` for any PCF control. Six Communication PCFs could not
+# be built from master from 2026-08-14 until #1123 fixed the pdfjs/babel
+# break that caused it, and nothing ever turned red — the gap was invisible
+# for seven weeks. This workflow closes that gap the same way
+# `client-tests.yml` closed the "no jest ever runs" gap: a nightly, advisory
+# baseline that discovers the surface, runs it, and records the result,
+# without gating anything.
+#
+# SCOPE — ADVISORY ONLY, mirroring client-tests.yml
+# ---------------------------------------------------
+# This workflow makes "can every PCF still build from master" VISIBLE and
+# nothing more. Every step that can fail is continue-on-error, the workflow
+# appears in no blocking filter (ci-tier1-blocking.yml / ci-tier2-advisory.yml
+# do not reference it), and it has NO pull_request or push trigger — only
+# `schedule` and `workflow_dispatch`. Do not add it to either tier file and
+# do not make it a required check.
+#
+# WHY A SEPARATE FILE, NOT A NEW JOB IN client-tests.yml
+# -------------------------------------------------------
+# client-tests.yml's own header scopes it explicitly to "Client Tests
+# (Jest)" — "runs jest at all" is the gap it closes, and a production
+# webpack build is a different question (can it build) than a different tool
+# (jest, not webpack) answers (do the tests pass). The two also discover
+# different package sets: client-tests.yml matches EVERY client package with
+# a real `test` script (40, repo-wide); this workflow matches only
+# `src/client/pcf/*` packages with a `build:prod` script (19 at the time of
+# writing). Folding this in would require either a second discover job
+# inside client-tests.yml (no sharing benefit — the matrix, install step, and
+# summary table all still need to be separate) or diluting that file's
+# stated single-tool scope. A separate file keeps each workflow's header
+# honest about what it covers.
+#
+# WHY 08:00 UTC (not 06:00 or 07:00)
+# -------------------------------------
+# nightly-health.yml runs at 06:00 UTC and client-tests.yml at 07:00 UTC
+# (one hour after nightly-health, by client-tests.yml's own design, so the
+# two do not contend for runners). This workflow runs at 08:00 UTC — one
+# hour after client-tests.yml — for the same reason: 19 PCF legs each doing
+# their own `npm install` is exactly the kind of runner contention
+# client-tests.yml's header already flags, and stacking it on top of either
+# existing nightly job would reintroduce that contention instead of avoiding
+# it.
+#
+# THE SHARED-LIBRARY PREBUILD CHAIN (why "Prepare shared libraries" exists)
+# ---------------------------------------------------------------------------
+# Measured empirically while building this workflow (fresh worktree, nothing
+# pre-installed — i.e. exactly what a GitHub Actions runner starts from):
+# most PCFs depend on `@spaarke/ui-components` via a `file:../../shared/...`
+# reference, and their `prebuild` / `prebuild:prod` script runs
+# `Spaarke.UI.Components/scripts/ensure-dist-fresh.js`, which rebuilds
+# `@spaarke/sdap-client` -> `@spaarke/auth` -> `@spaarke/ui-components` (in
+# that order) via `npm run build` (tsc) in each — but ONLY if that package
+# already has its OWN `node_modules`. `dist/` is gitignored for all three, so
+# on a clean checkout every one of them is missing, and the script's
+# documented fallback when `node_modules` is also absent is to warn and
+# SKIP the rebuild, not fail — which would silently turn a perfectly
+# buildable PCF into a false "fail" for an environment reason, not a code
+# reason. (`@spaarke/communication-components` and `@spaarke/visuals` need no
+# `dist/` build — both ship `src/index.ts` directly as `main` — but they DO
+# need their own `node_modules`: their source is compiled into the PCF
+# bundle, and its bare imports resolve from the package's real path under
+# src/client/shared/, never from the PCF's node_modules. The discover job
+# lists every such file:-linked package in `matrix.extra` and the prep step
+# npm-installs it. Corrected by task 092: `CommunicationActions` only ever
+# appeared to prove otherwise because the one shared-source file it reaches
+# has a type-only `@spaarke/ui-components` import, which ts-loader resolves
+# through the PCF's tsconfig `paths` and webpack never sees.) So: for any
+# discovered PCF whose `prebuild`/`prebuild:prod` script references
+# `ensure-dist-fresh.js`, this workflow installs the three shared packages'
+# own dependencies FIRST, in dependency order, before installing or building
+# the PCF itself. Getting this wrong would not produce a clean error — it
+# would make the six known-broken Communication PCFs indistinguishable from
+# every other PCF, all failing together for the wrong reason.
+#
+# WHY DISCOVERY, NOT A HAND-WRITTEN LIST
+# -----------------------------------------
+# A fixed list of 19 PCF names would drift the moment someone adds or
+# removes a control — silently narrowing coverage exactly the way "no
+# workflow builds any PCF" narrowed it to zero. Job 1 scans
+# `src/client/pcf/<name>/package.json` (git-tracked files, exactly one folder level deep, matching scripts/Build-AllClientComponents.ps1 Step 4) for a real
+# `build:prod` script instead.
+# ============================================================================
+
+name: PCF Production Build (Nightly)
+
+on:
+  # Nightly baseline. 08:00 UTC — deliberately one hour after
+  # client-tests.yml (07:00 UTC), which itself sits one hour after
+  # nightly-health.yml (06:00 UTC), so none of the three contend for
+  # runners.
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+    inputs:
+      pcf_filter:
+        description: 'Optional substring filter — build only PCFs whose path contains this'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed per ref, same as client-tests.yml. Never cancel a nightly baseline
+  # mid-flight on account of a manual dispatch: a partial baseline is worse
+  # than a late one.
+  group: pcf-build-prod-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1 — discover
+  # Build the matrix by SCANNING for PCFs that declare a real build:prod
+  # script, and tag each one with whether its prebuild hook needs the shared
+  # sdap-client/auth/ui-components chain primed first (see header).
+  # --------------------------------------------------------------------------
+  discover:
+    name: Discover PCF controls
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      count: ${{ steps.find.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find PCFs with a build:prod script
+        id: find
+        shell: bash
+        run: |
+          set -euo pipefail
+          filter='${{ inputs.pcf_filter }}'
+          rows=()
+          bad=0
+          err_file="$(mktemp)"
+
+          while IFS= read -r pkgjson; do
+            dir="$(dirname "$pkgjson")"
+
+            # Fixed 2026-10 (ci/pcf-nightly-detect-failure): shared-lib need
+            # used to be decided from the PCF's OWN prebuild/prebuild:prod
+            # script text ("does it call ensure-dist-fresh.js"). That missed
+            # UpdateRelatedButton, which imports `@spaarke/ui-components`
+            # directly in source but declares NO prebuild script at all —
+            # it got no prep and failed with TS2307 Cannot find module. Decide
+            # from DEPENDENCIES instead: the PCF's own package.json deps, OR a
+            # source import of one of the three shared packages. The walk
+            # below is safe and cheap because this job runs on a fresh
+            # checkout, before any `npm install` — there is no node_modules
+            # under src/client/pcf/*/ yet.
+            if ! row="$(node -e "
+              const fs = require('fs');
+              const path = require('path');
+              try {
+                const pkgPath = './$pkgjson';
+                const dir = path.dirname(pkgPath);
+                const j = require(pkgPath);
+                const s = j.scripts || {};
+                const buildProd = s['build:prod'] || '';
+                if (!buildProd) { process.exit(0); }
+
+                const sharedPkgs = ['@spaarke/ui-components', '@spaarke/auth', '@spaarke/sdap-client'];
+                const deps = Object.assign({}, j.dependencies || {}, j.devDependencies || {});
+                let needsShared = sharedPkgs.some((p) => Object.prototype.hasOwnProperty.call(deps, p));
+
+                // Fixed 2026-10 (task 092): every OTHER file:-linked shared
+                // package (e.g. @spaarke/communication-components,
+                // @spaarke/visuals) also needs its OWN node_modules. npm links
+                // a file: dependency as a symlink, webpack + ts-loader follow
+                // it to the real path under src/client/shared/<Pkg>/, and
+                // resolve that package's bare imports (@fluentui/*,
+                // @spaarke/auth, ...) by walking up from THERE — the PCF's own
+                // node_modules is never on that path, so declaring the same
+                // packages in the PCF's package.json cannot help. Such
+                // packages are listed in extra (no backticks or dollar signs
+                // in this script: it is inside a bash double-quoted string)
+                // and npm-installed by the
+                // prep step, exactly as scripts/Build-AllClientComponents.ps1
+                // Step 1 installs them on a clean machine.
+                const extra = [];
+                for (const [name, spec] of Object.entries(deps)) {
+                  if (sharedPkgs.includes(name) || typeof spec !== 'string' || !spec.startsWith('file:')) continue;
+                  const target = path.relative(process.cwd(), path.resolve(dir, spec.slice(5))).split(path.sep).join('/');
+                  if (!target.startsWith('src/client/shared/') || !fs.existsSync(path.join(target, 'package.json'))) continue;
+                  extra.push(target);
+                  // A linked package that itself depends on one of the three
+                  // dist-built packages needs their dist/ primed too.
+                  const t = require('./' + target + '/package.json');
+                  const tdeps = Object.assign({}, t.dependencies || {}, t.devDependencies || {});
+                  if (sharedPkgs.some((p) => Object.prototype.hasOwnProperty.call(tdeps, p))) needsShared = true;
+                }
+
+                if (!needsShared) {
+                  const importRe = /from\s+['\"](@spaarke\/(?:ui-components|auth|sdap-client))/;
+                  const stack = [dir];
+                  while (stack.length && !needsShared) {
+                    const cur = stack.pop();
+                    for (const entry of fs.readdirSync(cur, { withFileTypes: true })) {
+                      if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
+                      const full = path.join(cur, entry.name);
+                      if (entry.isDirectory()) { stack.push(full); continue; }
+                      if (!/\.(ts|tsx)$/.test(entry.name)) continue;
+                      const content = fs.readFileSync(full, 'utf8');
+                      if (importRe.test(content)) { needsShared = true; break; }
+                    }
+                  }
+                }
+
+                process.stdout.write(JSON.stringify({ pcf: '$dir', shared: needsShared, extra: extra.join(' ') }));
+              } catch (e) { console.error(e.message); process.exit(3); }
+            " 2>"$err_file")"; then
+              # A malformed package.json must never be a silent drop: report it and
+              # fail this job after the loop (no dollar signs/backticks above: the
+              # node script is inside a bash double-quoted string).
+              echo "::error file=$pkgjson::Could not evaluate $pkgjson: $(head -c 300 "$err_file")"
+              bad=1
+              continue
+            fi
+
+            if [ -z "$row" ]; then continue; fi
+            if [ -n "$filter" ] && [[ "$dir" != *"$filter"* ]]; then continue; fi
+            rows+=("$row")
+          done < <(git ls-files 'src/client/pcf/*/package.json' | { grep -E '^src/client/pcf/[^/]+/package\.json$' || true; })
+
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::At least one src/client/pcf package.json could not be evaluated (see the errors above). Failing the discover job rather than silently narrowing the PCF set."
+            exit 1
+          fi
+
+          if [ ${#rows[@]} -eq 0 ]; then
+            echo "::error::No PCF with a build:prod script was found under src/client/pcf. That is almost certainly a discovery bug, not an empty repo — failing loudly rather than reporting a vacuous green."
+            exit 1
+          fi
+
+          matrix=$(printf '%s\n' "${rows[@]}" | jq -cs '{include: .}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=${#rows[@]}" >> "$GITHUB_OUTPUT"
+
+          echo "Discovered ${#rows[@]} PCF(s):"
+          printf '  %s\n' "${rows[@]}"
+
+  # --------------------------------------------------------------------------
+  # Job 2 — build
+  # One PCF per matrix leg. continue-on-error so a red PCF never fails the
+  # run; the result is RECORDED, not enforced. Bound to max-parallel: 8, the
+  # same ceiling client-tests.yml uses, so this never monopolizes the runner
+  # queue even though it runs at a different hour than that workflow.
+  # --------------------------------------------------------------------------
+  build:
+    name: ${{ matrix.pcf }}
+    needs: discover
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Runs for any PCF that declares a dependency on, or has a source
+      # import of, one of the three shared packages (see the discover job —
+      # `matrix.shared` is computed from dependencies, not from this PCF's
+      # own prebuild script). See the header comment for the shared-library
+      # chain this primes and why skipping it for a PCF that needs it would
+      # produce a false "fail", not a clean error.
+      - name: Prepare shared libraries (sdap-client, auth, ui-components + linked source libs)
+        id: shared
+        if: ${{ matrix.shared == true || matrix.extra != '' }}
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ matrix.shared }}" != "true" ]; then
+            echo "No sdap-client/auth/ui-components prep needed for this PCF."
+          else
+            for d in src/client/shared/Spaarke.SdapClient src/client/shared/Spaarke.Auth src/client/shared/Spaarke.UI.Components; do
+              echo "::group::npm install ($d)"
+              (cd "$d" && npm install --legacy-peer-deps --no-audit --no-fund)
+              echo "::endgroup::"
+            done
+            # Build dist/ directly instead of trusting the target PCF's own
+            # prebuild/prebuild:prod script to call this script as an npm
+            # lifecycle hook. Fixed 2026-10: UpdateRelatedButton depends on
+            # `@spaarke/ui-components` in source but declares NO prebuild
+            # script at all, so that hook would never fire for it even with
+            # node_modules now installed above — this call is unconditional and
+            # does not depend on the target PCF's own wiring. Dependency-free,
+            # safe to call from the repo root (resolves its own paths from
+            # __dirname), and a fast no-op for every PCF whose prebuild script
+            # already keeps dist/ fresh.
+            echo "::group::ensure-dist-fresh (sdap-client -> auth -> ui-components)"
+            node src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js
+            echo "::endgroup::"
+          fi
+          # Other file:-linked shared packages this PCF compiles from source
+          # (see the discover job: `matrix.extra`). Their bare imports
+          # resolve from THEIR OWN folder, so they need their own
+          # node_modules — the same `npm install` that
+          # scripts/Build-AllClientComponents.ps1 Step 1 runs in each shared
+          # library. Without it the PCF fails with "Module not found" /
+          # TS2307 for packages it may well declare itself (task 092: this was
+          # CommunicationAttachments, CommunicationConnections and VisualHost).
+          for d in ${{ matrix.extra }}; do
+            echo "::group::npm install ($d)"
+            (cd "$d" && npm install --legacy-peer-deps --no-audit --no-fund)
+            echo "::endgroup::"
+          done
+
+      - name: Install PCF dependencies
+        id: install
+        continue-on-error: true
+        working-directory: ${{ matrix.pcf }}
+        # NOT `npm ci`. Per root CLAUDE.md §12, stale package-lock.json files
+        # make `npm ci` fail outright on most of these packages.
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      # `pcf-scripts build --buildMode production` EXITS 0 EVEN WHEN WEBPACK
+      # FAILS (root-caused 2026-10 to pcf-scripts/taskRunner.js: when a task
+      # rejects AND diagnostics already has errors logged, the catch block
+      # logs "[<cmd>] Failed:" + the diagnostic and `return`s WITHOUT
+      # rethrowing, so the bin wrapper's resultCode stays 200 and
+      # `process.exitCode` stays 0). Tee the output to a log so "Record
+      # result" can detect failure from TEXT, not just the exit code.
+      - name: Build (production)
+        id: build
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ matrix.pcf }}
+        run: |
+          set -o pipefail
+          npm run build:prod 2>&1 | tee "$RUNNER_TEMP/build-${{ strategy.job-index }}.log"
+
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/results"
+          log="$RUNNER_TEMP/build-${{ strategy.job-index }}.log"
+
+          # See the "Build (production)" step comment: exit code alone is not
+          # trustworthy for this tool. Detect failure from the tee'd OUTPUT
+          # too — any of these markers means the build actually failed even
+          # if the step's exit code says otherwise. "pass" requires the
+          # explicit success marker; anything that is neither a recognized
+          # pass nor a recognized failure is "unknown" and is treated (and
+          # shown) as a failure, never defaulted to green.
+          build_failed=false
+          build_passed=false
+          if [ -f "$log" ]; then
+            if grep -qE '\[build\] Failed' "$log" \
+              || grep -qE 'compiled with [0-9]+ error' "$log" \
+              || grep -q '\[pcf-1033\]' "$log"; then
+              build_failed=true
+            fi
+            if grep -q '\[build\] Succeeded' "$log"; then
+              build_passed=true
+            fi
+          fi
+
+          # Distinguish shared-prep failure from install failure from build
+          # failure. Collapsing them would send the next person debugging a
+          # pdfjs/webpack error to check npm install logs instead, or vice
+          # versa.
+          if [ "${{ steps.shared.outcome }}" = "failure" ]; then
+            status="shared-libs-failed"
+          elif [ "${{ steps.install.outcome }}" != "success" ]; then
+            status="install-failed"
+          elif [ "${{ steps.build.outcome }}" != "success" ] || [ "$build_failed" = "true" ]; then
+            status="fail"
+          elif [ "$build_passed" = "true" ]; then
+            status="pass"
+          else
+            status="unknown"
+          fi
+
+          slug="$(printf '%s' '${{ matrix.pcf }}' | tr '/' '_')"
+          printf '%s\t%s\n' '${{ matrix.pcf }}' "$status" > "$RUNNER_TEMP/results/$slug.tsv"
+          echo "$status  ${{ matrix.pcf }}"
+
+          # Short failure excerpt so the summary table doesn't require
+          # downloading artifacts to see WHY a PCF failed.
+          if { [ "$status" = "fail" ] || [ "$status" = "unknown" ]; } && [ -f "$log" ]; then
+            grep -E 'ERROR in |error TS[0-9]+|Module not found|\[pcf-1033\]|\[build\] Failed' "$log" \
+              | head -5 > "$RUNNER_TEMP/results/$slug.excerpt.txt" || true
+          fi
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcf-build-prod-result-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/results/
+          retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # Job 3 — summarize
+  # The per-PCF table is the artifact of this workflow. It must be readable
+  # without downloading anything, so it goes in the job summary.
+  # --------------------------------------------------------------------------
+  summarize:
+    name: Baseline summary
+    needs: [discover, build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pcf-build-prod-result-*
+          merge-multiple: true
+          path: results
+
+      - name: Build baseline table
+        shell: bash
+        run: |
+          set -euo pipefail
+          discovered='${{ needs.discover.outputs.count }}'
+          cat results/*.tsv 2>/dev/null | sort -u > all.tsv || true
+          reported=$(wc -l < all.tsv | tr -d ' ')
+
+          pass=$(awk -F'\t' '$2=="pass"'               all.tsv | wc -l | tr -d ' ')
+          fail=$(awk -F'\t' '$2=="fail"'                all.tsv | wc -l | tr -d ' ')
+          unk=$(awk -F'\t'  '$2=="unknown"'             all.tsv | wc -l | tr -d ' ')
+          inst=$(awk -F'\t' '$2=="install-failed"'      all.tsv | wc -l | tr -d ' ')
+          shrd=$(awk -F'\t' '$2=="shared-libs-failed"'  all.tsv | wc -l | tr -d ' ')
+
+          {
+            echo "# PCF Production Build Baseline (Nightly)"
+            echo
+            echo "Advisory only — this workflow gates nothing. See the header of"
+            echo '`.github/workflows/pcf-build-prod-nightly.yml` for the scope split.'
+            echo
+            echo "| Result | PCFs |"
+            echo "|---|---:|"
+            echo "| ✅ pass | $pass |"
+            echo "| ❌ fail | $fail |"
+            echo "| ❌ unknown (no recognized pass/fail marker — treated as failure) | $unk |"
+            echo "| ⚠️ install-failed | $inst |"
+            echo "| ⚠️ shared-libs-failed | $shrd |"
+            echo "| **discovered** | **$discovered** |"
+            echo
+
+            # Never let a partial baseline read as a complete one.
+            if [ "$reported" != "$discovered" ]; then
+              echo "> ⚠️ **Incomplete baseline** — $discovered PCF(s) discovered but only"
+              echo "> $reported reported a result. The difference is legs that did not finish"
+              echo "> (cancelled or infrastructure failure). Treat the table below as partial."
+              echo
+            fi
+
+            echo "## Per PCF"
+            echo
+            echo "| PCF | Result |"
+            echo "|---|---|"
+            awk -F'\t' '{
+              icon = ($2=="pass") ? "✅" : ($2=="fail" || $2=="unknown") ? "❌" : "⚠️";
+              printf "| `%s` | %s %s |\n", $1, icon, $2
+            }' all.tsv
+
+            echo
+            echo "## Failure details"
+            echo
+
+            has_excerpt=false
+            while IFS=$'\t' read -r pcf status; do
+              case "$status" in
+                fail|unknown) ;;
+                *) continue ;;
+              esac
+              slug="$(printf '%s' "$pcf" | tr '/' '_')"
+              excerpt="results/$slug.excerpt.txt"
+              if [ -s "$excerpt" ]; then
+                has_excerpt=true
+                echo "<details><summary><code>$pcf</code> ($status)</summary>"
+                echo
+                echo '```'
+                cat "$excerpt"
+                echo '```'
+                echo
+                echo "</details>"
+                echo
+              fi
+            done < all.tsv
+            if [ "$has_excerpt" = "false" ]; then
+              echo "_No failure excerpts captured for this run._"
+              echo
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Baseline: $pass pass / $fail fail / $unk unknown / $inst install-failed / $shrd shared-libs-failed of $discovered discovered"
+
+      - name: Upload combined baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: pcf-build-prod-baseline
+          path: all.tsv
+          retention-days: 90

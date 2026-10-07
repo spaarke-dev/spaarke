@@ -108,7 +108,10 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
         var sourceDocumentId = Guid.NewGuid();
         var matterId = Guid.NewGuid();
         var newDocumentId = Guid.NewGuid();
-        const string containerId = "b!container-bu-pdf-seam";
+        // Issue #858: the container is SERVER-derived from the acting user's business unit (fixture-
+        // arranged); aliasing the arranged value keeps the specific ResolveDriveIdAsync matcher below
+        // meaningful — it only matches when the real server-side derivation produced this container.
+        const string containerId = TestActingUserBusinessUnit.ContainerId;
         const string mintedDocxItemId = "spe-item-pdf-docx-seam-001";
         const string mintedDriveId = "drive-pdf-docx-seam-001";
 
@@ -179,10 +182,10 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(containerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), mintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            .Setup(s => s.UploadSmallAsync(
+                mintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);

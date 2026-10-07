@@ -1,56 +1,196 @@
-import { DriveItem } from '../types';
-import { TokenProvider } from '../auth/TokenProvider';
+import { DriveItem, AuthenticatedFetchFn } from '../types';
+import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 
 // `UploadSession` and the 320 KB CHUNK_SIZE constant were dropped from this file on 2026-08-27 with
 // the chunked path (task 076). The `UploadSession` TYPE is deliberately left in ../types and in the
 // package barrel: it describes Graph's own upload-session shape, and a future record-keyed
 // upload-session route will need it. Deleting a type that has to come straight back is churn.
+/**
+ * Name-collision behaviour for an upload, mirroring Graph's `@microsoft.graph.conflictBehavior`.
+ *
+ * The one value a UI offers after a collision is `rename` — keep both; the server stores the new file under a
+ * non-colliding name. `fail` is the SERVER's default, so a caller normally omits the option entirely and handles
+ * {@link UploadNameConflictError}.
+ *
+ * ⚠️ `replace` is REFUSED by the BFF since unified-access-control-r2 task 171 (409 `upload_replace_not_supported`,
+ * surfaced here as {@link UploadReplaceNotSupportedError}). The uploads are written by the BFF on the strength of the
+ * caller's right to file content under the RECORD, which is not a right to overwrite whichever file already holds the
+ * name in a shared container. Updating an existing document is a version save of THAT document (Word, the Office
+ * add-in, Compose). The value stays in the type only so an older caller still compiles and gets the clear error.
+ */
+export type ConflictBehaviorOption = 'fail' | 'rename' | 'replace';
+
+/**
+ * Thrown when an upload would collide with an existing file of the same name.
+ *
+ * ⚠️ Reaching this means **nothing was overwritten** — the BFF uploads with
+ * `conflictBehavior=fail` unless told otherwise, so the existing file is intact and the user can
+ * safely be asked what to do. Retry the SAME upload with `conflictBehavior: 'rename' | 'replace'`.
+ *
+ * Before 2026-09-02 there was no such type: a collision silently replaced the stored bytes and the
+ * user instead saw a Dataverse 412 titled "Duplicate Record" from the follow-on document insert,
+ * by which point the original content was already gone. Catch this by `instanceof`, never by
+ * matching a message string.
+ */
+export class UploadNameConflictError extends Error {
+  public readonly fileName: string;
+
+  constructor(fileName: string) {
+    super(`A file named "${fileName}" already exists in this location.`);
+    this.name = 'UploadNameConflictError';
+    this.fileName = fileName;
+    // Required for `instanceof` to survive the ES5 downlevel target some consumers build with.
+    Object.setPrototypeOf(this, UploadNameConflictError.prototype);
+  }
+}
+
+/**
+ * Thrown when a `conflictBehavior: 'replace'` upload is refused (BFF 409 `upload_replace_not_supported`, task 171).
+ * Nothing was uploaded or changed. Offer "keep both" (`rename`) instead, or tell the user to open the existing
+ * document and save a new version there.
+ */
+export class UploadReplaceNotSupportedError extends Error {
+  public readonly fileName: string;
+
+  constructor(fileName: string) {
+    super(
+      `"${fileName}" was not uploaded: an upload never replaces an existing file. Upload it under a new name, or open ` +
+        'the existing document and save your changes there as a new version.'
+    );
+    this.name = 'UploadReplaceNotSupportedError';
+    this.fileName = fileName;
+    Object.setPrototypeOf(this, UploadReplaceNotSupportedError.prototype);
+  }
+}
+
 export class UploadOperation {
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
-    private readonly tokenProvider: TokenProvider
+    private readonly authenticatedFetch?: AuthenticatedFetchFn
   ) {}
 
   /**
-   * Upload small file (< 4MB) in single request.
+   * Upload against the OWNING RECORD. The server resolves the container from that record.
+   *
+   * This is the task-076 contract. The caller names the record it is already authorized against and
+   * the server derives the container from it, so the authorization key and the container are the
+   * same value by construction and cannot disagree. There is deliberately NO container parameter.
+   *
+   * Refusals are the contract, not faults: a secure record with no container of its own fails closed
+   * (`secure_record_container_missing`), an unresolvable record 404s, and a non-secure record whose
+   * business unit has no container returns 409. None of them fall back to a shared container.
    */
-  public async uploadSmall(
-    containerId: string,
+  public async uploadSmallForRecord(
+    entityLogicalName: string,
+    recordId: string,
     file: File,
-    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal }
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
   ): Promise<DriveItem> {
-    const token = await this.tokenProvider.getToken();
+    return this.put(
+      `/api/obo/records/${encodeURIComponent(entityLogicalName)}/${encodeURIComponent(recordId)}/files/${encodeURIComponent(file.name)}`,
+      file,
+      options
+    );
+  }
 
-    // Report initial progress
+  /**
+   * Upload content that has NO OWNING RECORD YET. The server resolves the container from the ACTING
+   * USER's business unit.
+   *
+   * For content that is legitimately PARENTLESS — there is no record for it to belong to yet, as
+   * with an attachment on an unsent email draft. Task 076 classifies such content as correct by
+   * design, not as debt. Per the owner's 2026-08-28 resolution order.
+   *
+   * ⚠️ This comment deliberately does NOT enumerate its callers. It previously claimed "the three
+   * flows", naming DocumentUploadWizard's "skip associate" — which task 076 had already cut over to
+   * the record-keyed route. A low-level client method cannot know its consumers' flow count, and
+   * pinning one here is what made this comment wrong. For the current, verified caller set, see
+   * `projects/unified-access-control-r2/notes/task-093-close-out.md`.
+   *
+   * ⚠️ This is NOT a general-purpose escape hatch, and it is not "upload without authorization". If
+   * the content HAS an owning record, use {@link uploadSmallForRecord} — routing it here would place
+   * it in the caller's business-unit container rather than the record's, which for a secure record is
+   * provably the wrong container and cannot be undone (SPE permissions are additive-only).
+   */
+  public async uploadSmallWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    return this.put(`/api/obo/me/files/${encodeURIComponent(file.name)}`, file, options);
+  }
+
+  /**
+   * Shared transport for both record-keyed and record-less uploads.
+   *
+   * Extracted so the two contracts cannot drift in how they authenticate, report progress, encode
+   * `conflictBehavior`, or translate a 409 — that drift is exactly what produced four divergent
+   * copies of the association switch on the server side.
+   */
+  private async put(
+    routePath: string,
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'uploadFile');
+
     options?.onProgress?.(0);
 
-    const response = await fetch(
-      `${this.baseUrl}/api/obo/containers/${containerId}/files/${encodeURIComponent(file.name)}`,
+    const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
+
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}${routePath}${query}`,
       {
         method: 'PUT',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          'Content-Type': 'application/octet-stream',
-          'Content-Length': file.size.toString(),
-        },
+        headers: { 'Content-Type': 'application/octet-stream' },
         body: file,
         signal: options?.signal ?? AbortSignal.timeout(this.timeout),
+      },
+      'Upload failed',
+      status => {
+        if (status === 409) {
+          // A replace is refused before the server looks at the container (task 171), so its 409 is NOT a name
+          // collision — re-offering the collision prompt would loop.
+          if (options?.conflictBehavior === 'replace') {
+            throw new UploadReplaceNotSupportedError(file.name);
+          }
+          throw new UploadNameConflictError(file.name);
+        }
       }
     );
 
-    if (!response.ok) {
-      const error = await this.parseError(response);
-      throw new Error(`Upload failed: ${error}`);
-    }
-
     const result = await response.json();
-
-    // Report completion
     options?.onProgress?.(100);
-
     return result;
   }
+
+  /**
+   * 🔴 `uploadSmall(containerId, file, options)` was DELETED here 2026-09-03
+   * (unified-access-control-r2 task 076), together with `SdapApiClient.uploadFile` and the BFF route
+   * it called, `PUT /api/obo/containers/{id}/files/{*path}`.
+   *
+   * The caller named the CONTAINER and the server wrote there, with no per-resource authorization
+   * decision behind the destination. Use {@link uploadSmallForRecord} when the content has an owning
+   * record, or {@link uploadSmallWithoutRecord} when it genuinely does not. Both are above, both
+   * share {@link put}, and NEITHER takes a container — deliberately.
+   *
+   * Note the `Content-Length` gotcha this method carried, because {@link put} inherits it: the
+   * header is deliberately NOT set. It is a forbidden header name, so the browser ignores any value
+   * and computes the real one from the body.
+   */
 
   /**
    * DELETED 2026-08-27 (unified-access-control-r2 task 076): `uploadChunked`,
@@ -66,23 +206,29 @@ export class UploadOperation {
    * `uploadChunk` did not even use the BFF chunk route — it PUT directly to Graph's own
    * `session.uploadUrl` — so that route had no client at all.
    *
-   * ⚠️ **Files >= 4 MiB have no working upload path, and did not before this change either.** The
-   * server caps the small route at `PathValidator.SmallUploadMaxBytes` (4 MiB), and this was the
-   * only alternative. {@link uploadFile} previously routed large files here and failed with a
-   * misleading drive-resolution error; it now fails with an explicit, accurate message. Restoring
-   * large-file upload needs a record-keyed upload-session route and is follow-up work.
+   * ⚠️ **Corrected 2026-09-02 — the 4 MiB ceiling described here never existed on the server.**
+   * This block used to claim "the small route is capped at `PathValidator.SmallUploadMaxBytes`
+   * (4 MiB)". That constant is referenced by NOTHING but a comment, and the guard that once enforced
+   * it in `UploadSessionManager.UploadSmallAsUserAsync` was deleted by `spaarkeai-compose-r8` task
+   * 015 (FR-S08) as a stale Graph limit. The simple `PUT .../content` this operation uses has
+   * accepted up to **250 MB** since October 2023, so files between 4 MiB and 250 MB were being
+   * refused by this client alone, for no server-side reason.
+   *
+   * Above 250 MB a caller genuinely does need a resumable session. The BFF exposes one:
+   *
+   *     POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session
+   *
+   * This client is still not wired to it, and that remains blocked on the owner decision recorded in
+   * `projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md` §5 (three
+   * upload paths have no owning record at the moment the bytes move, so `(entityLogicalName,
+   * recordId)` cannot be supplied). That is now a >250 MB concern rather than a >4 MiB one.
    */
-  public static readonly LARGE_FILE_UNSUPPORTED =
-    'Files of 4 MiB or larger cannot be uploaded: the chunked upload path was removed in 2026-08 ' +
-    'because it was non-functional (it depended on GET /api/obo/containers/{id}/drive, a route ' +
-    'that does not exist). A record-keyed upload-session route is required to restore it.';
-
-  private async parseError(response: Response): Promise<string> {
-    try {
-      const error = await response.json();
-      return error.detail || error.title || response.statusText;
-    } catch {
-      return response.statusText;
-    }
+  public static fileTooLarge(actualBytes: number, maxBytes: number): string {
+    const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
+    return (
+      `This file is ${mb(actualBytes)}, which exceeds the ${mb(maxBytes)} maximum for a single ` +
+      `upload. Files larger than ${mb(maxBytes)} need a resumable upload session, which this ` +
+      `client does not yet support. Try splitting the file or compressing it.`
+    );
   }
 }

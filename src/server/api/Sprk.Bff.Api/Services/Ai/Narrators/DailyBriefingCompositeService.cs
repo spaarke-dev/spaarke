@@ -120,7 +120,7 @@ public class DailyBriefingCompositeService
         DailyBriefingCollector.BriefingWindowOptions windows,
         CancellationToken cancellationToken)
     {
-        var (payload, highPriorityItems, collectMs) =
+        var (payload, highPriority, collectMs) =
             await CollectAsync(systemUserId, windows, cancellationToken).ConfigureAwait(false);
 
         // FR-15: the proactive kind=suggestion producer runs as a SIBLING of narration, grounded in the
@@ -129,7 +129,7 @@ public class DailyBriefingCompositeService
         // channel narrative still surfaces suggestions. Non-fatal (the producer swallows its own errors).
         if (_suggestionProducer is not null)
         {
-            await _suggestionProducer.ProduceAsync(systemUserId, highPriorityItems, cancellationToken).ConfigureAwait(false);
+            await _suggestionProducer.ProduceAsync(systemUserId, highPriority.Items, cancellationToken).ConfigureAwait(false);
         }
 
         if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
@@ -138,9 +138,9 @@ public class DailyBriefingCompositeService
             // carries capability OUTPUTS, and an empty briefing produced none). High-priority
             // items STILL surface (operator design decision — structured list, not narrative).
             _logger.LogInformation(
-                "Daily briefing composite: no notable channel items for systemuserid={SystemUserId} — empty response (highPriorityItems={HighPriorityCount})",
-                systemUserId, highPriorityItems.Length);
-            return EmptyResponse(highPriorityItems);
+                "Daily briefing composite: no notable channel items for systemuserid={SystemUserId} — empty response (highPriorityItems={HighPriorityCount}, failedChannels={FailedCount})",
+                systemUserId, highPriority.Items.Length, payload.FailedChannels.Length);
+            return EmptyResponse(highPriority, payload.FailedChannels);
         }
 
         return await ExecuteAsync(
@@ -149,7 +149,7 @@ public class DailyBriefingCompositeService
             systemUserId: systemUserId,
             tenantId: tenantId,
             recipientEmail: null,
-            highPriorityItems: highPriorityItems,
+            highPriority: highPriority,
             collectDurationMs: collectMs,
             cancellationToken).ConfigureAwait(false);
     }
@@ -172,7 +172,7 @@ public class DailyBriefingCompositeService
             systemUserId: null,
             tenantId: tenantId,
             recipientEmail: null,
-            highPriorityItems: null,
+            highPriority: null,
             collectDurationMs: null,
             cancellationToken);
     }
@@ -192,7 +192,7 @@ public class DailyBriefingCompositeService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(recipientEmail);
 
-        var (payload, highPriorityItems, collectMs) =
+        var (payload, highPriority, collectMs) =
             await CollectAsync(systemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -201,7 +201,7 @@ public class DailyBriefingCompositeService
             _logger.LogInformation(
                 "Daily briefing email: nothing to brief for systemuserid={SystemUserId} — no email sent",
                 systemUserId);
-            return EmptyResponse(highPriorityItems);
+            return EmptyResponse(highPriority, payload.FailedChannels);
         }
 
         return await ExecuteAsync(
@@ -210,7 +210,7 @@ public class DailyBriefingCompositeService
             systemUserId: systemUserId,
             tenantId: tenantId,
             recipientEmail: recipientEmail,
-            highPriorityItems: highPriorityItems,
+            highPriority: highPriority,
             collectDurationMs: collectMs,
             cancellationToken).ConfigureAwait(false);
     }
@@ -223,7 +223,7 @@ public class DailyBriefingCompositeService
         Guid? systemUserId,
         string tenantId,
         string? recipientEmail,
-        HighPriorityItemDto[]? highPriorityItems,
+        HighPriorityCollection? highPriority,
         long? collectDurationMs,
         CancellationToken cancellationToken)
     {
@@ -311,10 +311,18 @@ public class DailyBriefingCompositeService
         // Attach the (non-LLM) high-priority structured list BEFORE the ledger write so the
         // stored section-keyed payload AND the email rendering carry it — the widget response,
         // the ledger entry, and the emailed briefing must agree (render follows store).
-        if (highPriorityItems is { Length: > 0 })
+        if (highPriority is { Items.Length: > 0 })
         {
-            response = response with { HighPriorityItems = highPriorityItems };
+            response = response with { HighPriorityItems = highPriority.Items };
         }
+
+        // Task 152: carry the failure markers through to the widget, the ledger and the email — "could not be
+        // loaded" must stay distinguishable from "nothing to report" all the way to the reader (ADR-003).
+        response = response with
+        {
+            FailedChannels = request.FailedChannels,
+            HighPriorityFailedEntityTypes = highPriority?.FailedEntityTypes ?? [],
+        };
 
         // 4. Ledger write BEFORE render/email (ADR-040 D2/D8). The briefing-run session is
         //    minted here (see class remarks decision 1) carrying the ToolChain entry; the
@@ -334,7 +342,7 @@ public class DailyBriefingCompositeService
         return response;
     }
 
-    private async Task<(DailyBriefingNarrateRequest Payload, HighPriorityItemDto[] HighPriority, long CollectMs)> CollectAsync(
+    private async Task<(DailyBriefingNarrateRequest Payload, HighPriorityCollection HighPriority, long CollectMs)> CollectAsync(
         Guid systemUserId,
         DailyBriefingCollector.BriefingWindowOptions windows,
         CancellationToken cancellationToken)
@@ -442,6 +450,8 @@ public class DailyBriefingCompositeService
                     tldr = response.Tldr,
                     channels = channelSections,
                     highPriority = response.HighPriorityItems,
+                    failedChannels = response.FailedChannels,
+                    highPriorityFailedEntityTypes = response.HighPriorityFailedEntityTypes,
                 },
                 generatedAtUtc = response.GeneratedAtUtc,
                 email,
@@ -487,6 +497,16 @@ public class DailyBriefingCompositeService
               .Append("</p>");
         }
 
+        if (response.FailedChannels.Length > 0 || response.HighPriorityFailedEntityTypes.Length > 0)
+        {
+            // Task 152: a section whose caller-context read failed is said to have failed — never shown as empty.
+            var failedSections = response.FailedChannels
+                .Concat(response.HighPriorityFailedEntityTypes.Select(e => $"high priority ({e})"));
+            sb.Append("<p style=\"color:#a4262c;\"><strong>Some sections could not be loaded:</strong> ")
+              .Append(System.Net.WebUtility.HtmlEncode(string.Join(", ", failedSections)))
+              .Append(". Open the briefing in Spaarke to try again.</p>");
+        }
+
         if (response.HighPriorityItems.Length > 0)
         {
             sb.Append("<h3>High Priority</h3><ul>");
@@ -521,12 +541,14 @@ public class DailyBriefingCompositeService
         return sb.ToString();
     }
 
-    private static DailyBriefingNarrateResponse EmptyResponse(HighPriorityItemDto[] highPriorityItems) => new()
+    private static DailyBriefingNarrateResponse EmptyResponse(HighPriorityCollection highPriority, string[] failedChannels) => new()
     {
         Tldr = new TldrResult { Summary = string.Empty, KeyTakeaways = [], TopAction = string.Empty },
         ChannelNarratives = [],
         GeneratedAtUtc = DateTimeOffset.UtcNow,
-        HighPriorityItems = highPriorityItems,
+        HighPriorityItems = highPriority.Items,
+        FailedChannels = failedChannels,
+        HighPriorityFailedEntityTypes = highPriority.FailedEntityTypes,
     };
 }
 

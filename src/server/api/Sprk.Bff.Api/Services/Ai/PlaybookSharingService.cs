@@ -3,7 +3,9 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Access;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -15,6 +17,7 @@ public class PlaybookSharingService : IPlaybookSharingService
 {
     private readonly HttpClient _httpClient;
     private readonly IPlaybookService _playbookService;
+    private readonly IDataverseRecordShareService _recordShare;
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<PlaybookSharingService> _logger;
@@ -33,12 +36,14 @@ public class PlaybookSharingService : IPlaybookSharingService
     public PlaybookSharingService(
         HttpClient httpClient,
         IPlaybookService playbookService,
+        IDataverseRecordShareService recordShare,
         IConfiguration configuration,
         TokenCredential credential,
         ILogger<PlaybookSharingService> logger)
     {
         _httpClient = httpClient;
         _playbookService = playbookService;
+        _recordShare = recordShare ?? throw new ArgumentNullException(nameof(recordShare));
         _logger = logger;
         _credential = credential;
 
@@ -299,55 +304,40 @@ public class PlaybookSharingService : IPlaybookSharingService
 
     #region Private Helper Methods
 
-    private async Task GrantAccessToTeamAsync(
+    /// <summary>
+    /// Shares the playbook with a team, via the ONE POA seam.
+    /// </summary>
+    /// <remarks>
+    /// Task 060 (CLAUDE.md §11): this method used to build the <c>GrantAccess</c> payload itself — a
+    /// second POA client alongside <c>DataverseWebApiService</c>'s. That duplicate is DELETED; only the
+    /// playbook-domain rights mapping stays here, because translating
+    /// <see cref="PlaybookAccessRights"/> to Dataverse's <c>AccessMask</c> CSV is a caller concern.
+    /// </remarks>
+    private Task GrantAccessToTeamAsync(
         Guid playbookId,
         Guid teamId,
         PlaybookAccessRights rights,
         CancellationToken cancellationToken)
-    {
-        // Map access rights to Dataverse AccessRights
-        var accessMask = MapToDataverseAccessRights(rights);
+        => _recordShare.GrantAccessAsync(
+            PlaybookEntitySet,
+            playbookId,
+            DataversePrincipalRef.Team(teamId),
+            MapToDataverseAccessRights(rights),
+            cancellationToken);
 
-        var payload = new Dictionary<string, object>
-        {
-            ["Target"] = new Dictionary<string, object>
-            {
-                ["@odata.id"] = $"{PlaybookEntitySet}({playbookId})"
-            },
-            ["PrincipalAccess"] = new Dictionary<string, object>
-            {
-                ["Principal"] = new Dictionary<string, object>
-                {
-                    ["@odata.id"] = $"{TeamEntitySet}({teamId})"
-                },
-                ["AccessMask"] = accessMask
-            }
-        };
-
-        var response = await _httpClient.PostAsJsonAsync("GrantAccess", payload, JsonOptions, cancellationToken);
-        response.EnsureSuccessStatusCode();
-    }
-
-    private async Task RevokeAccessFromTeamAsync(
+    /// <summary>
+    /// Removes a team's share on the playbook, via the ONE POA seam (task 060 — the <c>RevokeAccess</c>
+    /// payload this method used to build is now the seam's, and is what gives every other caller a revoke).
+    /// </summary>
+    private Task RevokeAccessFromTeamAsync(
         Guid playbookId,
         Guid teamId,
         CancellationToken cancellationToken)
-    {
-        var payload = new Dictionary<string, object>
-        {
-            ["Target"] = new Dictionary<string, object>
-            {
-                ["@odata.id"] = $"{PlaybookEntitySet}({playbookId})"
-            },
-            ["Revokee"] = new Dictionary<string, object>
-            {
-                ["@odata.id"] = $"{TeamEntitySet}({teamId})"
-            }
-        };
-
-        var response = await _httpClient.PostAsJsonAsync("RevokeAccess", payload, JsonOptions, cancellationToken);
-        response.EnsureSuccessStatusCode();
-    }
+        => _recordShare.RevokeAccessAsync(
+            PlaybookEntitySet,
+            playbookId,
+            DataversePrincipalRef.Team(teamId),
+            cancellationToken);
 
     private Task SetOrganizationWideAsync(
         Guid playbookId,
@@ -369,53 +359,43 @@ public class PlaybookSharingService : IPlaybookSharingService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// The teams holding a share on the playbook.
+    /// </summary>
+    /// <remarks>
+    /// Task 060: the POA query + the uncached <c>ObjectTypeCode</c> lookup that used to live here are
+    /// gone — both are the seam's now (and the seam's type-code resolution is process-cached). Two
+    /// behaviours change, deliberately: the read is filtered to <see cref="DataversePrincipalKind.Team"/>,
+    /// so a USER share on a playbook is no longer reported as a team named "Unknown Team"; and a failed
+    /// POA read still degrades to an empty list rather than throwing, matching the prior contract.
+    /// </remarks>
     private async Task<SharedWithTeam[]> GetSharedTeamsAsync(
         Guid playbookId,
         CancellationToken cancellationToken)
     {
         try
         {
-            // Query POA (principalobjectaccess) table for shared principals
-            var objectTypeCode = await GetEntityTypeCodeAsync(PlaybookEntityLogicalName, cancellationToken);
-            if (objectTypeCode == 0)
-            {
-                return [];
-            }
-
-            var url = $"principalobjectaccessset?$filter=objectid eq {playbookId} and objecttypecode eq {objectTypeCode}&$select=principalid,accessrightsmask,modifiedon";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return [];
-            }
-
-            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
-            if (result?.Value == null)
-            {
-                return [];
-            }
+            var shares = await _recordShare.GetPrincipalAccessAsync(
+                PlaybookEntityLogicalName, playbookId, cancellationToken);
 
             var teams = new List<SharedWithTeam>();
-            foreach (var item in result.Value)
+            foreach (var share in shares)
             {
-                if (item.TryGetProperty("principalid", out var principalProp))
+                if (share.Principal.Kind != DataversePrincipalKind.Team)
+                    continue;
+
+                // A share row whose accessrightsmask could not be read reports Read, not None — the
+                // pre-060 behaviour (`... : 1`). A consolidation must not quietly change what the
+                // sharing UI displays; if that default is wrong it is a separate, deliberate change.
+                var mask = share.AccessRightsMask == 0 ? 1 : share.AccessRightsMask;
+
+                teams.Add(new SharedWithTeam
                 {
-                    var principalId = principalProp.GetGuid();
-                    var accessMask = item.TryGetProperty("accessrightsmask", out var maskProp) ? maskProp.GetInt32() : 1;
-                    var modifiedOn = item.TryGetProperty("modifiedon", out var modProp) ? modProp.GetDateTime() : DateTime.UtcNow;
-
-                    // Get team name
-                    var teamName = await GetTeamNameAsync(principalId, cancellationToken);
-
-                    teams.Add(new SharedWithTeam
-                    {
-                        TeamId = principalId,
-                        TeamName = teamName,
-                        AccessRights = MapFromDataverseAccessRights(accessMask),
-                        SharedOn = modifiedOn
-                    });
-                }
+                    TeamId = share.Principal.Id,
+                    TeamName = await GetTeamNameAsync(share.Principal.Id, cancellationToken),
+                    AccessRights = MapFromDataverseAccessRights(mask),
+                    SharedOn = share.ModifiedOn.UtcDateTime,
+                });
             }
 
             return teams.ToArray();
@@ -424,27 +404,6 @@ public class PlaybookSharingService : IPlaybookSharingService
         {
             _logger.LogError(ex, "Failed to get shared teams for playbook {PlaybookId}", playbookId);
             return [];
-        }
-    }
-
-    private async Task<int> GetEntityTypeCodeAsync(string logicalName, CancellationToken cancellationToken)
-    {
-        try
-        {
-            var url = $"EntityDefinitions(LogicalName='{logicalName}')?$select=ObjectTypeCode";
-            var response = await _httpClient.GetAsync(url, cancellationToken);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                return 0;
-            }
-
-            var result = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, cancellationToken);
-            return result.TryGetProperty("ObjectTypeCode", out var otcProp) ? otcProp.GetInt32() : 0;
-        }
-        catch
-        {
-            return 0;
         }
     }
 

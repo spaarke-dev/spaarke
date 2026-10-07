@@ -70,13 +70,22 @@ public interface IOfficeService
     /// Searches for association target entities (Matters, Projects, Invoices, Accounts, Contacts).
     /// </summary>
     /// <param name="request">Search request with query, entity types, and pagination.</param>
-    /// <param name="userId">Authenticated user ID for permission filtering.</param>
+    /// <param name="userId">The caller's Entra object id (<c>oid</c>), for logging and correlation.</param>
+    /// <param name="callerSystemUserId">
+    /// The caller's Dataverse <c>systemuserid</c>, resolved by the endpoint via
+    /// <c>ICallerSystemUserResolver</c>. REQUIRED and non-empty: the search query is issued
+    /// IMPERSONATED as this user (<c>MSCRMCallerID</c>) so Dataverse applies row-level security
+    /// natively. Deliberately a required positional parameter with no default — omitting it must be a
+    /// compile error, not a silent reversion to the tenant-wide app-only enumeration that finding F1
+    /// closed (task 062). <see cref="System.Guid.Empty"/> is refused by the implementation.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Search response with matched entities.</returns>
     /// <remarks>
     /// <para>
     /// Searches across multiple Dataverse tables based on the requested entity types.
-    /// Results are filtered to only include entities the user has access to.
+    /// Results are filtered to only include entities the user has access to — by Dataverse itself,
+    /// inside the query, for every entity type and every page.
     /// </para>
     /// <para>
     /// Search is performed against primary name fields and optionally email fields:
@@ -90,54 +99,26 @@ public interface IOfficeService
     Task<EntitySearchResponse> SearchEntitiesAsync(
         EntitySearchRequest request,
         string userId,
+        Guid callerSystemUserId,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Searches for documents to share from the Office add-in.
-    /// Returns documents the user has permission to share.
+    /// Lists the active rows of one of the create form's reference lists — matter types (task 038), practice
+    /// areas and project types (task 100). See <see cref="OfficeSearchService.ReferenceLists"/>.
     /// </summary>
-    /// <param name="request">Search request with query, filters, and pagination.</param>
-    /// <param name="userId">Authenticated user ID for permission filtering.</param>
+    /// <param name="list">The list, from <see cref="OfficeSearchService.TryGetReferenceList"/>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Search response with matched documents and metadata for preview.</returns>
+    /// <returns>The active rows, ordered by name.</returns>
     /// <remarks>
     /// <para>
-    /// Searches the sprk_document entity and filters results based on:
-    /// - User's share permissions (only returns shareable documents)
-    /// - Association type/ID if specified
-    /// - Container/folder if specified
-    /// - Content type if specified
-    /// - Date range if specified
-    /// </para>
-    /// <para>
-    /// Results include thumbnail URLs and association info for UI preview.
+    /// Small, load-once reference lists — siblings of <see cref="SearchEntitiesAsync"/> under the same
+    /// <c>/api/office/search</c> group, not filters on it. They are reference/lookup tables, not association-target
+    /// entities, and the caller loads each once rather than per keystroke, so they do not fit the
+    /// 2-character-minimum typeahead contract.
     /// </para>
     /// </remarks>
-    Task<DocumentSearchResponse> SearchDocumentsAsync(
-        DocumentSearchRequest request,
-        string userId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Creates shareable links for the specified documents.
-    /// </summary>
-    /// <param name="request">Share links request containing document IDs and options.</param>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Share links response with URLs and any invitations created.</returns>
-    /// <remarks>
-    /// <para>
-    /// Generated links resolve through Spaarke access controls. The link format
-    /// is configurable via ShareLinkBaseUrl setting.
-    /// </para>
-    /// <para>
-    /// Supports partial success - documents the user cannot share will be returned
-    /// in the Errors array, while accessible documents will have links generated.
-    /// </para>
-    /// </remarks>
-    Task<ShareLinksResponse> CreateShareLinksAsync(
-        ShareLinksRequest request,
-        string userId,
+    Task<ReferenceListResponse> GetReferenceListAsync(
+        OfficeReferenceList list,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -147,7 +128,12 @@ public interface IOfficeService
     /// <param name="request">Quick create request with entity fields.</param>
     /// <param name="userId">Authenticated user ID.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Quick create response with created entity details, or null if creation failed.</returns>
+    /// <returns>Quick create response with created entity details, or null if creation is unavailable for the type.</returns>
+    /// <exception cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException">
+    /// Matter only (spaarkeai-word-add-in-r1 task 030): the server-side creation service refused — the caller has
+    /// no Dataverse user (403) or the request is invalid (400). No row was written; the exception carries the stable
+    /// code and HTTP status.
+    /// </exception>
     /// <remarks>
     /// <para>
     /// This supports inline entity creation from the Office add-in when the user
@@ -163,61 +149,55 @@ public interface IOfficeService
         QuickCreateEntityType entityType,
         QuickCreateRequest request,
         string userId,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Gets recently used association targets and documents for the user.
+    /// Creates a first-class <c>sprk_todo</c> from the add-in inline "Create To Do"
+    /// (email-communication-intelligence-r2, #3), regarding the record the email was filed to.
     /// </summary>
-    /// <param name="userId">Authenticated user ID.</param>
-    /// <param name="top">Maximum number of items to return per category (default: 10, max: 50).</param>
+    /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
+    /// <param name="userId">Authenticated user id (OBO oid).</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> — an INPUT to the owner-team resolution, not the owner (task 080: every record created here is owned by a business-unit default owner team, and the create is refused with OFFICE_022 when none resolves — never app-owned).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing recent associations, documents, and favorites.</returns>
+    /// <returns>The created To Do id + name, or null when the request carries no name (the endpoint validates the name first, so this is a defensive guard).</returns>
     /// <remarks>
     /// <para>
-    /// Recent items are tracked when users save documents via the Office add-in.
-    /// Items are sorted by most recently used and filtered to only include
-    /// entities the user still has access to.
-    /// </para>
-    /// <para>
-    /// Storage mechanism: Recent items are stored in Redis sorted sets per user
-    /// for efficient retrieval. Keys expire after 30 days of inactivity.
-    /// </para>
-    /// <para>
-    /// Categories returned:
-    /// - RecentAssociations: Entities used as save targets (Matter, Project, etc.)
-    /// - RecentDocuments: Documents the user has accessed/modified
-    /// - Favorites: User-pinned entities (persisted in Dataverse)
+    /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
+    /// regarding is written via the entity-specific lookup (<c>sprk_regardingmatter</c>/<c>project</c>/<c>invoice</c>)
+    /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). App-only create
+    /// via <see cref="IGenericEntityService"/>, owned by a business-unit default owner team resolved record-first
+    /// (regarding record → document → communication → caller; task 080), refused with OFFICE_022 when none resolves.
     /// </para>
     /// </remarks>
-    Task<RecentDocumentsResponse> GetRecentDocumentsAsync(
+    Task<CreateTodoResponse?> CreateTodoAsync(
+        CreateTodoRequest request,
         string userId,
-        int top = 10,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Retrieves documents and packages them for attachment to Outlook compose emails.
+    /// FR-08 (task 022; durable since task 068, #1086): requests a fresh document profile for the given
+    /// <c>sprk_document</c> from the pane's "Generate Profile" control. Queues ONE <c>AppOnlyDocumentAnalysis</c>
+    /// job whose key carries this request's id (task 029's discriminator), so every click runs, including on an
+    /// already-profiled or Failed document, with no confirmation; and returns once the job is on the queue, never
+    /// awaiting the profile. See <see cref="OfficeProfileQueue"/>.
     /// </summary>
-    /// <param name="request">Request containing document IDs and delivery mode.</param>
-    /// <param name="userId">Authenticated user ID for permission verification.</param>
-    /// <param name="correlationId">Correlation ID for request tracing.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Response containing packaged attachments and any errors.</returns>
-    /// <remarks>
-    /// <para>
-    /// Each document is validated for:
-    /// - Existence in Dataverse
-    /// - User share permission via UAC
-    /// - Size limits (25MB per file, 100MB total per spec NFR-03)
-    /// </para>
-    /// <para>
-    /// Partial success is allowed - some documents may succeed while others fail.
-    /// Failed documents are reported in the Errors array.
-    /// </para>
-    /// </remarks>
-    Task<ShareAttachResponse> GetAttachmentsAsync(
-        ShareAttachRequest request,
-        string userId,
-        string correlationId,
+    /// <param name="documentId">The target <c>sprk_document</c> id. Caller (the endpoint filter) has
+    /// already authorized <c>write</c> on this record.</param>
+    /// <param name="httpContext">The current request: its trace id is the job's correlation id, and its caller is
+    /// recorded as the requester.</param>
+    /// <param name="cancellationToken">Unused: once started, the submit is not abandoned (see
+    /// <see cref="OfficeProfileQueue.QueueAsync"/>).</param>
+    /// <returns>
+    /// The outcome and, when queued, the job's id (<see cref="GenerateProfileResult"/>). The caller MUST branch on it:
+    /// only <see cref="GenerateProfileDispatchOutcome.Dispatched"/> may produce a 202;
+    /// <see cref="GenerateProfileDispatchOutcome.FacadeUnavailable"/> (profiling off) and
+    /// <see cref="GenerateProfileDispatchOutcome.QueueUnavailable"/> (Service Bus refused) are 503s.
+    /// </returns>
+    Task<GenerateProfileResult> GenerateProfileAsync(
+        Guid documentId,
+        HttpContext httpContext,
         CancellationToken cancellationToken = default);
 
     /// <summary>

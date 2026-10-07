@@ -28,7 +28,7 @@ namespace Sprk.Bff.Api.Tests.Onboarding;
 public sealed class ConsentCallbackEndpointTests
 {
     private const string ValidKey = "test-signing-key-42-chars-of-shared-secret";
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string Tid = "11111111-1111-1111-1111-111111111111";
 
     [Fact]

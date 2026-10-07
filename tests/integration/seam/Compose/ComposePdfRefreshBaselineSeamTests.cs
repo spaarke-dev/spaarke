@@ -53,7 +53,12 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
 
     private const string PdfDriveId = "drive-pdf-refresh-001";
     private const string PdfFileName = "Master Services Agreement (executed).pdf";
-    private const string ContainerId = "b!container-bu-pdf-refresh";
+    /// <summary>Issue #858: the container is SERVER-derived (acting user → business unit →
+    /// sprk_containerid; arranged by the fixture via <c>TestActingUserBusinessUnit</c>) — the client
+    /// no longer names it. This const aliases the arranged value so the specific
+    /// <c>ResolveDriveIdAsync(ContainerId, …)</c> matchers below only match when the REAL derivation
+    /// produced it: the mint silently proves server-side resolution on every one of these tests.</summary>
+    private const string ContainerId = TestActingUserBusinessUnit.ContainerId;
     private const string MintedDriveId = "drive-pdf-docx-refresh-001";
 
     /// <summary>The edit the FIRST save lands. If the second save is resolving the right baseline, this
@@ -114,10 +119,10 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(MintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), MintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((HttpContext _, string _, string name, Stream stream, CancellationToken _) =>
+            .Setup(s => s.UploadSmallAsync(
+                MintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string name, Stream stream, Sprk.Bff.Api.Models.ConflictBehavior _conflict, CancellationToken _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -314,9 +319,9 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(MintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), MintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                MintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildHandle(mintedDocxItemId, "MSA.docx", MintedDriveId, 1, "\"docx-v1\""));
         _fixture.DataverseMock
             .Setup(d => d.RetrieveByAlternateKeyAsync(
@@ -384,9 +389,9 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(MintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), MintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                MintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildHandle(mintedDocxItemId, "MSA.docx", MintedDriveId, 1, "\"docx-v1\""));
         // …and then the user DELETES the Word document. Metadata for it returns null from here on,
         // which is how a deleted drive-item presents. They are entitled to re-open the PDF and start
@@ -470,9 +475,9 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(MintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), MintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                MintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildHandle("spe-item-docx-fork", "Executed Agreement.docx", MintedDriveId, 1, "\"v1\""));
         _fixture.DataverseMock
             .Setup(d => d.RetrieveByAlternateKeyAsync(

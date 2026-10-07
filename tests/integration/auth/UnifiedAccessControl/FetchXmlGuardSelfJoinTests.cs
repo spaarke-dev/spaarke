@@ -40,10 +40,19 @@ public class FetchXmlGuardSelfJoinTests
 {
     private const string ModuleRecordEntity = "sprk_document";
 
+    /// <summary>
+    /// The column allow-list these JOIN tests run under (task 134 added the column signal as the guard's
+    /// THIRD check). It holds the columns the single-entity "allowed" fixtures read, so a join verdict
+    /// here is never masked by — or confused with — a column verdict. Column behaviour is covered in
+    /// <c>ExternalModuleColumnAllowListTests</c>.
+    /// </summary>
+    private static readonly IReadOnlySet<string> ReadableColumns =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_name", "statecode" };
+
     /// <summary>Evaluates the REAL guard with the REAL extractor — no doubles, no transcription.</summary>
     private static ExternalModuleDataEndpoints.FetchXmlGuardResult Evaluate(string? fetchXml) =>
         ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
-            fetchXml, ModuleRecordEntity, new FetchXmlEntityExtractor());
+            fetchXml, ModuleRecordEntity, ReadableColumns, new FetchXmlEntityExtractor());
 
     /// <summary>
     /// The A-17 exploit verbatim: every ACTIVE sprk_document self-joined on statecode, aliasing columns
@@ -245,7 +254,8 @@ public class FetchXmlGuardSelfJoinTests
 
     [Theory]
     [InlineData("<fetch><entity name='sprk_document'><attribute name='sprk_name' /></entity></fetch>")]
-    [InlineData("<fetch><entity name='sprk_document'><all-attributes /></entity></fetch>")]
+    // `<all-attributes />` used to be in this list. Task 134 (defect C6) refuses it on the column signal —
+    // see ExternalModuleColumnAllowListTests — so it is no longer a legitimate read of this seam.
     [InlineData("<fetch top='50'><entity name='sprk_document'><attribute name='sprk_name' />" +
                 "<order attribute='sprk_name' descending='true' /></entity></fetch>")]
     [InlineData("<fetch page='2' count='50'><entity name='sprk_document'><attribute name='sprk_name' />" +
@@ -353,7 +363,7 @@ public class FetchXmlGuardSelfJoinTests
         var extractor = new ScriptedEntityExtractor(joinFreeFetchXml, "sprk_document", "sprk_matter");
 
         var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
-            joinFreeFetchXml, ModuleRecordEntity, extractor);
+            joinFreeFetchXml, ModuleRecordEntity, ReadableColumns, extractor);
 
         result.Verdict.Should().Be(Verdict.EntityMismatch,
             "with no join present, ONLY the entity-identity check can produce a refusal here");
@@ -372,7 +382,7 @@ public class FetchXmlGuardSelfJoinTests
         var extractor = new ScriptedEntityExtractor(joinFreeFetchXml);
 
         var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
-            joinFreeFetchXml, ModuleRecordEntity, extractor);
+            joinFreeFetchXml, ModuleRecordEntity, ReadableColumns, extractor);
 
         result.Verdict.Should().Be(Verdict.EntityMismatch, "an empty referenced set is refused, not admitted");
     }
@@ -388,7 +398,7 @@ public class FetchXmlGuardSelfJoinTests
         var extractor = new ScriptedEntityExtractor(A17ExploitFetchXml, ModuleRecordEntity);
 
         var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
-            A17ExploitFetchXml, ModuleRecordEntity, extractor);
+            A17ExploitFetchXml, ModuleRecordEntity, ReadableColumns, extractor);
 
         result.Verdict.Should().Be(Verdict.LinkEntityNotPermitted,
             "the entity-identity check ADMITS a self-join (that is A-17); structural join detection is the " +
@@ -407,7 +417,7 @@ public class FetchXmlGuardSelfJoinTests
         var extractor = new ScriptedEntityExtractor(unparseableFetchXml, ModuleRecordEntity);
 
         var result = ExternalModuleDataEndpoints.EvaluateFetchXmlGuard(
-            unparseableFetchXml, ModuleRecordEntity, extractor);
+            unparseableFetchXml, ModuleRecordEntity, ReadableColumns, extractor);
 
         result.Verdict.Should().Be(Verdict.Malformed,
             "ADR-003: unable to prove the absence of a join ⇒ refuse; never admit on a parse failure");

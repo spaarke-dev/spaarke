@@ -203,7 +203,7 @@ User-initiated save from Outlook add-in taskpane. Uploads email/attachment to SP
         ┌──────────────────────────────────────────┐
         │  BACKGROUND WORKER:                      │
         │  UploadFinalizationWorker                │
-        │  (BackgroundService, ADR-001)            │
+        │  (BackgroundService; placement: ADR-052) │
         │                                          │
         │ 1. Check Idempotency (Redis, 7d TTL)     │
         │ 2. Create Artifact Records               │

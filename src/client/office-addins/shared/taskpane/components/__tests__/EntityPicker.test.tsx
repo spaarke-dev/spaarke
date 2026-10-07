@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { EntityPicker } from '../EntityPicker';
@@ -33,7 +33,7 @@ jest.mock('../../hooks/useEntitySearch', () => ({
   ALL_ENTITY_TYPES: ['Matter', 'Project', 'Invoice', 'Account', 'Contact'],
 }));
 
-import { useEntitySearch, ALL_ENTITY_TYPES } from '../../hooks/useEntitySearch';
+import { useEntitySearch } from '../../hooks/useEntitySearch';
 
 // Helper to render with FluentProvider
 const renderWithProvider = (ui: React.ReactElement) => {
@@ -188,6 +188,13 @@ describe('EntityPicker', () => {
 
       renderWithProvider(<EntityPicker />);
 
+      // Fluent's Combobox only renders its popup Options while `open` (EntityPicker's own `isOpen`
+      // state, EntityPicker.tsx:268) is true, and that only flips true on focus/input/arrow-key
+      // (`handleFocus`, `:410-412`) — matching the pattern the sibling "shows recent entities" test
+      // below already used. Without it, the popup (and "Searching...") was never in the DOM (task 071).
+      const input = screen.getByPlaceholderText('Search for an association target...');
+      fireEvent.focus(input);
+
       // The loading spinner should be present
       expect(screen.queryByText('Searching...')).toBeInTheDocument();
     });
@@ -200,6 +207,9 @@ describe('EntityPicker', () => {
       });
 
       renderWithProvider(<EntityPicker />);
+
+      const input = screen.getByPlaceholderText('Search for an association target...');
+      fireEvent.focus(input);
 
       expect(screen.getByText('Smith vs Jones')).toBeInTheDocument();
       expect(screen.getByText('Website Redesign')).toBeInTheDocument();
@@ -292,6 +302,10 @@ describe('EntityPicker', () => {
 
       renderWithProvider(<EntityPicker onChange={handleChange} />);
 
+      // Open the popup first — see the "shows loading state" note above (task 071).
+      const input = screen.getByPlaceholderText('Search for an association target...');
+      fireEvent.focus(input);
+
       // Find and click the entity option
       const option = screen.getByText('Smith vs Jones');
       await userEvent.click(option);
@@ -313,6 +327,10 @@ describe('EntityPicker', () => {
       });
 
       renderWithProvider(<EntityPicker onQuickCreate={handleQuickCreate} showQuickCreate allowedTypes={['Matter']} />);
+
+      // Open the popup first — see the "shows loading state" note above (task 071).
+      const input = screen.getByPlaceholderText('Search for an association target...');
+      fireEvent.focus(input);
 
       // The Quick Create option should be visible for allowed types
       const createOption = screen.getByText(/Create new Matter/i);

@@ -4,9 +4,14 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 
@@ -37,7 +42,19 @@ namespace Sprk.Bff.Api.Api.Insights;
 /// claims from <see cref="HttpContext.User"/>. Missing <c>tid</c> → 401 ProblemDetails
 /// (token is invalid for Insights Engine purposes); missing <c>oid</c> → 401
 /// ProblemDetails. There is NO role gate — Insights synthesis is a tenant-user
-/// capability (per D-P15 task POML "regular tenant user, not admin role").
+/// capability (per D-P15 task POML "regular tenant user, not admin role"). There IS a
+/// record gate (unified-access-control-r2 task 163; owner round 16 items 1 and 3): the route
+/// filter runs only a playbook registered as an insights-ask Binding, applies the SHARED
+/// playbook-parameter policy, and authorizes the subject matter AS THE CALLER — Read for a
+/// playbook that cannot write, Write for one that can (matter-health-single persists to
+/// <c>sprk_matter.sprk_performancesummary</c>) — plus each record parameter. A denied, absent
+/// or unverifiable matter gets the uniform 404.
+/// </para>
+/// <para>
+/// <b>Zone B note</b>: besides <see cref="IInsightsAi"/>, this file uses two non-engine surfaces
+/// for that gate: <c>Api.Filters</c> (the route-filter precedent) and the pure
+/// <see cref="PlaybookParameterPolicy"/> class (no AI client, no engine — the §3.5.4 grep list
+/// is unaffected).
 /// </para>
 /// <para>
 /// <b>Rate limit</b>: <c>ai-context</c> policy (60 requests/minute sliding window per
@@ -68,7 +85,15 @@ public static class InsightEndpoints
             .RequireRateLimiting("ai-context")
             .WithTags("Insights");
 
+        // Authorization (unified-access-control-r2 task 163, sweep finding #17; owner round 16 items 1 and 3,
+        // round 25 item 3): before IInsightsAi or the playbook cache is reached, the route filter resolves the
+        // REGISTERED playbook, applies the shared playbook-parameter policy, and asks Dataverse AS THE CALLER for
+        // Read on the subject matter — Write when a node that can write reaches it (e.g. matter-health-single's
+        // UpdateRecord onto sprk_matter.sprk_performancesummary; "Read suffices only for non-persisting playbooks")
+        // — and for each record parameter's right. Any denial, an absent matter and a fault are the identical
+        // uniform 404.
         group.MapPost("/ask", Ask)
+            .AddInsightsAskAuthorizationFilter()
             .WithName("AskInsights")
             .WithSummary("Synthesize an Insights-mode answer or return a structured decline (D-P15)")
             .WithDescription(
@@ -82,10 +107,217 @@ public static class InsightEndpoints
             .Produces<InsightAskResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
+    }
+
+    /// <summary>
+    /// What the <c>/ask</c> route filter decided, published for the handler: the ONE playbook it authorized the run
+    /// of (the handler runs exactly this one — no second resolution that could pick another), and whether it
+    /// established the caller's Write on the subject (<see cref="InsightsAgentRequest.SubjectWriteAuthorized"/>).
+    /// </summary>
+    internal sealed record AuthorizedAskRun(Guid PlaybookId, bool SubjectWriteAuthorized);
+
+    /// <summary>The <see cref="HttpContext.Items"/> key under which the route filter publishes <see cref="AuthorizedAskRun"/>.</summary>
+    private const string AuthorizedAskRunItemKey = "Sprk.InsightEndpoints.AuthorizedAskRun";
+
+    /// <summary>
+    /// The route filter of <c>POST /api/insights/ask</c> (unified-access-control-r2 task 163; owner round 16 items 1
+    /// and 3, round 25 item 3). In order, so every 400 is returned before any rights query:
+    /// <list type="number">
+    ///   <item>no caller oid → 401 (the declaration filter's own body);</item>
+    ///   <item>body, <c>question</c>, <c>subject</c> and the <c>matter:{guid}</c> subject → the handler's 400s;</item>
+    ///   <item><c>parameters</c> → task 164's SHARED playbook-parameter policy
+    ///   (<see cref="PlaybookParameterPolicy.Evaluate"/>; its 400 is <see cref="PlaybookAuthorizationFilter.ParameterRejected"/>,
+    ///   the same body <c>/execute</c> and <c>/run-playbook</c> answer). Not forked: server-owned keys
+    ///   (<c>userId</c>, <c>tenantId</c>, <c>run.*</c>, …), non-GUID record ids, mistyped tuning keys, a GUID on a text
+    ///   key and every undeclared key are refused;</item>
+    ///   <item><c>question</c> → the playbook, only through an enabled insights-ask Binding (a canonical name by its exact
+    ///   consumer code; a raw GUID only when that Binding binds it) — otherwise the "not registered" 400;</item>
+    ///   <item>the rights, AS THE CALLER, through <see cref="PlaybookAuthorizationFilter.BuildSubjectRunChecksAsync"/> and
+    ///   the ONE per-route evaluator (<see cref="FinanceAuthorizationFilter"/>): Read on <c>sprk_matters(subject)</c> —
+    ///   Write when a node that can write reaches the subject (through <c>{{matterId}}</c>), or the playbook has no
+    ///   nodes — and each record parameter's right by the same rule. Every denial, an absent matter and a fault are
+    ///   the identical uniform 404.</item>
+    /// </list>
+    /// The decision is published as <see cref="AuthorizedAskRun"/>; the handler refuses to run without it.
+    /// </summary>
+    internal static RouteHandlerBuilder AddInsightsAskAuthorizationFilter(this RouteHandlerBuilder builder) =>
+        builder.AddEndpointFilter(AuthorizeAskAsync);
+
+    private static async ValueTask<object?> AuthorizeAskAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
+    {
+        var httpContext = context.HttpContext;
+        var services = httpContext.RequestServices;
+        var logger = services.GetService<ILogger<InsightAskRequest>>();
+        var ct = httpContext.RequestAborted;
+
+        // 1. Identity first — the same 401 the declaration filter answers; it does not depend on any record.
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(callerOid))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
+        // 2. The handler's own input 400s, before any Dataverse call.
+        var request = context.Arguments.OfType<InsightAskRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return BadRequest("Request body is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Question))
+        {
+            return BadRequest("'question' is required and cannot be empty.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            return BadRequest("'subject' is required and cannot be empty.");
+        }
+
+        if (!TryParseMatterSubject(request.Subject, out var subjectMatterId, out var subjectError))
+        {
+            return BadRequest(subjectError);
+        }
+
+        // 3. The shared playbook-parameter policy (task 164) — syntax only, no rights query, so never an oracle.
+        var parameterEvaluation = PlaybookParameterPolicy.Evaluate(request.Parameters);
+        if (!parameterEvaluation.IsValid)
+        {
+            logger?.LogWarning(
+                "[INSIGHTS-ASK] parameter {Key} refused by the shared playbook-parameter policy ({Reason}) for caller {CallerOid}",
+                parameterEvaluation.RejectedKey, parameterEvaluation.Reason, callerOid);
+            return PlaybookAuthorizationFilter.ParameterRejected(httpContext, parameterEvaluation);
+        }
+
+        // 4. The playbook — registered insights-ask Bindings only.
+        var playbookId = await ResolveRegisteredPlaybookAsync(
+            request.Question, services.GetRequiredService<IConsumerRoutingService>(), ct);
+        if (playbookId is not { } authorizedPlaybookId)
+        {
+            return UnregisteredQuestion(request.Question);
+        }
+
+        // 5. The rights, as the caller — fail closed on any fault (ADR-003).
+        IReadOnlyList<FinanceAuthorizationCheck> checks;
+        try
+        {
+            if (!EntityAccessFilter.TryResolveEntitySet("matter", out var matterEntitySet))
+            {
+                throw new InvalidOperationException("The shared entity-set map has no 'matter' entry.");
+            }
+
+            checks = await PlaybookAuthorizationFilter.BuildSubjectRunChecksAsync(
+                services, authorizedPlaybookId, matterEntitySet, subjectMatterId, MatterSubjectParameter,
+                parameterEvaluation.RecordParameters, ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger?.LogError(ex,
+                "[INSIGHTS-ASK] the run's rights could not be decided for playbook {PlaybookId} and caller {CallerOid}; denying (fail closed)",
+                authorizedPlaybookId, callerOid);
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
+        }
+
+        httpContext.Items[AuthorizedAskRunItemKey] = new AuthorizedAskRun(
+            authorizedPlaybookId,
+            SubjectWriteAuthorized: string.Equals(checks[0].Operation, "write", StringComparison.Ordinal));
+
+        var evaluator = new FinanceAuthorizationFilter(
+            services.GetRequiredService<AuthorizationService>(),
+            _ => FinanceAuthorizationTargets.Authorize(checks.ToArray()),
+            FinanceDenial.UniformNotFound,
+            services.GetService<CallerRecordAccessProbe>());
+
+        return await evaluator.InvokeAsync(context, next);
+    }
+
+    /// <summary>
+    /// The registered playbook a <c>question</c> names, or <c>null</c>. Two inputs are accepted, and both read the ONE
+    /// routing surface (enabled <c>sprk_playbookconsumer</c> Binding rows of consumer type insights-ask, FR-P3-01 /
+    /// ADR-039): a canonical name, resolved by its EXACT consumer code (a default-row fallback means "not
+    /// registered"); or a raw playbook GUID, accepted only when the Binding that targets it is an insights-ask one
+    /// (task 163 — a raw GUID used to run ANY playbook).
+    /// </summary>
+    private static async Task<Guid?> ResolveRegisteredPlaybookAsync(
+        string question, IConsumerRoutingService consumerRouting, CancellationToken ct)
+    {
+        if (Guid.TryParse(question, out var rawPlaybookId) && rawPlaybookId != Guid.Empty)
+        {
+            var boundAs = await consumerRouting.GetBindingByPlaybookIdAsync(rawPlaybookId, cancellationToken: ct);
+            return boundAs is not null
+                && string.Equals(boundAs.ConsumerType, ConsumerTypes.InsightsAsk, StringComparison.OrdinalIgnoreCase)
+                    ? rawPlaybookId
+                    : null;
+        }
+
+        var binding = await consumerRouting.ResolveBindingAsync(
+            ConsumerTypes.InsightsAsk, consumerCode: question, cancellationToken: ct);
+
+        // Null/empty ConsumerCode is treated as "default" by the resolution algorithm — normalize before comparing so a
+        // null-code default row behaves identically to a literal "default" row (same as AssistantToolCallHandler).
+        return binding is not null
+            && string.Equals(
+                string.IsNullOrWhiteSpace(binding.ConsumerCode) ? "default" : binding.ConsumerCode,
+                question,
+                StringComparison.OrdinalIgnoreCase)
+            && binding.PlaybookId is { } boundPlaybookId
+            && boundPlaybookId != Guid.Empty
+                ? boundPlaybookId
+                : null;
+    }
+
+    /// <summary>The 400 for a <c>question</c> that names no registered insights-ask playbook.</summary>
+    private static IResult UnregisteredQuestion(string question) =>
+        BadRequest(
+            "'question' must be either a valid playbook Guid id OR a canonical name " +
+            "registered as an enabled sprk_playbookconsumer row (consumerType " +
+            $"'{ConsumerTypes.InsightsAsk}', sprk_consumercode = the canonical name). " +
+            $"Received: '{question}'.");
+
+    /// <summary>
+    /// Parses the Phase 1 <c>matter:{guid}</c> subject. The error strings for a wrong scheme and an empty id are
+    /// the ones the handler has always returned; a non-GUID id is new with task 163 (it used to reach the
+    /// facade unparsed).
+    /// </summary>
+    private static bool TryParseMatterSubject(string subject, out Guid matterId, out string error)
+    {
+        matterId = Guid.Empty;
+        error = string.Empty;
+
+        if (!subject.StartsWith(MatterSubjectPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            error = $"'subject' must begin with '{MatterSubjectPrefix}' in Phase 1 " +
+                    "(e.g., 'matter:{id}'). Other schemes are not yet supported.";
+            return false;
+        }
+
+        var raw = subject.Substring(MatterSubjectPrefix.Length).Trim();
+        if (string.IsNullOrEmpty(raw))
+        {
+            error = $"'subject' is missing an identifier after '{MatterSubjectPrefix}'.";
+            return false;
+        }
+
+        if (!Guid.TryParse(raw, out matterId) || matterId == Guid.Empty)
+        {
+            error = $"'subject' must be '{MatterSubjectPrefix}' followed by a matter id (a non-empty GUID).";
+            return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -104,6 +336,13 @@ public static class InsightEndpoints
     /// guidance. Other schemes return 400 ProblemDetails.
     /// </summary>
     private const string MatterSubjectPrefix = "matter:";
+
+    /// <summary>
+    /// The playbook parameter a <c>matter:{id}</c> subject is bound to — the Insights orchestrator sets
+    /// <c>matterId</c> from the subject (<c>InsightsOrchestrator.EnrichParametersFromSubject</c>), so the nodes reach the
+    /// subject through it, and the route asks for Write on the subject when a node that can write references it.
+    /// </summary>
+    private const string MatterSubjectParameter = "matterId";
 
     /// <summary>
     /// Default <c>topic</c> dimension for the InsightSummaryCard widget invocation
@@ -128,7 +367,6 @@ public static class InsightEndpoints
         [FromBody] InsightAskRequest? request,
         HttpContext httpContext,
         IInsightsAi insightsAi,
-        IConsumerRoutingService consumerRouting,
         InsightWidgetsTelemetry widgetTelemetry,
         ILogger<InsightAskRequest> logger,
         CancellationToken ct)
@@ -173,61 +411,25 @@ public static class InsightEndpoints
             }
         }
 
-        // Resolve Question → Guid. Two acceptable inputs (in priority order):
-        //   1. A raw Guid (advanced/direct path — original Phase 1 contract; still works).
-        //   2. A canonical playbook name (e.g., "matter-health-single") registered as an
-        //      enabled sprk_playbookconsumer Binding row (consumerType 'insights-ask',
-        //      sprk_consumercode = the canonical name, sprk_playbook = the per-env
-        //      sprk_analysisplaybook Guid). FR-P3-01 hard cutover (ADR-039 single routing
-        //      surface): this replaces the deleted per-environment config name map.
-        // The Guid attempt comes first so existing Guid callers see no behavior change.
-        //
-        // EXACT-code semantic: ResolveBindingAsync falls back to the 'default' row when the
-        // requested code has no exact row. This endpoint must REJECT unknown canonical
-        // names, so it accepts the resolution only when the returned Binding's ConsumerCode
-        // equals the requested name (OrdinalIgnoreCase) — a default-row fallback means
-        // "not registered" here.
-        if (!Guid.TryParse(request.Question, out var playbookId) || playbookId == Guid.Empty)
+        // Phase 1 subject contract: matter:{guid}. The route filter has already parsed and authorized it.
+        if (!TryParseMatterSubject(request.Subject, out var subjectMatterId, out var subjectError))
         {
-            var binding = await consumerRouting.ResolveBindingAsync(
-                ConsumerTypes.InsightsAsk, consumerCode: request.Question, cancellationToken: ct);
-
-            // Null/empty ConsumerCode is treated as "default" by the resolution algorithm —
-            // normalize before comparing so a null-code default row behaves identically to a
-            // literal "default" row (same normalization as AssistantToolCallHandler).
-            if (binding is not null
-                && string.Equals(
-                    string.IsNullOrWhiteSpace(binding.ConsumerCode) ? "default" : binding.ConsumerCode,
-                    request.Question,
-                    StringComparison.OrdinalIgnoreCase)
-                && binding.PlaybookId is { } boundPlaybookId
-                && boundPlaybookId != Guid.Empty)
-            {
-                playbookId = boundPlaybookId;
-            }
-            else
-            {
-                return BadRequest(
-                    "'question' must be either a valid playbook Guid id OR a canonical name " +
-                    "registered as an enabled sprk_playbookconsumer row (consumerType " +
-                    $"'{ConsumerTypes.InsightsAsk}', sprk_consumercode = the canonical name). " +
-                    $"Received: '{request.Question}'.");
-            }
+            return BadRequest(subjectError);
         }
 
-        // Phase 1 subject contract: matter:{id}. Other schemes are out of scope per task POML.
-        if (!request.Subject.StartsWith(MatterSubjectPrefix, StringComparison.OrdinalIgnoreCase))
+        // Task 163: run EXACTLY the playbook the route filter resolved and authorized (an enabled insights-ask
+        // Binding; parameters through the shared policy; the caller's rights on the subject and every record
+        // parameter decided as the caller). No second resolution here — one that could pick a different playbook
+        // than the one the rights were decided for. Without the filter's decision nothing runs (fail closed).
+        if (httpContext.Items.TryGetValue(AuthorizedAskRunItemKey, out var decided) is false
+            || decided is not AuthorizedAskRun authorizedRun)
         {
-            return BadRequest(
-                $"'subject' must begin with '{MatterSubjectPrefix}' in Phase 1 " +
-                "(e.g., 'matter:{id}'). Other schemes are not yet supported.");
+            logger.LogError(
+                "[INSIGHTS-ASK] no route-filter authorization decision on the request; denying (fail closed)");
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
 
-        var subjectId = request.Subject.Substring(MatterSubjectPrefix.Length).Trim();
-        if (string.IsNullOrEmpty(subjectId))
-        {
-            return BadRequest($"'subject' is missing an identifier after '{MatterSubjectPrefix}'.");
-        }
+        var playbookId = authorizedRun.PlaybookId;
 
         // ---------------------------------------------------------------
         // Auth context — derive tenantId + caller oid from claims.
@@ -274,10 +476,18 @@ public static class InsightEndpoints
         // ---------------------------------------------------------------
         var facadeRequest = new InsightsAgentRequest(
             Question: playbookId,
-            Subject: request.Subject,
+            // Task 163: the CANONICAL form of the authorized id, not the raw string — so what the playbook
+            // and the cache key see is exactly the record the route filter asked Dataverse about, whatever
+            // GUID spelling (braces, case, no dashes) the caller sent.
+            Subject: $"{MatterSubjectPrefix}{subjectMatterId}",
             Parameters: request.Parameters,
             TenantId: tenantId,
-            AccessibleScopeHash: accessibleScopeHash);
+            AccessibleScopeHash: accessibleScopeHash)
+        {
+            // Task 163: the subject right the route filter established as the caller. When it is not Write, the facade
+            // refuses a run that can write (the playbook gained a writing node after the filter decided).
+            SubjectWriteAuthorized = authorizedRun.SubjectWriteAuthorized,
+        };
 
         // ---------------------------------------------------------------
         // Widget telemetry (NFR-06 / task 051):
@@ -330,6 +540,15 @@ public static class InsightEndpoints
                 ex.ErrorCode, tenantId, request.Subject);
 
             return ex.AsFeatureDisabled503();
+        }
+        catch (SdapProblemException ex) when (ex.Code == InsightsAgentRequest.SubjectWriteRequiredCode)
+        {
+            // Task 163: the facade's run guard refused a run that can write — the caller's Write on the subject was
+            // not established. Nothing ran. The route's deny shape: the uniform 404 (no id, no reason).
+            logger.LogWarning(
+                "[INSIGHTS-ASK] run refused: playbook {PlaybookId} can write and the caller's Write on the subject was not established. TenantId={TenantId}",
+                playbookId, tenantId);
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
         catch (ArgumentException ex)
         {

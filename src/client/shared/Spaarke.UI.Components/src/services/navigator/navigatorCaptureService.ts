@@ -198,7 +198,8 @@ async function resolveDisplayName(
       attributes?: string[]
     ) => Promise<{ PrimaryNameAttribute?: string }>;
   }
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+  // Optional (falls back to a label): the nearest frame that has getEntityMetadata (task 081 round 5).
+  const utility = getXrm('metadata')?.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
   if (!utility?.getEntityMetadata) return fallback;
 
   try {
@@ -270,7 +271,9 @@ export function startNavigatorCapture(options: NavigatorCaptureOptions = {}): St
     inFlight = true;
     try {
       // Task-001 spike lesson #1: re-acquire Xrm fresh EVERY tick — never cache.
-      const xrm = getXrm();
+      // WebApi (history writes), getGlobalContext (owner) and getPageContext (current page);
+      // the optional record-name lookup asks for 'metadata' itself (task 081 round 5).
+      const xrm = getXrm(['webApi', 'utility', 'pageContext']);
       const page = derivePageFromXrm(xrm);
 
       if (page === undefined) return; // Xrm/getPageContext unreachable this tick — preserve last known state

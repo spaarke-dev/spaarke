@@ -94,12 +94,67 @@ Both use existing `SystemAdmin` policy (`AuthorizationModule.cs:241`) per Q6 own
 ### Four global field exclusions
 
 `createdby`, `modifiedby`, `createdonbehalfby`, `modifiedonbehalfby` — these are touch-history, not association.
+**One exception, on one surface only:** the people-targeting surface admits a HUMAN `createdby` (ADR-034 Amendment
+A3, below). Discovery still excludes it everywhere; the resolver synthesizes it for that surface alone.
+
+---
+
+## Three Consumption Surfaces (ADR-034 A1 + A3)
+
+One resolver, three questions. Each is a `MembershipResolveOptions` setting on `IMembershipResolverService.ResolveAsync`;
+none is a second mechanism.
+
+| Surface | Option | Question it answers | Which descriptors bind | Consumers |
+|---|---|---|---|---|
+| **AI scoping** (default) | `options: null` | "Which records is this user associated with, in any way?" — generous by design, for retrieval | Every discovered descriptor (owner, team, BU, contact, account, organization) | `GET /api/users/me/memberships/{entityType}`, LookupUserMembership without `targeting` |
+| **Authorization** (A1/A1.1) | `AccessConferringOnly: true` | "Which records does this association let the user ACCESS?" | Registry-listed Contact/Organization columns + platform ownership (`ownerid`, `owningteam`, `owningbusinessunit`) | `AccessibleRecordSetService.ComposeForSystemUserAsync` |
+| **People targeting** (A3, task 152) | `PeopleTargeting: true` (`MembershipResolveOptions.People`) | "Which records are FOR this person?" — attention: briefing, notifications | A **human** `createdby`; the user-valued owner (`ownerid` / `owninguser`); registry **Contact**-typed "Assigned *" columns bound to the caller's **linked contact** (task 141). Nothing else — `owningteam`, `owningbusinessunit`, Team/BU/Organization/Account-typed lookups and maker-authored systemuser lookups select nothing | `DailyBriefingCollector` (all channels + High Priority), `PortfolioService` (Workspace portfolio / health metrics) and through it `BriefingService.GetTopPriorityMatterAsync`, LookupUserMembership with `"targeting": "people"` (every notification playbook) |
+
+Why the third surface exists (owner decisions round 2 item 9 + Q8, round 3 D1, 2026-09-30): a business unit's
+DEFAULT team contains every user in the unit, so binding `owningteam` put every team- or BU-owned matter in every
+same-BU user's briefing and notifications. Team and BU ownership are **access** facts; they are not **attention**
+facts. "Created By (when human) decides who a record is FOR — never who can open it."
+
+Rules of the people surface:
+
+- **Human Created By only.** The caller's `systemuser.applicationid` is read; an application user (e.g. the BFF's
+  own `# mi-bff-api-dev`, Created By of every BFF-created row) binds no `createdby` condition and a
+  `people_targeting_createdby_skipped` warning is logged. An unreadable systemuser row is treated the same way.
+- **Linked contact only.** "Assigned *" binds through `PersonIdentity.ContactId` (task 141's
+  `systemuser.sprk_primarycontact` / `contact.sprk_externalobjectid` link). No link → the term binds nothing and a
+  `member_skipped … reason=people_targeting_no_linked_contact` warning is logged. Never an email/UPN/name match.
+- **Mutually exclusive with `AccessConferringOnly`** — requesting both throws `ArgumentException`.
+- **Cache key.** `|p:1` is appended to the options hash only when set: every pre-existing key is byte-identical, and a
+  people-targeted call never shares a cache entry (2 min since task 132) with an AI-scoping call for the same user and entity.
+- **Selecting is not authorizing.** Every consumer reads the rows it SHOWS under the caller's Dataverse security
+  (`IImpersonatedCommunicationQuery`, MSCRMCallerID = caller), so a record FOR someone that they cannot open is
+  trimmed by Dataverse. A failed caller-context read is reported as failed (the briefing's `failedChannels` /
+  `highPriorityFailedEntityTypes`, the workspace briefing's `topPriorityMatterUnavailable`), never answered app-only.
+- **Read the whole set (briefing and Workspace consumers).** `DailyBriefingCollector` and `PortfolioService` (and,
+  through it, the Workspace top-priority matter) read their people-targeted ids to completion with `PeopleTargetedSet`
+  (one read at the resolver's 5,000-row ceiling, plus one confirmation read when that page comes back full). The
+  resolver pages in primary-id order, so the default 500-row page is an arbitrary subset, not the most recent rows; a
+  set larger than the ceiling is reported FAILED / unavailable, never shown truncated.
+  **Not the `LookupUserMembership` node:** with `"targeting": "people"` it still reads ONE page at
+  `MembershipResolveOptions.DefaultLimit` (500) and exposes `continuationToken` (pre-existing paging, unchanged by
+  task 152). The notification playbooks interpolate `myMatters.ids` into a downstream FetchXML `in` condition, and a
+  5,000-value `in` list is not a safe query (Dataverse passes `in` values as SQL parameters, and SQL Server refuses a
+  request with more than 2,100), so the node is not routed through `PeopleTargetedSet`; a person with more than
+  500 people-targeted matters gets notifications for a subset. Closing that needs the downstream query to page or
+  chunk its `in` list (a node/query contract change, not made here).
+
+Server-created records therefore name a person in an "Assigned *" column, because their Created By is the
+application user: `TodoGenerationService`, `TaskActionCore`, the external-portal to-do create and `POST
+/api/v1/events` write `sprk_assignedto`; Office quick-create writes `sprk_assignedtointernal` (owner A7). Precedence
+for the server to-do/task writers (`AssignedToDefaults`): a supplied assignee is kept; else the triggering person's
+linked contact; else the regarding parent's `sprk_assignedtointernal`, then `sprk_assignedattorney1`; else blank +
+`todo_unassigned`. Never a team.
 
 ---
 
 ## Identity Normalization (6-path, fail-isolated)
 
-`IdentityNormalizationService` (`Services/Ai/Membership/IdentityNormalizationService.cs:40`) resolves a `systemuserid` into the full `PersonIdentity` by querying 6 paths. Each path is independent: failure on one does NOT fail the others (per-path try/catch + warning log). Result cached in Redis (`CacheKeyPrefix = "membership:identity:"` at line 48) for 10 minutes per ADR-009.
+`IdentityNormalizationService` (`Services/Ai/Membership/IdentityNormalizationService.cs:40`) resolves a `systemuserid` into the full `PersonIdentity` by querying 6 paths. Each path is independent: failure on one does NOT fail the others (per-path try/catch + warning log). Result cached through `ITenantCache` (`tenant:{tid}:membership-identity:{systemUserId}:v2`) for **2 minutes** — and **never when a path FAILED** (unified-access-control-r2 task 132: a failed path is recorded on the identity, internal `PersonIdentity.Faults`, and such an identity is returned but not cached; it was 10 minutes and cached faults until then).
 
 | # | Source field type | Resolves via | Returned field |
 |---|---|---|---|
@@ -120,7 +175,7 @@ Steps 1–3 run in parallel via `Task.WhenAll`. Steps 4–5 are sequential after
 
 `MembershipResolverService` (`Services/Ai/Membership/MembershipResolverService.cs:64`) combines discovery + normalization + a single OR-joined FetchXml query against the target entity. Pipeline (algorithm doc-comment at `MembershipResolverService.cs:5-22`; cache key prefix at `:76`; TTL at `:79`):
 
-1. Cache key `membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}`, 5-min TTL (Phase 1A, FR-1A.8).
+1. Cache key `tenant:{tid}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v5`, **2-min TTL** (was 5 until task 132); a response built over a faulted identity is not cached.
 2. On miss: discover descriptors → filter by `options.Roles` + `options.IdentityTypes` → resolve identity → build single `<filter type="or">` FetchXml with one `<condition>` per (descriptor, identity value) pair.
 3. Execute via `IGenericEntityService.RetrieveMultipleAsync(FetchExpression)`.
 4. Materialize: dedupe ids, sort ascending, build `byRole` map by re-classifying each result row against descriptors.
@@ -155,9 +210,9 @@ Phase 2 ships a materialized junction `sprk_userentityassociation` plus event-dr
 | Subscription host (Null peer) | `Services/Ai/Membership/NullMembershipJunctionUpdaterHost.cs:47` | ADR-032 hosted-service peer — no `ServiceBusClient` constructed; logs Info on start | **Active by default** |
 | Junction handler | `Services/Ai/Membership/MembershipJunctionUpdater.cs:76` | Idempotent retrieve-by-alternate-key + create/update/delete per FR-2P2.4; Scoped lifetime; **ALWAYS registered** (no kill-switch — reused by both subscription host AND recon job) | Always active |
 | Reconciliation backstop | `Services/Ai/Membership/MembershipReconciliationJob.cs:113` (algorithm header `:14-46`; topic-independence rationale `:51-60`) | Nightly recon scan of source-of-truth Lookups → synthesizes events → dispatches DIRECTLY to `IMembershipJunctionUpdater` (no topic dependency) | `Membership:Reconciliation:Enabled` defaults **true**; cron `0 2 * * *` daily 02:00 UTC |
-| Cache invalidator (real) | `Services/Ai/Membership/MembershipCacheInvalidator.cs:38` | Redis pub/sub publisher to channel `membership-cache-invalidate` (FR-2P2.8); mirrors `JobStatusService` convention | Gated by `Membership:CacheInvalidator:Enabled` (default **false**) **AND** `IConnectionMultiplexer` registered (Redis enabled) |
+| Cache invalidator (real) | `Services/Ai/Membership/MembershipCacheInvalidator.cs` | Redis pub/sub publisher to channel `membership-cache-invalidate` (FR-2P2.8) **and** — since task 132 — the BFF write-path access evictions (`InvalidateUserAccessAsync`, `InvalidateRecordOwnerChangeAsync`, `InvalidateRecordShareChangeAsync` — the last called, through `IRecordShareWriteObserver`, by `DataverseWebApiService` on every share write it makes; SCAN + DEL, every tenant, only for a cache that can hold the type) | Registered whenever **`Redis:Enabled=true`**; the junction PUBLISH (and the subscriber) additionally need `Membership:CacheInvalidator:Enabled=true`. The old gate (`Enabled` AND an `IConnectionMultiplexer` already registered) could never select it: `AddMembership` runs before `AddCacheModule` (task 132) |
 | Cache subscriber | `Services/Ai/Membership/MembershipCacheInvalidationSubscriber.cs` | Hosted service that subscribes on `StartAsync`, evicts matching `membership:resolved:{personId:D}:{entityLogicalName}:*` entries via Redis SCAN+DEL | Registered alongside real invalidator |
-| Cache invalidator (Null peer) | `Services/Ai/Membership/NullMembershipCacheInvalidator.cs:28` | ADR-032 P2 — logs once at construction; debug-only per-call log | **Active by default** |
+| Cache invalidator (Null peer) | `Services/Ai/Membership/NullMembershipCacheInvalidator.cs` | ADR-032 P2 — logs once at construction (Warning: every invalidation inert); debug-only per-call log | Only when Redis is NOT the cache (in-memory — Development/Testing) |
 | Cache invalidation message | `Services/Ai/Membership/MembershipCacheInvalidationMessage.cs` | Wire payload for the Redis channel | n/a |
 | DI module | `Infrastructure/DI/MembershipModule.cs:65` (`AddMembership(services, configuration)` at `:73-75`; bootstrap hosted service at `:313`) | Unconditional resolver/discovery/identity registrations; SYMMETRIC kill-switched registrations for publisher/host/invalidator; recon job seeds `BackgroundJobDefinition` row | n/a |
 
@@ -174,14 +229,14 @@ MembershipEndpoints.GetMyMembershipsAsync (MembershipEndpoints.cs:138)
     │ 2. ResolveSystemUserIdAsync(oid, ...)               (:377)
     │     ├── Redis hit  → cached systemuserid
     │     └── Redis miss → systemuser.azureactivedirectoryobjectid=oid
-    │                       (10-min TTL, ADR-028)
+    │                       (10-min TTL, ADR-028 — oid → systemuserid only)
     │ 3. Build MembershipResolveOptions from query CSV   (:243)
     ▼
 IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
     │ MembershipResolverService.cs:64
     │
     │ Cache key: membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}
-    │  └── 5-min TTL (Phase 1A, FR-1A.8)
+    │  └── 2-min TTL (task 132; never caches a response built over a faulted identity)
     │
     ▼ Cache MISS:
     ├─→ IMembershipFieldDiscoveryService.DiscoverAsync(entityType)
@@ -193,7 +248,7 @@ IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
     │
     ├─→ IIdentityNormalizationService.ResolveAsync(systemUserId)
     │     │ IdentityNormalizationService.cs:40
-    │     │ Cache key: membership:identity:{systemUserId}  (10-min TTL)
+    │     │ Cache key: tenant:{tid}:membership-identity:{systemUserId}:v2  (2-min TTL; faulted → not cached)
     │     │ 6 paths in parallel/sequential per the contract
     │     ▼
     │   PersonIdentity { systemUserId, contactId?, teamIds[]?, BU, accountId?, orgIds[]? }
@@ -206,7 +261,7 @@ IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
           ▼
         MembershipResponse {entityType, personIdentity, ids[], byRole, count, cacheExpiresAt, continuationToken?}
           ▼
-        Cache write (5-min TTL) — failure is fail-open
+        Cache write (2-min TTL) unless faulted — a cache failure is fail-open
           ▼
         HTTP 200 OK (camelCase JSON locked at type level)
 ```
@@ -256,7 +311,7 @@ Azure Service Bus topic: sprk-membership-changes  (Bicep task 071; operator-depl
     │       │            ▼
     │       │   SCAN + DEL `{instanceName}membership:resolved:{personId:D}:{entity}:*`
     │       │            (next read repopulates from junction / FetchXml)
-    │       └── Null (default) → debug-log no-op (5-min TTL is correctness backstop)
+    │       └── channel switch off (default) → debug-log no-op (2-min TTL is correctness backstop)
     │
     └── (Future subscriptions: cache warmers, Teams notifiers, etc. — none shipped in R3)
 
@@ -298,7 +353,9 @@ This section enumerates every BFF surface that currently consumes the membership
 |---|---|---|---|
 | `LookupUserMembershipNodeExecutor` | `Services/Ai/Nodes/LookupUserMembershipNodeExecutor.cs:70` | **Shipped — production wired** | Playbook node executor for `ActionType=52` (added task 040). Singleton-with-Scoped DI pattern via `IServiceScopeFactory`. Binds `{ids[], byRole, count, continuationToken, cacheExpiresAt}` to the node's `OutputVariable` for Handlebars consumption (e.g., `{{joinIds myMatters.ids}}`). |
 | `GET /api/users/me/memberships/{entityType}` | `Api/Membership/MembershipEndpoints.cs:102` | **Shipped — production wired** | Single user-facing HTTP endpoint. Auth: `RequireAuthorization()` default JWT (line 93). |
-| `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs:172` | **Shipped — production wired (Wave 28 / GitHub #229 closeout, 2026-06-22)** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` via the same `systemuser.azureactivedirectoryobjectid` cross-reference algorithm as `MembershipEndpoints.ResolveSystemUserIdAsync` (10-min Redis cache under sibling prefix `membership:briefing-currentuser:`), calls `IMembershipResolverService.ResolveAsync(systemUserId, "sprk_matter", options: null, ct)`, queries Dataverse for matter detail rows by resolved IDs, applies the deterministic heuristic (max overdue events; tie-break = highest utilization; final tie-break = matter name). Failure-soft: any AAD-oid/resolver/Dataverse failure returns `null` TopMatter (briefing remains fully populated). Non-Guid `oid` short-circuits to `null` without I/O. Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs` (7 scenarios). |
+| `DailyBriefingCollector` (`POST /api/ai/daily-briefing/render` + `/email`, High Priority) | `Services/Ai/Narrators/DailyBriefingCollector.cs` | **People-targeting surface (task 152)** | Resolves events, matters, projects, documents and to-dos with `MembershipResolveOptions.People`; reads every returned row as the caller through `IImpersonatedCommunicationQuery` (chunked at 50 ids); failed reads are named in `failedChannels` / `highPriorityFailedEntityTypes`; all channels failing throws. Holds no app-only Dataverse client. |
+| `BriefingService.GetTopPriorityMatterAsync` (`GET /api/workspace/briefing`) | `Services/Workspace/BriefingService.cs` | **Shipped (Wave 28 / GitHub #229); people-targeting surface since task 152** | Replaces the prior STUB that returned hardcoded mock matter data. Resolves AAD `oid` → `systemuserid` (the `systemuser.azureactivedirectoryobjectid` cross-reference, 10-min Redis cache under `membership:briefing-currentuser:`), then takes the matters FOR the user from `PortfolioService.ReadMattersForSystemUserAsync` (below) — candidates from `MembershipResolveOptions.People`, read to completion (`PeopleTargetedSet`), detail rows + overdue-task counts read as the caller. Deterministic heuristic: max overdue tasks; tie-break = highest utilization; final tie-break = matter name. **Fail closed (task 152):** a failed people resolution, a people set larger than the resolver's 5,000-row ceiling, or a failed caller-context read sets `topPriorityMatterUnavailable` — "could not be determined", distinct from "no matters" (`null` TopMatter). A non-Guid `oid` or an unprovisioned user short-circuits to `null` without I/O. (Task 152 also fixed the original detail query, which named four columns that do not exist on `sprk_matter` and always failed.) Unit tests: `tests/unit/Sprk.Bff.Api.Tests/Services/Workspace/BriefingServiceTests.cs`. |
+| `PortfolioService` (`GET /api/workspace/portfolio`, `/health`, the Workspace briefing metrics) | `Services/Workspace/PortfolioService.cs` | **People-targeting surface since task 152 (verifier round 1)** | `ReadMattersForSystemUserAsync`: the matters FOR the user (`PeopleTargetedSet` over `MembershipResolveOptions.People`), read as the caller through `IImpersonatedCommunicationQuery` (chunked at 50 ids; `sprk_mattername`, `sprk_totalspendtodate`, `sprk_totalbudget`; overdue open tasks counted from `sprk_event`). Shared with `BriefingService` so the metrics and the top matter use one matter set. Replaced an app-only query with an ad-hoc `ownerid` = caller condition (the A1/D5 anti-pattern) that also selected three columns that do not exist on `sprk_matter`. A failed read keeps the endpoint's pre-existing empty portfolio. Unit tests: `PortfolioServiceTests.cs`. |
 
 > **Notes**: `Services/Ai/NodeService.cs:983` and `Services/Ai/Nodes/INodeExecutor.cs:139` contain only documentation references in comments — neither consumes the resolver.
 
@@ -312,6 +369,12 @@ All three notification playbooks were migrated in R3 Waves 9-10 (tasks 050-052) 
 | `notification-new-emails.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-emails.json` | Task 051 | Same pattern |
 | `notification-new-events.json` | `projects/spaarke-daily-update-service/notes/playbooks/notification-new-events.json` | Task 052 | Same pattern |
 
+**Task 152:** every notification playbook's LookupUserMembership node now carries `"targeting": "people"` (and no
+`roles` filter, which would have dropped Created By) in its source JSON — all seven
+`projects/spaarke-daily-update-service/notes/playbooks/notification-*.json`. The four that are live in dev (Matter/Project
+Activity Summary, Tasks Due Soon, Tasks Overdue, New Work Assignments) are redeployed through
+`scripts/Deploy-Playbook.ps1` as a recorded manual gate (`projects/unified-access-control-r2/notes/task-152-people-targeting.md`).
+
 Integration coverage: `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks/MigratedPlaybookTests.cs` + `MigratedPlaybookFixture.cs` (task 053).
 
 ### Consumers of `IMembershipEventPublisher` (Phase 2 publish path)
@@ -324,6 +387,18 @@ Integration coverage: `tests/integration/Sprk.Bff.Api.IntegrationTests/Playbooks
 | `OfficeService` (save-document path) | `Services/Office/OfficeService.cs:38` (field) + `:52` (ctor) | Implicit `ownerid` on Office-initiated document creates | Task 081/082 |
 
 All four sites use fire-and-forget semantics (Q2) — the mutation succeeds even when publish fails. Default state: publisher is the `NullMembershipEventPublisher` peer (per `Membership:EventPublisher:Enabled=false`); calls are logged at Info but no Service Bus interaction.
+
+**Event semantics (task 152, ADR-034 A3).** All four publish through `MembershipOwnerEvents.PublishOwnerAddedAsync` →
+`MembershipChangedEvent.ForRowOwner`: the event states the row's ACTUAL owner after the write — `PersonIdType=Team,
+PersonId=teamid` for a team-owned row, `PersonIdType=User, PersonId=systemuserid` for a user-owned row — typed from the
+owner value's `LogicalName`. Documents and Office save pass the team they wrote; events and quick-create read the owner
+back. An application-user owner is not a person and produces no event. `MembershipReconciliationJob` applies the same
+typing (`ReadLookupAsIdentity` types an `EntityReference` from its `LogicalName`, not from the descriptor, which is
+always SystemUser for the polymorphic Owner) and the same application-user rule, so both writers build the SAME
+junction key. Before task 152 the publishers wrote the caller's AAD **oid** as a User — false for team-owned rows and in
+an identity space reconciliation never writes; those old rows are orphans and the reconciliation orphan scan removes
+them. The wire contract (`schemaVersion` 1, closed enums, property names) is unchanged; no consumer parses the old
+semantics (the only consumer is `MembershipJunctionUpdater`, which writes `PersonId` verbatim).
 
 ### Consumers of `IMembershipJunctionUpdater` (Phase 2 write path — internal)
 
@@ -362,7 +437,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 | `MembershipJunctionUpdaterHost` (real impl) | ✅ Code present | Null peer active (host disabled) | Null peer active | Flip `Membership:JunctionUpdater:Enabled=true` after topic deploy |
 | `MembershipJunctionUpdater` (handler) | ✅ Always registered | ✅ Resolvable (used by recon job) | ✅ Resolvable | No kill-switch |
 | `MembershipReconciliationJob` + bootstrap | ✅ Always registered | ✅ Running (`Enabled=true` default; cron `0 2 * * *`) | ✅ Running | Independent of topic deploy |
-| `MembershipCacheInvalidator` (real impl) | ✅ Code present | Null peer active (default `Enabled=false`) | Null peer active | Requires BOTH `Membership:CacheInvalidator:Enabled=true` AND Redis registered |
+| `MembershipCacheInvalidator` (real impl) | ✅ Code present | Real impl active wherever Redis is (write-path evictions on; junction publish off by default) | Real impl active (Redis is mandatory in deployed environments) | `Redis:Enabled=true`; the junction publish also needs `Membership:CacheInvalidator:Enabled=true` (task 132) |
 | `MembershipCacheInvalidationSubscriber` (hosted service) | ✅ Code present | Not running (Null invalidator path) | Not running | Registered only when invalidator real impl wins |
 
 ### Feature flag matrix
@@ -371,7 +446,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 |---|---|---|---|---|
 | `Membership:EventPublisher:Enabled` | `false` | `MembershipEventPublisherOptions.cs:38` | `MembershipEventPublisher` registered; publishes to Service Bus topic | `NullMembershipEventPublisher` registered; logs Info, no SB interaction |
 | `Membership:JunctionUpdater:Enabled` | `false` | `MembershipJunctionUpdaterOptions.cs:65` | `MembershipJunctionUpdaterHost` BackgroundService runs; consumes subscription | `NullMembershipJunctionUpdaterHost` runs; logs once on start, no SB interaction |
-| `Membership:CacheInvalidator:Enabled` | `false` (also requires `IConnectionMultiplexer` registered) | `MembershipCacheInvalidatorOptions.cs:47` | `MembershipCacheInvalidator` + `MembershipCacheInvalidationSubscriber` registered | `NullMembershipCacheInvalidator` registered; debug-only logs, no Redis interaction |
+| `Membership:CacheInvalidator:Enabled` | `false` | `MembershipCacheInvalidatorOptions.cs` | junction PUBLISH on + `MembershipCacheInvalidationSubscriber` registered | junction publish is a logged no-op; the BFF write-path access evictions run regardless (task 132). With Redis off, `NullMembershipCacheInvalidator` is registered either way |
 | `Membership:Reconciliation:Enabled` | **`true`** | `MembershipReconciliationOptions.cs:73` | Job runs on configured cron (default `0 2 * * *` daily 02:00 UTC) | Job seeded but disabled in `BackgroundJobDefinition` row; can be re-enabled via admin endpoint |
 | `Membership:OrganizationLookup:UserLookupField` | (empty) | `MembershipOptions.cs` | `OrganizationMembershipResolver` queries `sprk_organization` filtered by the configured field | Returns empty `organizationIds[]` + Info log ONCE per process |
 
@@ -390,7 +465,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 - **p95 ≤ 300ms** for `/api/users/me/memberships/{entityType}` (spec NFR-04 / AC-1A.5).
 - **Measurement**: App Insights server-side request telemetry (owner clarification 2026-06-20 — NOT synthetic load test).
 - **In-process canary**: Task 056's perf test runs in CI against a mocked Dataverse; current measurement p95 = 1 ms (well under budget — the budget exists for production Dataverse latency).
-- **Cache hit ratios**: discovery cache 60-min TTL; identity cache 10-min TTL; resolved cache 5-min TTL Phase 1A (longer + pub/sub-invalidated Phase 2 when read-path swap ships).
+- **Cache hit ratios**: discovery cache 60-min TTL; identity cache 2-min TTL; resolved cache 2-min TTL (both were longer until task 132 cut them to the owner's "minutes" bound; BFF team / BU / owner writes evict them).
 
 ---
 
@@ -401,7 +476,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 | Event publish failure (Service Bus down) | Q2 fire-and-forget — mutation succeeds; structured Warning log with correlationId (NFR-08). Nightly `MembershipReconciliationJob` is the backstop (max 24h staleness). |
 | Topic unavailable (operator hasn't deployed task 071) | ADR-032 Null-Object peers — `NullMembershipEventPublisher` + `NullMembershipJunctionUpdaterHost` + `NullMembershipCacheInvalidator` register when feature flags off. BFF still ships. Phase 1A endpoint unaffected. |
 | Junction row drift (event lost, mid-edit failure) | Recon job dispatches `Updated` events directly to `IMembershipJunctionUpdater` (no topic). Handler is idempotent (retrieve-by-alternate-key + create/update/delete) — duplicate dispatch is safe. |
-| Cache stale after junction write | `MembershipCacheInvalidator` publishes to Redis channel `membership-cache-invalidate`. Subscriber clears `membership:resolved:{personId:D}:{entity}:*` via SCAN+DEL. If pub/sub fails, 5-min TTL is the correctness backstop — pub/sub is latency optimization, not correctness. |
+| Cache stale after junction write | `MembershipCacheInvalidator` publishes to Redis channel `membership-cache-invalidate` (channel switch on). Subscriber clears `tenant:*:membership-resolved:{personId:D}:{entity}:*` via SCAN+DEL. If pub/sub fails, the 2-min TTL is the correctness backstop — pub/sub is latency optimization, not correctness. |
 | Redis unavailable | Cache read/write failures fail-open (warn + continue). Discovery + identity + resolved paths all re-execute against Dataverse. Endpoint stays available (degraded latency). |
 | Org-membership unset (`OrganizationLookup:UserLookupField` empty) | `OrganizationMembershipResolver` returns empty list + Info log ONCE per process (operator setup pending; not an error). |
 | `includeRelated` > 1 hop | `400 BadRequest` with ProblemDetails `type="transitive-chain-too-deep"` (Q3 cap). Pre-validated at `MembershipResolverService.cs:142-159` before any I/O. |
@@ -489,9 +564,9 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 | User endpoint group | `Api/Membership/MembershipEndpoints.cs` | `:89` `MapMembershipEndpoints`; `:92-94` group + `RequireAuthorization()`; `:102` `MapGet("/{entityType}", ...)`; `:138` `GetMyMembershipsAsync` handler; `:344` `ExtractAadObjectId`; `:377` `ResolveSystemUserIdAsync` (AAD-oid → systemuserid + 10-min cache) |
 | Admin endpoint group | `Api/Admin/MembershipAdminEndpoints.cs` | `:42` `MapAdminMembershipEndpoints`; `:44-46` group + `RequireAuthorization("SystemAdmin")`; `:58` GET discovered; `:77` POST refresh-metadata; `:102` `DiscoverEntityAsync`; `:161` `RefreshMetadataAsync` |
 | Endpoint mapping wire-up | `Infrastructure/DI/EndpointMappingExtensions.cs` | `:275` `MapMembershipApi()`; `:283` `MapAdminMembershipEndpoints()` |
-| Orchestrator | `Services/Ai/Membership/MembershipResolverService.cs` | `:64` type; `:76` cache key prefix; `:79` 5-min `CacheTtl`; algorithm doc-comment `:5-22`; `:118` `ResolveAsync`; 1-hop depth pre-validation `:142-159` |
+| Orchestrator | `Services/Ai/Membership/MembershipResolverService.cs` | `:64` type; `CacheResource` cache key resource; 2-min `CacheTtl` (task 132); algorithm doc-comment `:5-22`; `:118` `ResolveAsync`; 1-hop depth pre-validation `:142-159` |
 | Discovery service | `Services/Ai/Membership/MembershipFieldDiscoveryService.cs` | `:59` type; `:69` cache key prefix (`"membership:discovery:"`); algorithm `:12-23` (header comment); `:79-81` trailing-digits regex |
-| Identity normalization | `Services/Ai/Membership/IdentityNormalizationService.cs` | `:40` type; `:48` cache key prefix (`"membership:identity:"`); `:50` 10-min TTL; 6-path contract `:7-15` (header comment) |
+| Identity normalization | `Services/Ai/Membership/IdentityNormalizationService.cs` | `:43` type; `CacheResource` (`"membership-identity"`); 2-min `CacheTtl`, `CacheVersion` 2 (task 132); 6-path contract `:7-15` (header comment) |
 | Organization-lookup resolver | `Services/Ai/Membership/OrganizationMembershipResolver.cs` | `:53-54` type (dual-interface impl); `:57` `OrganizationEntityLogicalName`; failure-soft latch `:70` |
 | Options | `Services/Ai/Membership/MembershipOptions.cs` | binds `Membership:*` section |
 | DTOs | `Services/Ai/Membership/Models/MembershipResponse.cs` · `Models/PersonIdentity.cs` · `Models/MembershipDescriptor.cs` | camelCase JSON locked at type level |
@@ -552,7 +627,7 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 | **Mapping `sprk_assignedlawfirm*` to `Contact`** | Wrong (was an error in design.md). They are Lookup → `sprk_organization` → `identityType="Organization"` per Q4. Handled by per-entity `FieldRoleOverrides`. |
 | **Synchronous wait on event publish** | Q2 forbids it. Mutation succeeds independent of publish (`_ = membershipEventPublisher.PublishAsync(...)`). Recon job is the backstop. |
 | **Reusing `ServiceBusJobProcessor` queue for membership events** | Forbidden (D3). Use the new topic `sprk-membership-changes` with subscription-per-consumer. |
-| **Flipping `CacheInvalidator:Enabled=true` without Redis** | The DI module guards this: real impl only wins when BOTH the flag AND `IConnectionMultiplexer` is registered (`MembershipModule.cs:180-186`). Null peer wins otherwise — flip is silently ineffective. |
+| **Flipping `CacheInvalidator:Enabled=true` without Redis** | The DI module selects the real impl on `Redis:Enabled` (task 132); with Redis off the Null peer wins and logs that every invalidation is inert. ⚠️ Before task 132 the gate was `Enabled` AND an already-registered `IConnectionMultiplexer` — never true, because `AddMembership` runs before `AddCacheModule`, so the flip was ineffective EVERYWHERE, Redis or not. |
 | **Asymmetric registration** | Forbidden per `bff-extensions.md` §F.1. All three kill-switched services use SYMMETRIC registration (exactly one impl always bound) so minimal-API endpoints unconditionally inject the interface. |
 
 ---

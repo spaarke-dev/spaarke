@@ -15,6 +15,7 @@
  */
 
 import { resolveTenantIdSync } from "@spaarke/auth";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -33,35 +34,24 @@ const LOG_PREFIX = "[nextStepLauncher]";
 // Xrm resolution helpers
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 /**
  * Resolve the Dataverse client URL from Xrm.Utility.getGlobalContext().
- * Walks the frame hierarchy (self → parent → top) for robustness.
+ * Shared cross-frame walker (task 081 / C-8).
  *
  * @returns Client URL (e.g. "https://spaarkedev1.crm.dynamics.com") or null
  */
 export function getClientUrl(): string | null {
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            const xrm = (frame as any).Xrm;
-            const url: string | undefined =
-                xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-            if (url) {
-                return url.endsWith("/") ? url.slice(0, -1) : url;
-            }
-        } catch {
-            // Cross-origin frame — skip
+    try {
+        const url: string | undefined =
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+        if (url) {
+            return url.endsWith("/") ? url.slice(0, -1) : url;
         }
+    } catch {
+        // getGlobalContext() unavailable
     }
     return null;
 }
-
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // openWebResourceInNewTab — shared helper

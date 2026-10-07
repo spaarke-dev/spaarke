@@ -20,7 +20,6 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
-import { summaryWidgetVisibility } from './pillar9-visibility';
 // FR-15 (task 050): assistantContract is a REQUIRED registration member — this
 // widget declares an EXPLICIT opt-out (see the registration below).
 import { assistantContractOptOut } from '../../types/shared';
@@ -78,12 +77,7 @@ registerWorkspaceWidget(
   () =>
     import('./StructuredOutputStreamWidget') as Promise<{
       default: import('../../types/widget-types').WorkspaceWidgetComponent;
-    }>,
-  // Pillar 9 visibility opt-in (task 073, D-C-28). Summary category: reads
-  // `prefilledFields.summary` + `prefilledFields.tldr` (self-limited per
-  // FR-55 token budget — 500 chars / 5 bullets × 200 chars). See
-  // `pillar9-visibility.ts` for the derivation.
-  summaryWidgetVisibility
+    }>
 );
 
 /**

@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>An Office-pane To Do names the person it is for, so the Daily Briefing can find it again after 080 (#1044, writer half)</title>
+    <phase>5 Remediation — ownership</phase>
+    <gate>BLOCKED on unified-access-control-r2 task 141 (the user↔contact link contract). UAC-r2 will send the field names and the resolution rule when 141 is authored.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `OfficeService.cs` (bff-api) and adds a data-mutation test. It repairs a regression this project introduced (080).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A small, fully specified writer change once 141's contract exists. The judgment calls (no linked contact, an explicit assignee) are settled below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `OfficeService.cs`, which the 058 → 059 → 060 → 068 → 075 track also edits, strictly serially.</parallel-reason>
+    <deps>external: unified-access-control-r2 task 141</deps>
+    <tags>bff-api, office, dataverse, ownership, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <issue>https://github.com/spaarke-dev/spaarke/issues/1044</issue>
+  </metadata>
+
+  <prompt>After task 080, an Office-pane To Do is owned by a team and created by the BFF app user, so nothing on the row names the person it is for, and the Daily Briefing cannot find it. Default `sprk_assignedto` to the caller's contact when the user picks no assignee.</prompt>
+
+  <role>SPAARKE platform developer repairing a regression this project introduced, on the writer side of a split agreed with unified-access-control-r2.</role>
+
+  <goal>A To Do created from the Office pane with no assignee carries `sprk_assignedto` = the caller's contact. A To Do with an explicit assignee is unchanged, and no To Do creation is refused because a contact link is missing.</goal>
+
+  <context>
+    <background>
+      **The regression (#1044, ISS-012).**
+      - On master, `CreateTodoAsync` sets `ownerid = systemuser(caller)`, so the briefing's `owninguser = caller`
+        filter finds it.
+      - Task 080 made the owner the BU default team (I-6). The create is app-only
+        (`IGenericEntityService.CreateAsync`, `OfficeService.cs:2951`), so `createdby` is the BFF app user. This is
+        verified live: an app-created To Do shows `createdby` = `# mi-bff-api-dev` and an empty
+        `createdonbehalfby`.
+      - `sprk_assignedto` is written only when the user picks an assignee (`:2875`).
+      - So an Office To Do with no assignee names nobody.
+
+      **Owner decision, 2026-09-30** (relayed by unified-access-control-r2): the "for person" route uses the
+      EXISTING `sprk_todo.sprk_assignedto` (a CONTACT lookup) plus Created By. **No new column.**
+
+      **The agreed split** (cross-session, 2026-09-30; `notes/uac-r2-findings-2026-09-30.md` §9):
+      - **This task, Office path only:** when no assignee is chosen, default `sprk_assignedto` to the caller's
+        contact, resolved through 141's link. This preserves master's meaning of "my To Do".
+      - **UAC-r2 task 141:** the reliable user↔contact link. Only 1 of 8 active dev systemusers has
+        `sprk_primarycontact` set today.
+      - **UAC-r2 task 152:** the briefing matches Assigned To = the user's contact. Created By counts only when
+        `createdby` is a HUMAN systemuser (`systemuser.applicationid` is null), so app-user creates are excluded as
+        a data test, not a heuristic.
+      - **UAC-r2 task 152 also covers the server generators** (TodoGenerationService, TaskActionCore and the other
+        #1034 To Do writers). `TaskActionCore` is AI playbook code (`Services/Ai/Nodes/ActionCore`), not Office, so
+        it is NOT in this task.
+      - **Rejected by both projects:** impersonated creates (MSCRMCallerID) so Created By becomes the person. That
+        would need Create on `sprk_todo` for every add-in user, which widens the roles.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner decision 2026-09-30">No new column. Use `sprk_assignedto` (contact).</constraint>
+    <constraint source="this task">An explicitly chosen assignee always wins. The default applies only when `AssignedToContactId` is absent or empty.</constraint>
+    <constraint source="this task">A caller with no resolvable contact still gets their To Do: leave `sprk_assignedto` null and log a warning naming the missing link. Never refuse the create for this; a To Do that is hard to find beats a refused one.</constraint>
+    <constraint source="this task">Resolve the caller's contact through 141's contract exactly as UAC-r2 specifies it (field names, ambiguity rule). Do not invent a second user↔contact resolver. If 141 offers a shared resolver, use it.</constraint>
+    <constraint source="ADR-019">No new error code. This change adds no refusal.</constraint>
+    <constraint source="ADR-038">Tests go in KEEP paths: `tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs` (extend it) or a sibling.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">No assignee, and the caller has a linked contact: the written row carries `sprk_assignedto` = contact(caller), and the owner is still the resolved team (080 unchanged).</criterion>
+    <criterion testable="true">An explicit assignee: `sprk_assignedto` = that contact, not the caller's.</criterion>
+    <criterion testable="true">No assignee, and no linked contact: the create succeeds, `sprk_assignedto` is absent, and one warning is logged naming the caller and the missing link.</criterion>
+    <criterion testable="true">Seeded negative control: remove the default and the first criterion's test FAILS. Record both outputs.</criterion>
+    <criterion testable="true">Live check in dev once #1045 has merged and deployed and 141 has linked Test User 1: an Office To Do created with no assignee appears in Test User 1's Daily Briefing. This requires UAC-r2 task 152. If 152 has not shipped, record the row's `sprk_assignedto` and leave this criterion open, stating why.</criterion>
+    <criterion testable="true">Any Office To Dos created after 080 and before this task are listed, with `sprk_assignedto` null and `createdby` = the app user. Either stamp them via a dry-run-first, reversible script, or state that none exist. Before #1045 deploys there should be none, because dev runs master.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish-size delta measured per root CLAUDE.md §10 against a fresh build of master.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If 141's link turns out to be unavailable for most users (as `sprk_primarycontact` is today), most Office To Dos would still be unfindable. STOP and put that to the owner rather than shipping a default that rarely fires.</trigger>
+    <trigger>If UAC-r2's task 152 matches on something other than Assigned To = the user's contact, re-align with them before implementing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read 141's link contract, as sent by UAC-r2, and 152's matching rule. Confirm both still hold.</step>
+    <step>Implement the default in `CreateTodoAsync`, next to the existing assignee write.</step>
+    <step>Extend the data-mutation tests; run the seeded negative control.</step>
+    <step>Build, full suite, ArchTests, publish delta.</step>
+    <step>Check for post-080 Office To Dos with no assignee, and stamp them or state that none exist.</step>
+    <step>Live check once 152 ships. Write `notes/083-office-todo-person.md`. Update TASK-INDEX: 083 → ✅; comment on #1044.</step>
+  </steps>
+
+  <justification>
+    <existing>`CreateTodoAsync` already writes `sprk_assignedto` for an explicit assignee (`OfficeService.cs:2875`), and 141 supplies the user↔contact resolution.</existing>
+    <extension>Yes. This extends the existing assignee write with a default. It adds no component, endpoint, column or registration; the only new file is the task note.</extension>
+    <cost-of-doing-nothing>After #1045 merges, every Office-pane To Do with no assignee is missing from its creator's Daily Briefing, a regression against master (#1044).</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file role="edit">tests/integration/data-mutation/RecordOwnership/OfficeRecordOwnershipTests.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/083-office-todo-person.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/080-record-ownership.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/uac-r2-findings-2026-09-30.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <notes>
+    2026-10-04: gate met (UAC-r2 141 and 152 merged; escalation triggers 1 and 2 did not fire). OfficeService.CreateTodoAsync defaults sprk_assignedto to the caller's linked contact (IIdentityNormalizationService), warning todo_assignee_unset when none; never refuses. 3 tests added (+ factory doubles); seeded negative control red then restored; 18/18 Office/ownership, ArchTests 349/349, full suite 14,226/6/54 where the 6 are load-induced host-startup timeouts that pass 118/118 in isolation; CVE clean. No post-080 Office To Do lacks an assignee (3 exist, all explicitly assigned). OPEN: live check as Test User 1 (needs deploy) and publish-size delta (main session). Details: notes/083-office-todo-person.md.
+  </notes>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/083-office-todo-person.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Do not start until UAC-r2 has sent 141's link contract.</protocol>
+  </execution>
+</task>

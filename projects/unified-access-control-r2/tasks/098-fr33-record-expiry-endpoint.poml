@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-33 — one atomic "set the expiry of every share on this record" endpoint (reuses BulkUpdateAsync)</title>
+    <phase>FR-33 External grant expiry</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New mutation endpoint on the access-control surface; tags bff-api/auth/security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive write that changes the lifetime of EVERY external share on a record. Two fail-open paths exist (touching another record's grants; a shortened expiry not biting until a cache expires) and the delegation gate must apply.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a route to the ExternalAccess endpoint group (contended registration file) and depends on 096 + 097.</parallel-reason>
+    <deps>096, 097</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>FR-33 redesign, owner 2026-09-10: a record-level Expiration on the Manage Access toolbar that "applies to all sharing"</origin>
+  </metadata>
+
+  <prompt>The owner's design puts ONE Expiration date on the Manage Access toolbar that applies to every share on the record. It is stored by reusing sprk_externalrecordaccess.sprk_expiresdate (no new column — owner 2026-09-10, §11). Changing it must update the expiry of every ACTIVE grant on that record — contact rows AND organization rows — in ONE all-or-nothing write, using IGenericEntityService.BulkUpdateAsync as fixed by task 096. It must never touch another record's grants, never affect standing-grant access, and a SHORTENED expiry must take effect immediately rather than after a cache TTL.</prompt>
+  <role>SPAARKE platform developer, C#/.NET Minimal API + Dataverse + authorization filters.</role>
+  <goal>A Write-holding caller can set the expiry of every active share on a record in one atomic operation, with the delegation gate enforced and the change visible to the evaluator immediately.</goal>
+
+  <context>
+    <background>Why a new endpoint rather than N calls to /grant: calling /grant once per grant from the client is exactly the non-atomic path — a failure partway through while SHORTENING leaves some grants at the later date, fail-open. Scope is "shares on this record end" (owner 2026-09-10, §12.1): standing grants (task 042) have no sprk_externalrecordaccess row and keep their own switch, so they are out of scope by design. Every /api/v1/external-access mutation is gated by the task-008 DelegationRuleFilter (Write on the TARGET RECORD, evaluated as the caller via OBO, group-level). The external grant data is cached per contact; the seam test StandingGrantRuntimeUnionSeamTests shows invalidation exists ("so the next evaluation re-reads instead of serving up to 60s of stale TTL").</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task-008">Scope: authorization. Register the route INSIDE the /api/v1/external-access group so the group-level DelegationRuleFilter applies (Write on the target record, OBO). The request carries the explicit polymorphic root — recordType + recordId — NOT a legacy projectId (a mismatched pair authorizes one record and writes another). Do not add a client-side or capability pre-check that skips the server call.</constraint>
+    <constraint source="owner 2026-09-10 §12.2">Scope: the write. Use IGenericEntityService.BulkUpdateAsync (made atomic by task 096) via the IDataverseService ExternalAccess already injects. MUST NOT build a changeset, a $batch helper, a per-row loop, or any second bulk mechanism.</constraint>
+    <constraint source="owner 2026-09-10 §12.1">Scope: which rows. ACTIVE (statecode = 0) sprk_externalrecordaccess rows whose regarding root equals the request's record — contact rows AND organization rows. Inactive rows untouched. Rows on any other record untouched. Standing-grant access is out of scope by design and must be unaffected.</constraint>
+    <constraint source="task-097">Scope: validation. Same rules as 097: expiry required, not before today (Date Only; today is valid), 400 with an sdap.* reason code and nothing written.</constraint>
+    <constraint source="NFR-01">Scope: freshness. After a successful write, invalidate the cached grant data of every contact affected (for organization rows, the organization's members). A shortened expiry that keeps conferring access until a cache TTL expires is a fail-open window.</constraint>
+    <constraint source="design §12.2">Scope: Date Only through the SDK. BulkUpdateAsync writes via the SDK, not the Web API. Shape the sprk_expiresdate value so no time-zone conversion moves the date by a day — assert the stored date in a test.</constraint>
+    <constraint source="project">Scope: zero grants. A record with no active grants returns 200 with updatedCount = 0. Under the reuse design the date has nowhere to live until a share exists — the client holds it as the default for the next add (task 099). This is correct, not an error.</constraint>
+    <constraint source="CLAUDE.md §10 / §11">Scope: this task's PR. State the Placement Justification citing .claude/constraints/bff-extensions.md; report publish size vs a fresh master (hazards 3 and 4). Run /conflict-check first.</constraint>
+    <constraint source="review-2026-08-24">Scope: verification. Perturbation is mandatory; pair every positive with a negative; assert the distinguishing observable.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Run /conflict-check. Read GrantExternalAccessEndpoint (reference), the delegation filter registration, and the grant cache invalidation path.</step>
+    <step order="1">Implement: resolve the record's active grant rows, validate, one BulkUpdateAsync, then invalidate affected cache entries. Response { updatedCount, expiresDate }.</step>
+    <step order="2">Register on the external-access group.</step>
+    <step order="3">Tests per the closed set; perturbations.</step>
+    <step order="4">Build, full suite, publish size; update TASK-INDEX; write notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the grant rows cannot be resolved to "active rows on THIS record" with a single server-side filter — i.e. correctly selecting them needs client-supplied ids — STOP and escalate. Accepting a list of grant ids from the client would let a caller with Write on record A change grants on record B.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>GrantExternalAccessEndpoint writes sprk_expiresdate for ONE subject's grant; BulkUpdateAsync updates many rows atomically; the delegation filter already gates the group.</existing>
+    <extension>/grant cannot be extended: it is per-subject, and N /grant calls from the client is precisely the non-atomic path this design exists to avoid. The new route is thin — it composes three existing pieces (row resolution, BulkUpdateAsync, cache invalidation) and adds no service or DI registration.</extension>
+    <cost-of-doing-nothing>The toolbar Expiration cannot apply to all sharing atomically; shortening it via per-grant calls can leave some grants at the later date — access that outlives the date the user just set.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/SetRecordShareExpiryEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ (KEEP path)</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-098-record-share-expiry.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sets sprk_expiresdate on every ACTIVE grant of the record — contact rows and organization rows — in exactly ONE BulkUpdateAsync call.</criterion>
+    <criterion testable="true">Negative: inactive grants on the record are not modified.</criterion>
+    <criterion testable="true">Negative: grants on a DIFFERENT record are not modified.</criterion>
+    <criterion testable="true">Negative: standing-grant-derived access is unaffected.</criterion>
+    <criterion testable="true">Negative (authorization): a caller without Write on the record receives 403 sdap.access.deny.delegation_write_required, and nothing is written.</criterion>
+    <criterion testable="true">Negative: a missing or past expiry returns 400 with an sdap.* reason code, and nothing is written.</criterion>
+    <criterion testable="true">A record with no active grants returns 200 with updatedCount = 0.</criterion>
+    <criterion testable="true">The cached grant data of every affected contact is invalidated after a successful write.</criterion>
+    <criterion testable="true">The stored date equals the requested date (no time-zone shift).</criterion>
+    <criterion testable="true">Perturbation: replacing BulkUpdateAsync with a per-row loop fails at least one test; skipping cache invalidation fails at least one test.</criterion>
+    <criterion testable="true">Build green; full suite green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design: notes/decisions/external-grant-expiry-mandatory.md §10-§12. Consumed by task 099.
+
+    COMPLETED 2026-09-11 (session 8). Full record: notes/task-098-record-share-expiry.md.
+    - Route POST /api/v1/external-access/set-record-share-expiry; request { recordType, recordId, expiryDate }
+      (no legacy projectId); 200 { updatedCount, expiresDate }. Contract table for task 099 in the notes §6.
+    - OWNER DECISION 2026-09-11 "Renew them too": every statecode=0 share gets the date, lapsed ones included.
+    - PREMISES CORRECTED (12th wrong-task-file finding): (1) DelegationRuleFilter needed a NEW case — this file
+      listed it only as a reference, and without it the route denies every caller; (2) the NFR-01 "fail-open
+      cache window" premise is false — the cache holds no dates and a past expiry is rejected, so invalidation
+      is freshness (it speeds renewal), not a security boundary; (3) sprk_expiresdate is Format=DateOnly,
+      Behavior=TimeZoneIndependent (live metadata) — SDK value is midnight, DateTimeKind.Unspecified.
+    - Escalation trigger evaluated: rows resolve with ONE server-side filter — did not fire.
+    - Added beyond the literal criteria, from review: 409 refusal for a share also linked to another record
+      (the constraint "never touch another record's grants"); 422 above 1000 shares; refusal of an id-less row.
+    - Verified: 6/6 perturbations caught (P5/P6 re-run after an invalid first run); full Sprk.Bff.Api.Tests
+      12,300/0/58 at 23953342a; ArchTests census 117 -> 118 (caught by adr-check); publish +0.01 MB
+      (45.40 -> 45.41, 214 files each side); no vulnerable packages.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

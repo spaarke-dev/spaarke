@@ -40,6 +40,12 @@ namespace Sprk.Bff.Api.Tests.Api.Finance;
 /// boundary BEFORE the handler, so <see cref="FinanceRollupService"/> is never invoked (its
 /// Dataverse dependency is a never-called mock).
 /// </para>
+/// <para>
+/// 401 is only the outer boundary. The per-RECORD check these routes gained in unified-access-control-r2
+/// task 130 (Read on the parent as the caller, uniform 404 for absent-or-unreadable) is covered by
+/// <see cref="FinanceEndpointsAuthorizationContractTests"/>, which hosts this mapper alongside the finance and
+/// scorecard mappers over the real authorization stack.
+/// </para>
 /// </remarks>
 public class FinanceRollupEndpointsContractTests : IClassFixture<FinanceRollupEndpointsTestFixture>
 {

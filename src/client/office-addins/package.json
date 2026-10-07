@@ -10,8 +10,8 @@
     "start": "webpack serve --mode development",
     "start:outlook": "webpack serve --mode development --env addin=outlook",
     "start:word": "webpack serve --mode development --env addin=word",
-    "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "lint": "eslint shared word outlook --ext .ts,.tsx --max-warnings 0",
+    "lint:fix": "eslint shared word outlook --ext .ts,.tsx --fix",
     "typecheck": "tsc --noEmit --skipLibCheck",
     "test": "jest",
     "test:watch": "jest --watch",
@@ -20,10 +20,18 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^3.10.0",
-    "@spaarke/auth": "file:../shared/Spaarke.Auth",
     "@fluentui/react-components": "^9.54.0",
     "@fluentui/react-icons": "^2.0.245",
+    "@lexical/html": "0.41.0",
+    "@lexical/link": "0.41.0",
+    "@lexical/list": "0.41.0",
+    "@lexical/react": "0.41.0",
+    "@lexical/rich-text": "0.41.0",
+    "@lexical/selection": "0.41.0",
+    "@lexical/utils": "0.41.0",
     "@microsoft/office-js": "^1.1.89",
+    "@spaarke/auth": "file:../shared/Spaarke.Auth",
+    "lexical": "0.41.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -33,7 +41,10 @@
     "@babel/preset-env": "^7.23.9",
     "@babel/preset-react": "^7.23.3",
     "@babel/preset-typescript": "^7.23.3",
-    "@testing-library/react": "^14.2.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^29.5.12",
     "@types/office-js": "^1.0.377",
     "@types/react": "^19.0.0",
@@ -62,6 +73,6 @@
     "webpack-dev-server": "^4.15.1"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.0.0 <21.0.0"
   }
 }

@@ -68,7 +68,9 @@ public sealed class ComposeContentDedupTests
         _dataverse.Object,
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
-        dedupDetector: detector);
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object,
+        dedupDetector: detector, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     // SessionId "" skips the FR-07 rebind (no ChatSessionManager interaction) so the test targets the dedup hook.
     private static PromoteComposeDocumentRequest Request() => new()

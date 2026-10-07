@@ -11,6 +11,7 @@
  * @see approach-a-dynamic-form-renderer.md
  */
 
+import { childCreateFailure, createChildThroughBff } from "./services/childRecordWrites";
 import * as React from "react";
 import {
   FluentProvider,
@@ -20,6 +21,7 @@ import {
 } from "@fluentui/react-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { parseSidePaneParams } from "./utils/parseParams";
+import { cleanGuid } from '@spaarke/ui-components';
 import {
   HeaderSection,
   StatusSection,
@@ -35,7 +37,6 @@ import {
 import { FormRenderer } from "./components/form";
 import { MemoSection } from "./components/MemoSection";
 import { closeSidePane } from "./services/sidePaneService";
-import { getXrm } from "./utils/xrmAccess";
 import { IEventRecord } from "./types/EventRecord";
 import type { ILookupValue } from "./types/FormConfig";
 import {
@@ -44,6 +45,7 @@ import {
   parseWebApiError,
   type DirtyFields,
 } from "./services/eventService";
+import { splitPartialSave } from "./services/partialSaveOutcome";
 import {
   useOptimisticUpdate,
   useRecordAccess,
@@ -104,16 +106,26 @@ const KNOWN_NAV_PROPERTIES: Record<string, string> = {
  * Map statuscode → required statecode for valid Dataverse state transitions.
  * Dataverse requires statecode + statuscode to be set together.
  *
- * Active (statecode 0): Draft, Open, On Hold
- * Inactive (statecode 1): Completed, Closed, Cancelled
+ * LIVE sprk_event option set (verified spaarkedev1 2026-10-05; task 097):
+ * Active (statecode 0): Draft, Open, Completed, Closed, On Hold, Reassigned
+ * Inactive (statecode 1): No Further Action, Cancelled, Transferred
+ *
+ * Completed and Closed are ACTIVE — pairing them with statecode 1 is rejected by
+ * Dataverse ("not a valid status code for state code Inactive"), which made
+ * every "mark Completed / Closed" save from this pane fail. Pinned against
+ * docs/data-model/sprk_event-related-tables.md by the BFF test
+ * EventStatusWritePathTests.EventDetailSidePane_StatusMap_PairsEveryStatusWithItsLiveState.
  */
 const STATUSCODE_STATECODE_MAP: Record<number, number> = {
   1:         0, // Draft → Active
   659490001: 0, // Open → Active
+  659490002: 0, // Completed → Active
+  659490003: 0, // Closed → Active
   659490006: 0, // On Hold → Active
-  659490002: 1, // Completed → Inactive
-  659490003: 1, // Closed → Inactive
+  659490007: 0, // Reassigned → Active
+  2:         1, // No Further Action → Inactive
   659490004: 1, // Cancelled → Inactive
+  659490005: 1, // Transferred → Inactive
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -238,7 +250,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
           ? (currVal as ILookupValue).id
           : null;
         const origRaw = original[origLookupKey] as string | null | undefined;
-        const origId = origRaw ? origRaw.replace(/[{}]/g, "").toLowerCase() : null;
+        const origId = origRaw ? cleanGuid(origRaw) : null;
         if (currId !== origId) {
           dirty[field] = currVal;
         }
@@ -516,11 +528,26 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
         setFooterMessage(createSuccessMessage(result.savedFields || []));
         console.log("[App] Save successful:", result.savedFields);
       } else {
-        // Show error message with rollback options
+        // Decision round 51 item 2: a PARTIAL save (the filing persisted through the BFF, the other fields failed) is
+        // saved for the filing — it is never rolled back or retried; only the fields that failed are.
+        const { persisted, failed } = splitPartialSave(fields, result.savedFields, buildSavePayload);
+        if (Object.keys(persisted).length > 0) {
+          optimistic.handleSaveSuccess(persisted, currentValues as unknown as Partial<IEventRecord>);
+          sendEventSaved(params.eventId, persisted);
+          setEditedFields((prev) => {
+            const next = new Set(prev);
+            for (const key of Object.keys(persisted)) {
+              next.delete(key);
+            }
+            return next;
+          });
+        }
+
+        // Show error message with rollback options (for the fields that failed only)
         const errorMsg = parseWebApiError(new Error(result.error));
         optimistic.handleSaveError(
           errorMsg,
-          fields,
+          failed,
           currentValues as unknown as Partial<IEventRecord>
         );
         setFooterMessage(createErrorMessageWithRollback(errorMsg));
@@ -611,16 +638,12 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       return;
     }
 
-    // No memo section visible — create one via WebApi
+    // No memo section visible — create one through the BFF (UAC-r2 task 147 r1, owner round 28 item 1: the server
+    // decides the memo's owner, the Secure Record Owners team when the event belongs to a secure record).
     if (!params.eventId) return;
-    const xrm = getXrm();
-    if (!xrm?.WebApi?.createRecord) {
-      console.warn("[App] Xrm.WebApi.createRecord not available");
-      return;
-    }
 
     try {
-      await xrm.WebApi.createRecord("sprk_memo", {
+      await createChildThroughBff("sprk_memo", {
         sprk_name: "Event Memo",
         sprk_memobody: "",
         "sprk_RegardingEvent@odata.bind": `/sprk_events(${params.eventId})`,
@@ -634,6 +657,8 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       });
     } catch (err) {
       console.error("[App] Error creating memo:", err);
+      // UAC-r2 task 147 r1c (owner round 28 item 1: "refusals show the ProblemDetails message"): the server's own words.
+      setFooterMessage(createErrorMessage(childCreateFailure(err, "memo")));
     }
   }, [params.eventId]);
 
@@ -643,9 +668,15 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    * R3 single-entity model (FR-09 / OS-1): the legacy two-entity
    * (`sprk_event` + `sprk_eventtodo`) shape has been retired. A To Do is now
    * a standalone `sprk_todo` row with the `sprk_RegardingEvent` lookup pointing
-   * at the source event. This binds the entity-specific lookup directly; the
-   * four polymorphic resolver fields (sprk_regardingrecordtype/id/name/url)
-   * are populated server-side by SprkPolymorphicResolverPlugin on create.
+   * at the source event. This binds the entity-specific lookup directly.
+   *
+   * NOTE (corrected 2026-09-25): an earlier version of this comment claimed a
+   * "SprkPolymorphicResolverPlugin" populated the four polymorphic resolver
+   * fields (sprk_regardingrecordtype/id/name/url) server-side on create. No such
+   * plugin exists — Spaarke ships NO Dataverse plugins (ADR-002). The To Do
+   * created here is currently NOT core-ancestor-stamped server-side; that is
+   * tracked by the ADR-002 WP-2/WP-3 write-path migration (see
+   * docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
    *
    * Initial status/state: Active / Open (statecode=0, statuscode=1) — matches
    * `SmartTodo/DataverseService.createTodo` (task 020).
@@ -656,14 +687,11 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    */
   const handleAddTodo = React.useCallback(async () => {
     if (!params.eventId) return;
-    const xrm = getXrm();
-    if (!xrm?.WebApi?.createRecord) {
-      console.warn("[App] Xrm.WebApi.createRecord not available");
-      return;
-    }
 
+    // UAC-r2 task 147 r1 (owner round 28 item 1): through the BFF (G5) — the server decides the to-do's owner and
+    // derives its core-ancestor stamp from the event (WP-1); nothing is created as the user.
     try {
-      await xrm.WebApi.createRecord("sprk_todo", {
+      await createChildThroughBff("sprk_todo", {
         sprk_name: "New To Do",
         statecode: 0,
         statuscode: 1,
@@ -672,6 +700,8 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
       console.log("[App] sprk_todo created for event:", params.eventId);
     } catch (err) {
       console.error("[App] Error creating to-do:", err);
+      // UAC-r2 task 147 r1c (owner round 28 item 1): the refusal is shown — the to-do was NOT created.
+      setFooterMessage(createErrorMessage(childCreateFailure(err, "to-do")));
     }
   }, [params.eventId]);
 

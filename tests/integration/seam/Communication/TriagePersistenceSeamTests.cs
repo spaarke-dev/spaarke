@@ -91,6 +91,8 @@ public sealed class TriagePersistenceSeamTests
             assessedProducer,
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Mock.Of<Spaarke.Dataverse.IFieldMappingDataverseService>(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 
@@ -192,8 +194,11 @@ public sealed class TriagePersistenceSeamTests
         fields["sprk_reviewoutcome"].Should().BeOfType<OptionSetValue>()
             .Which.Value.Should().Be(100000002, "Route is the as-built sprk_reviewoutcome integer");
 
+        // Weighted sum (2026-09-29, was a product): 0.7 x Urgent(1.0) + 0.3 x TopDeterministicConfidence(0.8)
+        // = 0.70 + 0.24 = 0.94. Under the old product form this was 1.0 x 0.8 = 0.8.
         fields["sprk_riconfidence"].Should().BeOfType<double>()
-            .Which.Should().BeApproximately(0.8, 1e-9, "Urgent (weight 1.0) x TopDeterministicConfidence 0.8");
+            .Which.Should().BeApproximately(0.94, 1e-9,
+                "0.7 x Urgent (weight 1.0) + 0.3 x TopDeterministicConfidence 0.8");
 
         // The persisted RI-confidence must match the communication_assessed signal's confidence exactly —
         // both read the SAME persisted provenance + the SAME triage Priority (task 024's formula, task

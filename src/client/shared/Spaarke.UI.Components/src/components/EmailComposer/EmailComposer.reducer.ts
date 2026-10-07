@@ -24,6 +24,7 @@ import type {
 // engine maps state onto. `mapStateToSendRequest` lives here (not in the .tsx) so
 // task 104's "selection → request payload" contract is unit-testable in isolation.
 import type { SendCommunicationOptions } from '../../services/communicationApi';
+import { cleanGuid } from '../../utils/guid';
 
 // ---------------------------------------------------------------------------
 // Attachment caps (project constraint — matches BFF enforcement + the
@@ -508,7 +509,7 @@ export function validateState(state: EmailComposerState, options: IValidateOptio
  * and its brace-less twin collapse to one). Used by `SET_PRIMARY_ASSOCIATION`.
  */
 function associationKey(a: { entityType: string; entityId: string }): string {
-  return `${a.entityType}:${a.entityId.replace(/[{}]/g, '')}`.toLowerCase();
+  return `${a.entityType.toLowerCase()}:${cleanGuid(a.entityId)}`;
 }
 
 // ---------------------------------------------------------------------------

@@ -31,15 +31,26 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 1
-last_updated: 2026-08-24
+manifest_version: 6
+last_updated: 2026-10-02
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 6 (2026-10-04, customer-provisioning-orchestration-r1 T251): PRQ-E-15 ADDED (Exchange admin app +
+# narrowed Exchange role, one-time per tenant); PRQ-C-08 reworded — the group now scopes H14a's Exchange RBAC for
+# Applications role assignments (owner D26), not an ApplicationAccessPolicy.
+# manifest_version 4 (2026-10-02, customer-provisioning-orchestration-r1 T245c + T225a): PRQ-C-08 ADDED (Exchange
+# ApplicationAccessPolicy scope group, owner decision D14); PRQ-E-05 rescoped once_per_env -> once_per_customer
+# and pointed at the stamp's own BFF (an H2a postcondition); PRQ-E-06 / PRQ-E-10 / PRQ-C-02 no longer name the
+# retired Model 1 shared stack.
+# manifest_version 3 (2026-09-30, customer-provisioning-orchestration-r1 T226): PRQ-E-06 RETIRED
+# (H4-shared + from-shared-service retired; no shared source services in the dedicated model).
+# manifest_version 2 (2026-09-28, unified-access-control-r2): PRQ-T-07 RETIRED per D-12 + D-13
+# (no shared/multitenant BFF app registration in either model; the BFF app registration is
+# per customer and is created by H3 during the run). PRQ-C-05 remediation + name corrected.
 cross_ref_markdown: docs/guides/PROVISIONING-PREREQUISITES.md
 cross_ref_deployment_guide: docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md
 cross_ref_skill: .claude/skills/provision-environment/SKILL.md
 
 prereqs:
-
   # ============================================================================
   # ONCE-PER-TENANT (Spaarke Model 1 Prod tenant OR customer tenant Model 2)
   # ============================================================================
@@ -118,18 +129,43 @@ prereqs:
       expect: non-empty GUID
     remediation: Power BI Admin Portal → Tenant settings → Service principals.
 
+  # RETIRED 2026-09-28 by unified-access-control-r2 (D-12 + D-13).
+  #
+  # This entry described a SHARED MULTITENANT BFF app registration for a "Model 1 tier",
+  # carried `never_delete: true`, and had an executable check_recipe that asserted such an
+  # app EXISTS. All three are now wrong:
+  #
+  #   * D-13 (BINDING, do not re-open): the BFF Entra app registration is PER CUSTOMER, in
+  #     BOTH models — Spaarke's tenant under Model 1, the customer's own tenant under
+  #     Model 2. There is no shared/multitenant BFF app registration.
+  #     `SharedBffAppRegistrationId` is a retired artifact.
+  #   * D-12: the "Model 1 = shared trial/SMB tier" is retired. Model 1 is a dedicated
+  #     stamp per customer in Spaarke's Azure tenant; Model 2 the same stamp in the
+  #     customer's own tenant.
+  #   * The per-customer app registration is created by provisioning automation (H3) on
+  #     every run, so by this manifest's own definition it is a HANDLER concern, not a
+  #     prerequisite. It is therefore not re-homed to another scope here.
+  #
+  # The id is retained (not deleted) so that references do not dangle.
   - id: PRQ-T-07
-    name: Multitenant BFF app-reg (Model 1 tier only — shared across all Model 1 customers)
+    name: 'RETIRED — multitenant BFF app-reg (superseded by D-13 per-customer BFF app registration)'
     scope: once_per_tenant
-    frequency: once for entire Model 1 tier
-    owner: Spaarke platform admin
-    never_delete: true
-    consequence_of_absence: Model 1 customers cannot authenticate; per spec.md v3.5 MUST rule.
-    check_recipe:
-      cli: az ad app list --filter "signInAudience eq 'AzureADMultipleOrgs'" --query "[?startswith(displayName,'spaarke-bff')].appId" -o tsv
-      expect: non-empty GUID
-    remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §4.3 (Phase D Model 1 shared app-reg).
-    related_findings: [spec.md-v3.5-MUST-model-1-no-per-customer-app-reg]
+    status: retired
+    retired_on: 2026-09-28
+    retired_by: unified-access-control-r2 (D-12 + D-13)
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. Nothing depends on a shared multitenant BFF app registration. Each customer's
+      BFF app registration is created per-customer by H3 during the provisioning run.
+      🔴 Do NOT create a multitenant BFF app registration — D-13 forbids it (one credential
+      would be accepted by the application user in every customer environment, and a shared
+      app registration hits the unraisable 20-federated-identity-credential cap at customer 21).
+    remediation: |
+      Nothing to do. For the per-customer app registration, see
+      `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` and
+      `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`.
+    related_findings: [D-12, D-13]
 
   # ============================================================================
   # ONCE-PER-SUBSCRIPTION (fresh Azure sub, before first customer stamp)
@@ -163,7 +199,7 @@ prereqs:
     scope: once_per_subscription
     frequency: once per sub (fresh subs)
     owner: Spaarke platform admin
-    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success.
+    consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success. Microsoft.Cache is for Azure Managed Redis (Microsoft.Cache/redisEnterprise), which every customer stamp deploys (task 242); L2 handler H1 registers it by default.
     check_recipe:
       cli: |
         for ns in Microsoft.Web Microsoft.Storage Microsoft.KeyVault Microsoft.CognitiveServices Microsoft.Search \
@@ -172,7 +208,7 @@ prereqs:
           echo "$ns=$(az provider show --namespace $ns --query registrationState -o tsv)"
         done
       expect: every namespace prints `Registered`
-    remediation: `az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow).
+    remediation: '`az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow).'
     related_findings: [F6]
 
   - id: PRQ-S-04
@@ -184,7 +220,7 @@ prereqs:
     check_recipe:
       cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{subId}" --query "[?roleDefinitionName=='Contributor']" -o tsv
       expect: non-empty
-    remediation: `az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`.
+    remediation: '`az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`.'
     related_findings: [audit-gap-02-l2-uami-contributor]
 
   - id: PRQ-S-05
@@ -211,7 +247,7 @@ prereqs:
     consequence_of_absence: H2a ARM-JSON publish workflow + H9 BFF-zip publish workflow both fail cleanly (empty account name). Blocks EVERY new customer stamp.
     check_recipe:
       cli: az storage account show --name "sprk{env}artifacts" --query "properties.provisioningState" -o tsv
-      expect: `Succeeded`
+      expect: '`Succeeded`'
     remediation: Author `infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-05).
     related_findings: [audit-gap-05-artifacts-storage-missing, h2a-bicep-precompile-ci-coord-pr]
 
@@ -223,7 +259,7 @@ prereqs:
     consequence_of_absence: Sidecar image cannot be pushed; H14a (Exchange PS) permanently blocked; workflow references `vars.SIDECAR_ACR_LOGIN_SERVER` placeholder.
     check_recipe:
       cli: az acr show --name "sprk{env}acr" --query "provisioningState" -o tsv
-      expect: `Succeeded`
+      expect: '`Succeeded`'
     remediation: Author `infrastructure/bicep/modules/controlplane-acr.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-10).
     related_findings: [audit-gap-10-acr-sidecar-chain, sidecar-ci-workflow-coord-pr, T108-*]
 
@@ -249,34 +285,48 @@ prereqs:
       expect: non-empty
     remediation: Wave G-8 Batch 2 / audit-gap-04.
 
+  # Scope corrected 2026-10-01 (T225a): the target is each customer stamp's own BFF App Service
+  # (D-12 — there is no shared Model 1 BFF). It exists only after H2a, and customer.bicep emits the grant,
+  # so this is an H2a POSTCONDITION, not a preflight: nothing runs this recipe automatically (Step 0.5b
+  # skips once_per_customer; H0 runs before the BFF exists). It is here for an operator diagnosing a
+  # H4b Kudu-log fetch failure after H2a. Id kept.
   - id: PRQ-E-05
-    name: L2 UAMI has Website Contributor on target BFF App Service (for Kudu docker log fetch)
-    scope: once_per_env
-    frequency: once per env, per BFF App Service (shared BFF only for Model 1)
-    owner: Spaarke platform admin
+    name: L2 UAMI has Website Contributor on a Model 1 customer stamp's BFF App Service (for Kudu docker log fetch)
+    scope: once_per_customer
+    frequency: once per Model 1 customer stamp (emitted by customer.bicep at H2a; Model 2 — not granted, task 249)
+    owner: Spaarke platform admin (Bicep)
     consequence_of_absence: H4b `KuduContainerLogFetcher` cannot fetch fail-fast diagnostics on BFF boot failure — falls back to generic diagnostic + Kudu URL.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{bffAppServiceId}" --query "[?roleDefinitionName=='Website Contributor']" -o tsv
+      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{stampSubscriptionId}/resourceGroups/rg-spaarke-{customerId}-{stampEnvironment}/providers/Microsoft.Web/sites/sprk-{customerId}-{stampEnvironment}-api" --query "[?roleDefinitionName=='Website Contributor']" -o tsv
       expect: non-empty
-    remediation: Emit from `platform-controlplane.bicep` (task 201 Deferred Item #1).
-    related_findings: [T201-h4b-kudu-rbac-deferred]
+    remediation: "Emitted by `customer.bicep` (`modules/customer-l2-bff-rbac.bicep`) on **Model 1** stamps — H2a sends `controlPlaneUamiPrincipalId` from the Worker setting `ControlPlaneIdentity__PrincipalObjectId` (task 249; before it the parameter was never passed, so the grant was never created). Re-run H2a if missing. Not applicable to Model 2: the stamp is in the customer's tenant, where a role assignment cannot name a Spaarke-tenant principal; L2 reaches it through its Lighthouse delegation."
+    related_findings: [T201-h4b-kudu-rbac-deferred, T225a, T249]
 
+  # RETIRED 2026-09-30 by customer-provisioning-orchestration-r1 T226.
+  #
+  # This entry required the L2 UAMI to hold key-reading roles on the SHARED source
+  # services (sprkshared{env}-openai/-docintel/-search/-servicebus/-storage/-redis) so the
+  # H4-shared handler could copy their keys into a shared vault. T226 retired H4-shared and
+  # the `from-shared-service` value source: every customer secret now comes from the
+  # customer's own resources (customer.bicep kvSecretValues), and the dedicated-stamp model
+  # has no shared source services. The role assignments it checked lived in
+  # model1-shared-l2-rbac.bicep, retired with the other Model 1 templates by T225a (2026-10-01).
+  #
+  # The id is retained (not deleted) so that references do not dangle.
   - id: PRQ-E-06
-    name: L2 UAMI has Cognitive Services User / Search Service Contributor / Service Bus Data Owner / Storage Account Contributor / Redis Cache Contributor on ALL shared source services
+    name: 'RETIRED — L2 UAMI key-reading RBAC on the shared source services (H4-shared retired by T226)'
     scope: once_per_env
-    frequency: once per env
-    owner: Spaarke platform admin
-    consequence_of_absence: H4-shared handler cannot extract credentials from source services (F19 automation blocked); H4b handler cannot bind KV refs (F20 automation blocked).
-    check_recipe:
-      cli: |
-        for svc in openai docintel search servicebus storage redis; do
-          az role assignment list --assignee {l2UamiPrincipalId} \
-            --scope "$(az resource show --resource-group rg-spaarke-shared-{env} --name sprkshared{env}-$svc --query id -o tsv)" \
-            --query "[].roleDefinitionName" -o tsv
-        done
-      expect: each row contains the appropriate role name
-    remediation: Extend `stacks/model1-shared.bicep` role-assignment module (task 200 Deferred Item #1). List of role/service pairs in `current-task.md` SESSION 4 handoff §RECOMMENDED.
-    related_findings: [T200-h4shared-*, F19, F20]
+    status: retired
+    retired_on: 2026-09-30
+    retired_by: customer-provisioning-orchestration-r1 T226
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. No handler reads a shared service's keys. H4b never depended on these roles — it
+      writes KV references to the customer's own vault.
+    remediation: |
+      Nothing to do. See projects/customer-provisioning-orchestration-r1/notes/t226-shared-secret-read-path.md.
+    related_findings: [T226, D-12, F19]
 
   - id: PRQ-E-07
     name: L2 UAMI has Graph app-role grants for provisioning-relevant roles
@@ -287,7 +337,7 @@ prereqs:
     check_recipe:
       cli: az rest --method get --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{graphAppId}')/appRoleAssignments?$filter=principalId eq {l2UamiSpId}" --query "value[].id" -o tsv
       expect: non-empty array; count matches expected role list in `GraphAppRoles.cs`
-    remediation: Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule.
+    remediation: 'Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule.'
     related_findings: [c5.8-l2-uami-graph-and-dataverse-grants, T3-graph-app-role-parity]
 
   - id: PRQ-E-08
@@ -324,7 +374,7 @@ prereqs:
     check_recipe:
       cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{kvResourceId}" --query "[?roleDefinitionName=='Key Vault Secrets User']" -o tsv
       expect: non-empty
-    remediation: Emit from Bicep (T1 handler enforces at run time; wave-4-drift-5 lesson for `sharedBffUami` Model 1 gap).
+    remediation: Emit from Bicep (T1 handler enforces at run time). wave-4-drift-5 lesson — the retired shared Model 1 BFF UAMI (`sharedBffUami`, stack retired by T225a) lacked this grant.
     related_findings: [F16, wave-4-drift-5-shared-bff-uami-kv-secrets-user]
 
   - id: PRQ-E-11
@@ -350,20 +400,44 @@ prereqs:
     consequence_of_absence: Session receiver against non-session queue throws at `StartProcessingAsync`; L1 dedup silently swallows §4C retries.
     check_recipe:
       cli: az servicebus queue show -g rg-spaarke-platform-{env} --namespace-name {sbNamespace} -n sprk-provisioning-jobs --query "{sessions:requiresSession, dedup:requiresDuplicateDetection}" -o json
-      expect: `{"sessions": true, "dedup": true}`
-    remediation: `az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost.
+      expect: '`{"sessions": true, "dedup": true}`'
+    remediation: '`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost.'
     related_findings: [T108-*, queue-recreate-runbook]
 
+  - id: PRQ-E-15
+    name: Exchange admin app — `Spaarke Exchange Admin` with a federated credential trusting the L2 Worker UAMI, `Exchange.ManageAsApp`, and the narrowed Exchange role `Spaarke App RBAC Admin` (T251)
+    scope: once_per_env
+    frequency: once per tenant L2 provisions into (Spaarke's, for Model 1); the platform parameter exchangeAdminAppId names it
+    owner: Spaarke platform admin (Entra Global Admin + Exchange Organization Management) — SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1
+    consequence_of_absence: H14a and H13 T4 fail on first use ("ExchangeAdminAppId is not configured", or the sign-in / Exchange call is refused); the stamp identity never receives its group-scoped mailbox roles, so its Mail.* calls 403 (trap T4).
+    check_recipe:
+      cli: az ad app list --display-name "Spaarke Exchange Admin" --query "[0].appId" -o tsv
+      expect: 'the client id set as exchangeAdminAppId in platform-controlplane-{env}.bicepparam; its federated credential names the L2 Worker UAMI principal id (`az ad app federated-credential list --id <appId>`), and in Exchange `Get-ManagementRoleAssignment -RoleAssignee <its service-principal object id>` lists `Spaarke App RBAC Admin`, `View-Only Recipients` and four DelegatingOrgWide `Application Mail.*` / `MailboxSettings.Read` assignments'
+    remediation: 'Follow SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §4.2.1 (Enable-OrganizationCustomization once per tenant — irreversible, ~1 h to apply). Never give the app a secret, a certificate or an Entra directory role.'
+    related_findings: [T251-G30, D24, D25, D26]
+
+  - id: PRQ-E-14
+    name: Registry schema current on the admin env — `sprk_dataverseenvironment` carries the v3.3 columns + `sprk_credentialmode` (T225b)
+    scope: once_per_env
+    frequency: once per registry env; re-run the (idempotent) script after it gains a column
+    owner: Spaarke platform admin (via `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`)
+    consequence_of_absence: H4 writes the customer vault, then fails Resumable `kvsecrets-secret-free-marker-apply-failed` (HTTP 400 naming `sprk_credentialmode`) — every new stamp is secret-free by default since T225b, so H4 always records the marker. Missing v3.3 columns fail H13's registry write the same way.
+    check_recipe:
+      cli: az rest --method get --resource "{adminDvUrl}" --url "{adminDvUrl}/api/data/v9.2/EntityDefinitions(LogicalName='sprk_dataverseenvironment')/Attributes(LogicalName='sprk_credentialmode')?$select=LogicalName" --query LogicalName -o tsv
+      expect: '`sprk_credentialmode`'
+    remediation: '`scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1 -EnvironmentDomain <admin env host>` — additive and idempotent (skips existing columns, never modifies one).'
+    related_findings: [A38a-secret-free-marker, T225b-G21]
+
   - id: PRQ-E-13
-    name: `sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`
-    scope: once_per_env (per customer being provisioned; created BEFORE POST /api/runs)
+    name: '`sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`'
+    scope: once_per_customer # per customer being provisioned; created BEFORE POST /api/runs. The E- id is kept for reference stability. (T226: the annotated scope string failed validate.ps1; it already kept the skill from running this check, as once_per_customer does.)
     frequency: per customer, per new run
     owner: operator (via skill Step 1 intake — task 203 wires the create step)
     consequence_of_absence: L2 `POST /api/runs` returns 400 (missing `environmentId`); c6-3-skill-registry-prereq.
     check_recipe:
       cli: pac data list --entity sprk_dataverseenvironment --filter "sprk_customerid eq '{customerId}'" --query "[0].sprk_environmentid" -o tsv
       expect: non-empty GUID
-    remediation: `pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).
+    remediation: '`pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).'
     related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
 
   # ============================================================================
@@ -375,7 +449,7 @@ prereqs:
     scope: once_per_customer
     frequency: per run (Step 2 preflight)
     owner: Spaarke platform admin (or auto-support-ticket if plan present)
-    consequence_of_absence: H2a fails with `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs.
+    consequence_of_absence: 'H2a fails with `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs.'
     check_recipe:
       cli: |
         az cognitiveservices usage list --location {region} \
@@ -389,13 +463,13 @@ prereqs:
     scope: once_per_customer
     frequency: per run (Step 2 preflight) — pins deprecate ~4-6 months after GA
     owner: Spaarke platform admin
-    consequence_of_absence: `ServiceModelDeprecated` at H2a deploy.
+    consequence_of_absence: '`ServiceModelDeprecated` at H2a deploy.'
     check_recipe:
       cli: |
         az cognitiveservices model list --location {region} \
           --query "[?kind=='OpenAI' && model.version=='{pinnedVer}'].model.lifecycleStatus" -o tsv
-      expect: `GenerallyAvailable` or `Legacy` (reject `Deprecating` or `Deprecated`)
-    remediation: Bump pinned version in `stacks/model1-shared.bicep` / `customer.bicep` OpenAI deployment set.
+      expect: '`GenerallyAvailable` or `Legacy` (reject `Deprecating` or `Deprecated`)'
+    remediation: Bump the pinned version in `infrastructure/bicep/modules/openai.bicep` — its `deployments` default is the set `customer.bicep` deploys (customer.bicep passes no override).
     related_findings: [F1, F4, L-o1-model-status-lexicon]
 
   - id: PRQ-C-03
@@ -409,8 +483,8 @@ prereqs:
         az rest --method post \
           --url "https://management.azure.com/subscriptions/{sub}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" \
           --body '{"name":"{sbName}","type":"Microsoft.ServiceBus/namespaces"}'
-      expect: `{"nameAvailable": true}`
-    remediation: Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).
+      expect: '`{"nameAvailable": true}`'
+    remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).'
     related_findings: [F10]
 
   - id: PRQ-C-04
@@ -421,11 +495,11 @@ prereqs:
     consequence_of_absence: H5 fails with rate-limit error; run blocks until quota window resets.
     check_recipe:
       cli: pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json
-      expect: `used < limit`
+      expect: '`used < limit`'
     remediation: Wait for quota window; no bump path.
 
   - id: PRQ-C-05
-    name: Customer admin consent granted for BFF multitenant app (Model 2 only)
+    name: Customer admin consent granted for that customer's BFF app registration (Model 2 only)
     scope: once_per_customer
     frequency: once per customer tenant
     owner: customer tenant admin (via H0.5 consent-capture URL)
@@ -436,7 +510,7 @@ prereqs:
           --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{bffAppId}')/appRoleAssignments" \
           --headers "Authorization=Bearer $customerTenantToken"
       expect: non-empty in customer tenant
-    remediation: Skill Step 5a auto-emits consent URL + polls callback (H0.5). Model 1 uses shared multitenant BFF app — Spaarke tenant consents once.
+    remediation: Skill Step 5a auto-emits consent URL + polls callback (H0.5). Model 1 does NOT require H0.5 admin consent at all — the stamp lives in Spaarke's own Azure tenant, and each customer has their own single-tenant BFF app registration there (D-13). Admin consent is one of only two things that genuinely differ between the models (the other is Azure Lighthouse delegation), and both apply to Model 2 only.
 
   - id: PRQ-C-06
     name: Dataverse org-settings contract satisfied (maxuploadfilesize ≥ 25MB)
@@ -446,8 +520,8 @@ prereqs:
     consequence_of_absence: F14 — SpaarkeMaster solution import fails 5min in on Spaarke.Controls.UniversalDocumentUpload (`Webresource content size too big`).
     check_recipe:
       cli: pac org list-settings --environment {dvUrl} --name maxuploadfilesize --query value -o tsv
-      expect: `>= 25600000`
-    remediation: `pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog.
+      expect: '`>= 25600000`'
+    remediation: '`pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog.'
     related_findings: [F14]
 
   - id: PRQ-C-07
@@ -462,5 +536,18 @@ prereqs:
           pac application list --environment {dvUrl} | Select-String "$app"
         done
       expect: each app present
-    remediation: `pac application install --application-name msft_PowerBI_Anchor` (~6 min).
+    remediation: '`pac application install --application-name msft_PowerBI_Anchor` (~6 min).'
     related_findings: [F13]
+
+  - id: PRQ-C-08
+    name: Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (H14a)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (its id is an intake value — exchangePolicyScopeGroupId)
+    owner: Exchange Online admin of the stamp's tenant (the customer's for Model 2; Spaarke's for Model 1)
+    consequence_of_absence: "POST /api/runs refuses the run (400 h14a-missing-policy-scope-group-id). With a wrong id, H14a cannot scope the stamp identity's Exchange mailbox roles and fails; the stamp's Mail.* calls 403 (trap T4). Only DIRECT members count — nested groups are not honoured."
+    check_recipe:
+      cli: |
+        pwsh -NoProfile -Command "Connect-ExchangeOnline -ShowBanner:\$false; (Get-DistributionGroup -Identity '{exchangePolicyScopeGroupId}').RecipientTypeDetails"
+      expect: '`MailUniversalSecurityGroup`, and its members are exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox)'
+    remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security -Members <mailboxes>` in Exchange Online PowerShell, then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. Membership is the customer''s access decision — which mailboxes the app may use — so L2 never creates or edits it (owner decision 2026-10-01, T245c).'
+    related_findings: [T245c, T4]

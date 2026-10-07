@@ -52,12 +52,12 @@ public static class ReviewMemoAssembler
             var after = string.IsNullOrEmpty(input.AfterText) ? input.QuotedText : input.AfterText;
 
             sections.Add(new ReviewMemoSection(
-                Location: input.SectionRef,
+                Location: OrPlaceholder(input.SectionRef),
                 Before: input.QuotedText,
                 After: after,
-                Why: input.Assessment,
-                FlaggedClause: input.FlaggedClause,
-                StandardRef: input.StandardRef,
+                Why: OrPlaceholder(input.Assessment),
+                FlaggedClause: OrPlaceholder(input.FlaggedClause),
+                StandardRef: OrPlaceholder(input.StandardRef),
                 RiskLevel: input.RiskLevel));
         }
 
@@ -67,6 +67,28 @@ public static class ReviewMemoAssembler
             SectionCount: sections.Count,
             Sections: sections);
     }
+
+    /// <summary>
+    /// The placeholder an absent grounding field renders as (R8 §GAPS-5 decision D3, 2026-09-07).
+    /// </summary>
+    /// <remarks>
+    /// The model does not always ground every finding: <c>sectionRef</c>, <c>standardRef</c>,
+    /// <c>flaggedClause</c> and <c>assessment</c> are each individually omittable, which is why the
+    /// CLIENT's own finding type has always had them optional ("the rest are optional so a partially-
+    /// grounded finding never crashes the panel"). The server contract nonetheless declared all four
+    /// <c>required</c>, so a partially-grounded finding could not be sent at all.
+    /// <para>
+    /// The alternative — dropping such findings from the memo — was rejected: silently excluding a
+    /// flagged clause from a review summary is a worse failure than showing it with one cell unfilled,
+    /// and it is the exact silent-omission class this project has spent its time closing. An EMPTY cell
+    /// was rejected too, because it reads as a rendering bug; an explicit em dash reads as "the model
+    /// did not supply this".
+    /// </para>
+    /// </remarks>
+    internal const string MissingValuePlaceholder = "—";
+
+    private static string OrPlaceholder(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? MissingValuePlaceholder : value;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,9 +126,11 @@ public sealed record GenerateReviewMemoRequest
 /// </summary>
 public sealed record ReviewMemoSectionInput
 {
-    /// <summary>Location — the finding's page/section/paragraph locator (Action's <c>sectionRef</c>).</summary>
+    /// <summary>Location — the finding's page/section/paragraph locator (Action's <c>sectionRef</c>).
+    /// OPTIONAL since R8 §GAPS-5 (decision D3): the model does not always ground a finding's location.
+    /// Absent ⇒ rendered as <see cref="ReviewMemoAssembler.MissingValuePlaceholder"/>, never dropped.</summary>
     [property: JsonPropertyName("sectionRef")]
-    public required string SectionRef { get; init; }
+    public string? SectionRef { get; init; }
 
     /// <summary>Before (original) — the grounded verbatim excerpt (Action's <c>quotedText</c>).</summary>
     [property: JsonPropertyName("quotedText")]
@@ -120,17 +144,20 @@ public sealed record ReviewMemoSectionInput
     [property: JsonPropertyName("afterText")]
     public string? AfterText { get; init; }
 
-    /// <summary>Why — the reasoned-judgment prose (Action's <c>assessment</c>).</summary>
+    /// <summary>Why — the reasoned-judgment prose (Action's <c>assessment</c>).
+    /// OPTIONAL since R8 §GAPS-5 (decision D3) — see <see cref="SectionRef"/>.</summary>
     [property: JsonPropertyName("assessment")]
-    public required string Assessment { get; init; }
+    public string? Assessment { get; init; }
 
-    /// <summary>Golden-ref (standard side) — the retrieved firm-standard citation (Action's <c>standardRef</c>).</summary>
+    /// <summary>Golden-ref (standard side) — the retrieved firm-standard citation (Action's <c>standardRef</c>).
+    /// OPTIONAL since R8 §GAPS-5 (decision D3) — see <see cref="SectionRef"/>.</summary>
     [property: JsonPropertyName("standardRef")]
-    public required string StandardRef { get; init; }
+    public string? StandardRef { get; init; }
 
-    /// <summary>Golden-ref (grounded fact) — what the clause actually says (Action's <c>flaggedClause</c>).</summary>
+    /// <summary>Golden-ref (grounded fact) — what the clause actually says (Action's <c>flaggedClause</c>).
+    /// OPTIONAL since R8 §GAPS-5 (decision D3) — see <see cref="SectionRef"/>.</summary>
     [property: JsonPropertyName("flaggedClause")]
-    public required string FlaggedClause { get; init; }
+    public string? FlaggedClause { get; init; }
 
     /// <summary>Optional coarse risk signal (Action's <c>riskLevel</c>) — carried through for completeness; never a numeric score (ADR-039).</summary>
     [property: JsonPropertyName("riskLevel")]

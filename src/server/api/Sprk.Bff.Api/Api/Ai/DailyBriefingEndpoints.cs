@@ -835,6 +835,15 @@ public record DailyBriefingNarrateRequest
     /// </summary>
     [JsonPropertyName("tldrFacts")]
     public TldrFactsDto? TldrFacts { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 152 — channel codes (e.g. <c>"matters"</c>) whose caller-context read FAILED
+    /// (ADR-003 fail closed). A failed channel contributes no items and is named here, so "could not be loaded" is
+    /// distinguishable from "nothing to report"; it is never answered with an app-only read. Empty when every
+    /// channel read succeeded.
+    /// </summary>
+    [JsonPropertyName("failedChannels")]
+    public string[] FailedChannels { get; init; } = [];
 }
 
 /// <summary>
@@ -981,6 +990,21 @@ public record DailyBriefingNarrateResponse
     /// </summary>
     [JsonPropertyName("highPriorityItems")]
     public HighPriorityItemDto[] HighPriorityItems { get; init; } = [];
+
+    /// <summary>
+    /// unified-access-control-r2 task 152 — the briefing channels whose caller-context read failed (copied from
+    /// <see cref="DailyBriefingNarrateRequest.FailedChannels"/>). The widget and the email say "could not be loaded"
+    /// for these instead of implying there was nothing to report.
+    /// </summary>
+    [JsonPropertyName("failedChannels")]
+    public string[] FailedChannels { get; init; } = [];
+
+    /// <summary>
+    /// unified-access-control-r2 task 152 — High Priority entity types (e.g. <c>"sprk_invoice"</c>) whose
+    /// caller-context read failed, so a missing flagged record is not mistaken for "nothing flagged".
+    /// </summary>
+    [JsonPropertyName("highPriorityFailedEntityTypes")]
+    public string[] HighPriorityFailedEntityTypes { get; init; } = [];
 
     /// <summary>
     /// Optional sidecar with post-LLM entity-name validation metadata. Added by R7

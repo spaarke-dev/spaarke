@@ -1,4 +1,5 @@
 // R7 Wave 12 T131 (2026-06-30) — DailyBriefingCollector — 6-entity expansion.
+// unified-access-control-r2 task 152 (2026-10-02) — PEOPLE targeting + caller-context reads.
 //
 // PURPOSE: Build the DailyBriefingNarrateRequest payload directly from live Dataverse
 // queries — no appNotification dependency, no scheduled playbooks, no notification
@@ -6,32 +7,38 @@
 //   [widget call] → [collector queries Dataverse live, 6 entity types] → [narrator] → [response].
 //
 // MVP SCOPE (this file) — 6 operator-specified channels per wave12-mvp-completion-plan §2.1:
-//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate OR sprk_finalduedate in next 5 days, status=Open
+//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate OR sprk_finalduedate in next N days, status=Open
 //   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate OR sprk_finalduedate > 5 days past, status=Open
-//   3. Documents      — sprk_document, modifiedon last 5 days, member of regarding matter/project
-//   4. Matters        — sprk_matter, modifiedon last 5 days, statecode=Active, member
-//   5. Projects       — sprk_project, modifiedon last 5 days, statecode=Active, member
-//   6. To Dos         — sprk_todo, sprk_duedate today/tomorrow, owner/assignee
+//   3. Documents      — sprk_document, modifiedon in the recency window
+//   4. Matters        — sprk_matter, modifiedon in the recency window, statecode=Active
+//   5. Projects       — sprk_project, modifiedon in the recency window, statecode=Active
+//   6. To Dos         — sprk_todo, sprk_duedate today or later, Open/In Progress
 //
-// MEMBERSHIP MODEL (R7 T130 fix landed): all ownership filters delegate to
-// `IMembershipResolverService` (post T130 commit `451603bac`). The resolver returns the
-// set of entity-instance IDs the caller is a member of (across all roles: owner,
-// owningTeam, assignedAttorney, assignedParalegal, assignedLawFirm — for each entity's
-// configured membership-bearing fields, discovered via metadata scan).
+// WHO A RECORD IS FOR (task 152 — owner decisions round 2 item 9 + Q8, round 3 D1; ADR-034 Amendment A3):
+//   Every candidate set comes from IMembershipResolverService with MembershipResolveOptions.People — the
+//   PEOPLE-TARGETING surface. A record is for the caller when the caller CREATED it (human Created By), is NAMED in
+//   one of its "Assigned *" contact columns (through the caller's linked contact, task 141), or personally OWNS it.
+//   Team, business-unit and organization ownership select NOTHING: a BU's default team contains the whole BU, so the
+//   pre-task default surface put every team- or BU-owned matter in every same-BU user's briefing. No query in this
+//   file carries its own owner/createdby condition — the resolver is the one mechanism (ADR-034 MUST).
 //
-// Membership-resolved candidate set strategy per entity:
-//   Tasks (Upcoming/Overdue): UNION of (a) sprk_event memberships (event owner/assignee
-//                              roles on the event itself) and (b) sprk_matter memberships
-//                              (events whose sprk_regardingmatter is a matter the user is on)
-//                              and (c) sprk_project memberships (regarding-project membership)
-//   Documents:                UNION of sprk_matter + sprk_project memberships (regarding edges)
-//   Matters:                  sprk_matter memberships
-//   Projects:                 sprk_project memberships
-//   To Dos:                   no membership filter — sprk_todo is per-user
-//                              (owner OR sprk_assignedto), filtered inline.
+//   Tasks (Upcoming/Overdue): events FOR the caller, OR events regarding a matter/project FOR the caller.
+//   Documents:                documents FOR the caller (own Created By / owner), OR documents on a matter/project
+//                             FOR the caller.
+//   Matters / Projects / To Dos: the records FOR the caller.
 //
-// Per-channel narrowing query uses ConditionOperator.In on the resolved candidate set +
-// the operator-specified date/status filters (next-5-days, last-5-days, etc.).
+// WHAT THE CALLER MAY SEE (task 152 — owner D1 "the briefing only lists records the user can access in Dataverse";
+// ADR-003 fail closed; ADR-047 privacy invariant): selecting a record FOR someone does not entitle them to read it.
+// Every row this collector RETURNS is read through IImpersonatedCommunicationQuery as the caller (MSCRMCallerID =
+// the caller's systemuserid), so Dataverse trims anything the caller cannot read. There is no app-only read of a
+// returned row anywhere in this class, and no app-only fallback:
+//   - a channel whose read (or any id chunk of it) fails is reported in DailyBriefingNarrateRequest.FailedChannels
+//     — distinguishable from "nothing to report" — and never answered app-only or as a silent empty list;
+//   - if EVERY channel fails, CollectAsync throws (mirrors word-add-in-r1 task 062's impersonated search fan-out:
+//     an impersonation privilege that is not configured must not look like an empty briefing).
+//   Candidate id lists are chunked (MaxIdsPerImpersonatedRequest) so each impersonated GET stays far below the URL
+//   limit; a failed chunk fails its channel, never shrinks it. Each candidate set is read to completion
+//   (PeopleTargetedSet: up to the resolver's 5,000-row ceiling); a set larger than that fails its channels too.
 //
 // PRESERVES: BriefingItem projection shape (downstream narrator depends on it). Each
 // channel's items[] populates RegardingMatterName/RegardingMatterId for entity-link
@@ -40,15 +47,15 @@
 //
 // Reference:
 //   projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md §2.1
-//   projects/spaarke-ai-platform-unification-r7/tasks/131-extend-collector-six-entities.poml
-//   src/server/api/Sprk.Bff.Api/Services/Workspace/BriefingService.cs (reference pattern for
-//     IMembershipResolverService consumption — top-priority-matter resolver)
+//   projects/unified-access-control-r2/tasks/152-notifications-briefing-people-targeting.poml
+//   projects/unified-access-control-r2/notes/task-152-people-targeting.md
 
-using Microsoft.Xrm.Sdk;
-using Microsoft.Xrm.Sdk.Query;
-using Spaarke.Dataverse;
+using System.Globalization;
+using System.Text;
+using System.Text.Json;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Ai.Narrators;
 
@@ -69,6 +76,18 @@ internal sealed record BriefingItem
     public string? RegardingMatterName { get; init; }
     public string? RegardingMatterId { get; init; }        // Matter GUID for click-through navigation
     public DateTimeOffset? ModifiedOn { get; init; }
+}
+
+/// <summary>
+/// The High Priority section (task 152): the flagged records FOR the caller that the caller may read, plus the entity
+/// types whose caller-context read failed — so a failed read is visibly "could not be loaded", never an empty list.
+/// </summary>
+/// <param name="Items">Flagged records, de-duplicated and ordered by due date then name.</param>
+/// <param name="FailedEntityTypes">Entity logical names whose read failed (empty when every read succeeded).</param>
+public sealed record HighPriorityCollection(HighPriorityItemDto[] Items, string[] FailedEntityTypes)
+{
+    /// <summary>No flagged items and no failures.</summary>
+    public static HighPriorityCollection Empty { get; } = new([], []);
 }
 
 /// <summary>
@@ -93,6 +112,11 @@ internal sealed record BriefingItem
 /// <see cref="ExecuteAsync"/> delegates to the pre-existing <see cref="CollectAsync"/>;
 /// existing callers and behavior are unchanged.
 /// </para>
+/// <para>
+/// Task 152: the collector holds NO app-only Dataverse client. Its only Dataverse access is the people-targeting
+/// resolver (which returns ids, never row content) and the caller-context read seam. That is what makes "no app-only
+/// read of a returned row" structural rather than a convention.
+/// </para>
 /// </remarks>
 public class DailyBriefingCollector : ICodedWorkflow
 {
@@ -101,7 +125,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
 
     // sprk_event statuscode values (consistent with deployed notification playbooks).
-    private const int EventStatusOpen = 659490001;
+    private const int EventStatusOpen = Spaarke.Dataverse.EventStatusCode.Open; // task 097 review F8: the one source of truth
 
     // sprk_todo statuscode values per docs/data-model schema (Open=1, In Progress=659490001).
     // Treat both as "active" for the today/tomorrow surface.
@@ -138,21 +162,34 @@ public class DailyBriefingCollector : ICodedWorkflow
     private const string EntityMatter = "sprk_matter";
     private const string EntityProject = "sprk_project";
     private const string EntityTodo = "sprk_todo";
+    private const string EntityInvoice = "sprk_invoice";
+    private const string EntityWorkAssignment = "sprk_workassignment";
 
     // Channel-code naming convention (T133 coordination) — kebab-case slugs.
     // Keep these stable; they are the keys downstream consumers (channel registry,
     // EnrichBulletWithEntityRefs primaryEntityType resolution) join on.
-    private const string ChannelUpcomingTasks = "upcoming-tasks";
-    private const string ChannelOverdueTasks = "overdue-tasks";
-    private const string ChannelDocuments = "documents";
-    private const string ChannelMatters = "matters";
-    private const string ChannelProjects = "projects";
-    private const string ChannelTodos = "to-dos";
+    internal const string ChannelUpcomingTasks = "upcoming-tasks";
+    internal const string ChannelOverdueTasks = "overdue-tasks";
+    internal const string ChannelDocuments = "documents";
+    internal const string ChannelMatters = "matters";
+    internal const string ChannelProjects = "projects";
+    internal const string ChannelTodos = "to-dos";
 
     // Per-channel row caps (defensive — large result sets degrade narrator quality
     // before they cost LLM tokens). Operator may tune later via config table (deferred
     // per wave12 §4 — config-table-with-rules is interpreter).
     private const int PerChannelMaxRows = 50;
+
+    /// <summary>
+    /// Task 152: the most candidate ids bound into ONE impersonated GET. A lookup clause is ~75 characters
+    /// (<c>_sprk_regardingmatter_value eq {guid} or </c>), so 50 ids keep the query near 4 KB — an order of magnitude
+    /// under the Dataverse Web API URL limit — whatever the other clauses add. Larger sets are read in several chunks
+    /// and unioned; a failed chunk fails the whole channel.
+    /// </summary>
+    internal const int MaxIdsPerImpersonatedRequest = 50;
+
+    /// <summary>The Web API annotation that carries a lookup's display name on the same impersonated row.</summary>
+    private const string FormattedValueSuffix = "@OData.Community.Display.V1.FormattedValue";
 
     // R5 task 013 (FR-A4) — TL;DR scaffolding aggregation caps. The TL;DR call's ground-truth
     // payload MUST aggregate, not dump every source record (ADR-015 data minimization) — these
@@ -160,16 +197,23 @@ public class DailyBriefingCollector : ICodedWorkflow
     internal const int TldrFactsMaxRecordNames = 20;
     internal const int TldrFactsMaxKeyDates = 6;
 
-    private readonly IGenericEntityService _entityService;
+    private readonly IImpersonatedCommunicationQuery _callerQuery;
     private readonly IMembershipResolverService _membershipResolver;
     private readonly ILogger<DailyBriefingCollector> _logger;
 
+    /// <param name="callerQuery">
+    /// The existing caller-context read seam (MSCRMCallerID = the caller). Generic over entity set + OData query
+    /// despite its Communication-specific name; reused, not duplicated (ExternalAccessModule records the decision
+    /// not to declare a second impersonated-query interface).
+    /// </param>
+    /// <param name="membershipResolver">The canonical ADR-034 resolver, called with the people-targeting surface.</param>
+    /// <param name="logger">Logger.</param>
     public DailyBriefingCollector(
-        IGenericEntityService entityService,
+        IImpersonatedCommunicationQuery callerQuery,
         IMembershipResolverService membershipResolver,
         ILogger<DailyBriefingCollector> logger)
     {
-        _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
+        _callerQuery = callerQuery ?? throw new ArgumentNullException(nameof(callerQuery));
         _membershipResolver = membershipResolver ?? throw new ArgumentNullException(nameof(membershipResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -183,7 +227,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// </summary>
     protected DailyBriefingCollector(ILogger<DailyBriefingCollector> logger)
     {
-        _entityService = null!;
+        _callerQuery = null!;
         _membershipResolver = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -225,8 +269,10 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// <summary>
     /// Run all 6 channel queries in parallel against Dataverse and build the request
     /// payload the narrator consumes. Empty channels are filtered out of the final
-    /// payload (the narrator skips empty channels naturally).
+    /// payload (the narrator skips empty channels naturally); FAILED channels are named in
+    /// <see cref="DailyBriefingNarrateRequest.FailedChannels"/>.
     /// </summary>
+    /// <exception cref="InvalidOperationException">Every channel's caller-context read failed (task 152).</exception>
     public virtual async Task<DailyBriefingNarrateRequest> CollectAsync(
         Guid systemUserId,
         BriefingWindowOptions windows,
@@ -245,96 +291,85 @@ public class DailyBriefingCollector : ICodedWorkflow
         _logger.LogInformation(
             "DailyBriefingCollector starting for systemUserId={SystemUserId}", systemUserId);
 
-        // ── Phase 1: resolve candidate-set IDs for the 3 entities in parallel.
-        //
-        // R5 task 033 (2026-07-08) — bypass reverted; routes through
-        // IMembershipResolverService again.
-        //
-        //   R7 W12 (2026-06-30) had introduced a temporary owner-only bypass here because
-        //   the resolver returned 0 rows for the polymorphic Owner attribute (DEF-NNN) —
-        //   `OwnerAttributeMetadata` doesn't inherit from the sealed `LookupAttributeMetadata`,
-        //   so the resolver's condition translation silently dropped Owner-based membership
-        //   fields. R7 ALSO shipped the root-cause fix in the same wave:
-        //   `MembershipFieldDiscoveryService.ProjectLookupAttributeRows` now synthesizes
-        //   Owner + Customer lookup targets from the base `AttributeMetadata`, so the resolver
-        //   returns rows for owner-based fields again.
-        //
-        //   With the root cause fixed, the owner-only bypass left in place silently
-        //   under-scoped the candidate set: it only matched `owninguser`, so collaborators
-        //   (assigned attorneys, paralegals, etc. — reachable via
-        //   IMembershipResolverService's other discovered roles) never appeared in the
-        //   briefing. This routes candidate-set resolution back through
-        //   `ResolveMembershipsSafelyAsync` to restore full membership scope (owner +
-        //   collaborator roles) for events/matters/projects.
-        //
-        //   Reference: projects/spaarke-daily-update-service-r5/notes/inbound-from-r7/
-        //              03-code-review-followups.md item 1.
-        var membershipsTask = Task.WhenAll(
-            ResolveMembershipsSafelyAsync(systemUserId, EntityEvent, ct),
-            ResolveMembershipsSafelyAsync(systemUserId, EntityMatter, ct),
-            ResolveMembershipsSafelyAsync(systemUserId, EntityProject, ct));
-
-        var memberships = await membershipsTask.ConfigureAwait(false);
-        var eventIds = memberships[0];
-        var matterIds = memberships[1];
-        var projectIds = memberships[2];
+        // ── Phase 1: the records FOR the caller, per entity (ADR-034 A3 people-targeting surface). Ids only — the
+        //    resolver never hands back row content, so nothing here is shown to anyone.
+        var sets = await Task.WhenAll(
+            ResolvePeopleSetAsync(systemUserId, EntityEvent, ct),
+            ResolvePeopleSetAsync(systemUserId, EntityMatter, ct),
+            ResolvePeopleSetAsync(systemUserId, EntityProject, ct),
+            ResolvePeopleSetAsync(systemUserId, EntityDocument, ct),
+            ResolvePeopleSetAsync(systemUserId, EntityTodo, ct)).ConfigureAwait(false);
+        var events = sets[0];
+        var matters = sets[1];
+        var projects = sets[2];
+        var documents = sets[3];
+        var todos = sets[4];
 
         _logger.LogInformation(
-            "DailyBriefingCollector membership-resolved IDs: events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
-            eventIds.Count, matterIds.Count, projectIds.Count);
+            "DailyBriefingCollector people-targeted ids: events={EventCount}, matters={MatterCount}, projects={ProjectCount}, documents={DocumentCount}, todos={TodoCount}",
+            events.Ids.Count, matters.Ids.Count, projects.Ids.Count, documents.Ids.Count, todos.Ids.Count);
 
-        // ── Phase 2: query per-channel candidate rows in parallel.
-        //    Each query returns empty array on Dataverse failure (failure-soft per channel —
-        //    a single broken channel does not abort the whole briefing).
-        var queries = await Task.WhenAll(
-            QueryUpcomingTasksAsync(systemUserId, eventIds, matterIds, projectIds, w.DueWithinDays, ct),
-            QueryOverdueTasksAsync(systemUserId, eventIds, matterIds, projectIds, ct),
-            QueryDocumentsAsync(matterIds, projectIds, w.RecencyHours, ct),
-            QueryMattersAsync(matterIds, w.RecencyHours, ct),
-            QueryProjectsAsync(projectIds, w.RecencyHours, ct),
-            QueryTodosAsync(systemUserId, ct)
-        ).ConfigureAwait(false);
+        // ── Phase 2: read each channel AS THE CALLER, in parallel.
+        var results = await Task.WhenAll(
+            QueryUpcomingTasksAsync(systemUserId, events, matters, projects, w.DueWithinDays, ct),
+            QueryOverdueTasksAsync(systemUserId, events, matters, projects, ct),
+            QueryDocumentsAsync(systemUserId, documents, matters, projects, w.RecencyHours, ct),
+            QueryMattersAsync(systemUserId, matters, w.RecencyHours, ct),
+            QueryProjectsAsync(systemUserId, projects, w.RecencyHours, ct),
+            QueryTodosAsync(systemUserId, todos, ct)).ConfigureAwait(false);
 
-        var upcomingTasks = queries[0];
-        var overdueTasks = queries[1];
-        var documents = queries[2];
-        var matters = queries[3];
-        var projects = queries[4];
-        var todos = queries[5];
+        var channelCodes = new[]
+        {
+            ChannelUpcomingTasks, ChannelOverdueTasks, ChannelDocuments, ChannelMatters, ChannelProjects, ChannelTodos,
+        };
+        var failedChannels = channelCodes.Where((_, i) => results[i].Failed).ToArray();
+
+        if (failedChannels.Length == channelCodes.Length)
+        {
+            // Fail closed, never "nothing to report": the most likely cause is the go-live prerequisite — the BFF
+            // application user lacks prvActOnBehalfOfAnotherUser, so every impersonated read is rejected.
+            throw new InvalidOperationException(
+                "Daily briefing: every channel's caller-context read failed. Refusing to return an empty briefing — "
+                + "the impersonated read may be rejected because the BFF application user lacks the Dataverse "
+                + "Delegate privilege prvActOnBehalfOfAnotherUser.");
+        }
 
         var request = BuildNarrateRequest(
-            upcomingTasks, overdueTasks, documents, matters, projects, todos);
+            results[0].Items, results[1].Items, results[2].Items,
+            results[3].Items, results[4].Items, results[5].Items) with
+        {
+            FailedChannels = failedChannels,
+        };
 
         _logger.LogInformation(
-            "DailyBriefingCollector completed in {DurationMs}ms: upcoming={A}, overdue={B}, docs={C}, matters={D}, projects={E}, todos={F}, totalNotifs={Total}",
+            "DailyBriefingCollector completed in {DurationMs}ms: upcoming={A}, overdue={B}, docs={C}, matters={D}, projects={E}, todos={F}, totalNotifs={Total}, failedChannels={Failed}",
             (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
-            upcomingTasks.Length, overdueTasks.Length, documents.Length,
-            matters.Length, projects.Length, todos.Length,
-            request.TotalNotificationCount);
+            results[0].Items.Length, results[1].Items.Length, results[2].Items.Length,
+            results[3].Items.Length, results[4].Items.Length, results[5].Items.Length,
+            request.TotalNotificationCount,
+            failedChannels.Length == 0 ? "none" : string.Join(",", failedChannels));
 
         return request;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // High Priority section (R7 W12 feedback item 9)
+    // High Priority section (R7 W12 feedback item 9; narrowed by task 152)
     //
-    // Cross-entity flag scan: returns every record across the 7 flagged entities
-    // (matter, project, invoice, document, workassignment, event, todo) where
-    // sprk_highpriority = true OR sprk_monitor = true — regardless of ownership
-    // in this MVP (operator flags what THEY care about; scoping by owninguser is
-    // a follow-up refinement if the list becomes too broad).
+    // Flagged records (sprk_highpriority = true OR sprk_monitor = true) across the 7 flagged entities — but only
+    // the ones FOR the caller (people-targeting surface) and readable BY the caller (impersonated read). Before task
+    // 152 this was an org-wide, app-only scan returning every flagged record in the tenant, with names and
+    // descriptions, to every caller (owner escalation (b): narrowed to the caller's people-targeted set).
     //
     // No LLM call — widget renders as a compact list of clickable record refs.
     // Ordered by due date ascending (undated items last).
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// R7 W12 feedback item 9 (2026-07-01) — collect all high-priority items across the 7
-    /// flagged entities. Bypasses membership resolution + narrator. Returns items whose
-    /// <c>sprk_highpriority</c> OR <c>sprk_monitor</c> = true, sorted by due date ascending.
-    /// Empty array on error (per-entity queries are failure-soft).
+    /// Collect the high-priority items FOR the caller across the 7 flagged entities, each read as the caller.
+    /// <see cref="HighPriorityCollection.FailedEntityTypes"/> names any entity whose read failed.
     /// </summary>
-    public virtual async Task<HighPriorityItemDto[]> CollectHighPriorityAsync(
+    /// <exception cref="InvalidOperationException">Every entity's read failed (task 152 — never an empty list).</exception>
+    public virtual async Task<HighPriorityCollection> CollectHighPriorityAsync(
         Guid systemUserId,
         CancellationToken ct)
     {
@@ -348,15 +383,31 @@ public class DailyBriefingCollector : ICodedWorkflow
             "DailyBriefingCollector.CollectHighPriorityAsync starting for systemUserId={SystemUserId}",
             systemUserId);
 
-        // One parallel query per flagged entity, driven off HighPriorityEntitySpecs (R5 task
-        // 036 collapsed the former 7 named wrappers into that spec array). Each query returns
-        // HighPriorityItemDto[] and is failure-soft: on Dataverse exception the entity
-        // contributes an empty array (logged as warning) so the digest still renders. Order
-        // matches HighPriorityEntitySpecs, so the per-entity counts in the completion log
-        // below stay correctly positioned.
+        // The people-targeted sets the 7 specs need (document additionally needs matter + project for its
+        // parent term, which the matter/project specs already resolve).
+        var setTasks = HighPriorityEntitySpecs
+            .Select(s => s.EntityType)
+            .Distinct(StringComparer.Ordinal)
+            .ToDictionary(e => e, e => ResolvePeopleSetAsync(systemUserId, e, ct), StringComparer.Ordinal);
+        await Task.WhenAll(setTasks.Values).ConfigureAwait(false);
+        var sets = setTasks.ToDictionary(kv => kv.Key, kv => kv.Value.Result, StringComparer.Ordinal);
+
         var queries = await Task.WhenAll(
-            HighPriorityEntitySpecs.Select(spec => QueryHighPriorityAsync(spec, systemUserId, ct))
+            HighPriorityEntitySpecs.Select(spec => QueryHighPriorityAsync(spec, systemUserId, sets, ct))
         ).ConfigureAwait(false);
+
+        var failed = HighPriorityEntitySpecs
+            .Where((_, i) => queries[i].Failed)
+            .Select(s => s.EntityType)
+            .ToArray();
+
+        if (failed.Length == HighPriorityEntitySpecs.Length)
+        {
+            throw new InvalidOperationException(
+                "Daily briefing High Priority: every entity's caller-context read failed. Refusing to return an "
+                + "empty list — the impersonated read may be rejected because the BFF application user lacks the "
+                + "Dataverse Delegate privilege prvActOnBehalfOfAnotherUser.");
+        }
 
         // R5 task 034 (FR-C5) — de-dup before ordering. The 7 queries are one per
         // flagged entity type so cross-entity collision is not possible today, but this
@@ -365,7 +416,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         // the same record twice. DistinctBy preserves first-occurrence order, so applying
         // it BEFORE the OrderBy/ThenBy below means the de-dup never reshuffles anything —
         // it only removes duplicates ahead of the existing DueDate-then-Name ordering.
-        var all = queries.SelectMany(x => x)
+        var all = queries.SelectMany(x => x.Items)
             .DistinctBy(x => (x.EntityType, x.EntityId))
             .OrderBy(x => x.DueDate ?? DateTimeOffset.MaxValue)
             .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
@@ -373,207 +424,147 @@ public class DailyBriefingCollector : ICodedWorkflow
 
         _logger.LogInformation(
             "DailyBriefingCollector.CollectHighPriorityAsync completed in {DurationMs}ms: total={Total} " +
-            "(matters={M}, projects={P}, invoices={I}, docs={D}, workassignments={W}, events={E}, todos={T})",
+            "(matters={M}, projects={P}, invoices={I}, docs={D}, workassignments={W}, events={E}, todos={T}), failed={Failed}",
             (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
             all.Length,
-            queries[0].Length, queries[1].Length, queries[2].Length, queries[3].Length,
-            queries[4].Length, queries[5].Length, queries[6].Length);
+            queries[0].Items.Length, queries[1].Items.Length, queries[2].Items.Length, queries[3].Items.Length,
+            queries[4].Items.Length, queries[5].Items.Length, queries[6].Items.Length,
+            failed.Length == 0 ? "none" : string.Join(",", failed));
 
-        return all;
+        return new HighPriorityCollection(all, failed);
     }
 
-    // R5 task 036 (FR-C7) — the 7 flagged entities as data. Collapses the former 7
-    // near-identical QueryHighPriority{Matter,Project,Invoice,Document,Workassignment,
-    // Event,Todo}Async wrappers into rows over which CollectHighPriorityAsync fans out,
-    // each delegating to QueryHighPriorityGenericAsync with the SAME entity/column/filter
-    // intent the named wrapper carried. A change that once had to be made 7 times (e.g. the
-    // R7 case-sensitivity fix) is now a single spec edit. Row order matches the per-entity
-    // counts logged in CollectHighPriorityAsync.
+    // R5 task 036 (FR-C7) — the 7 flagged entities as data. Task 152 replaced the per-spec owner switch
+    // (ScopeToOwner / owninguser) with the people-targeting surface for EVERY entity, and added the entity set the
+    // impersonated read needs.
     private sealed record HighPriorityEntitySpec(
         string EntityType,
+        string EntitySet,
         string IdColumn,
         string NameColumn,
         string? DescriptionColumn,
         string? DueDateColumn,
         string? FallbackDueDateColumn,
         string KindLabel,
-        bool IncludeStateFilter,
-        bool ScopeToOwner);
+        bool IncludeStateFilter);
 
     private static readonly HighPriorityEntitySpec[] HighPriorityEntitySpecs =
     {
-        new(EntityMatter, "sprk_matterid", "sprk_mattername", "sprk_matterdescription",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Matter",
-            IncludeStateFilter: true, ScopeToOwner: false),
-        new(EntityProject, "sprk_projectid", "sprk_projectname", "sprk_description",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Project",
-            IncludeStateFilter: true, ScopeToOwner: false),
+        new(EntityMatter, "sprk_matters", "sprk_matterid", "sprk_mattername", "sprk_matterdescription",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Matter", IncludeStateFilter: true),
+        new(EntityProject, "sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_description",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Project", IncludeStateFilter: true),
         // Invoice has sprk_invoicedate (invoice date, NOT payment due date) — don't map to
         // DueDate. Include all flagged invoices regardless of date. Operator can refine later.
-        new("sprk_invoice", "sprk_invoiceid", "sprk_name", "sprk_description",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Invoice",
-            IncludeStateFilter: true, ScopeToOwner: false),
-        new(EntityDocument, "sprk_documentid", "sprk_documentname", "sprk_documentdescription",
-            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Document",
-            IncludeStateFilter: true, ScopeToOwner: false),
-        new("sprk_workassignment", "sprk_workassignmentid", "sprk_name", "sprk_description",
-            DueDateColumn: "sprk_responseduedate", FallbackDueDateColumn: null,
-            KindLabel: "Work Assignment", IncludeStateFilter: true, ScopeToOwner: false),
+        new(EntityInvoice, "sprk_invoices", "sprk_invoiceid", "sprk_name", "sprk_description",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Invoice", IncludeStateFilter: true),
+        new(EntityDocument, "sprk_documents", "sprk_documentid", "sprk_documentname", "sprk_documentdescription",
+            DueDateColumn: null, FallbackDueDateColumn: null, KindLabel: "Document", IncludeStateFilter: true),
+        new(EntityWorkAssignment, "sprk_workassignments", "sprk_workassignmentid", "sprk_name", "sprk_description",
+            DueDateColumn: "sprk_responseduedate", FallbackDueDateColumn: null, KindLabel: "Work Assignment",
+            IncludeStateFilter: true),
         // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
         // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
-        new(EntityEvent, "sprk_eventid", "sprk_eventname", "sprk_eventdescription",
-            DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate",
-            KindLabel: "Task", IncludeStateFilter: false, ScopeToOwner: false),
-        // R7 W12 fix (2026-07-01): todos scoped to `owninguser = systemUserId` to match the
-        // primary Todos channel — operators shouldn't see other users' flagged todos in their
-        // own briefing. ScopeToOwner threads systemUserId into the owner filter.
-        new(EntityTodo, "sprk_todoid", "sprk_name", "sprk_description",
-            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "To Do",
-            IncludeStateFilter: true, ScopeToOwner: true),
+        // 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1, master #1032): the description column was
+        // "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real column is "sprk_description", exactly
+        // as every sibling entry in this list already uses. The bad column made Dataverse reject the whole retrieve, so
+        // this channel threw on every briefing run and the briefing could not see tasks at all (AP-14). Merged with task
+        // 152's people-targeting spec shape (entity set, no per-spec owner switch).
+        new(EntityEvent, "sprk_events", "sprk_eventid", "sprk_eventname", "sprk_description",
+            DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate", KindLabel: "Task",
+            IncludeStateFilter: false),
+        new(EntityTodo, "sprk_todos", "sprk_todoid", "sprk_name", "sprk_description",
+            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "To Do", IncludeStateFilter: true),
     };
 
     /// <summary>
-    /// Dispatch one <see cref="HighPriorityEntitySpec"/> to the shared
-    /// <see cref="QueryHighPriorityGenericAsync"/>, threading the owner filter only for specs
-    /// that opt into per-user scoping (To Do). Behavior per entity is identical to the named
-    /// wrapper this replaced (R5 task 036 / FR-C7).
+    /// One flagged entity: its people-targeted ids (for <c>sprk_document</c>, also documents on a matter/project FOR
+    /// the caller — the same rule as the Documents channel), read as the caller.
     /// </summary>
-    private Task<HighPriorityItemDto[]> QueryHighPriorityAsync(
+    private async Task<(HighPriorityItemDto[] Items, bool Failed)> QueryHighPriorityAsync(
         HighPriorityEntitySpec spec,
         Guid systemUserId,
+        IReadOnlyDictionary<string, PeopleSet> sets,
         CancellationToken ct)
     {
-        return QueryHighPriorityGenericAsync(
-            entityType: spec.EntityType,
-            idColumn: spec.IdColumn,
-            nameColumn: spec.NameColumn,
-            dueDateColumn: spec.DueDateColumn,
-            kindLabel: spec.KindLabel,
-            includeStateFilter: spec.IncludeStateFilter,
-            ct: ct,
-            descriptionColumn: spec.DescriptionColumn,
-            fallbackDueDateColumn: spec.FallbackDueDateColumn,
-            ownerUserId: spec.ScopeToOwner ? systemUserId : null);
-    }
-
-    /// <summary>
-    /// Shared query pattern for high-priority items on any of the 7 flagged entities.
-    /// Applies the flag filter (sprk_highpriority=true OR sprk_monitor=true), optional
-    /// state filter (statecode=0), and optional owner filter (owninguser=systemuserid).
-    /// Projects into HighPriorityItemDto. Failure-soft: returns empty array on error.
-    /// </summary>
-    private async Task<HighPriorityItemDto[]> QueryHighPriorityGenericAsync(
-        string entityType,
-        string idColumn,
-        string nameColumn,
-        string? dueDateColumn,
-        string kindLabel,
-        bool includeStateFilter,
-        CancellationToken ct,
-        string? descriptionColumn = null,
-        string? fallbackDueDateColumn = null,
-        Guid? ownerUserId = null)
-    {
-        try
+        var terms = new List<IdTerm> { new(spec.IdColumn, sets[spec.EntityType]) };
+        if (spec.EntityType == EntityDocument)
         {
-            var columns = new List<string> { idColumn, nameColumn, "sprk_highpriority", "sprk_monitor", "modifiedon" };
-            if (!string.IsNullOrEmpty(descriptionColumn)) columns.Add(descriptionColumn);
-            if (!string.IsNullOrEmpty(dueDateColumn)) columns.Add(dueDateColumn);
-            if (!string.IsNullOrEmpty(fallbackDueDateColumn)) columns.Add(fallbackDueDateColumn);
+            terms.Add(new IdTerm("_sprk_matter_value", sets[EntityMatter]));
+            terms.Add(new IdTerm("_sprk_project_value", sets[EntityProject]));
+        }
 
-            var query = new QueryExpression(entityType)
+        var columns = new List<string> { spec.IdColumn, spec.NameColumn, "sprk_highpriority", "sprk_monitor", "modifiedon" };
+        if (!string.IsNullOrEmpty(spec.DescriptionColumn)) columns.Add(spec.DescriptionColumn);
+        if (!string.IsNullOrEmpty(spec.DueDateColumn)) columns.Add(spec.DueDateColumn);
+        if (!string.IsNullOrEmpty(spec.FallbackDueDateColumn)) columns.Add(spec.FallbackDueDateColumn);
+
+        var filters = new List<string> { "(sprk_highpriority eq true or sprk_monitor eq true)" };
+        if (spec.IncludeStateFilter)
+        {
+            filters.Add("statecode eq 0");
+        }
+
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            spec.EntitySet,
+            spec.IdColumn,
+            filters,
+            terms,
+            columns,
+            orderBy: null,
+            label: $"high-priority:{spec.EntityType}",
+            ct).ConfigureAwait(false);
+
+        if (read.Failed)
+        {
+            return (Array.Empty<HighPriorityItemDto>(), true);
+        }
+
+        var items = new List<HighPriorityItemDto>(read.Rows.Count);
+        foreach (var row in read.Rows)
+        {
+            var id = GetGuid(row, spec.IdColumn);
+            if (id is null) continue;
+
+            DateTimeOffset? dueDate = null;
+            if (!string.IsNullOrEmpty(spec.DueDateColumn))
             {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(columns.ToArray())
-            };
-
-            // Flag filter: HighPriority OR Monitor
-            var flagGroup = new FilterExpression(LogicalOperator.Or);
-            flagGroup.AddCondition("sprk_highpriority", ConditionOperator.Equal, true);
-            flagGroup.AddCondition("sprk_monitor", ConditionOperator.Equal, true);
-            query.Criteria.AddFilter(flagGroup);
-
-            if (includeStateFilter)
-            {
-                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-            }
-
-            if (ownerUserId.HasValue && ownerUserId.Value != Guid.Empty)
-            {
-                query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, ownerUserId.Value);
-            }
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = new List<HighPriorityItemDto>(result.Entities.Count);
-            foreach (var e in result.Entities)
-            {
-                var id = e.GetAttributeValue<Guid>(idColumn);
-                if (id == Guid.Empty) continue;
-
-                DateTimeOffset? dueDate = null;
-                if (!string.IsNullOrEmpty(dueDateColumn))
+                dueDate = GetDate(row, spec.DueDateColumn);
+                if (dueDate is null && !string.IsNullOrEmpty(spec.FallbackDueDateColumn))
                 {
-                    var raw = e.GetAttributeValue<DateTime?>(dueDateColumn);
-                    if (!raw.HasValue && !string.IsNullOrEmpty(fallbackDueDateColumn))
-                    {
-                        raw = e.GetAttributeValue<DateTime?>(fallbackDueDateColumn);
-                    }
-                    if (raw.HasValue)
-                    {
-                        dueDate = new DateTimeOffset(DateTime.SpecifyKind(raw.Value, DateTimeKind.Utc));
-                    }
+                    dueDate = GetDate(row, spec.FallbackDueDateColumn);
                 }
-
-                var highPriority = e.GetAttributeValue<bool?>("sprk_highpriority") ?? false;
-                var monitor = e.GetAttributeValue<bool?>("sprk_monitor") ?? false;
-
-                var description = !string.IsNullOrEmpty(descriptionColumn)
-                    ? (e.GetAttributeValue<string>(descriptionColumn) ?? string.Empty)
-                    : string.Empty;
-
-                DateTimeOffset? modifiedOn = null;
-                var rawModified = e.GetAttributeValue<DateTime?>("modifiedon");
-                if (rawModified.HasValue)
-                {
-                    modifiedOn = new DateTimeOffset(DateTime.SpecifyKind(rawModified.Value, DateTimeKind.Utc));
-                }
-
-                var reason = highPriority && monitor ? "Both"
-                    : highPriority ? "HighPriority"
-                    : monitor ? "Monitor"
-                    : string.Empty;
-
-                var action = ClassifyAction(dueDate, modifiedOn);
-
-                items.Add(new HighPriorityItemDto
-                {
-                    EntityType = entityType,
-                    EntityId = id.ToString(),
-                    Name = e.GetAttributeValue<string>(nameColumn) ?? "(untitled)",
-                    DueDate = dueDate,
-                    HighPriority = highPriority,
-                    Monitor = monitor,
-                    KindLabel = kindLabel,
-                    Description = description,
-                    Action = action,
-                    Reason = reason,
-                    ModifiedOn = modifiedOn,
-                });
             }
-            return items.ToArray();
+
+            var highPriority = GetBool(row, "sprk_highpriority") ?? false;
+            var monitor = GetBool(row, "sprk_monitor") ?? false;
+            var modifiedOn = GetDate(row, "modifiedon");
+
+            var reason = highPriority && monitor ? "Both"
+                : highPriority ? "HighPriority"
+                : monitor ? "Monitor"
+                : string.Empty;
+
+            items.Add(new HighPriorityItemDto
+            {
+                EntityType = spec.EntityType,
+                EntityId = id.Value.ToString(),
+                Name = GetString(row, spec.NameColumn) ?? "(untitled)",
+                DueDate = dueDate,
+                HighPriority = highPriority,
+                Monitor = monitor,
+                KindLabel = spec.KindLabel,
+                Description = !string.IsNullOrEmpty(spec.DescriptionColumn)
+                    ? (GetString(row, spec.DescriptionColumn) ?? string.Empty)
+                    : string.Empty,
+                Action = ClassifyAction(dueDate, modifiedOn),
+                Reason = reason,
+                ModifiedOn = modifiedOn,
+            });
         }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "DailyBriefingCollector.QueryHighPriority failed for entity={EntityType} — returning empty",
-                entityType);
-            return Array.Empty<HighPriorityItemDto>();
-        }
+
+        return (items.ToArray(), false);
     }
 
     /// <summary>
@@ -610,553 +601,536 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Membership resolution (delegates to IMembershipResolverService)
+    // Who a record is FOR — the people-targeting surface (ADR-034 A3)
     // ──────────────────────────────────────────────────────────────────────────
 
+    /// <summary>The people-targeted ids for one entity, or a failure marker. Failure is never an empty set.</summary>
+    private sealed record PeopleSet(IReadOnlyList<Guid> Ids, bool Failed)
+    {
+        public static PeopleSet FailedSet { get; } = new(Array.Empty<Guid>(), true);
+    }
+
+    /// <summary>One id-bearing clause of a channel query: <c>{FilterProperty} eq id</c> over the set's ids.</summary>
+    private sealed record IdTerm(string FilterProperty, PeopleSet Set);
+
     /// <summary>
-    /// Resolves membership for a single entity type. Returns empty list on any failure
-    /// (logged as warning) so a partial-failure in the membership pipeline doesn't
-    /// abort the whole briefing — the dependent per-channel query simply returns
-    /// zero rows and the channel is skipped.
+    /// Resolves the records of <paramref name="entityType"/> FOR the caller through the canonical resolver's
+    /// people-targeting surface, read to completion (<see cref="PeopleTargetedSet"/>). A resolver failure, or a set
+    /// larger than the resolver's ceiling, becomes a FAILED set — the channels that depend on it report failure
+    /// instead of silently shrinking to an arbitrary subset.
     /// </summary>
-    private async Task<IReadOnlyList<Guid>> ResolveMembershipsSafelyAsync(
-        Guid systemUserId, string entityType, CancellationToken ct)
+    private async Task<PeopleSet> ResolvePeopleSetAsync(Guid systemUserId, string entityType, CancellationToken ct)
     {
         try
         {
-            var response = await _membershipResolver
-                .ResolveAsync(systemUserId, entityType, options: null, ct)
+            var set = await PeopleTargetedSet
+                .ResolveAsync(_membershipResolver, systemUserId, entityType, _logger, ct)
                 .ConfigureAwait(false);
-            return response.Ids;
+            if (!set.Complete)
+            {
+                _logger.LogWarning(
+                    "DailyBriefingCollector people-targeted set for entity={EntityType} exceeds the resolver ceiling; "
+                    + "dependent channels are reported FAILED (never a truncated list)",
+                    entityType);
+                return PeopleSet.FailedSet;
+            }
+            return new PeopleSet(set.Ids, Failed: false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "DailyBriefingCollector membership resolution failed for entity={EntityType}; channel will be empty",
+                "DailyBriefingCollector people-targeting resolution failed for entity={EntityType}; dependent channels are reported FAILED",
                 entityType);
-            return Array.Empty<Guid>();
+            return PeopleSet.FailedSet;
         }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // What the caller may see — every returned row is read AS the caller
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>The rows of one channel's caller-context read, or a failure marker.</summary>
+    private sealed record CallerRead(IReadOnlyList<Dictionary<string, JsonElement>> Rows, bool Failed)
+    {
+        public static CallerRead FailedRead { get; } = new(Array.Empty<Dictionary<string, JsonElement>>(), true);
+        public static CallerRead None { get; } = new(Array.Empty<Dictionary<string, JsonElement>>(), false);
+    }
+
+    /// <summary>
+    /// Reads the rows matching <paramref name="filters"/> AND (any <paramref name="terms"/> id) under the CALLER's
+    /// Dataverse security, chunking each id list at <see cref="MaxIdsPerImpersonatedRequest"/> and unioning by
+    /// <paramref name="idColumn"/>. A failed dependency set or a failed chunk fails the whole read; there is no
+    /// app-only path.
+    /// </summary>
+    private async Task<CallerRead> ReadAsCallerAsync(
+        Guid callerSystemUserId,
+        string entitySet,
+        string idColumn,
+        IReadOnlyList<string> filters,
+        IReadOnlyList<IdTerm> terms,
+        IReadOnlyList<string> columns,
+        string? orderBy,
+        string label,
+        CancellationToken ct)
+    {
+        if (terms.Any(t => t.Set.Failed))
+        {
+            _logger.LogWarning(
+                "DailyBriefingCollector channel={Label} FAILED: a people-targeted candidate set could not be resolved",
+                label);
+            return CallerRead.FailedRead;
+        }
+
+        if (terms.All(t => t.Set.Ids.Count == 0))
+        {
+            return CallerRead.None;
+        }
+
+        var baseFilter = string.Join(" and ", filters);
+        var select = string.Join(",", columns);
+        var rows = new Dictionary<Guid, Dictionary<string, JsonElement>>();
+
+        foreach (var term in terms)
+        {
+            foreach (var chunk in term.Set.Ids.Distinct().Chunk(MaxIdsPerImpersonatedRequest))
+            {
+                var idClause = string.Join(
+                    " or ",
+                    chunk.Select(id => $"{term.FilterProperty} eq {id.ToString("D", CultureInfo.InvariantCulture)}"));
+                var filter = baseFilter.Length == 0 ? $"({idClause})" : $"{baseFilter} and ({idClause})";
+
+                var odata = new StringBuilder()
+                    .Append("$select=").Append(select)
+                    .Append("&$filter=").Append(filter);
+                if (!string.IsNullOrEmpty(orderBy))
+                {
+                    odata.Append("&$orderby=").Append(orderBy);
+                }
+                odata.Append("&$top=").Append(PerChannelMaxRows.ToString(CultureInfo.InvariantCulture));
+
+                IReadOnlyList<Dictionary<string, JsonElement>> page;
+                try
+                {
+                    page = await _callerQuery
+                        .QueryAsync(entitySet, odata.ToString(), callerSystemUserId, ct)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "DailyBriefingCollector channel={Label} FAILED: the caller-context read of {EntitySet} was refused or "
+                        + "faulted — reported as failed, never answered app-only",
+                        label, entitySet);
+                    return CallerRead.FailedRead;
+                }
+
+                foreach (var row in page)
+                {
+                    if (GetGuid(row, idColumn) is { } id)
+                    {
+                        rows.TryAdd(id, row);
+                    }
+                }
+            }
+        }
+
+        return new CallerRead(rows.Values.ToList(), Failed: false);
+    }
+
+    /// <summary>A channel's items, or the failure marker the collected payload carries.</summary>
+    private sealed record ChannelResult(BriefingItem[] Items, bool Failed)
+    {
+        public static ChannelResult FailedChannel { get; } = new(Array.Empty<BriefingItem>(), true);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
     // Channel query methods
     // ──────────────────────────────────────────────────────────────────────────
 
+    private static readonly string[] EventColumns =
+    {
+        "sprk_eventid", "sprk_eventname", "sprk_duedate", "sprk_finalduedate", "modifiedon",
+        "_sprk_regardingmatter_value", "_sprk_regardingproject_value", "sprk_priority",
+    };
+
     /// <summary>
-    /// Upcoming Tasks — sprk_event of type Task, due in next 5 days, status Open.
-    /// Membership filter: event-side OR regarding-matter OR regarding-project member.
+    /// Upcoming Tasks — sprk_event of type Task, due in the next N days, status Open.
+    /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
-    private Task<BriefingItem[]> QueryUpcomingTasksAsync(
+    private Task<ChannelResult> QueryUpcomingTasksAsync(
         Guid systemUserId,
-        IReadOnlyList<Guid> eventIds,
-        IReadOnlyList<Guid> matterIds,
-        IReadOnlyList<Guid> projectIds,
+        PeopleSet events,
+        PeopleSet matters,
+        PeopleSet projects,
         int dueWithinDays,
         CancellationToken ct)
     {
+        var days = dueWithinDays.ToString(CultureInfo.InvariantCulture);
         return QueryEventsAsync(
-            label: ChannelUpcomingTasks,
-            eventIds: eventIds,
-            matterIds: matterIds,
-            projectIds: projectIds,
-            applyDateFilter: query =>
-            {
-                // sprk_duedate OR sprk_finalduedate within the user's Due-soon window (days).
-                var dateGroup = new FilterExpression(LogicalOperator.Or);
-                dateGroup.AddCondition("sprk_duedate", ConditionOperator.NextXDays, dueWithinDays);
-                dateGroup.AddCondition("sprk_finalduedate", ConditionOperator.NextXDays, dueWithinDays);
-                query.Criteria.AddFilter(dateGroup);
-            },
-            ct: ct);
+            ChannelUpcomingTasks,
+            systemUserId,
+            events,
+            matters,
+            projects,
+            // sprk_duedate OR sprk_finalduedate within the user's Due-soon window (days).
+            $"(Microsoft.Dynamics.CRM.NextXDays(PropertyName='sprk_duedate',PropertyValue={days}) or "
+            + $"Microsoft.Dynamics.CRM.NextXDays(PropertyName='sprk_finalduedate',PropertyValue={days}))",
+            ct);
     }
 
     /// <summary>
-    /// Overdue Tasks — sprk_event of type Task, due > 5 days past, status Open.
-    /// Membership filter: event-side OR regarding-matter OR regarding-project member.
+    /// Overdue Tasks — sprk_event of type Task, due more than 5 days ago, status Open.
+    /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
-    private Task<BriefingItem[]> QueryOverdueTasksAsync(
+    private Task<ChannelResult> QueryOverdueTasksAsync(
         Guid systemUserId,
-        IReadOnlyList<Guid> eventIds,
-        IReadOnlyList<Guid> matterIds,
-        IReadOnlyList<Guid> projectIds,
+        PeopleSet events,
+        PeopleSet matters,
+        PeopleSet projects,
         CancellationToken ct)
     {
+        // "Overdue" = on or before (today - TaskOverdueDaysPast), computed once per call.
+        var cutoff = DateTime.UtcNow.Date.AddDays(-TaskOverdueDaysPast).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         return QueryEventsAsync(
-            label: ChannelOverdueTasks,
-            eventIds: eventIds,
-            matterIds: matterIds,
-            projectIds: projectIds,
-            applyDateFilter: query =>
-            {
-                // sprk_duedate OR sprk_finalduedate older than (today - TaskOverdueDaysPast).
-                // Convention: "overdue" = past the threshold; use ConditionOperator.OnOrBefore
-                // against a date computed once at call time (deterministic across the multi-query
-                // fan-out within the same request).
-                var cutoff = DateTime.UtcNow.Date.AddDays(-TaskOverdueDaysPast);
-                var dateGroup = new FilterExpression(LogicalOperator.Or);
-                dateGroup.AddCondition("sprk_duedate", ConditionOperator.OnOrBefore, cutoff);
-                dateGroup.AddCondition("sprk_finalduedate", ConditionOperator.OnOrBefore, cutoff);
-                query.Criteria.AddFilter(dateGroup);
-            },
-            ct: ct);
+            ChannelOverdueTasks,
+            systemUserId,
+            events,
+            matters,
+            projects,
+            $"(Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{cutoff}') or "
+            + $"Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_finalduedate',PropertyValue='{cutoff}'))",
+            ct);
     }
 
     /// <summary>
-    /// Common sprk_event query path used by Upcoming Tasks + Overdue Tasks.
-    /// Both channels share the same shape (type=Task, status=Open, member-scope) and
-    /// differ only in the date filter — apply it via the <paramref name="applyDateFilter"/>
-    /// callback.
+    /// The sprk_event read shared by Upcoming + Overdue: type=Task, status=Open, the caller-provided date clause, and
+    /// the event-side OR regarding-matter OR regarding-project people-targeted terms.
     /// </summary>
-    private async Task<BriefingItem[]> QueryEventsAsync(
+    private async Task<ChannelResult> QueryEventsAsync(
         string label,
-        IReadOnlyList<Guid> eventIds,
-        IReadOnlyList<Guid> matterIds,
-        IReadOnlyList<Guid> projectIds,
-        Action<QueryExpression> applyDateFilter,
+        Guid systemUserId,
+        PeopleSet events,
+        PeopleSet matters,
+        PeopleSet projects,
+        string dateFilter,
         CancellationToken ct)
     {
-        try
-        {
-            // Membership scope: event-side ids OR regarding-matter ids OR regarding-project ids.
-            // If all 3 are empty, the user has no candidate rows at all — return early.
-            if (eventIds.Count == 0 && matterIds.Count == 0 && projectIds.Count == 0)
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            "sprk_events",
+            "sprk_eventid",
+            new[]
             {
-                return Array.Empty<BriefingItem>();
-            }
-
-            var query = new QueryExpression(EntityEvent)
+                $"_sprk_eventtype_ref_value eq {EventTypeTask}",
+                $"statuscode eq {EventStatusOpen.ToString(CultureInfo.InvariantCulture)}",
+                dateFilter,
+            },
+            new[]
             {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(
-                    "sprk_eventid",
-                    "sprk_eventname",
-                    "sprk_duedate",
-                    "sprk_finalduedate",
-                    "modifiedon",
-                    "sprk_regardingmatter",
-                    "sprk_regardingproject",
-                    "ownerid",
-                    "sprk_priority")
-            };
+                new IdTerm("sprk_eventid", events),
+                new IdTerm("_sprk_regardingmatter_value", matters),
+                new IdTerm("_sprk_regardingproject_value", projects),
+            },
+            EventColumns,
+            "sprk_finalduedate asc,sprk_duedate asc",
+            label,
+            ct).ConfigureAwait(false);
 
-            // type=Task AND status=Open
-            query.Criteria.AddCondition("sprk_eventtype_ref", ConditionOperator.Equal, new Guid(EventTypeTask));
-            query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, EventStatusOpen);
+        if (read.Failed) return ChannelResult.FailedChannel;
 
-            // Date filter — caller-provided (differs between upcoming/overdue).
-            applyDateFilter(query);
+        var items = read.Rows
+            .OrderBy(r => GetDate(r, "sprk_finalduedate") ?? DateTimeOffset.MaxValue)
+            .ThenBy(r => GetDate(r, "sprk_duedate") ?? DateTimeOffset.MaxValue)
+            .Take(PerChannelMaxRows)
+            .Select(MapEventToBriefingItem)
+            .ToArray();
 
-            // Membership scope: OR group across the three candidate-set sources.
-            var memberGroup = new FilterExpression(LogicalOperator.Or);
-            if (eventIds.Count > 0)
-            {
-                memberGroup.AddCondition("sprk_eventid", ConditionOperator.In, eventIds.Cast<object>().ToArray());
-            }
-            if (matterIds.Count > 0)
-            {
-                memberGroup.AddCondition("sprk_regardingmatter", ConditionOperator.In, matterIds.Cast<object>().ToArray());
-            }
-            if (projectIds.Count > 0)
-            {
-                memberGroup.AddCondition("sprk_regardingproject", ConditionOperator.In, projectIds.Cast<object>().ToArray());
-            }
-            query.Criteria.AddFilter(memberGroup);
-
-            query.AddOrder("sprk_finalduedate", OrderType.Ascending);
-            query.AddOrder("sprk_duedate", OrderType.Ascending);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities.Select(MapEventToBriefingItem).ToArray();
-
-            _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", label, items.Length);
-            return items;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DailyBriefingCollector channel={Label} query failed — returning empty array", label);
-            return Array.Empty<BriefingItem>();
-        }
+        _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", label, items.Length);
+        return new ChannelResult(items, false);
     }
 
     /// <summary>
-    /// Documents — sprk_document modified within the user's Recency window where the user
-    /// is a member of the regarding matter or project.
+    /// Documents — sprk_document modified within the user's Recency window, FOR the caller (its own Created By /
+    /// owner) or filed on a matter / project FOR the caller.
     /// </summary>
-    private async Task<BriefingItem[]> QueryDocumentsAsync(
-        IReadOnlyList<Guid> matterIds,
-        IReadOnlyList<Guid> projectIds,
+    private async Task<ChannelResult> QueryDocumentsAsync(
+        Guid systemUserId,
+        PeopleSet documents,
+        PeopleSet matters,
+        PeopleSet projects,
         int recencyHours,
         CancellationToken ct)
     {
-        try
-        {
-            // If user has no matter/project memberships, no candidate documents.
-            if (matterIds.Count == 0 && projectIds.Count == 0)
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            "sprk_documents",
+            "sprk_documentid",
+            new[] { $"modifiedon ge {Cutoff(recencyHours)}" },
+            new[]
             {
-                return Array.Empty<BriefingItem>();
-            }
-
-            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
-
-            var query = new QueryExpression(EntityDocument)
+                new IdTerm("sprk_documentid", documents),
+                new IdTerm("_sprk_matter_value", matters),
+                new IdTerm("_sprk_project_value", projects),
+            },
+            new[]
             {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(
-                    "sprk_documentid",
-                    "sprk_documentname",
-                    "sprk_filename",
-                    "sprk_documentdescription",
-                    "modifiedon",
-                    "sprk_matter",
-                    "sprk_project",
-                    "sprk_documenttype",
-                    "sprk_documentstatus")
-            };
+                "sprk_documentid", "sprk_documentname", "sprk_filename", "sprk_documentdescription", "modifiedon",
+                "_sprk_matter_value", "_sprk_project_value",
+            },
+            "modifiedon desc",
+            ChannelDocuments,
+            ct).ConfigureAwait(false);
 
-            query.Criteria.AddCondition("modifiedon", ConditionOperator.GreaterEqual, cutoff);
+        if (read.Failed) return ChannelResult.FailedChannel;
 
-            // Membership scope: matter OR project regarding lookup.
-            var memberGroup = new FilterExpression(LogicalOperator.Or);
-            if (matterIds.Count > 0)
-            {
-                memberGroup.AddCondition("sprk_matter", ConditionOperator.In, matterIds.Cast<object>().ToArray());
-            }
-            if (projectIds.Count > 0)
-            {
-                memberGroup.AddCondition("sprk_project", ConditionOperator.In, projectIds.Cast<object>().ToArray());
-            }
-            query.Criteria.AddFilter(memberGroup);
+        var items = read.Rows
+            .OrderByDescending(r => GetDate(r, "modifiedon") ?? DateTimeOffset.MinValue)
+            .Take(PerChannelMaxRows)
+            .Select(MapDocumentToBriefingItem)
+            .ToArray();
 
-            query.AddOrder("modifiedon", OrderType.Descending);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities.Select(MapDocumentToBriefingItem).ToArray();
-
-            _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelDocuments, items.Length);
-            return items;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DailyBriefingCollector channel={Label} query failed — returning empty array", ChannelDocuments);
-            return Array.Empty<BriefingItem>();
-        }
+        _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelDocuments, items.Length);
+        return new ChannelResult(items, false);
     }
 
-    /// <summary>
-    /// Matters — sprk_matter modified within the user's Recency window where the user is a
-    /// member. Active only.
-    /// </summary>
-    private async Task<BriefingItem[]> QueryMattersAsync(
-        IReadOnlyList<Guid> matterIds,
+    /// <summary>Matters — sprk_matter FOR the caller, modified within the Recency window, Active.</summary>
+    private async Task<ChannelResult> QueryMattersAsync(
+        Guid systemUserId,
+        PeopleSet matters,
         int recencyHours,
         CancellationToken ct)
     {
-        try
-        {
-            if (matterIds.Count == 0)
-            {
-                return Array.Empty<BriefingItem>();
-            }
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            "sprk_matters",
+            "sprk_matterid",
+            new[] { "statecode eq 0", $"modifiedon ge {Cutoff(recencyHours)}" },
+            new[] { new IdTerm("sprk_matterid", matters) },
+            new[] { "sprk_matterid", "sprk_mattername", "sprk_matternumber", "sprk_matterdescription", "modifiedon" },
+            "modifiedon desc",
+            ChannelMatters,
+            ct).ConfigureAwait(false);
 
-            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
+        if (read.Failed) return ChannelResult.FailedChannel;
 
-            var query = new QueryExpression(EntityMatter)
-            {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(
-                    "sprk_matterid",
-                    "sprk_mattername",
-                    "sprk_matternumber",
-                    "sprk_matterdescription",
-                    "modifiedon",
-                    "statecode",
-                    "statuscode")
-            };
+        var items = read.Rows
+            .OrderByDescending(r => GetDate(r, "modifiedon") ?? DateTimeOffset.MinValue)
+            .Take(PerChannelMaxRows)
+            .Select(MapMatterToBriefingItem)
+            .ToArray();
 
-            // statecode=Active (0)
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-            query.Criteria.AddCondition("modifiedon", ConditionOperator.GreaterEqual, cutoff);
-            query.Criteria.AddCondition("sprk_matterid", ConditionOperator.In, matterIds.Cast<object>().ToArray());
-
-            query.AddOrder("modifiedon", OrderType.Descending);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities.Select(MapMatterToBriefingItem).ToArray();
-
-            _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelMatters, items.Length);
-            return items;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DailyBriefingCollector channel={Label} query failed — returning empty array", ChannelMatters);
-            return Array.Empty<BriefingItem>();
-        }
+        _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelMatters, items.Length);
+        return new ChannelResult(items, false);
     }
 
-    /// <summary>
-    /// Projects — sprk_project modified within the user's Recency window where the user is a
-    /// member. Active only.
-    /// </summary>
-    private async Task<BriefingItem[]> QueryProjectsAsync(
-        IReadOnlyList<Guid> projectIds,
+    /// <summary>Projects — sprk_project FOR the caller, modified within the Recency window, Active.</summary>
+    private async Task<ChannelResult> QueryProjectsAsync(
+        Guid systemUserId,
+        PeopleSet projects,
         int recencyHours,
         CancellationToken ct)
     {
-        try
-        {
-            if (projectIds.Count == 0)
-            {
-                return Array.Empty<BriefingItem>();
-            }
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            "sprk_projects",
+            "sprk_projectid",
+            new[] { "statecode eq 0", $"modifiedon ge {Cutoff(recencyHours)}" },
+            new[] { new IdTerm("sprk_projectid", projects) },
+            new[] { "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription", "modifiedon" },
+            "modifiedon desc",
+            ChannelProjects,
+            ct).ConfigureAwait(false);
 
-            var cutoff = DateTime.UtcNow.AddHours(-recencyHours);
+        if (read.Failed) return ChannelResult.FailedChannel;
 
-            var query = new QueryExpression(EntityProject)
-            {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(
-                    "sprk_projectid",
-                    "sprk_projectname",
-                    "sprk_projectnumber",
-                    "sprk_projectdescription",
-                    "modifiedon",
-                    "statecode",
-                    "statuscode")
-            };
+        var items = read.Rows
+            .OrderByDescending(r => GetDate(r, "modifiedon") ?? DateTimeOffset.MinValue)
+            .Take(PerChannelMaxRows)
+            .Select(MapProjectToBriefingItem)
+            .ToArray();
 
-            query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
-            query.Criteria.AddCondition("modifiedon", ConditionOperator.GreaterEqual, cutoff);
-            query.Criteria.AddCondition("sprk_projectid", ConditionOperator.In, projectIds.Cast<object>().ToArray());
-
-            query.AddOrder("modifiedon", OrderType.Descending);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities.Select(MapProjectToBriefingItem).ToArray();
-
-            _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelProjects, items.Length);
-            return items;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DailyBriefingCollector channel={Label} query failed — returning empty array", ChannelProjects);
-            return Array.Empty<BriefingItem>();
-        }
+        _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelProjects, items.Length);
+        return new ChannelResult(items, false);
     }
 
     /// <summary>
-    /// To Dos — sprk_todo due today or later, owner=user, status Open/In Progress.
-    ///
-    /// R7 W12 widget cutover fix (2026-07-01 UTC):
-    ///   1. Ownership filter changed from `ownerid = systemUserId` to
-    ///      `owninguser = systemUserId`. The polymorphic Owner attribute doesn't
-    ///      match plain Guid values reliably in QueryExpression (same class of
-    ///      bug the R7 root-cause fix addressed for the membership resolver —
-    ///      see ResolveMembershipsSafelyAsync above). sprk_todo has no
-    ///      membership-bearing fields, so it stays a direct per-user query
-    ///      (out of scope for the R5 task 033 resolver-routing revert).
-    ///   2. Date filter widened from `= today OR = tomorrow` (exact timestamp
-    ///      match, misses records with any time-of-day) to `>= today start UTC`
-    ///      (matches operator intent: "today, tomorrow, later"). Operator can
-    ///      set a due date in their local time; as long as the stored UTC value
-    ///      is at-or-after UTC midnight today, it shows.
-    ///
-    /// sprk_assignedto targets contact; only ownerid/owninguser is systemuser-
-    /// typed — contact-side filtering would require an identity-normalization
-    /// round-trip and is out of MVP scope.
+    /// To Dos — sprk_todo FOR the caller, due today or later, Open / In Progress.
     /// </summary>
-    private async Task<BriefingItem[]> QueryTodosAsync(Guid systemUserId, CancellationToken ct)
+    /// <remarks>
+    /// <para>
+    /// Task 152 (#1044, owner Q8): a to-do is FOR the person who created it (a HUMAN Created By) and the person named
+    /// in <c>sprk_assignedto</c> (a CONTACT lookup, matched through the caller's linked contact — task 141), plus the
+    /// user who personally owns it. All three come from the people-targeting resolver; this method carries no
+    /// owner condition of its own. Before this task the channel filtered <c>owninguser = caller</c>, so a TEAM-owned
+    /// to-do (every server-created to-do once RecordOwnershipResolver owns it by team) matched nobody, and the
+    /// assignee was never consulted. Server-created to-dos have the BFF application user as Created By, which is why
+    /// the generators now fill <c>sprk_assignedto</c> (TodoGenerationService, TaskActionCore, the external portal).
+    /// </para>
+    /// <para>
+    /// Date filter (R7 W12 widget cutover, 2026-07-01): due today or later — undated to-dos are excluded so they do
+    /// not clutter the digest.
+    /// </para>
+    /// </remarks>
+    private async Task<ChannelResult> QueryTodosAsync(Guid systemUserId, PeopleSet todos, CancellationToken ct)
     {
-        try
-        {
-            var todayStartUtc = DateTime.UtcNow.Date;
+        var today = DateTime.UtcNow.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
 
-            var query = new QueryExpression(EntityTodo)
+        var read = await ReadAsCallerAsync(
+            systemUserId,
+            "sprk_todos",
+            "sprk_todoid",
+            new[]
             {
-                NoLock = true,
-                TopCount = PerChannelMaxRows,
-                ColumnSet = new ColumnSet(
-                    "sprk_todoid",
-                    "sprk_name",
-                    "sprk_description",
-                    "sprk_duedate",
-                    "sprk_priority",
-                    "sprk_regardingmatter",
-                    "modifiedon",
-                    "ownerid",
-                    "sprk_assignedto",
-                    "statuscode")
-            };
+                $"(statuscode eq {TodoStatusOpen.ToString(CultureInfo.InvariantCulture)} or statuscode eq {TodoStatusInProgress.ToString(CultureInfo.InvariantCulture)})",
+                "sprk_duedate ne null",
+                $"Microsoft.Dynamics.CRM.OnOrAfter(PropertyName='sprk_duedate',PropertyValue='{today}')",
+            },
+            new[] { new IdTerm("sprk_todoid", todos) },
+            new[]
+            {
+                "sprk_todoid", "sprk_name", "sprk_description", "sprk_duedate", "sprk_priority",
+                "_sprk_regardingmatter_value", "modifiedon",
+            },
+            "sprk_duedate asc,sprk_priority asc",
+            ChannelTodos,
+            ct).ConfigureAwait(false);
 
-            // Status: Open OR In Progress.
-            var statusGroup = new FilterExpression(LogicalOperator.Or);
-            statusGroup.AddCondition("statuscode", ConditionOperator.Equal, TodoStatusOpen);
-            statusGroup.AddCondition("statuscode", ConditionOperator.Equal, TodoStatusInProgress);
-            query.Criteria.AddFilter(statusGroup);
+        if (read.Failed) return ChannelResult.FailedChannel;
 
-            // Due date: today or later (matches operator intent "today, tomorrow, later").
-            // NotNull first so records without a due date are excluded (intentional —
-            // undated todos would clutter the digest).
-            query.Criteria.AddCondition("sprk_duedate", ConditionOperator.NotNull);
-            query.Criteria.AddCondition("sprk_duedate", ConditionOperator.OnOrAfter, todayStartUtc);
+        var items = read.Rows
+            .OrderBy(r => GetDate(r, "sprk_duedate") ?? DateTimeOffset.MaxValue)
+            .ThenBy(r => GetInt(r, "sprk_priority") ?? int.MaxValue)
+            .Take(PerChannelMaxRows)
+            .Select(MapTodoToBriefingItem)
+            .ToArray();
 
-            // Ownership: owninguser=user (NOT ownerid — see method docstring).
-            query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, systemUserId);
-
-            query.AddOrder("sprk_duedate", OrderType.Ascending);
-            query.AddOrder("sprk_priority", OrderType.Ascending);
-
-            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
-            var items = result.Entities.Select(MapTodoToBriefingItem).ToArray();
-
-            _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelTodos, items.Length);
-            return items;
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "DailyBriefingCollector channel={Label} query failed — returning empty array", ChannelTodos);
-            return Array.Empty<BriefingItem>();
-        }
+        _logger.LogDebug("DailyBriefingCollector channel={Label} returned {Count} items", ChannelTodos, items.Length);
+        return new ChannelResult(items, false);
     }
+
+    private static string Cutoff(int recencyHours) =>
+        DateTime.UtcNow.AddHours(-recencyHours).ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture);
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Per-entity → BriefingItem projection
+    // Per-entity → BriefingItem projection (Web API rows read as the caller)
     // ──────────────────────────────────────────────────────────────────────────
 
-    private static BriefingItem MapEventToBriefingItem(Entity entity)
+    private static BriefingItem MapEventToBriefingItem(Dictionary<string, JsonElement> row)
     {
-        var matterRef = entity.GetAttributeValue<EntityReference>("sprk_regardingmatter");
+        var id = GetGuid(row, "sprk_eventid") ?? Guid.Empty;
+        var matterId = GetGuid(row, "_sprk_regardingmatter_value");
         return new BriefingItem
         {
-            Id = entity.Id.ToString(),
+            Id = id.ToString(),
             EntityType = EntityEvent,
-            EntityId = entity.GetAttributeValue<Guid>("sprk_eventid").ToString(),
-            Title = entity.GetAttributeValue<string>("sprk_eventname") ?? "(untitled event)",
-            Priority = MapPriority(entity.GetAttributeValue<OptionSetValue>("sprk_priority")),
-            DueDate = ParseDate(entity.GetAttributeValue<DateTime?>("sprk_finalduedate")
-                ?? entity.GetAttributeValue<DateTime?>("sprk_duedate")),
-            RegardingMatterName = matterRef?.Name,
-            RegardingMatterId = matterRef?.Id.ToString(),
-            ModifiedOn = ParseDate(entity.GetAttributeValue<DateTime?>("modifiedon")),
+            EntityId = id.ToString(),
+            Title = GetString(row, "sprk_eventname") ?? "(untitled event)",
+            Priority = MapPriority(GetInt(row, "sprk_priority")),
+            DueDate = GetDate(row, "sprk_finalduedate") ?? GetDate(row, "sprk_duedate"),
+            RegardingMatterName = matterId is null ? null : GetFormatted(row, "_sprk_regardingmatter_value"),
+            RegardingMatterId = matterId?.ToString(),
+            ModifiedOn = GetDate(row, "modifiedon"),
         };
     }
 
-    private static BriefingItem MapDocumentToBriefingItem(Entity entity)
+    private static BriefingItem MapDocumentToBriefingItem(Dictionary<string, JsonElement> row)
     {
-        var matterRef = entity.GetAttributeValue<EntityReference>("sprk_matter");
-        var name = entity.GetAttributeValue<string>("sprk_documentname")
-                   ?? entity.GetAttributeValue<string>("sprk_filename")
+        var id = GetGuid(row, "sprk_documentid") ?? Guid.Empty;
+        var matterId = GetGuid(row, "_sprk_matter_value");
+        var name = GetString(row, "sprk_documentname")
+                   ?? GetString(row, "sprk_filename")
                    ?? "(untitled document)";
         return new BriefingItem
         {
-            Id = entity.Id.ToString(),
+            Id = id.ToString(),
             EntityType = EntityDocument,
-            EntityId = entity.GetAttributeValue<Guid>("sprk_documentid").ToString(),
+            EntityId = id.ToString(),
             Title = name,
-            Body = entity.GetAttributeValue<string>("sprk_documentdescription"),
+            Body = GetString(row, "sprk_documentdescription"),
             Priority = "normal",
             DueDate = null,
-            RegardingMatterName = matterRef?.Name,
-            RegardingMatterId = matterRef?.Id.ToString(),
-            ModifiedOn = ParseDate(entity.GetAttributeValue<DateTime?>("modifiedon")),
+            RegardingMatterName = matterId is null ? null : GetFormatted(row, "_sprk_matter_value"),
+            RegardingMatterId = matterId?.ToString(),
+            ModifiedOn = GetDate(row, "modifiedon"),
         };
     }
 
-    private static BriefingItem MapMatterToBriefingItem(Entity entity)
+    private static BriefingItem MapMatterToBriefingItem(Dictionary<string, JsonElement> row)
     {
-        var matterId = entity.GetAttributeValue<Guid>("sprk_matterid");
-        var matterName = entity.GetAttributeValue<string>("sprk_mattername") ?? "(untitled matter)";
+        var matterId = GetGuid(row, "sprk_matterid") ?? Guid.Empty;
+        var matterName = GetString(row, "sprk_mattername") ?? "(untitled matter)";
         // Operator UAT (2026-07-09): title line = "{number}   {name}". Number omitted
         // gracefully when the matter has none (falls back to name only).
-        var matterNumber = entity.GetAttributeValue<string>("sprk_matternumber");
+        var matterNumber = GetString(row, "sprk_matternumber");
         var matterTitle = string.IsNullOrWhiteSpace(matterNumber) ? matterName : $"{matterNumber}   {matterName}";
         return new BriefingItem
         {
-            Id = entity.Id.ToString(),
+            Id = matterId.ToString(),
             EntityType = EntityMatter,
             EntityId = matterId.ToString(),
             Title = matterTitle,
-            Body = entity.GetAttributeValue<string>("sprk_matterdescription"),
+            Body = GetString(row, "sprk_matterdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — the matter IS the regarding entity, surface as click-through.
             RegardingMatterName = matterName,
             RegardingMatterId = matterId.ToString(),
-            ModifiedOn = ParseDate(entity.GetAttributeValue<DateTime?>("modifiedon")),
+            ModifiedOn = GetDate(row, "modifiedon"),
         };
     }
 
-    private static BriefingItem MapProjectToBriefingItem(Entity entity)
+    private static BriefingItem MapProjectToBriefingItem(Dictionary<string, JsonElement> row)
     {
-        var projectId = entity.GetAttributeValue<Guid>("sprk_projectid");
-        var projectName = entity.GetAttributeValue<string>("sprk_projectname") ?? "(untitled project)";
+        var projectId = GetGuid(row, "sprk_projectid") ?? Guid.Empty;
+        var projectName = GetString(row, "sprk_projectname") ?? "(untitled project)";
         // Operator UAT (2026-07-09): title line = "{number}   {name}" (same as matters).
-        var projectNumber = entity.GetAttributeValue<string>("sprk_projectnumber");
+        var projectNumber = GetString(row, "sprk_projectnumber");
         var projectTitle = string.IsNullOrWhiteSpace(projectNumber) ? projectName : $"{projectNumber}   {projectName}";
         return new BriefingItem
         {
-            Id = entity.Id.ToString(),
+            Id = projectId.ToString(),
             EntityType = EntityProject,
             EntityId = projectId.ToString(),
             Title = projectTitle,
-            Body = entity.GetAttributeValue<string>("sprk_projectdescription"),
+            Body = GetString(row, "sprk_projectdescription"),
             Priority = "normal",
             DueDate = null,
             // Self-regarding — entity-link points to the project itself.
             RegardingMatterName = projectName,
             RegardingMatterId = projectId.ToString(),
-            ModifiedOn = ParseDate(entity.GetAttributeValue<DateTime?>("modifiedon")),
+            ModifiedOn = GetDate(row, "modifiedon"),
         };
     }
 
-    private static BriefingItem MapTodoToBriefingItem(Entity entity)
+    private static BriefingItem MapTodoToBriefingItem(Dictionary<string, JsonElement> row)
     {
-        var todoId = entity.GetAttributeValue<Guid>("sprk_todoid");
-        var matterRef = entity.GetAttributeValue<EntityReference>("sprk_regardingmatter");
+        var todoId = GetGuid(row, "sprk_todoid") ?? Guid.Empty;
+        var matterId = GetGuid(row, "_sprk_regardingmatter_value");
         return new BriefingItem
         {
-            Id = entity.Id.ToString(),
+            Id = todoId.ToString(),
             EntityType = EntityTodo,
             EntityId = todoId.ToString(),
-            Title = entity.GetAttributeValue<string>("sprk_name") ?? "(untitled to do)",
-            Body = entity.GetAttributeValue<string>("sprk_description"),
-            Priority = MapPriority(entity.GetAttributeValue<OptionSetValue>("sprk_priority")),
-            DueDate = ParseDate(entity.GetAttributeValue<DateTime?>("sprk_duedate")),
-            RegardingMatterName = matterRef?.Name,
-            RegardingMatterId = matterRef?.Id.ToString(),
-            ModifiedOn = ParseDate(entity.GetAttributeValue<DateTime?>("modifiedon")),
+            Title = GetString(row, "sprk_name") ?? "(untitled to do)",
+            Body = GetString(row, "sprk_description"),
+            Priority = MapPriority(GetInt(row, "sprk_priority")),
+            DueDate = GetDate(row, "sprk_duedate"),
+            RegardingMatterName = matterId is null ? null : GetFormatted(row, "_sprk_regardingmatter_value"),
+            RegardingMatterId = matterId?.ToString(),
+            ModifiedOn = GetDate(row, "modifiedon"),
         };
     }
 
     /// <summary>
-    /// Map an OptionSetValue priority to the narrator's expected "normal"|"high"|"urgent" strings.
+    /// Map a priority option value to the narrator's expected "normal"|"high"|"urgent" strings.
     /// Source schemas:
     ///   sprk_event.sprk_priority = Low(100000000)|Normal(100000001)|High(100000002)|Urgent(100000003)
     ///   sprk_todo.sprk_priority  = Urgent(100000000)|High(100000001)|Medium(100000002)|Low(100000003)
@@ -1165,7 +1139,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// sprk_event (100000002/100000003) and explicit urgent/high on sprk_todo (100000000/100000001).
     /// Default to "normal" for unknown/empty.
     /// </summary>
-    private static string MapPriority(OptionSetValue? priority)
+    private static string MapPriority(int? priority)
     {
         if (priority is null) return "normal";
         return priority.Value switch
@@ -1180,8 +1154,33 @@ public class DailyBriefingCollector : ICodedWorkflow
         };
     }
 
-    private static DateTimeOffset? ParseDate(DateTime? dt) =>
-        dt.HasValue ? new DateTimeOffset(DateTime.SpecifyKind(dt.Value, DateTimeKind.Utc), TimeSpan.Zero) : null;
+    // ── Web API row readers ────────────────────────────────────────────────
+
+    private static string? GetString(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
+
+    private static string? GetFormatted(Dictionary<string, JsonElement> row, string key) =>
+        GetString(row, key + FormattedValueSuffix);
+
+    private static Guid? GetGuid(Dictionary<string, JsonElement> row, string key) =>
+        Guid.TryParse(GetString(row, key), out var g) && g != Guid.Empty ? g : null;
+
+    private static int? GetInt(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var v) ? v : null;
+
+    private static bool? GetBool(Dictionary<string, JsonElement> row, string key) =>
+        row.TryGetValue(key, out var el)
+            ? el.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null }
+            : null;
+
+    private static DateTimeOffset? GetDate(Dictionary<string, JsonElement> row, string key) =>
+        DateTimeOffset.TryParse(
+            GetString(row, key),
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var d)
+            ? d
+            : null;
 
     // ──────────────────────────────────────────────────────────────────────────
     // Narrate request assembly

@@ -25,7 +25,8 @@ last-reviewed: 2026-05-16
 ### MUST:
 - ✅ **MUST** use unmanaged solution unless explicitly told to use managed (ADR-022)
 - ✅ **MUST** use Dataverse publisher `Spaarke` with prefix `sprk_`
-- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`)
+- ✅ **MUST** rebuild fresh every deployment (`npm run build:prod`, via `scripts/Invoke-PcfBuildProd.ps1`)
+- ✅ **MUST** stop if the PCF build failed, judged from its **output**: `pcf-scripts build` **exits 0 when webpack fails** (logs `[build] Failed:` / `[pcf-1033]` and returns), so trusting the exit code can pack and import the PREVIOUS bundle. `scripts/Invoke-PcfBuildProd.ps1` exits 1 on failure (found 2026-10-04: CI reported 17/18 PCFs passing when 9 had failed)
 - ✅ **MUST** copy ALL 3 files to Solution folder (bundle.js, ControlManifest.xml, styles.css)
 - ✅ **MUST** update version in ALL 5 locations
 - ✅ **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
@@ -57,9 +58,10 @@ last-reviewed: 2026-05-16
 ### Step 1: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}
-rm -rf out/ bin/
-npm run build:prod
+cd src/client/pcf/{ControlName}   # stay here for Steps 1-4
+rm -rf out/ bin/                  # a failed build must leave NO bundle behind
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+# STOP on a non-zero exit. A bare `npm run build:prod` exits 0 even when webpack fails.
 
 # Verify size (~200-400KB, NOT 8MB)
 ls -la out/controls/control/bundle.js
@@ -207,7 +209,7 @@ Deploy Dataverse components using PAC CLI following the [PCF-DEPLOYMENT-GUIDE.md
 |----------|----------------|
 | **Always use unmanaged** | Never export/pack as managed unless user explicitly requests |
 | **Always use Spaarke publisher** | Never create a new publisher - use `Spaarke` (`sprk_`) |
-| **Always build fresh** | Run `npm run build:prod`, never reuse old artifacts |
+| **Always build fresh** | Run `scripts/Invoke-PcfBuildProd.ps1` (`npm run build:prod` + a failure check, since pcf-scripts exits 0 on a failed build); never reuse old artifacts |
 | **Always use pack.ps1** | Never use `Compress-Archive` (creates backslashes) |
 | **Version footer** | Every PCF MUST display `vX.Y.Z • Built YYYY-MM-DD` in the UI |
 | **Version bumping** | Increment version in ALL 5 locations |
@@ -262,7 +264,7 @@ pac auth select --index 1
 
 **Use the "Deployment Workflow" section above.** Follow [PCF-DEPLOYMENT-GUIDE.md](../../../docs/guides/PCF-DEPLOYMENT-GUIDE.md) for the complete workflow:
 
-1. Build fresh (`npm run build:prod`)
+1. Build fresh with `scripts/Invoke-PcfBuildProd.ps1` (runs `npm run build:prod`; stop on a non-zero exit)
 2. Update version in ALL 5 locations
 3. Copy ALL 3 files to Solution folder
 4. Pack with `pack.ps1` (NOT `Compress-Archive`)
@@ -420,9 +422,9 @@ When you open a Custom Page in Power Apps Studio, it may **downgrade** your PCF 
 #### Quick Steps
 
 ```bash
-# 1. Build
+# 1. Build (exits 1 if the build failed; a bare `npm run build:prod` exits 0 even then)
 cd src/client/pcf/{ControlName}
-npm run build:prod
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
 
 # 2. Update version in 4 locations (manual)
 
@@ -670,7 +672,7 @@ pac solution import --path Y            # Import solution
 pac solution publish                    # Publish customizations
 
 # PCF Controls - Use pack.ps1 workflow (see Deployment Workflow above)
-npm run build:prod                      # Build control
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .   # in src/client/pcf/X: build control (fails on a failed build)
 powershell -File Solution/pack.ps1      # Pack solution (NOT Compress-Archive)
 pac solution import --path bin/X.zip    # Import solution
 
@@ -692,64 +694,18 @@ pac solution check --path Y             # Validate solution before import
 
 ## CI/CD Integration
 
-### Automated Plugin Deployment via GitHub Actions
+### No Plugin Deployment (ADR-002, 2026-09-25)
 
-Plugin deployments can be automated via the `deploy-staging.yml` workflow:
+Spaarke ships **no Dataverse plugins**, so there is no plugin deployment — manual or automated. (A `deploy-staging.yml` / `deploy-plugins` job and a `Spaarke.Plugins.dll` were previously documented here; neither ever existed.) Do not run `pac plugin push` or register plugin steps against Spaarke environments. The only permitted Dataverse step registrations are **no-code service-endpoint/webhook steps** used as async change signals (ADR-002 WP-5) — see [`docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md`](../../../docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md).
 
-| Workflow | Trigger | What It Deploys |
-|----------|---------|-----------------|
-| `deploy-staging.yml` | Auto (after CI passes on master) or Manual | Dataverse plugins via PAC CLI |
-
-### Workflow Plugin Deployment
-
-The `deploy-plugins` job in `deploy-staging.yml`:
-
-1. Downloads build artifacts from CI
-2. Authenticates with Power Platform using service principal
-3. Deploys plugin assembly via PAC CLI
-
-```yaml
-pac auth create --url $POWER_PLATFORM_URL --applicationId $CLIENT_ID --clientSecret $SECRET
-pac plugin push --path ./artifacts/publish/plugins/Spaarke.Plugins.dll
-```
-
-### When to Use Manual vs Automated
+### When to Use This Skill
 
 | Scenario | Use |
 |----------|-----|
-| Plugin code changes merged to master | Automated (`deploy-staging.yml`) |
-| PCF control iterative development | Manual (this skill - Quick Dev Deploy) |
-| Production solution release | Manual (this skill - Scenario 1d) |
-| Custom Page updates | Manual (this skill - Scenario 1c) |
-| Emergency hotfix | Manual (this skill) |
-
-### Required Secrets for Automated Deployment
-
-| Secret | Purpose |
-|--------|---------|
-| `POWER_PLATFORM_URL` | Dataverse environment URL |
-| `POWER_PLATFORM_CLIENT_ID` | Service principal app ID |
-| `POWER_PLATFORM_CLIENT_SECRET` | Service principal secret |
-
-### Monitor Automated Deployments
-
-```powershell
-# View staging deployment status
-gh run list --workflow=deploy-staging.yml
-
-# View specific deployment run
-gh run view {run-id}
-
-# Check deploy-plugins job
-gh run view {run-id} --log --job=deploy-plugins
-```
-
-### Manual Trigger of Plugin Deployment
-
-```powershell
-# Trigger staging deployment with plugins
-gh workflow run deploy-staging.yml -f deploy_plugins=true
-```
+| PCF control iterative development | This skill - Quick Dev Deploy |
+| Production solution release | This skill - Scenario 1d |
+| Custom Page updates | This skill - Scenario 1c |
+| Emergency hotfix | This skill |
 
 ## Related ADRs
 
@@ -776,7 +732,7 @@ gh workflow run deploy-staging.yml -f deploy_plugins=true
 When deploying PCF updates, the #1 cause of "deployment succeeded but nothing changed" is forgetting to update the control manifest version. Follow this exact order:
 
 1. **FIRST**: Update `control/ControlManifest.Input.xml` version attribute
-2. **THEN**: Rebuild with `npm run build:prod` (or `pcf-scripts build --buildMode production`)
+2. **THEN**: Rebuild with `scripts/Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/{ControlName}` (runs `npm run build:prod`; it exits 1 when the build failed, which a bare `npm run build:prod` does not)
 3. **THEN**: Copy ALL 3 files to Solution folder
 4. **THEN**: Update `solution.xml` and `pack.ps1` versions
 5. **THEN**: Pack and import

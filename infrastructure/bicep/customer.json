@@ -5,16 +5,16 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4283978128937208579"
+      "templateHash": "17705922489390793174"
     }
   },
   "parameters": {
     "customerId": {
       "type": "string",
       "minLength": 3,
-      "maxLength": 10,
+      "maxLength": 8,
       "metadata": {
-        "description": "Customer identifier (lowercase, alphanumeric only). Drives all resource naming."
+        "description": "Customer identifier. 3-8 chars, lowercase letters and digits, starting with a letter. Drives all resource naming; the 8-char limit comes from the Key Vault name composed below (see AZURE-RESOURCE-NAMING-CONVENTION.md)."
       }
     },
     "environmentName": {
@@ -36,11 +36,11 @@
         "description": "Primary Azure region for all customer resources"
       }
     },
-    "platformKeyVaultName": {
+    "openAiLocation": {
       "type": "string",
-      "defaultValue": "[format('sprk-{0}-kv', parameters('environmentName'))]",
+      "defaultValue": "westus3",
       "metadata": {
-        "description": "Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § \"KV-Secret & Resource Naming Standard\" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020."
+        "description": "Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it."
       }
     },
     "storageSku": {
@@ -112,7 +112,7 @@
       "type": "string",
       "defaultValue": "",
       "metadata": {
-        "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId."
+        "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. H2a (ArmDeploymentRunner) sends it for Model 1 stamps only (task 249): a Model 2 stamp is in the customer's tenant, where a role assignment cannot name a Spaarke-tenant principal, and L2 reaches it through its Lighthouse delegation. Empty skips the grant."
       }
     },
     "signalrEnabled": {
@@ -173,23 +173,29 @@
         "description": "SKU for the BFF App Service Plan. Default S1 (Standard) per design.md §7.2 Resource Catalog row 7."
       }
     },
-    "redisSku": {
+    "redisSkuName": {
       "type": "string",
-      "defaultValue": "Basic",
+      "defaultValue": "Balanced_B0",
       "allowedValues": [
-        "Basic",
-        "Standard",
-        "Premium"
+        "Balanced_B0",
+        "Balanced_B1",
+        "Balanced_B3",
+        "Balanced_B5",
+        "Balanced_B10"
       ],
       "metadata": {
-        "description": "SKU for the per-customer Redis Cache. Default Basic (dev-cost-optimized, ~$15/mo) per redis-dev.bicepparam precedent — single overridable default, not environment-conditional Bicep logic; override via CLI --parameters for staging/prod, matching appServiceSku default S1 being overridden the same way."
+        "description": "Azure Managed Redis SKU for the per-customer cache. Owner D12: Balanced_B0. Size up only on a measured memory metric — Managed Redis has no scale-down."
       }
     },
-    "redisCapacity": {
-      "type": "int",
-      "defaultValue": 0,
+    "redisHighAvailability": {
+      "type": "string",
+      "defaultValue": "Enabled",
+      "allowedValues": [
+        "Enabled",
+        "Disabled"
+      ],
       "metadata": {
-        "description": "SKU capacity (family size) for the per-customer Redis Cache. Default 0 (Basic C0, cheapest tier) per redis-dev.bicepparam precedent."
+        "description": "High availability for the per-customer cache. Owner D12: Enabled. Fixed at create time — changing it on an existing stamp is rejected by Azure."
       }
     },
     "tags": {
@@ -198,8 +204,7 @@
         "customer": "[parameters('customerId')]",
         "environment": "[parameters('environmentName')]",
         "application": "spaarke",
-        "managedBy": "bicep",
-        "createdDate": "[utcNow('yyyy-MM-dd')]"
+        "managedBy": "bicep"
       },
       "metadata": {
         "description": "Tags applied to ALL resources for cost tracking and management"
@@ -361,6 +366,9 @@
           "userAssignedIdentityPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
+          "logAnalyticsWorkspaceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.logAnalyticsId.value]"
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -372,7 +380,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15519022507304554186"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -481,7 +489,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },
@@ -636,6 +644,7 @@
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
@@ -1673,7 +1682,7 @@
             "value": "[variables('openAiName')]"
           },
           "location": {
-            "value": "[parameters('location')]"
+            "value": "[parameters('openAiLocation')]"
           },
           "sku": {
             "value": "S0"
@@ -1692,7 +1701,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11129456632631642405"
+              "templateHash": "14901195768447614326"
             }
           },
           "parameters": {
@@ -1736,7 +1745,7 @@
                 {
                   "name": "gpt-4o",
                   "model": "gpt-4o",
-                  "version": "2024-08-06",
+                  "version": "2024-11-20",
                   "capacity": 150
                 },
                 {
@@ -2093,7 +2102,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13199676677394953369"
+              "templateHash": "11530843244190946280"
             }
           },
           "parameters": {
@@ -2187,10 +2196,6 @@
             "docIntelligenceEndpoint": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('docIntelligenceName')), '2023-10-01-preview').endpoint]"
-            },
-            "docIntelligenceKey": {
-              "type": "string",
-              "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('docIntelligenceName')), '2023-10-01-preview').key1]"
             }
           }
         }
@@ -2217,11 +2222,16 @@
           "location": {
             "value": "[parameters('location')]"
           },
-          "sku": {
-            "value": "[parameters('redisSku')]"
+          "skuName": {
+            "value": "[parameters('redisSkuName')]"
           },
-          "capacity": {
-            "value": "[parameters('redisCapacity')]"
+          "highAvailability": {
+            "value": "[parameters('redisHighAvailability')]"
+          },
+          "accessPolicyPrincipalIds": {
+            "value": [
+              "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+            ]
           },
           "tags": {
             "value": "[parameters('tags')]"
@@ -2234,146 +2244,140 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "16985751438911611831"
+              "templateHash": "105629902906573440"
             }
           },
           "parameters": {
             "redisName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the Redis Cache"
+                "description": "Name of the Azure Managed Redis cluster (globally unique DNS label)."
               }
             },
             "location": {
               "type": "string",
               "defaultValue": "[resourceGroup().location]",
               "metadata": {
-                "description": "Location for the Redis Cache"
+                "description": "Location for the cluster."
               }
             },
-            "sku": {
+            "skuName": {
               "type": "string",
-              "defaultValue": "Premium",
+              "defaultValue": "Balanced_B0",
               "allowedValues": [
-                "Basic",
-                "Standard",
-                "Premium"
+                "Balanced_B0",
+                "Balanced_B1",
+                "Balanced_B3",
+                "Balanced_B5",
+                "Balanced_B10"
               ],
               "metadata": {
-                "description": "SKU for Redis Cache (Premium required for VNet injection + persistence)"
+                "description": "Azure Managed Redis SKU. Owner D12: Balanced_B0 for customer stamps; size up only on a measured memory metric (no scale-down)."
               }
             },
-            "capacity": {
-              "type": "int",
-              "defaultValue": 1,
+            "highAvailability": {
+              "type": "string",
+              "defaultValue": "Enabled",
+              "allowedValues": [
+                "Enabled",
+                "Disabled"
+              ],
               "metadata": {
-                "description": "SKU capacity (family size). Premium: 1-5"
-              }
-            },
-            "enableNonSslPort": {
-              "type": "bool",
-              "defaultValue": false,
-              "metadata": {
-                "description": "Enable non-SSL port (not recommended)"
+                "description": "High availability (two nodes, zone-redundant in AZ regions). Owner D12: Enabled for customer stamps; dev uses Disabled. Can only be set at create time."
               }
             },
             "minimumTlsVersion": {
               "type": "string",
               "defaultValue": "1.2",
               "metadata": {
-                "description": "Minimum TLS version"
+                "description": "Minimum TLS version."
               }
             },
-            "redisVersion": {
+            "publicNetworkAccess": {
               "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Redis server major version. Empty string lets Azure pick the default (currently 6.0). Set to \"6\" to pin major version. FR-09 (R1 task 020)."
-              }
-            },
-            "subnetId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Subnet resource ID for VNet injection (Premium SKU required). Also aliased as vnetSubnetId in FR-09; this module retains the existing name to preserve compatibility with 3 in-tree callers."
-              }
-            },
-            "staticIP": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Optional static IP within the injected subnet (Premium VNet-injected SKU only). Empty string lets Azure assign one. FR-09 (R1 task 020)."
-              }
-            },
-            "enableRdbPersistence": {
-              "type": "bool",
-              "defaultValue": true,
-              "metadata": {
-                "description": "Enable RDB persistence (Premium SKU required)"
-              }
-            },
-            "rdbBackupFrequencyMinutes": {
-              "type": "int",
-              "defaultValue": 15,
+              "defaultValue": "Enabled",
               "allowedValues": [
-                15,
-                30,
-                60,
-                360,
-                720,
-                1440
+                "Enabled",
+                "Disabled"
               ],
               "metadata": {
-                "description": "RDB backup frequency in minutes (15, 30, 60, 360, 720, 1440)"
+                "description": "Public network access. Set explicitly (the 2025-07-01 API requires it). Customer stamps have no VNet, matching Cosmos DB / OpenAI / AI Search in customer.bicep."
+              }
+            },
+            "accessPolicyPrincipalIds": {
+              "type": "array",
+              "minLength": 1,
+              "metadata": {
+                "description": "Object (principal) IDs of the managed identities granted the built-in \"default\" data access policy. The only way in: access keys are disabled, so an empty list would deploy a cache nobody can use."
               }
             },
             "tags": {
               "type": "object",
               "defaultValue": {},
               "metadata": {
-                "description": "Tags for the resource"
+                "description": "Tags for the resource."
               }
             }
           },
           "variables": {
-            "skuFamilies": {
-              "Basic": "C",
-              "Standard": "C",
-              "Premium": "P"
-            },
-            "baseRedisConfig": {
-              "maxmemory-policy": "allkeys-lru"
-            },
-            "rdbConfig": "[if(and(parameters('enableRdbPersistence'), equals(parameters('sku'), 'Premium')), createObject('rdb-backup-enabled', 'true', 'rdb-backup-frequency', format('{0}', parameters('rdbBackupFrequencyMinutes')), 'rdb-backup-max-snapshot-count', '1'), createObject())]",
-            "redisConfiguration": "[union(variables('baseRedisConfig'), variables('rdbConfig'))]"
+            "databasePort": 10000
           },
           "resources": [
             {
-              "type": "Microsoft.Cache/redis",
-              "apiVersion": "2023-08-01",
+              "type": "Microsoft.Cache/redisEnterprise",
+              "apiVersion": "2025-07-01",
               "name": "[parameters('redisName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('skuName')]"
+              },
               "properties": {
-                "sku": {
-                  "name": "[parameters('sku')]",
-                  "family": "[variables('skuFamilies')[parameters('sku')]]",
-                  "capacity": "[parameters('capacity')]"
-                },
-                "enableNonSslPort": "[parameters('enableNonSslPort')]",
+                "highAvailability": "[parameters('highAvailability')]",
                 "minimumTlsVersion": "[parameters('minimumTlsVersion')]",
-                "redisVersion": "[if(empty(parameters('redisVersion')), null(), parameters('redisVersion'))]",
-                "publicNetworkAccess": "[if(not(equals(parameters('subnetId'), '')), 'Disabled', 'Enabled')]",
-                "subnetId": "[if(not(equals(parameters('subnetId'), '')), parameters('subnetId'), null())]",
-                "staticIP": "[if(and(not(equals(parameters('subnetId'), '')), not(equals(parameters('staticIP'), ''))), parameters('staticIP'), null())]",
-                "redisConfiguration": "[variables('redisConfiguration')]"
+                "publicNetworkAccess": "[parameters('publicNetworkAccess')]"
               }
+            },
+            {
+              "type": "Microsoft.Cache/redisEnterprise/databases",
+              "apiVersion": "2025-07-01",
+              "name": "[format('{0}/{1}', parameters('redisName'), 'default')]",
+              "properties": {
+                "clientProtocol": "Encrypted",
+                "port": "[variables('databasePort')]",
+                "clusteringPolicy": "OSSCluster",
+                "evictionPolicy": "AllKeysLRU",
+                "accessKeysAuthentication": "Disabled"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cache/redisEnterprise', parameters('redisName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "accessPolicyAssignments",
+                "count": "[length(parameters('accessPolicyPrincipalIds'))]",
+                "mode": "serial",
+                "batchSize": 1
+              },
+              "type": "Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments",
+              "apiVersion": "2025-07-01",
+              "name": "[format('{0}/{1}/{2}', parameters('redisName'), 'default', replace(parameters('accessPolicyPrincipalIds')[copyIndex()], '-', ''))]",
+              "properties": {
+                "accessPolicyName": "default",
+                "user": {
+                  "objectId": "[parameters('accessPolicyPrincipalIds')[copyIndex()]]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Cache/redisEnterprise/databases', parameters('redisName'), 'default')]"
+              ]
             }
           ],
           "outputs": {
             "redisId": {
               "type": "string",
-              "value": "[resourceId('Microsoft.Cache/redis', parameters('redisName'))]"
+              "value": "[resourceId('Microsoft.Cache/redisEnterprise', parameters('redisName'))]"
             },
             "redisName": {
               "type": "string",
@@ -2381,28 +2385,25 @@
             },
             "redisHostName": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').hostName]"
+              "value": "[reference(resourceId('Microsoft.Cache/redisEnterprise', parameters('redisName')), '2025-07-01').hostName]"
             },
             "redisPort": {
               "type": "int",
-              "value": "[reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').sslPort]"
+              "value": "[variables('databasePort')]"
             },
-            "redisPrimaryKey": {
+            "redisEndpoint": {
               "type": "string",
               "metadata": {
-                "description": "Primary access key (admin-key auth). Sensitive — do not log; deploy script extracts to KV. FR-09 (R1 task 020)."
+                "description": "host:port — the value of the BFF / Worker `Redis__Endpoint` setting. Not a secret."
               },
-              "value": "[listKeys(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').primaryKey]"
-            },
-            "redisConnectionString": {
-              "type": "string",
-              "value": "[format('{0}:{1},password={2},ssl=True,abortConnect=False', reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').hostName, reference(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').sslPort, listKeys(resourceId('Microsoft.Cache/redis', parameters('redisName')), '2023-08-01').primaryKey)]"
+              "value": "[format('{0}:{1}', reference(resourceId('Microsoft.Cache/redisEnterprise', parameters('redisName')), '2025-07-01').hostName, variables('databasePort'))]"
             }
           }
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -2780,7 +2781,7 @@
             "value": "[parameters('signalrSku')]"
           },
           "bffPrincipalId": {
-            "value": "[parameters('bffPrincipalId')]"
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
           "tags": {
             "value": "[parameters('tags')]"
@@ -2934,7 +2935,8 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
     },
     {
@@ -3096,18 +3098,15 @@
           },
           "appSettings": {
             "value": {
+              "Customer__Id": "[parameters('customerId')]",
               "AZURE_CLIENT_ID": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
               "ManagedIdentity__ClientId": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.clientId.value]",
               "Redis__Enabled": "true",
-              "Redis__ConnectionString": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=Redis-ConnectionString)', parameters('keyVaultName'))]",
+              "Redis__Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisEndpoint.value]",
               "Redis__InstanceName": "spaarke:",
-              "ConnectionStrings__ServiceBus": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=ServiceBus-ConnectionString)', parameters('keyVaultName'))]",
-              "ConnectionStrings__Storage": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=Storage-ConnectionString)', parameters('keyVaultName'))]",
               "OPENAI_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
               "AI_SEARCH_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
-              "AI_SEARCH_API_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=AiSearch--AdminKey)', parameters('keyVaultName'))]",
               "DOC_INTELLIGENCE_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
-              "DOC_INTELLIGENCE_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=DocumentIntelligence-ApiKey)', parameters('keyVaultName'))]",
               "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
               "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
             }
@@ -3254,6 +3253,7 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
       ]
@@ -3421,7 +3421,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5945159200447773141"
+              "templateHash": "9333419783799827268"
             }
           },
           "parameters": {
@@ -3429,7 +3429,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Empty skips the grant (what-if isolation only -- a real per-customer deploy always needs it for H4b + H9 to function)."
+                "description": "Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). Sent by H2a for Model 1 stamps only (task 249); empty (Model 2) skips the grant."
               }
             },
             "bffAppServiceName": {
@@ -3498,7 +3498,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7944878029499895893"
+              "templateHash": "11370368152236243245"
             }
           },
           "parameters": {
@@ -3506,19 +3506,19 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the BFF RUNTIME UAMI (Model 1: sharedBffUami.outputs.principalId; Model 2: uami.outputs.principalId). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function)."
+                "description": "Principal ID of the stamp's BFF RUNTIME UAMI (customer.bicep: uami.outputs.principalId — the only principal, both tenancy models). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function)."
               }
             },
             "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from. Model 1: sharedServiceBusName; Model 2: per-customer serviceBusName."
+                "description": "Name of the stamp's Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from."
               }
             },
             "searchServiceName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to. Model 1: sharedAiSearchName; Model 2: per-customer searchServiceName."
+                "description": "Name of the stamp's AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to."
               }
             }
           },
@@ -3625,16 +3625,11 @@
           },
           "secretValues": {
             "value": {
-              "AiSearch--AdminKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceAdminKey.value]",
               "AiSearch-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
               "AppInsights-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
               "AzureOpenAI-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
               "Communication-WebhookUrl": "[format('{0}/api/communications/incoming-webhook', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceUrl.value)]",
-              "DocumentIntelligence-ApiKey": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceKey.value]",
-              "DocumentIntelligence-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
-              "Redis-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisConnectionString.value]",
-              "ServiceBus-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]",
-              "Storage-ConnectionString": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]"
+              "DocumentIntelligence-Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]"
             }
           }
         },
@@ -3645,7 +3640,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "8185643840258927724"
+              "templateHash": "6850126951709465381"
             }
           },
           "parameters": {
@@ -3664,26 +3659,6 @@
             }
           },
           "resources": [
-            {
-              "condition": "[contains(parameters('secretValues'), 'AiSearch--AdminKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AiSearch--AdminKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['AiSearch--AdminKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "AiSearch--AdminKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
             {
               "condition": "[contains(parameters('secretValues'), 'AiSearch-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
@@ -3725,26 +3700,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'AzureOpenAI-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'AzureOpenAI-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['AzureOpenAI-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "AzureOpenAI-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'AzureOpenAI-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -3774,7 +3729,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "written-by-h3"
               },
               "tags": {
                 "canonicalName": "BFF-API-Audience",
@@ -3794,32 +3749,12 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "written-by-h3"
               },
               "tags": {
                 "canonicalName": "BFF-API-ClientId",
                 "category": "identity",
                 "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'BingSearch-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'BingSearch-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['BingSearch-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "BingSearch-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
                 "neverDelete": "false",
                 "managedBy": "canonical-secret-catalog-generator"
               }
@@ -3834,7 +3769,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-intake-parameter"
               },
               "tags": {
                 "canonicalName": "Communication-DefaultMailbox",
@@ -3965,46 +3900,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'Dataverse-ServiceUrl')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Dataverse-ServiceUrl')]",
-              "properties": {
-                "value": "[parameters('secretValues')['Dataverse-ServiceUrl']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "Dataverse-ServiceUrl",
-                "category": "dataverse",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'DocumentIntelligence-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['DocumentIntelligence-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "DocumentIntelligence-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4065,106 +3960,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'LlamaParse-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'LlamaParse-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['LlamaParse-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "LlamaParse-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'PromptFlow-Endpoint')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Endpoint')]",
-              "properties": {
-                "value": "[parameters('secretValues')['PromptFlow-Endpoint']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "PromptFlow-Endpoint",
-                "category": "ai",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'PromptFlow-Key')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'PromptFlow-Key')]",
-              "properties": {
-                "value": "[parameters('secretValues')['PromptFlow-Key']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "PromptFlow-Key",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'Redis-ConnectionString')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Redis-ConnectionString')]",
-              "properties": {
-                "value": "[parameters('secretValues')['Redis-ConnectionString']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "Redis-ConnectionString",
-                "category": "data-services",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'ServiceBus-ConnectionString')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ServiceBus-ConnectionString')]",
-              "properties": {
-                "value": "[parameters('secretValues')['ServiceBus-ConnectionString']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "ServiceBus-ConnectionString",
-                "category": "data-services",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'SPE-CommunicationArchiveContainerId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4194,7 +3989,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-bicep-output"
+                "contentType": "from-topology-constants"
               },
               "tags": {
                 "canonicalName": "SPE-ContainerTypeId",
@@ -4225,26 +4020,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'Storage-ConnectionString')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'Storage-ConnectionString')]",
-              "properties": {
-                "value": "[parameters('secretValues')['Storage-ConnectionString']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-shared-service"
-              },
-              "tags": {
-                "canonicalName": "Storage-ConnectionString",
-                "category": "data-services",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'TenantId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4254,7 +4029,7 @@
                 "attributes": {
                   "enabled": true
                 },
-                "contentType": "from-run-parameter"
+                "contentType": "from-intake-parameter"
               },
               "tags": {
                 "canonicalName": "TenantId",
@@ -4269,15 +4044,12 @@
             "canonicalSecretNames": {
               "type": "array",
               "value": [
-                "AiSearch--AdminKey",
                 "AiSearch-Endpoint",
                 "AppInsights-ConnectionString",
-                "AzureOpenAI-ApiKey",
                 "AzureOpenAI-Endpoint",
                 "BFF-API-Audience",
                 "BFF-API-ClientId",
                 "BFF-API-ClientSecret",
-                "BingSearch-ApiKey",
                 "Communication-DefaultMailbox",
                 "Communication-Webhook-SigningKey",
                 "Communication-WebhookClientState",
@@ -4286,20 +4058,12 @@
                 "Compose-Webhook-SigningKey",
                 "ContentSafety-ApiKey",
                 "Dataverse-ClientSecret",
-                "Dataverse-ServiceUrl",
-                "DocumentIntelligence-ApiKey",
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
                 "Email-WebhookSigningKey",
-                "LlamaParse-ApiKey",
-                "PromptFlow-Endpoint",
-                "PromptFlow-Key",
-                "Redis-ConnectionString",
-                "ServiceBus-ConnectionString",
                 "SPE-CommunicationArchiveContainerId",
                 "SPE-ContainerTypeId",
                 "SPE-DefaultContainerId",
-                "Storage-ConnectionString",
                 "TenantId"
               ]
             }
@@ -4313,10 +4077,7 @@
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName')))]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName')))]"
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
       ]
     }
   ],
@@ -4429,6 +4190,10 @@
       "type": "int",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisPort.value]"
     },
+    "redisEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('redisCache-{0}', variables('baseName'))), '2025-04-01').outputs.redisEndpoint.value]"
+    },
     "membershipTopicName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('membershipTopic-{0}', variables('baseName'))), '2025-04-01').outputs.topicName.value]"
@@ -4496,10 +4261,6 @@
     "appServiceStagingSlotName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApiSlot-{0}', variables('baseName'))), '2025-04-01').outputs.slotName.value]"
-    },
-    "platformKeyVaultName": {
-      "type": "string",
-      "value": "[parameters('platformKeyVaultName')]"
     }
   }
 }

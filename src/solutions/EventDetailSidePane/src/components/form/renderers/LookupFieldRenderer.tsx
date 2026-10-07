@@ -28,12 +28,13 @@ import {
   SearchRegular,
   DismissCircleRegular,
 } from "@fluentui/react-icons";
+import { cleanGuid } from '@spaarke/ui-components';
 import type {
   IFieldConfig,
   ILookupValue,
   FieldChangeCallback,
 } from "../../../types/FormConfig";
-import { getXrm } from "../../../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../../../utils/xrmAccess";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -91,7 +92,7 @@ const useStyles = makeStyles({
 async function openLookupDialog(
   targets: string[]
 ): Promise<ILookupValue | null> {
-  const xrm = getXrm();
+  const xrm = getXrmWithWebApiAnd('lookupObjects');
   if (!xrm?.Utility?.lookupObjects) {
     console.error("[LookupField] Xrm.Utility.lookupObjects not available");
     return null;
@@ -107,7 +108,7 @@ async function openLookupDialog(
     const result = await xrm.Utility.lookupObjects(lookupOptions);
     if (result && result.length > 0) {
       return {
-        id: result[0].id.replace(/[{}]/g, "").toLowerCase(),
+        id: cleanGuid(result[0].id),
         name: result[0].name ?? "Unknown",
         entityType: result[0].entityType ?? targets[0],
       };
@@ -156,7 +157,7 @@ function resolveLookupValue(
     const entityType = allValues?.[entityKey] as string | undefined;
 
     return {
-      id: value.replace(/[{}]/g, "").toLowerCase(),
+      id: cleanGuid(value),
       name: name ?? "Unknown",
       entityType: entityType ?? "",
     };

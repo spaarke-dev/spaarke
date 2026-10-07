@@ -16,8 +16,9 @@
 
 export * from './components';
 export * from './context';
-export * from './hooks';
-export * from './services';
+// './hooks' and './services' — DELETED (task 087, C-25, 2026-10-03). Each
+// directory held exactly one dead module (`useEventsBulkActions`, the
+// Events-local `FetchXmlService`) with zero consumers outside its own barrel.
 export type * from './types';
 export * from './utils';
 export * from './widgets';

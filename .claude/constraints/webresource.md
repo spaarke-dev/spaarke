@@ -2,7 +2,7 @@
 
 > **Domain**: Dataverse JavaScript Web Resources
 > **Source ADRs**: ADR-006 (PCF preferred), ADR-008 (endpoint auth)
-> **Last Updated**: 2026-02-16
+> **Last Updated**: 2026-10-01 (auth rules rewritten: `Spaarke.BffAuth` delegated tokens; `.AllowAnonymous()` retired)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Verified
@@ -29,28 +29,23 @@ Load when:
 - ✅ **MUST** use `"use strict"` and `Spaarke.*` namespace for all web resources
 - ✅ **MUST** wrap all event handlers in try/catch (never throw from form events)
 
-### Authentication — Web Resource → API Calls
+### Authentication — Web Resource → API Calls (rewritten 2026-10-01, `unified-access-control-r2` session 27)
 
-- ✅ **MUST** use `.AllowAnonymous()` on API endpoints called from web resources
-- ✅ **MUST** add `RequireRateLimiting()` as compensating control for anonymous endpoints
-- ✅ **MUST** document anonymous access with TODO for production hardening (API key or service-to-service auth)
+- ✅ **MUST** call the BFF through the shared helper **`Spaarke.BffAuth`** (`src/solutions/webresources/sprk_bff_auth.js`, task 030 / FR-17): `Spaarke.BffAuth.authenticatedFetch(url, options, apiBaseUrl)` or `Spaarke.BffAuth.getToken(apiBaseUrl)`. It acquires a **delegated** BFF token by MSAL SSO for the signed-in user. Load `sprk_bff_auth.js` before the calling library on the form or ribbon command.
+- ✅ **MUST** keep every BFF endpoint authenticated (root CLAUDE.md §9: only `/healthz` and `/ping` are anonymous) **and** authorized per record where the endpoint touches a record (ADR-003 / ADR-008 endpoint filters).
+- ✅ **MUST** treat a null token or a failed token acquisition as a failure (show a notice; never fall back to an anonymous call).
 
-**Why**: Dataverse web resources run in the browser context but cannot acquire Azure AD tokens for external APIs. There is no mechanism to obtain a Bearer token from JavaScript running on a Dataverse form. `fetch()` calls to protected endpoints will always return 401.
+**Why this changed**: the previous rule said web resources *cannot* acquire Azure AD tokens and prescribed `.AllowAnonymous()` plus rate limiting. That premise is false since `Spaarke.BffAuth` exists, and the rule produced real holes: the scorecard recalculate endpoints were anonymous / auth-only IDORs (session-26 defect **C8**, task 130). Live users of the helper: `sprk_kpiassessment_quickcreate.js`, `sprk_kpi_subgrid_refresh.js`, `sprk_matter_kpi_refresh.js`.
 
-```csharp
-// ✅ CORRECT: AllowAnonymous + rate limiting for web resource callers
-var group = app.MapGroup("/api/matters")
-    .WithTags("Scorecard")
-    .RequireRateLimiting("dataverse-query");
-
-group.MapPost("/{id:guid}/recalculate", Handler)
-    .AllowAnonymous();  // Web resources cannot acquire tokens
+```javascript
+// ✅ CORRECT: delegated token via the shared helper; the endpoint stays authenticated + per-record authorized
+var res = await Spaarke.BffAuth.authenticatedFetch(apiBaseUrl + "/api/matters/" + id + "/recalculate-grades",
+    { method: "POST" }, apiBaseUrl);
 ```
 
 ```csharp
-// ❌ WRONG: RequireAuthorization blocks all web resource calls
-var group = app.MapGroup("/api/matters")
-    .RequireAuthorization();  // Returns 401 from web resource fetch()
+// ❌ WRONG (retired): anonymous endpoint for web-resource callers
+group.MapPost("/{id:guid}/recalculate", Handler).AllowAnonymous();
 ```
 
 ### UCI Quick Create Forms
@@ -74,8 +69,8 @@ var group = app.MapGroup("/api/matters")
 
 ### Authentication
 
-- ❌ **MUST NOT** use `RequireAuthorization()` on endpoints called from web resources
-- ❌ **MUST NOT** assume web resources can pass Bearer tokens in `fetch()` headers
+- ❌ **MUST NOT** use `.AllowAnonymous()` on any endpoint called from a web resource (retired 2026-10-01 — see Authentication above)
+- ❌ **MUST NOT** hand-roll MSAL or token caching in an individual web resource — use `Spaarke.BffAuth`
 - ❌ **MUST NOT** use `credentials: "include"` expecting it to provide Azure AD tokens (cookies are not Azure AD tokens)
 
 ### UCI Quick Create

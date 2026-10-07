@@ -352,10 +352,16 @@ export function formatClauseLocation(sectionRef?: string): string {
 /** Sort order for the summary findings (UAT round-4 #2/#4). */
 export type NdaSummarySort = 'section' | 'risk';
 
-/** One flagged-section finding — the CLOSED contract's 5 fields (nda-review.schema.json), minus the
- *  array-position identity. `quotedText`/`explanation` required (a finding is never emitted without
+/** One flagged-section finding — the CLOSED contract's fields (agreement-review.schema.json), minus
+ *  the array-position identity. `quotedText`/`explanation` required (a finding is never emitted without
  *  them — see `projectFlaggedSectionsToAdvisoryComments`'s guard); the rest are optional so a
- *  partially-grounded finding never crashes the panel. */
+ *  partially-grounded finding never crashes the panel.
+ *
+ *  Vintage note: this type spans BOTH schema vintages. `explanation` is the PRE-SPLIT fused blob;
+ *  {@link NdaReviewFindingSummary.flaggedClause}/{@link NdaReviewFindingSummary.assessment} are the
+ *  post-split discrete fields (agreements-r1 task-002 / FR-05). Post-split payloads carry the discrete
+ *  pair and the host composes `explanation` from them, so `explanation` stays populated either way and
+ *  every existing reader keeps working. */
 export interface NdaReviewFindingSummary {
   /** Page/section/paragraph locator (e.g. "Section 4.2, para 2 (p. 3)"). */
   sectionRef?: string;
@@ -363,10 +369,26 @@ export interface NdaReviewFindingSummary {
   quotedText: string;
   /** Low | Medium | High | Critical severity of this finding. */
   riskLevel?: string;
-  /** Advisory explanation — grounded fact + reasoned judgment. */
+  /** Advisory explanation — grounded fact + reasoned judgment. On a post-split payload this is
+   *  COMPOSED from `flaggedClause` + `assessment` by the host's projection; prefer the discrete
+   *  fields when present rather than string-parsing this back apart. */
   explanation: string;
   /** The firm-standard clause this finding is measured against — the standard-side citation. */
   standardRef?: string;
+  /**
+   * agreements-r1 task-002 / FR-05 schema split — the GROUNDED FACT: what the flagged clause actually
+   * says, stated without judgment. Undefined on a legacy (pre-split) payload, where the fact is fused
+   * into {@link explanation} behind a "Grounded fact —" marker.
+   */
+  flaggedClause?: string;
+  /**
+   * agreements-r1 task-002 / FR-05 schema split — the REASONED JUDGMENT: why the clause was flagged.
+   * Undefined on a legacy (pre-split) payload, where the judgment is fused into {@link explanation}
+   * behind a "Judgment —" marker. When present this IS the takeaway, so {@link resolveTakeaway} uses
+   * it directly instead of regex-hunting the marker — the split's stated purpose ("no consumer
+   * string-parses 'Grounded fact —' markers", agreement-review.schema.json).
+   */
+  assessment?: string;
   /**
    * UAT round-3 (S3/S4) — a short, crisp TL;DR headline for this finding (the takeaway, NOT the full
    * explanation). When the model supplies it (a future NDA_Review `takeaway` field), the summary
@@ -421,6 +443,31 @@ export function deriveTakeaway(explanation: string): string {
     .trim();
   if (!core) return text;
   return core.charAt(0).toUpperCase() + core.slice(1);
+}
+
+/**
+ * The takeaway a row renders, resolved across all three vintages in priority order:
+ *
+ *   1. `takeaway` — model-supplied verbatim (UAT round-3 S3/S4).
+ *   2. `assessment` — the POST-SPLIT discrete judgment. Headline-SHAPED by {@link deriveTakeaway}
+ *      (first sentence, de-"This"-ed, capitalized) but never marker-PARSED, because the judgment is
+ *      already isolated. This is the field the FR-05 split exists to provide.
+ *   3. `explanation` — the LEGACY fused blob, from which {@link deriveTakeaway} must still recover the
+ *      judgment by hunting a "Judgment —" marker.
+ *
+ * Why 2 beats 3 even though both end in `deriveTakeaway`: the marker hunt is a heuristic over free
+ * text. A post-split payload composes `explanation` by joining the discrete fields with a blank line
+ * and NO markers, so the regex finds nothing, and the fallback path returns the FIRST sentence of the
+ * blob — which is the grounded FACT, not the judgment. Every post-split finding therefore rendered a
+ * takeaway that was the wrong half of the finding. Reading `assessment` directly is both faster and
+ * correct.
+ */
+export function resolveTakeaway(
+  finding: Pick<NdaReviewFindingSummary, 'takeaway' | 'assessment' | 'explanation'>
+): string {
+  if (finding.takeaway) return finding.takeaway;
+  const assessment = (finding.assessment ?? '').trim();
+  return deriveTakeaway(assessment.length > 0 ? assessment : finding.explanation);
 }
 
 /** Derives an overall-risk band from the rendered findings — see the file header's derivation note. */
@@ -619,11 +666,12 @@ export function AgreementReviewSummaryPanel(props: AgreementReviewSummaryPanelPr
                   ) : null}
                 </div>
               );
-              // S2/S3/S4: render the short takeaway (model-supplied when available, else derived) — NOT
-              // the full grounded-fact+judgment explanation, which lives on the in-document comment.
+              // S2/S3/S4: render the short takeaway (model-supplied when available, else the discrete
+              // `assessment`, else derived from the legacy fused blob — see resolveTakeaway) — NOT the
+              // full grounded-fact+judgment explanation, which lives on the in-document comment.
               const explanation = (
                 <Text size={200} className={styles.explanation}>
-                  {finding.takeaway ?? deriveTakeaway(finding.explanation)}
+                  {resolveTakeaway(finding)}
                 </Text>
               );
               const testId = `nda-review-summary-finding-${index}`;

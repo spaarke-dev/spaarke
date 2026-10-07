@@ -35,6 +35,11 @@ public class OfficeJobQueue
     /// <summary>
     /// Queues a job to the Service Bus for background processing.
     /// </summary>
+    /// <param name="isVersionSave">Task 029: true only on the version-save path. Stamps
+    /// <see cref="UploadFinalizationPayload.VersionSaveJobId"/> with <paramref name="jobId"/> so the worker refreshes the
+    /// profile and index for this version. False leaves the payload exactly as before (the property is omitted).</param>
+    /// <param name="owningTeamId">Task 080: the owner team <c>SaveAsync</c> resolved for this save's document, handed
+    /// on so the worker's attachment children get the same one. Null for a version save (omitted from the payload).</param>
     public async Task QueueUploadFinalizationAsync(
         Guid jobId,
         string idempotencyKey,
@@ -46,7 +51,10 @@ public class OfficeJobQueue
         string fileName,
         long fileSize,
         Guid documentId,
-        CancellationToken cancellationToken)
+        bool isVersionSave,
+        Guid? owningTeamId,
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Queueing upload finalization job {JobId} for {ContentType}",
@@ -60,7 +68,6 @@ public class OfficeJobQueue
             AssociationType = request.TargetEntity?.EntityType,
             AssociationId = request.TargetEntity?.EntityId,
             ContainerId = driveId, // Use resolved drive ID
-            FolderPath = request.FolderPath,
             TempFileLocation = $"spe://{driveId}/{itemId}", // Reference the already-uploaded SPE file
             FileName = fileName,
             FileSize = fileSize,
@@ -80,7 +87,15 @@ public class OfficeJobQueue
                     SentDate = request.Email.SentDate,
                     ReceivedDate = request.Email.ReceivedDate,
                     BodyPreview = request.Email.Body?[..Math.Min(request.Email.Body.Length, 500)],
-                    HasAttachments = request.Email.Attachments?.Count > 0,
+                    // The Office add-in client sends SelectedAttachmentFileNames (not the
+                    // separate Attachments array) to indicate the email's attachments — it is
+                    // non-null whenever the email has attachments (undefined only when none;
+                    // empty = "create no Documents"). Deriving HasAttachments from Attachments
+                    // alone left it false for every add-in save, so ProcessEmailAttachmentsAsync
+                    // (gated on HasAttachments) never ran and attachment child Documents were
+                    // never created. Consider both signals.
+                    HasAttachments = request.Email.Attachments?.Count > 0
+                        || request.Email.SelectedAttachmentFileNames?.Count > 0,
                     Importance = 1, // Normal
                     SelectedAttachmentFileNames = request.Email.SelectedAttachmentFileNames
                 }
@@ -108,7 +123,10 @@ public class OfficeJobQueue
                     RagIndex = request.TriggerAiProcessing,
                     DeepAnalysis = false
                 },
-            DocumentId = documentId
+            DocumentId = documentId,
+            VersionSaveJobId = isVersionSave ? jobId : null,
+            OwningTeamId = owningTeamId,
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — carried with the team
         };
 
         // Create the job message

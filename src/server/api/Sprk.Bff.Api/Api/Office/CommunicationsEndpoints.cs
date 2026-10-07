@@ -1,11 +1,15 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Office;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -37,11 +41,27 @@ namespace Sprk.Bff.Api.Api.Office;
 /// ADR-028 (auth via JWT bearer per the shared BFF pipeline).
 /// </para>
 /// <para>
-/// Dataverse access uses <see cref="IGenericEntityService"/> per existing BFF
-/// patterns (see <c>WorkAssignmentEndpoints</c>, <c>CommunicationEndpoints</c>). The
-/// service is registered in <c>SharedServicesModule</c> and resolves to either
-/// <c>DataverseServiceClientImpl</c> (canonical) or <c>DataverseWebApiService</c>
-/// depending on configuration.
+/// 🔴 <b>Dataverse access on these routes is DELEGATED (user-OBO), via
+/// <see cref="IDataverseUserClient"/> — not app-only.</b> Changed 2026-09-29 by
+/// unified-access-control-r2 task 127 (GitHub #1020). Every read here previously went through
+/// <c>IGenericEntityService</c>, an app-only singleton that cannot carry per-request user context,
+/// and every read was keyed SOLELY on a caller-supplied identifier. The caller's object id was
+/// resolved on all three handlers and used exclusively as a log argument — so holding an
+/// internetMessageId (which every participant in a thread holds) or a communication GUID was the
+/// same thing as being entitled to what it pointed at.
+/// </para>
+/// <para>
+/// The group's bare <c>.RequireAuthorization()</c> means "any authenticated caller" and nothing more:
+/// there is no <c>DefaultPolicy</c> override, and the <c>FallbackPolicy</c> (UAC-r2 task 167) also asks only
+/// for an authenticated user. Authorization
+/// on these routes is therefore the DELEGATED QUERY ITSELF — there is no per-record filter because the
+/// record is not known until the query resolves it. Denial is deliberately indistinguishable from
+/// absence (a 404, never a 403): answering 403 would confirm the record exists, trading an IDOR for an
+/// existence oracle.
+/// </para>
+/// <para>
+/// ⚠️ Do not "restore" <c>IGenericEntityService</c> on these handlers to fix a permissions complaint.
+/// If a caller cannot see a communication, that is the control working.
 /// </para>
 /// </remarks>
 public static class OfficeCommunicationsEndpoints
@@ -123,7 +143,7 @@ public static class OfficeCommunicationsEndpoints
     /// </summary>
     private static async Task<IResult> FindByMessageIdAsync(
         string internetMessageId,
-        IGenericEntityService entityService,
+        IDataverseUserClient userClient,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -157,7 +177,7 @@ public static class OfficeCommunicationsEndpoints
 
         try
         {
-            var entity = await QueryCommunicationByMessageIdAsync(entityService, internetMessageId, ct);
+            var entity = await QueryCommunicationByMessageIdAsync(userClient, internetMessageId, ct);
 
             if (entity is null)
             {
@@ -176,10 +196,10 @@ public static class OfficeCommunicationsEndpoints
                     });
             }
 
-            var communicationId = entity.GetAttributeValue<Guid>("sprk_communicationid");
+            var communicationId = ReadGuid(entity.Value, "sprk_communicationid");
             // Use sprk_subject if present, otherwise fall back to the empty string. The
             // client tolerates a missing subject (see communicationLookupService.ts L99).
-            var subject = entity.GetAttributeValue<string>("sprk_subject") ?? string.Empty;
+            var subject = ReadString(entity.Value, "sprk_subject") ?? string.Empty;
 
             logger.LogInformation(
                 "Found sprk_communication {CommunicationId}, " +
@@ -217,25 +237,80 @@ public static class OfficeCommunicationsEndpoints
     /// <c>DataverseServiceClientImpl.GetCommunicationByInternetMessageIdAsync</c> but selects the richer
     /// column set the callers need.
     /// </summary>
-    private static async Task<Entity?> QueryCommunicationByMessageIdAsync(
-        IGenericEntityService entityService,
+    /// <remarks>
+    /// 🔴 DELEGATED (user-OBO) read — #1020 / task 127. Runs under the CALLER's Dataverse security
+    /// context, so a communication the caller may not read simply does not come back and the handler
+    /// returns its ordinary 404. That conflation is deliberate: answering 403 here would tell the
+    /// caller the record EXISTS, trading an IDOR for an existence oracle — the separation task 022
+    /// removed from bulk download and that <c>CallerRecordAccessProbe</c> refuses to reintroduce.
+    /// <para>
+    /// This previously used the app-only <c>IGenericEntityService</c>, so holding an internetMessageId
+    /// — which every participant in an email thread holds — was the same thing as being allowed to
+    /// read its Spaarke filing.
+    /// </para>
+    /// </remarks>
+    private static async Task<JsonElement?> QueryCommunicationByMessageIdAsync(
+        IDataverseUserClient userClient,
         string internetMessageId,
         CancellationToken ct)
     {
-        var query = new QueryExpression("sprk_communication")
-        {
-            ColumnSet = new ColumnSet(
-                "sprk_communicationid",
-                "sprk_subject",
-                "sprk_internetmessageid"),
-            TopCount = 1
-        };
-        query.Criteria.AddCondition(
-            "sprk_internetmessageid", ConditionOperator.Equal, internetMessageId);
+        // OData string literal: single-quotes doubled, then the whole value URL-encoded.
+        var escaped = Uri.EscapeDataString(internetMessageId.Replace("'", "''"));
+        var path =
+            "sprk_communications"
+            + "?$select=sprk_communicationid,sprk_subject,sprk_internetmessageid"
+            + $"&$filter=sprk_internetmessageid eq '{escaped}'"
+            + "&$top=1";
 
-        var results = await entityService.RetrieveMultipleAsync(query, ct);
-        return results.Entities.Count == 0 ? null : results.Entities[0];
+        var response = await userClient.GetAsync(path, ct);
+
+        if (!response.IsSuccess)
+        {
+            // 401/403 means the delegated context itself is broken. Returning null would present that
+            // as "this email was never captured", which the add-in shows as a normal no-preselection
+            // state — a broken security context silently rendering as a working feature.
+            if (response.StatusCode is 401 or 403)
+            {
+                throw new InvalidOperationException(
+                    $"Communication lookup could not run under the caller's Dataverse security context "
+                    + $"(HTTP {response.StatusCode}, {response.ErrorCode}).");
+            }
+
+            return null;
+        }
+
+        if (response.Body is not { } body || !body.TryGetProperty("value", out var rows))
+        {
+            return null;
+        }
+
+        foreach (var row in rows.EnumerateArray())
+        {
+            return row.Clone();
+        }
+
+        return null;
     }
+
+    /// <summary>Reads a string property from a Dataverse OData row, or null when absent.</summary>
+    private static string? ReadString(JsonElement row, string property)
+        => row.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString()
+            : null;
+
+    /// <summary>Reads an integer (option-set) property from a Dataverse OData row; 0 when absent.</summary>
+    private static int ReadInt(JsonElement row, string property)
+        => row.TryGetProperty(property, out var v) && v.ValueKind == JsonValueKind.Number
+            ? v.GetInt32()
+            : 0;
+
+    /// <summary>Reads a GUID property from a Dataverse OData row.</summary>
+    private static Guid ReadGuid(JsonElement row, string property)
+        => row.TryGetProperty(property, out var v)
+           && v.ValueKind == JsonValueKind.String
+           && Guid.TryParse(v.GetString(), out var g)
+            ? g
+            : Guid.Empty;
 
     /// <summary>
     /// Handler for <c>GET /api/office/communications/by-message-id/{internetMessageId}/suggestions</c>.
@@ -246,9 +321,10 @@ public static class OfficeCommunicationsEndpoints
     /// </summary>
     private static async Task<IResult> GetSuggestionsByMessageIdAsync(
         string internetMessageId,
-        IGenericEntityService entityService,
+        IDataverseUserClient userClient,
         CommunicationService communicationService,
         IncomingAssociationResolver associationResolver,
+        OfficeSearchService searchService,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -271,7 +347,7 @@ public static class OfficeCommunicationsEndpoints
 
         try
         {
-            var entity = await QueryCommunicationByMessageIdAsync(entityService, internetMessageId, ct);
+            var entity = await QueryCommunicationByMessageIdAsync(userClient, internetMessageId, ct);
             if (entity is null)
             {
                 // Not captured yet — the client opens the picker with NO pre-selection (FR-B2 fallback).
@@ -290,31 +366,39 @@ public static class OfficeCommunicationsEndpoints
                     });
             }
 
-            var communicationId = entity.GetAttributeValue<Guid>("sprk_communicationid");
-            var subject = entity.GetAttributeValue<string>("sprk_subject") ?? string.Empty;
+            var communicationId = ReadGuid(entity.Value, "sprk_communicationid");
+            var subject = ReadString(entity.Value, "sprk_subject") ?? string.Empty;
 
-            // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork.
+            // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork — and the
+            // SAME caller-scoped trimming (task 161): a candidate the caller cannot read is absent from the
+            // decision itself, so neither its id nor a status computed with it reaches the response. The helper
+            // also resolves each readable candidate's DISPLAY NAME (task 042 / FR-B2) — the persisted provenance
+            // carries IDs, not names, and the shared candidate model (`derivePrimaryReview`) is designed to receive
+            // `targetName` — from the same delegated read that decided it was readable.
             var (message, associationContext) = await communicationService.ReconstructEnvelopeAsync(communicationId, ct);
-            var decision = await associationResolver.EvaluateAsync(message, associationContext, ct);
-            var suggestions = SuggestAssociationsResponse.FromDecision(communicationId, decision);
+            var scoped = await SuggestionCandidateAccess.EvaluateForCallerAsync(
+                communicationId, message, associationContext, associationResolver, userClient, logger, ct);
+            var suggestions = scoped.Suggestions;
+            var names = scoped.Names;
 
-            // Resolve candidate DISPLAY NAMES (task 042 / FR-B2). The persisted provenance carries
-            // IDs, not names — so the client would otherwise show a GUID in the picker. We fill the
-            // `targetName` the shared candidate model (`derivePrimaryReview`) is DESIGNED to receive,
-            // reusing the same per-entity name-field map the denorm writer uses (RegardingNameFields).
-            var names = await ResolveCandidateNamesAsync(entityService, suggestions.Candidates, logger, ct);
+            // Task 084 (#1037): "pickable equals savable". The pane renders these candidates as selectable cards
+            // and the ribbon quick-save files straight to the top one, so each named candidate also says whether
+            // POST /api/office/save would accept it, from the save's own rights check (OfficeSearchService).
+            var filingAccess = await ResolveCandidateFilingAccessAsync(
+                searchService, suggestions.Candidates, names, TokenHelper.ExtractBearerTokenOrNull(context), ct);
 
             logger.LogInformation(
-                "Returning engine suggestions for sprk_communication {CommunicationId} ({NameCount} names resolved), " +
-                "UserId={UserId}, CorrelationId={CorrelationId}",
-                communicationId, names.Count, userId, traceId);
+                "Returning engine suggestions for sprk_communication {CommunicationId} ({NameCount} names resolved, " +
+                "{FilingCount} filing verdicts), UserId={UserId}, CorrelationId={CorrelationId}",
+                communicationId, names.Count, filingAccess.Count, userId, traceId);
 
             return Results.Ok(new CommunicationSuggestionsResponse
             {
                 CommunicationId = communicationId,
                 Subject = subject,
                 Suggestions = suggestions,
-                Names = names
+                Names = names,
+                FilingAccess = filingAccess
             });
         }
         catch (Exception ex)
@@ -336,37 +420,49 @@ public static class OfficeCommunicationsEndpoints
     }
 
     /// <summary>
-    /// Resolve display names for the suggested candidates (task 042). Retrieves each distinct
-    /// candidate record's primary-name attribute (via <see cref="RegardingNameFields"/>) so the add-in
-    /// picker shows a real name instead of a GUID. Best-effort: a miss (unknown entity, bad id, retrieve
-    /// failure) simply leaves that candidate to the client's id fallback. Keyed by candidate targetId.
+    /// Whether the caller can file to each NAMED candidate (task 084), keyed by candidate <c>targetId</c>.
     /// </summary>
-    private static async Task<IReadOnlyDictionary<string, string>> ResolveCandidateNamesAsync(
-        IGenericEntityService entityService,
+    /// <remarks>
+    /// Only candidates that resolved a name are evaluated. Since task 161 a record the caller cannot read is not a
+    /// candidate at all (<see cref="SuggestionCandidateAccess"/> removes it from the decision); a readable candidate
+    /// with a blank name is one the client cannot label, so it is not offered for filing and asking whether it is
+    /// fileable would cost a Dataverse call for nothing. The type is the candidate's LOGICAL name;
+    /// <c>EntityAccessFilter.TryResolveEntitySet</c> maps it to the same collection as the friendly name the
+    /// client sends to the save, so the verdict is the save's.
+    /// </remarks>
+    internal static async Task<IReadOnlyDictionary<string, bool>> ResolveCandidateFilingAccessAsync(
+        OfficeSearchService searchService,
         IReadOnlyList<SuggestedCandidate> candidates,
-        ILogger<Program> logger,
+        IReadOnlyDictionary<string, string> names,
+        string? callerBearerToken,
         CancellationToken ct)
     {
-        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var targets = new List<(string EntityType, Guid RecordId)>();
+        var targetIds = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var c in candidates)
         {
-            if (!seen.Add($"{c.TargetEntity}:{c.TargetId}")) continue; // one retrieve per distinct record
-            var nameField = RegardingNameFields.PrimaryNameField(c.TargetEntity);
-            if (nameField is null) continue;
+            if (!names.ContainsKey(c.TargetId)) continue;
             if (!Guid.TryParse(c.TargetId, out var recordId)) continue;
-            try
-            {
-                var record = await entityService.RetrieveAsync(c.TargetEntity, recordId, new[] { nameField }, ct);
-                var name = record.GetAttributeValue<string>(nameField);
-                if (!string.IsNullOrWhiteSpace(name)) names[c.TargetId] = name;
-            }
-            catch (Exception ex)
-            {
-                logger.LogDebug(ex, "Could not resolve display name for {Entity} {Id}", c.TargetEntity, c.TargetId);
-            }
+            if (!seen.Add(c.TargetId)) continue;
+
+            targets.Add((c.TargetEntity, recordId));
+            targetIds.Add(c.TargetId);
         }
-        return names;
+
+        var filingAccess = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        if (targets.Count == 0)
+            return filingAccess;
+
+        var verdicts = await searchService.EvaluateFilingAccessAsync(targets, callerBearerToken, ct);
+        for (var i = 0; i < targets.Count; i++)
+        {
+            // null = not checked (past the per-request cap): leave the key out, so the client treats it as today.
+            if (verdicts[i] is { } canFile)
+                filingAccess[targetIds[i]] = canFile;
+        }
+
+        return filingAccess;
     }
 
     /// <summary>
@@ -374,7 +470,7 @@ public static class OfficeCommunicationsEndpoints
     /// </summary>
     private static async Task<IResult> GetLinkedTodosAsync(
         Guid commId,
-        IGenericEntityService entityService,
+        IDataverseUserClient userClient,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -389,32 +485,51 @@ public static class OfficeCommunicationsEndpoints
 
         try
         {
-            // Query sprk_todo where sprk_regardingcommunication = commId. Selects only
-            // the fields the client banner needs (FR-28 / NFR-09).
-            var query = new QueryExpression("sprk_todo")
-            {
-                ColumnSet = new ColumnSet(
-                    "sprk_todoid",
-                    "sprk_name",
-                    "statecode",
-                    "statuscode"),
-                TopCount = LinkedTodosTopCount
-            };
-            query.Criteria.AddCondition(
-                "sprk_regardingcommunication", ConditionOperator.Equal, commId);
+            // 🔴 DELEGATED read (#1020 / task 127). This filtered on sprk_regardingcommunication
+            // alone, app-only — so a caller holding any communication GUID received that email's
+            // linked to-dos regardless of entitlement. Under the caller's own context Dataverse
+            // returns only what they may see, and a communication they cannot see yields an empty
+            // list — indistinguishable from one that simply has no to-dos, which is the intended
+            // conflation.
+            //
+            // OData addresses a lookup column as _{name}_value.
+            var path =
+                "sprk_todos"
+                + "?$select=sprk_todoid,sprk_name,statecode,statuscode"
+                + $"&$filter=_sprk_regardingcommunication_value eq {commId}"
+                + $"&$top={LinkedTodosTopCount}";
 
-            var results = await entityService.RetrieveMultipleAsync(query, ct);
+            var response = await userClient.GetAsync(path, ct);
 
-            var todos = new List<LinkedTodoSummary>(results.Entities.Count);
-            foreach (var entity in results.Entities)
+            if (!response.IsSuccess)
             {
-                todos.Add(new LinkedTodoSummary
+                if (response.StatusCode is 401 or 403)
                 {
-                    SprkTodoid = entity.GetAttributeValue<Guid>("sprk_todoid"),
-                    SprkName = entity.GetAttributeValue<string>("sprk_name") ?? string.Empty,
-                    Statecode = entity.GetAttributeValue<OptionSetValue>("statecode")?.Value ?? 0,
-                    Statuscode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0
-                });
+                    throw new InvalidOperationException(
+                        $"Linked-todos lookup could not run under the caller's Dataverse security "
+                        + $"context (HTTP {response.StatusCode}, {response.ErrorCode}).");
+                }
+
+                logger.LogWarning(
+                    "Linked-todos lookup failed for {CommunicationId}: HTTP {StatusCode} {ErrorCode}",
+                    commId, response.StatusCode, response.ErrorCode);
+            }
+
+            var todos = new List<LinkedTodoSummary>();
+            if (response.IsSuccess
+                && response.Body is { } todoBody
+                && todoBody.TryGetProperty("value", out var todoRows))
+            {
+                foreach (var entity in todoRows.EnumerateArray())
+                {
+                    todos.Add(new LinkedTodoSummary
+                    {
+                        SprkTodoid = ReadGuid(entity, "sprk_todoid"),
+                        SprkName = ReadString(entity, "sprk_name") ?? string.Empty,
+                        Statecode = ReadInt(entity, "statecode"),
+                        Statuscode = ReadInt(entity, "statuscode")
+                    });
+                }
             }
 
             logger.LogInformation(
@@ -490,6 +605,14 @@ public sealed class CommunicationSuggestionsResponse
     /// (which is designed to be catalog-resolved). Absent keys fall back to the id (task 042).
     /// </summary>
     public IReadOnlyDictionary<string, string> Names { get; init; } = new Dictionary<string, string>();
+
+    /// <summary>
+    /// Whether the caller can file a document to each named candidate, keyed by candidate <c>targetId</c>
+    /// (task 084, #1037). <c>false</c> means <c>POST /api/office/save</c> would refuse it as the target: the pane
+    /// shows it disabled with the reason, and the ribbon quick-save does not auto-file to it. An absent key means
+    /// not checked; the client treats it as selectable and the save remains the enforcement.
+    /// </summary>
+    public IReadOnlyDictionary<string, bool> FilingAccess { get; init; } = new Dictionary<string, bool>();
 }
 
 /// <summary>

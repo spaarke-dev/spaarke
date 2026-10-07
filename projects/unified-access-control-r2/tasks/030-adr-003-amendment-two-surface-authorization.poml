@@ -4,7 +4,7 @@
     <title>ADR-003 amendment (path B) — two-surface authorization; sanction the (recordId → rights) evaluator</title>
     <phase>1 One evaluator</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architecture change on the authorization model; tags include auth/adr (CLAUDE.md §8 FULL row).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -84,7 +84,26 @@
     <criterion testable="true">.claude/CHANGELOG.md carries an entry for this amendment.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec: ADR Tensions table row 1. The amendment sanctions the task-032 shape change; sequence 030 → 032 is mandatory (orchestrator instruction). Register §G row 2 lists the concrete drift points to fix while in the file.</notes>
+  <notes>Spec: ADR Tensions table row 1. The amendment sanctions the task-032 shape change; sequence 030 → 032 is mandatory (orchestrator instruction). Register §G row 2 lists the concrete drift points to fix while in the file.
+
+COMPLETED 2026-09-04. Amendment A1 added to both ADR versions; concise ADR rewritten (106 lines);
+.claude/CHANGELOG.md entry added; register §G row 2 dead link fixed
+(patterns/auth/authorization-service.md -> uac-access-control.md).
+
+The escalation trigger was EVALUATED and did NOT fire, which is the one outcome worth recording here:
+OperationAccessRule IS a live, registered IAuthorizationRule (SpaarkeCore.cs:96) — but the amendment
+retires the MANDATE ("new auth logic MUST be a rule"), not the MECHANISM. Nothing that exists stops
+working. Both ADR versions say so explicitly so a later reader cannot infer deprecation.
+
+Both drift claims were re-verified in SOURCE rather than trusted from the spec prose (this project has
+been wrong 11 times that way): CachedAccessDataSource depends on IDistributedCache with 2-min
+roles/teams and 60-s per-resource TTLs — cross-request AND cross-instance, i.e. stronger than the
+claim. Preserved verbatim: fail-closed, deny codes, authorize-before-SpeFileStore, never-cache-decisions.
+
+One self-caught deviation: a "client must not name the container" MUST NOT was drafted and then
+REMOVED — out of scope, already owned by ADR-049 + the provenance guard, and it would have
+manufactured an ADR-003 violation against DocumentsEndpoints.cs that task 083 already owns. See
+notes/task-030-adr-003-amendment.md §3.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

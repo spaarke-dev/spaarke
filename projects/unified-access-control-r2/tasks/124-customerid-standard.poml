@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="unified-access-control-r2">
+  <metadata>
+    <title>Define, document and enforce the customerId standard — the current constraint permits a value that produces an INVALID Key Vault name</title>
+    <phase>Register-driven (authored 2026-09-29, session 25; owner decision on D-14 §6)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes a provisioning parameter constraint that every customer resource name derives from. Too loose and a deploy fails; too tight and existing values become illegal.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The binding limit is not stated anywhere — it has to be derived from the composed resource-name expressions across two stacks with different conventions, and the failure is a deployment error rather than a test failure.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches both customer stacks plus the naming-convention architecture doc; coordinates with cpo-r1's intake.</parallel-reason>
+    <deps>none</deps>
+    <tags>provisioning, config, docs, infra</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>Owner decision 2026-09-29 on D-14 §6: "the current dataverse values can be changed and we can update our process so that it aligns with what is required for KV; we don't have production systems so this is easy clean up. Define the standard, document it, and then update components accordingly (as necessary)."</origin>
+  </metadata>
+
+  <prompt>Every Azure resource a customer owns is named from customerId, and nothing states what a legal customerId is. Derive the limit from the names it actually produces, write it down once, and make the parameter reject what the names cannot hold.</prompt>
+
+  <role>SPAARKE platform developer — customer provisioning stacks and the resource-naming convention. You are narrowing a parameter that every downstream name depends on.</role>
+
+  <goal>One documented standard for customerId, enforced at the parameter so an illegal value cannot reach a deployment, with the naming-convention doc corrected where it disagrees with the code, and the Dataverse/intake values brought into line.</goal>
+
+  <context>
+    <background>🔴 THE CURRENT CONSTRAINT PERMITS A VALUE THAT FAILS TO DEPLOY. Verified by computing the composed names (2026-09-29):
+
+`infrastructure/bicep/customer.bicep:31-33` and `stacks/model2-full.bicep:11-14` both declare
+`@minLength(3) @maxLength(10) param customerId string`, described as "lowercase, alphanumeric only".
+
+`customer.bicep` composes its Key Vault name as `take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24)`.
+Azure Key Vault names are 3–24 chars and **may not begin or end with a hyphen**. With `environmentName = 'staging'`:
+
+| customerId length | resulting name | |
+|---|---|---|
+| 8 | `sprk-xxxxxxxx-staging-kv` | ✅ complete, 24 chars |
+| 9 | `sprk-xxxxxxxxx-staging-k` | ⚠️ truncated — loses the `v` |
+| **10** | `sprk-xxxxxxxxxx-staging-` | 🔴 **INVALID — trailing hyphen; Azure rejects the name and the deployment fails** |
+
+So `maxLength(10)` is not merely loose; it admits a deploy-breaking value. `staging` is the binding case
+(`dev` and `prod` are shorter).
+
+⚠️ THE TWO STACKS USE DIFFERENT KEY VAULT FORMS, which is why the limit is not obvious:
+  - `stacks/model2-full.bicep:63,101` — `baseName = 'sprk${customerId}${environment}'`, KV = `'${baseName}-kv'` (NO hyphens, no take) → fits at 10.
+  - `infrastructure/bicep/customer.bicep` / `customer.json:210` — `sprk-{customerId}-{env}-kv` with `take(...,24)` → breaks at 10.
+The standard must satisfy BOTH, so the tighter form governs: **8**.
+
+⚠️ "ALPHANUMERIC ONLY" IS DESCRIPTION-ONLY. There is no `@pattern`, so a hyphenated id passes ARM and is then
+silently mangled: `storageAccountName = take(toLower(replace('${baseName}sa','-','')),24)` STRIPS hyphens, so
+`acme-x` and `acmex` resolve to the SAME storage account name. Nothing validates this.
+
+⚠️ THE REGISTRY ALREADY HOLDS ILLEGAL VALUES. `sprk_dataverseenvironment.sprk_customerid` carries values like
+`trial-2026-08-18` (16 chars, hyphens) — see
+`src/server/services/Sprk.Provisioning.ControlPlane.Tests/Registry/DataverseEnvironmentRegistryClientTests.cs:232`
+and `provisioning-runs/_templates/intake.md`, which describes it only as "slug". The owner has ruled these can
+be changed: no production systems exist.
+
+⚠️ THE NAMING DOC HAS DRIFTED FROM THE CODE. `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md:220` gives
+the resource group as `rg-spaarke-prod-{customer}` (env BEFORE customer); the code is
+`rg-spaarke-${customerId}-${environment}` (customer BEFORE env, `model2-full.bicep:62`). The doc also never
+defines what `{customer}` itself may contain — which is the gap this task closes.
+
+RECOMMENDED STANDARD: `^[a-z][a-z0-9]{2,7}$` — 3 to 8 characters, lowercase letters and digits, first
+character a letter. The length is derived above. Lowercase-alphanumeric is required by the storage-account
+name it feeds. Letter-first is a READABILITY convention, not an Azure requirement (the `sprk` prefix already
+satisfies the platform rules) — say so rather than implying it is mandated.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="modify">infrastructure/bicep/stacks/model2-full.bicep</file>
+      <file role="modify">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/D-14-customer-discriminator.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint>Derive the limit from the composed names, and SHOW the derivation in the doc. A number with no derivation rots the moment a name changes.</constraint>
+    <constraint>🔴 CORRECTED DURING EXECUTION: Bicep/ARM has NO `@pattern` decorator and no regex constraint on parameters, and this repo has no `bicepconfig.json` enabling experimental assertions. Only LENGTH is enforceable in the template. The character rule is enforced where the value is ASSIGNED (provisioning intake) and documented at the parameter so the two cannot drift.</constraint>
+    <constraint>Do NOT rename existing Azure resources to widen the limit. Tightening the parameter costs nothing; changing a Key Vault name is a live-resource change.</constraint>
+    <constraint>`customer.json` is COMPILED from `customer.bicep` — change the source and regenerate; do not hand-edit the JSON.</constraint>
+    <constraint>The Dataverse/intake half is cpo-r1's process; state the standard and hand it over rather than editing their tree.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/D-14-customer-discriminator.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Re-verify the Key Vault arithmetic for all three environments before changing any number.</step>
+    <step>Write the standard into AZURE-RESOURCE-NAMING-CONVENTION.md with its derivation, and fix the resource-group order the doc gets backwards.</step>
+    <step>Tighten the length in both stacks and document the character rule; regenerate BOTH compiled artifacts (`customer.json`, `stacks/model2-full.json`) from source with `az bicep build --outfile`.</step>
+    <step>Record the decision in D-14 §6.</step>
+    <step>Hand the registry/intake cleanup to cpo-r1 in writing.</step>
+  </steps>
+
+  <escalation>
+    <trigger>A deployed Azure resource is found whose name derives from a customerId longer than the new limit — that is a live rename, not a parameter change, and is the owner's call.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion>Both stacks enforce the same length (8), and both document the character rule plus the fact that ARM cannot enforce it.</criterion>
+    <criterion>A customerId at the new maximum produces a COMPLETE, valid Key Vault name in BOTH stacks for all three environments — demonstrated, not asserted.</criterion>
+    <criterion>The naming doc states the standard, shows the derivation, and names the binding resource.</criterion>
+    <criterion>The resource-group pattern in the doc matches the code.</criterion>
+    <criterion>`customer.json` AND `stacks/model2-full.json` are regenerated from source, not hand-edited.</criterion>
+    <criterion>The cpo-r1 handoff for the registry/intake values is written.</criterion>
+  </acceptance-criteria>
+
+  <notes>Authored 2026-09-29 (session 25) on the owner's D-14 §6 decision. The finding that made it urgent: the existing maxLength(10) admits a value that produces an invalid Key Vault name, so this is a latent deploy failure rather than a naming preference.</notes>
+
+  <execution>
+    <outcome>Completed 2026-09-29. Limit 10 → 8 in both stacks; both compiled artifacts regenerated with
+    `az bicep build --outfile` (customer.json diff 3 lines, model2-full.json 5 — confirming the sources and
+    artifacts were otherwise in sync). Naming doc gained the standard with its derivation, and had two
+    drifts corrected: the resource-group pattern had env and customer reversed, and the section closed by
+    claiming customers share environment-level AI services and the BFF, which D-12 retired.</outcome>
+    <deviation>The POML required enforcement via `@pattern`. That decorator does not exist in Bicep/ARM —
+    verified, after nearly shipping a comment that asserted it. Length is enforced in the template; the
+    character rule is enforced at assignment and documented at both parameters.</deviation>
+  </execution>
+</task>

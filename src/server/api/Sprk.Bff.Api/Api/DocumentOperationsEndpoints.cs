@@ -178,6 +178,13 @@ public static class DocumentOperationsEndpoints
                 )
             };
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException refused)
+        {
+            // Task 146: the new file version's owner could not be resolved from its document — nothing was written.
+            logger.LogWarning(refused, "Checkout refused for document {DocumentId}: no owner", documentId);
+            return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.RecordOwnerRefused(
+                refused.RefusalCode, refused.Reason, "checkout", correlationId);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Checkout failed for document {DocumentId}", documentId);
@@ -339,7 +346,13 @@ public static class DocumentOperationsEndpoints
                 FileName = fileInfo.FileName,
                 DocumentId = fileInfo.DocumentId.ToString(),
                 Source = "CheckinTrigger",
-                EnqueuedAt = DateTimeOffset.UtcNow
+                EnqueuedAt = DateTimeOffset.UtcNow,
+                // Task 048 (spaarkeai-word-add-in-r1): check-in re-indexes an EXISTING, previously
+                // checked-out item — the same "new version of an existing item" shape task 029 fixed for
+                // Office version saves. This trigger's idempotency key already includes DateTimeOffset
+                // ticks (never skipped as a duplicate), so every check-in reaches this payload and must
+                // trim any leftover tail once the new chunks land.
+                ReplaceStaleChunks = true,
             }));
 
             // Create and submit job
@@ -589,7 +602,7 @@ public static class DocumentOperationsEndpoints
                 JobType = AppOnlyDocumentAnalysisJobHandler.JobTypeName,
                 SubjectId = documentId.ToString(),
                 CorrelationId = correlationId,
-                IdempotencyKey = $"analysis-{documentId}-documentprofile",
+                IdempotencyKey = AppOnlyDocumentAnalysisJobHandler.ProfileIdempotencyKey(documentId),
                 Attempt = 1,
                 MaxAttempts = 3,
                 Payload = JsonDocument.Parse(JsonSerializer.Serialize(new

@@ -50,12 +50,31 @@ export interface IAccessGrantRecord {
   email?: string;
   accessLevel: number;
   grantedByName?: string;
+  /**
+   * The CONTACT who issued this grant from the external SPA (`sprk_grantedbycontact`, unified-access-control-r2
+   * task 140 — contact-side Grant Access). Set only on a contact-issued row; `grantedByName` (the systemuser
+   * `sprk_grantedby`) is empty on such a row. Rendered as "Granted by {name} (external contact)"; the row stays
+   * revocable here exactly like any other grant.
+   */
+  grantedByContactName?: string;
   /** ISO 8601 grant date (`sprk_granteddate`). */
   grantedDate?: string;
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no
    * provenance field; this is a client-side annotation of HOW the grant was
-   * created, inferred by the caller or defaulted by this modal's own writes). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown';
+   * created, inferred by the caller or defaulted by this modal's own writes).
+   * `'share'` (task 065, FR-29) is an internal system-user POA share, read
+   * from `GET /api/v1/external-access/user-shares` — NOT a
+   * `sprk_externalrecordaccess` row, so it carries no `accessRecordId`; see
+   * {@link IAccessGrantModalProps.pickUser}. Full provenance rendering for
+   * every row kind is task 066 — this modal only needs the row to exist, be
+   * labeled, and be revocable. */
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share';
+  /**
+   * Share rows only (unified-access-control-r2 task 114, owner round 67 amendment 4(c)): the record is Restricted and
+   * this user is flagged external (`externalNoAccess` from `/user-shares`). Rendered as "External user — no access"
+   * until the server removes the share (the record's next save, or its 5-minute job). Still revocable here.
+   */
+  externalNoAccess?: boolean;
 }
 
 /** A single Dataverse Contact search result (named-contact person-picker). */
@@ -77,6 +96,42 @@ export interface IOrganizationPick {
   name: string;
 }
 
+/** An internal system user picked via the side-pane Advanced Lookup (task 065,
+ * FR-29) — a Dataverse `systemuser` record. `id` is the `systemuserid` GUID
+ * (already `cleanGuid`-normalized by the navigation adapter). Sent to the BFF
+ * as `systemUserId` on `POST /api/v1/external-access/share-user`. The shared
+ * modal never reads `systemuser` itself — the host supplies this via the
+ * injected {@link IAccessGrantModalProps.pickUser} callback, mirroring
+ * {@link IOrganizationPick} / {@link pickOrganization} (ADR-012). */
+export interface IUserPick {
+  id: string;
+  name: string;
+  /** The user's primary email, when the host could read it. Shown beside the name because several users can share
+   * one (owner test feedback 2026-10-07). */
+  email?: string;
+}
+
+/** What the modal asks of the "+ User" lookup (task 114). */
+export interface IUserPickOptions {
+  /** Leave out users flagged external (`sprk_isexternal = true`): set on a Restricted record, where they cannot
+   * receive a share (owner round 67). Blank counts as internal. */
+  excludeExternal?: boolean;
+}
+
+/** The secure-project owner + business-unit alignment read-only display (task
+ * 065, design.md §6). Per design §5.1a a secure record is owned by an OWNER
+ * TEAM, not a service account — `ownerName` is whatever Dataverse's polymorphic
+ * `ownerid` resolves to (team or user display name), and `businessUnitName` is
+ * `owningbusinessunit`'s display name. The host resolves both via a
+ * host-context read (`ownerid`/`owningbusinessunit`, entity-agnostic column
+ * names on every one of the three grant-root entities) and returns `null` when
+ * the record is not secure (`sprk_issecure` is not `true`) or the read failed —
+ * the modal renders nothing in that case (fail-soft, never a hard error). */
+export interface ISecureOwnerInfo {
+  ownerName: string;
+  businessUnitName: string;
+}
+
 /** The polymorphic root type a grant is held at (task 070/071). Mirrors the
  * BFF's `ExternalGrantRoot` types; the caller (the PCF host) derives it from the
  * bound record's entity and passes it as {@link IAccessGrantModalProps.recordType}
@@ -93,24 +148,27 @@ export type ExternalGrantRootType = 'project' | 'matter' | 'workassignment';
  * ONLY place that knows the real `sprk_project` OptionSet values), keeping
  * this shared modal entity-agnostic per ADR-012.
  *
- * - `'restricted'` — external access is off for this record: the modal
- *   blocks ALL external-grant actions (approve-candidate + add-named-contact).
- * - `'limited'` — named/approved grants remain available, but the
- *   standing-grant option is unavailable (no auto-approval across future
- *   records).
- * - `'standard'` — every grant type is available, including standing
- *   grants. This is the DEFAULT applied when the prop is omitted, matching
- *   task 041's baseline behavior for any caller that hasn't wired the
- *   record's Access-Permission value (zero-regression default).
+ * The owner's model (unified-access-control-r2 task 138, round 2 item 3,
+ * binding) — the server enforces exactly this at read AND write time:
+ * - `'restricted'` — no contact-based access at all; internal users are
+ *   unaffected. The modal does not offer "+ Contact", "+ Organization" or the
+ *   role-based candidates; "+ User" (an internal share), its level dropdown,
+ *   Add and Revoke stay available.
+ * - `'limited'` — contacts get access ONLY through named, direct grants:
+ *   organization-wide grants, standing-grant membership and organization
+ *   expansion confer nothing. The modal does not offer "+ Organization".
+ *   A SECURE record (not Restricted) is passed as `'limited'` too — Secure
+ *   implies Limited for contacts — with {@link IAccessGrantModalProps.isSecureRecord}
+ *   set so the banner can say "Secure".
+ * - `'standard'` — every grant type is available. This is the DEFAULT applied
+ *   when the prop is omitted (task 041's baseline).
+ *
+ * The host maps raw values to this state and MUST fail closed: an unreadable
+ * secure flag maps to `'limited'`, never `'standard'`.
  *
  * DISTINCT from the per-grant `sprk_accesslevel` field (`accessLevelOptions`
- * / `defaultAccessLevel` below) — this state governs WHICH grant types the
- * modal permits, never WHAT access level an individual grant carries. R1
- * exposes no per-grant access-level selector in this modal's UI (see
- * `defaultAccessLevel`'s doc comment), so there is no shared UI surface for
- * this gate to affect; the independence is structural — the gate only
- * touches candidate/named-contact/standing-grant availability, never
- * `accessLevelOptions` or `defaultAccessLevel`.
+ * / `defaultAccessLevel` below) — this state governs WHICH grantee kinds the
+ * modal offers, never WHAT access level an individual grant carries.
  */
 export type AccessPermissionState = 'standard' | 'limited' | 'restricted';
 
@@ -140,14 +198,30 @@ export interface IAccessGrantModalProps {
    * writing project grants unchanged (the BFF also accepts the legacy `projectId`
    * shorthand, but this modal always sends the explicit `recordType`). */
   recordType?: ExternalGrantRootType;
-  /** Gates the modal's functional UI. Mirrors `TrackingFieldTrio`'s
-   * `canGrantAccess` gate on the person icon (task 040) — this is a SECOND,
-   * defense-in-depth check inside the modal itself, so a direct component
-   * mount (bypassing the icon's disabled state) still cannot grant/revoke.
-   * When `false`, the modal renders an explanatory not-authorized state
-   * instead of the candidate list / picker / grants list. Default `true`
-   * (fail-open only when the caller hasn't wired an access decision at all —
-   * matches `TrackingFieldTrio`'s own default). */
+  /** Gates the modal's functional UI. When not `true`, the modal renders an
+   * explanatory not-authorized state instead of the candidate list / picker /
+   * grants list.
+   *
+   * 🔴 WHAT THIS IS NOT (corrected in task 118, unified-access-control-r2).
+   * This doc used to call the check "a SECOND, defense-in-depth check inside
+   * the modal itself". It is not, and describing it that way is what let a
+   * fail-open default survive review: this check and `TrackingFieldTrio`'s
+   * person-icon check read THE SAME VALUE, from the same host, so they cannot
+   * disagree and neither can catch the other being wrong. Two gates reading
+   * one value are one gate. What it DOES buy is narrower and worth stating
+   * honestly: a direct component mount that bypasses the icon's disabled state
+   * still renders the not-authorized surface rather than the grant UI.
+   *
+   * THE REAL BACKSTOP IS THE SERVER. `DelegationRuleFilter`, group-level on
+   * `/api/v1/external-access`, refuses every grant, revoke, share and expiry
+   * change from a caller without Write on the target record — evaluated as the
+   * caller over OBO, and denying what it cannot evaluate. No client-side value
+   * can bypass it.
+   *
+   * Default `false` — INVERTED in task 118. It was `true`, so a host that had
+   * not wired an access decision got the full grant UI. An unanswered access
+   * question is now a denial, matching both `TrackingFieldTrio`'s default and
+   * the server's fail direction. */
   canGrantAccess?: boolean;
   /** Host-supplied `authenticatedFetch` (ADR-028 function-dependency contract
    * — never a raw token). Used for the three built BFF calls: `/grant`,
@@ -200,6 +274,16 @@ export interface IAccessGrantModalProps {
    * mechanism, mirroring {@link pickContact}. Omit → the "+ Organization" button
    * is hidden. */
   pickOrganization?: () => Promise<IOrganizationPick | null>;
+  /** Opens the host's NATIVE advanced-lookup side pane for a single
+   * `systemuser` (task 065, FR-29) — the PRIMARY "+ User" mechanism, mirroring
+   * {@link pickContact} / {@link pickOrganization}. The picked user is staged
+   * into the SAME "Add Access Permissions" list (its own per-row access-level
+   * dropdown) and committed by `Add (N)` via `POST
+   * /api/v1/external-access/share-user` — an internal Dataverse POA share, NOT
+   * a `sprk_externalrecordaccess` row (distinct write path from
+   * pickContact/pickOrganization's `/grant` | `/invite-and-grant`). Omit → the
+   * "+ User" button is hidden. */
+  pickUser?: (options?: IUserPickOptions) => Promise<IUserPick | null>;
   /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
    * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
    * access to the Contact can view/edit it. When supplied, each contact name in
@@ -214,17 +298,9 @@ export interface IAccessGrantModalProps {
    * person) — see the modal's own doc comment for the escalated internal
    * deep-link notify gap. */
   isInternalContact: (contactId: string) => Promise<boolean>;
-  /** Sets/clears the contact's subject-level standing-grant flag
-   * (`contact.sprk_standinggrant`, FR-12) — a single-field Contact write, NOT
-   * a `sprk_externalrecordaccess` write, so it is intentionally OUTSIDE the
-   * "reuse the grant endpoint" constraint. The host implements this via
-   * Xrm.WebApi (host-context, single-entity, single-field — per
-   * DATA-ACCESS-DECISION-CRITERIA.md). Best-effort: a failure here does NOT
-   * roll back the grant that was already written (NFR-06 principle applied
-   * to the standing-grant option specifically). Omit to hide the standing-
-   * grant option entirely (e.g., a host that hasn't wired task 050's field
-   * yet). */
-  onSetStandingGrant?: (contactId: string, standingGrant: boolean) => Promise<void>;
+  // `onSetStandingGrant` was REMOVED by task 138: the modal has had no
+  // standing-grant control since task 073 UAT v1.0.24 #5 (the standing grant is
+  // set on the Contact record itself), so the prop was dead wiring.
   /** Header title override (default `"Manage Access"`). */
   title?: string;
   /** Access-level choices offered for every grant (default: the BFF's fixed
@@ -237,14 +313,25 @@ export interface IAccessGrantModalProps {
    * callers needing a different default may override. */
   defaultAccessLevel?: number;
   /** The record's current Access-Permission sharing-gate state (spec FR-14,
-   * Option A — task 043). Governs which grant types the modal permits:
-   * `'restricted'` blocks all external grants (approve-candidate +
-   * add-named-contact disabled, with an explanatory banner); `'limited'`
-   * allows named/approved grants but hides the standing-grant option;
-   * `'standard'` (default, when omitted) allows every grant type — task
-   * 041's unmodified baseline. See {@link AccessPermissionState} for the
-   * full mapping and the `sprk_accesslevel` independence guarantee. */
+   * Option A — task 043; made real by task 138). Governs which grantee kinds
+   * the modal offers: `'restricted'` hides "+ Contact", "+ Organization" and
+   * the candidates (keeping "+ User"); `'limited'` hides "+ Organization";
+   * `'standard'` (default, when omitted) offers everything. See
+   * {@link AccessPermissionState} for the full mapping. */
   accessPermissionState?: AccessPermissionState;
+  /** Whether the record is SECURE (task 138; owner O1 FINAL, 2026-10-01) — a
+   * semantic flag, not a Dataverse column name. Only changes the banner's copy
+   * ("Secure", or "Secure – Restricted" when {@link accessPermissionState} is
+   * `'restricted'`); the gating itself comes from `accessPermissionState`, to
+   * which the host already folds Secure as `'limited'`. Default `false`. */
+  isSecureRecord?: boolean;
+  /** Resolves the current record's secure-project owner + business-unit
+   * alignment (task 065, design.md §6) for read-only display. Called once
+   * when the modal opens, alongside the other loaders. Returns `null` for a
+   * non-secure record, or when the host cannot resolve it — the modal simply
+   * renders no owner/BU row in that case. Omit → the row never renders (a
+   * host that hasn't wired the read yet; zero-regression default). */
+  fetchSecureOwnerInfo?: () => Promise<ISecureOwnerInfo | null>;
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

@@ -62,7 +62,7 @@
   </context>
 
   <constraints>
-    <constraint source="ADR-001">.NET 8 Minimal API patterns. No Azure Functions. Endpoints registered via Minimal API `Map*` calls.</constraint>
+    <constraint source="ADR-001">.NET 8 Minimal API patterns; BFF endpoints are never hosted in Azure Functions, and no Azure Functions inside the BFF assembly. Endpoints registered via Minimal API `Map*` calls.</constraint>
     <constraint source="ADR-008">Endpoint-filter authorization (`.AddEndpointFilter&lt;...&gt;()`) MUST apply on every Action endpoint. NO global middleware for resource checks. G11 verified by grep audit.</constraint>
     <constraint source="ADR-010">Endpoint registration goes through `MapActionEndpoints()` extension method registered in `EndpointMappingExtensions.cs` — NOT inline in Program.cs.</constraint>
     <constraint source="ADR-013">Endpoints depend on `IActionEngineFacade` (PublicContracts) where possible; internal types (`IActionOrchestrationService` from task 041) are accessed via the facade boundary, not direct injection from any CRUD-side caller.</constraint>

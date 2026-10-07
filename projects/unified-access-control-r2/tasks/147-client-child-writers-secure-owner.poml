@@ -1,0 +1,500 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="147" project="unified-access-control-r2">
+  <metadata>
+    <title>C10 part 2 (client) — children created or re-parented in the browser through Xrm.WebApi (wizards, Notepad memos, To Do widgets, document upload, regarding resolvers) end up secure when their parent is: inventory every client writer, decide per writer (route through the BFF per WP-3, or create-then-server-fix-up per WP-5), and turn on the scheduled reconciliation as the safety net for every write outside the product</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "client-created children")</phase>
+    <gate>after 144, 145, 146, 148 and 149 are merged. Coordinate with field-mapping-server-write-path-r1 (W3/W4/W5) before building any BFF create endpoint.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-boundary change spanning client (.ts/.tsx) and BFF (.cs) write paths; tags bff-api, auth, security, frontend; enables a scheduled job that writes ownership.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per-writer architectural decision (WP-3 vs WP-5) across ~15 client writers in five packages and a sibling project's pipeline; a wrong call leaves a disclosure window on a secure record's children.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches shared client packages (Spaarke.UI.Components wizards, SmartTodo, DailyBriefing, AI.Widgets, Notepad, EventDetailSidePane, RegardingResolver PCF) and the job/engine from 148; overlaps field-mapping-server-write-path-r1's wizard migration.</parallel-reason>
+    <deps>144, 145, 146, 148, 149</deps>
+    <tags>bff-api, auth, security, dataverse, frontend, react, typescript, pcf, job, testing</tags>
+    <estimated-effort>14-20 hours</estimated-effort>
+    <origin>Session 27 C10 research gap 2: "Client Xrm.WebApi creates (wizards, Notepad memos) are user-owned, and no fix-up channel exists." Owner round 2 item 6.</origin>
+  </metadata>
+
+  <prompt>Many children are created in the browser, as the user, through Xrm.WebApi — Dataverse makes the creating user the owner, in the user's own business unit, so a to-do, event, memo, document or analysis created on a secure project is readable by everyone with ordinary depth in that user's BU. Inventory every client writer that creates or re-parents a child record, make each one end up with the owner and shares task 146 and task 149 define for its parent, and switch on the scheduled reconciliation (task 148's engine) so writes made outside the product — MDA forms, quick create, grid edits, imports, flows — are corrected too.</prompt>
+
+  <role>SPAARKE full-stack developer (React/TypeScript shared components + BFF .NET Minimal API) on the ADR-002 server-side write path. Fail closed (ADR-003); client code previews, the server enforces (WP-2).</role>
+
+  <goal>Every client writer in the census below produces a child that, when its parent is secure, is owned by task 144's named Secure team with shares mirrored from the parent — either because the create/re-parent now goes through a BFF path that applies the task-146 owner rule inline (WP-3), or because the client create is followed by a server fix-up call and the gap is within an owner-accepted bound (WP-5) — and task 148's reconciliation job runs on a schedule with writes enabled as the L4 safety net for every non-product write; each writer's decision and evidence are recorded.</goal>
+
+  <context>
+    <background>WHY THE CLIENT PATH LEAKS. A `Xrm.WebApi.createRecord` runs as the user: `ownerid` = the user, `owningbusinessunit` = the user's BU. Task 146 only changes BFF writers. So after 146 a to-do created through the To Do wizard on a secure project is still owned by its creator in an ordinary BU and readable by anyone there with Local/Deep Read — the same C10 exposure, through the front door. DATAVERSE-WRITE-PATH-ARCHITECTURE.md §4.3 (`:109-113`) lists the client-only create paths and says the migration is "typed BFF create endpoints per invariant-bearing table … then switch each wizard's create call to the BFF"; §3 (`:72-76`) defines the L3 async fix-up (WP-5, change channel — does not exist yet) and the L4 scheduled reconciliation (ADR-036).
+
+CLIENT WRITER CENSUS (verified 2026-09-30 by grep of `createRecord('sprk_…')` / `updateRecord` over src/client and src/solutions; the executor re-runs it and adds anything new, including raw `fetch` POSTs to `/api/data/` and PCF sources whose built bundles matched):
+  CREATE
+  • `src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts:281` (sprk_todo)
+  • `.../CreateEventWizard/eventService.ts:411` (sprk_event)
+  • `.../CreateWorkAssignmentWizard/workAssignmentService.ts:671` (follow-on sprk_event; the work assignment itself is a ROOT — task 144)
+  • `.../CreateInvoiceWizard/invoiceService.ts:297` (sprk_invoice)
+  • `.../CreateReportCardWizard/reportCardService.ts:255` (sprk_reportcard — a child of project/matter per design.md §5.1d)
+  • `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx:918` (sprk_analysis) and its chained communication (`:955` target sprk_communication)
+  • `src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useInlineTodoCreate.ts:318` (sprk_todo)
+  • `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx:806`, `src/solutions/SmartTodo/src/components/SmartToDo.tsx:760`, `src/solutions/SmartTodo/src/services/DataverseService.ts:506`, `src/solutions/LegalWorkspace/src/services/DataverseService.ts:521` (sprk_todo)
+  • `src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts:446` (sprk_memo — parents: matter, project, event, invoice, budget, work assignment per SUPPORTED_MEMO_PARENTS)
+  • `src/solutions/EventDetailSidePane/src/App.tsx:623` (sprk_memo), `:672` (sprk_todo)
+  • `src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts:752`, `.../services/document-upload/DocumentRecordService.ts:200`, `:261` (sprk_document)
+  RE-PARENT (a child moved under or out of a secure parent must change owner too)
+  • `src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts:412`, `:532` (updateRecord on the host child)
+  • `src/client/shared/Spaarke.Communication.Components/src/logic/connections/ConnectionsWriteHandler.ts:244`, `:301`, `:357`, `:379` (communication regarding updates)
+  NON-PRODUCT WRITES (no code to change — OOB MDA forms, quick create, editable grids, Excel/Data Import, customer flows): only a server-side fix-up or reconciliation can reach them (WP-5).
+
+TWO GAPS INSIDE THE CENSUS THAT THE OWNER RULE EXPOSES.
+  (1) `sprk_memo` is in NEITHER FR-26 taxonomy set (`src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs:56-82`, mirrored in `@spaarke/ui-components`, parity-pinned by `CoreAncestorResolverTests`), so a memo regarding an EVENT carries no stamp naming the event's project. The task-146 rule derives a child's securability from its parent lookups and stamps; for a memo on an event on a secure project it must reach the project through the event. The reconciler (148) walks that hop; the client path must too.
+  (2) `sprk_document` and `sprk_invoice` carry no `sprk_regarding{core}` columns at all (phase3-backfill-runbook.md §1b), so a to-do or memo regarding a document/invoice is secure only if the document's/invoice's own parent is.
+
+THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-field-mapping-server-write-path-r1`, design only as of 2026-09-30) plans W3 "typed BFF create endpoints + wizard migration" for the 8 wizards, W4 for the other product creates (Daily Briefing inline To Do, Communication, Notepad memo, EventDetailSidePane), and W5 the change-signal fix-up channel; its design §9 names UAC-r2 as owner of I-2 and says "the pipeline must leave a slot for it". This task must not fork that pipeline (CLAUDE.md §11), and must not leave a writer unfixed waiting for it (owner: nothing deferred).</background>
+    <relevant-files>
+      <file role="modify">the client writer files listed in the census (each one's create/re-parent call)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs (task 148 — schedule + enable writes; add the per-row fix-up entry point)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciler.cs (task 148 — single-child reconcile used by the fix-up path)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs and its TypeScript mirror in @spaarke/ui-components (add sprk_memo to the CHILD taxonomy, both sides, parity test)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/bffDataServiceAdapter.ts (only if the WP-3 route is chosen for a wizard and the sibling project has not already backed it — its create/update currently target routes that do not exist, per field-mapping-r1 design §2.3)</file>
+      <file role="new">BFF route(s) chosen per writer in step 3 — named in the task note; each needs its own justification line (see justification)</file>
+      <file role="new">tests/integration/data-mutation/RecordOwnership/ClientChildFixUpTests.cs</file>
+      <file role="modify">client unit tests beside each changed writer (existing __tests__ folders)</file>
+      <file role="modify">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md (§4.3 list and I-2 row)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-147-client-child-writers.md (census + per-writer decision table)</file>
+      <file role="read">C:\code_files\spaarke-wt-field-mapping-server-write-path-r1\projects\field-mapping-server-write-path-r1\design.md (sibling pipeline W3/W4/W5)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-002 WP-2/WP-3/WP-5">Scope: every writer in the census. The client never decides or sets the owner and never shares a child itself — the server applies the task-146 owner rule and task-149 share rule (WP-2: the client may only preview). Per writer choose, in this order of preference: (A) the create/re-parent goes through a BFF path that applies the rule inline (WP-3); (B) only if (A) is impossible for that writer: the client create is immediately followed by a BFF fix-up call for that one row, with the scheduled reconciliation as backstop (WP-5). Record the choice and the reason for every writer. No writer is left on (C) "reconciliation only" without an owner decision (escalation).</constraint>
+    <constraint source="CLAUDE.md §11 / coordination">Scope: BFF create endpoints. Before building any typed create endpoint, check field-mapping-server-write-path-r1's state and message that session. If its W3/W4 endpoint for the table exists on master, route the writer through it and add the I-2 owner/share step into its pipeline slot; if not, build ONLY what this writer needs, in the location and shape that project's design names (`RecordCreationService` pipeline), and tell them. Never two create endpoints for one table.</constraint>
+    <constraint source="ADR-003">Scope: every changed writer. If the server cannot resolve the owner (task 146 refusal), the user sees the server's message and the record is NOT left user-owned: under (A) nothing is created; under (B) the fix-up failure is surfaced to the user and the row is picked up by the reconciliation run. The reconciliation job never silently skips a secure-parent child it could not fix — it reports it.</constraint>
+    <constraint source="owner round 2">Scope: required use cases. A document-only save with no related record keeps working unchanged (no parent → no secure derivation). Nothing here makes a target record required. Existing wizard UX (steps, validation, field-mapping preview) is unchanged except where a server error must now be shown.</constraint>
+    <constraint source="ADR-036 / ADR-052">Scope: the L4 safety net. Reuse task 148's `SecureChildReconciliationJob` — schedule it and enable writes in the deployed configuration; also give it a "recently modified children" pass (modifiedon watermark over the census tables) so non-product writes are corrected within one interval, not only at the next full sweep. No hand-rolled BackgroundService; no new job class for the same invariant. The interval is recorded in the note and put to the owner (escalation).</constraint>
+    <constraint source="project">Scope: the taxonomy change. Adding `sprk_memo` to the CHILD set is made on BOTH the C# and TypeScript sides in the same change; the cross-language parity test stays green; `scripts/Backfill-CoreAncestorStamps.ps1` is run in dry-run to report memos needing a stamp, and applied in dev under the manual gate.</constraint>
+    <constraint source="owner D-1 / ADR-002">Scope: all enforcement. No Dataverse plugin. No Dataverse in CI; live verification is a MANUAL gate with existing non-admin test users in their current BU; never propose relocating users.</constraint>
+    <constraint source="ADR-028">Scope: any new BFF route. Delegated caller auth with an explicit per-record authorization filter on the PARENT (the caller must be able to append to it), no new `.WithClientSecret(...)`; route added to RouteAuthorizationGuardTests as gated.</constraint>
+    <constraint source="ADR-038">Scope: tests. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests. Server fix-up paths get integration tests under `tests/integration/data-mutation/**`; client writers keep/extend their existing jest tests.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement decision citing bff-extensions.md for every new route; publish-size delta vs a fresh master build (short path, Compress-Archive, both sizes, file counts), ≤60 MB; CVE scan. PCF version bump in all four locations for any PCF changed (PCF-DEPLOYMENT-GUIDE.md); `npm run build:prod`.</constraint>
+    <constraint source="owner round 2">Scope: deliverable. 100% of the census writers are decided and fixed here; writers found during execution are added, not deferred.</constraint>
+    <constraint source="owner round 2 item 11 / task 145 (added by review 2026-09-30)">Scope: the Secure Record Owner role's privileges. Every table a census writer creates or re-parents (at least sprk_todo, sprk_event, sprk_memo, sprk_document, sprk_invoice, sprk_reportcard, sprk_analysis, sprk_communication) must be in the ONE codified set (word-add-in-r1 task 082's JSON file, extended through task 145's procedure) and granted live before its writer ships; a missing table is added in this task through 145's script, never by widening a role by hand.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>projects/unified-access-control-r2/notes/phase3-derivation-rules.md</file>
+      <file>projects/unified-access-control-r2/notes/phase3-backfill-runbook.md</file>
+      <file>projects/unified-access-control-r2/tasks/146-server-child-writers-secure-owner.poml</file>
+      <file>projects/unified-access-control-r2/tasks/148-secure-child-backfill-and-transitions.poml</file>
+      <file>projects/unified-access-control-r2/tasks/149-secure-child-sharee-access.poml</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-052-workload-placement.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/api/scheduled-jobs.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL. Confirm 144/145/146/148/149 merged. Message the field-mapping-server-write-path-r1 session: ask which W3/W4 endpoints exist and when.</step>
+    <step order="1">Re-run the client census (createRecord/updateRecord/raw Web API POST/PATCH of child tables and of their parent lookups, in src/client and src/solutions, including PCF sources); record every writer with file:line and which parents it can name.</step>
+    <step order="2">Add `sprk_memo` to the CHILD taxonomy on both sides (parity test green); run the ancestor-stamp backfill dry run for memos and record it.</step>
+    <step order="3">Decide per writer: (A) BFF path — reuse the sibling's endpoint if on master, else build the minimal one in the sibling's named shape; (B) client create + immediate BFF fix-up of that row. Record the decision table with reasons.</step>
+    <step order="4">Implement each writer's change; show the server's refusal message in the UI where a create/re-parent is refused.</step>
+    <step order="5">Extend task 148's job with the modifiedon-watermark pass over the census tables and a single-row fix-up entry point; schedule it and set writes enabled in the deployed configuration template; record the interval.</step>
+    <step order="6">Tests: per writer, a secure-parent create ends secure-team-owned with mirrored shares (server integration for A and for the fix-up in B; client jest for the call switch); refusal leaves no user-owned row (A) or is reported and later fixed (B); a non-product write (simulated user-owned child under a secure parent) is corrected by the job's watermark pass; unfiled document save unchanged.</step>
+    <step order="7">Update DATAVERSE-WRITE-PATH-ARCHITECTURE.md §4.3 and the I-2 row. Build (BFF, `npm run build:prod` per package), tests, ArchTests, publish size, CVE, PCF version bumps.</step>
+    <step order="8" mode="prescriptive">MANUAL LIVE GATE (dev, after deploy of BFF and clients): as an existing non-admin test user shared on a secure project, a secure matter and a secure work assignment, create through each client writer (and re-parent through RegardingResolver and Connections); record owner read-back and child shares; confirm a non-sharee test user cannot open each; create one child with the OOB MDA quick-create under a secure project and record the job correcting it within the interval; delete probes and record the deletion.</step>
+    <step order="9">Update TASK-INDEX.md (`✅ [done]`) and the POML status; write the task note with the census and decision table.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any writer can be fixed only by option (B) or by the reconciliation alone: the child exists user-owned in the user's BU for the fix-up latency (B) or up to one job interval (reconciliation). State the window per writer and get the owner's acceptance (CLAUDE.md §6) before shipping it; the alternative to present is routing that writer through the BFF.</trigger>
+    <trigger>field-mapping-server-write-path-r1 is building the same table's create endpoint concurrently, or its pipeline cannot host the I-2 step: STOP and agree ownership of the endpoint with that project and the owner rather than building a second one.</trigger>
+    <trigger>Routing a wizard create through the BFF changes `createdby` to the application user (app-only create) and a surface depends on `createdby` = the human (e.g. Daily Briefing / notifications use Created By, owner round 2 item 9; task 152 counts Created By only for human systemusers): surface the conflict (§6.5 path A/B/C) — do not silently lose the creator. The alternative, an OBO (delegated) BFF create that sets `ownerid` to the Secure team, requires the caller's role to hold `prvAssign` on that table; if it does not, do not widen user roles — present both options with the recommendation.</trigger>
+    <trigger>Writes made OUTSIDE the product (OOB MDA forms, quick create, editable grids, imports, flows) can only be corrected by the reconciliation job, so each such child is user-owned in the creator's BU for up to one job interval. Put the interval (and the per-table exposure it implies) to the owner for explicit acceptance before enabling the schedule as the only control for those paths; the alternative to present is removing Create on the child tables from the MDA for secure parents (form/ribbon rules) — recorded, not silently chosen.</trigger>
+    <trigger>The owner-accepted reconciliation interval cannot be met by an in-BFF ADR-036 job (load, lease, or Dataverse throttling): present the ADR-052 placement alternatives rather than shortening it unsafely.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Client writers create children only through `Xrm.WebApi`/`IDataService` (census above); `bffDataServiceAdapter` create/update target routes that do not exist (field-mapping-r1 design §2.3); no BFF path applies I-2 to a client-created row (grep `sprk_issecure` in src/client → reads only; grep `ResolveOwningTeamAsync` → no client-facing caller before task 146). Task 148's `SecureChildReconciler`/`SecureChildReconciliationJob` is the engine and trigger this task reuses.</existing>
+    <extension>Yes for the fix-up and safety net: extend task 148's engine (single-row entry) and job (watermark pass) rather than adding a second job. New BFF create routes are added only where option (A) is chosen AND the sibling project has not built the endpoint, in the sibling's `RecordCreationService` shape — each one listed in the task note with its three-question justification at the time it is built.</extension>
+    <cost-of-doing-nothing>After task 146, every to-do, event, memo, document, invoice, report card and analysis created in the browser on a secure project, matter or work assignment is still owned by its creator in an ordinary business unit and readable in MDA by that BU at ordinary depth; and anything created through an OOB form, import or flow is never corrected.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">the client writer files in the census</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (+ TypeScript mirror)</output>
+    <output type="test">tests/integration/data-mutation/RecordOwnership/ClientChildFixUpTests.cs</output>
+    <output type="docs">docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-147-client-child-writers.md</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="To Do wizard on a secure project">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_project&amp;id={secure-project-id}</url>
+      <steps>
+        <step>Sign in as an existing non-admin test user shared on the secure project.</step>
+        <step>Create a To Do through the Create To Do wizard.</step>
+        <step>Check the console for JavaScript errors.</step>
+        <step>Open the new To Do's record and confirm Owner = the named Secure owner team.</step>
+      </steps>
+      <expected>The wizard completes as before; the record is owned by the named Secure owner team; no console errors.</expected>
+    </test>
+    <test name="Notepad memo on an event under a secure project">
+      <steps>
+        <step>Open an event regarding a secure project; open Notepad; create a memo.</step>
+        <step>Confirm the memo's Owner = the named Secure owner team.</step>
+      </steps>
+      <expected>Memo saved and secure-team-owned; no console errors.</expected>
+    </test>
+    <test name="Server refusal is shown, not swallowed">
+      <steps>
+        <step>With the owner resolution forced to refuse (e.g. a secure parent that is flagged but not provisioned in a test environment), attempt a create from a wizard.</step>
+      </steps>
+      <expected>The wizard shows the server's message using the existing Fluent v9 MessageBar error pattern of that wizard; no record is left owned by the user (option A) or the job report lists it (option B).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; repeat the refusal test.</step>
+        <step>Verify the error message uses Fluent v9 semantic tokens (no hard-coded colours).</step>
+      </steps>
+      <expected>Error rendering adapts to dark mode.</expected>
+    </test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">The task note lists every client create/re-parent writer of a child table found by the census (file:line) with its decision (A or B) and reason; none is undecided.</criterion>
+    <criterion testable="true">Given a secure project, matter or work assignment, a child created through each census writer ends owned by the named Secure team and its sharees' access equals the parent's under task 149's recorded mechanism (BFF mirror asserted in the server integration test for each A route and for the B fix-up; platform cascade asserted in the manual live gate).</criterion>
+    <criterion testable="true">A child re-parented under a secure parent through RegardingResolver or Connections becomes secure-team-owned with the parent's sharee access (task 149 mechanism); one re-parented out of every secure parent returns to its new parent's BU default team and loses the mirrored shares.</criterion>
+    <criterion testable="true">NEGATIVE / AUTHORIZATION: no client code sets `ownerid` or writes a share on a child (grep of the changed packages for `ownerid@odata.bind` / share calls on child tables returns no new hit); a caller who cannot append to the parent cannot create or re-parent a child under it through any new route or fix-up call (fix-up refuses to act for a row the caller could not have written).</criterion>
+    <criterion testable="true">Every table a census writer touches is in the ONE codified set and granted live in dev (recorded via task 145's procedure).</criterion>
+    <criterion testable="true">A memo regarding an event whose project is secure is secure-team-owned; `sprk_memo` is in the CHILD taxonomy on both sides and the parity test is green.</criterion>
+    <criterion testable="true">NEGATIVE: when the server refuses (task 146 refusal), option A creates nothing and the UI shows the server's message; option B surfaces the failure and the row is corrected (and reported) by the next job run; no path leaves a secure-parent child user-owned without it appearing in the job report.</criterion>
+    <criterion testable="true">NEGATIVE: children of non-secure parents keep today's ownership behaviour; an unfiled document save still succeeds unchanged.</criterion>
+    <criterion testable="true">AUTHORIZATION: every new BFF route is delegated-auth, authorizes the caller against the PARENT record, is listed as gated in RouteAuthorizationGuardTests, and a caller without access to the parent gets the same response as for a non-existent parent.</criterion>
+    <criterion testable="true">The reconciliation job runs on a schedule with writes enabled in the deployed configuration template; its watermark pass corrects a user-owned child created under a secure parent outside the product (integration test) and reports what it changed.</criterion>
+    <criterion testable="true">MANUAL LIVE GATE (dev): the step-8 sequence is recorded — each client writer and both re-parent paths on all three secure root types (owner read-back, child shares, non-sharee denied), and an OOB MDA quick-create corrected by the job within the recorded interval; probes deleted and the deletion recorded.</criterion>
+    <criterion testable="true">BFF unit/integration/ArchTests green; each changed client package builds with `npm run build:prod` and its jest suite passes; PCF versions bumped in all four locations; publish size reported per CLAUDE.md §10 and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: per writer the secure/ordinary/refusal cases, the re-parent cases, the memo-through-event case and the job's watermark correction named above. Anything beyond needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Defect C10 half 2 (session27 note C10 research gap 2; owner round 2 item 6). Engine and job from task 148; owner rule from 146; share mirror from 149; named team from 144; privileges from 145. Sibling: field-mapping-server-write-path-r1 (W3/W4/W5; its design §9 names UAC-r2 as I-2 owner). Related: task 056 (amended) — contact coverage of memos depends on the memo taxonomy change made here.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in knowledge before starting. Coordinate with field-mapping-server-write-path-r1 before any BFF create route is written.</protocol>
+    <run date="2026-10-04" branch="task/uac-r2-147" base="2bd0175ad" outcome="escalated">
+      <summary>ESCALATED with partial delivery. Built and tested: the L4 net and the sprk_memo taxonomy change. Stopped
+        (first-class stops): routing the client writers and switching on the schedule. Escalation triggers 1/2/3 (E1, the
+        identity model of a BFF child create) and 4 (E2, the L4 interval) fired, and owner rounds 1-13 do not answer them.
+        Full record: notes/task-147-client-child-writers.md.</summary>
+      <done>
+        <item>Census: 29 call sites in 21 files (18 creates, 11 re-files), 12 writers new since the POML's list, each with
+          file:line, parents, host, BFF reachability and a proposed decision (note section 2). Every writer is proposed
+          for A; none is final until E1.</item>
+        <item>sprk_memo added to the CHILD taxonomy in C#, TypeScript and the stamp backfill script. The new guard
+          Taxonomy_MatchesTheStampBackfillScript pins the script's copy.</item>
+        <item>scripts/Backfill-CoreAncestorStamps.ps1 had never been able to run: every candidate query returned 400
+          because lookups were named by their logical name, and -Apply bound through the logical name. Both are fixed.
+          The dry run (read-only, dev): memo 0 to write; 4 stamps to write on other tables; the script's escalation gate
+          fired on communication (28.6% unresolvable).</item>
+        <item>The recent-changes pass in SecureChildReconciliationJob. It covers every lineage child table modified
+          since a per-instance watermark and not already Secure-team-owned. The records above those rows come from
+          SecureChildShareSynchronizer.SecureRootsAboveAsync (the existing upward walk) and are reconciled first with the
+          Sweep trigger. Failures and undetermined rows are reported and fail the run. The watermark moves only past a
+          completed listing in a run that wrote.</item>
+        <item>Tests: ClientChildFixUpTests (7); the CoreAncestorResolverTests memo case and script pin; the jest memo case.
+          Nine seeds, every one bites on the final code.</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c table.</item>
+        <item>field-mapping-server-write-path-r1 was messaged (state, options, questions); replies go to the main
+          session.</item>
+      </done>
+      <stopped>
+        <item>E1 (triggers 1, 2 and 3): who creates a client-initiated child through the BFF. A1 is app-only G5 plus
+          sprk_createdbyperson (field-mapping-r1 Q2); createdby becomes the app, and it needs a column policy past FLS.
+          A2 is an impersonated create with the owner set; Core User holds Assign at Deep, but the Secure Record BU is a
+          sibling in production, so it is likely refused (probe G147-1). A3 is an impersonated create plus an inline app
+          Assign, read back, then mirror; delete on failure; a one-request window. Recommended: A3, adopted INTO
+          field-mapping-r1's pipeline, so there is one create endpoint per table. No writer was switched.</item>
+        <item>E2 (trigger 4): the L4 interval for writes outside the product. It is the ownership exposure, not the
+          2-minute share window round 11 item 2 accepted. Recommended: 2 minutes with writes on, plus hardening (c):
+          remove model-driven Create on child tables under secure parents. The job stays disabled and report-only, and
+          the exact diff is in note section 5.</item>
+      </stopped>
+      <justification-new-surface>
+        <item name="SecureChildShareSynchronizer.SecureRootsAboveAsync + Run.LineageOfReadRowAsync + SecureRootsAbove record">
+          <existing>the synchronizer's private LineageOfAsync (the one upward walk, with the resolver's follow rule).
+            Grep SecureRootsAbove: no hits before this task.</existing>
+          <extension>Yes: it exposes the existing walk for rows of any owner. A copy in the job or the reconciler would be
+            a second follow rule.</extension>
+          <cost-of-doing-nothing>a child written outside the product reaches isolation only when the capped sweep window
+            reaches its record, which takes at least ceil(secure records / 50) runs.</cost-of-doing-nothing>
+        </item>
+        <item name="recent-changes pass in SecureChildReconciliationJob (method, watermark field, two constants, additive ResultJson.recentChanges)">
+          <existing>task 148's sweep (capped, ordered); task 149's share job (Secure-owned rows only).</existing>
+          <extension>Yes: it extends the ONE job for this invariant. The POML forbids a second job class. Constants, not
+            options: the lookback and overlap are correctness margins.</extension>
+          <cost-of-doing-nothing>the same delay, and a failed window would be lost silently.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (ADR-052 "BFF, schedule"; ADR-036 IScheduledJob). No new service, DI registration, endpoint,
+          option, job, column, package or plugin. No AI code (ADR-013 not applicable).</placement>
+      </justification-new-surface>
+      <tests>Affected suites green: the ClientChildFixUpTests, SecureChildTransitionTests, SecureChildShare* and
+        CoreAncestorResolverTests classes, 157 tests in the last affected run. Jest PolymorphicResolverService: 56/56. UI
+        components full jest: 3424 passed, 14 failed. The same 8 suites (13 tests) fail on the baseline taxonomy, so the
+        failures are pre-existing and unrelated. UI components tsc build is green, once the sibling packages
+        @spaarke/auth and @spaarke/sdap-client are built locally. Final full suites (run once): BFF unit 14,845 (14,791 passed + 54
+        skipped, 0 failed); ArchTests 373/373; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 428 (403
+        passed + 25 skipped, 0 failed). CVE scan finds none; dotnet format whitespace is clean.</tests>
+      <live>READ-ONLY only (GETs): sprk_memo metadata, role privileges per business unit, the stamp backfill dry run.
+        Pending manual gates G147-1 to G147-4 are in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1" base="1a39f7bdd" outcome="interrupted">
+      <summary>INTERRUPTED by a machine restart before its final checks; the work was saved on wip/uac-r2-147-r1-restart and
+        finished by the r1c run below (which found and fixed a seed left in place and three defects in it). As recorded at the
+        stop: owner round 28 implemented in full (E1 = A1, E2 = BFF-backed commands under a secure parent + the L4 recent pass
+        every 2 minutes with writes on); verifier items 1-23 closed or recorded as manual live gates. Rebased onto the batch-4
+        integration base (merges 70db1efb1 and e96112845). Full record: notes/task-147-client-child-writers.md (r1).</summary>
+      <done>
+        <item>Items 1-2: sprk_memo is an intermediate (IntermediateRootColumns), a stamp source with parties, and known to
+          RecordContainerResolver (KindByEntity, ByEntity links, sprk_timekeeper party) on the integration base.</item>
+        <item>E1 = A1: POST /api/v1/child-records/{table} (G5: as-caller Create + AppendTo + no server-owned or FLS column;
+          app-only create owned by the resolver's team; sprk_createdbyperson = caller; sharees mirrored inline) and the ONE
+          re-file core OwnedChildWrite.RefileAsync behind PATCH /api/v1/child-records/{table}/{id},
+          PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing; Compose re-files through
+          PUT /api/v1/documents/{id}. Uniform 404; ProblemDetails reason codes.</item>
+        <item>Every census client writer switched (wizards via withBffChildWrites, Daily Briefing, Smart To Do widget,
+          SmartTodo page, LegalWorkspace, Notepad, event side pane, document upload, EntityCreationService, Compose, Create
+          Matter invoice re-file, RegardingResolver PCF 1.6.0, CommunicationConnections PCF 1.7.0 and the communication
+          surfaces); unwired hosts refused (fail closed); refusals show the server message; client ownerid binds removed.</item>
+        <item>Task 152 + reminder: "Created By" readers use sprk_createdbyperson, else createdby (people-targeting, grant
+          expiry reminder, Notepad, document tabs).</item>
+        <item>E2: platform subgrid "+ New" under a secure root replaced by BFF-backed "New &lt;thing&gt;" commands
+          (sprk_secure_child_ribbon.js, SecureChildRibbons template + merge script, Deploy-SecureChildNewCommands.ps1 dry run /
+          -Apply / -Verify; read-only live inventory and RetrieveEntityRibbon drift check run against dev); sprk_budget added
+          to the create route and the stamped child tables; MDA Create privilege kept.</item>
+        <item>L4: SecureChildReconciliationJob every 2 minutes, enabled; recent pass writes unless
+          RecentChangesWritesEnabled=false; unfinished records and unplaced rows carried and retried every run; a
+          non-Completed synchronizer answer fails the run (items 4-5).</item>
+        <item>Docs (item 6): DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3, I-2 and I-6; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c. Note corrections (items 7-8), backfill owner (item 9), 169 hand-off (item 10).</item>
+      </done>
+      <justification-new-surface>
+        <item name="POST/PATCH /api/v1/child-records/{table} (ChildRecordEndpoints)">
+          <existing>OwnedChildWrite (chat tools), PUT /api/v1/documents/{id}; /api/dataverse is read-only; no browser create
+            route existed.</existing>
+          <extension>A thin HTTP face over the existing core; event and communication re-files were added to their own
+            families instead of here.</extension>
+          <cost-of-doing-nothing>every browser child under a secure record stays user-owned, readable by the creator's
+            business unit, until a reconcile run.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing and PATCH /api/communications/{id}/filing">
+          <existing>the families' typed update routes (no lookup payload).</existing>
+          <extension>Added to the families per round 28; both call the shared ChildRecordEndpoints.UpdateAsync.</extension>
+          <cost-of-doing-nothing>a re-filed event or communication keeps its previous owner.</cost-of-doing-nothing>
+        </item>
+        <item name="OwnedChildWrite.RefileAsync, SecureChildShareSynchronizer.SyncChildAsync and IsSecureOwnerTeamAsync, DataverseWriteItemMapper.MapWebApiPayloadAsync">
+          <existing>the AI update handler's inline re-file; SyncRootAsync; the AI item mapper.</existing>
+          <extension>Extracted or extended; the handler calls the shared core.</extension>
+          <cost-of-doing-nothing>two copies of the re-file rule and no inline mirror for one child.</cost-of-doing-nothing>
+        </item>
+        <item name="config SecureChild:Reconciliation:RecentChangesWritesEnabled">
+          <existing>SecureChild:Reconciliation:WritesEnabled (the sweep).</existing>
+          <extension>A separate switch: round 28 turns the recent pass on while the backfill sweep stays report-only.</extension>
+          <cost-of-doing-nothing>either the sweep writes unreviewed or the net stays off.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_budget in CreateTables, StampedChildTables and the schema script">
+          <existing>the codified role set already holds sprk_budget (G146-1).</existing>
+          <extension>One table added to existing lists.</extension>
+          <cost-of-doing-nothing>the ribbon's New Budget would have no BFF create.</cost-of-doing-nothing>
+        </item>
+        <item name="client bffChildWriteAdapter.ts, BffChildRecordDataverseClient.ts and per-host auth bootstrap files">
+          <existing>bffDataServiceAdapter.ts, with no child create route behind it.</existing>
+          <extension>One seam of decorators over IDataService / IDataverseClient; host files only bootstrap auth.</extension>
+          <cost-of-doing-nothing>each writer hand-rolls fetch and error parsing.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_secure_child_ribbon.js, SecureChildRibbons, Deploy-SecureChildNewCommands.ps1, SecureChildNewCommandAgreementTests">
+          <existing>AccessRibbons (tasks 142/150) pattern; no guard spans ribbon script, template and scripts.</existing>
+          <extension>Same pattern (one template, one merge script, one deploy script); placed on CHILD subgrids, not in the
+            root forms' Access flyout.</extension>
+          <cost-of-doing-nothing>the platform "+ New" under a secure record creates user-owned children.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF for the routes (app-identity Dataverse write after an as-caller check; low volume; no package, no
+          background work, no AI capability). No new DI registration or interface (static endpoint class over existing
+          services). Publish size: skipped per the brief.</placement>
+      </justification-new-surface>
+      <tests>Not run to completion: the restart stopped this run before its final suites. See the r1c run.</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, quick-create flags, RetrieveEntityRibbon, the deploy script's dry
+        run. Pending manual gates G147-2 to G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-1 withdrawn.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1c" base="0ab6411e1" outcome="completed">
+      <summary>Finished the round the restart stopped (from wip/uac-r2-147-r1-restart), implemented owner/main-session round 28
+        in full, round 34 item 6 and round 36, and closed verifier items 1-25. Merged integ/uac-r2-batch4 (tasks 159-164) per the
+        main session's binding note: 159's deletion of PUT /api/v1/events/{id} stands; the event's ONE re-file route is
+        PATCH /api/v1/events/{id}/filing in 159's family, filing only, with the child pass. Full record:
+        notes/task-147-client-child-writers.md (r1c).</summary>
+      <done>
+        <item>Item 1: the WIP read file by file; a seed left in place (UpdateAsync's server-owned-column refusal) restored;
+          the filing routes' DI parameters made [FromServices] (11 host tests were red); the CreateTodoWizard broadcast kept
+          in the call path; the RegardingResolver new-host rule tightened; the E2 inventory widened to every main form.</item>
+        <item>Round 28 E1: ten create tables on POST /api/v1/child-records/{table} (+ sprk_kpiassessment, sprk_billingevent);
+          every census writer switched; refusals show the ProblemDetails message; PCFs RegardingResolver 1.6.0 and
+          CommunicationConnections 1.7.0 in all four places, npm run build:prod, bundles copied; task 152 "Created By" via
+          RecordCreatorPerson. E2: secure-record ribbon commands on every ownership-child subgrid (28, live inventory), the
+          "+ Add KPI" guard, dry run / -Apply / -Verify script; the L4 job every 2 minutes with writes on, carry-forward and
+          the r1c catch-up after every start.</item>
+        <item>Round 34 item 6: CreateEventWizard binds sprk_RelatedEvent; the BFF create refuses sprk_Event@odata.bind (400).</item>
+        <item>Round 36: PATCH /api/v1/events/{id}/filing (shape filter, then 159's RecordRouteAccessAuthorizationFilter
+          "write", then the ONE re-file core: AppendTo, 146's F3, owner assigned; 156's re-stamp); communications: the same
+          rule in 161's family (CommunicationRecordRoute.Refile). SecureChildReconciler.AfterRefileAsync is the ONE
+          after-re-file step of every re-file writer: the row's mirror, then 148's pass over everything filed under it when
+          it moved under, out of or between secure records (a release only when the row itself left isolation). Clients
+          send only the filing to those routes (the seam splits a mixed update, filing first; the side pane; Connections).</item>
+        <item>Verifier items 3-25: memo taxonomy and container links on the integration base; the 409; AC1/R1 new host; L4
+          retries; seed survival; docs; note; E1 framing; backfill owner (G147-3, analysis); merge hazard; ACs; publish size
+          and CVE measured (tests element).</item>
+      </done>
+      <justification-new-surface>
+        <item name="SecureChildReconciler.AfterRefileAsync, ReconcileBelowAsync, MirrorIsolatedDescendantsAsync, IsSecureTeamOwnedAsync / IsSecureOwnerTeamAsync pass-throughs">
+          <existing>SecureChildReconciler's Pass (task 148) walks a ROOT's descendants; SecureChildShareSynchronizer.AfterRefileAsync
+            (r1c) mirrors ONE row; grep "child pass" after a re-file: none.</existing>
+          <extension>Yes: the existing Pass anchored on the re-filed child row (one flag skips the root-only cascade step), per
+            row SyncChildAsync for the mirror; the reconciler already composes the synchronizer, so the after-re-file step moved
+            up one level rather than adding a second walker.</extension>
+          <cost-of-doing-nothing>a re-filed event's to-dos stay readable by the business unit under the secure record it moved
+            into until the sweep, and stay isolated for good under the ordinary record it moved out to.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing filing-only (ValidateFilingRequestAsync, RefileEventAsync) + ChildRecordEndpoints.IsFilingColumn / FilingShapeProblem / NotFilingCode">
+          <existing>159 deleted PUT /api/v1/events/{id}; 159's RecordRouteAccessAuthorizationFilter and its shape-filter pattern.</existing>
+          <extension>One route added to 159's family (round 36: "add the route there if the family lacks it; never a second
+            one"); the general PUT is not restored.</extension>
+          <cost-of-doing-nothing>an event has no browser re-file at all, or a general update comes back ungated.</cost-of-doing-nothing>
+        </item>
+        <item name="CommunicationRecordRoute.Refile (+ RefileDenyCode)">
+          <existing>161's MessageDeactivate write check.</existing>
+          <extension>One enum value reusing the message-write check; its own deny code.</extension>
+          <cost-of-doing-nothing>the communication filing route is gated only inside the handler, outside 161's family contract.</cost-of-doing-nothing>
+        </item>
+        <item name="SecureChildShareSynchronizer.AfterRefileAsync + IsSecureTeamOwnedAsync (r1c)">
+          <existing>SyncChildAsync, RemoveMirrorAsync (148).</existing>
+          <extension>Composes the two existing steps; replaces the route-local copy.</extension>
+          <cost-of-doing-nothing>a move out by the documents route or the chat tool left the old record's sharees on the row for good.</cost-of-doing-nothing>
+        </item>
+        <item name="catch-up in SecureChildReconciliationJob (two fields, one enum value)">
+          <existing>the recent pass and the sweep cursor.</existing>
+          <extension>The same reconcile over the same root list, once per instance.</extension>
+          <cost-of-doing-nothing>a restart drops every carried record and row; a refused re-own older than the lookback is never retried.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_kpiassessment, sprk_billingevent in CreateTables / StampedChildTables / the schema script; ribbon guard for + Add KPI">
+          <existing>the codified role set holds both (G146-1); the r1 ribbon set.</existing>
+          <extension>Entries in existing lists; the same ribbon pattern.</extension>
+          <cost-of-doing-nothing>the live inventory's KPI and billing-event subgrids create user-owned children under a secure record.</cost-of-doing-nothing>
+        </item>
+        <item name="client isFilingKey / splitFilingPayload / FILING_ONLY_REFILE_TABLES; OWNERSHIP_CHILD_TABLES; Connections regardingNavPropFor">
+          <existing>withBffChildWrites (r1).</existing>
+          <extension>Exports on the one seam.</extension>
+          <cost-of-doing-nothing>an event or communication update with any other field is refused 400 by the filing route; a host
+            control re-files an ownership child as the user.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (CLAUDE.md §10; bff-extensions.md): the invariant owner's write path, app-identity writes after
+          as-caller checks, request-scoped; no new DI registration, interface, package, job or column; no AI capability
+          consumed (the chat handler calling the reconciler is AI to CRUD, the permitted direction). Publish size and CVE in
+          the tests element.</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on the merged branch: BFF unit 16,461 (16,406 passed, 54 skipped, 1 failed: a 146 test whose
+        "table without the creator column" example, sprk_memo, gained the column in 147 r1; the case now uses sprk_agreement and its
+        class re-ran 101/101); NetArchTest 608/608; Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed,
+        25 skipped, 0 failed). Affected BFF classes during the round 539/539. Client: ui-components 3,559 (21 failed under load:
+        13 pre-existing in 8 suites, identical on the integration base, #1290; 8 contention, re-run alone 114/114); communication
+        components touched suites 75/75; RegardingResolver 122/122 and CommunicationConnections 43/43, both npm run build:prod and
+        bundles copied; EventDetailSidePane vite build and ui-components tsc green. Seeds: 34 r1c seeds plus 15 round-36 server
+        seeds, 5 round-36 client seeds and P3, every one bites (note section 7). Publish size (fresh short-path worktrees,
+        Compress-Archive Optimal, PDBs included): master c2ef1857b 45.66 MB / 212 files; integration tip 63556192c 35.52 MB
+        (37,243,155 B) / 190 files; branch e19a5f4ab 35.55 MB (37,279,975 B) / 190 files: +0.04 MB against the base it merges into
+        (the -10.11 MB against master is task 162's QuestPDF removal). CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, KPI and billing-event metadata, RegardingResolver hosts, the two
+        unresolvable communications of the stamp dry run, the ribbon deploy script's dry run. Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-05" branch="task/uac-r2-147-r1c-v1" base="149fffd9d" outcome="completed">
+      <summary>Closed the r1c verification's items 1-15 (note section 0). The HIGH defect: every browser re-file that cleared a
+        lookup was refused live, because the one mapper wrote a clear as the lookup's LOGICAL name, which the Web API does not
+        declare; it now writes the metadata navigation property's null bind, and the record-ownership fake refuses the broken
+        shape the way Dataverse does. Owner and main-session rounds 1-43 applied; no new decision needed.</summary>
+      <done>
+        <item>Item 1: DataverseWriteItemMapper.MapCoreAsync (behind MapAsync and MapWebApiPayloadAsync) writes a null on a
+          lookup column as {Nav}@odata.bind: null (ClearedColumns keyed by logical name; a polymorphic lookup through its first
+          navigation property by ordinal name - on the eleven browser tables the only polymorphic lookup is ownerid, refused,
+          live GET 2026-10-05); one value per column (400); relationships read once. Covers the RegardingResolver pre-clear and
+          clear, Connections unlink and clear-primary, the side pane's clears, the chat update tool's clears and a create
+          carrying a clear. The fake refuses a body naming an undeclared property on PATCH, POST and the app-only create.
+          Tests pin the body (set + clear, clear-only move out, unlink, chat clear, polymorphic clear, create, named twice x4).</item>
+        <item>Item 2: a row the caller may not read (Dataverse 403) answers exactly as a missing row on the child-records
+          PATCH, the event filing handler and the communication filing core (fake UnreadableRows).</item>
+        <item>Items 3-4: the watermark holding while carried rows overflow is pinned end to end (the row past the 1,000 cap is
+          still corrected); a carried record no longer flagged secure is dropped, no longer listed as retried, and named in the
+          new additive recentChanges.droppedRoots.</item>
+        <item>Item 5: Deploy-SecureChildNewCommands.ps1 -Apply runs pac solution import --environment $EnvironmentUrl; ArchTests
+          guard on every environment-reaching pac call of the script.</item>
+        <item>Item 6: EventDetailSidePane saveEvent writes the filing through the BFF first (a refused re-file writes nothing),
+          then the other fields; the split is the seam's splitFilingPayload. Jest harness added to the package (6 tests).</item>
+        <item>Item 13: ui-components full jest on this branch = 13 failed in the 8 #1290 suites only, none in a 147 file; with PR
+          #1293's fix applied 3,558/3,559 (the integ-only stale todoScoreMappings pin), with master's #1118 todoScoring.ts too
+          3,559/3,559 - green when the integration branch takes master + #1293; not duplicated here (#1293 owns those files).</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 re-file bullet and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c job row. Note: section 0, seeds table, G147-4 clear read-backs, section 10 rows.</item>
+      </done>
+      <justification-new-surface>
+        <item name="ResultJson.recentChanges.droppedRoots (SecureChildReconciliationJob)">
+          <existing>retriedRoots / carriedRoots in the same report.</existing>
+          <extension>One additive field in the existing report; no new job, option or service.</extension>
+          <cost-of-doing-nothing>a carried record unsecured between runs leaves the carried set with no trace, and was listed as
+            retried although it was not looked at again.</cost-of-doing-nothing>
+        </item>
+        <item name="EventDetailSidePane jest harness (jest.config.cjs; devDependencies jest, ts-jest, @types/jest)">
+          <existing>the same harness in DocumentUploadWizard, Notepad and SmartTodo; the ui-components seam suite (covers the seam,
+            not the pane's own saveEvent).</existing>
+          <extension>The existing pattern in one more package; dev-only, nothing reaches the bundle (package-lock: 286 dev
+            packages added, no production version changed).</extension>
+          <cost-of-doing-nothing>the pane's write order stays unpinned - the partial-save defect of verifier item 6 was invisible
+            to every test.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF changes are inside existing members (the mapper, the job); no new service, DI registration, endpoint,
+          option, job, column, PCF or runtime package; no plugin (ADR-002); fail closed unchanged (ADR-003).</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on e7f405e1f: BFF unit 16,476 (16,422 passed, 54 skipped, 0 failed); NetArchTest 609/609;
+        Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed, 25 skipped, 0 failed). Affected BFF classes
+        354/354. EventDetailSidePane jest 6/6, tsc and vite build green. ui-components full jest: 13 failed in the 8 #1290
+        suites only (none a 147 file); 3,558/3,559 with PR #1293's fix applied, 3,559/3,559 with master's #1118 todoScoring.ts
+        as well. Seeds (note section 7): S1 7, S4 4, S5 1, V3 3, V5 1, V9 1, A8 1, C6-1 1/6, C6-2 3/6 - every one bites; S3
+        survived, so the duplicate check it mutated was deleted. Publish size (fresh short-path worktrees, Compress-Archive
+        Optimal, PDBs included): base 149fffd9d 35.55 MB (37,280,009 B) / 190 files; branch e7f405e1f 35.55 MB (37,281,073 B)
+        / 190 files; delta +1,064 B. CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (one GET of the lookup attribute metadata of the eleven browser tables). Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-4 now names the clear / unlink / chat-clear read-backs.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+  </execution>
+</task>

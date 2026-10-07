@@ -3,7 +3,7 @@
   <metadata>
     <title>SECURITY - remove the spoofable X-Tenant-Id fallback from tenant resolution, or bound it to a trusted caller</title>
     <phase>6 Track B - Durable Session Files</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Tenant resolution IS the authorization boundary. A change here can silently widen or break every tenant-scoped read and write in the BFF.</rigor-reason>
     <model-tier>opus</model-tier>

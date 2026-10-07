@@ -94,8 +94,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var validRequest = new RevokeAccessRequest(
             AccessRecordId: Guid.NewGuid(),
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, validRequest);
@@ -131,8 +130,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var validRequest = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, validRequest);
@@ -351,8 +349,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.Empty,
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
@@ -395,12 +392,20 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         await AssertIsProblemDetailsAsync(response, "invite with empty Email");
     }
 
+    /// <summary>
+    /// Task 138 (unified-access-control-r2): <c>/invite</c> reads the named record's access policy BEFORE it
+    /// touches a Contact or a CIAM account, and an unreadable policy fails CLOSED with 503 and its own reason code.
+    /// This fixture's Dataverse cannot be reached, so the policy read fails — the outcome pinned here.
+    /// </summary>
+    /// <remarks>
+    /// Replaces <c>InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails</c>. Its premise had gone:
+    /// <c>PowerPages:SecureProjectParticipantWebRoleId</c> is read nowhere in <c>src/</c>, and the 500 it saw came
+    /// from the first Dataverse call failing inside onboarding. Asserting "400 or 500" accepted any fault; this
+    /// asserts the specific fail-closed answer the endpoint documents.
+    /// </remarks>
     [Fact]
-    public async Task InviteExternalUser_MissingWebRoleConfig_Returns500WithProblemDetails()
+    public async Task InviteExternalUser_RecordPolicyUnreadable_Returns503WithReasonCode_BeforeOnboarding()
     {
-        // Arrange — the InviteEndpoint requires PowerPages:SecureProjectParticipantWebRoleId to be configured.
-        // The test fixture does NOT set this configuration key, so the handler returns 500
-        // with a "Configuration Error" detail before creating any Dataverse records.
         var request = new InviteExternalUserRequest(
             Email: "external.user@example.com",
             ProjectId: Guid.NewGuid(),
@@ -412,17 +417,18 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
+        var body = await response.Content.ReadAsStringAsync();
 
-        // Assert — the fixture has no PowerPages:SecureProjectParticipantWebRoleId configured
-        // so the handler returns 500 before calling Dataverse.
-        // (If the handler somehow passes this guard and fails on Dataverse, the test still passes
-        //  because both 400 and 500 prove the endpoint ran.)
-        ((int)response.StatusCode).Should().BeOneOf(
-            new[] { StatusCodes.Status400BadRequest, StatusCodes.Status500InternalServerError },
-            "invite without web role configuration must return 500 (configuration error) " +
-            "or 400 (if validation fires first)");
+        // Assert
+        ((int)response.StatusCode).Should().Be(StatusCodes.Status503ServiceUnavailable,
+            "an unreadable record policy must refuse the invite (fail closed), not onboard; body: " + body);
 
-        await AssertIsProblemDetailsAsync(response, "invite without web role config");
+        var problem = JsonDocument.Parse(body).RootElement;
+        problem.TryGetProperty("reasonCode", out var reasonProp).Should().BeTrue(
+            "the refusal must say WHY, so a client can tell 'try again' from a refusal; body: " + body);
+        reasonProp.GetString().Should().Be(ExternalGrantLifecycle.PolicyUnreadableReasonCode);
+
+        await AssertIsProblemDetailsAsync(response, "invite whose record policy cannot be read");
     }
 
     #endregion
@@ -451,8 +457,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Arrange
         var request = new CloseProjectRequest(
-            ProjectId: Guid.Empty,
-            ContainerId: null);
+            ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -471,8 +476,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // Arrange — valid request; validation guard passes.
         // The handler will attempt to query Dataverse (which fails in tests), yielding 500.
         var request = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -517,8 +521,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.Empty,
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null);
+            ProjectId: Guid.NewGuid());
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
@@ -533,7 +536,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     public async Task CloseProject_ValidationError_ReturnsProblemJsonContentType()
     {
         // Arrange — empty ProjectId triggers 400
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
+        var request = new CloseProjectRequest(ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -581,7 +584,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     public async Task CloseProject_ValidationError_ProblemDetailsHasStatusAndDetail()
     {
         // Arrange
-        var request = new CloseProjectRequest(ProjectId: Guid.Empty, ContainerId: null);
+        var request = new CloseProjectRequest(ProjectId: Guid.Empty);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
@@ -846,7 +849,8 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     {
         // Documents the expected revoke flow:
         //   Plane 1: Dataverse — deactivate sprk_externalrecordaccess (statecode=1, statuscode=2)
-        //   Plane 2: SPE — remove Contact from container permissions (if ContainerId provided)
+        //   Plane 2: SPE — remove Contact from the grant root's OWN container (secure roots only; derived from the
+        //            root since uac-r2 task 166 — the request carries no container)
         //   Plane 3: Redis — invalidate sdap:external:access:{contactId} cache
         //
         // Additionally checks remaining participations and conditionally removes web role.
@@ -854,8 +858,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.NewGuid(),
             ContactId: Guid.NewGuid(),
-            ProjectId: Guid.NewGuid(),
-            ContainerId: null); // Skip SPE plane — no ContainerId
+            ProjectId: Guid.NewGuid());
 
         var response = await _authenticatedClient.PostAsJsonAsync(RevokeEndpoint, request);
 
@@ -870,12 +873,11 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // Documents the expected close-project flow:
         //   Step 1: Query all active sprk_externalrecordaccess for the project
         //   Step 2: Deactivate each record (statecode=1, statuscode=2)
-        //   Step 3: Remove all external SPE members (if ContainerId provided)
+        //   Step 3: Remove exactly the revoked grantees from a SECURE project's own container (derived from the
+        //           project since uac-r2 task 166 — the request carries no container)
         //   Step 4: Invalidate Redis cache for all affected Contacts
 
-        var request = new CloseProjectRequest(
-            ProjectId: Guid.NewGuid(),
-            ContainerId: "container-close-test-abc123");
+        var request = new CloseProjectRequest(ProjectId: Guid.NewGuid());
 
         var response = await _authenticatedClient.PostAsJsonAsync(CloseProjectEndpoint, request);
 

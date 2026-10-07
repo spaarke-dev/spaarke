@@ -1,0 +1,875 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="157" project="unified-access-control-r2">
+  <metadata>
+    <title>External SPA grids stop offering the internal MDA views (showViewSelector=false), and each external module's column allow-list shrinks to what its grid actually shows (owner round 4 item 7, task 134 open item D1)</title>
+    <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
+    <gate>startable now (134 merged)</gate>
+    <status>completed-with-escalation</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Narrows the columns an external (CIAM/contact) caller may read through /fetch and /record. That is an authorization surface (defect C6), plus a client change to the external SPA.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The change touches an authorization allow-list on the external data plane. If a list is shrunk wrongly, it either leaks or blanks a grid.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>It edits ExternalAccessModule.cs descriptor allow-lists (task 134's surface) and the external SPA grid mounts.</parallel-reason>
+    <deps>134</deps>
+    <tags>bff-api, security, external-spa, react</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Task 134 open item D1 (notes/task-134-*.md). Owner round 4 item 7 (2026-10-01): "yes".</origin>
+  </metadata>
+
+  <prompt>Turn off the view picker on every external SPA grid, then shrink each external module's server column allow-list. The new list is the columns that grid's own configuration shows, plus the scope columns and the /record default projection, and nothing more.</prompt>
+
+  <role>SPAARKE platform developer: the external data plane (ExternalModuleDataEndpoints and ExternalAccessModule descriptors) and the external SPA (React, DataGrid framework).</role>
+
+  <goal>Every `&lt;DataGrid&gt;` mounted in `src/client/external-spa` passes `showViewSelector={false}`. External callers can therefore no longer switch a grid to an internal MDA saved view. Each external module descriptor's column allow-list then drops the columns admitted only by derivation rule (b) of task 134, the sibling saved views the ViewSelector offered. It keeps (a) every attribute the module's `sprk_gridconfiguration` references, (c) the scope-dimension attributes, and (d) the /record default projection. The derivation is re-done from LIVE data (read-only) and recorded.</goal>
+
+  <context>
+    <background>Task 134 (defect C6) gave every external module a column allow-list. At the time the external grids still offered a ViewSelector over the entity's internal MDA main views, so rule (b) had to admit the columns of every sibling view that could render rows. That widened each list beyond what the grid's own configuration shows. The owner approved removing the selector (round 4 item 7), so rule (b) no longer applies and the lists can shrink.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">src/client/external-spa/src/widgets/GridWidgetBody.tsx</file>
+      <file role="modify">src/client/external-spa/src/pages/OutsideCounselDashboard.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/ContactsOrganizations.tsx</file>
+      <file role="modify">src/client/external-spa/src/components/DocumentLibrary.tsx</file>
+      <file role="read">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file role="read">tests/integration/auth/UnifiedAccessControl/ExternalModuleColumnAllowListTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Derive each new list from LIVE data, read-only (the module's sprk_gridconfiguration record, the scope dimensions and EntityDefinitions for the primary id and primary name). Never write a list from memory. Record the derivation per module in the task note.</constraint>
+    <constraint source="project">Shrink ONLY. A column absent from the old list must not appear in the new one. A column the grid configuration references must not be dropped, or the grid blanks.</constraint>
+    <constraint source="project">Every external DataGrid mount in src/client/external-spa gets showViewSelector={false}. The shared DataGrid's default (true) does not change, because internal surfaces still use the selector.</constraint>
+    <constraint source="project">Deployment order is recorded in the note: the external SPA (no selector) deploys BEFORE or WITH the BFF that shrinks the lists. A BFF-first deploy would make a still-offered view error.</constraint>
+    <constraint source="project">The external SPA build is npm run build:prod (or the package's documented prod build). Use npm install --legacy-peer-deps --no-audit --no-fund, never npm ci.</constraint>
+    <constraint source="project">ADR-038 test bans. Prove the shrink bites by seeding a dropped column back.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Grep every DataGrid mount under src/client/external-spa and set showViewSelector={false}; build the SPA.</step>
+    <step order="2">For each external module descriptor, re-derive (a)+(c)+(d) live, read-only; compute the drop set (old list minus new); record both in notes/task-157-external-grid-columns.md.</step>
+    <step order="3">Apply the shrunk lists; update ExternalModuleColumnAllowListTests so each module's list equals its recorded derivation, and add a test that a column admitted only by rule (b) is now refused by /fetch and stripped by /record.</step>
+    <step order="4">Run affected tests, the full BFF unit suite and NetArchTest; record the deployment order.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true" amended="fix round c1, 2026-10-03">Every shared Spaarke DataGrid that renders inside the external SPA shows no view selector and never requests the entity's saved-query list, BY CONSTRUCTION AT RUNTIME: the shared DataGrid reads DataGridExternalHost (the provider the SPA's root component mounts above every route, or the constant the SPA's Vite build defines) and then ignores showViewSelector, externalViews and any picked view, whatever props, wrappers, clones, spreads or imports reach it. Asserted by the jest suite DataGrid.externalHost.test.tsx (showViewSelector={true} passed directly, under each switch) and by ExternalSpaGridViewSelectorGuardTests (the provider mount, the define, and the rule's text pinned in the shared library). Every other host is unchanged: both switches default off and the shared DataGrid default stays true. The SPA prod build succeeds.</criterion>
+    <criterion-amendment for="1" date="2026-10-03" round="fix round c1">The original criterion asked that every DataGrid MOUNT under src/client/external-spa pass showViewSelector={false}, asserted by a source scan. Seven verifier rounds each compiled a new shape into a live picker-on mount that the scan let through (V7: a carrier file with no extension or an unscanned one). A source scan cannot prove what every JavaScript expression does, so the criterion now asks for the owner's goal itself (round 4 item 7: every external SPA grid has no view selector) and meets it by construction: the rule lives inside the shared grid, so it no longer depends on how the grid is reached. The scan stays as defence in depth, plus one robust assertion (the root mounts the provider) and the build define.</criterion-amendment>
+    <criterion testable="true">Each external module's allow-list equals its recorded live derivation (a)+(c)+(d); no column was added.</criterion>
+    <criterion testable="true">Negative: a column that was admitted only by rule (b) is refused by /fetch and stripped from /record for that module.</criterion>
+    <criterion testable="true">Every column the module's grid configuration references is still admitted (no grid blanks).</criterion>
+    <criterion testable="true">The shrink is proven to bite by seeding a dropped column back; BFF unit + NetArchTest green.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (dev, after deploying SPA then BFF): an outside-counsel contact opens each external grid; no view selector shows; each grid renders its configured columns.</criterion>
+    <criterion testable="true" added="fix round c1, 2026-10-03, finding F1">F1 closed (owner decisions C6/C9: a contact gets only what it is granted): (a) with the selector off, and always on the external host, the shared DataGrid does not call retrieveSavedQueriesForEntity; (b) GET /api/v1/external/api/dataverse/savedqueries/{entity} and savedquery/{id} return only the views an external module grid is registered to use (ExternalModuleDescriptor.SavedQueryIds, derived live from the same grid configurations as the column allow-lists), and 404 for any other view. Negative tests on both routes (an internal view id of a registered entity, and another entity) are each proven to bite by a seed.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A grid's live configuration references a column that is an SPE pointer or FLS-secured (task 134's refused classes) — STOP and report; do not admit it.</trigger>
+  </escalation>
+
+  <notes>Owner round 4 item 7 (2026-10-01). Closes task 134's open item D1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; code-review and adr-check at Step 9.5.</protocol>
+    <outcome date="2026-10-02" branch="task/uac-r2-157">
+      Code complete. The live deploy and the MANUAL live gate are PENDING; no live write was made.
+      Client: the one Spaarke DataGrid mount (GridWidgetBody.tsx) passes showViewSelector={false}. The shared default
+      is unchanged. Premise correction: OutsideCounselDashboard, ContactsOrganizations and DocumentLibrary mount
+      Fluent's DataGrid, which has no view picker, so they are untouched. The SPA has no build:prod; npm run build
+      (vite build) succeeds.
+      Server: lists re-derived READ-ONLY from live dev on 2026-10-01 from the six grid configjson records,
+      EntityDefinitions and IsSecured. The escalation trigger did not fire: there are no pointer columns and no
+      FLS-secured columns. 16 rule-(b)-only columns were dropped across project, invoice, work assignment and
+      matter. Documents, service requests and grid configuration are unchanged. No column was added.
+      Tests: ExternalModuleColumnAllowListTests section 6 has an equality pin per module, a shrink-only check
+      against the task-134 lists, and fetch-400 / record-$select-400 / record-strip for each dropped column. A new
+      arch guard, ExternalSpaGridViewSelectorGuardTests, has controls.
+      Perturbations P1-P3 each turned tests red (1 / 4 / 7) and were reverted.
+      No new service, DI registration, endpoint, option, job or package; the change is data in the existing
+      registrations, so the section 11 justification is n/a.
+      Deploy order: SPA first, or together with the BFF. Full record:
+      notes/task-157-external-grid-columns.md.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-r1" round="review-1">
+      Status corrected from "completed" to "completed-with-escalation". Code is complete and tested. Two items stay
+      open: the MANUAL live gate (criterion 6, pending by design, deploy order in note section 5), and an owner
+      decision on finding F1.
+      Item 8/15 (guard failed open, criterion 1): ExternalSpaGridViewSelectorGuardTests was rewritten to fail closed.
+      Every import of DataGrid or DataGridDefault from the shared lib is now a mount source. That covers named,
+      aliased, "default as", default and mixed default+named imports, from the package alias or from a path into
+      Spaarke.UI.Components. Each mount must end with showViewSelector={false} as its last top-level attribute, with
+      no spread after it. Any non-JSX reference to the grid binding is refused (createElement, aliasing,
+      export { X }, export default X, HOCs). Also refused: DataGridPageShell(Default), namespace imports,
+      re-exports that could carry the grid, dynamic import()/require() of the shared lib, and unparseable import
+      clauses. Each of the verifier's shapes A-H, plus D2/D3/E2/F2-F4/G2/H2, a relative path and an unparseable
+      clause, has a Theory control row. A positive control covers spread-before, closing tag, typeof, type-only
+      re-export and the JSX comment. The verifier's nine seed files were re-created under
+      external-spa/src/zzseed. The production fact went red with 8 violations, one per shape (F was caught via
+      F_reexport.ts). The seeds were then deleted. P1 was re-run against the new detector: red at
+      GridWidgetBody.tsx:71, then restored (no diff) and touched.
+      Item 10 (comment stripper failed open): only comments that START their line are stripped now, so a "/*" or
+      "//" inside a string can no longer blank code. The new control covers 'src/**/*.ts' and 'a // b'.
+      Item 9 (no run counts): counts are recorded below and in note section 7.
+      Runs (this branch): ExternalSpaGridViewSelectorGuardTests 29/29. NetArchTest (dotnet test
+      tests/Spaarke.ArchTests): Passed 370, Failed 0, Total 370. That is 349 at 3d858490b plus 21 new control rows.
+      BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 20m24s). The verifier's own run at 3d858490b
+      (Release) was Passed 13627, Failed 0, Skipped 54, Total 13681.
+      SPA: no client file changed in this round (GridWidgetBody.tsx is byte-identical to 3d858490b). The
+      verifier's npm run build (vite) at 3d858490b exited 0, so no rebuild was needed.
+      Item 11 (INFO): the task-134 comparison test is tautological on its own. It reaches production only through
+      the equality pin, which the verifier confirmed against live data. Left as is.
+      Item 12 / F1 (OPEN, owner decision): with the selector off, DataGrid still calls the external savedqueries
+      route on every load, so internal MDA view definitions still reach external callers. Proposed follow-up:
+      skip the sibling fetch when showViewSelector is false, and/or restrict the external savedquer* routes. This
+      is out of scope here.
+      Item 16 (OPEN, live gate): deploy the SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then run note section 6. Not run here: no
+      live write was made.
+      Justification: no new service, DI registration, endpoint, option, job or package. Only a test file and
+      documentation changed.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-r1-r2" round="review-2">
+      Status stays "completed-with-escalation". The same two items stay open: the MANUAL live gate (criterion 6,
+      pending by design) and the owner decision on F1.
+      Item 5/9 (guard still failed open, criterion 1): ExternalSpaGridViewSelectorGuardTests now refuses all five
+      seeded shapes.
+      S1, a generic mount (&lt;DataGrid&lt;any&gt;): a mount is now "&lt;X" followed by anything that cannot
+      continue the identifier. Type arguments are refused.
+      S2/S3, a JSX-children line starting "//" or "/*": comments are no longer stripped; every comment is scanned
+      as code. GridWidgetBody.tsx's JSDoc was reworded so no comment names the binding (comments only; the mount
+      line is unchanged).
+      S4, a brace inside a string attribute: the opening-tag walk now skips string literals as strings. It refuses
+      an attribute string holding { } &lt; &gt;, a JS string or template literal holding { } inside a prop
+      expression, any "/" except the closing "/&gt;", a bare JSX element as an attribute value, an unbalanced }, and
+      a tag that never closes. A bare showViewSelector after the false one counts as true. A namespaced
+      x:showViewSelector does not count.
+      S5, a node_modules-relative import: the shared-library pattern now matches @spaarke/ui-components or
+      Spaarke.UI.Components anywhere in the specifier.
+      Each shape has a Theory control row: 16 rows covering S1-S5 plus the neighbours above. The comment control now
+      asserts that comments ARE reported. The sanctioned control drops its JSX comment and adds a second compliant
+      mount: a plain string attribute, a nested arrow prop, "{ false }" and "/ &gt;".
+      Seeded under external-spa/src/zzseed (S1-S5 verbatim plus 5 extras), the production fact went red with 10
+      violations, one per mount. The seeds were then deleted. P1 re-run: red at GridWidgetBody.tsx:73, then
+      restored and touched.
+      Item 7 (INFO): F1 is still open for the owner. The task-134 comparison test is tautological on its own, as
+      acknowledged. No change.
+      Item 10 (live gate): unchanged. Deploy the SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then run note section 6. Not run here: no
+      live write was made.
+      Runs: guard 45/45; NetArchTest Passed 386, Failed 0, Total 386; BFF unit Passed 13627, Failed 0, Skipped 54, Total 13681 (Debug, 22m15s); SPA npm run build
+      (vite) exit 0.
+      Justification: no new service, DI registration, endpoint, option, job or package. Changes: one test file,
+      comment-only edits to one client file, and documentation.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b1" round="review-3" verified="no (written by fix round b1, cut off by a usage limit; re-checked in the b2 outcome below)">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design) and the owner decision on F1.
+      BLOCKING item (criterion 1, the guard failed open a third time). The verifier compiled three shapes with
+      vite build into a live mount with the picker on: V1 import.meta.glob of DataGrid.tsx, V2 a unicode-escaped
+      identifier, and V3 React.cloneElement over a compliant mount. A regex cannot catch V3 in general (a computed
+      property such as React['clone' + 'Element'] spells nothing), so the guarantee now rests on a runtime guard.
+      Runtime guard: the new src/client/external-spa/src/widgets/ExternalDataGrid.tsx renders the shared grid as
+      DataGrid {...props} showViewSelector={false}, with the forced false AFTER the caller's props. Its props type
+      omits showViewSelector. A clone or createElement of ExternalDataGrid sets the wrapper's props, and the forced
+      false still wins. [Corrected in fix round b2-r1: that holds for an ExternalDataGrid ELEMENT only. Called as a
+      plain function, the wrapper returns the inner grid element, which can be cloned or whose .type can be mounted
+      with the picker on (Q1/Q2); see the b2-r1 outcome.] GridWidgetBody.tsx now mounts ExternalDataGrid; its header comment was updated. The bundle
+      (dist/assets/app.js) shows e=&gt;u.jsx(ole,{...e,showViewSelector:!1}), and showViewSelector:!0 occurs
+      nowhere in it.
+      Scan: ExternalSpaGridViewSelectorGuardTests now enforces six rules.
+      1. Only ExternalDataGrid.tsx may import a grid binding. A fully compliant mount in any other file is
+         refused.
+      2. The wrapper's text is pinned, whitespace-insensitive. A computed clone inside the wrapper passes every
+         regex rule but fails the pin (P5).
+      3. import.meta.glob is refused in any form (V1, plus the spaced, bracket and globEager forms).
+      4. In a grid-binding file, cloneElement, createElement and any \u escape are refused (V2, V3).
+      5. Every from '...' specifier must be escape-free. One that names the shared library must belong to a parsed
+         import, which catches the string-named specifier { "DataGrid" as G }. It must resolve inside the SPA
+         source or into the library. A bare @spaarke/ specifier must be the library.
+      6. Every import() or require() takes one plain literal that resolves inside the SPA source.
+      New fact SharedLibrary_OnlyKnownModulesCarryTheGrid pins the four shared-library modules that import or
+      re-export the grid: DataGrid/index.ts, DataGridPageShell.tsx, components/index.ts and src/index.ts.
+      Without that pin, a new shared component that embeds the grid would reach the SPA unseen; the scan
+      refuses DataGridPageShell only by name.
+      Controls: 23 round-3 Theory rows (V1-V1e, V2-V2e, V3-V3c, W1-W5, X1-X4, Y1). There is also a sanctioned
+      external-SPA control (it uses the wrapper, local dynamic imports, @/ and npm imports, and Array.from) and a
+      fan-in control. The round-1 and round-2 rows now run AS the wrapper, so each still proves its own rule fires.
+      Proof the guard bites:
+      - Nine seed files under external-spa/src/zzseed (V1, V2, V3, a clone of ExternalDataGrid, a string-named
+        specifier, an escaped module specifier, a module outside the SPA, a dynamic variable import, and a
+        compliant mount outside the wrapper). The production fact went red with 10 violations across the 8
+        bypass files. The clone of ExternalDataGrid was correctly NOT flagged, because the runtime guard
+        neutralises it. The seeds were deleted.
+      - P4 (spread moved after the forced prop in the wrapper): the production fact and the pin both went red.
+      - P5 (a computed clone inside the wrapper): only the pin went red. That is the scan's residual, closed by
+        the pin.
+      - P1 (GridWidgetBody imports the shared grid directly, compliant JSX): the production fact went red.
+      - P6 (a new shared component imports the grid as Table): the fan-in fact went red.
+      Each perturbation was restored from a hash-checked backup and touched.
+      MINOR item (overclaims): the ExternalAccessModule.cs derivation comment (comment only) no longer says the
+      guard "fails the build otherwise". It now names the runtime wrapper and the guard's documented residuals,
+      and says the allow-list refuses regardless. The guard's remarks no longer claim the scan refuses
+      everything; they say three rounds each found a bypass and list the residuals. Note section 7 records round
+      3 without a "no remaining shape" claim.
+      Residuals (documented in the guard remarks and in note G5):
+      - a new npm dependency that bundles and re-exports the grid;
+      - a shared-library import() whose path is built in a variable elsewhere;
+      - edits to the shared DataGrid.tsx itself.
+      All three are reviewed changes outside external-spa/src, and the BFF allow-list still returns 400 for the
+      internal views' columns.
+      CONFIRMED / INFO / CLEAN items: no change needed. F1 stays OPEN for the owner.
+      Section 11 justification for the new file ExternalDataGrid.tsx:
+      (1) Existing: GridWidgetBody.tsx mounted the shared grid directly. DataGridPageShell also wraps the grid but
+      forces the picker ON, and Grep shows no other wrapper.
+      (2) Extension: the shared DataGrid's default cannot change, because internal surfaces keep the picker (a
+      task constraint). Forcing the prop inside GridWidgetBody would leave an 80-line file as the only grid
+      importer, and its text is too large to pin. A 20-line pinned wrapper is the smallest unit the guard can
+      hold exactly.
+      (3) Cost of doing nothing: the three verifier shapes compile into a live mount with the picker on, and the
+      guard passes them.
+      Section 10: no BFF surface was added. The BFF edit is comment-only (no IL change), so the publish size was
+      not re-measured.
+      Runs: see note section 7 (round 3).
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2" round="review-3-fix-b2" base="1f3e7bd76">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5) and the owner decision on F1 (note section 8).
+      Base: task/uac-r2-157-b1 merged with work/unified-access-control-r2 (origin/master 93634db58 plus integrated
+      batch 3). The merge was clean, with no conflicts.
+      Re-check of b1's unverified commit: kept. ExternalDataGrid.tsx, GridWidgetBody.tsx, the comment-only
+      ExternalAccessModule.cs edit and the guard's round-3 rules are correct. b2 re-ran these proofs itself:
+      - vite build: the bundle holds nle=e=&gt;u.jsx(ole,{...e,showViewSelector:!1}), and showViewSelector:!0
+        occurs 0 times.
+      - Seeds V1, V2 and V3 were each red.
+      - P4 (spread after the forced prop): 2 red, the production fact and the pin.
+      - P1 (GridWidgetBody mounting the grid directly): 1 red.
+      - P6 (a new shared carrier): 1 red, the fan-in fact.
+      Not re-run: P5. Any text change fails the pin, as P4 shows.
+      BLOCKING item, criterion 1 (V1 glob, V2 escaped identifier, V3 cloneElement): CLOSED.
+      - V1: import.meta.glob is refused.
+      - V2: a grid import outside the wrapper is refused, and so is a \u escape.
+      - V3: neutralised at runtime by ExternalDataGrid, and cloneElement is refused in a grid-binding file.
+        [Corrected in fix round b2-r1: neutralised only for a clone of an ExternalDataGrid ELEMENT. A clone of the
+        element the wrapper RETURNS when called as a function (Q1) was neither caught nor documented.]
+      - The production fact is red on all three seeds.
+      NEW in b2, a fourth compiled bypass (V4). A side-effect import '../../zzoutside/gridGlobal' of a module
+      outside src/ imported the grid and set window.SprkGrid, and a src file then mounted window.SprkGrid. vite
+      build compiled it into a live picker-on mount, and the round-3 guard passed it.
+      Fix: side-effect imports now get the from-specifier rules. Three cheap fail-closed rules were added from the
+      same class:
+      - a bare specifier must be a package declared in external-spa/package.json, which refuses a resolve
+        alias, a '#' subpath import or a node: builtin;
+      - eval( and the Function constructor are refused;
+      - every script in external-spa/index.html must load a file under src/ and hold no inline code.
+      Proof: each seed (V4, '#grid', and a second index.html script) turned the production fact red, then was
+      removed and touched. There are 8 new Theory rows (Z1-Z8) and 1 index.html control. The sanctioned control
+      gained react-dom/client, a side-effect import 'react', a local side-effect import, and look-alikes of eval
+      and Function.
+      MINOR item (overclaims): CLOSED.
+      - ExternalAccessModule.cs: the comment names the runtime wrapper and the residuals, and no longer says
+        "fails the build otherwise".
+      - Guard remarks: they now say the scan is NOT a proof, that each review round so far found a compiled
+        bypass, and list five residuals: a new npm dependency; vite.config alias/plugin re-pointing a declared
+        name; a variable-built shared-library import(); edits to DataGrid.tsx; React-internals reflection.
+      - Note sections 4 (G5) and 7: rewritten without a "no remaining shape" claim.
+      CONFIRMED / INFO / CLEAN items: no change.
+      OPEN by design, F1: still an owner decision; out of scope.
+      Live: none performed (no deploy, no Dataverse write). Deploy order for the main session:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      Publish size: not measured here (the main session measures). b2 makes no BFF edit, and b1's is
+      comment-only.
+      Section 10/11: b2 adds no service, DI registration, endpoint, option, job, column or package. It changes one
+      test file plus documentation. ExternalDataGrid.tsx (b1) keeps the round-3 justification above.
+      Runs: guard class 81/81; NetArchTest Passed 426, Failed 0, Total 426; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 18m54s); SPA npm run
+      build exit 0; npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2-r1" round="review-4-fix-b2-r1" base="a2d6ffd48">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5) and the owner decision on F1 (note section 8).
+      BLOCKING item 1 (criterion 1; Q1-Q5 compiled into live picker-on mounts and the guard passed them): CLOSED,
+      with one documented residual. [Corrected in fix round b2-r2: Q1-Q7 were closed AS SPELLED. Review round 6
+      reopened Q1/Q2 (R2) and the round-1/3 dynamic-load rule H/X (R3) with one comment after 'from' / 'import', and
+      found three more compiled bypasses (R1, R4, R5); see the b2-r2 outcome.] Before any change, the 5 verifier shapes plus 3 of mine were re-seeded and wired
+      into main.tsx. vite build compiled all 8 into a live mount (Q1-Q5 and Q7 onto the shared grid; Q6 onto a SECOND
+      instance of the grid module; Q8 onto the shared grid). The guard stayed 81/81 green.
+      - Q1/Q2 (the wrapper called as a plain function): outside the wrapper, every import of the wrapper module, by any
+        path-like spelling (./, ../, @/, /src/, with or without a script extension, any letter case), binds names that
+        may appear only as a JSX tag, after typeof, or as a member name. This is the verifier's fix (a). In such a
+        file, cloneElement, createElement and \u are refused. A namespace import, a re-export, an unattributed import
+        (string-named or side-effect) and a dynamic import()/require() of the wrapper module are refused too.
+        GridWidgetBody.tsx needed comment-only rewording: its JSDoc named the wrapper three times outside a tag, and
+        comments are scanned as code.
+      - Q3/Q4 (a carrier beside src/, or in a __* / test path): this is the verifier's fix (b). A specifier that names
+        the shared library must resolve into the library's src, directly or through the npm link. It may not resolve
+        into a __* segment or a .test/.spec/.stories file, with or without the extension. The fan-in fact also gained
+        a rule (SharedEscapes): every shipped library file, the allowed carriers included, is refused if it loads a
+        module outside src/ or from a test / __* path. Without it, a shipped file could re-export a __* carrier past
+        both checks. Q4 class: the fan-in's test exclusion is now sound, because nothing shipped can reach a test path.
+      - Q5 (@spaarke/ui-components/../...): this is the verifier's fix (c). The alias is now resolved to the
+        library's src, then checked by the same rule. It is no longer trusted by prefix.
+      - Q6 (found here): import Table from '@spaarke/ui-components/components/DataGrid/DataGrid?v=1'. Vite loads a
+        second module instance, and the default-export rule read the last segment 'DataGrid?v=1' as a non-grid name.
+        A ?query or #fragment in any specifier is now refused (static, side-effect and dynamic).
+      - Q7 (found here): import { Grid } from 'react-window/../../zzoutside/gridAlias2'. react-window is a declared
+        package with no exports map, so the subpath stepped out to any file. A bare specifier with a '.' or '..'
+        segment is now refused.
+      - Q8 (found here, NOT closed, documented residual 5): element-tree peeling with no wrapper reference. In a file
+        that never names the wrapper: const outer = (createGridWidgetBody('x') as any)({}).props.children; then
+        outer.type(outer.props).type is the shared grid, mounted with the picker on. It compiled. No fixed spelling
+        identifies it (computed keys, Object.values, a helper in another file). Refusing every .type read would refuse
+        ordinary code (event.type, file.type). No wrapper in the same JavaScript realm can hide the element it must
+        hand to React; every layer peels the same way. Residual 5, previously "React-internals fiber walk", is widened
+        to this class, with the compiled example. The BFF allow-list still returns 400 for every internal-view column.
+      Proof the guard bites, all re-seeded in this worktree and wired into main.tsx for the build:
+      - With the fix, the production fact went red on exactly Q1-Q7: Q1 (cloneElement + non-JSX reference), Q2, Q3,
+        Q4, Q5, Q6 and Q7. Q8 was not flagged; it is the residual.
+      - SharedEscapes seeds: a new shipped file components/ZzSeed/ZzSeed.ts re-exporting from ../../../zzoutside and
+        ../DataGrid/__zz__ made the fan-in fact red with 2 entries. A line appended to the allowed carrier src/index.ts
+        (export from ../zzoutside) made it red with 1 entry, which shows the allowed carriers are not exempt.
+      - Every seed was deleted. main.tsx and src/index.ts were restored with git checkout and touched. The npm-touched
+        package-lock.json was reverted.
+      MINOR item 2 (overclaims): CLOSED.
+      - ExternalDataGrid.tsx JSDoc, which is pinned: it now says the runtime guard covers every JSX mount (caller prop,
+        spread, clone or re-creation of an ExternalDataGrid ELEMENT) and does NOT protect the element it returns when
+        called as a function. That is why the guard refuses any non-JSX use, and peeling is a residual.
+        PinnedWrapperSource was updated in the same change. The code tokens are unchanged.
+      - Guard remarks: the runtime item says the same. Two scan items were added (the wrapper's binding; shipped
+        library source only). The fan-in paragraph gained the escape rule, and residual 5 is widened.
+      - POML: b1 and b2 overclaims are annotated in place ("[Corrected in fix round b2-r1 ...]").
+      - Note: section 1 row, G5 and section 7 were corrected.
+      CONFIRMED / CLEAN / INFO items 3-7: no change needed. F1 stays OPEN for the owner. Items 8/9 are re-stated
+      above.
+      Live: none performed (no deploy, no Dataverse access). Deploy order is unchanged:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      b2-r1 changes no BFF file. Publish size was not measured; the main session measures.
+      Section 10/11: no new service, DI registration, endpoint, option, job, column or package. Changes: one test
+      file, comment-only edits to two client files (ExternalDataGrid.tsx JSDoc, GridWidgetBody.tsx JSDoc), and
+      documentation.
+      Runs: guard class 109/109 (81 + 26 round-5 Theory rows + 2 controls); NetArchTest Passed 454, Failed 0, Total
+      454; BFF unit Passed 14274, Failed 0, Skipped 54, Total 14328 (Debug, 19m56s); SPA npm install
+      --legacy-peer-deps --no-audit --no-fund + npx vite build exit 0 (bundle: nle=e=&gt;u.jsx(ole,{...e,showViewSelector:!1}),
+      showViewSelector:!0 occurs 0 times); npx tsc --noEmit 6 errors, all pre-existing, none in a changed file.
+    </outcome>
+    <outcome date="2026-10-02" branch="task/uac-r2-157-b2-r2" round="review-6-fix-b2-r2" base="e205c1b7e">
+      Status stays "completed-with-escalation". Two items stay open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, below) and the owner decision on F1 (note section 8).
+      BLOCKING item 1 / criterion 1 (R1-R5 compiled into live picker-on mounts; the guard stayed 109/109 green):
+      the five shapes are now refused, each with a Theory row and a seeded production run. The scan is still not a
+      proof; residuals 1-5 stand, and residual 2 now names the tsconfig / React-plugin JSX options.
+      - R1-R3 (item 2-4, a comment between a module keyword and its specifier or "("): a comment after 'from',
+        'import' or 'require' that is followed by a quote or "(" is refused (CommentAfterModuleKeyword). The verifier
+        offered two fixes; I took the refusal, not "treat comments as whitespace in every specifier regex". Reason:
+        inside JSX children "/*" is TEXT, so a specifier regex that skips a "comment" can be made to skip live code,
+        and in the regexes whose matches are attributed (parsed import spans) or excluded (importSpans for the
+        reference rule) a skipped span would hide what it covers. Worked through by hand, not compiled: a 'from'
+        in JSX text followed by "/*" would let a comment-skipping AnyFrom match run to the next "*/" and swallow a real
+        import in between (regex matches do not overlap). A refusal rule has no such failure, because every match is
+        already a violation. The comment bounds are JavaScript's (a block ends at the first */, a line at \n, \r,
+        U+2028 or U+2029; the R3i row covers U+2028). A comment INSIDE import( ... ) already failed the plain-literal
+        rule (R3c row).
+      - R4 (item 5, a JSX pragma): @jsx in any form (@jsx, @jsxImportSource, @jsxRuntime, @jsxFrag; case-insensitive)
+        is refused anywhere in an external-SPA file, comment or not.
+      - R5 (item 6, src/node_modules): a specifier that resolves into a node_modules folder inside the SPA source,
+        or inside the library's src, is refused. The production facts also fail if any node_modules folder exists
+        under external-spa/src or Spaarke.UI.Components/src, because the scans skip node_modules AND Vite resolves
+        even a DECLARED bare name (react) through the nearest node_modules walking up from the importer. The
+        verifier's "scan src/**/node_modules" alternative would not cover that bare-name route.
+      - Item 7, the shared library: SharedEscapes (always reported, carriers included) now refuses a comment or
+        U+FEFF between a module keyword and a specifier or argument that could load a library module (relative,
+        root-relative or alias path, or text naming the library or DataGrid), and any JSX pragma. The library rule is
+        narrower than the SPA's on purpose: a first form (keyword, then any comment) had at least 24 false positives in the
+        library (prose ending a comment line with "from" or "import" above another comment line); the final SPA form
+        (comment, then a quote or "(") still had one (surfaceLaunchRegistry.ts:161: prose ending in "from", a comment
+        line, then the quoted object key 'nda-review'). A bare package there is residual 1 already. The library is
+        not refused a literal U+FEFF globally either: csvExport.ts:32 holds the UTF-8 BOM as a string on purpose. The regex is a lookahead
+        from each keyword, so a misread "comment" cannot swallow a later keyword. SharedEscapes reads AnyFrom /
+        SideEffectImport / DynamicCall (whitespace-only) for its path rules, so the new rule is what covers the gap.
+      - Found while fixing, same class, each compile-proven with vite build in this worktree and then refused:
+        (a) U+FEFF between 'from' and the specifier: JavaScript whitespace, not .NET \s. Seed compiled to
+        u.jsx(vp,{configId:"zzr6"}), vp being the shared grid (the wrapper renders u.jsx(vp,{...e,
+        showViewSelector:!1})). A literal U+FEFF is now refused in every SPA file (none today), and the token gap
+        treats it as whitespace. (b) import.meta.glob(...) with an escaped letter, in a file with no binding:
+        the round-3 \u refusal applied only in binding files. Compiled to Object.assign({".../DataGrid.tsx":dE}),
+        dE being the grid module namespace (DataGrid:vp). \u is now refused in every SPA file (none today). (c)
+        import.meta /* c */ .glob(...): ImportMetaGlob read only whitespace between tokens. Compiled the same way.
+        ImportMetaGlob now reads comments and U+FEFF between tokens, accepts ?. and refuses any computed
+        import.meta[...] access (none in the SPA).
+      - Q8 (element-tree peeling) stays residual 5, as before; the owner directive (runtime guard + documented
+        residual when a scan cannot catch a shape with zero false positives) applies.
+      MINOR item 8 (overclaims): reworded.
+      - Guard remarks: the scan item no longer says the scan keeps every path to the grid going through a JSX mount
+        of the pinned wrapper; it says the scan refuses the routes it knows of, in the spellings it recognises. The
+        specifier and dynamic-load items say which form they read (keyword, whitespace, quote or "("), and a new item
+        lists what the rules above do not read and how each is refused (R1-R5, U+FEFF, \u, import.meta). The fan-in
+        paragraph and the "comments are not stripped" paragraph say the same for the library and for comments.
+      - POML: the b2-r1 "CLOSED" is annotated in place. Note: section 1 row, G5 and section 7 were updated.
+      CONFIRMED / CLEAN items 9-12, 14: no change needed. Item 13 (process): the integration hard gate
+      (tests/integration/Sprk.Bff.Api.IntegrationTests AND tests/integration/Spe.Integration.Tests in full before
+      the PR) was NOT run here; the main session must run both before the PR.
+      Proof the guard bites (this worktree; seeds written by a script so U+FEFF and \u stayed literal):
+      - SPA: zzseed/R1.tsx, R2.tsx, R3.tsx, R4.tsx, R5.tsx (+ src/node_modules/zzc/index.ts carrying the grid),
+        R6feff.tsx, R7glob.tsx, R8metacomment.tsx. The production fact went red on all 8 files plus the
+        src/node_modules folder: R1/R2/R3 comment rule, R4 pragma, R5 node_modules specifier, R6 U+FEFF, R7 \u, R8
+        import.meta.glob.
+      - Library: components/ZzSeed/ZzSeed.ts (from /* c */ '../DataGrid'; import // c then ('../DataGrid/DataGrid');
+        from U+FEFF '../DataGrid'; an @jsxImportSource pragma) + src/node_modules/zzc. The fan-in fact went red with
+        5 entries, one per seed.
+      - Every seed was deleted; main.tsx (wired for the build) was restored with git checkout and touched; the
+        npm-touched package-lock.json was reverted; external-spa/zzoutside was removed.
+      Client: no client file changed in b2-r2. Clean build (seeds removed): npm install --legacy-peer-deps
+      --no-audit --no-fund + npm run build (vite) exit 0; the bundle holds ole,{...e,showViewSelector:!1};
+      showViewSelector:!0 occurs 0 times.
+      Live: none performed (no deploy, no Dataverse access). Deploy order is unchanged:
+      1. SPA first: gh workflow run deploy-external-spa.yml --ref &lt;branch-or-master-containing-157&gt;. The
+         workflow runs npm install --legacy-peer-deps --no-audit --no-fund and then npm run build.
+      2. Then the BFF: pwsh scripts/Deploy-BffApi.ps1.
+      3. Then the note section 6 gate.
+      b2-r2 changes no BFF file. Publish size was not measured; the main session measures.
+      Section 10/11: no new service, DI registration, endpoint, option, job, column or package. Changes: one test
+      file and documentation.
+      Runs: guard class 134/134 (109 + 24 round-6 Theory rows + 1 round-6 neighbours control; the SharedEscapes
+      control gained 7 asserts); NetArchTest Passed 479, Failed 0, Total 479 (454 + 25); BFF unit Passed 14274,
+      Failed 0, Skipped 54, Total 14328 (Debug, 18m31s); SPA npm install --legacy-peer-deps --no-audit --no-fund +
+      npm run build (vite) exit 0, clean tree (bundle: ole,{...e,showViewSelector:!1}; showViewSelector:!0 occurs 0
+      times). Integration suites: NOT run (item 13; main session).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c1" round="review-7-fix-c1" base="f55f3d426">
+      Base: task/uac-r2-157-b2-r2 merged with work/unified-access-control-r2 (clean, no conflicts) = f55f3d426.
+      Status stays "completed-with-escalation". ONE item stays open: the MANUAL live gate (criterion 6, pending by
+      design; deploy order unchanged, note section 5; F1 adds a step 3 to the gate, note section 6). F1 is CLOSED
+      (no owner decision was needed: owner C6 / C9, a contact gets only what it is granted).
+      ITEM 1, stop the scan arms race (V7 and every earlier shape): CLOSED BY CONSTRUCTION AT RUNTIME.
+      - The rule now lives inside the shared grid. The new DataGridExternalHost.tsx (shared library) holds a React
+        context (default false), its provider (true), the build constant __SPAARKE_DATAGRID_EXTERNAL_HOST__ read
+        behind a typeof guard, and useDataGridExternalHost(), which ORs them. DataGrid.tsx reads the hook. When it
+        is true, the grid forces showViewSelector off (so externalViews is ignored too), never honours a picked view,
+        refuses a savedquery-set source with an error, and never calls retrieveSavedQueriesForEntity, whatever
+        props, wrappers, clones, spreads or imports reach it.
+      - Switch 1: App.tsx returns its whole tree inside DataGridExternalHostProvider, above the app's one
+        BrowserRouter. Switch 2: vite.config.ts defines the constant as 'true', so every copy of the grid in the
+        bundle is external, whatever tree, React root or module instance renders it. That closes what a context
+        alone leaves open: a second createRoot, and a peeled raw Provider value={false}. Both switches are off in
+        every other host, so no other host changes behaviour.
+      - Bundle (vite build): the host check compiles to function soe(){return!0}. Rollup drops the picker branches
+        as dead code, so the picker's "Select view (currently" label occurs 0 times and the constant 0 times.
+        Contrast build with the define removed: the label occurs once and the constant twice. Restored.
+      - V7 compile proof. A carrier file with NO extension (src/zzseed/carrier) imported the grid and set
+        window.SprkGridV7, and a src file mounted it with showViewSelector={true}. vite build compiled it into
+        u.jsx(window.SprkGridV7,{configId:"zzv7",showViewSelector:!0}), yet the bundle holds no picker code
+        (label 0). The runtime rule closes V7. The guard was red on exactly that file with the new round-7 rule
+        (one violation; the b2-r2 rule set passed it). Seeds deleted; main.tsx restored with git checkout and
+        touched.
+      - Scan: the one robust assertion, plus a pin of the rule, plus every earlier zero-false-positive rule kept as
+        defence in depth.
+        - ExternalSpa_RootMountsTheExternalHostProviderAboveEveryRoute: App's one JSX return is one provider
+          element around the app's only BrowserRouter, anchored to the end of the file; no other file binds a
+          router.
+        - ExternalSpa_ViteBuildDefinesTheExternalHostConstant: one define block maps the constant to 'true', with
+          comments stripped first, so a commented-out define does not count; the constant is named once in code.
+        - SharedDataGrid_EnforcesTheExternalHostRule: the host module pinned verbatim (whitespace-insensitive); the
+          grid's nine rule statements present; the raw prop, retrieveSavedQueriesForEntity(, the ViewSelector
+          element and the hook each counted exactly; no props.x access.
+        This pin exists because the shared library's jest suite is not run by CI today.
+      - Tests: jest DataGrid.externalHost.test.tsx, 7/7. It has a control (no host: picker shown, list requested);
+        provider with showViewSelector={true} and externalViews; provider with a wrapper and a cloneElement; the
+        build constant with no provider; a savedquery source loading only its own view; savedquery-set refused;
+        and F1 (a) with the picker off on an ordinary host. Each passes the prop directly.
+      - Seeds (jest, each restored hash-matched and touched):
+        - A1, the context check removed from the hook: 4 red.
+        - A2, the grid ignores the host: 4 red.
+        - B, the build check removed: 1 red.
+        - C, the sibling fetch unconditional: 5 red.
+        - D, the savedquery-set refusal removed: 1 red.
+      - Seeds (arch, on disk, restored and touched):
+        - P7, the provider removed from App.tsx: the root fact red.
+        - P8, the define removed: the define fact red.
+        - P9, the grid ignores the host: the pin fact plus 8 in-memory controls red.
+        - P10, the context check removed: the pin fact plus 10 controls red.
+        - P11, MemoryRouter imported in a page: the root fact red.
+      - Not testable: the picked-view gate (pickedViewId). On the external host no ViewSelector renders, so nothing
+        can set a picked view. It is pinned, not behaviour-tested.
+      - Residuals removed (closed by the runtime rule): a variable-built shared-library import(); edits to
+        DataGrid.tsx ignoring the switch (now pinned); element-tree peeling (Q8). [Corrected in fix round c1-r1:
+        "edits to DataGrid.tsx ignoring the switch" is NARROWED by the pin, not closed. Review round 8's seed J4, an
+        added nested-scope shadow, passed the guard 194/194. It is residual 4; see the c1-r1 outcome.]
+      - Residuals kept (honest): (1) a new npm dependency shipping its OWN grid or picker; (2) build config that
+        drops or overrides the define, or re-points the grid module; (3) a new, differently named picker inside
+        DataGrid.tsx.
+      - Criterion 1 is amended to the owner's goal (round 4 item 7: every external SPA grid has no view selector),
+        met by construction. The amendment and its reason are recorded in the POML criterion-amendment element.
+      ITEM 2, F1: CLOSED.
+      - (a) DataGrid requests the sibling list only when the picker is on, and never on the external host.
+        Seed C proves it.
+      - (b) New ExternalModuleDescriptor.SavedQueryIds holds the views a module's grid is registered to use. It is
+        empty by default and fails closed. ExternalModuleRegistry indexes it, refuses Guid.Empty and a view
+        registered by two modules, and exposes FindBySavedQueryId.
+      - GetSavedQueryCoreAsync returns a view only if its id is registered (checked BEFORE any read) and the loaded
+        view's entity is the registering module's. GetSavedQueriesCoreAsync returns only the module's registered
+        views. Everything else gets the same 404 DV_SAVEDQUERY_NOT_FOUND: an internal view, another entity's view,
+        an unknown id, or an entity with no module. Before, an unregistered entity got 403 and every view got 200.
+      - Derivation, live and read-only, 2026-10-02: all six sprk_gridconfiguration records (61711823, 3af4102c,
+        3ff4102c, 42f4102c, 583a2a33, 403e5d37) are source.type "inline" and name no savedQueryId, so all seven
+        modules register NONE (NoSavedQueries). Both routes 404 every view in production.
+      - Tests: ExternalModuleSavedQueryScopeTests, 28. Negative cases on both routes cover an internal view id
+        (404, 0 reads) and another entity (404, 0 reads). There is also a mis-registered id, an absent view,
+        production refusal rows, the live-derivation pin, and the registration checks.
+      - Contract tests: 3 HTTP rows return 404 over the real pipeline (savedqueries/sprk_project,
+        savedqueries/contact, savedquery/{new guid}).
+      - Seeds (each rebuilt, red, restored hash-matched and touched):
+        - B1, the by-id allow-list skipped: 4 red.
+        - B2, the list filter removed: 1 red.
+        - B3, the list's no-view 404 removed: 9 red.
+        - B4, the entity match removed: 2 red.
+        - B5, the Guid.Empty check removed: 1 red.
+        - B6, the duplicate check removed: 1 red.
+        - B7, the project module registers an internal view: 4 red.
+        The HTTP savedquery/{id} row does not bite B1 on its own: the fixture's Dataverse returns no view. The core
+        rows do. [Corrected in fix round c1-r1: so no row guarded the by-id ROUTE wiring (review round 8, seed X1).
+        A fourth HTTP row now does; see the c1-r1 outcome.]
+      ITEM 3, V7 in the remaining scan: CLOSED.
+      - UnscannedImportTargets: every path-like specifier (static, side-effect, dynamic; SPA files and shipped
+        library files, the grid's own included) is resolved as Vite does: the exact file, then the default
+        extensions, then index. It must land on a file the scans read (the ScriptFilesUnder set minus library test
+        paths). A no-extension or other-extension target, and a directory holding a package.json, are refused.
+      - A specifier with nothing to load is left alone. A real one fails the build, and 12 library JSDoc examples
+        quote such paths; reporting them was the first run's false positives.
+      - ScanPackageManifest refuses a "browser" field in either package.json (Vite remaps through it).
+      - Controls: 13 V7 rows, 1 positive, a resolution-order row, and a manifest row. Proof: the V7 disk seed above.
+      ITEM 4, both integration suites in full: see Runs.
+      Section 10/11 (new surface):
+      (i) DataGridExternalHost.tsx, a shared-library module.
+          - Existing: ExternalDataGrid.tsx forces the prop for JSX mounts only, and DataGrid has no host awareness
+            (Grep: no other context or flag reads showViewSelector).
+          - Extension: the rule must live in DataGrid itself, so this is a 40-line extension of the grid's own
+            folder, not a new service. A prop cannot carry it, since props are exactly what the bypasses forged.
+          - Cost of doing nothing: seven verifier rounds compiled picker-on mounts past the scan, and V7 compiles
+            today without it.
+      (ii) The define in vite.config.ts, a build option.
+          - Existing: none (Grep: the SPA defines nothing).
+          - Extension: it extends the SPA's own build config.
+          - Cost of doing nothing: a second React root, or a peeled Provider value={false}, would render the grid
+            outside the context.
+      (iii) ExternalModuleDescriptor.SavedQueryIds and ExternalModuleRegistry.FindBySavedQueryId, an option on the
+          existing registration.
+          - Existing: ReadableColumns on the same descriptor, which is where the owner's "same module registry"
+            points.
+          - Extension: yes, an added property on that descriptor, with no new type or service.
+          - Cost of doing nothing: the external savedquery routes keep returning internal MDA view definitions
+            (names, FetchXML, layoutXml) to any external caller (F1).
+      No new service, DI registration, endpoint, job, Dataverse column or package. The two routes are existing
+      endpoints; their handlers now delegate to testable cores (the /fetch and /record pattern). Placement: the
+      view scope stays in the BFF's external read seam next to the column scope (task 134 section 5). ADR-002: no
+      plugin. ADR-003: every new default fails closed (empty views; 404). Publish size: skipped per instructions.
+      Live: none written. One live READ (Dataverse MCP read_query of the six sprk_gridconfiguration records) for
+      the view derivation. Deploy order unchanged: SPA first (gh workflow run deploy-external-spa.yml --ref
+      &lt;branch-or-master-containing-157&gt;), then the BFF (pwsh scripts/Deploy-BffApi.ps1), then the note
+      section 6 gate (steps 1-4).
+      Runs (this branch, once at the end):
+      - jest DataGrid.externalHost.test.tsx: 7/7.
+      - Spaarke.UI.Components full jest: 3381 tests, 3367 passed, 14 failed in 9 suites. None of those suites
+        imports DataGrid.tsx or DataGridExternalHost.tsx, and every DataGrid suite passed. This suite is not run by
+        CI; its baseline was not re-measured here.
+      - ExternalSpaGridViewSelectorGuardTests: 194/194 (134 + 3 facts + 57 controls).
+      - NetArchTest: Passed 540, Failed 0, Total 540.
+      - BFF affected: 226/226 (ExternalModuleSavedQueryScopeTests 28; ExternalModuleDataContractTests 18, 3 new).
+      - BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 14305, Failed 1, Skipped 54, Total 14360
+        (Debug, 23m52s). The one failure, PinnedMemoryEndpointsContractTests.CreatePin_Authenticated_Returns201AndEmitsCounter,
+        read a metric tag from another test's emission (an unrelated surface). It passed on an isolated re-run
+        (15/15): contention.
+      - ITEM 4, the integration hard gate, run in full on this branch for the first time:
+        - tests/integration/Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Skipped 0, Total 104.
+        - tests/integration/Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m32s).
+      Client builds:
+      - SPA npm install --legacy-peer-deps --no-audit --no-fund, then npm run build (vite): exit 0.
+      - Shared library npm run build (tsc): exit 0, after building the Spaarke.Auth and Spaarke.SdapClient dists
+        in CI order.
+      - SPA tsc --noEmit: 25 errors. The one in a changed line is App.tsx TS2786 on the provider mount, the same
+        React-18/19 types class as the pre-existing TS2786 on ExternalDataGrid.tsx's DataGrid mount (F2). vite
+        build does not typecheck.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c1-r1" round="review-8-fix-c1-r1" base="55dfb9d8f">
+      Base: task/uac-r2-157-c1 at 55dfb9d8f. Status stays "completed-with-escalation": the MANUAL live gate
+      (criterion 6) is still the one open item, pending by design. Criterion 7 is now met on BOTH routes.
+      Review round 8 verified items 2, 3, 7-10 and 12 with no change asked; this round changes no source file.
+      ITEM 1 (BLOCKING), criterion 7 on the by-id ROUTE: CLOSED.
+      - Finding, reproduced: seed X1 (the GET savedquery/{id} handler skips GetSavedQueryCoreAsync and returns to
+        the pre-157 passthrough, which serves any view of a registered entity) left all 46 rows of
+        ExternalModuleSavedQueryScopeTests and ExternalModuleDataContractTests green. Every by-id negative drove the
+        core directly, and the one HTTP row used an unknown id, which 404s whether or not the allow-list runs.
+      - New HTTP contract row, ExternalModuleDataContractTests.ModuleSavedQuery_WhenTheIdIsAnInternalViewOfARegisteredEntity_Returns404.
+        It plants an internal sprk_project view in the distributed cache that the app's own SavedQueryService reads
+        first (key sdap:dv:savedquery:{id:D}; the service's Dataverse read needs a live ServiceClient). As a
+        precondition it asserts that the service really returns that view, so a 404 cannot come from an absent view.
+        Then the route must answer 404 DV_SAVEDQUERY_NOT_FOUND, and the body must hold neither the view's name nor
+        its FetchXML column. The cache key is removed in finally.
+      - Seed X1 re-planted (the handler's one return replaced by the old passthrough; built; restored hash-matched
+        19e6e832... and touched): exactly the new row red, "expected 404 but found 200", which is the F1 leak over
+        HTTP. The other 46 rows stayed green. Restored: 47/47.
+      ITEM 4 (MINOR), the overclaim: CORRECTED, restated as NARROWED, not closed.
+      - Seed J4 re-planted (const showViewSelector = true; after fetchConfigRecord in the load effect; restored
+        hash-matched 944dd3fb... and touched): the guard class passed 194/194, and jest
+        DataGrid.externalHost.test.tsx went 5 of 7 red (7/7 before and after).
+      - The pin checks statements and counts, not scopes. Residual 4 is now "an edit to DataGrid.tsx that ignores
+        the switch without touching a pinned statement: narrowed by the pin, not closed". It is restated in the
+        guard's class remarks (and its earlier "a change to either ... is gated in CI" sentence), the
+        ScanSharedGridRule summary, note G6, and the c1 outcome above (correction marker).
+      - Only the jest suite catches J4, and CI does not run that package's jest. Data impact: nil, because the BFF
+        404s every view no module grid registers, which today is every view. Running the DataGrid jest folder in CI
+        would close it. That is a ci-workflows hot-path change, which this project's design.md declares N, so it is
+        not made in this round.
+      ITEM 11 (INFO), the SPA tsc --noEmit count: a one-line note added (note F2), with measurements from this
+      worktree. tsc follows the SPA's paths into the shared library's src, so the count depends on whether that
+      library's node_modules is installed.
+      - Installed: 24 errors at base f55f3d426, 25 at 55dfb9d8f. The diff is exactly App.tsx(232) TS2786 on the
+        provider mount. DataGrid.tsx(1234) TS2322 is in both.
+      - Hidden: 6 errors at 55dfb9d8f.
+      - That explains the 6 / 24 / 25 spread across earlier rounds. CI runs vite build for the SPA, not tsc.
+      ITEMS 5 and 6 (INFO): no change. Residual 2 already states that a build config overriding the define leaves
+      only the provider (S2). A standalone DataGridViewSelector in the SPA would list nothing, because both
+      external savedquery routes 404 every view.
+      Section 10/11: no new service, DI registration, endpoint, option, job, Dataverse column or package. Changes:
+      one test row, test-file comments, the note and this POML. Live: none (no read, no write). Publish size:
+      skipped per instructions (no BFF source change).
+      Runs (this branch):
+      - BFF affected (ExternalModuleSavedQueryScopeTests + ExternalModuleDataContractTests): 47/47 (46 + 1 new);
+        under seed X1, 1 failed and 46 passed; restored, 47/47.
+      - ExternalSpaGridViewSelectorGuardTests: 194/194, and 194/194 under seed J4 (the gap this round documents).
+      - jest DataGrid.externalHost.test.tsx: 7/7; under seed J4, 5 of 7 failed.
+      - Once at the end, all four started together on one machine:
+        - BFF unit (dotnet test tests/unit/Sprk.Bff.Api.Tests): Passed 14307, Failed 0, Skipped 54, Total 14361
+          (Debug, 23m7s). One more than c1's 14360: the new row.
+        - NetArchTest (dotnet test tests/Spaarke.ArchTests): Passed 540, Failed 0, Total 540.
+        - Integration, tests/integration/Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Skipped 0, Total 104.
+        - Integration, tests/integration/Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m35s).
+      - No client file changed, so no SPA build was run in this round. The npm installs used for the tsc and jest
+        measurements left no tracked change: the SPA package-lock.json npm touched was reverted with git checkout.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2" round="fix-c2-residual-4" base="381707788">
+      Base: task/uac-r2-157-c1-r1 merged with work/unified-access-control-r2 (clean, no conflict) = 381707788.
+      Status stays "completed-with-escalation": the MANUAL live gate (criterion 6) is still the one open item,
+      pending by design. Residual 4 is CLOSED.
+      ITEM 1 (main-session ruling under owner round 10, residual 4): the shared DataGrid's jest folder is a BLOCKING
+      CI check on the Router path.
+      - Premise correction: the Compose Client Gate is NOT on the blocking path. It lives only in sdap-ci.yml and
+        carries continue-on-error: true. Tier 1 had no client gate at all. The classification mechanism used is the
+        one Tier 1's BFF-conditional job uses: the router's classify job (dorny/paths-filter) passes a string input
+        to ci-tier1-blocking.yml.
+      - ci-router.yml: new paths-filter output ui_components ('src/client/shared/Spaarke.UI.Components/**'); passed
+        to Tier 1 as ui_components_changed = ui_components OR ci_workflows (an edit to the gate job runs the gate);
+        added to the docs_only exclusion; a summary row. Found while wiring it: docs_only counted only BFF,
+        SpaarkeAi and CI workflows as code, so a PR editing DataGrid.tsx plus any *.md file read as docs_only and
+        skipped Tier 1 entirely. Without the exclusion the new gate would be skippable that way.
+      - ci-tier1-blocking.yml: new input ui_components_changed (default 'true'; the job's if is
+        inputs.ui_components_changed != 'false', so an omitted input or a workflow_dispatch run executes it). New
+        job datagrid-external-host-gate (ubuntu-latest, Node 20, timeout 15 min, no continue-on-error): npm install
+        --legacy-peer-deps --no-audit --no-fund in Spaarke.UI.Components; npx jest --ci --json src/components/DataGrid/
+        (8 suites, 75 tests; no --coverage, because the package's global coverageThreshold would fail a folder run);
+        then a node step that fails unless DataGrid.externalHost.test.tsx ran with at least 7 tests, all passing
+        (a rename, deletion or skip would otherwise leave the folder green); job summary via the existing
+        scripts/ci/summarize-jest-results.js; artifact on failure. Header CONTENTS list item 5 added.
+      - No shared-lib dist is needed: measured from a clean worktree (fresh npm install, no Spaarke.Auth or
+        Spaarke.SdapClient dist), 8/8 suites and 75/75 tests, also under TZ=UTC, America/Los_Angeles and
+        Asia/Kolkata with --randomize.
+      - Freeze: the three tier files are frozen for the shadow window, with a GATE REPAIR carve-out for "a guard
+        present but not armed" (projects/INDEX.md). This is that case: no PR-triggered workflow ran the jest suite.
+        Disclosed in a new INDEX.md disclosure record; the window re-baselines from this merge.
+      - actionlint 1.7.12 (-shellcheck=, as workflows-validate.yml runs it): exit 0 on both files and on all of
+        .github/workflows (exit 0 before the change too).
+      - /conflict-check: no open PR touches ci-tier1-blocking.yml or ci-router.yml. Dependabot #909 bumps
+        setup-node in other workflow files; the new job uses actions/setup-node@v4 like ci-tier2-advisory.yml.
+        projects/INDEX.md is also touched by #935 (code-quality-and-assurance-r4), in other rows.
+      - Self-protection, new arch fact ExternalSpaGridViewSelectorGuardTests.SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate
+        (runs in the blocking arch-tests job) plus a 10-row negative-control Theory over the real workflow text:
+        job renamed, continue-on-error added, "|| true", if changed, jest narrowed, suite assertion dropped, input
+        default flipped, router filter dropped, docs_only exclusion removed, input not passed. Each row produces a
+        violation.
+      - Proof it bites (each restored hash-matched and touched): seed J4 in DataGrid.tsx (restored 944dd3fb...): the
+        job's jest step, run from the YAML's own run: text, exits 1 (5 of 7 failed) and the assertion step exits 1;
+        the external-host suite renamed: jest exits 0, the assertion step exits 1 ("did not run"); one of its tests
+        it.skip'd: jest exits 0, assertion exits 1 ("6 of 7 passed"); continue-on-error written into the job on
+        disk: the new fact red; the docs_only exclusion removed on disk: the new fact red.
+      - design.md hot-path declaration: ci-workflows N to Y. projects/INDEX.md: the project's row (which already
+        read Y) notes the correction and this change; disclosure record added.
+      - Guard remarks, ScanSharedGridRule summary and note G6 / section 7 updated: residual 4 moved from the
+        residual list to closed.
+      Not observed on ubuntu-latest: every run here was on Windows (Node 22.14; the job pins Node 20 like the repo's
+      other client jobs). The repo's "green runs on the runner before blocking" standard is waived by the
+      main-session ruling that this gate lands blocking. If the first ubuntu-latest run is red for an environment
+      reason, fix the environment rather than add continue-on-error.
+      Section 10/11: no new service, DI registration, endpoint, option, job (background), Dataverse column or
+      package. The CI job is a new workflow job, justified:
+      - Existing: sdap-ci.yml compose-client-gate (advisory, other package, being retired); client-tests.yml
+        (nightly, advisory by construction, its header forbids promotion into the tiers); office-addins-tests.yml
+        (another package, not a required check). None runs this suite on a PR in a blocking way.
+      - Extension: tier1's existing jobs are .NET jobs on other runners; a step in one would couple a Node install
+        to a .NET job's verdict and run it on every BFF change. A conditional job beside them is the smallest change.
+      - Cost of doing nothing: seed J4 (one added line in DataGrid.tsx) merges green, and the external SPA's grid
+        requests the internal saved-query list again.
+      No new script file (the suite assertion is an inline node -e, the office-addins-tests.yml pattern). Live:
+      none. Publish size: skipped per instructions (no BFF source change). ADR-002: no plugin. ADR-003: the input
+      defaults fail closed (the gate runs unless explicitly classified out).
+      Runs (this branch; detail in the note, section 7, "Fix round c2"):
+      - actionlint 1.7.12: exit 0 (both edited files, and all of .github/workflows).
+      - jest src/components/DataGrid/ (clean install): 8/8 suites, 75/75 tests; external-host suite 7/7.
+      - ExternalSpaGridViewSelectorGuardTests: 205/205 (194 + 1 fact + 10 Theory rows).
+      - Once at the end, all four started together on one machine:
+        - NetArchTest: Passed 551, Failed 0, Total 551 (540 + 11).
+        - BFF unit: Passed 14307, Failed 0, Skipped 54, Total 14361 (Debug, 19m11s).
+        - Integration, Sprk.Bff.Api.IntegrationTests: concurrent run Passed 103, Failed 1, Total 104
+          (PlaybookByNameDeprecationTests.ByName_SetsActivityTag_DeprecatedEndpoint_OnEveryCall, an activity-tag
+          capture on an unrelated surface); isolated re-run of the class 3/3, then the full suite 104/104. Contention.
+        - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m31s).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2-r1" round="fix-c2-r1" base="0f719645f">
+      Base: task/uac-r2-157-c2 (0f719645f). Status stays "completed-with-escalation". The MANUAL live gate
+      (criterion 6) is still open, pending by design. One owner item is also open: item 8, the waiver of "N green
+      runs before blocking", which is not owner-confirmed.
+      Review c2 items 1 to 4: verified by the reviewer; no change.
+      ITEMS 5 and 12 (MEDIUM, self-protection overclaimed). Four actionlint-clean disarmings left the c2 fact green:
+      (a) needs: changed-surface-smoke; (b) a non-constant false step-level if on the jest and assert steps;
+      (c) ui_components='false' in the docs_only step; (d) "if (false)" in the assertion. ScanDataGridCiGate now
+      refuses:
+      - any job-level key outside name, runs-on, timeout-minutes, if, steps (DataGridGateJobKeys);
+      - any step-level if (including the "- if:" dash-line form) except always(), or failure() on the
+        actions/upload-artifact step that has no run;
+      - any change to the assertion script, which is pinned verbatim (DataGridGateAssertScript);
+      - any change to the shape of the router's docs_only run block: each of the 7 variables assigned once, in order,
+        from its own filter output; an if made only of "&amp;&amp; x != true" terms naming all 6 exclusions; value=true
+        only in the then-branch; nothing else;
+      - a change to the classify job's docs_only output source, or to the tier1 call's docs_only if.
+      The Theory grew from 10 to 31 rows (the four review seeds plus near variants). The job header comment, the
+      fact's summary and the class remarks now say: a text check that refuses the disarmings it names.
+      ITEM 6 (MEDIUM). ci-router.yml has new paths-filters external_spa ('src/client/external-spa/**') and arch_tests
+      ('tests/Spaarke.ArchTests/**'). They are used only in docs_only (assignments, exclusion terms, summary rows).
+      A PR editing external-spa or the guard file plus a task note now runs Tier 1, and with it the arch-tests job.
+      The guard pins both filters and both exclusions. The general fail-open of docs_only for other unclassified
+      paths is pre-existing and wider than this task, so it is not changed. It is recorded as note section 8 F3 and in
+      the note to ci-cd-unit-test-remediation-r1, with a fail-closed design (predicate-quantifier: 'every').
+      ITEM 7 (LOW). The INDEX.md disclosure now separates the two verdict impacts. The second is the docs_only
+      reclassification: PRs touching Spaarke.UI.Components, external-spa or the arch tests plus only docs-class files
+      now run ALL of Tier 1 and Tier 2, where before both were skipped. The record also states the 31-row
+      self-protection precisely.
+      ITEM 8 (LOW). NARROWED, NOT CLOSED. The job ran on Node 20.20.2 (the pinned major) on Windows, in a clean
+      short-path worktree (C:\wvd157r1, removed afterwards). npm install left the lockfile unchanged. Jest: 8/8 suites,
+      75/75 tests, exit 0. The assertion step printed "7 of 7 passed", exit 0. Seed J4: jest exit 1 (5 failed, 70
+      passed); restored and hash-matched. ubuntu-latest still needs a push, which is not allowed here. The waiver of
+      "N green runs before blocking" is a main-session ruling; owner round 10 records it for the owner, and the owner
+      has not confirmed it. Stated as open in INDEX.md, in the note and in the ci-cd note.
+      ITEM 9 (LOW). The root .gitignore ignores src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
+      (git check-ignore -v confirms it).
+      ITEM 10 (INFO). #1110 (word-add-in-r1, touched projects/INDEX.md) is MERGED (62277d50a). git merge-tree of
+      c2 against origin/master is clean. No open PR touches either tier file, .gitignore or the guard file. #935
+      touches INDEX.md; #909 and #894 touch ci-tier2-advisory.yml only.
+      ITEM 11 (INFO). The banner's "disclose in a note to ci-cd-unit-test-remediation-r1" is done:
+      projects/ci-cd-unit-test-remediation-r1/notes/gate-repair-disclosure-2026-10-03-uac-r2-157.md. It points to
+      the INDEX.md record, which stays the authoritative one.
+      Proof it bites, on disk (each workflow restored hash-matched and touched; actionlint exit 0 on every seed):
+      (a), (b), (c), (d), the external_spa exclusion removed, and the arch_tests filter narrowed. Each turns
+      SharedDataGrid_ExternalHostJestSuiteIsABlockingTier1Gate red with its own message. All 31 Theory rows produce a
+      violation.
+      Section 10/11: no new service, DI registration, endpoint, option, background job, Dataverse column or package.
+      The two router paths-filters are new classification outputs:
+      - Existing: the bff, spaarke_ai, ci_workflows and ui_components filters; none matches either path.
+      - Extension: this IS the extension, the same filter list and docs_only exclusion that c2 extended. No new job
+        or tier input.
+      - Cost of doing nothing: a PR editing external-spa App.tsx or vite.config.ts, or the guard file, plus any
+        task note is docs_only. Tier 1 is skipped and the guard's facts never run.
+      Live: none. Publish size: not applicable (no BFF or product source change). ADR-002: no plugin. ADR-003: the
+      guard fails closed (whitelists, verbatim pins), and so does the classification (more paths count as code).
+      .claude edits needed: none.
+      Runs (this branch; detail in the note, section 7, "Fix round c2-r1"):
+      - actionlint 1.7.12: exit 0 (both edited files, all of .github/workflows, and each of the six on-disk seeds).
+      - jest on Node 20.20.2: 8/8 suites, 75/75 tests; assertion "7 of 7 passed"; seed J4 exit 1 (5 failed).
+      - ExternalSpaGridViewSelectorGuardTests: 226/226 (205 + 21 new Theory rows).
+      - NetArchTest: Passed 572, Failed 0, Total 572 (551 + 21).
+      - Integration, Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Total 104.
+      - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m41s).
+      - BFF unit, under heavy machine contention from other agents (about 216 dotnet test processes, about 87% CPU):
+        full run 1 Passed 14218, Failed 89, Skipped 54, Total 14361 (45m); full run 2 Passed 14128, Failed 179,
+        Skipped 54, Total 14361 (1h03m). Of the 179, 178 were TaskCanceledException (host HTTP timeouts of 3 to 15
+        minutes) and 1 was ComposeFidelityGateHarnessTests (alternate-content-duplicate-paraid.docx). Isolated
+        re-run of the 66 failing classes: Passed 597, Failed 9, Skipped 10, Total 616 (the fidelity case passed;
+        the 9 were 3-minute timeouts). Re-run of those 6 classes: 50/50 passed. No BFF source or BFF test changed in
+        c2-r1.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-157-c2-r2" round="fix-c2-r2-owner-round-13" base="802f98d2f">
+      Base: task/uac-r2-157-c2-r1 (802f98d2f). Status stays "completed-with-escalation": the MANUAL live gate
+      (criterion 6) is still open, pending by design. c2-r1's owner item 8 (the unconfirmed waiver of "N green runs
+      before blocking") is answered by owner round 13 item 11 and is closed.
+      ITEM 1 = OWNER ROUND 13 ITEM 11 (BINDING): datagrid-external-host-gate lands ADVISORY and becomes blocking after
+      N green runs on the CI runner.
+      - ci-tier1-blocking.yml: job-level "continue-on-error: true" with an ADVISORY comment (the sdap-ci.yml
+        compose-client-gate construction); "merge-blocking" dropped from the jest step's name; header item 5 and the
+        job comment rewritten (advisory, the reason, the FLIP CONDITION).
+      - N = 3: the repo's standard as compose-client-gate states it (three consecutive green runs on unchanged code on
+        the runner). office-addins-tests.yml names the rule without a number.
+      - Flip procedure (note section 7 "Fix round c2-r2", and the job comment): count three consecutive runs on
+        ubuntu-latest, on diffs that do not change src/components/DataGrid/, whose jest step and assertion step both
+        concluded success (read STEP conclusions; with job-level continue-on-error the run stays green when the job
+        fails), no red such run in between (a red one resets the count); a skipped job does not count. Commands:
+        gh run list --workflow ci-router.yml, then gh run view &lt;id&gt; --json jobs. Then ONE PR deletes the
+        continue-on-error line, sets DataGridGateAdvisory to false in ExternalSpaGridViewSelectorGuardTests, rewrites
+        the job comment and header item 5, updates the INDEX.md disclosure (the flip is a verdict change), and cites
+        the three run ids. The guard refuses either half of the flip alone.
+      ITEM 2 = OWNER ROUND 13 ITEM 12 (BINDING): the router's docs_only skip is NOT changed here.
+      - ci-router.yml restored to its pre-task content (git checkout 381707788 -- .github/workflows/ci-router.yml;
+        diff against 381707788 empty). Removed: c2's ui_components filter, output, summary row, docs_only exclusion and
+        ui_components_changed pass-through; c2-r1's external_spa and arch_tests filters and exclusions.
+      - The gate is now classified inside Tier 1: classify-tier1 (dorny/paths-filter) gains output datagrid_gate from
+        'src/client/shared/Spaarke.UI.Components/**' or '.github/workflows/**' (the same triggers as before). The job
+        has needs: classify-tier1 and if: github.event_name == 'workflow_dispatch' or datagrid_gate != 'false'
+        (fail closed: empty output runs it). The ui_components_changed workflow_call input is removed. classify-tier1
+        always runs; the guard pins that it has no job-level if.
+      - Consequence: a PR that edits DataGrid.tsx, external-spa or the arch guard together with only docs-class files
+        is docs_only again and skips Tier 1 (the pre-task state). Recorded in note section 8 F3, the INDEX.md
+        disclosure and the note to ci-cd-unit-test-remediation-r1.
+      - The GitHub issue to ci-cd-unit-test-remediation-r1 is for the MAIN SESSION to file (round 13 item 12). Not
+        filed from this branch. Suggested title and body: note section 7 "Fix round c2-r2".
+      SELF-PROTECTION: ScanDataGridCiGate reads only ci-tier1-blocking.yml (all router assertions removed:
+      RouterWorkflowFile, DocsOnlyVariables, DocsOnlyExclusions, DocsOnlyStepProblem), so it never constrains the
+      router owner. Fact renamed SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate. New: DataGridGateAdvisory
+      (static readonly bool; while true exactly one job-level continue-on-error: true, once false none); no
+      continue-on-error on any step; pinned needs and if; allowed job keys add needs and continue-on-error;
+      classify-tier1 has no job-level if; datagrid_gate output once and as written; its filter defined once with
+      exactly the two paths. Kept: job present, jest call, verbatim assertion script, "|| true", step-level if rule.
+      Theory 24 rows (31 before: 11 router rows removed, 4 added), each valid in both advisory states, plus the new
+      fact ScanDataGridCiGate_RefusesAnAdvisoryStateTheConstantDoesNotRecord for the state-specific disarming.
+      Proof it bites, on disk (workflow restored hash-matched and touched each time): (a) continue-on-error line
+      deleted with the constant left true: actionlint exit 0, fact red; (b) needs: changed-surface-smoke: actionlint
+      exit 1, fact red; (f) needs: [classify-tier1, changed-surface-smoke]: actionlint 0, fact red; (c) datagrid_gate
+      filter narrowed: actionlint 0, fact red; (d) continue-on-error on the jest step: actionlint 0, fact red; (e)
+      job-level if on classify-tier1: actionlint 0, fact red. The correct flip (line deleted AND constant false):
+      actionlint 0, the class 220/220 green (both files restored hash-matched and touched).
+      Section 10/11: no new service, DI registration, endpoint, option, background job, Dataverse column or package.
+      One new classification output (datagrid_gate in classify-tier1), replacing the router's ui_components output:
+      - Existing: classify-tier1 already classifies Tier-1-only surfaces with dorny/paths-filter (auth, the smoke
+        namespaces); none matches Spaarke.UI.Components.
+      - Extension: this IS the extension of that filter list. The router was the earlier home; round 13 item 12 rules
+        it out.
+      - Cost of doing nothing: with the router reverted, the gate has no classification. Either it runs on every
+        Tier 1 run (an npm install on every BFF PR) or never.
+      Removed: the ui_components_changed workflow_call input (no caller after the router revert).
+      ADR-002: no plugin. ADR-003: fail closed (empty classification runs the gate; the guard refuses a YAML-only
+      flip either way). Live: none. Publish size: skipped (no BFF source change). .claude edits needed: none.
+      Runs (this branch; detail in the note, section 7, "Fix round c2-r2"):
+      - actionlint 1.7.12 (-shellcheck=): exit 0 on both workflow files and on all of .github/workflows.
+      - ExternalSpaGridViewSelectorGuardTests: 220/220 (194 + 1 fact + 24 Theory rows + 1 state fact).
+      - NetArchTest: Passed 566, Failed 0, Total 566 (572 - 31 + 24 + 1).
+      - Integration, Sprk.Bff.Api.IntegrationTests: Passed 104, Failed 0, Total 104.
+      - Integration, Spe.Integration.Tests: Passed 403, Failed 0, Skipped 25, Total 428 (7m38s).
+      - BFF unit, under heavy machine contention from other agents (about 278 dotnet processes): full run Passed
+        14177, Failed 130, Skipped 54, Total 14361 (47m42s); all 130 TaskCanceledException (host HTTP timeouts) in
+        65 classes. Isolated re-run of the 65 classes: Passed 865, Failed 7, Total 872 (all 7 TaskCanceledException).
+        Re-run of those 7 classes: 90/90 passed. No BFF source or BFF test changed in c2-r2.
+    </outcome>
+  </execution>
+</task>

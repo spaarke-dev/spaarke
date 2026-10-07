@@ -53,7 +53,7 @@
 | **`IEventDataverseService`** | **WebApi** | SDK impl STUBS events |
 | **`IFieldMappingDataverseService`** | **WebApi** | SDK impl STUBS field-mapping |
 | `IImpersonatedCommunicationQuery` (concrete `DataverseWebApiService`) | **WebApi** | NFR-06 row-level security. Registered in **`CommunicationModule.cs`** (~`:272`), not `GraphModule` |
-| `IDataverseAccessGrantService` (concrete `DataverseWebApiService`) | **WebApi** | POA grants. Registered in **`CommunicationModule.cs`** (~`:648`), not `GraphModule` |
+| `IDataverseRecordShareService` (concrete `DataverseWebApiService`) | **WebApi** | POA record shares — grant, **revoke** and read, for `systemuser` **and** `team` principals. Registered in **`CommunicationModule.cs`** (~`:671`), not `GraphModule`. Renamed from `IDataverseAccessGrantService` and moved to `Services/Access/` by `unified-access-control-r2` task 060, which consolidated it with the private POA client that had lived inside `PlaybookSharingService`. **It is the only POA client — a build guard (`PoaShareClientSingletonGuardTests`) fails if a second one appears.** |
 
 > **`UpdateRecordFieldsAsync` is single-impl as of 2026-08-20** (trap 2a below): `IFieldMappingDataverseService`
 > → WebApi is the only live route. The SDK impl throws. Never call it through the composite.
@@ -112,6 +112,8 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
 4. **✅ DONE (RED-4 B, 2026-08-17) — silent-empty SDK stubs → throw.** The 8 event/field-mapping query stubs on
    `DataverseServiceClientImpl` (`QueryEventsAsync`, `GetEventAsync`, `QueryEventLogsAsync`, `GetEventTypesAsync`,
    `GetEventTypeAsync`, `QueryFieldMappingProfilesAsync`, `GetFieldMappingProfileAsync`, `GetFieldMappingRulesAsync`)
+   — *`GetEventTypesAsync`/`GetEventTypeAsync` were later deleted outright (no callers; their `sprk_eventtypes`
+   entity set returns 404 live — the table is `sprk_eventtype_ref`), spaarke-ontology-platform-r1 task 097* —
    returned empty + `LogWarning` — masking a mis-route as "no data" (the DEF-1 bug class). Now they `throw
    NotImplementedException`, consistent with the sibling event/field-mapping methods, so a mis-route (injecting
    the composite `IDataverseService` instead of the narrow interface) fails LOUD. Gated behind DEF-1: done only

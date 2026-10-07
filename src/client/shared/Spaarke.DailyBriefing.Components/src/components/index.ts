@@ -11,7 +11,9 @@
  *   - PreferencesDropdown
  *   - CaughtUpFooter
  *   - DigestHeader
- *   - EmptyState
+ *
+ * (`EmptyState` was hoisted to `@spaarke/ui-components` by task 081 / C-11
+ * and is no longer re-exported here.)
  *
  * Plus the channel-icon resolver helper used by ActivityNotesSection
  * (carries the original `getChannelIcon` export contract).
@@ -23,8 +25,8 @@ export type { DailyBriefingAppProps } from './DailyBriefingApp';
 export { DigestHeader } from './DigestHeader';
 export type { DigestHeaderProps } from './DigestHeader';
 
-export { EmptyState } from './EmptyState';
-export type { EmptyStateProps } from './EmptyState';
+// EmptyState hoisted to @spaarke/ui-components (task 081 / C-11) — import it
+// from there directly; it is no longer re-exported from this package.
 
 export { TldrSection } from './TldrSection';
 export type { TldrSectionProps } from './TldrSection';

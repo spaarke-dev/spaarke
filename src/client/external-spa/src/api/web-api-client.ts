@@ -15,7 +15,6 @@
  *   GET   /api/v1/external/projects/{id}/organizations        → project organizations
  *   POST  /api/v1/external/projects/{id}/events               → create event
  *   POST  /api/v1/external/projects/{id}/todos                → create to-do (NEW)
- *   PATCH /api/v1/external/events/{id}                        → update event
  *   PATCH /api/v1/external/todos/{id}                         → update to-do (NEW)
  *
  * Contract change (R3 task 007): the legacy event-as-todo boolean toggle was
@@ -93,16 +92,24 @@ export interface ODataDocument {
 export interface ODataEvent {
   /** Primary key — Dataverse GUID */
   sprk_eventid: string;
-  /** Event display name */
+  /** Event display name — the BFF reads it from Dataverse `sprk_eventname` (sprk_event has no `sprk_name`; task 097). */
   sprk_name: string;
   /** ISO date string — due date */
   sprk_duedate?: string | null;
-  /** Event status option set value */
+  /**
+   * Event status — the BFF reads it from the event's status of record, Dataverse `statuscode` (sprk_event has no
+   * `sprk_status`; task 097 review F2): Draft 1, Open 659490001, Completed 659490002, Closed 659490003,
+   * Cancelled 659490004, Transferred 659490005, On Hold 659490006, Reassigned 659490007, No Further Action 2.
+   */
   sprk_status?: number | null;
   /** ISO date string — record created */
   createdon?: string | null;
-  /** Lookup ID of the owning project */
-  _sprk_projectid_value?: string | null;
+  /**
+   * Lookup ID of the owning project. `sprk_event` has no `sprk_projectid`
+   * attribute — its project lookup is `sprk_regardingproject` — so the BFF
+   * returns `_sprk_regardingproject_value`.
+   */
+  _sprk_regardingproject_value?: string | null;
 }
 
 /**
@@ -321,7 +328,7 @@ async function createRecord<TBody, TResult = TBody>(bffPath: string, body: TBody
 /**
  * Make a PATCH (update) request to the BFF API.
  *
- * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/events")
+ * @param bffPath  BFF API path prefix (e.g. "/api/v1/external/todos")
  * @param id       Record GUID to update
  * @param body     Partial record payload with fields to update
  */
@@ -410,16 +417,23 @@ export async function getDocuments(projectId: string, options: ODataQueryOptions
 /**
  * Retrieve all Events belonging to a Secure Project.
  *
- * Filters by the `_sprk_projectid_value` lookup column. Events no longer
- * carry a to-do flag — see `getProjectTodos` for project to-do retrieval.
+ * Events no longer carry a to-do flag — see `getProjectTodos` for project to-do
+ * retrieval. `sprk_event`'s project lookup is `sprk_regardingproject` (it has no
+ * `sprk_projectid` attribute), so the lookup value field is
+ * `_sprk_regardingproject_value`.
+ *
+ * NOTE: the `defaults` below are inert. `getCollection` ignores its `_options`
+ * argument entirely (:291) — select/filter/order/top are all applied server-side
+ * by GET /api/v1/external/projects/{id}/events. They are kept only as
+ * documentation of the expected projection.
  *
  * @param projectId  Dataverse GUID of the parent sprk_project record
- * @param options    Optional OData query overrides
+ * @param options    Optional OData query overrides (currently ignored downstream)
  */
 export async function getEvents(projectId: string, options: ODataQueryOptions = {}): Promise<ODataEvent[]> {
   const defaults: ODataQueryOptions = {
-    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_projectid_value,createdon',
-    $filter: `_sprk_projectid_value eq '${projectId}'`,
+    $select: 'sprk_eventid,sprk_name,sprk_duedate,sprk_status,_sprk_regardingproject_value,createdon',
+    $filter: `_sprk_regardingproject_value eq '${projectId}'`,
     $orderby: 'sprk_duedate asc',
     $top: 200,
   };
@@ -542,11 +556,11 @@ export async function getOrganizations(
  * Omits system-generated fields (primary key, createdon, etc.).
  */
 export interface CreateEventPayload {
-  /** Event display name */
+  /** Event display name — the BFF writes it to `sprk_eventname` (task 097). */
   sprk_name: string;
   /** ISO date string for the due date */
   sprk_duedate?: string;
-  /** Event status option set value */
+  /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;
   /**
    * OData binding to associate the event with a project. The navigation property is the
@@ -555,19 +569,6 @@ export interface CreateEventPayload {
    * Example: "/sprk_projects(b1c2d3e4-0000-0000-0000-000000000001)"
    */
   'sprk_RegardingProject@odata.bind'?: string;
-}
-
-/**
- * Payload for updating an existing Event record via the Web API.
- * All fields are optional — only provided fields are updated (PATCH semantics).
- */
-export interface UpdateEventPayload {
-  /** Event display name */
-  sprk_name?: string;
-  /** ISO date string for the due date */
-  sprk_duedate?: string;
-  /** Event status option set value */
-  sprk_status?: number;
 }
 
 /**
@@ -590,19 +591,6 @@ export async function createEvent(projectId: string, payload: CreateEventPayload
   };
 
   return createRecord<CreateEventPayload, ODataEvent>(`/api/v1/external/projects/${projectId}/events`, body);
-}
-
-/**
- * Update an existing Event record in Dataverse via the Power Pages Web API.
- *
- * Uses PATCH semantics — only the fields included in `payload` are modified.
- * The Bearer token is automatically included by `bffApiCall`.
- *
- * @param eventId  Dataverse GUID of the sprk_event record to update
- * @param payload  Partial event fields to update
- */
-export async function updateEvent(eventId: string, payload: UpdateEventPayload): Promise<void> {
-  return updateRecord<UpdateEventPayload>('/api/v1/external/events', eventId, payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -713,7 +701,6 @@ export const webApiClient = {
   // Events
   getEvents,
   createEvent,
-  updateEvent,
   // To-Dos (NEW)
   getProjectTodos,
   createTodo,

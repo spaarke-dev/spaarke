@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Models.Ai.PublicContracts;
 /// <remarks>
 /// <para>
 /// <b>Zone B-importable DTO</b> per SPEC §3.5 — pure value type with primitive fields,
-/// no AI internals. The D-P8 consumer (BackgroundService or Function per ADR-001) uses
+/// no AI internals. The D-P8 consumer (an ADR-004 IJobHandler, InsightsIngestJobHandler) uses
 /// this to write structured telemetry / dead-letter on failure and to populate
 /// disposition events for the D-P11 review surface.
 /// </para>

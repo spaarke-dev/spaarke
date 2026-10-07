@@ -306,6 +306,11 @@ export const useConnectionsReviewStyles = makeStyles({
   // "New record" as a FULL-WIDTH button (owner: "+New record as a full width button").
   newRecordFullWidth: { width: '100%' },
 
+  // ── R3-CARD-2 "See all" — a subtle brand-text trigger under the candidate strip
+  //    + the vertical list of compact candidate rows inside the modal body. ──
+  seeAllBtn: { alignSelf: 'flex-start', paddingInline: 0, color: tokens.colorBrandForeground1 },
+  seeAllList: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS, minWidth: 0 },
+
   // ── Shared affordances ──
   actionsRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   linkRow: {

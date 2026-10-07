@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://spaarke.dev/schemas/provisioning-arm-manifest.json",
   "title": "Provisioning ARM Artifact Manifest (provisioning-arm-{buildId}.json / provisioning-arm-latest.json)",
-  "description": "Schema for the manifest pushed alongside the CI-pre-compiled ARM-JSON artifacts (az bicep build output of infrastructure/bicep/customer.bicep + infrastructure/bicep/stacks/model1-shared.bicep) to the platform provisioning-artifacts blob container by .github/workflows/publish-provisioning-arm-artifacts.yml (customer-provisioning-orchestration-r1 task 117, Phase C'' Wave G-1, design.md DS-1b §1 H2a row / §4A). H2a's SDK-port handler (task 123, Wave G-2) reads this file to resolve the ARM JSON artifact for the run's TenancyModel, downloads it via Azure.Storage.Blobs, and passes it to Azure.ResourceManager.Resources.ArmDeploymentResource.CreateOrUpdateAsync -- because the ARM SDK deploys ARM JSON, not raw .bicep, and the L2 main-site runtime has zero shells (no bicep CLI) per DS-1b's Option D constraint (design.md §4.2a).",
+  "description": "Schema for the manifest pushed alongside the CI-pre-compiled ARM-JSON artifacts (az bicep build output of infrastructure/bicep/customer.bicep — the one template H2a deploys since task 225a retired stacks/model1-shared.bicep) to the platform provisioning-artifacts blob container by .github/workflows/publish-provisioning-arm-artifacts.yml (customer-provisioning-orchestration-r1 task 117, Phase C'' Wave G-1, design.md DS-1b §1 H2a row / §4A). H2a's SDK-port handler (task 123, Wave G-2) reads this file to resolve the ARM JSON artifact for the run's TenancyModel, downloads it via Azure.Storage.Blobs, and passes it to Azure.ResourceManager.Resources.ArmDeploymentResource.CreateOrUpdateAsync -- because the ARM SDK deploys ARM JSON, not raw .bicep, and the L2 main-site runtime has zero shells (no bicep CLI) per DS-1b's Option D constraint (design.md §4.2a).",
   "type": "object",
   "additionalProperties": false,
   "required": ["buildId", "sha", "publishedAt", "bicepCliVersion", "templates"],
@@ -14,7 +14,7 @@
     },
     "sha": {
       "type": "string",
-      "description": "Full git commit SHA (github.sha) the ARM JSON was compiled from. This is the provenance anchor for the ENTIRE Bicep source tree consumed by the compile (customer.bicep / stacks/model1-shared.bicep + every infrastructure/bicep/modules/*.bicep file each one transitively references) -- az bicep build resolves module references from the checked-out working tree at this commit, so a single repo-level sha covers all of them (no separate per-module source hash is tracked).",
+      "description": "Full git commit SHA (github.sha) the ARM JSON was compiled from. This is the provenance anchor for the ENTIRE Bicep source tree consumed by the compile (customer.bicep + every infrastructure/bicep/modules/*.bicep file it transitively references) -- az bicep build resolves module references from the checked-out working tree at this commit, so a single repo-level sha covers all of them (no separate per-module source hash is tracked).",
       "pattern": "^[0-9a-f]{40}$"
     },
     "publishedAt": {
@@ -29,16 +29,17 @@
     "templates": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["customer", "model1-shared"],
-      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.ResolveTemplatePath (the authoritative C# source: TenancyModel == 'Model1Shared' (case-insensitive) selects 'model1-shared'; every other value, including 'Model2Dedicated', falls through to the 'customer' default).",
+      "required": ["customer"],
+      "description": "One entry per Bicep template this workflow compiles. Keys are stable file-basename identifiers (NOT raw TenancyModel enum strings) so this manifest does not need to change shape if the TenancyModel vocabulary grows -- see each entry's resolutionHint for the exact selection rule H2a must apply, mirrored from Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.ResolveArmTemplateAsync (the authoritative C# source: an exhaustive switch over TenancyModel -- Model2 selects 'customer'; Model1 fails closed until tasks 225b + 228 (task 225a); any other value throws).",
       "properties": {
         "customer": {
           "$ref": "#/definitions/templateEntry",
-          "description": "Compiled from infrastructure/bicep/customer.bicep. This is the DEFAULT template -- selected whenever TenancyModel is anything other than 'Model1Shared' (currently: 'Model2Dedicated', and any future value not yet enumerated)."
+          "description": "Compiled from infrastructure/bicep/customer.bicep. Selected for TenancyModel.Model2; Model1 joins it with tasks 225b + 228 (D-12 -- both models are dedicated customer stamps)."
         },
         "model1-shared": {
           "$ref": "#/definitions/templateEntry",
-          "description": "Compiled from infrastructure/bicep/stacks/model1-shared.bicep. Selected only when TenancyModel == 'Model1Shared' (case-insensitive)."
+          "deprecated": true,
+          "description": "DEPRECATED -- retired with stacks/model1-shared.bicep by task 225a (2026-10-01). No longer published; kept OPTIONAL so manifests published before 2026-10-02 still validate (ADR-020). H2a never reads it."
         }
       }
     }
@@ -55,7 +56,7 @@
         },
         "resolutionHint": {
           "type": "string",
-          "description": "Human-readable statement of the TenancyModel selection rule for this template, kept in sync with FileBicepTemplateInspector.ResolveTemplatePath. Advisory / documentation only -- H2a's handler encodes the actual branch in code, this field lets an operator or a future audit confirm the manifest and the code still agree."
+          "description": "Human-readable statement of the TenancyModel selection rule for this template, kept in sync with ArmDeploymentRunner.ResolveArmTemplateAsync. Advisory / documentation only -- H2a's handler encodes the actual branch in code, this field lets an operator or a future audit confirm the manifest and the code still agree."
         },
         "armJsonBlobName": {
           "type": "string",

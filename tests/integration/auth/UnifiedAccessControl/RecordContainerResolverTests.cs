@@ -35,6 +35,26 @@ public class RecordContainerResolverTests
 
     private static readonly Guid RecordId = Guid.Parse("11111111-1111-1111-1111-111111111111");
 
+    /// <summary>
+    /// The entities this double's org contains (task 151). LOGICAL names only — the real registry's
+    /// known-entity set is built from metadata <c>LogicalName</c>, so it never contains an alias or an entity
+    /// SET name. <c>account</c> is deliberately included: it is a real entity that is in NO alias table, which
+    /// is what pins "a real logical name outside DocumentAssociationMap still resolves as before".
+    /// </summary>
+    private static readonly string[] OrgEntityLogicalNames =
+    [
+        "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice", "sprk_event", "sprk_todo",
+        "sprk_document", "sprk_communication", "contact", "account", "email", "businessunit", "systemuser"
+    ];
+
+    /// <summary>
+    /// The three securable roots this project names. NOTE: live dev metadata (task 151 live gate, 2026-09-30)
+    /// reports a FOURTH entity carrying <c>sprk_issecure</c> — <c>sprk_invoice</c> — which the real registry does
+    /// NOT treat as securable since task 150 (owner round 10 item 11: an invoice follows its matter;
+    /// <c>SecurableEntityRegistry.FlagIsNotASecurityInput</c>). This double's world matches that.
+    /// </summary>
+    private static readonly string[] SecurableRoots = ["sprk_project", "sprk_matter", "sprk_workassignment"];
+
     // ============================================================================================
     // FORWARD — the storage decision
     // ============================================================================================
@@ -98,6 +118,40 @@ public class RecordContainerResolverTests
             .Which.Code.Should().Be("secure_record_container_missing");
     }
 
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision (fail closed, after the NULL backfill). <c>sprk_issecure</c> is
+    /// field-secured; a column this identity cannot read comes back ABSENT, not refused. Before task 150 that read as
+    /// "not secure" and resolved the shared fallback supplied right here — the one outcome SPE cannot take back.
+    /// </summary>
+    [Theory(DisplayName = "Task 150: a securable record whose sprk_issecure is ABSENT is refused, never resolved to the fallback")]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    public async Task SecurableRecord_WithAbsentFlag_IsRefused(string entity)
+    {
+        var row = new Entity(entity, RecordId) { ["sprk_containerid"] = OwnContainer };
+        var resolver = Build(securable: SecurableRoots, record: row);
+
+        var act = async () => await resolver.ResolveForRecordAsync(
+            entity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+    }
+
+    [Fact(DisplayName = "Task 150: an explicit FALSE still resolves the fallback — only ABSENT refuses")]
+    public async Task SecurableRecord_WithExplicitFalse_StillResolvesTheFallback()
+    {
+        var resolver = Build(securable: SecurableRoots, record: Row(isSecure: false, containerId: null));
+
+        var decision = await resolver.ResolveForRecordAsync(
+            SecureProjectEntity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        decision.ContainerId.Should().Be(SharedBuContainer);
+    }
+
     [Fact(DisplayName = "Task 075: a NON-secure record still resolves through the BU cascade, unchanged")]
     public async Task NonSecureRecord_ResolvesThroughTheBusinessUnitCascade()
     {
@@ -128,17 +182,25 @@ public class RecordContainerResolverTests
         decision.ContainerId.Should().Be(SharedBuContainer);
     }
 
-    [Fact(DisplayName = "Task 075: a non-securable entity never reads the record at all")]
+    [Fact(DisplayName = "Task 075: a non-securable entity with no ancestor concept never reads the record when given a fallback")]
     public async Task NonSecurableEntity_ShortCircuits_WithoutReadingTheRecord()
     {
         // Both a correctness and a cost assertion: an entity that cannot carry sprk_issecure cannot be
         // secure, so the fallback is right AND no Dataverse round trip should be spent proving it. That is
         // what keeps this seam cheap enough to sit on every upload path.
+        //
+        // Task 155: the entity under test moved from sprk_invoice to contact. An invoice is a CHILD record —
+        // owner C10 part 2 makes every child of a secure record secure — so it can no longer be decided without
+        // reading its root link (ChildRecordContainerResolutionTests). The zero-read guarantee now belongs to
+        // entities with no ancestor concept, which is what this asserts, unchanged.
+        //
+        // Task 155 f3: moved again, contact → account. The f3 live sweep found contact's own sprk_invoice lookup,
+        // whose target can belong to a matter, so a contact must now be read. account names no root by any column.
         var entityService = Substitute.For<IGenericEntityService>();
         var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
 
         var decision = await resolver.ResolveForRecordAsync(
-            NonSecurableEntity, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+            "account", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
 
         decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
         decision.ContainerId.Should().Be(SharedBuContainer);
@@ -185,18 +247,23 @@ public class RecordContainerResolverTests
         // is not securable", every record would silently resolve to the shared fallback — the identical
         // isolation failure, with an extra step and no log line saying so.
         var registry = Substitute.For<ISecurableEntityRegistry>();
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("Dataverse metadata unavailable"));
 
         var resolver = new RecordContainerResolver(
             registry, Substitute.For<IGenericEntityService>(),
             NullLogger<RecordContainerResolver>.Instance);
 
-        var act = async () => await resolver.ResolveForRecordAsync(
-            SecureProjectEntity, RecordId, SharedBuContainer);
+        // Both a securable and a non-securable name: the single classification call is the only place either
+        // could learn its answer, so a swallowed failure would surface as a decision for one of them.
+        foreach (var name in new[] { SecureProjectEntity, NonSecurableEntity })
+        {
+            var act = async () => await resolver.ResolveForRecordAsync(name, RecordId, SharedBuContainer);
 
-        await act.Should().ThrowAsync<InvalidOperationException>(
-            "an undetermined securability answer must never resolve to a shared container");
+            await act.Should().ThrowAsync<InvalidOperationException>(
+                "an undetermined securability answer must never resolve to a shared container, nor be relabelled "
+                + "as a 400 'not an entity' the caller cannot fix");
+        }
     }
 
     [Fact(DisplayName = "Task 075: a record-read failure PROPAGATES rather than defaulting to not-secure")]
@@ -237,6 +304,221 @@ public class RecordContainerResolverTests
 
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.Code.Should().Be("container_record_not_found");
+    }
+
+    // ============================================================================================
+    // FORWARD — the entity NAME (task 151, #1038): aliases map, non-entities are refused
+    // ============================================================================================
+
+    [Theory(DisplayName = "Task 151: a SECURE record named by alias resolves to the same own container as by logical name")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("matter", "sprk_matter")]
+    [InlineData("workassignment", "sprk_workassignment")]
+    [InlineData("  Project ", "sprk_project")]
+    public async Task SecureRecord_NamedByAlias_ResolvesLikeItsLogicalName(string alias, string logicalName)
+    {
+        // #1038 itself: "project" was not in the (logical-name-keyed) securable set, so a SECURE project read as
+        // "not securable" and its content resolved to a shared container that SPE cannot un-share.
+        var byAlias = Substitute.For<IGenericEntityService>();
+        var byLogical = Substitute.For<IGenericEntityService>();
+        foreach (var svc in new[] { byAlias, byLogical })
+        {
+            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(Row(isSecure: true, containerId: OwnContainer)));
+        }
+
+        var aliasDecision = await Build(securable: SecurableRoots, entityService: byAlias)
+            .ResolveForRecordAsync(alias, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+        var logicalDecision = await Build(securable: SecurableRoots, entityService: byLogical)
+            .ResolveForRecordAsync(logicalName, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        aliasDecision.Should().Be(logicalDecision);
+        aliasDecision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        aliasDecision.ContainerId.Should().Be(OwnContainer,
+            "an alias must reach the secure branch — reading it as non-securable is the #1038 fail-open");
+
+        // The SAME record is read: the logical entity, never the alias spelling.
+        await byAlias.Received(1).RetrieveAsync(
+            logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory(DisplayName = "Task 151: a SECURE record with no container FAILS CLOSED by alias exactly as by logical name")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("matter", "sprk_matter")]
+    [InlineData("workassignment", "sprk_workassignment")]
+    public async Task SecureRecord_WithoutContainer_NamedByAlias_FailsClosedLikeItsLogicalName(
+        string alias, string logicalName)
+    {
+        foreach (var name in new[] { alias, logicalName })
+        {
+            var svc = Substitute.For<IGenericEntityService>();
+            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(Row(isSecure: true, containerId: null)));
+
+            var resolver = Build(securable: SecurableRoots, entityService: svc);
+
+            var act = async () => await resolver.ResolveForRecordAsync(
+                name, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be("secure_record_container_missing", $"'{name}' must fail closed");
+            ex.StatusCode.Should().Be(409);
+        }
+    }
+
+    [Theory(DisplayName = "Task 151: a NON-secure record named by alias resolves like its logical name")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("invoice", "sprk_invoice")]
+    [InlineData("event", "sprk_event")]
+    [InlineData("todo", "sprk_todo")]
+    public async Task NonSecureRecord_NamedByAlias_ResolvesLikeItsLogicalName(string alias, string logicalName)
+    {
+        // Covers both non-secure shapes: a securable entity whose record is not secure (project), and a
+        // non-securable entity (invoice / event / todo), which short-circuits before any record read.
+        var aliasSvc = Substitute.For<IGenericEntityService>();
+        var logicalSvc = Substitute.For<IGenericEntityService>();
+        foreach (var svc in new[] { aliasSvc, logicalSvc })
+        {
+            svc.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+                .Returns(Task.FromResult(Row(isSecure: false, containerId: null)));
+        }
+
+        var aliasDecision = await Build(securable: SecurableRoots, entityService: aliasSvc)
+            .ResolveForRecordAsync(alias, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+        var logicalDecision = await Build(securable: SecurableRoots, entityService: logicalSvc)
+            .ResolveForRecordAsync(logicalName, RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        aliasDecision.Should().Be(logicalDecision);
+        aliasDecision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        aliasDecision.ContainerId.Should().Be(SharedBuContainer);
+    }
+
+    [Theory(DisplayName = "Task 151: a real non-securable logical name resolves exactly as before with an explicit fallback (no record read)")]
+    [InlineData("account")]
+    public async Task RealNonSecurableEntity_ResolvesAsBefore(string logicalName)
+    {
+        // `account` is in NO alias table: a real logical name the shared map does not know must still resolve,
+        // because the refusal is for names that are not ENTITIES, not for names that are not ALIASES.
+        //
+        // Task 155 f3 removed the `contact` row: the live sweep found contact's own sprk_invoice lookup, whose target
+        // can belong to a matter, so a contact is now READ (and held when that lookup is set) even with a fallback —
+        // ChildRecordContainerResolutionTests.Child_UnderARootOwnedNonCoreRecord_WithNoStamp_IsRefused.
+        //
+        // Task 155 changed TWO things this theory used to pin, both deliberately:
+        //   * sprk_invoice left the data set — it is a CHILD record whose root must be read (owner C10 part 2);
+        //     ChildRecordContainerResolutionTests covers it.
+        //   * the NO-fallback leg used to assert Unresolved with no read. That was the defect: the two-argument
+        //     overload's documented contract is the RECORD's own business unit, and Unresolved is the misleading
+        //     "No storage container is configured" 409. It now reads the record —
+        //     RecordContainerResolverTests.NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit.
+        // The explicit-fallback leg below is the four-argument path, and its assertions are unchanged.
+        var entityService = Substitute.For<IGenericEntityService>();
+        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+
+        var withFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, SharedBuContainer);
+
+        withFallback.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        withFallback.ContainerId.Should().Be(SharedBuContainer);
+
+        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+    }
+
+    [Theory(DisplayName = "Task 155: with NO fallback, a non-securable entity derives the RECORD's own business-unit container (no misleading Unresolved)")]
+    [InlineData("contact")]
+    [InlineData("account")]
+    public async Task NonSecurableEntity_WithoutFallback_DerivesTheRecordsBusinessUnit(string logicalName)
+    {
+        var buId = Guid.Parse("12121212-1212-1212-1212-121212121212");
+        var entityService = Substitute.For<IGenericEntityService>();
+        entityService.RetrieveAsync(logicalName, RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity(logicalName, RecordId)
+            {
+                ["owningbusinessunit"] = new EntityReference("businessunit", buId)
+            }));
+        entityService.RetrieveAsync("businessunit", buId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("businessunit", buId) { ["sprk_containerid"] = SharedBuContainer }));
+
+        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+
+        var twoArg = await resolver.ResolveForRecordAsync(logicalName, RecordId);
+        var nullFallback = await resolver.ResolveForRecordAsync(logicalName, RecordId, null);
+
+        foreach (var decision in new[] { twoArg, nullFallback })
+        {
+            decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+            decision.ContainerId.Should().Be(SharedBuContainer);
+        }
+    }
+
+    [Theory(DisplayName = "Task 151: a name that is NOT an entity is REFUSED (400 container_entity_unknown) by both overloads — never a decision")]
+    [InlineData("not_an_entity")]
+    [InlineData("sprk_projectt")]
+    [InlineData("sprk_projects")] // an entity SET name — never mapped silently
+    [InlineData("projects")]      // an alias from neither DocumentAssociationMap nor Dataverse
+    [InlineData("organization")]  // a friendly name no alias table carries
+    public async Task UnknownEntityName_IsRefused_ByBothOverloads_WithoutReadingAnyRecord(string name)
+    {
+        var entityService = Substitute.For<IGenericEntityService>();
+        var resolver = Build(securable: SecurableRoots, entityService: entityService);
+
+        // A usable non-secure fallback is supplied on purpose: the failure being prevented is "a fallback was
+        // available and the unknown name quietly used it".
+        var withFallback = async () => await resolver.ResolveForRecordAsync(name, RecordId, SharedBuContainer);
+        var twoArg = async () => await resolver.ResolveForRecordAsync(name, RecordId);
+
+        foreach (var act in new[] { withFallback, twoArg })
+        {
+            var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+            ex.Code.Should().Be("container_entity_unknown");
+            ex.StatusCode.Should().Be(400,
+                "distinct from 404 container_record_not_found and 409 secure_record_container_missing, which "
+                + "clients branch on");
+        }
+
+        await entityService.DidNotReceiveWithAnyArgs().RetrieveAsync(default!, default, default!, default);
+    }
+
+    [Fact(DisplayName = "Task 151: the bare name 'invoice' means sprk_invoice — the alias table wins over a same-named OOB entity (stated exception to the byte-for-byte rule)")]
+    public async Task BareInvoice_ResolvesAsSprkInvoice_EvenWhenTheOrgHasTheOobInvoiceEntity()
+    {
+        // "invoice" is BOTH a DocumentAssociationMap alias (→ sprk_invoice) AND the logical name of the
+        // out-of-the-box Dynamics 365 Sales Invoice entity, present in any org with Sales installed. The
+        // byte-for-byte rule ("a real logical name resolves exactly as before") would send it to the OOB entity;
+        // the resolver deliberately lets the ALIAS win, because every Spaarke caller that says "invoice" means
+        // sprk_invoice and the route filter AUTHORIZES "invoice" against sprk_invoices — resolving it anywhere
+        // else reads a different record from the one authorized. This world therefore KNOWS the OOB "invoice"
+        // and files the sprk_invoice under a SECURE matter, so the two readings give different answers: only the
+        // alias reading follows the invoice's matter link to the secure matter's own container. (Until task 150 this
+        // test made sprk_invoice SECURABLE in its own right, as live dev's metadata has it; owner round 10 item 11
+        // ruled an invoice follows its matter, so its own flag is no longer a security input.)
+        var matterId = Guid.Parse("15015015-0000-0000-0000-0000000a11a5");
+        var svc = Substitute.For<IGenericEntityService>();
+        svc.RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_invoice", RecordId)
+            {
+                ["sprk_matter"] = new EntityReference("sprk_matter", matterId)
+            }));
+        svc.RetrieveAsync("sprk_matter", matterId, Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult(new Entity("sprk_matter", matterId)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = OwnContainer
+            }));
+
+        var resolver = Build(
+            securable: SecurableRoots,
+            entityService: svc,
+            extraKnownEntities: ["invoice"]);
+
+        var decision = await resolver.ResolveForRecordAsync("invoice", RecordId, nonSecureFallbackContainerId: SharedBuContainer);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(OwnContainer,
+            "'invoice' is sprk_invoice here; reading it as the OOB entity would route the content of an invoice under a "
+            + "secure matter to the shared fallback");
+
+        await svc.Received(1).RetrieveAsync("sprk_invoice", RecordId, Arg.Any<string[]>(), Arg.Any<CancellationToken>());
+        await svc.DidNotReceive().RetrieveAsync("invoice", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
     }
 
     // ============================================================================================
@@ -769,15 +1051,25 @@ public class RecordContainerResolverTests
         (string Entity, Guid Id, bool IsSecure)[]? claimants = null,
         IGenericEntityService? entityService = null,
         string? storedContainerOverride = null,
-        Claimant[]? explicitClaimants = null)
+        Claimant[]? explicitClaimants = null,
+        string[]? extraKnownEntities = null)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
         var set = new HashSet<string>(securable.Select(s => s.ToLowerInvariant()), StringComparer.Ordinal);
 
+        // Task 151: the org's entity catalog, keyed on LOGICAL names only — exactly as the production registry
+        // is (it is built from metadata LogicalName). An alias ("project") or an entity SET name
+        // ("sprk_projects") is therefore NOT known to this double, so a resolver that stopped mapping aliases
+        // would see its alias tests refused, and one that stopped asking would see its unknown-name tests pass
+        // through to a decision. The securable set is a subset, as in production (one query yields both).
+        var known = new HashSet<string>(OrgEntityLogicalNames, StringComparer.Ordinal);
+        known.UnionWith(set);
+        known.UnionWith(extraKnownEntities ?? []);
+
         registry.GetSecurableEntitiesAsync(Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlySet<string>>(set));
-        registry.IsSecurableAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(call => Task.FromResult(set.Contains(call.Arg<string>().ToLowerInvariant())));
+        registry.ClassifyEntityAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult(TestEntityCatalog.Classify(call.Arg<string>(), set, known)));
 
         var svc = entityService ?? Substitute.For<IGenericEntityService>();
 

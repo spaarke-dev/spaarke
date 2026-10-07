@@ -4,7 +4,7 @@
     <title>Author Cosmos DB spaarke-provisioning database + runs container schema (+ C# POCO)</title>
     <phase>C Wave C1 — Registry Schema + Cosmos Model</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new persistent data store carrying all provisioning-run state; downstream consumers (L2 REST, state-reconciler, crash recovery, §4C quarantine state) all depend on this shape — task-create Step 3.5.5 FULL (new surface + &gt;3 downstream deps + creates test-modifying dep).</rigor-reason>
     <model-tier>sonnet</model-tier>

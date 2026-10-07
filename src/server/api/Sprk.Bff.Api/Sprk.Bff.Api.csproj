@@ -49,17 +49,36 @@
          internal DataverseAuthorizationFilter / IDataversePrivilegeChecker / IFetchXmlEntityExtractor /
          EntitySource / SavedQueryService / FetchService / FetchRequestDto / SavedQueryDto types. -->
     <InternalsVisibleTo Include="Sprk.Bff.Api.IntegrationTests" />
+    <!-- CacheModule.NetworkStepsForBootedHostTests: BootedBff's Production boot (task 167 f2-v2 x master T242). -->
+    <InternalsVisibleTo Include="Spaarke.ArchTests" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Agent Framework (Phase 1 - AIPL-002, AIPL-050) - PINNED: Do NOT upgrade without testing -->
-    <!-- Microsoft.Agents.AI 1.0.0-rc1 requires Microsoft.Extensions.AI >= 10.3.0 -->
+    <!-- unified-access-control-r2 task 165, owner round 35 item 1: the SPE container → business-unit stamp's property
+         name is ONE C# constant, compiled into BOTH the BFF and the L2 control plane (which creates the H8 root
+         container) from this one source file — see its header. -->
+    <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 🔴 THREE DIFFERENT "AGENT" STACKS ARE EASY TO CONFLATE HERE. Verified 2026-09-29 (task 125):
+           * Azure.AI.Projects          = Azure AI Foundry AGENT SERVICE. USED — Services/Ai/Foundry/.
+           * Microsoft.Agents.Hosting.* = M365 AGENTS SDK (Copilot/Teams channel). USED — brings
+                                          Microsoft.Agents.Builder/.Core transitively, consumed by
+                                          Api/Agent/SpaarkeAgentHandler.cs.
+           * Microsoft.Agents.AI        = Microsoft AGENT FRAMEWORK. REMOVED 2026-09-29 (#1027) —
+                                          it had zero call sites. Nothing depended on it
+                                          (`dotnet nuget why` showed no parent), and Microsoft.Extensions.AI
+                                          is pinned DIRECTLY below, so dropping it did not move that
+                                          version. If you are tempted to re-add it, note that its
+                                          AsAIAgent() agent/thread/run loop is a DIFFERENT design from
+                                          Spaarke's hand-written SprkChatAgent + middleware pipeline. -->
+    <!-- PINNED: Do NOT upgrade without testing (Phase 1 - AIPL-002, AIPL-050) -->
     <!-- Microsoft.Extensions.AI.OpenAI 10.3.0 requires OpenAI >= 2.8.0 (added in AIPL-050 for IChatClient bridge) -->
     <PackageReference Include="Azure.AI.Projects" Version="1.0.0-beta.8" />
     <PackageReference Include="Microsoft.Agents.Hosting.AspNetCore" Version="1.0.1" />
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.3.0" />
     <PackageReference Include="Microsoft.Extensions.AI.OpenAI" Version="10.3.0" />
-    <PackageReference Include="Microsoft.Agents.AI" Version="1.0.0-rc1" />
     <!-- OpenAI pinned to 2.8.0: required by Microsoft.Extensions.AI.OpenAI 10.3.0 IChatClient bridge -->
     <PackageReference Include="OpenAI" Version="2.8.0" />
 
@@ -112,6 +131,12 @@
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.11" />
+    <!-- Microsoft Entra authentication to Azure Managed Redis (task 242, owner D12/D13): CacheModule calls
+         ConfigureForAzureWithUserAssignedManagedIdentityAsync when Redis:Endpoint is set (no key exists).
+         It needs StackExchange.Redis >= 2.10.1; pinned to the latest 2.x (OpenTelemetry.Instrumentation
+         .StackExchangeRedis requires < 3.0; Microsoft.Extensions.Caching.StackExchangeRedis floors 2.7.27). -->
+    <PackageReference Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
 
     <!-- Microsoft Graph SDK v6.x (dotnet-10-upgrade-r1 task 033, 2026-08-13): bumped 5.105.0 -> 6.5.0.
@@ -165,7 +190,6 @@
     <PackageReference Include="Polly" Version="8.7.0" />
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.8" />
-    <PackageReference Include="QuestPDF" Version="2025.12.1" />
 
     <!-- net10 retarget (task 004): System.Text.RegularExpressions AND System.Security.Cryptography.Xml
          CVE-override pins REMOVED. NU1510 confirmed the net10 framework supersedes both (framework 10.0.x
@@ -221,6 +245,15 @@
   <!-- Registration email templates embedded as resources -->
   <ItemGroup>
     <EmbeddedResource Include="Services\Registration\EmailTemplates\*.html" />
+  </ItemGroup>
+
+  <!-- unified-access-control-r2 task 145 (#1046): the Secure Record Owner role's codified table set — the ONE list at
+       config/secure-record-owner-role.json — LINKED (not copied) so the NFR-05 census (scheduled job + manual gate)
+       reads the same bytes as scripts/Set-SecureRecordOwnerRolePrivileges.ps1 and the setup guide. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\..\config\secure-record-owner-role.json"
+                      LogicalName="Sprk.Bff.Api.SecureRecordOwnerRole.json"
+                      Link="Infrastructure\Dataverse\secure-record-owner-role.json" />
   </ItemGroup>
 
   <!-- Exclude template config from publish - all config comes from Azure App Settings -->

@@ -4,7 +4,7 @@
     <title>FR-24/FR-25 — org-expansion membership term (registry-filtered, baseline-levelled) + registry filter on the systemuser fallback path</title>
     <phase>2 One definition of member</phase>
     <gate>after-037-041-042</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change adding a new access-conferring term; tags bff-api/auth.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -33,9 +33,9 @@
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="037" status="pending">Secure suppression hook the new term must route through.</dependency>
-      <dependency task="041" status="pending">The column registry + AccessConferringOnly option.</dependency>
-      <dependency task="042" status="pending">Org standing-grant baseline reader.</dependency>
+      <dependency task="037" status="completed">Secure suppression hook the new term must route through.</dependency>
+      <dependency task="041" status="completed">The column registry + AccessConferringOnly option.</dependency>
+      <dependency task="042" status="completed">Org standing-grant baseline reader.</dependency>
     </dependencies>
   </context>
 
@@ -98,6 +98,97 @@
   </acceptance-criteria>
 
   <notes>Design §4.5 terms 3-4; spec FR-24/FR-25/FR-22; register B-1/B-12; investigation 02 §3/§4.2. The standing-gated implementation choice for the org term is deliberately conservative pending the escalation's owner answer — record the outcome in notes/ and in the PR.</notes>
+
+  <completion date="2026-09-17" commit="28f833a0e">
+    Delivered design §4.5 term 4 (org expansion, standing-gated at the ORGANISATION's baseline) and
+    wired FR-24's registry filter into the systemuser membership path, closing the register A-8
+    asymmetry the contact plane never had.
+
+    PREREQUISITE THE BRIEF DID NOT NAME: MembershipResolverService.HashOptions omitted
+    AccessConferringOnly, so setting it true here would have made the AUTHORIZATION caller and the
+    SCOPING caller (MembershipEndpoints) share one 5-minute cache entry for the same
+    user+entity+limit. A scoping call landing first hands the gate the UNFILTERED descriptor set —
+    A-8 restored through Redis instead of through code. Latent only because task 041 deliberately
+    left the flag unset everywhere. Both that flag and the new OrganizationIds are now hashed.
+
+    DESIGN DECISIONS (taken, not escalated): the evaluator resolves the junction ONCE and passes the
+    org ids inward, rather than the resolver reading them (which would invert the layering and add a
+    second cache that could disagree mid-composition); the read returns an OUTCOME, not a list,
+    because the additive term and the FR-23 deny-veto subject fail in OPPOSITE directions and an
+    empty list would have silently turned the veto's fail-CLOSED into a fail-OPEN; one walk per
+    DISTINCT baseline (≤3), because one walk for all organisations could credit only a single level
+    and a record reachable solely through a View Only firm would inherit a Full Access firm's rights
+    undetectably; the org walk narrows to IdentityTypes ["Organization"] so the always-bound
+    ContactId cannot drag contact-derived records in at an organisation's level.
+
+    ESCALATION TRIGGER 1 DID NOT FIRE — the standing-gated shape this task was told to encode is what
+    shipped, and no non-standing derived term exists today. TRIGGER 2 DID NOT FIRE — no
+    MembershipResponse field was added, so the M10 wire shape is unchanged.
+
+    TWO TASK-020 CONSTRAINTS DECIDED AND RECORDED EITHER WAY (notes §4): the sprk_enddate read-side
+    asymmetry is deliberately NOT bounded, because QueryActiveOrgIdsAsync is shared by an ADDITIVE
+    caller and a VETO subject whose fail directions are inverted — one query shape cannot be right
+    for both, and a blanket date bound would make the ethical wall match FEWER subjects. Filed as an
+    owner item; exposure is currently nil (0 organisations hold a standing grant). Per-member cache
+    invalidation is also NOT added, for a different reason than 020's: the staleness that matters is
+    the resolver's own 5-minute response cache, which a junction-row invalidation would not touch —
+    ADR-034's Phase 2 pub/sub invalidator is the mechanism that actually closes it.
+
+    POML PREMISE ERRORS 18 AND 19: it cites ContactStandingGrantReader.cs, which task 042 renamed
+    SubjectStandingGrantReader.cs; and step 3 says wire the flag into "the flag-off branch of 036",
+    but 036 is open (gated behind 034) and no such branch exists — the single ResolveAsync call IS
+    the path. Its three dependency status attributes were also stale. Separately, ResolveByContactAsync's
+    own XML doc still described the RETIRED sprk_assigned* convention as the allowlist (task 041
+    deleted it); corrected in place — 12th docs-vs-reality instance.
+
+    REPLACED task 042's deliberate scope-boundary test (Times.Never on ReadForOrganizationAsync,
+    reason "task 043 owns it") with the closed set it was marking — inverted, not deleted.
+
+    STEP 9.5 CRITICAL C-1 — ESCALATED, THEN IMPLEMENTED ON THE OWNER'S DECISION (2026-09-17):
+    "implement the correct technical and user access control option; note that records will be
+    primarily owned at the team/business unit and not individual users". Turning on
+    AccessConferringOnly did not only close A-8 — it also DELETED owner/team/business-unit membership
+    from the systemuser plane, because the conferring registry can only express Contact/Organization
+    columns (FilterToAccessConferringRoles rejects anything else as malformed), making ownerid
+    INEXPRESSIBLE rather than merely unregistered. This task's OWN test had asserted the regression as
+    correct (it seeded ownerid and expected roles == {assignedAttorney}), which is how it passed
+    review-by-author. It had also already happened in production: R7 W12 task 130 recorded
+    "sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid, verified via raw SQL".
+
+    FIX: ownerid / owningteam / owningbusinessunit confer STRUCTURALLY, ahead of the registry and
+    without an entry. FR-24 exists so a MAKER-AUTHORED lookup cannot confer by naming accident; these
+    three are platform-maintained and fixed by the Dataverse data model, so there is nothing for a
+    review to protect, and being the owner IS Dataverse access — the thing this filter approximates
+    until task 036 lands. NARROW by construction: keyed on the three platform NAMES, never the
+    identity type, so a maker-authored sprk_reviewer -> systemuser still needs a reviewed entry.
+    owningteam is the load-bearing column and ownerid alone would have been a FALSE fix: discovery
+    binds the first target matching IncludedIdentityTables, which starts at systemuser, so a
+    polymorphic Owner column always resolves to SystemUser and binds the caller's own id — on a
+    team-owned record ownerid holds the TEAM's id and never matches.
+    ADR-034 Amendment A1.1 applied (CLAUDE.md 6.5 path B, owner-approved).
+
+    I OVER-WIDENED IT FIRST AND A PRE-EXISTING TEST CAUGHT ME: applied unconditionally the allowance
+    reached the contact plane, where ResolveByContactAsync_AllowlistedAssignedContactRole_
+    ReturnsMatchingRecords failed with ByRole {["owner"] = {empty}, ...} against its own NFR-05 reason.
+    A contact cannot own a Dataverse record, so those descriptors bound nothing and merely widened the
+    query. Fixed by threading includePlatformOwnership per call site (true on systemuser, false on
+    contact), keeping the contact plane byte-identical. The test's expectations were NOT touched.
+
+    VERIFICATION: BFF build 0/0 · edited classes 111/111 with every filter proven non-empty before
+    being trusted · affected namespaces 331/331 · seam + auth surfaces 197/197 (189 selected),
+    including all three StandingGrantRuntimeUnionSeamTests methods by name · ArchTests 323/323 ·
+    perturbations 13/13 CAUGHT (11 core + 2 for the C-1 platform-ownership fix) · publish 45.45 MB vs
+    re-measured master 45.35 = +0.10 MB, 214 files each side, re-measured at the final commit.
+    C1-b is the perturbation worth having: it recreates the exact over-widening committed in the first
+    cut, and the test that fails is the PRE-EXISTING NFR-05 assertion — so that invariant is genuinely
+    guarded rather than having caught me once by luck.
+
+    A VERIFICATION ERROR WORTH CARRYING FORWARD (notes §8): a filtered run reported "Failed: 0,
+    Passed: 16" for a filter that selected the WRONG 16 — tests/integration/{auth,seam}/** are
+    globbed into the UNIT csproj, not the integration one, so the seam test was never in the run. A
+    filter selecting nothing reports identically to one selecting everything. Prove the filter
+    non-empty before trusting the result.
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

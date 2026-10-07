@@ -39,7 +39,16 @@
   </Templates>
   <CommandDefinitions>
     <CommandDefinition Id="sprk.matter.subgrid.kpi.AddKpiButton.Command">
-      <EnableRules />
+      <!--
+        unified-access-control-r2 task 147 r1c (owner round 28 item 2, "E2"): this button opens the KPI assessment QUICK
+        CREATE with the matter prefilled - a create AS THE USER, owned by the user. Under a SECURE matter (or one whose flag
+        cannot be read) it is hidden, and the BFF-backed "New KPI Assessment" (SecureChildRibbons) shows instead. The rule
+        is the secure-child template's (Spaarke.SecureChild.Ribbon.nativeNewAllowed); the script itself refuses too
+        (Spaarke.KpiRibbon, defence in depth).
+      -->
+      <EnableRules>
+        <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule" />
+      </EnableRules>
       <DisplayRules />
       <Actions>
         <JavaScriptFunction Library="$webresource:sprk_/scripts/kpi_ribbon_actions.js"
@@ -52,7 +61,15 @@
   <RuleDefinitions>
     <TabDisplayRules />
     <DisplayRules />
-    <EnableRules />
+    <EnableRules>
+      <!-- Task 147 r1c: the secure-child template's rule, verbatim (infrastructure/dataverse/ribbon/SecureChildRibbons). -->
+      <EnableRule Id="sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule">
+        <CustomRule Library="$webresource:sprk_/scripts/secure_child_ribbon.js"
+                    FunctionName="Spaarke.SecureChild.Ribbon.nativeNewAllowed" Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
   </RuleDefinitions>
   <LocLabels>
     <LocLabel Id="sprk.matter.subgrid.kpi.AddKpiButton.LabelText">

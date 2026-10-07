@@ -170,7 +170,18 @@ public sealed class CommunicationRiActionService
             var threadId = threadRef?.Id ?? Guid.Empty;
             var channel = MapChannel(communication.GetAttributeValue<OptionSetValue>(CommunicationTypeField));
             var regardingId = communication.GetAttributeValue<string>(RegardingIdField);
-            var regardingType = communication.GetAttributeValue<string>(RegardingTypeField);
+            // 🔴 sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref, NOT a string. Reading it as
+            // <string> threw InvalidCastException ("Unable to cast EntityReference to System.String"), and
+            // because this whole method is wrapped in a swallow-and-log guard (NFR-05), the RI action died
+            // silently: no seam task, no outbox row, no ping, no appnotification — and the caller had already
+            // logged "AUTHORIZED executing RI action", so the logs read as a success.
+            //
+            // It could only ever throw when the field was POPULATED, which requires a RESOLVED association,
+            // which only reaches this code when the policy gate AUTHORIZES. The gate had never authorized in
+            // this environment (no sprk_communicationrule rows existed until 2026-09-29), so the defect was
+            // unreachable and therefore undiscovered from task 042 until the first authorize.
+            // Found by: App Insights exception at 18:59:21 sharing its timestamp with the AUTHORIZE trace.
+            var regardingType = ReadRegardingTypeLabel(communication);
 
             var subject = BuildActionSubject(signal);
 
@@ -178,14 +189,26 @@ public sealed class CommunicationRiActionService
             //    communication, owned by the responsible user). A Spaarke task is a sprk_event (event type = Task),
             //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
             //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
+            // 🔴 Due dates added 2026-09-29. Previously BOTH were left null, and
+            // DailyBriefingCollector's task channels read sprk_finalduedate first, fall back to sprk_duedate,
+            // and FILTER BY DATE — so every RI task ever created was outside the briefing's window and could
+            // never surface there, however correctly it was written. The day counts are DECLARED on the
+            // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
+            // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so
+            // an operator retunes the SLA by editing a row rather than shipping code.
+            var createdAtUtc = DateTime.UtcNow;
             var taskResult = await _seam.CreateTaskAsync(
                 new CreateTaskRequest
                 {
                     Subject = subject,
                     Description = BuildActionDescription(signal, decision),
+                    DueDate = createdAtUtc.AddDays(decision.TaskDueDays),
+                    FinalDueDate = createdAtUtc.AddDays(decision.TaskFinalDueDays),
                     RegardingObjectId = signal.CommunicationId,
                     RegardingObjectType = CommunicationEntity,
                     OwnerId = recipientSystemUserId,
+                    // Task 152: the task is FOR the recipient the signal was raised for — their linked contact names it.
+                    ActingUserId = recipientSystemUserId,
                 },
                 ct).ConfigureAwait(false);
 
@@ -243,6 +266,38 @@ public sealed class CommunicationRiActionService
                 "[comms-ri] RI action path failed (non-fatal) for communication {CommunicationId}.",
                 signal.CommunicationId);
         }
+    }
+
+    /// <summary>
+    /// Reads <c>sprk_communication.sprk_regardingrecordtype</c> as a display LABEL for the outbox row's
+    /// <c>sprk_regardingrecordtype</c> text column.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 <b>Added 2026-09-29 — do not "simplify" this back to <c>GetAttributeValue&lt;string&gt;</c>.</b> That
+    /// attribute is a <b>lookup to <c>sprk_recordtype_ref</c></b>, so a <c>&lt;string&gt;</c> read throws
+    /// <see cref="InvalidCastException"/> the moment it is populated — and this service's outer swallow-and-log
+    /// guard (NFR-05) turned that throw into a silent no-op for the entire RI action.
+    /// <para>
+    /// Uses the reference's formatted <c>Name</c> (e.g. "Matter"), which is what the reconciliation surfaces
+    /// already display via <c>sprk_regardingrecordtypename</c> — the outbox column is a display/type label, not
+    /// an entity logical name. Tolerates a raw string too, so an environment that models the attribute
+    /// differently degrades to the value rather than throwing. Absent/empty → <c>null</c>, which
+    /// <c>OutboxService.WriteAsync</c> already accepts.
+    /// </para>
+    /// </remarks>
+    private static string? ReadRegardingTypeLabel(Entity communication)
+    {
+        if (!communication.Contains(RegardingTypeField))
+        {
+            return null;
+        }
+
+        return communication[RegardingTypeField] switch
+        {
+            EntityReference reference => string.IsNullOrWhiteSpace(reference.Name) ? null : reference.Name,
+            string text => string.IsNullOrWhiteSpace(text) ? null : text,
+            _ => null,
+        };
     }
 
     /// <summary>

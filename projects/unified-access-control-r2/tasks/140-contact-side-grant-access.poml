@@ -1,0 +1,450 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="140" project="unified-access-control-r2">
+  <metadata>
+    <title>NEW FEATURE — contact-side Grant Access: a Collaborate/Full Access contact grants colleagues of their own organization, capped at their own level, from the external SPA</title>
+    <phase>Register-driven (authored 2026-09-30, session 27; grant-model group; C4 owner decision)</phase>
+    <gate>after-135-136-138-139-141-013</gate>
+    <status>in-progress</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New access-minting write path reachable by CIAM tokens; new routes, new endpoint filter, new Dataverse column, external SPA wiring; tags bff-api/auth/security.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>First route that lets a NON-Dataverse principal mint access; the authorization must be derived entirely from the BFF's own principal model with no Dataverse backstop, so every rule (org scope, cap, Secure/Limited/Restricted, deny list, no-downgrade) is security-critical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>grant-model</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends GrantExternalAccessEndpoint's shared grant core (modified by 138 and 139; also 137 and 142) and ExternalAccessEndpoints.cs route mapping; consumes the CallerPrincipal shape that tasks 135/136 change; edits ExternalParticipationService.cs (131, 132, 137), tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (130 and most register-driven auth tasks) and AccessGrantModal.tsx (138, 139, 066/067). Merge serially and run /conflict-check first.</parallel-reason>
+    <deps>135, 136, 138, 139, 141, 013 (131 transitively via 135)</deps>
+    <tags>bff-api, auth, security, dataverse, frontend, testing</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner decision session 27 round 1 (C4: "a contact user with collaborate or full access ... should not be prevented from using the 'grant access' feature") and round 2 Q2 ("a contact grants only to contacts of their own organization, at or below their own level, never organization-wide").</origin>
+  </metadata>
+
+  <prompt>Build contact-side Grant Access. A contact holding Collaborate or Full Access on a project, matter or work assignment may grant access to other contacts of their own organization, at or below their own level, never organization-wide, never on Restricted records, and on Secure/Limited records only by direct grant. Today contacts cannot grant at all: the management routes are workforce-only and the external SPA's "Invite User" button is dead.</prompt>
+
+  <role>SPAARKE platform developer — BFF external collaboration surface (/api/v1/external, CallerPrincipal) and the external SPA. Follow ADRs strictly.</role>
+
+  <goal>
+    (1) CIAM-reachable routes on the /api/v1/external group let a contact principal grant, list the grants they issued, and revoke them, each gated by a route-level endpoint filter that enforces the owner's contact-grantor rules.
+    (2) Grants are written through the SAME shared grant core as /grant, with expiry defaulting to today + 90 days and a contact-typed audit of who granted. Task 138's policy check (inside the core) applies unchanged, and task 139's ceiling method (applied in handlers) is called by this route's handler.
+    (3) The external SPA's Contacts tab "Invite User" works for Collaborate and Full Access contacts, offers only levels at or below theirs, and shows the grants they issued with a working Revoke.
+    (4) A manual live gate on spaarkedev1 proves the feature end to end with a CIAM contact.
+  </goal>
+
+  <context>
+    <background>
+OWNER RULES (BINDING — session 27):
+- A contact with **Collaborate or Full Access** on a record may grant; a **View Only** contact may not.
+- Grantees: **other contacts of the grantor's OWN organization only** (Q2). Never organization-wide.
+- Level: **at or below the grantor's own level** (Q1 cap).
+- **Restricted** records: no contact access at all → a contact can never grant there.
+- **Secure** records (and Limited): only named, direct grants count for contacts → the grant written is direct by construction, and the grantor's own level on such a record comes from their DIRECT grant only.
+- Expiry: a grant with no expiry gets today + 90 days (binding directive). A failed revoke returns a message, not a bare 500 (binding directive).
+
+WHY CONTACTS CANNOT GRANT TODAY (verified 2026-09-30):
+- The management group `/api/v1/external-access` (`Api/ExternalAccess/ExternalAccessEndpoints.cs:123-126`) uses the workforce default scheme + `DelegationRuleFilter`, whose check is an OBO `RetrievePrincipalAccess` (`Api/ExternalAccess/DelegationRuleFilter.cs:155-179`). A contact is not a Dataverse principal and a CIAM token cannot be exchanged OBO, so neither the scheme nor the check can ever admit a contact.
+- The collaboration group `/api/v1/external` (`ExternalAccessEndpoints.cs:54-57`, policy `AuthPolicies.ExternalCollaboration` registered at `Infrastructure/DI/AuthorizationModule.cs:351`) accepts CIAM and workforce tokens and resolves a plane-agnostic `CallerPrincipal` (`Infrastructure/ExternalAccess/CallerPrincipalResolver.cs:93-157`: `Plane`, `ContactId`, `SystemUserId`, per-root rights maps) — but has no grant route.
+- The external SPA's Contacts tab (`src/client/external-spa/src/pages/ProjectPage.tsx:279-310`) shows "Invite User" for Full Access only (`canInvite`, `src/client/external-spa/src/hooks/useAccessLevel.ts:75-78`; dialog guard `src/client/external-spa/src/components/InviteUserDialog.tsx:164-168`). It posts to `POST /api/v1/external-access/invite` (`src/client/external-spa/src/auth/bff-client.ts:310-322`), which a CIAM token cannot authenticate to, and `/invite` writes no grant anyway (`Api/ExternalAccess/InviteExternalUserEndpoint.cs:9-29`). `bff-client.ts:274-298` also carries `grantAccess`/`revokeAccess` calls to the same unreachable group. Note: `ProjectPage.tsx:282` computes its OWN `canUserInvite = accessLevel === AccessLevel.FullAccess` inline and does not call `canInvite`, so fixing `useAccessLevel.ts` alone changes nothing on screen. The mock service matches every POST under `/api/v1/external-access/` (`mocks/mock-service.ts:133-134`).
+- Only ProjectPage has a Contacts tab. The external SPA has no matter or work-assignment detail page (`src/client/external-spa/src/pages/`; WorkAssignmentsWidget is a list widget). The routes serve all three root types; the SPA wiring covers the one surface that exists. If a matter or work-assignment detail page with a Contacts tab exists at execution time, wire it too (no scope cut).
+- The grant table (`sprk_externalrecordaccess`, live metadata 2026-09-30) has `sprk_grantedby` as a SYSTEMUSER lookup only — there is no column that can record a contact grantor.
+
+REUSE MAP (CLAUDE.md §11):
+- Write core: `GrantExternalAccessEndpoint.CreateGrantAsync` (`Api/ExternalAccess/GrantExternalAccessEndpoint.cs:186-383`) — upsert, duplicate collapse, +90 default, expired-row 409, cache invalidation. After 138 it also carries the Restricted/Limited/Secure write-time policy. Task 139 puts the ceiling, never-lower and deny checks in the /grant and /invite-and-grant HANDLERS (the Q5 auto-grant of task 142 has no human grantor), so this route's handler calls the same methods.
+- Grantor level: the authorization-grade function task 139 adds (Read+Write+Delete → Full; Read+Write → Collaborate; Read → View Only). A contact's rights map is always one of R / R|C|W / R|C|W|D (`ExternalAccessLevels.ToAccessRights`, `Infrastructure/ExternalAccess/ExternalCallerContext.cs:207-213`), so the same function applies exactly.
+- The caller's rights on a root: `RightsForRoot` pattern (`Api/ExternalAccess/ExternalProjectDataEndpoints.cs:467-474`) over `CallerPrincipal` — which, after tasks 135/136 (per the orchestrator's dependency statement; re-derive their exact scope from their own POMLs), carries post-veto, rights-based answers on BOTH planes (Secure/Limited → direct grant only, Restricted → none).
+- Org membership: the ONE junction reader is `ExternalParticipationService.QueryActiveOrgIdsAsync` (public virtual, `Infrastructure/ExternalAccess/ExternalParticipationService.cs:1081`; query at `:1096-1124`). `AccessibleRecordSetService.ReadActiveOrgMembershipsAsync` (`AccessibleRecordSetService.cs:486`) only wraps it. Two properties make it unfit AS IS for a grant-eligibility decision, so extend it (a parameter or overload on the same method, not a copy):
+  1. It bounds on `statecode eq 0` only and deliberately NOT on `sprk_enddate`. notes/task-043-org-expansion-term.md §4.1 records why: the reader is shared by an additive term and a veto, whose fail directions are inverted. Eligibility to be GRANTED is additive, so it must be tightened: an ended membership does not qualify. Verify live whether the junction also carries a start-date column; if it does, bound on it too.
+  2. It swallows every fault into an EMPTY list (`:1112-1117`, `:1127-1131`), which here would read as "no organization". The contact route must distinguish a fault: 503 with a message, never 403 no_organization.
+- Deny list (No Access List): task 139 adds the narrow single-subject, single-record write-time entry point over `AccessibleRecordSetService.ResolveDenyVetoAsync` (`AccessibleRecordSetService.cs:596`; task 039 / FR-23) and the reasonCode `sdap.access.grant.grantee_denied`. Reuse both; do not add a second deny check.
+- Never-lower: task 139's refusal `sdap.access.grant.would_lower_existing` (409), reused verbatim.
+- Revoke: `ExternalGrantLifecycle` (`RetrieveRowAsync`, `DeactivateAsync`) as used by `RevokeExternalAccessEndpoint`.
+- CIAM onboarding: `InviteExternalUserEndpoint.ProvisionAsync` (cert-credential provisioner — ADR-028 A4 compliant) as composed by `InviteAndGrantExternalUserEndpoint.cs:97-98`.
+    </background>
+    <relevant-files>
+      <file role="create">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ContactGrantEndpoints.cs</file>
+      <file role="create">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ContactGrantorFilter.cs</file>
+      <file role="create">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ContactGrantDtos.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (map the routes on the /api/v1/external group)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (core accepts a contact grantor for the audit column and a no-downgrade mode)</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (register the new routes as governed)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (QueryActiveOrgIdsAsync :1081/:1096 — date-bounded, fault-distinguishing variant for grant eligibility; extend, do not copy)</file>
+      <file role="create">scripts/Deploy-ExternalRecordAccessContactGrantor.ps1 (name indicative; -DryRun default; operator-run — see the AP-13 constraint)</file>
+      <file role="modify">src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md (the new contact-typed grantor lookup + relationship)</file>
+      <file role="create">tests/integration/auth/UnifiedAccessControl/ContactGrantAuthorizationTests.cs</file>
+      <file role="modify">src/client/external-spa/src/pages/ProjectPage.tsx</file>
+      <file role="modify">src/client/external-spa/src/hooks/useAccessLevel.ts</file>
+      <file role="modify">src/client/external-spa/src/components/InviteUserDialog.tsx</file>
+      <file role="modify">src/client/external-spa/src/auth/bff-client.ts</file>
+      <file role="modify">src/client/external-spa/src/mocks/mock-service.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx (show "granted by (contact)" provenance on Current Access rows)</file>
+      <file role="modify">docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</file>
+      <file role="modify">docs/architecture/external-access-spa-architecture.md</file>
+      <file role="modify">docs/architecture/uac-access-control.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs:399-474 (rights-gated external write + RightsForRoot)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs (group-level deny-by-default filter shape to mirror for the contact filter)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="135" status="pending">Named by the orchestrator as a prerequisite (session-27 batch); expected to supply CIAM-plane veto parity so the grantor's level on the CIAM plane honours Restricted / Secure / deny. Re-derive from its POML.</dependency>
+      <dependency task="136" status="pending">Named by the orchestrator as a prerequisite (session-27 batch); expected to make external read gates rights-based so a None-rights key can never read as a grantable root. Re-derive from its POML.</dependency>
+      <dependency task="138" status="pending">Write-time Restricted / Limited / Secure policy inside the shared grant core — inherited here, not re-implemented.</dependency>
+      <dependency task="141" status="pending">C7: workforce identity binding by Entra oid. This route admits a WORKFORCE contact-only principal as a grantor, and today that principal can be resolved from an unverified email claim matched against contact.emailaddress1. That is the hijack path in session 27's C7 research and in task 013's background (WorkforcePrincipalResolver.cs:153-202 → IdentityNormalizationService.cs:242-303). Without 141, anyone whose token carries a matching email could MINT grants as that contact. This escalates an existing read-side defect into an access-minting one.</dependency>
+      <dependency task="013" status="pending">FR-12 / A-18: the workforce contact-by-email no-hijack check (depends on 141). Same reason as 141: the identity this route trusts to mint grants must not come from the email-hijack branch.</dependency>
+      <dependency task="139" status="pending">The grantor ceiling method on ExternalAccessLevels (Read+Write+Delete → Full; Read+Write → Collaborate; Read → View Only; Create/Append/AppendTo/Share not consulted), the write-time deny entry point with `sdap.access.grant.grantee_denied`, and the never-lower 409 `sdap.access.grant.would_lower_existing`, all reused here. The ceiling is applied in 139's HANDLERS, not the core, so this task's handler must apply it too.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-09-30 C4 + Q2">Scope: every new route. The caller MUST be a contact principal (CIAM contact, or workforce contact-only). A workforce SYSTEMUSER principal is refused 403 `sdap.access.contact_grant.use_manage_access` with a message pointing to Manage Access (systemusers grant through the Write-gated management group).</constraint>
+    <constraint source="owner 2026-09-30 C4">Scope: grant + revoke. The grantor's level on the target root (from the CallerPrincipal rights map, via task 139's grantor-level function) must be Collaborate or Full Access; View Only or none → 403 `sdap.access.contact_grant.level_insufficient`. Out-of-scope root and insufficient level are indistinguishable to the caller (same status, same code family), mirroring RightsForRoot's "caller cannot tell which happened".</constraint>
+    <constraint source="owner Q1">Scope: grant. The written level is capped at the grantor's level by task 139's ceiling method, called in this handler over the grantor's CallerPrincipal rights for the root (narrow, never refuse, per 139's stated decision). The response reports `grantedLevel` and `narrowed`.</constraint>
+    <constraint source="owner Q2">Scope: grant. The grantee is ONE contact; the request DTO has NO organization-grantee field (an org-wide grant is structurally impossible on this route). The grantee must be an ACTIVE contact holding an ACTIVE membership (junction statecode 0, `sprk_enddate` absent or not passed, and a start date reached if the junction carries one) in at least one organization in which the GRANTOR also holds an active membership under the same test.
+- A grantee who fails this is refused 422 `sdap.access.contact_grant.grantee_not_in_organization`.
+- A grantor with no active organization is refused 403 `sdap.access.contact_grant.no_organization`.
+- A membership read FAULT is 503 `sdap.access.contact_grant.membership_unreadable` with a message. It is never folded into no_organization or grantee_not_in_organization.
+- Self-grant is refused 400.
+- The contact route NEVER creates, alters, activates or ends a `sprk_contactorganization` row (see escalation trigger 6).</constraint>
+    <constraint source="owner round 2 item 3 / task 138">Scope: grant. Restricted → refused. After task 135 a contact's post-veto level on a Restricted root is None, so ContactGrantorFilter refuses first (403 level_insufficient). The core's 422 `sdap.access.grant.record_restricted` (task 138) is the second, independent refusal, and both are tested. Secure/Limited → allowed only because the write is a direct grant, and only when the grantor's own level there is from a direct grant (guaranteed by 135's parity; add a test that pins it).</constraint>
+    <constraint source="FR-23 (No Access List)">Scope: grant. A grantee who is on the record's No Access List (as a contact or through an organization) is refused 422 `sdap.access.grant.grantee_denied` at write time, through task 139's write-time deny entry point. It is never written and left for the read-time veto.</constraint>
+    <constraint source="project (no proxy revocation or proxy extension)">Scope: grant. A contact grantor never changes access someone else issued.
+- If the grantee has NO active row on (root × grantee), the route creates one (capped level, +90 default expiry, contact grantor stamped).
+- If the grantee has an active row that THIS caller issued (contact-grantor column = caller), the route may raise its level up to the cap and lengthen its expiry. It never lowers the level; a lower request is refused 409 `sdap.access.grant.would_lower_existing` (task 139's code). It never shortens the expiry.
+- If the grantee has an active row issued by ANYONE ELSE (a systemuser, or another contact), the route leaves it untouched: no level change, no expiry change, no re-stamp. It answers 409 `sdap.access.contact_grant.managed_elsewhere` with a message ("{name} already has access to this record that was granted by someone else; ask them or the record's team to change it").
+- Why: re-stamping a row someone else issued would let the contact then REVOKE it (revoke is issuer-scoped), which is proxy revocation. Extending its expiry would override an operator's deliberate time bound. See escalation trigger 3 for the alternative.</constraint>
+    <constraint source="owner binding directive (+90)">Scope: grant. An absent expiry defaults to today + 90 days via the shared core; a past expiry is refused 400 `sdap.access.grant.expiry_in_past` (existing ValidateRequestedExpiry).</constraint>
+    <constraint source="owner binding directive (message, not 500)">Scope: revoke. A contact may revoke only rows whose contact-grantor column is the caller, on a root where the caller still holds Collaborate or Full Access. Any failure (row not found, not theirs, Dataverse fault) returns ProblemDetails with a message and reason code — never a bare 500. Not-found and not-theirs are indistinguishable (same 404 + code) so the route is not an access-record oracle.</constraint>
+    <constraint source="ADR-008">Scope: authorization. The contact-grantor rules are enforced in a route-level endpoint filter (`ContactGrantorFilter`) attached to every new route, deny-by-default for any unmapped request type (mirror DelegationRuleFilter's default-deny switch); the handler re-validates the root it writes (a handler must not trust a pipeline it cannot see).</constraint>
+    <constraint source="ADR-028 A1 / A4 + C7">Scope: onboarding. CIAM onboarding (ProvisionAsync) runs ONLY when the grantor is on the CIAM plane; a workforce contact-only grantor may grant only to EXISTING contacts (their colleagues sign in with company SSO — identity binding is the C7 task's scope). No new `.WithClientSecret(...)` anywhere.</constraint>
+    <constraint source="DATAVERSE-WRITE-PATH-ARCHITECTURE WP-1/WP-3">Scope: the write. All grant rows go through the shared BFF core; the contact grantor is recorded in a new contact-typed lookup on sprk_externalrecordaccess (e.g. `sprk_grantedbycontact`), and `sprk_grantedby` (systemuser) stays empty for contact-issued grants. Every write logs `[EXT-CONTACT-GRANT]` with grantor contact id, grantee contact id, root type/id, requested level, granted level, narrowed, expiry.</constraint>
+    <constraint source="owner binding directive (no Dataverse test in CI)">Scope: verification. Live proof is a MANUAL gate using existing test identities; no user relocation; no CI job calling Dataverse.</constraint>
+    <constraint source="owner directive 2026-09-04 (FAILURE-MODES AP-13)">Scope: the new lookup column. On this project, schema work by the agent is CODE + DOCS only; live creation is an explicit OPERATOR step.
+- The agent authors an idempotent, `-DryRun`-default script (e.g. scripts/Deploy-ExternalRecordAccessContactGrantor.ps1). It uses the raw Web API with the `MSCRM.SolutionUniqueName` header and the `sprk` publisher, in the shape of scripts/Deploy-AccessEventEntity.ps1, and authenticates with the operator's own az/pac token (no client secret).
+- The agent never calls `mcp__dataverse__create_table`/`update_table` for it (AP-13: no publisher or solution parameter).
+- After the operator runs the script, the agent reads the column back (`mcp__dataverse__describe` or a metadata GET) and asserts the `sprk_` prefix, the contact target, and membership in the SpaarkeCore solution.
+- It updates src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/entity-schema.md.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR. Placement Justification: in BFF (CallerPrincipal, grant core and CIAM onboarding all live there; bff-extensions.md criteria). Publish size measured per CLAUDE.md §10 (fresh master + fresh branch worktrees from SHORT paths, Compress-Archive both, equal file counts, both sizes + delta); ≤60 MB; no new HIGH CVE. Unconditional route mapping ⇒ unconditional registration of everything it injects.</constraint>
+    <constraint source="ADR-038">Scope: tests. No Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor null-check tests. Every negative has a positive twin differing in exactly one input (level, org membership, flag, principal kind).</constraint>
+      <constraint source="main-session-review">Persist every contact-issued grant through 139's grant core, passing the contact grantor's effective level as the REQUIRED ceiling — never a direct write.</constraint>
+</constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md</file>
+      <file>projects/unified-access-control-r2/notes/session26-uac-defects-and-synopsis.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/external-access-spa-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="rights-gated external write" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs:433-474">RightsForRoot over CallerPrincipal; out-of-scope and insufficient rights deny through one expression.</pattern>
+      <pattern name="deny-by-default request-type filter" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs:205-286">Dispatch on the bound request type; default branch denies.</pattern>
+      <pattern name="onboard-then-grant composition" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs:46-160">Validation before onboarding; grant failure after onboarding reports a retryable message.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Confirm 135, 136, 138 and 139 have merged; re-read their outcomes (the CallerPrincipal rights semantics and the shared core's signature may have changed). Verify ADR-008's exact file name under .claude/adr/.</step>
+    <step order="1" name="Schema (prescriptive)">(a) Author the dry-run-default column script per the AP-13 constraint, and run it with -DryRun only; record the output. (b) STOP for the OPERATOR to run it for real on spaarkedev1. (c) Read the column back and assert its prefix, target and solution membership; record the metadata in notes. (d) Update the SpaarkeCore entity-schema.md for sprk_externalrecordaccess. Code that binds the new lookup must not merge before (c) passes.</step>
+    <step order="2">Extend the shared grant core to accept a contact grantor (writes the new lookup, leaves sprk_grantedby empty) and a no-downgrade / no-expiry-shortening mode used only by the contact route. /grant and /invite-and-grant behaviour must not change.</step>
+    <step order="3">Routes on the /api/v1/external group (names are the executor's, shape is binding): POST grant (root type + id, grantee email or contact id, level, optional expiry, optional first/last name for the CIAM new-person branch); GET the grants the caller issued on a root; POST revoke of one issued grant. Attach ContactGrantorFilter to all three.</step>
+    <step order="4">ContactGrantorFilter: contact principal only; grantor level ≥ Collaborate on the root; grantor has ≥1 active organization. Handler: resolve the grantee strictly within the grantor's organizations (by contact id, or by email among active org members — ambiguous match refused 409 `sdap.access.contact_grant.grantee_ambiguous`); self-grant 400; deny-list 422; then the shared core (policy → cap → upsert).</step>
+    <step order="5">New-person branch (email matches no member of the grantor's organizations): see escalation trigger 1 — implement only the owner-confirmed rule. Workforce-plane grantors never reach this branch.</step>
+    <step order="6">Revoke: issued-by-caller check, grantor level ≥ Collaborate on the root, deactivate via ExternalGrantLifecycle, cache invalidation as the core does; every failure returns a message.</step>
+    <step order="7">External SPA: canInvite = Collaborate or Full Access; the dialog offers only levels ≤ the caller's level, posts to the new route, renders server refusal messages verbatim, and reports narrowing; the Contacts tab lists the caller's issued grants with Revoke; remove or repoint the dead `/api/v1/external-access/*` calls in bff-client.ts and the mock service.</step>
+    <step order="8">Manage Access (AccessGrantModal): Current Access rows for contact-issued grants show "granted by {contact}"; systemusers can still revoke them with the existing /revoke.
+- Task 066 (open) rebases Current Access onto task 064's record-access report, with provenance per row. If 064/066 have merged, carry the contact grantor as a field of the report DTO and render it in 066's row model.
+- If they have not, add it to the current row model (grant list read) and record in notes that 064/066 must carry it. The main session amends 066 accordingly.
+- Do not build a second provenance mechanism.</step>
+    <step order="9">Tests (scope = acceptance criteria): ContactGrantAuthorizationTests (new, tests/integration/auth/UnifiedAccessControl/, KEEP path) for every allow/deny rule; RouteAuthorizationGuardTests registration.</step>
+    <step order="10">Docs: EXTERNAL-ACCESS-SPA-GUIDE.md, external-access-spa-architecture.md, uac-access-control.md — contact-side granting rules, routes, audit column, revoke semantics.</step>
+    <step order="11">Build + suites; external-spa `npm run build` + `npm run lint`; publish size + CVE per constraints.</step>
+    <step order="12" name="Manual live gate">Deploy BFF (bff-deploy) and the external SPA (power-page-deploy or its current deployment skill) to dev; run the live gate below; record in notes/task-140-contact-side-grant.md.</step>
+    <step order="13">Update TASK-INDEX.md: set this task's status cell to `✅ [done]`. Document deviations in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>1. NEW-PERSON INVITES (open owner question — Q2 covered "contacts of their own organization" but not people who are not yet contacts). Before implementing the branch where the email matches no existing member of the grantor's organizations, STOP and obtain the owner's rule.
+- This question is bound to trigger 6. Making a new person "a contact of the grantor's organization" means CREATING a `sprk_contactorganization` membership, and trigger 6 recommends that contacts may NOT create memberships.
+- Recommended default: REFUSE the new-person branch on this route with 422 `sdap.access.contact_grant.grantee_not_in_organization` and a message ("{email} is not yet a member of your organization in this system; ask the record's team to add them").
+- Alternative, only if the owner answers YES to trigger 6: allow it on the CIAM plane only, when the email's domain equals the grantor organization's `sprk_organization.sprk_domain` (non-empty). It creates the contact plus an active membership and onboards via ProvisionAsync, knowingly widening every organization-wide grant to that organization.
+- The existing-member branch ships regardless.</trigger>
+    <trigger>2. GRANTOR-LEVEL SOURCE ON STANDARD RECORDS (open owner question). The owner said "a contact with Collaborate or Full Access" without saying whether access derived from an ORGANIZATION grant or a STANDING grant counts.
+- Recommendation, implemented by default: the caller's effective post-veto level. On Secure/Limited that is necessarily the direct grant; on Standard it includes organization and standing access, because the owner's rule is about the level a contact HOLDS.
+- If the owner answers "direct grants only", STOP and switch the filter to the direct level rather than improvising.</trigger>
+    <trigger>3. GRANT LIFETIME AND OWNERSHIP VS GRANTOR (open owner question). Three questions:
+- (i) May a contact-issued grant carry an expiry later than the grantor's own grant?
+- (ii) Does it survive the grantor losing access?
+- (iii) May a contact raise a colleague's EXISTING grant that someone else issued? This task refuses it with managed_elsewhere.
+Recommendation:
+- (i) Cap the issued expiry at the grantor's own effective expiry when the grantor's level rests on a dated grant, so a grantor cannot hand out time they do not hold (the time analogue of owner Q1).
+- (ii) No automatic cascade. Issued rows stand on their own, carry the contact-grantor column, and are visible and revocable in Manage Access.
+- (iii) Keep the refusal.
+This task implements (ii) and (iii) as recommended and the binding +90 default. For (i), STOP and ask before shipping. Whatever the owner decides is added HERE, not in a follow-up.</trigger>
+    <trigger>4a. If task 141 (oid binding) or task 013 (no-hijack) has not merged, STOP before enabling the workforce contact-only grantor path. Do not ship it by relying on "dev has no such principals" (contact.azureactivedirectoryobjectid is absent in dev, so every Type-2 employee is 403 there today). The hijack path exists wherever that column exists but is empty.</trigger>
+    <trigger>4. If tasks 135/136 have not delivered CIAM-plane veto parity and rights-based gates, STOP: without them a CIAM contact's level on a Restricted or Secure root can be wrong, and this route would mint access from that wrong level.</trigger>
+    <trigger>5. If adr-check flags the CIAM-reachable access-minting route against ADR-028 (plane rules) or ADR-008, surface it per CLAUDE.md §6.5 as path A/B/C with this POML's rationale — do not move the route onto the workforce-only management group. (ADR-028 A3 already requires plane-agnostic routes on the one ExternalCollaboration group and forbids a second workforce entry point, so this placement is expected to be path C, comply.)</trigger>
+    <trigger>6. ORGANIZATION MEMBERSHIPS (open owner question, raised 2026-09-30 by the orchestrator): may an external contact create or alter ORGANIZATION MEMBERSHIPS (`sprk_contactorganization`), for example to add a colleague to their firm?
+- Recommendation: NO.
+- A membership is not a grant on one record. It silently widens EVERY organization-wide grant made to that organization, on every record, and also feeds org-expansion and the deny-list's organization match. That would let one contact multiply access far beyond "at or below their own level on this record" (owner Q1/Q2).
+- Membership stays an internal (systemuser / admin) action.
+- This task implements the recommendation: no route or code path here writes `sprk_contactorganization` (asserted). If the owner answers YES, STOP and re-scope with trigger 1's alternative; do not add membership writes silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Grant writes: GrantExternalAccessEndpoint /grant and InviteAndGrantExternalUserEndpoint /invite-and-grant (Api/ExternalAccess/, mapped on the management group at ExternalAccessEndpoints.cs:123-155). Contact-principal writes: ExternalProjectDataEndpoints (todos/documents/events, ExternalAccessEndpoints.cs:92) — no grant route (grep `MapPost` in ExternalProjectDataEndpoints.cs → only todos, documents, events). Audit column: sprk_externalrecordaccess.sprk_grantedby is a systemuser lookup (live metadata 2026-09-30); no contact-typed grantor column exists.</existing>
+    <extension>The write logic IS extended (the shared CreateGrantAsync core — no second writer). The ROUTES cannot join the /api/v1/external-access group: its scheme is workforce-only and its DelegationRuleFilter requires an OBO RetrievePrincipalAccess, which a contact (not a Dataverse principal, CIAM token not OBO-exchangeable) can never pass; making that admin group dual-scheme would expose every admin mutation to CIAM tokens. The filter is new because DelegationRuleFilter's check is the wrong question for a contact; its shape is copied from it. The lookup is new because sprk_grantedby cannot reference a contact. The column script is new because no script adds a column to sprk_externalrecordaccess (scripts/Deploy-AccessEventEntity.ps1 deploys a different entity); it copies that script's shape. The membership eligibility check EXTENDS QueryActiveOrgIdsAsync rather than adding a reader.</extension>
+    <cost-of-doing-nothing>The owner-mandated capability does not exist: a Full Access or Collaborate contact who clicks "Invite User" gets an authentication failure (bff-client.ts:317-322 posts to a route CIAM cannot reach) and, even if it were reachable, /invite writes no grant. Without the contact-typed grantor column a contact-issued grant has no record of who issued it, so "revoke only what you granted" cannot be enforced and the audit trail for an external user minting access is empty.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ContactGrantEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ContactGrantorFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs</output>
+    <output type="code">src/client/external-spa/src/components/InviteUserDialog.tsx</output>
+    <output type="code">src/client/external-spa/src/pages/ProjectPage.tsx</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/ContactGrantAuthorizationTests.cs</output>
+    <output type="docs">docs/guides/EXTERNAL-ACCESS-SPA-GUIDE.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-140-contact-side-grant.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A CIAM contact with a Collaborate grant on project P grants a colleague (active member of the grantor's organization) Collaborate: 200, one sprk_externalrecordaccess row for the colleague on P at Collaborate, contact-grantor column = the caller, sprk_grantedby empty, expiry = today + 90 when none was sent.</criterion>
+    <criterion testable="true">Cap: the same Collaborate grantor requesting Full Access writes Collaborate and returns `narrowed = true`; a Full Access grantor requesting Full Access gets Full Access.</criterion>
+    <criterion testable="true">View Only grantor → 403 `sdap.access.contact_grant.level_insufficient`, no write; a caller with no access to the root gets the same response (indistinguishable).</criterion>
+    <criterion testable="true">A workforce SYSTEMUSER principal calling any new route → 403 `sdap.access.contact_grant.use_manage_access`, no write. This includes a systemuser that ALSO carries a linked contact id (task 141's user↔contact link): the principal kind decides, not the presence of a ContactId. Unauthenticated → 401.</criterion>
+    <criterion testable="true">Organization scope:
+- a grantee not an active member of any of the grantor's active organizations → 422 `sdap.access.contact_grant.grantee_not_in_organization`, no write, with twins covering an inactive (statecode 1) membership and an ENDED (`sprk_enddate` past) membership;
+- a grantor with no active organization → 403 `sdap.access.contact_grant.no_organization`;
+- a membership read fault → 503 `sdap.access.contact_grant.membership_unreadable` with a message, not no_organization;
+- self-grant → 400;
+- no code path on this route writes `sprk_contactorganization` (asserted: the Dataverse double records no create or update on that entity set).</criterion>
+    <criterion testable="true">The request DTO has no organization-grantee member AND rejects unknown members. System.Text.Json IGNORES unknown properties by default, so omitting the member alone would silently accept `organizationId` and ignore it. Mark the DTO `[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]`, or reject explicitly. A body carrying `organizationId` (with or without a contact) is rejected 400, and nothing is written (asserted end-to-end through the route, not on the DTO type alone).</criterion>
+    <criterion testable="true">Restricted root → refused, no write. Because the grantor's own post-veto level there is None, the filter answers 403 `sdap.access.contact_grant.level_insufficient` first. The core's 422 `sdap.access.grant.record_restricted` (task 138) is ALSO asserted by calling the handler's write path with a Restricted flag fixture past the filter, so the core refusal is proven reachable and not just shadowed.</criterion>
+    <criterion testable="true">Grantee on the record's No Access List (directly or via organization) → 422 `sdap.access.grant.grantee_denied` (task 139's code and entry point), no write.</criterion>
+    <criterion testable="true">Someone else's access is never changed:
+- a grantee holding an active row issued by a systemuser (or by another contact) → 409 `sdap.access.contact_grant.managed_elsewhere`, row unchanged (level, expiry and both grantor columns identical before and after);
+- on a row the caller issued: a higher request (within the cap) raises it; a lower request → 409 `sdap.access.grant.would_lower_existing`, row unchanged; an earlier expiry never shortens it.</criterion>
+    <criterion testable="true">Secure and Limited roots: a contact whose ONLY access is an organization-inherited grant cannot grant (level from direct grants only → none, 403 level_insufficient); a contact with a direct Collaborate grant on the same root can. Asserted for a Secure root AND for a Limited root.</criterion>
+    <criterion testable="true">Past expiry → 400 `sdap.access.grant.expiry_in_past`, no write.</criterion>
+    <criterion testable="true">Ambiguous email (two active org members share it) → 409 `sdap.access.contact_grant.grantee_ambiguous`, no write.</criterion>
+    <criterion testable="true">Workforce contact-only grantor: granting an existing colleague works; the new-person branch is unreachable (no ProvisionAsync call, asserted).</criterion>
+    <criterion testable="true">List: returns only the grants the caller issued on that root; another contact's issued grants are not returned.</criterion>
+    <criterion testable="true">Revoke: the caller revokes a grant they issued → row deactivated, 200; a grant issued by someone else or a non-existent id → identical 404 `sdap.access.contact_grant.not_found` (same body shape, so not an access-record oracle); a Dataverse fault → ProblemDetails with a message and reasonCode `sdap.access.contact_grant.revoke_failed` (never a bare 500); a grantor whose own level fell to View Only can no longer revoke (403).</criterion>
+    <criterion testable="true">ContactGrantorFilter denies an unmapped request type by default (test with a route bound to an unknown DTO); the new routes are registered as governed in RouteAuthorizationGuardTests.</criterion>
+    <criterion testable="true">/grant and /invite-and-grant behaviour is unchanged by the core extension (their existing suites green without edits for this reason).</criterion>
+    <criterion testable="true">External SPA: "Invite User" is shown for Collaborate and Full Access and hidden for View Only. Asserted by rendering ProjectPage's Contacts tab, not only the `canInvite` helper: ProjectPage.tsx:282 has its own inline check, and InviteUserDialog.tsx:167-170 has a FullAccess-only guard that must also change. The dialog offers only levels ≤ the caller's; no code path in external-spa calls `/api/v1/external-access/*`; `npm run build` and `npm run lint` pass.</criterion>
+    <criterion testable="true">Manage Access shows contact-issued grants with their contact grantor; a systemuser can revoke them.</criterion>
+    <criterion testable="true">Build green; BFF unit + integration + ArchTests green; publish size reported per CLAUDE.md §10 (both absolute sizes, delta, tool, equal file counts) and ≤60 MB; no new HIGH CVE.</criterion>
+    <criterion testable="false">MANUAL LIVE GATE (spaarkedev1, existing test identities incl. a CIAM contact; no user relocation): (a) a CIAM contact with Collaborate on a Standard project invites an existing colleague of their organization at Collaborate from the SPA; the colleague signs in and sees the project; (b) the same contact tries Full Access → Collaborate written, narrowed notice shown; (c) after a Write-holder switches that project to Restricted, the contact no longer sees it in the SPA and a direct API grant call is refused (403 level_insufficient); (d) a View Only contact sees no Invite button and a direct API call is refused; (e) the grantor revokes the colleague's grant from the SPA and the colleague loses the project within the cache TTL; (f) the row shows the contact grantor in Manage Access, and a systemuser revokes a second contact-issued grant from there; (g) inviting a contact of a DIFFERENT organization is refused with the grantee_not_in_organization message; (h) inviting a colleague who already holds a systemuser-issued grant is refused with the managed_elsewhere message and their row is unchanged. Recorded in notes/task-140-contact-side-grant.md.</criterion>
+    <criterion testable="true">Test scope: cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>New feature required by the owner's C4 answer (session27-owner-decisions-and-research.md round 1 "C4", round 2 item 3, Q1, Q2) and the session 27 C4 research ("Contacts cannot grant at all … needs a new contact-side grant path"). Related defects: C4 (grant model), C1/C2 (plane parity + rights gates, via 135/136), C5 (cache invalidation keyed on the caller's tid: a CIAM grantor invalidates under the CIAM tid, which is right for a CIAM grantee and wrong for a workforce-plane grantee; task 137 (C5) owns that keying, so record the interaction in notes), C7 (task 141, workforce contact identity: why workforce-plane grantors cannot onboard). Open owner questions are escalation triggers 1, 2, 3 and 6 (6 = contacts may not create/alter org memberships; recommended NO and implemented as NO). The external SPA is also the Teams-tab host (ADR-028 A2, one shared standalone-MSAL module), so the SPA wiring covers Teams. Hot-path: BFF Y, SpaarkeAi N, ci-workflows N, skill-directives N, root-CLAUDE.md N.
+
+Review 2026-09-30 (adversarial). Provenance: this file was NOT written by the grant-model author, and was reviewed with that in mind. Deps confirmed as 135, 136, 138, 139 (131 transitively).
+
+Fixes:
+- The schema step moved to an operator-run script per the owner's 2026-09-04 directive (AP-13).
+- The membership reader was corrected to ExternalParticipationService.QueryActiveOrgIdsAsync, date-bounded and fault-distinguishing.
+- The deny, never-lower and ceiling semantics were aligned with task 139's binding codes.
+- Proxy revocation/extension via rows issued by someone else is closed (managed_elsewhere).
+- The DTO unknown-member 400 was made real (System.Text.Json ignores unknown members by default).
+- The Restricted refusal order was made explicit.
+- Provenance display was coordinated with 064/066.
+- The org-membership owner question was added.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor (opus); code-review and adr-check at Step 9.5; every new guard seeded and restored.</protocol>
+    <outcome date="2026-10-04" branch="task/uac-r2-140-x1" base="integ/uac-r2-batch4 @ 6b685f0d4" status="code-complete; operator schema gate G-140-1 (Deploy-ExternalRecordAccessContactGrantor.ps1 -Apply then -Verify) and the criterion-20 manual live gate G-140-2 are pending (main session). Merge gate: the BFF selects sprk_grantedbycontact on every grant read, so it must not deploy where G-140-1 has not passed.">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md.
+      - Owner decisions applied: C4, Q1 (3b), Q2, round 3 G1 (a) (no new persons, no membership writes), G2 (i) expiry cap at the
+        grantor's dated access, (ii) no cascade, (iii) managed_elsewhere; G3 (a) effective post-veto level; round 13 item 4
+        (Unverifiable No Access = 503 fault). Escalation triggers 1, 2, 3, 6 answered by round 3; 4, 4a, 5 did not fire.
+      - Routes on /api/v1/external (ADR-028 A3): POST /contact-grants, GET /contact-grants, POST /contact-grants/revoke, each with
+        ContactGrantorAuthorizationFilter (contact principal; Collaborate/Full on the record; active organization to grant;
+        default-deny), handlers re-validate. Writes through the ONE core in contact-issuer mode with GrantCeiling.FromContactGrantorRights.
+      - Core extension (optional trailing ContactGrantIssuer): issuer stamp sprk_grantedbycontact (sprk_grantedby empty), expiry cap,
+        managed_elsewhere, never lower / never shorten own row, race collapse over own rows only; default mode: a systemuser CHANGING
+        a contact-issued row takes it over (contact stamp cleared). /grant and /invite-and-grant behaviour otherwise unchanged.
+      - Membership eligibility reuses task 109's ReadOrganizationMembershipsAsync (conferring = statecode 0 + start/end dates current +
+        active organization; faults reported) — no extension needed.
+      - Schema: scripts/Deploy-ExternalRecordAccessContactGrantor.ps1 (dry run / -Apply / -Verify; FLS writable only by the BFF);
+        dry run on spaarkedev1 recorded; entity-schema.md updated.
+      - SPA: Invite User for Collaborate + Full; levels at or below the caller; server messages verbatim; issued-grants list with
+        Revoke; dead management-group calls removed. vitest + eslint made runnable (fixed 10 pre-existing rules-of-hooks errors).
+      - Manage Access: "Granted by {contact} (external contact)"; TrackingFieldTrio v1.0.35 (5 locations + build:prod bundle).
+      - Placement: BFF; no new DI registration, package or job. Publish +0.03 MB (46.00 to 46.03 MB, Compress-Archive, 212 = 212
+        files). No vulnerable BFF package.
+      - Tests: ContactGrantAuthorizationTests + ContactGrantRouteTests (host), ContactGrantGuardTests, RouteAuthorizationGuardTests
+        census 122 to 123, SPA vitest 12, modal jest 2; RecordShareExpiryTests' live-column list gained the new column (the
+        deploy-order hazard, by design). 22 BFF + 6 SPA + 1 modal seeded violations each went red.
+    </outcome>
+    <outcome date="2026-10-04" round="r-final (after the machine restart)" branch="task/uac-r2-140-x1-v1c" base="wip/uac-r2-140-x1-v1-restart @ c1210b9da" status="code-complete; every verifier r1 item closed in code; G-140-1 (operator schema -Apply then -Verify) and G-140-2 (criterion 21 manual live gate) remain the pending manual gates (main session; exact commands in the task note section 5).">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md section 11.
+      - The WIP restart commit was reviewed, built and kept; its untested parts were completed.
+      - Round 34 item 3 (BINDING): POST set-record-share-expiry takes every contact-issued share over in its ONE transaction
+        (sprk_grantedbycontact cleared via DBNull.Value, sprk_grantedby = the caller's systemuser when it resolves);
+        IGenericEntityService.BulkUpdateAsync now clears on DBNull.Value (UpdateAsync's convention). The core's take-over
+        stamp is now under test. Writers enumerated: core + set-record-share-expiry change active rows (both take over);
+        /revoke, project closure and the reconciliation job deactivate (out of every contact path); no Spaarke role holds
+        prvWrite on sprk_externalrecordaccess (live read-only). [CORRECTED in round v1c-v1, see the next outcome: the
+        reconciliation job does not only deactivate - its R1 stamps an expiry onto an ACTIVE undated row and keeps
+        sprk_grantedbycontact; session 27 round 42 item 2 decides what it does to a contact-issued row.]
+      - G-140-1 false negative closed: the script's step (d) uses scripts/common/DataverseSolutionMembership.ps1 with the
+        table's MetadataId (live read-only probe: a column of sprk_externalrecordaccess has no own solutioncomponents row and
+        reads ViaTable); pinned by a new ContactGrantGuardTests fact. .NOTES test reference corrected.
+      - Grantee resolution strictly within the grantor's organizations (POML step 4): by email through the new
+        ExternalParticipationService.FindConferringMembersByEmailAsync (scoped junction read, chunked, live-verified query);
+        by id one uniform 422 ("This person"), no stored email echoed, the same reads for every id.
+      - External SPA: the six pre-existing tsc errors fixed (one was a real display defect in OutsideCounselDashboard), the
+        one lint warning fixed, npm run typecheck added.
+      Placement (CLAUDE.md section 10): BFF, inside the existing ExternalParticipationService / ExternalGrantLifecycle /
+      SetRecordShareExpiryEndpoint; no new endpoint, DI registration, option, job, column, PCF or package.
+      Justification (CLAUDE.md section 11) for the new surface:
+      (a) FindConferringMembersByEmailAsync (+ its pure projection, filter builder and row types). Existing:
+          IContactIdentityStore.FindActiveContactsByEmailAsync (system-wide, two rows), ReadOrganizationMembershipsAsync (one
+          contact's memberships), FindWallMemberContactsAsync (one organization's WALL set, ids only). Extension: none can
+          answer "active members of THESE organizations who use THIS email" under the conferring rule; it lives beside them
+          in the same service and reuses ProjectOrganizationMemberships, WallMembershipStateClause, OrganizationMembershipSelect
+          and OrganizationStateExpand. Cost of doing nothing: POML step 4 violated; a colleague is refused 409 when an outsider
+          shares the address, and the answer discloses that outsider.
+      (b) ExternalGrantLifecycle.AddInternalTakeOverFields + two logical-name constants. Existing: the core's Web API
+          take-over (@odata.bind). Extension: the SDK bulk path needs logical names and an EntityReference, a different wire
+          shape; one helper beside the existing names. Cost of doing nothing: round 34 item 3 unimplemented.
+      (c) external-spa "typecheck" npm script. Existing: none. Cost of doing nothing: the tsc gate is not runnable and the
+          errors it found had accumulated unseen.
+      - The full ArchTests run found the new junction read tripping task 109's guard
+        (ExternalAccessQueryIntegrityGuardTests: membership-junction queries build their $filter through a named builder).
+        The guard was extended to the third direction ((organizations, email) -&gt; colleagues): BuildColleagueByEmailFilter
+        is accepted, required to be found, and its body held to the wall rule (WallMembershipStateClause, no date column).
+        ColleagueByEmailWireTests (3) pin the production read on the wire over an in-memory server (exact filter, paging,
+        live row shape, faulted page = Failed, chunks).
+      Tests (KEEP paths): ContactGrantAuthorizationTests +3 (core stamp; cross-surface share-expiry theory x2) and the by-id
+      theory extended; RecordShareExpiryTests +3; ColleagueByEmailWireTests +3; ContactGrantGuardTests +1 fact; the task-109
+      junction guard extended; SPA vitest +1. 17 BFF + 5 ArchTests + 1 SPA seeded violations each went red, each restored.
+    </outcome>
+    <outcome date="2026-10-05" round="v1c-v1 (verifier v1c; session 27 round 42)" branch="task/uac-r2-140-x1-v1c-v1" base="task/uac-r2-140-x1-v1c @ 2c2bcb232" status="code-complete; verifier v1c items 1-14 closed in code, tests and docs (round 42 items 1 and 2 implemented); G-140-1 (operator schema -Apply then -Verify) and G-140-2 (criterion 21 manual live gate) remain the pending manual gates (main session; task note sections 5, 6 and 12).">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md section 12.
+      - Round 42 item 1 (BINDING, option A): every contact-path write to a row the contact checked was its own is
+        CONDITIONAL on the version that read returned (@odata.etag as If-Match, new DataverseWebApiClient.UpdateIfMatchAsync):
+        the core's contact-issuer PATCH, the contact revoke's deactivation, and both contact-issuer duplicate collapses
+        (ExternalGrantLifecycle.DeactivateIfUnchangedAsync). HTTP 412 -&gt; 409 managed_elsewhere with the existing copy, the
+        row re-read (logged; GrantUpsertOutcome.ChangedRowNow), no retry. A revoke that had already ended another of the
+        caller's rows says so (PartlyManagedElsewhereDetail); a collapse leaves a taken-over duplicate; a row read without a
+        version is never written unconditionally. managed_elsewhere's ProblemDetails title corrected; the SPA's issued-grants
+        list re-reads after a refused revoke.
+      - Round 42 item 2 (BINDING): reconciliation R1 on a CONTACT-issued row with no expiry stamps the EARLIER of +90 and the
+        issuing contact's own grant on the record (at the row's level or above), DEACTIVATES it when the issuer holds none
+        there, keeps sprk_grantedbycontact, and reports each such row; judged as the run leaves the table (plain-R1 stamps,
+        R2 ends, contact-issued chains in dependency order, cycles fail closed); a fault leaves the row unchanged (run
+        partial). "The issuer's own grant" is ONE definition shared with the contact route's expiry cap
+        (ExternalGrantLifecycle.ReadContactHeldGrantsAsync, extracted from ContactGrantEndpoints).
+      - The three statements that said the job only deactivates are corrected (uac-access-control.md, note section 11
+        item 2, the previous outcome), and entity-schema.md + the job's class doc now say what R1 does.
+      - DISCOVERED and FIXED (pre-existing since task 023, on master too): sprk_expiresdate is DateOnly-format but
+        TimeZoneIndependent, so the Web API returns "2026-12-10T00:00:00Z" (read live, read-only); ExternalGrantRow's
+        DateOnly property threw on it, so every read of a dated grant row failed (/grant re-grant, /revoke,
+        set-record-share-expiry, and every contact grant/list/revoke). DataverseDateOnlyJsonConverter reads both shapes;
+        pinned by GrantRowWireTests over the real client. FAILURE-MODES entry recommended (exact text in note 12.7).
+      Placement (CLAUDE.md section 10): BFF + one method on the shared Spaarke.Dataverse client the grant code already uses.
+      No new endpoint, DI registration, option, job, column, PCF or package; the job resolves the already-registered
+      DataverseWebApiClient and ExternalParticipationService from its run scope, only when a contact-issued undated row exists.
+      Justification (CLAUDE.md section 11) for the new surface — full table in note 12.2:
+      (a) DataverseWebApiClient.UpdateIfMatchAsync. Existing: UpdateAsync (unconditional, upserts),
+          DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync (another client, logical-name keyed, long version).
+          Extension: UpdateAsync cannot gain a parameter without breaking every overriding double; same exception contract as
+          the existing conditional method. Cost of doing nothing: round 42 item 1 cannot be implemented.
+      (b) DataverseDateOnlyJsonConverter. Existing: System.Text.Json's DateOnly converter (the defect). Cost: every dated
+          grant-row read throws.
+      (c) ExternalGrantRow.ETag; ExternalGrantLifecycle.DeactivateIfUnchangedAsync + ConditionalDeactivation +
+          ReReadChangedRowsAsync. Existing: DeactivateAsync, whose callers are internal decisions and stay unconditional.
+          Cost: the revoke/collapse race stays open.
+      (d) ExternalGrantLifecycle.ReadContactHeldGrantsAsync + ContactHeldGrants: extracted, not new logic. Cost: two
+          definitions of "the contact's own grant" would drift.
+      (e) R1's contact-issued resolution and report types inside ExternalAccessReconciliationJob: it IS R1 (no new rule,
+          schedule or job). Cost: round 42 item 2 unimplemented.
+      Tests (KEEP paths): ContactGrantAuthorizationTests +12 (six one-input twin pairs), GrantRowWireTests 10 (new),
+      ExternalAccessReconciliationTests +16, ContactGrantGuardTests +2 (one theory), SPA vitest +1.
+      Seeds (each alone, restored and touched): 13 BFF race seeds + 1 ArchTest + 1 SPA, 10 R1 seeds (J2 re-seeded once after a
+      compile error), 2 shared-reader seeds, 1 wire-shape seed (the converter removed reproduces the production JsonException
+      through the real client) - every one went red (note 12.4).
+      Suites (final code, once): BFF unit 15536 passed / 0 failed / 54 skipped (15590); ArchTests 605/605;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed (428); external SPA
+      typecheck 0 errors, vitest 14/14, lint 0 problems, vite build green.
+      Publish (CLAUDE.md section 10, fresh exported trees at short paths, Compress-Archive Optimal incl. PDBs): task base
+      6b685f0d4 46.00 MB, round base 2c2bcb232 46.03 MB, this round 46.05 MB - +0.01 MB this round, +0.04 MB for the task,
+      212 = 212 = 212 files; no package change; no vulnerable BFF package.
+    </outcome>
+    <outcome date="2026-10-05" round="v1c-v2 (re-verification of v1c-v1; session 27 round 50)" branch="task/uac-r2-140-x1-v1c-v2" base="task/uac-r2-140-x1-v1c-v1 @ 55d84c474" status="code-complete; verifier items 1, 2 and 43 closed with tests that bite (V6, V11); round 50 item 2 implemented (sprk_grantedbycontactid); round 50 item 1 is the master hotfix lane's; G-140-1 (operator schema -Apply then -Verify, now also creating, securing and backfilling sprk_grantedbycontactid) and G-140-2 (criterion 21 manual live gate) remain the pending manual gates (main session; task note sections 5, 6 and 13).">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md section 13.
+      - Item 1 (V6): R1_AnIssuersOwnRow_IsJudgedAsThisRunLeavesIt gains the DATED twin (the issuer's own row carries +200 and R2
+        ends it this run) - the only shape in which the R2 check in Effective() decides deactivate over +90. Seed V6: 1 red.
+      - Item 2 (V11): new theory R1_AnIssuersUndatedRowThisRunDidNotPlan_LeavesTheRowItIssuedUnchanged_AndTheRunPartial
+        (created after the scan / beyond a truncated scan): the row is left unchanged, reported Unresolved, the run partial.
+        Seed V11 (the guard made runtime-false; removing it is CS8321): 2 red.
+      - Round 50 item 2 (BINDING): sprk_grantedbycontactid, the issuing contact's id as text (ExternalGrantLifecycle.
+        ContactIssuerProvenance), set and cleared in the SAME write as sprk_grantedbycontact by every writer: the contact
+        grant's create; the core's take-over (ExternalGrantLifecycle.AddInternalTakeOverBinds, moved beside the SDK twin
+        AddInternalTakeOverFields that set-record-share-expiry uses) - a row whose issuer was already deleted is taken over
+        too. The collapses write neither column. R1: an UNDATED row recording an issuer whose lookup is empty is deactivated
+        with no read, reported IssuerDeleted, its provenance kept, and decided with the run (a row its grantee issued ends in
+        the same run); an unparseable provenance ends it too (fail closed); a dated one stands (G2 (ii)). The schema script
+        gains (a2) the column, (c) its lock, (d) its solution membership and (f) the backfill (If-Match per row; 412 left for a
+        re-run; -Verify fails while any row lacks it), the backfill's decision and write rule in
+        scripts/common/GrantProvenanceBackfill.ps1. Live read-only: dry run and -Verify run; no live write.
+      Placement (CLAUDE.md section 10): BFF + the existing task-140 schema script. No new endpoint, DI registration, option,
+      job, PCF or package. One new COLUMN.
+      Justification (CLAUDE.md section 11) - full table in note 13.2:
+      (a) Column sprk_grantedbycontactid. Existing: the lookup sprk_grantedbycontact. Extension: the lookup cannot outlive
+          the row it points to (Delete RemoveLink; Restrict blocks privacy deletions; a cascade is ruled out by G2 (ii)).
+          Cost of doing nothing: a deleted contact's undated grant looks internally issued and R1 stamps it +90.
+      (b) ExternalGrantRow.GrantedByContactProvenance/IsContactIssued, ExternalGrantLifecycle.GrantedByContactIdAttribute/
+          ContactIssuerProvenance: the one row shape and constant set, extended. Cost: no one text form to read or write.
+      (c) ExternalGrantLifecycle.AddInternalTakeOverBinds: MOVED from the core (no new behaviour beyond the provenance clear).
+          Cost: the take-over would leave the provenance and R1 would end an internal user's grant.
+      (d) R1's IssuerDeleted outcome: it IS R1. Cost: round 50 item 2 unimplemented.
+      (e) scripts/common/GrantProvenanceBackfill.ps1: part of the script, extracted so it runs offline. Cost: the backfill
+          first runs untested at a live -Apply.
+      Tests (KEEP paths): ExternalAccessReconciliationTests +8 cases (and its fake now serves rows projected to the FetchXML
+      select), ContactGrantAuthorizationTests +2 (3 extended), RecordShareExpiryTests +1 (2 extended),
+      GrantProvenanceBackfillScriptTests 4 (new; the helper run in pwsh), ContactGrantGuardTests +2 facts (1 updated).
+      Seeds (each alone, restored and touched, trees verified byte-identical): V6, V11, P1-P11 (BFF), B1-B7 (the backfill
+      helper), A1-A4 (ArchTests) - every one went red (note 13.4).
+      Suites (final code, once): BFF unit 15550 passed / 1 failed / 54 skipped (15605; +15 = this round's tests) - the one
+      failure, StandaloneChatContextEndpointsTests.GetStandaloneContext_WithSprkDocument_Returns200_WithEmptyContextFields,
+      is contention (client aborted after 2 m 47 s while other suites and a publish ran; untouched code); its class re-run
+      alone: 19/19. ArchTests 607/607; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25
+      skipped / 0 failed (428). No client code changed this round.
+      Publish (fresh exported trees at short paths, Compress-Archive Optimal incl. PDBs): round base 55d84c474 46.05 MB
+      (48,282,235 bytes), this round 6f85d67cb 46.05 MB (48,283,101 bytes) - +866 bytes; 212 = 212 files; no package change; no
+      vulnerable BFF package.
+    </outcome>
+  </execution>
+  <ui-tests>
+    <test name="A Full Access contact grants a colleague in their own organization">
+      <steps>
+        <step>In the external SPA, signed in as a CIAM test contact holding Full Access on a project, open the project and choose Invite / Grant Access for another contact of the same organization at Collaborate.</step>
+      </steps>
+      <expected>The colleague appears in the project's access list at Collaborate with an expiry (default +90 days) and "granted by" showing the contact; the colleague can open the project after sign-in.</expected>
+    </test>
+    <test name="A View Only contact cannot grant">
+      <steps>
+        <step>Sign in to the external SPA as a contact holding View Only on a project.</step>
+      </steps>
+      <expected>The grant/invite action is not offered (or is disabled with the reason); calling the route directly returns the documented refusal.</expected>
+    </test>
+    <test name="Out-of-organization, above-level and organization-wide grants are refused">
+      <steps>
+        <step>As a Collaborate contact, try to grant (a) a contact of another organization, (b) Full Access, (c) the whole organization.</step>
+      </steps>
+      <expected>(a) and (c) are refused with the server's message; (b) is refused or capped exactly as the POML specifies, with the message shown. No grant row is written for a refusal.</expected>
+    </test>
+  </ui-tests>
+  <amendments>
+    <amendment n="R3" date="2026-09-30" source="owner round 3 (session27 note) — BINDING">(A1) The grantor-level cap for contact-issued grants is awaiting owner confirmation (the owner questioned rule 1 in round 3) — keep it as an escalation trigger until answered; the View-only-cannot-grant rule is unaffected.</amendment>
+  </amendments>
+  <amendments>
+    <amendment n="R3b" date="2026-10-01" source="owner round 3b (session27 note) — BINDING">A1 SETTLED: contact-issued grants are capped at the contact grantor's own level (owner round 3b). The R3 escalation on the cap is resolved.</amendment>
+  </amendments>
+</task>

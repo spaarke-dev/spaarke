@@ -5,6 +5,16 @@
 > **Status**: Current
 > **Solution**: Spaarke (Dataverse) — `sprk_ispinned` shipped in the `SpaarkeCore` unmanaged solution
 
+> **2026-10-02 (unified-access-control-r2 task 138, owner decision Q6)**: `sprk_communication.sprk_accesspermission` is **RETIRED** — see **Access Permission — inherited from the parent (retired column)** below.
+
+## Access Permission — inherited from the parent (retired column)
+
+**Rule (owner Q6, 2026-09-30, binding):** a communication has **no Access Permission of its own**. Its effective permission is its **parent root's** — the `sprk_project`, `sprk_matter` or `sprk_workassignment` reached through the `sprk_regarding{core}` ancestor link that `CoreAncestorResolver` stamps (`Services/Dataverse/CoreAncestorResolver.cs`). That root's `sprk_accesspermission` (Standard / Limited / Restricted) and `sprk_issecure` decide which contacts may reach the communication; no client or server code may substitute a value read from the communication itself.
+
+- **Contact coverage of communications** (UAC-r2 task 056, as amended) MUST take the permission from the parent root's flags — `ExternalParticipationService.GetRootRecordFlagsAsync` on the ancestor — exactly as the root's own read does: Restricted removes contact access; Limited or Secure admit only named, direct grants.
+- **The retired column** `sprk_accesspermission` (Picklist, unmanaged, never read by the BFF — its flag sources are the three roots only) is removed by the operator-run, dry-run-default, idempotent script [`scripts/Retire-CommunicationAccessPermission.ps1`](../../scripts/Retire-CommunicationAccessPermission.ps1). It strips form, view and Copilot form-fill references first, then deletes the column. Live scan 2026-10-01 (spaarkedev1): no form, view, workflow or plugin step referenced it; one unmanaged `aiskillconfig` (FormFillFieldOptOut) depended on it; 99 rows held Standard (100000000), nothing else.
+- **Code:** the Email workspace no longer reads or writes it (`EMAIL_TRACKING_FIELDS` carries Monitor and High Priority only), and the TrackingFieldTrio PCF's `accessPermission` property is optional (v1.0.32) so the control can sit on a form without the column.
+
 > **2026-07-21 (R3 task 040)**: Added `sprk_communicationthread.sprk_ispinned` (Boolean/Two Options, default `false`) — additive pin/favorite flag for FR-24. See the new **Communication Thread — Pin Field** section below. This doc does not yet catalog the rest of the `sprk_communicationthread` entity's columns (out of scope for task 040 — flagged, not invented; the entity itself predates R3).
 
 > **2026-07-20 (R3 task 006)**: Added `100000004: Message` to `sprk_communicationtype` (matches shipped `CommunicationType.cs` enum). Added the R1 messaging columns that were verified in code and/or the as-built schema but missing from this doc: `sprk_acsmessageid`, `sprk_acsthreadid`, `sprk_communicationthread` (message → thread lookup), `sprk_isinternalonly`, `sprk_privilegeclassification`, and `sprk_isprivate` (present in the as-built schema per `projects/messaging-communication-app-r1/notes/messaging-schema-spec.md`, but not yet consumed by any BFF code path as of this correction — flagged, not invented).

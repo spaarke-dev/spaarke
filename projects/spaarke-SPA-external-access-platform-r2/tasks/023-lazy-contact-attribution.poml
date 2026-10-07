@@ -4,7 +4,9 @@
     <title>Lazy Contact attribution (resolve-or-create by workforce oid on first attributed action)</title>
     <phase>P2 Access-control + entitlement</phase>
     <gate>blocked-until:021</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>2026-10-01 (UAC-r2 141 verifier fix round): marked completed as UAC-r2 141 step 10 instructed, because the CODE is delivered there. It is not yet LIVE: UAC-r2 141's manual gates (schema, acct claim, tenant setting, deploy) are pending, and the alternate-key-vs-field-security question is decided (UAC-r2 owner round 4 item 4, 2026-10-01: B2, the key on an unsecured mirror column sprk_externalobjectidkey; UAC-r2 notes/task-141-identity-binding.md §9). A consumer must treat the requester contact as possibly null until the gates run.</status-note>
+    <completed-by>unified-access-control-r2 task 141 (2026-10-01, branch task/uac-r2-141)</completed-by>
     <rigor>FULL</rigor>
     <rigor-reason>Tag `bff-api`; modifies `.cs` on the shared external-access surface; broadens an oid-binding field with cross-plane implications — FULL per CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,6 +84,13 @@
     <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size + delta vs 46.90 MB baseline is reported and ≤60 MB; BFF suite passes; no new HIGH CVE.</criterion>
   </acceptance-criteria>
   <notes>This task delivers the MECHANISM; the P3 intake-submit endpoint is the first real caller. The field-broadening (CIAM-or-workforce oid on `sprk_externalobjectid`) is per spec Assumption — oids are globally unique so one field serves both planes. Reuse `ResolveOrCreateContactAsync`/bind-oid verbatim; this is not a re-implementation.</notes>
+  <closure>
+    <delivered-by>unified-access-control-r2 task 141 (GitHub #1064), "Workforce identity binding by Entra oid".</delivered-by>
+    <summary>Delivered by unified-access-control-r2 task 141. The mechanism this task describes was built there as part of a wider identity-binding rewrite: a workforce caller binds to a contact by Entra oid in contact.sprk_externalobjectid (one field, both planes, plus a plane marker sprk_identityplane), with exactly one contact per oid (owner decision B2, UAC-r2 round 4 item 4: the alternate key sits on an unsecured mirror column sprk_externalobjectidkey written with the binding in one request, because Dataverse refuses a key on the field-secured binding; until the schema gate runs, contact creation denies and two contacts on one oid always deny — UAC-r2 notes/task-141-identity-binding.md §9). No ContactAttributionService was added. The writer is ContactIdentityBinder (Infrastructure/ExternalAccess/ContactIdentityBinder.cs) and the read-side contract is projects/unified-access-control-r2/notes/141-link-contract.md.</summary>
+    <supersedes>Per owner round 2 item 4 and Q3 (unified-access-control-r2 session27-owner-decisions-and-research.md), a contact is created at the FIRST SIGN-IN of a member of a configured customer workforce tenant, not at the first attributed action. This supersedes FR-11's wording "no Contact is created merely by having access". The creation grants nothing: access still comes only from Dataverse (systemusers) or explicit grants (contacts). Acceptance criterion 3 of this task (no contact on access only) is therefore retired by owner decision, not met.</supersedes>
+    <escalation-answered>The cross-plane collision trigger of this task was answered by the owner: refuse and flag, never merge and never re-bind (round 2 item 4; I2 = (1) for a licensed user's existing link).</escalation-answered>
+    <remaining-with-spa-r2>The P3 intake-submit requester wiring stays with SPA-r2, as its consumer of this mechanism. It should take the requester from the resolved workforce principal's ContactId (WorkforcePrincipalResolution.ContactId) and must not resolve a contact by email. See notes/task-023-delivered-by-uac-r2-141.md.</remaining-with-spa-r2>
+  </closure>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate at Step 9.5.</protocol>

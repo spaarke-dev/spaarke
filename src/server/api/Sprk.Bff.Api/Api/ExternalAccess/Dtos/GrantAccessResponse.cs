@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+
 namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 
 /// <summary>
@@ -5,6 +7,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </summary>
 /// <param name="AccessRecordId">The ID of the created sprk_externalrecordaccess record.</param>
 /// <param name="SpeContainerMembershipGranted">Whether the Contact was successfully added to the SPE container.</param>
+/// <param name="GrantedAccessLevel">
+/// The level actually written — the requested level capped at the caller's own level on the record (task 139, owner
+/// Q1: every grant is capped at the grantor's level). Additive; older clients ignore it.
+/// </param>
+/// <param name="Narrowed">
+/// <c>true</c> when the caller's own level was below the requested one, so the grant was written at
+/// <paramref name="GrantedAccessLevel"/> instead (task 139). Additive.
+/// </param>
 public record GrantAccessResponse(
     Guid AccessRecordId,
-    bool SpeContainerMembershipGranted);
+    bool SpeContainerMembershipGranted,
+    ExternalAccessLevel? GrantedAccessLevel = null,
+    bool Narrowed = false);

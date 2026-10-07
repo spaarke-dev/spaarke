@@ -207,7 +207,8 @@ jobs:
   # Job 3 — full-unit-tests (Debug only — spec MUST §125 forbids Release until
   # after 7-day soak per CICD-075).
   #
-  # TIMEOUT: 30 min (was 6, raised 2026-08-24 by unified-access-control-r2).
+  # TIMEOUT HISTORY: 6 -> 30 min (2026-08-24, unified-access-control-r2) -> sharded, 40 min
+  # per shard (2026-10-05, see SHARDED below). The 30-min reasoning is kept as history.
   # The old 6 was authored against a "<3 min" budget the suite has long outgrown
   # and was structurally unreachable: on windows-latest the overhead BEFORE a
   # single test runs is ~4m23s (measured, run 32744675143 → Checkout w/
@@ -234,21 +235,52 @@ jobs:
   # redden `CI / Router` (see ci-router.yml router-result), so headroom is free
   # while a too-tight value costs the signal entirely. Re-tune from observed p95
   # once green runs accumulate.
+  #
+  # SHARDED 2026-10-05 (customer-provisioning-orchestration-r1). The 30-minute
+  # guard above stopped being reachable: Sprk.Bff.Api.Tests alone took 48m50s on
+  # master (legacy SDAP CI run 37319731281, 14,306 tests; it was ~20 min on
+  # 2026-09-21), so this job was cancelled on every run and Tier 2 reported
+  # nothing. Raising the timeout was rejected: the Router waits on tier2, so a
+  # ~60-minute job would make every merge wait an hour. Time is dominated by tests
+  # that boot a full BFF host (~4 CPU-seconds per warm host; 193 test-minutes in
+  # all on a 4-core runner), so the cure is parallel runners, not a bigger wall.
+  #
+  # The four shards are namespace filters over FullyQualifiedName. Shards 1-3 name
+  # namespaces; `rest` is the complement of all of them, so a test in a new
+  # namespace (or a new test project) always runs somewhere. Simulated against
+  # every test in master's 2026-10-05 TRX: 16,553 tests, each in exactly one
+  # shard; shares 25.0 / 24.9 / 27.3 / 22.8 % of test time. Rebalance by moving a
+  # namespace between the named shards and its exclusion into `rest`/`api-seam`
+  # - never by listing it in two shards.
+  #
+  # Each shard writes its own verdict; `full-unit-tests` (below) aggregates them,
+  # so the PR comment keeps one line and a cancelled or crashed shard reads as a
+  # failure, never as green.
   # ============================================================================
-  full-unit-tests:
-    name: Full Unit Tests (Debug)
+  full-unit-tests-shard:
+    name: Full Unit Tests (Debug) / ${{ matrix.shard }}
     runs-on: windows-latest
     if: ${{ inputs.run-unit-tests != 'false' }}
     continue-on-error: true
-    timeout-minutes: 30
-    outputs:
-      result: ${{ steps.report.outputs.result }}
+    # Runaway guard: expected ~18 min per shard (~13-14 min of tests + ~4.5 min setup).
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         # Debug-only is BINDING through Phase 2 per spec MUST §125 / FR-B07.
         # Restore Release here ONLY after surviving suite green >= 7 days (CICD-075).
         configuration: [Debug]
+        # KEEP IN SYNC with the shard list in `full-unit-tests` (the aggregator).
+        shard: [api-office, api-insights-integration, api-seam, rest]
+        include:
+          - shard: api-office
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
+          - shard: api-insights-integration
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-seam
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
+          - shard: rest
+            filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -306,6 +338,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ matrix.filter }}" `
             --logger "trx;LogFilePrefix=tier2-pass1" `
             --results-directory ./TestResults/tier2/pass1
 
@@ -329,16 +362,55 @@ jobs:
         id: verdict
         shell: pwsh
         run: |
+          # The shard verdict: pass = pass 1 clean, or every pass-1 failure passed on
+          # retry. A failure in both passes, a test that was not re-run, a crash,
+          # or a red pass 1 with no failed test to retry (build/host crash) = fail.
+          function Write-Verdict([string]$v) {
+            "verdict=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            New-Item -ItemType Directory -Force -Path ./TestResults/verdict | Out-Null
+            Set-Content -Path "./TestResults/verdict/verdict-${{ matrix.configuration }}-${{ matrix.shard }}.txt" -Value $v -NoNewline
+          }
+          # Pass 1 must itself be sound, whatever the retry says: a test host that
+          # crashed or aborted (no test marked Failed) and a shard whose filter matched
+          # no test at all (a namespace typo exits 0) are both failures, never green.
+          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
+          $p1 = @(Get-ChildItem -Path ./TestResults/tier2/pass1 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
+          $p1Count = 0; $p1Aborted = @()
+          foreach ($t in $p1) {
+            $x = [xml](Get-Content $t.FullName -Raw)
+            $n = New-Object System.Xml.XmlNamespaceManager $x.NameTable; $n.AddNamespace("x", $nsUri)
+            $p1Count += $x.SelectNodes("//x:UnitTestResult", $n).Count
+            $summaryOutcome = $x.SelectSingleNode("//x:ResultSummary", $n).GetAttribute("outcome")
+            $runErrors = @($x.SelectNodes("//x:RunInfos/x:RunInfo[@outcome='Error']/x:Text", $n) | Where-Object { $_.InnerText -match 'abort|crash' })
+            if ($summaryOutcome -in @('Error', 'Aborted', 'Timeout') -or $runErrors.Count -gt 0) { $p1Aborted += $t.Name }
+          }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "Shard **${{ matrix.shard }}**: $p1Count test result(s) in pass 1."
+          if ($p1Count -eq 0) {
+            Write-Host "::warning::Pass 1 ran no test at all — the shard filter matched nothing (namespace typo?) or dotnet test crashed"
+            Write-Verdict "fail"
+            exit 0
+          }
+          if ($p1Aborted.Count -gt 0) {
+            Write-Host "::warning::Pass 1 test run aborted or crashed in: $($p1Aborted -join ', ')"
+            Write-Verdict "fail"
+            exit 0
+          }
           if ("${{ steps.classify.outputs.retry_needed }}" -ne "true") {
-            Write-Host "Pass 1 clean — full suite green"
+            if ("${{ steps.tests.outcome }}" -eq "success") {
+              Write-Host "Pass 1 clean — shard green"
+              Write-Verdict "pass"
+            } else {
+              Write-Host "::warning::Pass 1 failed with no failed test to retry — dotnet test likely crashed"
+              Write-Verdict "fail"
+            }
             exit 0
           }
           $trx = @(Get-ChildItem -Path ./TestResults/tier2/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
           if ($trx.Count -eq 0) {
             Write-Host "::warning::Pass 2 produced no TRX — dotnet test likely crashed"
+            Write-Verdict "fail"
             exit 0
           }
-          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
           $stillFailing = @()
           $executed = New-Object System.Collections.Generic.List[string]
           foreach ($t in $trx) {
@@ -362,25 +434,86 @@ jobs:
           } else {
             Write-Host "All pass-1 failures passed on retry — no real failures"
           }
+          if ($stillFailing.Count -gt 0 -or $notReRun.Count -gt 0) { Write-Verdict "fail" } else { Write-Verdict "pass" }
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: tier2-unit-test-results-${{ matrix.configuration }}
+          name: tier2-unit-test-results-${{ matrix.configuration }}-${{ matrix.shard }}
           path: ./TestResults/tier2/
           if-no-files-found: warn
 
+      - name: Upload shard verdict
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier2-unit-verdict-${{ matrix.configuration }}-${{ matrix.shard }}
+          path: ./TestResults/verdict/
+          if-no-files-found: ignore
+
+  # ============================================================================
+  # Job 3b — full-unit-tests: aggregates the shard verdicts into the ONE result
+  # the PR comment reads. A shard with no verdict (cancelled at its timeout, or
+  # crashed before the verdict step) counts as a failure.
+  # ============================================================================
+  full-unit-tests:
+    name: Full Unit Tests (Debug)
+    runs-on: ubuntu-latest
+    needs: full-unit-tests-shard
+    if: ${{ always() && needs.full-unit-tests-shard.result != 'skipped' }}
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Download shard verdicts
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: tier2-unit-verdict-*
+          path: ./verdicts
+          merge-multiple: true
+
       - name: Report result
         id: report
-        if: always()
+        shell: bash
         run: |
-          if ("${{ steps.tests.outcome }}" -eq "success") {
-            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } else {
-            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          }
-        shell: pwsh
+          # KEEP IN SYNC with the `shard` list in full-unit-tests-shard's matrix.
+          if [ "${{ needs.full-unit-tests-shard.result }}" = "cancelled" ]; then
+            echo "::warning::the shard job was cancelled — no verdict"
+            echo "result=cancelled" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Expected = every configuration x shard of the matrix. A verdict file outside
+          # this set means the matrix gained a shard this list lacks: fail, never skip it.
+          expected=""
+          for config in Debug; do
+            for shard in api-office api-insights-integration api-seam rest; do
+              expected="$expected verdict-$config-$shard.txt"
+            done
+          done
+          result=pass
+          for name in $expected; do
+            f="./verdicts/$name"
+            if [ ! -f "$f" ]; then
+              echo "::warning::$name missing (shard cancelled or crashed)"
+              result=fail
+            elif [ "$(cat "$f")" != "pass" ]; then
+              echo "::warning::$name: $(cat "$f")"
+              result=fail
+            else
+              echo "$name: pass"
+            fi
+          done
+          for f in ./verdicts/verdict-*.txt; do
+            [ -e "$f" ] || continue
+            case " $expected " in
+              *" $(basename "$f") "*) ;;
+              *) echo "::warning::$(basename "$f") is not in this job's shard list — update it to match the matrix"; result=fail ;;
+            esac
+          done
+          echo "result=$result" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # Job 4 — adr-compliance (NetArchTest full suite). Budget: <60s.
@@ -389,8 +522,10 @@ jobs:
     name: ADR Compliance (NetArchTest)
     runs-on: ubuntu-latest
     if: ${{ inputs.run-adr-compliance != 'false' }}
+    # TIMEOUT 3 -> 5 min (2026-10-07): the arch suite grew to 806 tests in #1312 and now runs
+    # 2m50s-3m35s, so the 3-min kill (conclusion=CANCELLED, not failure) hit ~half of runs. Owner-approved 2026-10-07.
     continue-on-error: true
-    timeout-minutes: 3
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:
@@ -699,6 +834,7 @@ jobs:
             // failure, not a pass, so an infrastructure fault is never read as green).
             function fmt(name, result, outputResult) {
               if (outputResult === 'skip') return `- ⏭️ **${name}**: pending (CICD-044 follow-up)`;
+              if (outputResult === 'cancelled') return `- ⚪ **${name}**: cancelled`;
               if (result === 'skipped') return `- ⏭️ **${name}**: skipped`;
               if (result === 'cancelled') return `- ⚪ **${name}**: cancelled`;
               if (outputResult === 'pass') return `- ✅ **${name}**: pass`;
@@ -729,7 +865,7 @@ jobs:
             comment += '### How to investigate\n\n';
             comment += '- View per-job logs in the [Actions tab](../actions).\n';
             comment += '- Run locally: `dotnet test`, `dotnet format whitespace --verify-no-changes`, `npx prettier --check`, `npx eslint .`.\n';
-            comment += '- Tier 2 budget: **p95 ≤ 8 min** (spec NFR-02). If consistently over budget, file an issue tagged `ci-tier2-budget`.\n\n';
+            comment += '- Tier 2 budget: **p95 ≤ 8 min** per job (spec NFR-02); the full unit-test run is split into 4 parallel shards of ~11–15 min each and is the known exception. If consistently over budget, file an issue tagged `ci-tier2-budget`.\n\n';
             comment += '_Generated by `.github/workflows/ci-tier2-advisory.yml`._\n';
 
             // ----------------------------------------------------------------

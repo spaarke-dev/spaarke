@@ -11,7 +11,8 @@ Creating a new PCF; touching the `ControlManifest.Input.xml` `<resources>` block
 
 1. `knowledge/fluent-ui-v9/samples/PowerApps-Samples_FluentThemingAPIControl/FluentThemingAPIControl/components/` — Microsoft's canonical reference (4 examples, one per approach)
 2. `knowledge/fluent-ui-v9/samples/PowerApps-Samples_FluentThemingAPIControl/FluentThemingAPIControl/ControlManifest.Input.xml` — the `<platform-library>` declarations
-3. `src/client/pcf/UniversalDatasetGrid/control/index.ts` — Spaarke's working reference using approach #1 (platform Fluent v9)
+3. `src/client/pcf/VisualHost/control/index.ts` — Spaarke's working reference using approach #1 (platform Fluent v9)
+   <!-- Corrected 2026-09-01: was the DELETED UniversalDatasetGrid/control/index.ts. -->
 4. Drill-down only if needed: `knowledge/fluent-ui-v9/docs/pcf-modern-theming.md`
 
 ## Constraints

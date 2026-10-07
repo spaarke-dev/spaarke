@@ -24,11 +24,12 @@
       "@shared/*": ["shared/*"],
       "@outlook/*": ["outlook/*"],
       "@word/*": ["word/*"],
+      "@spaarke/ui-components/guid": ["../shared/Spaarke.UI.Components/src/utils/guid"],
       "@spaarke/communication-components/logic/connections/provenance": [
         "../shared/Spaarke.Communication.Components/src/logic/connections/provenance"
       ]
     },
-    "types": ["office-js", "node", "jest"]
+    "types": ["office-js", "node", "jest", "@testing-library/jest-dom"]
   },
   "include": [
     "shared/**/*.ts",

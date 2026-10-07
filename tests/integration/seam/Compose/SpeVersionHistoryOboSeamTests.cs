@@ -1,5 +1,13 @@
 // Task 050 (spaarkeai-compose-r6, Phase 5, spec FR-07 / Success Criterion 4) — through-the-wire
-// seam slice for the user-context (OBO) document version-history endpoint pair:
+// seam slice for the document version-history endpoint pair.
+//
+// ⚠️ UPDATED by unified-access-control-r2 task 171 (owner round 69 — broker-only): the routes now read
+// APP-ONLY after the per-document gate and the document-pointer check. The OBO list this file once
+// pinned worked only for a caller holding a container role, which per-record secure containers never
+// grant. The file name keeps its history; the assertions below pin the APP-ONLY contract.
+//
+//   GET /api/documents/{documentId}/versions                       (list, metadata)
+//   GET /api/documents/{documentId}/versions/{versionId}/content   (open prior, bytes)
 //
 //   GET /api/documents/{documentId}/versions                       (list, metadata)
 //   GET /api/documents/{documentId}/versions/{versionId}/content   (open prior, bytes)
@@ -35,17 +43,17 @@
 //
 //   (1) LIST — the endpoint returns the version-metadata projection (id/label, lastModified
 //       timestamp, size — VersionInfoDto) resolved through the USER-CONTEXT facade method
-//       (`ListFileVersionsAsUserAsync`, which runs on the caller's OBO token underneath), with the
-//       AUTHENTICATED HttpContext threaded through, and NEVER touches any app-only facade method.
+//       (`ListFileVersionsAsync`, APP-ONLY since task 171, after the gate and the pointer check), and
+//       NEVER runs as the user.
 //   (2) SERVER-DERIVED POINTER (task 079) — the drive/item handed to SPE come off the AUTHORIZED
 //       document ROW, not from the URL. The caller names a document; it cannot name an SPE item.
 //   (3) OPEN PRIOR — with v3 and v4 both existing, opening v3 streams v3's EXACT bytes (not v4's),
-//       via the existing OBO primitive `DownloadFileVersionAsUserAsync` (task 002 inventory row 4)
+//       via the app-only `DownloadFileVersionAsync` (task 171; the OBO twin it replaced was task 002 row 4)
 //       — and an unknown versionId yields 404, not someone else's bytes.
 //   (4) NEGATIVE SCOPE — the surface is READ-ONLY: a full list+open round trip invokes NO
 //       write-shaped facade method (no ReplaceFileContentAsUserAsync, no UploadSmall*), and no
 //       restore/branch route exists (POST .../restoreVersion → 404).
-//   (5) SPE DENIAL IS STILL HONOURED, as defence in depth BEHIND the gate — a facade
+//   (5) SPE DENIAL IS STILL HONOURED (now of the BFF identity) BEHIND the gate — a facade
 //       UnauthorizedAccessException still yields 403 and never the bytes.
 //   (6) The DELETED drive-keyed pair is not routed.
 //
@@ -103,14 +111,9 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
             new(Id: "3.0", ETag: null, LastModifiedDateTime: v3Modified, Size: 1024),
         };
 
-        // Capture the auth state INSIDE the request (the HttpContext is disposed once the
-        // response completes, so it cannot be inspected afterwards).
-        bool? facadeReceivedAuthenticatedUser = null;
         _fixture.SpeMock
-            .Setup(s => s.ListFileVersionsAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, CancellationToken>((ctx, _, _, _) =>
-                facadeReceivedAuthenticatedUser = ctx?.User?.Identity?.IsAuthenticated)
+            .Setup(s => s.ListFileVersionsAsync(
+                DriveId, ItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(metadata);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -130,26 +133,18 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         returned[1].Size.Should().Be(1024);
         returned[1].LastModifiedDateTime.Should().Be(v3Modified);
 
-        // The USER-CONTEXT facade method carried the request's AUTHENTICATED HttpContext — the
-        // handle the OBO token exchange (IGraphClientFactory.ForUserAsync) runs on underneath.
-        //
         // task 079: the (DriveId, ItemId) matched here came off the AUTHORIZED DOCUMENT ROW. The
         // request URL contained only a document id, so this Verify is simultaneously the proof that
-        // the SPE pointer is server-derived and no longer caller-supplied.
+        // the SPE pointer is server-derived and no longer caller-supplied. Task 171: the read is APP-ONLY.
         _fixture.SpeMock.Verify(
-            s => s.ListFileVersionsAsUserAsync(It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<CancellationToken>()),
+            s => s.ListFileVersionsAsync(DriveId, ItemId, It.IsAny<CancellationToken>()),
             Times.Once,
-            "the endpoint must resolve versions through the As-User (OBO) facade method, using the pointer from the authorized row");
-        facadeReceivedAuthenticatedUser.Should().BeTrue(
-            "the OBO facade must receive the calling user's authenticated context — that context IS the token source");
+            "the endpoint must list versions app-only, using the pointer from the authorized row");
 
-        // NO app-only elevation anywhere in the path (task 050 hard rule / ADR-028).
+        // Nothing on this path runs as the user any more (task 171).
         _fixture.SpeMock.Verify(
-            s => s.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never, "the OBO version surface must never fall back to an app-only metadata read");
-        _fixture.SpeMock.Verify(
-            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never, "the OBO version surface must never fall back to an app-only download");
+            s => s.DownloadFileVersionAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the version surface must not depend on the caller holding a container role");
     }
 
     [Fact]
@@ -158,8 +153,8 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         _fixture.ResetBoundaries();
 
         _fixture.SpeMock
-            .Setup(s => s.ListFileVersionsAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, DocumentVersionSeamFixture.MissingItemId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ListFileVersionsAsync(
+                DriveId, DocumentVersionSeamFixture.MissingItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((IReadOnlyList<VersionInfoDto>?)null);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -167,14 +162,14 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
             $"/api/documents/{DocumentVersionSeamFixture.MissingItemDocumentId}/versions");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "a facade null (item not found under the user's token) surfaces as 404, never as data");
+            "a facade null (item not found) surfaces as 404, never as data");
 
         // Not vacuous: prove the 404 came from the FACADE returning null, not from the route being
         // absent. Before task 079 migrated this file, this test passed for exactly the wrong reason —
         // the drive-keyed route it called had been deleted, so "404" meant "not routed".
         _fixture.SpeMock.Verify(
-            s => s.ListFileVersionsAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, DocumentVersionSeamFixture.MissingItemId, It.IsAny<CancellationToken>()),
+            s => s.ListFileVersionsAsync(
+                DriveId, DocumentVersionSeamFixture.MissingItemId, It.IsAny<CancellationToken>()),
             Times.Once,
             "the request must have REACHED the facade — otherwise this 404 proves nothing about the handler");
     }
@@ -182,6 +177,44 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
     // ═══════════════════════════════════════════════════════════════════════════════════════════
     // (3) OPEN PRIOR — v3's EXACT bytes after v4 exists, read-only; nothing mutated.
     // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact(DisplayName = "F4: opening the CURRENT version streams the current content (Graph refuses it through the versions API); a prior version still uses version content; an unknown id is 404")]
+    public async Task OpenCurrentVersion_StreamsTheCurrentContent_PriorUsesVersionContent_UnknownIs404()
+    {
+        _fixture.ResetBoundaries();
+        var current = Encoding.UTF8.GetBytes("CURRENT bytes (version 2.0) — what /content serves.");
+        var prior = Encoding.UTF8.GetBytes("PRIOR bytes (version 1.0).");
+
+        _fixture.SpeMock
+            .Setup(s => s.GetCurrentVersionIdAsync(DriveId, ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync("2.0");
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsync(DriveId, ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(current));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileVersionAsync(DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, string, CancellationToken>((_, _, versionId, _) =>
+                versionId == "2.0"
+                    ? throw new InvalidOperationException("Graph 400: You cannot get the content of the current version.")
+                    : Task.FromResult<Stream?>(versionId == "1.0" ? new MemoryStream(prior) : null));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var currentResponse = await client.GetAsync($"/api/documents/{DocumentId}/versions/2.0/content");
+        currentResponse.StatusCode.Should().Be(HttpStatusCode.OK, await currentResponse.Content.ReadAsStringAsync());
+        (await currentResponse.Content.ReadAsByteArrayAsync()).Should().Equal(current);
+
+        var priorResponse = await client.GetAsync($"/api/documents/{DocumentId}/versions/1.0/content");
+        priorResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await priorResponse.Content.ReadAsByteArrayAsync()).Should().Equal(prior);
+
+        (await client.GetAsync($"/api/documents/{DocumentId}/versions/9.0/content")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+
+        _fixture.SpeMock.Verify(
+            s => s.DownloadFileVersionAsync(DriveId, ItemId, "2.0", It.IsAny<CancellationToken>()), Times.Never,
+            "the current version is never asked of the versions API — Graph answers it with a 400");
+        _fixture.SpeMock.Verify(s => s.DownloadFileAsync(DriveId, ItemId, It.IsAny<CancellationToken>()), Times.Once);
+    }
 
     [Fact]
     public async Task OpenPriorVersion_AfterLaterVersionExists_ReturnsThatVersionsExactBytes_AndMutatesNothing()
@@ -200,9 +233,9 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         };
 
         _fixture.SpeMock
-            .Setup(s => s.DownloadFileVersionAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns<HttpContext, string, string, string, CancellationToken>((_, _, _, versionId, _) =>
+            .Setup(s => s.DownloadFileVersionAsync(
+                DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, string, CancellationToken>((_, _, versionId, _) =>
                 Task.FromResult<Stream?>(versionsById.TryGetValue(versionId, out var bytes) ? new MemoryStream(bytes) : null));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -225,10 +258,10 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         var missingResponse = await client.GetAsync($"/api/documents/{DocumentId}/versions/9.0/content");
         missingResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
 
-        // It reused the EXISTING OBO primitive (task 002 inventory row 4) — twice for real versions,
-        // once for the miss — each time with the pointer from the authorized row.
+        // Task 171: the APP-ONLY version read — twice for real versions, once for the miss — each time
+        // with the pointer from the authorized row.
         _fixture.SpeMock.Verify(
-            s => s.DownloadFileVersionAsUserAsync(It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.DownloadFileVersionAsync(DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3));
 
         // ── NEGATIVE SCOPE: the whole round trip is READ-ONLY — no write-shaped facade call. ─────
@@ -239,11 +272,14 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
             s => s.ReplaceFileContentAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Never, "the version-history surface must never write content (etag overload)");
         _fixture.SpeMock.Verify(
-            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Never, "the version-history surface must never create drive-items");
         _fixture.SpeMock.Verify(
             s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
             Times.Never, "the version-history surface must never create drive-items (app-only)");
+        _fixture.SpeMock.Verify(
+            s => s.ReplaceFileContentAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the version-history surface must never write content (app-only)");
     }
 
     [Fact]
@@ -280,17 +316,16 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         var secretBytes = Encoding.UTF8.GetBytes("SECRET-DOCUMENT-CONTENT-another-users-version-bytes");
 
         // The caller IS authorized at the Dataverse gate here (this fixture states rights), and SPE
-        // then refuses their own OBO token anyway — the facade translates Graph's 403 to
-        // UnauthorizedAccessException (DriveItemOperations' documented contract). Task 079 demoted
-        // this from "the authorization boundary" to defence in depth, but it must still be honoured:
-        // a 403 from SPE may never be rendered as data.
+        // then refuses the read anyway — since task 171 that is SPE refusing the BFF identity (the
+        // facade translates Graph's 403 to UnauthorizedAccessException). A 403 from SPE may never be
+        // rendered as data.
         _fixture.SpeMock
-            .Setup(s => s.ListFileVersionsAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<CancellationToken>()))
+            .Setup(s => s.ListFileVersionsAsync(
+                DriveId, ItemId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException($"Access denied to file {ItemId}"));
         _fixture.SpeMock
-            .Setup(s => s.DownloadFileVersionAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.DownloadFileVersionAsync(
+                DriveId, ItemId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new UnauthorizedAccessException($"Access denied to file {ItemId}"));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -325,10 +360,10 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
         openResponse.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
 
         _fixture.SpeMock.Verify(
-            s => s.ListFileVersionsAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.ListFileVersionsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never, "an unauthenticated request must be rejected BEFORE any SPE call");
         _fixture.SpeMock.Verify(
-            s => s.DownloadFileVersionAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.DownloadFileVersionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never, "an unauthenticated request must be rejected BEFORE any SPE call");
     }
 
@@ -350,10 +385,10 @@ public sealed class SpeVersionHistoryOboSeamTests : IClassFixture<DocumentVersio
             "task 079 DELETED the drive-keyed pair; a caller-supplied (driveId, itemId) must not "
             + "address SPE version content at all");
         _fixture.SpeMock.Verify(
-            s => s.ListFileVersionsAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.ListFileVersionsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _fixture.SpeMock.Verify(
-            s => s.DownloadFileVersionAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.DownloadFileVersionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 }
@@ -403,6 +438,12 @@ public sealed class DocumentVersionSeamFixture : ComposeFidelitySeamFixture
 
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(new VersionSeamDocumentDataverseService());
+
+            // Task 171: the version reads are app-only, so the route verifies the row's pointer first. In this pointer
+            // world every b! drive is a business-unit container of the owner's subtree and every item was uploaded by the
+            // row's creator — the check passes and these tests stay about the facade/addressing contract.
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>();
+            services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!", StringComparison.Ordinal)));
         });
     }
 

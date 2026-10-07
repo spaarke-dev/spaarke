@@ -15,7 +15,7 @@ The Communication Service provides a unified email communication layer built on 
 
 The critical design principle is **Graph send is the critical path** — if the Graph `sendMail` call fails, the entire operation fails. All tracking (Dataverse record creation, SPE archival, attachment records, association, AI analysis) is best-effort and wrapped in try/catch.
 
-> **R4 changes (send side)**: (1) the send path stamps the sent message's **`Internet-Message-Id`** back onto `sprk_communication.sprk_internetmessageid` (feeds the thread-continuity rung); (2) all client email-send UX is consolidated behind ONE canonical **`<EmailComposer />`** engine (`@spaarke/ui-components`) exposed via three thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`), with programmatic send via the `sendCommunication()` typed wrapper (ADR-045); (3) the record surface's send actions are hosted by the **Communication Actions PCF**, which **replaces the retired ~1,150-LOC ribbon web resource `sprk_communication_send.js`**. The send request DTO carries `AttachmentDocumentIds` (attachment Document GUIDs); a canonical `AttachmentDriveItemIds` (File-ID) rename is designed but not yet shipped (deferred — see the R4 project notes). The old fragmented, per-caller client-send implementations are **RETIRED** (§ Fragmented client send — RETIRED).
+> **R4 changes (send side)**: (1) the send path stamps the sent message's **`Internet-Message-Id`** back onto `sprk_communication.sprk_internetmessageid` (feeds the thread-continuity rung); (2) all client email-send UX is consolidated behind ONE canonical **`<EmailComposer />`** engine (`@spaarke/ui-components`) exposed via four thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`/`SendEmailPane`), with programmatic send via the `sendCommunication()` typed wrapper (ADR-045); (3) the record surface's send actions are hosted by the **Communication Actions PCF**, which **replaces the retired ~1,150-LOC ribbon web resource `sprk_communication_send.js`**. The send request DTO carries `AttachmentDocumentIds` (attachment Document GUIDs); a canonical `AttachmentDriveItemIds` (File-ID) rename is designed but not yet shipped (deferred — see the R4 project notes). The old fragmented, per-caller client-send implementations are **RETIRED** (§ Fragmented client send — RETIRED).
 >
 > **Messaging-channel note (messaging-communication-app-r1)**: this document covers the **Graph/email** transport specifically. `CommunicationService` (the outbound entry point below) is also the uniform outbound call site for the **messaging (ACS Chat)** channel — it invokes `IThreadResolver` on both the email and messaging outbound legs — but the ACS-specific mechanics (identity/token minting, thread lifecycle, membership-as-projection, the Event Grid inbound path) are **not** Graph-shaped and are documented in [communication-intelligence-architecture.md §9](communication-intelligence-architecture.md#9-the-messaging-channel-acs-chat--second-channel-as-built), not here.
 
@@ -149,7 +149,7 @@ The rung ladder that replaces this (rung 0 explicit-ref → 1 thread-continuity 
 
 ## Background Services
 
-Three `BackgroundService` implementations following ADR-001:
+Three hand-rolled timer `BackgroundService` implementations (existing debt — each migrates to an `IScheduledJob` when next touched, ADR-052 §1):
 
 | Service | Interval | Startup Delay | Purpose |
 |---------|----------|---------------|---------|
@@ -197,7 +197,7 @@ Three `BackgroundService` implementations following ADR-001:
 
 Before R4, email-send UX was implemented ad-hoc across ~6 divergent client surfaces plus a ~1,150-LOC (×2 copies) ribbon web resource `sprk_communication_send.js`. R4 **retires all of it** (ADR-045 rule 1):
 
-- All send UX flows through ONE `<EmailComposer />` engine in `@spaarke/ui-components` (modes `compose|view|reply|forward|draft`; mounts `inline|dialog|page`) via three thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`).
+- All send UX flows through ONE `<EmailComposer />` engine in `@spaarke/ui-components` (modes `compose|view|reply|forward|draft`; mounts `inline|dialog|page`) via four thin wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`/`SendEmailPane` — the Word add-in task pane, 2026-10-04).
 - All programmatic (no-UI) send flows through the `sendCommunication()` typed wrapper — no ad-hoc `fetch` to the send endpoint, no per-caller composer fork.
 - The `sprk_communication` record's send actions are hosted by the **Communication Actions PCF** on the OOB form, which **replaces the retired ribbon web resource** (tasks 044c/062).
 

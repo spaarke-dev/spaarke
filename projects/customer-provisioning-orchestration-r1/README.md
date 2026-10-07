@@ -1,8 +1,26 @@
 # Customer Provisioning & Deployment Orchestration (r1)
 
+> 🔴 **SUPERSEDED IN PART — D-12 / D-13 (owner, 2026-09-28).** This document's **D3 (v3) two-tier
+> tenancy model is RETIRED.** There is no shared trial/SMB tier. Both deployment models are dedicated
+> stamps and differ **only** in which Azure tenant owns the customer's subscription:
+>
+> | | Dataverse environment | Azure tenant | Azure subscription |
+> |---|---|---|---|
+> | **Model 1** | dedicated per customer | **Spaarke's** | dedicated per customer |
+> | **Model 2** | dedicated per customer | **the customer's own** | dedicated per customer |
+>
+> Every Azure resource is dedicated per customer, with two named exceptions (Static Web Apps, Content
+> Safety). The BFF **Entra app registration is per customer in both models (D-13, BINDING)**. Passages
+> below describing a shared tier, shared fixed-floor resources, a shared BFF app registration, or
+> `model1-shared.bicep` are **historical**. Authoritative:
+> `projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md` +
+> `…/D-13-per-customer-bff-app-registration.md`.
+
+
+
 > **Last Updated**: 2026-08-16
 > **Status**: Ready for Implementation (task-execute)
-> **Portfolio**: (register via `/devops-project-register` at task-execution start)
+> **Portfolio**: [Project #438](https://github.com/spaarke-dev/spaarke/issues/438) · Parent Epic [#432 IMPLEMENTATION](https://github.com/spaarke-dev/spaarke/issues/432) · [Board #2](https://github.com/users/spaarke-dev/projects/2) · Start 2026-06-15
 
 ## Overview
 
@@ -38,7 +56,7 @@ Provisioning a new Spaarke customer environment today requires mentally merging 
 
 ## Solution Summary
 
-One orchestrated pipeline. L1 = 19 idempotent `IProvisioningHandler` handlers (ADR-004-shaped) implementing every provisioning step. L2 = new .NET 10 App Service control plane with Cosmos DB serverless state, REST + AAD auth, fire-and-forget handler execution via Service Bus, state-reconciler `BackgroundService`, per-customer optimistic-concurrency serialization, crash-recovery, and quarantine semantics. L3 = `/provision-environment` Claude Code operator skill with 15-tool matrix + fallback for MCP disconnects. Ships 8 Dataverse solutions, ~25 Bicep modules, 7 AI Search indexes, 14 canonical KV secrets, 12 new columns on `sprk_dataverseenvironment` registry. Enforces 5 tenant-isolation invariants (I1–I5) via new ArchTests + 6 silent-failure trap post-conditions (T1–T6). Two deployment tiers (Model 2 dedicated / Model 1 shared trial) with per-tenant token metering (D19) enabling fair economics.
+One orchestrated pipeline. L1 = 19 idempotent `IProvisioningHandler` handlers (ADR-004-shaped) implementing every provisioning step. L2 = new .NET 10 App Service control plane with Cosmos DB serverless state, REST + AAD auth, fire-and-forget handler execution via Service Bus, state-reconciler `BackgroundService`, per-customer optimistic-concurrency serialization, crash-recovery, and quarantine semantics. L3 = `/provision-environment` Claude Code operator skill with 15-tool matrix + fallback for MCP disconnects. Ships 8 Dataverse solutions, ~25 Bicep modules, 7 AI Search indexes, 14 canonical KV secrets, 12 new columns on `sprk_dataverseenvironment` registry. Enforces 5 tenant-isolation invariants (I1–I5) via new ArchTests + 7 silent-failure trap post-conditions (T1–T7). Two deployment tiers (Model 2 dedicated / Model 1 shared trial) with per-tenant token metering (D19) enabling fair economics.
 
 ## Graduation Criteria
 
@@ -48,7 +66,7 @@ The project is considered **complete** when:
 - [ ] L2 control-plane deployed and serving `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine`, `POST /api/onboarding/consent-callback` per §4.2
 - [ ] `/provision-environment` skill executes full flow with confirmation gates + produces handoff report + Dataverse MCP registry update
 - [ ] Fresh `trial-{yyyymmdd}` customer stamp (Model 1 profile) provisioned end-to-end via new pipeline; reaches `Setup Status = Ready`
-- [ ] All 6 §4B silent-fail traps (T1–T6) verified cleared by owning handler post-conditions
+- [ ] All 7 §4B silent-fail traps (T1–T7) verified cleared by owning handler post-conditions
 - [ ] All 5 §4D tenant-isolation invariants (I1–I5) enforced via new ArchTests; pass Phase A audit sweep
 - [ ] `scripts/naming-conformance-check.ps1` exits 0 on r1-owned surfaces post-provisioning
 - [ ] Canonical secret-catalog manifest is single source generating seeder + Configure script + tokens doc + Bicep KV secret set (Phase H)
@@ -74,7 +92,7 @@ Per design.md §3 Locked Decisions D1–D20 + v3 additions D18/D19/D20 + §3A A1
 
 | Decision | Rationale | Reference |
 |---|---|---|
-| D3 (v3): two-tier tenancy (Model 2 dedicated + Model 1 shared trial) | Fixed-floor cost of dedicated stamp uneconomic for trial/SMB; PROJECT-UPDATE §4–5 economic analysis | design.md §3A |
+| ~~D3 (v3): two-tier tenancy~~ → 🔴 **SUPERSEDED by D-12 (2026-09-28)**: both models dedicated; no shared tier | Was: fixed-floor cost uneconomic for trial/SMB; PROJECT-UPDATE §4–5 economic analysis | design.md §3A |
 | D14 (v3.2 deferred): TF Power Platform provider adoption to first-customer engagement | Dev-only reality, 0 pending customers; interim `pac admin` + PPAC + Graph SDK | design.md §11.2 M-10 |
 | D18 (v3): BFF exposes `/api/onboarding/consent-callback` for Model 2 self-service | Only irreducible customer-tenant admin action — capturing it in BFF triggers pipeline immediately | design.md §4.1 H0.5 |
 | D19 (v3): per-tenant token-metering layer regardless of tenancy model | No-regret investment; powers pricing for either tier + runaway guardrail | design.md §3A A2 |

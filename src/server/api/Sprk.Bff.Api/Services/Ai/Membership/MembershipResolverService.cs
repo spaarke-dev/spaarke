@@ -2,8 +2,8 @@
 // Task 033 (2026-06-21): Implements IMembershipResolverService.
 //
 // Pipeline:
-//   1. Cache lookup — key "membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}"
-//      TTL 5 min (FR-1A.8 Phase 1A; Phase 2 task 086 extends TTL + pub/sub invalidation).
+//   1. Cache lookup — key "tenant:{tid}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v{n}"
+//      TTL 2 min (was 5 — unified-access-control-r2 task 132; BFF team/BU/owner writes evict it).
 //   2. Cache MISS:
 //      a. IMembershipFieldDiscoveryService.DiscoverAsync(entityType) → descriptors
 //      b. Filter descriptors by options.Roles + options.IdentityTypes (case-insensitive)
@@ -19,7 +19,8 @@
 //         the row's id to that role's bucket if non-empty).
 //      g. Apply paging: if matches > options.Limit, truncate ids[] and emit a
 //         continuationToken (encoded skip + take using the deterministic sort).
-//      h. Build MembershipResponse, cache it (5-min TTL), return.
+//      h. Build MembershipResponse, cache it (2-min TTL) unless it was built over a FAULTED read (task 132),
+//         return.
 //
 // Phase 1D (includeRelated) is ACCEPTED-BUT-IGNORED here — task 054 implements
 // transitive expansion as a downstream layer that calls this service per parent +
@@ -28,15 +29,16 @@
 // Failure isolation:
 //   - DiscoverAsync throws (entity not found) → propagate (caller's input is invalid).
 //   - IdentityNormalizationService throws OnlyOperationCanceledException; other
-//     failures yield empty fields per the task 031 contract.
+//     failures yield empty fields per the task 031 contract — and, since task 132, are RECORDED on the
+//     identity, so a response built over a faulted identity is returned but NOT cached.
 //   - Fetch query failure throws; the caller sees a 500/ProblemDetails from the
 //     endpoint layer (task 035). No retries here — IRequestSender resiliency is
 //     a deeper concern (ADR-016).
 //   - Cache read/write failures fail-open (warn + continue).
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md FR-1A.5 through
-//            FR-1A.9; design.md Part 1 § "Endpoint contract"; ADR-009 (Redis 5-min
-//            TTL Phase 1A); ADR-010 (interface as testing seam); ADR-013
+//            FR-1A.9; design.md Part 1 § "Endpoint contract"; ADR-009 (Redis 2-min
+//            TTL since task 132); ADR-010 (interface as testing seam); ADR-013
 //            (lives under Services/Ai/Membership/); ADR-016 (cache + retry pattern);
 //            bff-extensions.md §A (BFF pre-merge checklist).
 
@@ -58,18 +60,18 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// Default <see cref="IMembershipResolverService"/> implementation. Orchestrates
 /// discovery + identity normalization + a single OR-joined FetchXml query to
 /// resolve the rows of <c>entityType</c> a user is a member of, grouped by role.
-/// Per-user results cached in Redis (5-min TTL, FR-1A.8 Phase 1A).
+/// Per-user results cached in Redis (2-min TTL since task 132; never when built over a faulted read).
 /// </summary>
 public sealed class MembershipResolverService : IMembershipResolverService
 {
     /// <summary>
     /// Cache resource label (per ITenantCache contract). The on-wire key becomes
-    /// <c>tenant:{tenantId}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v1</c>
+    /// <c>tenant:{tenantId}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v{CacheVersion}</c>
     /// (with the configured <c>InstanceName</c> prepended by StackExchangeRedisCache).
     /// </summary>
     /// <remarks>
-    /// Phase 2 invalidation channel (FR-2P2.8) — a future per-user invalidation can
-    /// target this resource label without affecting other Redis namespaces.
+    /// Evicted per user and per entity type, across every tenant segment, by
+    /// <see cref="IMembershipCacheInvalidator"/> (task 132) — the patterns are built from <see cref="ComposeCacheId"/>.
     /// </remarks>
     internal const string CacheResource = "membership-resolved";
 
@@ -83,11 +85,48 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// <para>
     /// Prior bump: 3 (r5 2026-07-09) for the distinct='true' completeness fix.
     /// </para>
+    /// <para>
+    /// <b>Bumped 4 → 5 by task 132 (defect C12).</b> The key is unchanged, but entries written by the pre-fix code
+    /// may be FAULT-derived (an empty response built over a failed team or systemuser read), so the version is what
+    /// keeps them from being served after the deploy — the "bump REQUIRED" case below.
+    /// </para>
+    /// <para>
+    /// <b>Bumped 5 → 6 by task 172 (GitHub #1011)</b> — the "bump REQUIRED" case below: the options hash is
+    /// unchanged, but the query's semantics changed (the Owner column now also binds the caller's teams), so a
+    /// pre-deploy entry would be served as a valid answer for up to <see cref="CacheTtl"/> with team-owned records
+    /// missing from the <c>owner</c> role.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>When a bump IS required, and when it is not</b> (stated 2026-09-17, task 043, because the
+    /// question came up and the answer was non-obvious). This constant and
+    /// <see cref="HashOptions"/> defend against two DIFFERENT failure modes, and only one of them needs
+    /// a bump:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><b>Bump REQUIRED</b> when the cached VALUE's shape or the query's semantics change while
+    /// the options-hash composition stays the same — because old entries then remain ADDRESSABLE under
+    /// an unchanged key and will be served as valid answers. That is exactly the 3→4 case above: the
+    /// key was identical, so only the version could orphan the silently-truncated id sets.</item>
+    /// <item><b>Bump NOT required</b> when the change alters the options-hash composition itself, as
+    /// task 043 did by adding <c>AccessConferringOnly</c> and <c>OrganizationIds</c> to
+    /// <see cref="HashOptions"/>. Every post-change hash carries the new fields, so no running code can
+    /// compute the key of a pre-change entry: they are unreachable and expire on their own TTL. The
+    /// changed composition IS the orphaning mechanism, and a bump would be redundant.</item>
+    /// </list>
+    /// <para>
+    /// The distinction matters in the unsafe direction: getting it wrong the FIRST way serves a stale
+    /// answer to a new question, which on this path means serving an unfiltered descriptor set to an
+    /// authorization decision.
+    /// </para>
     /// </summary>
-    private const int CacheVersion = 4;
+    internal const int CacheVersion = 6;
 
-    /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
-    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// Per-user cache TTL: 2 minutes (was 5) — task 132, owner rounds 3 R3/R4 (access changes take effect in
+    /// minutes, ≤ 5). Stacked on the identity TTL it bounds an owner or team change made OUTSIDE the BFF at
+    /// 2 + 2 = 4 minutes; BFF writes evict both (<see cref="IMembershipCacheInvalidator"/>).
+    /// </summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
     private readonly IMembershipFieldDiscoveryService _discovery;
     private readonly IIdentityNormalizationService _identity;
@@ -119,10 +158,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _cache = cache;
         _httpContextAccessor = httpContextAccessor;
         _logger = logger;
-        _options = options.Value; // Consumed by ResolveByContactAsync's
-                                  // access-conferring role allowlist (NFR-05).
-                                  // Resolving here surfaces binding errors at
-                                  // construction rather than first call.
+        _options = options.Value; // Consumed by the access-conferring column registry filter
+                                  // (ADR-034 A1 / FR-24, NFR-05) — ResolveByContactAsync always;
+                                  // ResolveAsync when AccessConferringOnly is requested. Resolving
+                                  // here surfaces binding errors at construction, not first call.
     }
 
     /// <summary>
@@ -162,6 +201,18 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var normalizedEntity = entityType.Trim().ToLowerInvariant();
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
+        // ADR-034 A3 (task 152): the people-targeting surface and the authorization surface answer different
+        // questions ("who is this record FOR" vs "who may ACCESS it"). A caller asking for both has a bug; merging
+        // them silently would hand one of the two consumers the other's descriptor set. Rejected before any I/O.
+        if (effectiveOptions.PeopleTargeting && effectiveOptions.AccessConferringOnly)
+        {
+            throw new ArgumentException(
+                "MembershipResolveOptions.PeopleTargeting and AccessConferringOnly are mutually exclusive: the "
+                + "people-targeting surface selects records FOR a person, the access-conferring surface decides "
+                + "ACCESS. Request one or the other.",
+                nameof(options));
+        }
+
         // ── R3 Part 1D — pre-validate includeRelated for >1-hop syntax ─────
         // FR-1D.2 / Q3 (owner 2026-06-20): max chain depth is 1 hop. Reject
         // explicit chain syntax (e.g., "documents.events") at the front door
@@ -192,7 +243,9 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── Cache lookup ────────────────────────────────────────────────────
         var tenantId = GetTenantId();
-        var cacheId = BuildCacheId(systemUserId, normalizedEntity, effectiveOptions);
+        // Task 132 integration residual: a table an Assign cascade re-owns silently is never cached (null id = no read,
+        // no write) — see CachesEntityType.
+        var cacheId = CachesEntityType(normalizedEntity) ? BuildCacheId(systemUserId, normalizedEntity, effectiveOptions) : null;
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
@@ -221,12 +274,63 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── a) Discovery ────────────────────────────────────────────────────
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var descriptors = FilterDescriptors(discovery.DiscoveredFields, effectiveOptions);
+
+        // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041): when the caller opts
+        // in via AccessConferringOnly, apply the SAME registry filter ResolveByContactAsync always
+        // applies — BEFORE the Roles/IdentityTypes narrowing below, mirroring that method's order.
+        // Default false (the untouched path) makes this line a no-op — candidateFields IS
+        // discovery.DiscoveredFields, the same reference — so scoping output stays byte-identical to
+        // pre-task-041 behavior (AC pinned by ResolveAsync_AccessConferringOnlyDefaultsFalse_* tests).
+        // includePlatformOwnership: true — the SYSTEMUSER plane, the only plane where owning a record is
+        // possible (task 043 C-1, owner decision 2026-09-17). See PlatformOwnershipColumns.
+        // ADR-034 A3 (task 152): the PEOPLE-TARGETING surface — person terms only (human createdby, user-valued
+        // owner, registry Contact-typed "Assigned *" columns). See FilterToPeopleTargetingTermsAsync.
+        IReadOnlyList<MembershipDescriptor> candidateFields;
+
+        // Task 132 (C12): true when this response is built over a read that could not be completed — the identity (any
+        // faulted sub-read) or, on the people-targeting surface, the human/application-user check. Such a response is
+        // returned to this request unchanged (fail soft, as before) and is NEVER cached: caching it is what kept a team
+        // read's failure hiding every team-owned record for the identity TTL plus this one.
+        var faulted = false;
+        if (effectiveOptions.AccessConferringOnly)
+        {
+            candidateFields = FilterToAccessConferringRoles(
+                normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: true);
+        }
+        else if (effectiveOptions.PeopleTargeting)
+        {
+            (candidateFields, var createdByUnreadable) = await FilterToPeopleTargetingTermsAsync(
+                normalizedEntity, systemUserId, discovery.DiscoveredFields, ct).ConfigureAwait(false);
+            faulted |= createdByUnreadable;
+        }
+        else
+        {
+            candidateFields = discovery.DiscoveredFields;
+        }
+        var descriptors = FilterDescriptors(candidateFields, effectiveOptions);
 
         // ── c) Identity normalization (started in parallel with discovery
         //     would also be valid, but discovery is typically cache-hot;
         //     sequential keeps the failure-flow simpler).
         var identity = await _identity.ResolveAsync(systemUserId, ct).ConfigureAwait(false);
+        faulted |= identity.IsFaulted;
+
+        if (effectiveOptions.PeopleTargeting
+            && identity.ContactId is null
+            && descriptors.Any(d => string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase)))
+        {
+            // ADR-034 A3 / C7: the "Assigned *" term binds ONLY through the caller's linked contact (task 141).
+            // With no link it binds nothing — there is deliberately no email, UPN or name fallback (that is the C7
+            // hijack path). Created By and personal ownership still apply. BuildFetchXml also emits the per-column
+            // member_skipped warning below; this line names the surface so the gap is queryable on its own.
+            _logger.LogWarning(
+                "member_skipped: matter={MatterId} contact={ContactId} role={Role} reason={Reason} field={Field}",
+                normalizedEntity,
+                systemUserId,
+                "assigned*",
+                "people_targeting_no_linked_contact",
+                "*");
+        }
 
         // Empty descriptors → no matching rows (return empty response, NOT error).
         if (descriptors.Count == 0)
@@ -252,7 +356,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, emptyResponse, faulted, systemUserId, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -288,7 +392,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                         ct).ConfigureAwait(false)
                 : null;
             var emptyResponse = BuildEmptyResponse(normalizedEntity, identity, descriptors, emptyTransitive);
-            await TrySetCacheAsync(tenantId, cacheId, emptyResponse, ct).ConfigureAwait(false);
+            await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, emptyResponse, faulted, systemUserId, ct).ConfigureAwait(false);
             return emptyResponse;
         }
 
@@ -331,7 +435,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
             ContinuationToken: nextToken,
             RelatedByRole: relatedByRole);
 
-        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
+        await TrySetCacheUnlessFaultedAsync(tenantId, cacheId, response, faulted, systemUserId, ct).ConfigureAwait(false);
 
         sw.Stop();
         _logger.LogInformation(
@@ -372,21 +476,36 @@ public sealed class MembershipResolverService : IMembershipResolverService
         var effectiveOptions = options ?? new MembershipResolveOptions();
 
         // ── Contact-only principal (ADR-034 Path C — no systemuser) ─────────
-        // A PersonIdentity carrying ONLY the contactId. SystemUserId is
-        // Guid.Empty so BuildFetchXml's SystemUser branch (and every other
-        // non-Contact branch — Team/BusinessUnit/Account/Organization) emits
-        // zero conditions (AppendCondition guards Guid.Empty; the identity's
-        // team/org collections are empty). Only the Contact branch can bind —
-        // and we further constrain the descriptors to the access-conferring
-        // allowlist below, so this path can NEVER resolve via a non-contact or
-        // adverse lookup. We deliberately bypass IIdentityNormalizationService
-        // (which is hard-keyed to a systemuserid) — that is exactly the gap
-        // this entry point closes.
-        var identity = new PersonIdentity(SystemUserId: Guid.Empty, ContactId: contactId);
+        // A PersonIdentity carrying the contactId and, when the caller supplies them, the
+        // organizations that contact actively belongs to. SystemUserId is Guid.Empty so
+        // BuildFetchXml's SystemUser branch (and the Team/BusinessUnit/Account branches) emit
+        // zero conditions (AppendCondition guards Guid.Empty; those identity collections are
+        // empty). So exactly two branches can bind — Contact, and Organization when org ids were
+        // supplied — and we further constrain the descriptors to the access-conferring registry
+        // below, so this path can NEVER resolve via a non-registry or adverse lookup. We
+        // deliberately bypass IIdentityNormalizationService (which is hard-keyed to a
+        // systemuserid) — that is exactly the gap this entry point closes.
+        //
+        // ORG EXPANSION (design §4.5 term 4 / FR-24 + FR-25, task 043): binding org ids is what
+        // makes registry-listed org-typed descriptors emit conditions at all. Before this, the
+        // identity's OrganizationIds was always empty here, so those descriptors survived the
+        // registry filter and then matched nothing — investigation 02 §3's "org-typed descriptors
+        // emit zero conditions today".
+        //
+        // ⚠️ The ids are the CALLER's to resolve, and the caller is expected to pair them with
+        // IdentityTypes: ["Organization"] when it wants the org-derived records ALONE. ContactId is
+        // bound unconditionally on this path, so an unnarrowed call with org ids returns the UNION
+        // of contact- and org-derived records with no way to tell them apart — and the evaluator
+        // credits org-derived records at the ORGANIZATION's baseline, which would then be applied
+        // to the contact's own assignments too. See MembershipResolveOptions.OrganizationIds.
+        var identity = new PersonIdentity(
+            SystemUserId: Guid.Empty,
+            ContactId: contactId,
+            OrganizationIds: effectiveOptions.OrganizationIds);
 
         // ── Cache lookup (contact-namespaced id, disjoint from systemuser path) ─
         var tenantId = GetTenantId();
-        var cacheId = BuildContactCacheId(contactId, normalizedEntity, effectiveOptions);
+        var cacheId = CachesEntityType(normalizedEntity) ? BuildContactCacheId(contactId, normalizedEntity, effectiveOptions) : null;
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
@@ -407,7 +526,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // contact roles before any options narrowing. Reuses the SAME metadata
         // discovery mechanism as the systemuser path — no second discovery engine.
         var discovery = await _discovery.DiscoverAsync(normalizedEntity, ct).ConfigureAwait(false);
-        var allowlisted = FilterToAccessConferringContactRoles(discovery.DiscoveredFields);
+        // includePlatformOwnership: FALSE — a contact can never own a Dataverse record, so ownership
+        // descriptors would bind nothing here and merely widen the query (task 043 C-1; NFR-05, pinned
+        // by ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords).
+        var allowlisted = FilterToAccessConferringRoles(
+            normalizedEntity, discovery.DiscoveredFields, includePlatformOwnership: false);
         var descriptors = FilterDescriptors(allowlisted, effectiveOptions);
 
         // No access-conferring contact roles → empty response (NOT an error).
@@ -485,42 +608,126 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return response;
     }
 
-    // ── Access-conferring role allowlist (NFR-05 — security-load-bearing) ───
+    // ── Access-conferring column registry (ADR-034 Amendment A1 / spec FR-24 — security-load-bearing,
+    //    NFR-05) ────────────────────────────────────────────────────────────────────────────────────
     /// <summary>
-    /// Reduces discovered descriptors to ONLY the access-conferring contact
-    /// roles for the contact-anchored entry point. A descriptor qualifies when
-    /// ALL hold:
-    ///   (1) its <see cref="MembershipDescriptor.IdentityType"/> is
-    ///       <c>Contact</c> — org/systemuser/team/BU/account lookups (and
-    ///       polymorphic <c>sprk_regardingrecord*</c> fields resolved to a
-    ///       non-contact target) never confer contact-anchored access;
-    ///   (2) its logical field name starts with the configured convention
-    ///       prefix (default <c>sprk_assigned</c>, case-insensitive) — adverse
-    ///       contact lookups such as an opposing-counsel field fail here;
-    ///   (3) it is NOT on the config/data-driven exclusion list.
-    /// The allowlist is therefore derived from live metadata discovery + a
-    /// naming convention + a config exclusion list — never a hardcoded field
-    /// allowlist — so a newly-added <c>sprk_assigned*</c> contact lookup
-    /// auto-qualifies with no code change (NFR-05).
+    /// Reduces discovered descriptors to ONLY the access-conferring columns registered for
+    /// <paramref name="entityType"/> — consumed by the systemuser-plane opt-in gate
+    /// (<see cref="ResolveAsync"/>, when <see cref="MembershipResolveOptions.AccessConferringOnly"/> is
+    /// requested) AND the contact-anchored entry point (<see cref="ResolveByContactAsync"/>,
+    /// unconditionally). A descriptor qualifies when ALL hold:
+    ///   (1) <paramref name="entityType"/> has a registry entry naming its
+    ///       <see cref="MembershipDescriptor.Field"/> (<see cref="MembershipOptions.AccessConferringRoles"/>);
+    ///   (2) that entry's declared identity type is <c>Contact</c> or <c>Organization</c> — the two
+    ///       identity types the registry covers per ADR-034 Amendment A1 (org-typed lookups are
+    ///       allow-listed too, closing the disclosure where unrestricted org expansion would confer
+    ///       access from ANY organization referenced on the record, including opposing counsel);
+    ///   (3) that declared type matches what live metadata discovery ACTUALLY resolved for the field
+    ///       (<see cref="MembershipDescriptor.IdentityType"/>) — a mismatch is a stale/malformed entry.
+    /// Conferral is registry membership ONLY — there is no naming-convention fallback; the prefix check
+    /// is DELETED, not layered under the registry. An entity with NO registry entries (or an empty list)
+    /// confers NOTHING (fail-closed, spec NFR-01); a malformed entry (missing field, unsupported
+    /// identity type, or a declared type that disagrees with live discovery) is logged and ignored —
+    /// never widened. Adding a conferring column is therefore a reviewed registry edit; renaming a
+    /// column — or a maker naming a brand-new column to merely LOOK like an assignment field — has zero
+    /// effect on access, because only an explicit registry entry does.
     /// </summary>
-    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringContactRoles(
-        IReadOnlyList<MembershipDescriptor> discovered)
+    /// <summary>
+    /// The Dataverse PLATFORM ownership columns, which confer access structurally rather than by
+    /// registry entry (owner decision 2026-09-17 — task 043 finding C-1).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Restoring these is not a convenience; omitting them caused a production outage once
+    /// already.</b> <c>MembershipFieldDiscoveryService</c>'s own rationale block records R7 W12 task 130
+    /// (2026-06-30): <i>"sprk_matter resolved rows=0 for a user who owns 44 matters via ownerid …
+    /// verified via raw SQL. Only ownerid matches those 44 rows for that user; the assigned* fields do
+    /// not."</i> Task 043's registry filter would have reproduced that exact symptom on the systemuser
+    /// plane, because the registry can only declare Contact/Organization types.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Team ownership arrives through BOTH <c>owningteam</c> and, since task 172 (GitHub #1011),
+    /// <c>ownerid</c></b> — records in this deployment are owned primarily at team / business-unit level
+    /// (owner, 2026-09-17; D-11, 2026-09-22). Until task 172, discovery bound only the FIRST target of
+    /// the polymorphic Owner column (<c>systemuser</c>), so <c>ownerid</c> was compared against the
+    /// caller's own <c>SystemUserId</c> only and a team-owned record matched through <c>owningteam</c>
+    /// alone. Discovery now emits <c>ownerid</c> as SystemUser AND Team; both descriptors pass here by
+    /// NAME. On a team-owned row <c>owningteam</c> = <c>ownerid</c> (platform-maintained), so on a table
+    /// where <c>owningteam</c> is discovered the Team leg of <c>ownerid</c> selects exactly the rows
+    /// <c>owningteam</c> already selects — the access set is unchanged; what changes is that the Owner
+    /// column's own role (<c>owner</c>) now carries them, for callers that narrow by role or identity type.
+    /// </para>
+    /// <para>
+    /// Residual worth knowing: <c>TeamIds</c> comes from the <c>teammembership</c> query in
+    /// <c>IdentityNormalizationService</c>, which fails <b>soft</b> to an empty list ("TeamIds will be
+    /// empty"). So on team-owned records a transient failure of that read is indistinguishable from "no
+    /// access" — the same read-fault-looks-like-absence shape recorded as ISS-019.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> PlatformOwnershipColumns =
+        new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owningteam", "owningbusinessunit" };
+
+    /// <param name="includePlatformOwnership">
+    /// Whether <see cref="PlatformOwnershipColumns"/> may confer. <c>true</c> on the SYSTEMUSER plane
+    /// only; <c>false</c> on the contact plane.
+    /// <para>
+    /// ⚠️ <b>Not a toggle — a plane invariant, and a pre-existing test caught it being violated.</b> A
+    /// contact can never own a Dataverse record, so on the contact plane these descriptors bind nothing
+    /// (<c>SystemUserId</c> is <see cref="Guid.Empty"/>, <c>TeamIds</c> empty, <c>BusinessUnitId</c>
+    /// null) and admitting them only widens the descriptor set and the emitted FetchXml. When task 043
+    /// first added the ownership allowance unconditionally,
+    /// <c>ResolveByContactAsync_AllowlistedAssignedContactRole_ReturnsMatchingRecords</c> failed with
+    /// <c>ByRole</c> = <c>{["owner"] = {empty}, ["assignedAttorney"] = {…}}</c> — the role present and
+    /// contributing zero records — against its own reason, "SystemUser lookups are not access-conferring
+    /// on the contact path" (NFR-05). Keeping this <c>false</c> there preserves the contact plane's
+    /// byte-identical output, which several tests deliberately pin.
+    /// </para>
+    /// </param>
+    private IReadOnlyList<MembershipDescriptor> FilterToAccessConferringRoles(
+        string entityType,
+        IReadOnlyList<MembershipDescriptor> discovered,
+        bool includePlatformOwnership)
     {
         if (discovered.Count == 0)
         {
             return Array.Empty<MembershipDescriptor>();
         }
 
-        var config = _options.AccessConferringRoles ?? new AccessConferringRoleOptions();
-        var prefix = string.IsNullOrWhiteSpace(config.ConventionPrefix)
-            ? AccessConferringRoleOptions.DefaultConventionPrefix
-            : config.ConventionPrefix.Trim();
+        var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
+        registry.Entities.TryGetValue(entityType, out var columns);
 
-        var exclusions = new HashSet<string>(
-            (config.ExcludedFields ?? new List<string>())
-                .Where(f => !string.IsNullOrWhiteSpace(f))
-                .Select(f => f.Trim()),
-            StringComparer.OrdinalIgnoreCase);
+        // An entity absent from the registry confers nothing via the maker-authored axis (fail-closed,
+        // NFR-01) — but it still confers through PLATFORM OWNERSHIP below, so this is no longer an
+        // early return. Ownership is not a registry concern; see PlatformOwnershipColumns.
+        columns ??= new List<AccessConferringColumn>();
+
+        // Validate + index the registry's declared columns for this entity. A malformed entry (blank
+        // Field, or an IdentityType outside {Contact, Organization}) is logged and dropped here — never
+        // widened, per NFR-01. NOTE: the Contact/Organization restriction applies to the REGISTRY only.
+        // The ownership axis is admitted structurally, not by declaring a type here.
+        var byField = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var column in columns)
+        {
+            if (string.IsNullOrWhiteSpace(column.Field))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "(blank Field) — ignored (fail-closed, never widened).",
+                    entityType);
+                continue;
+            }
+            if (!string.Equals(column.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(column.IdentityType, "Organization", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogWarning(
+                    "MembershipResolverService: malformed AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field}: IdentityType={IdentityType} is neither Contact nor Organization — " +
+                    "ignored (fail-closed, never widened).",
+                    entityType, column.Field, column.IdentityType);
+                continue;
+            }
+            byField[column.Field.Trim()] = column.IdentityType.Trim();
+        }
 
         var result = new List<MembershipDescriptor>(discovered.Count);
         foreach (var d in discovered)
@@ -529,27 +736,228 @@ public sealed class MembershipResolverService : IMembershipResolverService
             {
                 continue;
             }
-            var field = d.Field.Trim();
 
-            // (1) Contact-typed person lookup only.
-            if (!string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            // ── PLATFORM OWNERSHIP — admitted structurally, ahead of the registry ──────────────────
+            // Owner/team/business-unit ownership confers access without a registry entry, and MUST:
+            // being the owner IS Dataverse access, which is the very thing this filter is approximating
+            // until the FR-20 impersonated read (task 036) replaces it with Dataverse's own answer.
+            //
+            // Why these three are NOT a registry concern (owner decision 2026-09-17, task 043 C-1):
+            // FR-24's entire rationale is that a MAKER-AUTHORED lookup must not confer by naming
+            // accident — a rename could silently grant access, so conferral needs a reviewed entry.
+            // `ownerid` / `owningteam` / `owningbusinessunit` are platform-maintained system columns,
+            // fixed by the Dataverse data model (see MembershipFieldDiscoveryService's
+            // OwnerAttributeTargets, "fixed ... regardless of solution / entity"). Nobody can rename
+            // their way into them, so there is nothing for a review to protect against — and requiring
+            // an entry made them INEXPRESSIBLE, because the loop above rejects any declared type
+            // outside {Contact, Organization} as malformed.
+            //
+            // 🔴 What this deliberately does NOT do: admit every SystemUser/Team/BusinessUnit-typed
+            // lookup. A maker-authored `sprk_reviewer → systemuser` still confers nothing without a
+            // reviewed entry — otherwise register A-8's over-inclusion returns through a different
+            // door. The allowance is keyed on the three platform NAMES, not on the identity type.
+            // Pinned by ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing.
+            if (includePlatformOwnership && PlatformOwnershipColumns.Contains(d.Field.Trim()))
             {
+                result.Add(d);
                 continue;
             }
-            // (2) Access-conferring naming convention.
-            if (!field.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+
+            if (!byField.TryGetValue(d.Field.Trim(), out var registeredType))
             {
+                // Not in the registry — the FR-24 default. Adverse fields (opposing-counsel lookups),
+                // account-typed lookups, maker-authored systemuser/team-typed lookups, and any column
+                // nobody has reviewed onto the registry all end here, regardless of how their name
+                // reads. (Platform ownership is the one exception, handled immediately above.)
                 continue;
             }
-            // (3) Config/data-driven exclusion list.
-            if (exclusions.Contains(field))
+
+            if (!string.Equals(registeredType, d.IdentityType, StringComparison.OrdinalIgnoreCase))
             {
+                // Task 172 (#1011): discovery emits one descriptor per matched identity type of a POLYMORPHIC
+                // column. When ANOTHER descriptor of this same field carries the registered type, this one is
+                // simply the column's other type — dropped (only the registered type confers; never widened),
+                // and not a stale entry, so no warning.
+                if (discovered.Any(other => !ReferenceEquals(other, d)
+                        && string.Equals(other.Field?.Trim(), d.Field.Trim(), StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(other.IdentityType, registeredType, StringComparison.OrdinalIgnoreCase)))
+                {
+                    continue;
+                }
+
+                // The registry's assertion about this column's type disagrees with what live discovery
+                // just resolved (e.g. the column's target table changed since the registry was last
+                // reviewed). Malformed/stale — log and ignore rather than trust either side blindly.
+                _logger.LogWarning(
+                    "MembershipResolverService: AccessConferringRoles entry for entity={EntityType} " +
+                    "field={Field} declares IdentityType={RegisteredType} but live discovery resolved " +
+                    "{ActualType} — entry ignored (fail-closed, never widened).",
+                    entityType, d.Field, registeredType, d.IdentityType);
                 continue;
             }
 
             result.Add(d);
         }
         return result;
+    }
+
+    // ── People-targeting surface (ADR-034 Amendment A3 — unified-access-control-r2 task 152) ─────────────────
+    /// <summary>
+    /// The user-valued ownership columns that name exactly ONE person. <c>ownerid</c> is polymorphic: on a
+    /// team-owned row it holds the team's id, so the SystemUser binding (the caller's own id) never matches it — a
+    /// team-owned row is never selected through ownership. <c>owninguser</c> is user-only by construction.
+    /// <para>
+    /// Since task 172 (GitHub #1011) discovery emits <c>ownerid</c> TWICE — SystemUser and Team. Only the SystemUser
+    /// descriptor is admitted here (the check below is on the name AND the identity type); the Team descriptor falls
+    /// through and selects nothing, so this surface stays exactly what ADR-034 A3 fixed.
+    /// </para>
+    /// </summary>
+    private static readonly HashSet<string> PersonOwnershipColumns =
+        new(StringComparer.OrdinalIgnoreCase) { "ownerid", "owninguser" };
+
+    /// <summary>The Created By column admitted on the people-targeting surface for a HUMAN caller only.</summary>
+    internal const string CreatedByAttribute = "createdby";
+
+    /// <summary>Role name the people-targeting surface reports Created By matches under.</summary>
+    internal const string CreatedByRole = "createdBy";
+
+    /// <summary>
+    /// unified-access-control-r2 task 147 r1 (owner round 28 item 1): the person who asked for a row the BFF created as the
+    /// APPLICATION — <c>sprk_createdbyperson</c>. "Every reader of who created it uses RecordCreatorPerson (createdbyperson,
+    /// else createdby)": a to-do, event, memo or document the browser now creates through the BFF has the application as its
+    /// <c>createdby</c>, so without this term it would drop out of its creator's briefing.
+    /// </summary>
+    internal const string CreatorPersonAttribute = Sprk.Bff.Api.Services.Dataverse.RecordCreatorPerson.Column;
+
+    /// <summary>
+    /// Reduces discovered descriptors to the PERSON terms of the people-targeting surface (owner decisions round 2
+    /// item 9 + Q8; round 3 D1): a record is FOR a person when that person CREATED it (a human <c>createdby</c>), is
+    /// NAMED in one of its registry-listed Contact-typed "Assigned *" columns, or personally OWNS it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Everything else selects NOTHING here: <c>owningteam</c>, <c>owningbusinessunit</c>, and every Team-,
+    /// BusinessUnit-, Organization- or Account-typed descriptor. A business unit's DEFAULT team contains every user
+    /// in the unit (teammembership carries no <c>isdefault</c> exclusion), so admitting <c>owningteam</c> would put
+    /// every team- or BU-owned matter in every same-BU user's briefing — the defect this surface closes. Team and BU
+    /// ownership keep granting ACCESS on the authorization surface (A1.1, untouched).
+    /// </para>
+    /// <para>
+    /// <c>createdby</c> is globally excluded by discovery (ADR-034 MUST — touch-history, not association) and is
+    /// SYNTHESIZED here, on this surface only (A3, CLAUDE.md §6.5 path B). It binds only when the caller is a human:
+    /// every BFF-created row has the BFF application user as Created By, so binding it for that user would hand it
+    /// the set of everything the BFF ever created. Unknown (the systemuser row is unreadable) is treated as
+    /// not-a-person — the term binds nothing and a warning is logged.
+    /// </para>
+    /// <para>
+    /// Maker-authored SystemUser lookups (e.g. a <c>sprk_reviewer → systemuser</c>) are NOT person terms here: the
+    /// owner named Created By, Assigned To and personal ownership, and nothing else. Adding one is an ADR-034 edit.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// The person-term descriptors, and whether the human/application-user check could not be read (task 132 — the
+    /// response built over it is then not cached; Created By binds nothing for this request, as before).
+    /// </returns>
+    private async Task<(IReadOnlyList<MembershipDescriptor> Descriptors, bool CreatedByUnreadable)> FilterToPeopleTargetingTermsAsync(
+        string entityType,
+        Guid systemUserId,
+        IReadOnlyList<MembershipDescriptor> discovered,
+        CancellationToken ct)
+    {
+        // The registry's CONTACT-typed columns for this entity — the "Assigned *" person columns. Org-typed entries
+        // (law firms) are organizations, not people, and are deliberately not admitted.
+        var registry = _options.AccessConferringRoles ?? new AccessConferringRegistry();
+        var contactColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (registry.Entities.TryGetValue(entityType, out var columns) && columns is not null)
+        {
+            foreach (var column in columns)
+            {
+                if (!string.IsNullOrWhiteSpace(column.Field)
+                    && string.Equals(column.IdentityType?.Trim(), "Contact", StringComparison.OrdinalIgnoreCase))
+                {
+                    contactColumns.Add(column.Field.Trim());
+                }
+            }
+        }
+
+        var result = new List<MembershipDescriptor>(discovered.Count + 2);
+        MembershipDescriptor? creatorPerson = null;
+        foreach (var d in discovered)
+        {
+            if (string.IsNullOrWhiteSpace(d.Field))
+            {
+                continue;
+            }
+
+            var field = d.Field.Trim();
+
+            if (PersonOwnershipColumns.Contains(field)
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(d);
+                continue;
+            }
+
+            if (contactColumns.Contains(field)
+                && string.Equals(d.IdentityType, "Contact", StringComparison.OrdinalIgnoreCase))
+            {
+                result.Add(d);
+            }
+
+            if (string.Equals(field, CreatorPersonAttribute, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(d.IdentityType, "SystemUser", StringComparison.OrdinalIgnoreCase))
+            {
+                // Task 147 r1: discovered only where the column exists (the schema scripts put it on the roots and the
+                // stamped child tables), so a table without it never names it in the query. Bound under the human rule
+                // below, with Created By.
+                creatorPerson = d;
+            }
+
+            // Anything else — owningteam, owningbusinessunit, team/BU/org/account-typed lookups, maker-authored
+            // systemuser lookups, a force-included createdby (re-added below under the human rule) — selects nothing.
+        }
+
+        var isApplicationUser = await ApplicationUserCheck
+            .IsApplicationUserAsync(_dataverse, systemUserId, _logger, ct)
+            .ConfigureAwait(false);
+
+        if (isApplicationUser == false)
+        {
+            result.Add(new MembershipDescriptor(
+                Field: CreatedByAttribute,
+                Role: CreatedByRole,
+                IdentityType: "SystemUser",
+                TargetTable: "systemuser",
+                Source: "people-targeting"));
+
+            // Task 147 r1 (owner round 28 item 1): "createdbyperson, else createdby". The two terms are OR-ed: a row the
+            // BFF created as the application names the person in sprk_createdbyperson (its createdby is the application,
+            // which is never a human caller); a row a person created themselves names them in createdby, and no writer
+            // stamps sprk_createdbyperson on such a row (it is field-secured, written only by the BFF's app-only creates).
+            if (creatorPerson is not null)
+            {
+                result.Add(new MembershipDescriptor(
+                    Field: CreatorPersonAttribute,
+                    Role: CreatedByRole,
+                    IdentityType: "SystemUser",
+                    TargetTable: "systemuser",
+                    Source: "people-targeting"));
+            }
+        }
+        else
+        {
+            _logger.LogWarning(
+                "people_targeting_createdby_skipped: systemUserId={SystemUserId} entity={EntityType} reason={Reason} — "
+                + "Created By binds only for a human systemuser (applicationid null); an application user never receives "
+                + "the set of everything it created (ADR-034 A3).",
+                systemUserId,
+                entityType,
+                isApplicationUser == true ? "application_user" : "systemuser_unreadable");
+        }
+
+        // Stable order (by field) so the emitted FetchXML is deterministic.
+        result.Sort((a, b) => string.CompareOrdinal(a.Field, b.Field));
+        return (result, isApplicationUser is null);
     }
 
     // ── Descriptor filtering ───────────────────────────────────────────────
@@ -707,8 +1115,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
                     else
                     {
                         // R4 spec FR-11 / AC-11: Contact-typed membership descriptor whose
-                        // user has no Contact cross-ref via azureactivedirectoryobjectid
-                        // (per ADR-028 canonical mapping) is silently skipped today. Emit a
+                        // user has no linked contact (systemuser.sprk_primarycontact, or the contact
+                        // bound to the user's oid via contact.sprk_externalobjectid — maintained by
+                        // ContactIdentityBinder + the identity-link reconciliation job, task 141).
+                        // The descriptor is skipped (fail closed). Emit a
                         // structured `member_skipped` warning so Application Insights can
                         // pivot on it (traces | where message contains "member_skipped").
                         //
@@ -1385,7 +1795,28 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// returned string carries the user + entity + options-hash composition.
     /// </summary>
     private static string BuildCacheId(Guid systemUserId, string entityType, MembershipResolveOptions options)
-        => $"{systemUserId:D}:{entityType}:{HashOptions(options)}";
+        => ComposeCacheId(SystemUserSubject(systemUserId), entityType, HashOptions(options));
+
+    /// <summary>
+    /// The ONE composition of a membership cache id: <c>{subject}:{entityType}:{optionsHash}</c>. Readers pass real
+    /// values; the eviction patterns of <see cref="IMembershipCacheInvalidator"/> pass the Redis glob <c>*</c> for the
+    /// segments they do not fix (task 132), so a pattern cannot drift from the key a read wrote.
+    /// </summary>
+    internal static string ComposeCacheId(string subject, string entityType, string optionsHash)
+        => $"{subject}:{entityType}:{optionsHash}";
+
+    /// <summary>
+    /// Whether a membership resolution for <paramref name="normalizedEntity"/> is cached at all — the ONE predicate the
+    /// reader (both planes) and the eviction hook (<see cref="IMembershipCacheInvalidator"/>, which builds no
+    /// per-entity membership pattern for an uncached type) share. False only for a table Dataverse re-owns as a side
+    /// effect of a secure root's Assign cascade (<c>AssignCascadeChildOwners.IsReownedByCascade</c> — task 132
+    /// integration residual): those owner changes have no BFF write to evict after, so the answer is always read live.
+    /// </summary>
+    internal static bool CachesEntityType(string normalizedEntity)
+        => !Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.IsReownedByCascade(normalizedEntity);
+
+    /// <summary>The subject segment of a systemuser-plane cache id (task 132 — shared with the eviction patterns).</summary>
+    internal static string SystemUserSubject(Guid systemUserId) => systemUserId.ToString("D");
 
     /// <summary>
     /// Builds the resource-id segment for the contact-anchored entry point.
@@ -1395,14 +1826,45 @@ public sealed class MembershipResolverService : IMembershipResolverService
     /// <see cref="BuildCacheId"/>.
     /// </summary>
     private static string BuildContactCacheId(Guid contactId, string entityType, MembershipResolveOptions options)
-        => $"contact:{contactId:D}:{entityType}:{HashOptions(options)}";
+        => ComposeCacheId($"contact:{contactId:D}", entityType, HashOptions(options));
 
     /// <summary>
     /// Options hash — deterministic across equivalent option values regardless of
-    /// ordering. Includes Roles, IdentityTypes, IncludeRelated, Limit, and the
-    /// ContinuationToken (so paging requests cache per-page). First 8 bytes →
-    /// 16 hex chars; collision risk negligible at this scope.
+    /// ordering. Covers EVERY option that changes the resolved row set: Roles,
+    /// IdentityTypes, IncludeRelated, Limit, ContinuationToken (so paging requests cache
+    /// per-page), <see cref="MembershipResolveOptions.AccessConferringOnly"/> and
+    /// <see cref="MembershipResolveOptions.OrganizationIds"/> and (task 152, appended only when set)
+    /// <see cref="MembershipResolveOptions.PeopleTargeting"/>. First 8 bytes → 16 hex chars;
+    /// collision risk negligible at this scope.
     /// </summary>
+    /// <remarks>
+    /// 🚨 <b><c>AccessConferringOnly</c> and <c>OrganizationIds</c> were ADDED to this hash by task
+    /// 043, and the omission was a latent disclosure — not a tidiness fix.</b>
+    /// <para>
+    /// Task 041 introduced <c>AccessConferringOnly</c> as the systemuser plane's registry-filter
+    /// opt-in but did not add it here, which was harmless only because 041 deliberately left the
+    /// flag unset at every call site. Task 043 sets it <c>true</c> in
+    /// <c>AccessibleRecordSetService.ComposeForSystemUserAsync</c>. From that moment the
+    /// AUTHORIZATION caller (filtered, <c>true</c>) and the SCOPING caller
+    /// (<c>Api/Membership/MembershipEndpoints</c>, unfiltered, <c>false</c>) would have shared one
+    /// cache entry — same user, same entity, same Limit, therefore the same
+    /// <c>{systemUserId}:{entityType}:{optionsHash}</c> — for the cache TTL (5 min then). Whichever call
+    /// arrived first would decide what the other saw, and in the direction that matters: a scoping
+    /// call landing first hands the authorization gate the UNFILTERED descriptor set, which is
+    /// exactly the register A-8 over-inclusion FR-24 exists to close, reintroduced through Redis
+    /// rather than through code.
+    /// </para>
+    /// <para>
+    /// <c>OrganizationIds</c> is the same hazard in a new option: two compositions for one contact
+    /// differ ONLY by which organizations were bound (task 043 resolves one walk per distinct
+    /// standing-grant baseline), so omitting it would serve one baseline's row set as another's.
+    /// </para>
+    /// <para>
+    /// The general rule for this method: an option that can change the returned rows MUST appear
+    /// here. A cache key narrower than the query it stores is not a performance detail — on an
+    /// authorization path it is a way to answer the wrong question quietly.
+    /// </para>
+    /// </remarks>
     private static string HashOptions(MembershipResolveOptions options)
     {
         var sb = new StringBuilder(64);
@@ -1410,7 +1872,18 @@ public sealed class MembershipResolverService : IMembershipResolverService
         sb.Append("i:").Append(HashSorted(options.IdentityTypes)).Append('|');
         sb.Append("x:").Append(HashSorted(options.IncludeRelated)).Append('|');
         sb.Append("l:").Append(options.Limit).Append('|');
-        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty);
+        sb.Append("c:").Append(options.ContinuationToken ?? string.Empty).Append('|');
+        sb.Append("a:").Append(options.AccessConferringOnly ? '1' : '0').Append('|');
+        sb.Append("o:").Append(HashSortedGuids(options.OrganizationIds));
+
+        // ADR-034 A3 (task 152): the people-targeting surface. Appended ONLY when set, so every pre-existing caller's
+        // key is byte-identical (no orphaned entries, no cold cache on deploy) while a people-targeted call and an
+        // AI-scoping call for the same user + entity can never share an entry — the task-043 disclosure shape in
+        // the opposite direction (an AI-scoping call landing first would hand the briefing every team/BU-owned row).
+        if (options.PeopleTargeting)
+        {
+            sb.Append("|p:1");
+        }
 
         var hashInput = sb.ToString();
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(hashInput));
@@ -1431,8 +1904,32 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return string.Join(",", sorted);
     }
 
-    private async Task<MembershipResponse?> TryGetFromCacheAsync(string tenantId, string cacheId, CancellationToken ct)
+    /// <summary>
+    /// The Guid counterpart of <see cref="HashSorted(IReadOnlyList{string}?)"/> — order-independent
+    /// and duplicate-independent, so two callers that bind the same organizations in a different
+    /// order share a cache entry, and two that bind different ones never do.
+    /// </summary>
+    private static string HashSortedGuids(IReadOnlyList<Guid>? values)
     {
+        if (values is null || values.Count == 0)
+        {
+            return "*";
+        }
+        var sorted = values
+            .Where(v => v != Guid.Empty)
+            .Select(v => v.ToString("D", CultureInfo.InvariantCulture))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(v => v, StringComparer.Ordinal);
+        return string.Join(",", sorted);
+    }
+
+    private async Task<MembershipResponse?> TryGetFromCacheAsync(string tenantId, string? cacheId, CancellationToken ct)
+    {
+        if (cacheId is null)
+        {
+            return null; // an uncached entity type (CachesEntityType) — always resolved live
+        }
+
         try
         {
             return await _cache.GetAsync<MembershipResponse>(
@@ -1442,7 +1939,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 CacheVersion,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -1457,8 +1954,31 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
     }
 
-    private async Task TrySetCacheAsync(string tenantId, string cacheId, MembershipResponse response, CancellationToken ct)
+    /// <summary>
+    /// The systemuser path's ONE cache gate (task 132 · C12): a response built over a faulted read is not stored.
+    /// </summary>
+    private async Task TrySetCacheUnlessFaultedAsync(
+        string tenantId, string? cacheId, MembershipResponse response, bool faulted, Guid systemUserId, CancellationToken ct)
     {
+        if (faulted)
+        {
+            _logger.LogWarning(
+                "MembershipResolverService: response for systemUserId={SystemUserId} entity={EntityType} was built over a " +
+                "FAULTED identity/people-targeting read; returned to this request only and NOT cached (task 132)",
+                systemUserId, response.EntityType);
+            return;
+        }
+
+        await TrySetCacheAsync(tenantId, cacheId, response, ct).ConfigureAwait(false);
+    }
+
+    private async Task TrySetCacheAsync(string tenantId, string? cacheId, MembershipResponse response, CancellationToken ct)
+    {
+        if (cacheId is null)
+        {
+            return; // an uncached entity type (CachesEntityType)
+        }
+
         try
         {
             await _cache.SetAsync(
@@ -1470,7 +1990,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 CacheTtl,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }

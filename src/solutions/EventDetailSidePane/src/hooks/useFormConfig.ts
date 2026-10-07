@@ -12,8 +12,9 @@
  */
 
 import * as React from "react";
-import { getXrm } from "../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../utils/xrmAccess";
 import { parseFormConfig, type IFormConfig } from "../types/FormConfig";
+import { cleanGuid } from '@spaarke/ui-components';
 import { FALLBACK_FORM_CONFIG } from "../config/fallbackConfig";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ export function useFormConfig(
       setIsLoading(true);
       setError(null);
 
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         console.warn("[useFormConfig] Xrm.WebApi not available, using fallback");
         setFormConfig(FALLBACK_FORM_CONFIG);
@@ -81,7 +82,7 @@ export function useFormConfig(
       }
 
       try {
-        const normalizedId = eventTypeId!.replace(/[{}]/g, "").toLowerCase();
+        const normalizedId = cleanGuid(eventTypeId);
 
         const record = await xrm.WebApi.retrieveRecord(
           EVENT_TYPE_ENTITY,

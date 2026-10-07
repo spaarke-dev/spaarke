@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 4 (6-8): an "Email" tab in Word, built from the shared Communication compose components, sends the document as an attachment from the user's own mailbox and files the email against the record; the broken Graph sharing link leaves every Send Email path</title>
+    <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New pane view + tab built from a shared component library, wiring to an existing BFF route that sends mail as the user (OBO), and removal of a failing link path; `.ts`/`.tsx`, build config, possibly `.cs`.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sends email as the user and attaches a stored document — authorization, data association, a cross-module contract (the Communication module's send route) and a shared-library dependency.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT4-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 095 (client-only). Disjoint: 096 owns `App.tsx`, `TaskPaneToolbar.tsx`, `TaskPaneNavigation.tsx`, a new `components/views/EmailView.tsx` (+ service), `sendEmailService.ts`, `shareLinkService.ts`, `webpack.config.js`/`tsconfig.json` aliases and their tests; it MUST NOT edit `RelatedToPicker.tsx` or `SaveFlow.tsx` (095's). 096 is the only W1 task allowed to run `dotnet`.</parallel-reason>
+    <deps>091, 094</deps>
+    <tags>frontend, office-addins, typescript, bff-api, email, communication, unit-test</tags>
+    <estimated-effort>2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 4 (2026-10-04), items 6-8, the Send Email failure in the owner's screenshot, and the owner's decisions the same day — including *"for the email form we should use our shared UI components so it looks consistent"*. Record: `notes/042-uat-round4-2026-10-04.md` §1, §3.</prompt>
+
+  <role>SPAARKE full-stack developer on the Office add-in, the shared Communication component library and the BFF Communication module.</role>
+
+  <goal>In Word, the user writes and sends an email from the pane — using the same compose components as the Spaarke email page — with the current document attached, from their own mailbox, and the sent email is recorded in Spaarke against the same record; no Send Email path depends on a Graph sharing link.</goal>
+
+  <context>
+    <background>
+      - **Owner, verbatim (round 4)**: (6) *"Add the send email to the main add-in bar next to 'Find'; could this be an
+        email form so do not then have to open Spaarke?"* (7) *"when the email is sent, the email should be associated to
+        the same record"* (8) *"the email has this file/document attached"*; and *"for the email form we should use our
+        shared UI components so it looks consistent"*. Decisions: send **as the user, from their own mailbox**;
+        **Outlook unchanged** (native new-message window) — the in-pane form is Word-only.
+      - **Shared compose components (binding — reuse, do not rebuild)**: `src/client/shared/Spaarke.Communication.Components/src/components/`
+        has `EmailRecipients`, `EmailBody`, `EmailComposeActions`, `AttachmentList`, `EmailAssociationsAndTracking`
+        (the Spaarke email page's composer pieces; find their consumer, e.g. `src/client/code-pages/CommunicationPage`,
+        for how they are assembled). The add-in already resolves `@spaarke/communication-components` by alias for ONE
+        file (`tsconfig.json:27`, `webpack.config.js:213` — `logic/connections/provenance`); widen that to the compose
+        components (alias + `tsconfig` paths), the way other shared libraries are consumed in this repo. Check each
+        component's dependencies before wiring: anything bound to the model-driven host (`Xrm`, `Xrm.WebApi`,
+        `window.parent.Xrm`) or to a data service the add-in cannot provide must be fed through props/adapters, not
+        copied. React/Fluent version compatibility with the add-in (React 19, Fluent v9) must be confirmed.
+      - **The send route already exists**: `POST /api/communications/send` (`Api/CommunicationEndpoints.cs:55`,
+        `CommunicationAuthorizationFilter`) with `SendCommunicationRequest`: `To`, `Cc`, `Bcc`, `Subject`, `Body`,
+        `BodyFormat`, **`SendMode.User`** (OBO, `/me/sendMail`), **`Associations`** (`CommunicationAssociation[]`),
+        **`AttachmentDocumentIds`** (sprk_document ids; the server fetches the file and sends a `FileAttachment`; max 150 /
+        35 MB), `ArchiveToSpe`. REUSE it — no new send route. Read `CommunicationService` + `EmailChannelSender` to confirm
+        what a User-mode send records (the `sprk_communication` row, its associations, the attachment) and what the
+        filter demands.
+      - **The defect**: Graph refuses `createLink` for SPE container files — *"This sharing scenario is not supported on
+        CSP Container site."* (owner screenshot; share-link route `FileAccessEndpoints.cs:118`). Paths that mint a
+        document sharing link (`shareLinkService.mintDocumentShareLink`, used by `sendEmailService.ts` for task 086's Word
+        choice AND Outlook's native compose) therefore fail.
+      - **Word**: replace task 086's Send Email row (above the tabs) with an **Email tab** after Find (Save · To Do · Find
+        · Email). The form, from the shared components: To (recipient search showing email — the add-in's contact search
+        from task 091 as the data source if the component takes a provider), Cc, Subject (prefilled from the document
+        name), Body (prefilled with a short line and the Spaarke **record** link from `openRecordLauncher`, never a
+        sharing link), the attachment (the current document's Spaarke file) and the related record. Send ->
+        `/api/communications/send` with `SendMode: User`, `AttachmentDocumentIds: [documentId]`, `Associations: [the
+        related record]`. After send: a success message with "Open in Spaarke" (the communication) via `openRecord`.
+      - **A document not yet in Spaarke** cannot be attached by id: the Email tab says so and offers "Save to Spaarke
+        first" (switches to the Save tab).
+      - **Outlook**: keep native compose, but its body must stop depending on the sharing link — use the Spaarke
+        document/record link instead, so it works again.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-04">The email form is built from the shared `Spaarke.Communication.Components` compose components (owner: consistency). A new component in the add-in is allowed only as a thin container that wires them; restyling or re-implementing a shared component is not.</constraint>
+    <constraint source="owner 2026-10-04">Word only for the in-pane form, gated by capability, never `hostType`. Outlook keeps native compose.</constraint>
+    <constraint source="owner 2026-10-04">Send as the user (`SendMode.User`). The sent email is associated with the same record the document is filed to; the document is attached (not linked).</constraint>
+    <constraint source="this task">No new send route, no second mail sender: reuse `POST /api/communications/send`. A BFF change is allowed only if the existing contract cannot carry what is needed (e.g. the filter refuses the Office caller) — then extend that route minimally and state the placement per CLAUDE.md §10.</constraint>
+    <constraint source="this task">No pane path calls `mintDocumentShareLink` after this task. The share-link route's failure for its other consumer (the Spaarke email composer) is recorded in the note with a recommendation for the main session (owner rule 2026-09-21: findings are fixed in this project).</constraint>
+    <constraint source="security">The pane sends only what the user typed and the document/record ids; the server authorizes the send, the attachment read and the association. Never put a token or the BFF URL in a body or URL.</constraint>
+    <constraint source="ADR-021">Fluent v9, semantic tokens, dark mode; accessible labels on every field (as the shared components provide).</constraint>
+    <constraint source="ADR-038">Tests in `shared/**/__tests__/` listed in `ci-gated-suites.txt`; server tests in the existing Communication test classes if the server changes.</constraint>
+    <constraint source="parallel wave">Do NOT edit 095's files. Do NOT run `npm run build` (the main session does). Publish size, if the BFF changes, is owed to the main session.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">In Word the tab row is Save · To Do · Find · Email, and task 086's Send Email row above the tabs is gone; in Outlook the tabs are unchanged and Send Email opens native compose.</criterion>
+    <criterion testable="true">The Email form is composed of the shared `Spaarke.Communication.Components` compose components (recipients, body, attachments, associations, actions) — a test or import check proves the add-in renders those components, not local copies.</criterion>
+    <criterion testable="true">The form has To (recipient search showing email, plus free-typed addresses), Cc, Subject prefilled from the document name, Body prefilled with the record link, the attached document shown, and the related record shown.</criterion>
+    <criterion testable="true">Send calls `POST /api/communications/send` with `SendMode: User`, `AttachmentDocumentIds: [documentId]` and `Associations` naming the related record; a test asserts the exact request.</criterion>
+    <criterion testable="true">After a successful send: a success message with "Open in Spaarke" for the communication; the form resets.</criterion>
+    <criterion testable="true">A document not yet in Spaarke: the Email tab explains and offers "Save to Spaarke first"; Send is not possible.</criterion>
+    <criterion testable="true">Negative: a refused send (403/400/500) shows the server's reason; nothing is reported as sent.</criterion>
+    <criterion testable="true">No client code path calls `mintDocumentShareLink`; Outlook's native-compose body carries the Spaarke document/record link instead (test).</criterion>
+    <criterion testable="true">Gates: gated jest green; lint 0; typecheck 0 production; if the BFF changed: build, Communication tests, ArchTests green, CVE clean.</criterion>
+    <criterion testable="true">Live (after deploy): from Word, send an email to yourself — it arrives from your mailbox with the document attached, appears in Sent Items, and the `sprk_communication` row is associated with the record. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A shared compose component cannot run in the add-in without host-only dependencies (`Xrm`/model-driven services) that props cannot replace, or needs a React/Fluent version the add-in cannot load — STOP and report which component and why; do not copy it.</trigger>
+    <trigger>`CommunicationAuthorizationFilter` or the User send mode refuses the Office pane's token (e.g. a missing delegated `Mail.Send` consent on the BFF app) — STOP and report the exact error; consent changes are the owner's.</trigger>
+    <trigger>`AttachmentDocumentIds` cannot read an SPE file the user can read, or the attachment limit blocks ordinary documents — report before working around it.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read the round-4 note, the shared compose components and their consumer page, the Communication send route/service/sender/filter, 086's and 036's notes, `sendEmailService.ts`, `shareLinkService.ts`, 091's contact search.</step>
+    <step>Confirm the components can be consumed (dependencies, versions) and what a User-mode send records (read code; no live send).</step>
+    <step>Alias/paths for the shared library; Email tab + thin container over the shared components + send service; tests.</step>
+    <step>Remove 086's Send Email row in Word; switch Outlook's body to the Spaarke link; remove `mintDocumentShareLink` from pane paths; tests.</step>
+    <step>Record the share-link route defect and recommendation.</step>
+    <step>Gates; `notes/096-email-tab.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The compose components (`Spaarke.Communication.Components`), `POST /api/communications/send` (send as user, associations, document attachments), 091's contact search, `openRecordLauncher` and the tab shell all exist.</existing>
+    <extension>Yes — a thin pane container over shared components and an existing route; the only new surface is the tab and its container, which the owner asked for.</extension>
+    <cost-of-doing-nothing>Send Email fails for every user today (Graph refuses sharing links on SPE), and the owner wants to email a document without leaving Word, attached and recorded against the record, looking like the rest of Spaarke.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Email tab (Word)">
+      <steps>
+        <step>Save a document to a matter; open Email: the same recipient/body/attachment controls as the Spaarke email page; the document chip; the matter shown.</step>
+        <step>Send to yourself: it arrives from your mailbox with the .docx attached; the communication record is on the matter.</step>
+      </steps>
+    </test>
+    <test name="Outlook unchanged">
+      <steps>
+        <step>In Outlook, Send Email opens the native new-message window with a working Spaarke link.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/views/EmailView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/shareLinkService.ts</file>
+    <file role="edit">src/client/office-addins/webpack.config.js</file>
+    <file role="edit">src/client/office-addins/tsconfig.json</file>
+    <file role="read">src/client/shared/Spaarke.Communication.Components/src/components/index.ts</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Services/Communication/Models/SendCommunicationRequest.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/096-email-tab.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round4-2026-10-04.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/086-word-send-email-and-focused-open.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/036-send-email-via-outlook.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/091-todo-tab.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/views/EmailView.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/096-email-tab.md</file>
+  </outputs>
+
+  <notes>
+    Completed 2026-10-04 (subagent, wave UAT4-W1). Full record: notes/096-email-tab.md.
+    - Word Email tab (Save · To Do · Find · Email), gated on new capability canEmailFromPane (Word true, Outlook false);
+      task 086's Send Email row removed; Outlook's native Send Email unchanged.
+    - The "shared compose components" named in the background are the READING-PANE components; the email page's
+      form is EmailComposer (@spaarke/ui-components). The tab mounts it through a new thin shared wrapper
+      SendEmailPane (ADR-045 "new mount = new thin wrapper"), by exact webpack/jest alias to source; types via an
+      ambient shim (shared/types/spaarke-send-email-pane.d.ts). lexical 0.41.0 added to the add-in.
+    - Send = existing POST /api/communications/send, sendMode User, attachmentDocumentIds [documentId],
+      associations [related record, logical name], archiveToSpe false. No BFF change.
+    - No client path mints a sharing link; shareLinkService.ts + suite deleted; Outlook body links the Spaarke
+      document record.
+    - Gates: gated jest 75/75 suites, 1031/1031; lint 0; typecheck 68 total / 0 production (= CI pin); shared
+      wrappers.test 14/14; webpack build exit 0 (run twice — the second proved the scoped resolve change).
+    - Step 9.5: adr-check found an ADR-045 deviation (direct engine mount) → Path C (SendEmailPane). code-review:
+      1 Critical (server, escalated), W3/W4/W5/W6/W8 + S2/S4/S6/S7/S8 fixed; table in notes §8.
+    - OPEN: live send from Word (AC 10). Escalated: app-only attachment read + association with no caller-access
+      check on the send route (security); share-link route recommendation (notes §4); archiveToSpe default bug.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

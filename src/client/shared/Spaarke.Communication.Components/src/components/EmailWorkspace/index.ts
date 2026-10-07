@@ -12,7 +12,6 @@ export type { EmailRelatedToPillsProps } from './EmailRelatedToPills';
 export {
   COMMUNICATION_ENTITY,
   EMAIL_TRACKING_FIELDS,
-  DEFAULT_ACCESS_PERMISSION_OPTIONS,
   mapRowToEmailCardItem,
   readFiledAssociations,
   toWorkspaceRecordState,

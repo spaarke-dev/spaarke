@@ -47,7 +47,8 @@ Single managed solution containing everything a Spaarke customer environment nee
 Explicitly EXCLUDED:
 - `Spaarke.Plugins` assembly — REMOVED from spaarkedev1 on 2026-08-20 during Wave H-3
   audit (unregistered `DocumentEventPlugin` + Delete/Create SDK message steps + assembly).
-  Any future Spaarke plugin registration is a policy decision, not a default.
+  Spaarke ships no plugins (ADR-002, updated 2026-09-25); reintroducing one requires the ADR-002
+  reopen criteria via CLAUDE.md §6.5, not a manifest addition.
 - Test / scratch / temp solutions (`SpaarkeMasterTest*`, `PowerAppsToolsTemp_sprk`,
   `TemplatePCFImport`, `SPRKMAINDEV1250801`).
 - Microsoft-authored tooling installed to spaarkedev1 (`CreatorKit*`, `DataverseAccelerator*`).
@@ -154,9 +155,10 @@ For each Spaarke release (initial customer OR update to existing customers):
 2. **Test/scratch solutions never ship.** The exclude pattern in
    `Get-SpaarkeComponents.ps1` is authoritative. Test solutions must follow the
    naming convention (contain `Test` at end, `Temp`, `SCRATCH`, `MasterTest`).
-3. **No custom plugins ship without an explicit policy decision.** Current policy:
-   Spaarke doesn't use plugins (all server-side logic lives in the BFF). If a plugin
-   is ever added, it must be documented + approved + then included via manifest addition.
+3. **No custom plugins ship.** *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
+   Spaarke ships no Dataverse plugins; record invariants live in the BFF server-side write
+   path (ADR-002 WP-1…WP-8). Reintroducing a plugin requires meeting the ADR-002 reopen
+   criteria through the CLAUDE.md §6.5 ADR amendment path — not a manifest addition.
 4. **OOB customizations MUST be documented** in `oob-customizations.yaml` in the same
    PR that adds the sprk_ column. Test-SolutionCompleteness catches drift.
 5. **Version bumps are semver**: Major on breaking schema changes; Minor on new entity or

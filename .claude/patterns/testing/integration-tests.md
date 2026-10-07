@@ -14,7 +14,7 @@ Writing end-to-end HTTP tests against the BFF API, or architecture compliance te
 4. `tests/Spaarke.ArchTests/ADR001_MinimalApiTests.cs` — NetArchTest pattern for ADR enforcement
 
 ## Constraints
-- **ADR-001**: Architecture tests must assert no Azure Functions dependency
+- **ADR-001**: Architecture tests assert the BFF assembly carries no Functions or Durable Task packages and no Function-attributed methods
 - **ADR-007**: Architecture tests must assert Graph types don't appear outside Infrastructure namespace
 - **ADR-008**: Architecture tests must assert endpoint filters are used for auth
 

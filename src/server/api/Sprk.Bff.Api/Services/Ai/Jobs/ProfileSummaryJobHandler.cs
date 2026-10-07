@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Services.Ai.Jobs;
 /// Processes AI Document Profile analysis for Office add-in saved content.
 ///
 /// Follows ADR-004 for job contract patterns and idempotency requirements.
-/// Follows ADR-001 for BackgroundService pattern.
+/// An ADR-004 IJobHandler (dispatched by ServiceBusJobProcessor).
 /// Uses AppOnlyAnalysisService for Document Intelligence + OpenAI analysis.
 /// </summary>
 /// <remarks>

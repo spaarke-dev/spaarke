@@ -1,5 +1,6 @@
 using Azure.Security.KeyVault.Secrets;
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -14,15 +15,18 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///
 /// Non-framework DI registrations: 10 (within ADR-010 ≤15 limit)
 ///   1.  SpeAdminOptions         — Configure  (options pattern, bound from "SpeAdmin" section)
-///   2.  SecretClient            — Singleton  (Azure Key Vault client for fetching Graph credentials)
+///   2.  SecretClient            — Singleton  (shared Key Vault client — consumed by OTHER modules; see below)
 ///   3.  DataverseWebApiClient   — Singleton  (thread-safe REST client; used by SpeAuditService + SpeDashboardSyncService)
-///   4.  SpeAdminTokenProvider   — Singleton  (Phase 3: OBO token acquisition and per-app caching)
-///   5.  SpeAdminGraphService    — Singleton  (multi-config Graph client; app-only + OBO via TokenProvider)
-///   6.  SpeAuditService         — Scoped     (per-request, writes to sprk_speauditlog)
-///   7.  SpeDashboardSyncService — Singleton  (shared instance injected into dashboard endpoints)
-///   8.  SpeDashboardSyncService — Hosted     (delegates to singleton instance for background execution)
-///   9.  BulkOperationService    — Singleton  (shared instance injected into bulk endpoints)
-///   10. BulkOperationService    — Hosted     (delegates to singleton instance for background execution)
+///   4.  SpeAdminGraphService    — Singleton  (Graph via IGraphClientFactory: BFF app-only identity + delegated OBO)
+///   5.  SpeAuditService         — Scoped     (per-request, writes to sprk_speauditlog)
+///   6.  SpeAdminTenantScope     — Scoped     (cross-customer boundary)
+///   7.  SpeDashboardSyncService — Singleton + scheduled job (AddScheduledJob — ScheduledJobHost dispatches it;
+///       ADR-036 / ADR-052; migrated from a hosted timer loop by unified-access-control-r2 task 165)
+///   8.  BulkOperationService    — Singleton  (shared instance injected into bulk endpoints)
+///   9.  BulkOperationService    — Hosted     (delegates to singleton instance for background execution)
+///
+/// SpeAdminTokenProvider (owning-app OBO with a Key Vault client secret) was removed 2026-10-04: it was
+/// reachable only through an unused method, and SPE Admin no longer authenticates as owning apps at all.
 /// </summary>
 public static class SpeAdminModule
 {
@@ -31,7 +35,6 @@ public static class SpeAdminModule
         IConfiguration configuration)
     {
         // Bind SpeAdmin configuration from "SpeAdmin" section (appsettings.json).
-        // Phase 1 uses app-only tokens; Phase 3 adds OBO via SpeAdminTokenProvider.
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral — the
         // only annotations are [Range] on DashboardSyncIntervalMinutes (15) and MaxContainersPerPage (100),
         // both in range by default, so an absent "SpeAdmin" section binds valid defaults and boots.
@@ -40,7 +43,9 @@ public static class SpeAdminModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Azure Key Vault SecretClient — used by SpeAdminGraphService to fetch per-config client secrets.
+        // Azure Key Vault SecretClient — registered here for historical reasons and SHARED: the
+        // credential provider (certificate fallback, AuthorizationModule) and ExternalAccessModule resolve
+        // it. SpeAdminGraphService no longer uses it — it reads no secrets since 2026-10-04.
         // Singleton: SecretClient is thread-safe and designed for reuse.
         var keyVaultUri = configuration["SpeAdmin:KeyVaultUri"]
             ?? configuration["KeyVaultUri"]
@@ -70,15 +75,9 @@ public static class SpeAdminModule
         // (SDK-based ServiceClient in GraphModule) — used here for direct REST POST to sprk_speauditlogs.
         services.AddSingleton<DataverseWebApiClient>();
 
-        // Phase 3: OBO token provider — acquires per-owning-app tokens via MSAL OBO exchange.
-        // Singleton: stateless except for the thread-safe OBO token cache and MSAL app cache.
-        // Injected optionally into SpeAdminGraphService to enable multi-app scenarios.
-        // Single-app configs continue to use app-only tokens without this provider.
-        services.AddSingleton<SpeAdminTokenProvider>();
-
-        // Multi-config SPE Graph client (app-only + OBO for multi-app configs).
-        // Singleton: stateless except for the in-memory client caches (ConcurrentDictionary + TTL).
-        // Resolves Graph credentials from Dataverse + Key Vault; caches GraphServiceClient by configId.
+        // SPE Admin Graph facade. Holds no credential: app-only work uses the BFF's own identity
+        // (IGraphClientFactory.ForApp — the managed identity on Azure) and grant / container-type work is
+        // delegated (IGraphClientFactory.ForUserAsync). Stateless singleton.
         // Full implementation: Infrastructure/Graph/SpeAdminGraphService.cs
         services.AddSingleton<SpeAdminGraphService>();
 
@@ -92,19 +91,17 @@ public static class SpeAdminModule
         // the caller's identity and must never be shared across requests.
         services.AddScoped<SpeAdminTenantScope>();
 
-        // Background service: syncs dashboard metrics (container counts, storage usage)
-        // from Graph API into IDistributedCache on a configurable interval (default 15 min).
-        // ADR-001: BackgroundService, not Azure Functions.
-        //
-        // Registered as Singleton first so the same instance can be injected into dashboard
-        // endpoints (for ReadCachedMetricsAsync and TriggerRefreshAsync). The hosted service
-        // registration delegates to the singleton instance via factory lambda — ensuring both
-        // the endpoint injection and the background runner share the same object.
-        services.AddSingleton<SpeDashboardSyncService>();
-        services.AddHostedService(sp => sp.GetRequiredService<SpeDashboardSyncService>());
+        // Scheduled job: syncs dashboard metrics (container counts, storage usage per config) from Graph API into
+        // IDistributedCache on a configurable interval (default 15 min).
+        // Migrated to an IScheduledJob on ScheduledJobHost (ADR-036) by unified-access-control-r2 task 165, which changed
+        // its behaviour (per-config storage, per-container attribution — owner round 25 item 5); ADR-052 §1 migrates a
+        // timer service when it is next touched. One run per schedule across instances (distributed lease). The
+        // singleton AddScheduledJob registers is the instance the dashboard endpoints read the cache through.
+        var speAdminOptions = configuration.GetSection(SpeAdminOptions.SectionName).Get<SpeAdminOptions>() ?? new SpeAdminOptions();
+        services.AddScheduledJob<SpeDashboardSyncService>(SpeDashboardSyncService.BuildCronSchedule(speAdminOptions));
 
         // Background service: processes bulk container operations (delete, permission assignment).
-        // ADR-001: BackgroundService, not Azure Functions.
+        // Runs in the BFF as a BackgroundService, governed by ADR-052.
         //
         // Registered as Singleton first so bulk endpoints can inject the same instance
         // to call EnqueueDelete / EnqueuePermissions / GetStatus. The hosted service

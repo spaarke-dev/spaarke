@@ -1,11 +1,18 @@
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
+import type { AccountInfo } from '@azure/msal-browser';
 import { App } from '@shared/taskpane';
+import type { SavedTodoContext } from '@shared/taskpane/components/views/CreateTodoView';
+import { HostAdapterFactory, isHostAdapterError } from '@shared/adapters';
+import type { IHostAdapter } from '@shared/adapters';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with outlook/manifest.json's "version" field
-const APP_VERSION = '1.0.20';
+// Version information. Like the Word pane (task 089), this is the unified package's version injected at build time
+// (`UNIFIED_PACKAGE.VERSION` → `process.env.ADDIN_PACKAGE_VERSION`). It was a hand-maintained '1.0.22' — the old
+// Outlook-only manifest's version — so Outlook showed v1.0.22 while Word showed the package the admin uploads
+// (owner UAT 2026-10-06). 'unknown' only outside a webpack build.
+const APP_VERSION = process.env.ADDIN_PACKAGE_VERSION || 'unknown';
 // Task 040 / FR-B0: fallback (used only outside webpack, e.g. non-build test
 // contexts) was a stale hardcoded date; webpack's DefinePlugin always injects
 // the real build date, so this fallback should never be user-visible.
@@ -43,30 +50,72 @@ function readInitialAction(): 'createTodo' | undefined {
 }
 
 /**
- * Build the createTodoConfig wiring for the App, including the save-flow
- * adapter. When the user clicks "Create To Do" and the email isn't yet saved
- * to Spaarke, the CreateTodoView calls this callback. Until task 072 wires
- * the in-taskpane SaveView orchestration, this returns null (signalling "save
- * was not completed") so the view surfaces a clear "save first" message.
+ * In the browser test harness (webpack dev mode) supply a demo "filed" context so
+ * the inline Create To Do form is fully interactive without a real save — the
+ * `demo-` communication id routes the create-To-Do call to a mocked success in App.
  *
- * @see projects/smart-todo-decoupling-r3/notes/outlook-ribbon-create-todo.md
+ * In production this returns undefined until the SaveView → regarding wiring lands;
+ * until then the Create To Do tab shows a "file this email first" prompt (correct
+ * behavior — a To Do needs the record the email is filed to as its regarding).
+ *
+ * `regardingEntity` is the FRIENDLY type ("Matter"/"Project"/"Invoice") the BFF
+ * `POST /api/office/todo` expects; App also maps the Dataverse logical name
+ * defensively, so the future Save-flow wiring may pass either form.
  */
-function buildCreateTodoConfig() {
-  if (!CONFIG.smartTodoCodePageUrl) {
-    // Action disabled — the App falls through to the default tabs.
+function buildDemoSavedContext(): SavedTodoContext | undefined {
+  if (process.env.NODE_ENV !== 'development') {
     return undefined;
   }
   return {
-    codePageBaseUrl: CONFIG.smartTodoCodePageUrl,
-    saveEmailToSpaarke: async () => {
-      // Initial wiring: the host save-flow integration is intentionally a stub
-      // here. The CreateTodoView's "save first" path surfaces a clear message
-      // pointing users to the Save view. A follow-up task can replace this
-      // with a richer in-taskpane orchestrator (open SaveView programmatically,
-      // await job completion, re-look up). For task 070 (code-only), the
-      // stub keeps the contract intact without requiring cross-view coupling.
-      return null;
-    },
+    communicationId: 'demo-communication-0001',
+    regardingEntity: 'Matter',
+    regardingRecordId: '00000000-0000-0000-0000-000000000001',
+    regardingName: 'Acme Corp — NDA (demo)',
+  };
+}
+
+/**
+ * True inside the browser test harness (`taskpane-test.html` sets the flag before the
+ * bundle loads). Never true in a deployed build.
+ */
+function isBrowserTestMode(): boolean {
+  try {
+    return (window as unknown as { __SPAARKE_TEST_MODE__?: boolean }).__SPAARKE_TEST_MODE__ === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Browser test harness only: replace the auth service methods with mocks so the taskpane
+ * renders the authenticated app (Save + Create To Do tabs) without a real Entra sign-in.
+ * The deployed build never calls this — the `.env` placeholder tenant/client would 401
+ * against Entra otherwise, which is exactly what a UX harness must not require.
+ */
+function installMockAuth(): void {
+  const mockAccount: AccountInfo = {
+    homeAccountId: 'test-home-account',
+    environment: 'login.microsoftonline.com',
+    tenantId: 'test-tenant',
+    username: 'test.user@spaarke.com',
+    localAccountId: 'test-local-account',
+    name: 'Test User',
+  };
+  const mutableAuth = authService as unknown as {
+    isAuthenticated: () => boolean;
+    getAccount: () => AccountInfo | null;
+    getAccessToken: (scopes?: string[]) => Promise<string | null>;
+    signIn: () => Promise<void>;
+    signOut: () => Promise<void>;
+  };
+  mutableAuth.isAuthenticated = () => true;
+  mutableAuth.getAccount = () => mockAccount;
+  mutableAuth.getAccessToken = async () => 'mock-access-token';
+  mutableAuth.signIn = async () => {
+    /* no-op */
+  };
+  mutableAuth.signOut = async () => {
+    /* no-op */
   };
 }
 
@@ -80,7 +129,16 @@ function renderError(error: Error | string, stage: string) {
   const container = document.getElementById('root');
   if (!container) return;
 
-  const errorMessage = error instanceof Error ? error.message : String(error);
+  // Task 010 / FR-04: Stage 4 can now reject with a typed `HostAdapterError` — a PLAIN OBJECT
+  // `{ code, message }`, not an Error. Without this branch every factory failure (INVALID_HOST,
+  // API_NOT_AVAILABLE, unregistered host) rendered as the literal string "[object Object]", i.e. the
+  // one failure this change introduces would have been the one nobody could diagnose from the pane.
+  // (code-review W-1, 2026-09-09.)
+  const errorMessage = isHostAdapterError(error)
+    ? `${error.code}: ${error.message}`
+    : error instanceof Error
+      ? error.message
+      : String(error);
 
   container.innerHTML = `
     <div style="padding: 20px; font-family: 'Segoe UI', sans-serif; height: 100%; box-sizing: border-box;">
@@ -122,7 +180,14 @@ async function init() {
     bffApiBaseUrl: CONFIG.bffApiBaseUrl,
   });
 
-  // Stage 1: Wait for Office.js to be ready
+  // Stage 1: Wait for Office.js to be ready.
+  // Task 010 option B (operator decision 2026-09-09): capture the host Office hands us HERE and
+  // pass it to the factory at Stage 4. THIS PANE IS WHERE THE RISK ACTUALLY LIVES —
+  // `Office.context.host` is unpopulated in some Outlook desktop builds, and this is a bootstrap
+  // with no fallback: an empty global would throw INVALID_HOST and leave a working Outlook surface
+  // dark. `Office.onReady`'s info.host is reported by the host at ready time and does not have that
+  // failure mode.
+  let readyHost: Office.HostType | undefined;
   console.log('[Spaarke] Stage 1: Waiting for Office.js...');
   try {
     await new Promise<void>((resolve, reject) => {
@@ -132,6 +197,7 @@ async function init() {
 
       Office.onReady(info => {
         clearTimeout(timeout);
+        readyHost = info?.host ?? undefined;
         console.log('[Spaarke] Office.js ready:', info);
         resolve();
       });
@@ -141,19 +207,24 @@ async function init() {
     throw error;
   }
 
-  // Stage 2: Initialize auth service
-  console.log('[Spaarke] Stage 2: Initializing auth service...');
-  try {
-    await authService.initialize({
-      clientId: CONFIG.clientId,
-      tenantId: CONFIG.tenantId,
-      bffApiClientId: CONFIG.bffApiClientId,
-      ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
-    });
-    console.log('[Spaarke] Auth service initialized');
-  } catch (error) {
-    renderError(error as Error, 'Auth service initialization');
-    throw error;
+  // Stage 2: Initialize auth service (mocked in the browser test harness).
+  if (isBrowserTestMode()) {
+    console.log('[Spaarke] Browser test mode — mocking auth (no real Entra sign-in).');
+    installMockAuth();
+  } else {
+    console.log('[Spaarke] Stage 2: Initializing auth service...');
+    try {
+      await authService.initialize({
+        clientId: CONFIG.clientId,
+        tenantId: CONFIG.tenantId,
+        bffApiClientId: CONFIG.bffApiClientId,
+        ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
+      });
+      console.log('[Spaarke] Auth service initialized');
+    } catch (error) {
+      renderError(error as Error, 'Auth service initialization');
+      throw error;
+    }
   }
 
   // Stage 3: Configure API client
@@ -169,13 +240,32 @@ async function init() {
     throw error;
   }
 
-  // Stage 4: Create host adapter
+  // Stage 4: Create host adapter via the factory (task 010 / FR-04).
+  //
+  // `createAndInitialize()` constructs the registered class and awaits `initialize()`, so the ADAPTER
+  // it hands back is the same `OutlookAdapter`, initialized the same way, as the previous
+  // `new OutlookAdapter()` + `await initialize()` (pinned by the equivalence test in
+  // `shared/adapters/__tests__/HostAdapterFactory.test.ts`).
+  //
+  // It is NOT behaviourally identical END TO END: the factory runs `detectHostType()` and a registry
+  // lookup BEFORE construction, adding two pre-initialize failure modes this pane did not have before
+  // (INVALID_HOST from an unrecognized/absent `Office.context.host`, and INVALID_HOST from an
+  // unregistered host). Both are typed and rendered by `renderError` above. See
+  // `projects/spaarkeai-word-add-in-r1/notes/010-adapter-consolidation.md` §6. (code-review C-2.)
+  //
+  // Registration MUST happen before any `create()`/`createAndInitialize()` call in this entry point.
   console.log('[Spaarke] Stage 4: Creating host adapter...');
-  let hostAdapter: OutlookAdapter;
+  let hostAdapter: IHostAdapter;
   try {
-    hostAdapter = new OutlookAdapter();
-    // Initialize the adapter (connects to Office.js)
-    await hostAdapter.initialize();
+    HostAdapterFactory.registerAdapter('outlook', OutlookAdapter);
+    // Option B (operator decision 2026-09-09) — see the equivalent note in word/taskpane/index.tsx.
+    // Hand the factory the Stage-1 host instead of letting it re-derive one from
+    // `Office.context.host`, which is unpopulated in some Outlook desktop builds. If Office.onReady
+    // reported no host, detectHostType() still runs and a real failure still surfaces as a typed
+    // INVALID_HOST rendered by the catch below.
+    hostAdapter = await HostAdapterFactory.createAndInitialize(
+      readyHost === Office.HostType.Outlook ? 'outlook' : undefined
+    );
     console.log('[Spaarke] Host adapter created and initialized');
   } catch (error) {
     renderError(error as Error, 'Host adapter creation');
@@ -194,7 +284,7 @@ async function init() {
   try {
     reactRoot = createRoot(container);
     const initialAction = readInitialAction();
-    const createTodoConfig = buildCreateTodoConfig();
+    const initialSavedContext = buildDemoSavedContext();
     reactRoot.render(
       <React.StrictMode>
         <App
@@ -203,7 +293,7 @@ async function init() {
           version={APP_VERSION}
           buildDate={BUILD_DATE}
           {...(initialAction ? { initialAction } : {})}
-          {...(createTodoConfig ? { createTodoConfig } : {})}
+          {...(initialSavedContext ? { initialSavedContext } : {})}
         />
       </React.StrictMode>
     );

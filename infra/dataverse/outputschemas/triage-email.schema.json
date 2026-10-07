@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "obligations",
+    "category",
+    "priority",
+    "reviewOutcome"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "EXACTLY 2 lines (two short sentences) summarizing what this email is and what it requires, for a reviewer scanning a triage queue.",
+      "maxLength": 320
+    },
+    "obligations": {
+      "type": "array",
+      "description": "Concrete, human-readable action-phrase obligations grounded in the classification's obligations/suggestedActions signal and the message text (e.g. 'Respond to court by Friday, Aug 15'). Empty array when none apply — never fabricated.",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "maxItems": 8
+    },
+    "category": {
+      "type": "string",
+      "description": "The triage category, mapped from the classification's freeform category onto ONE entry of the firm's Dataverse-configured taxonomy (sprk_triagecategory). Never invent a value outside the allowed list.",
+      "maxLength": 100
+    },
+    "priority": {
+      "type": "string",
+      "description": "Triage priority, derived from the classification's urgency signal and the mapped category's severity. One of the firm's configured priority levels (sprk_communication.sprk_triagepriority).",
+      "maxLength": 20
+    },
+    "reviewOutcome": {
+      "type": "string",
+      "description": "Suggested initial review routing for a human reviewer to confirm or override — never a final auto-applied decision. One of the closed review-outcome set (sprk_communication.sprk_reviewoutcome; D-05 — 'review outcome', not 'disposition').",
+      "maxLength": 20
+    }
+  }
+}

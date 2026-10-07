@@ -1,11 +1,11 @@
 # Communication Intelligence Architecture
 
-> **Last Updated**: 2026-07-19
-> **Last Reviewed**: 2026-07-19
-> **Reviewed By**: email-communication-solution-r4 task 080 (W8 documentation); extended by messaging-communication-app-r1 task 081 (§9 — ACS messaging channel as-built); extended by messaging-communication-app-r2 task 081 (§15 — the Communication Workspace read/organize layer as-built)
+> **Last Updated**: 2026-09-03
+> **Last Reviewed**: 2026-09-03
+> **Reviewed By**: email-communication-solution-r4 task 080 (W8 documentation); extended by messaging-communication-app-r1 task 081 (§9 — ACS messaging channel as-built); extended by messaging-communication-app-r2 task 081 (§15 — the Communication Workspace read/organize layer as-built); **refreshed by email-communication-intelligence-r2 2026-09-03 (§3 enrichment pipeline 5→10 steps; §4 Association Engine 6→13 rungs + always-run AI tier; §5 C-1 auto-file narrowing + core-writable gate)**
 > **Status**: Current — canonical
 > **Canonical ADR**: [ADR-045 — Communication Architecture](../../.claude/adr/ADR-045-communication-architecture.md) (engine + seams) · [ADR-046 — ACS Messaging Channel](../../.claude/adr/ADR-046-acs-messaging-channel.md) (§9 — second channel + thread model) · [ADR-048 — Communication Participant Index](../../.claude/adr/ADR-048-communication-participant-index.md) (§15.2 — message-grain participant junction)
-> **Purpose**: The canonical architecture reference for the Communication Intelligence subsystem — the normalized-message envelope, the 6-rung Association Engine, the confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, **the ACS messaging channel + first-class thread model (§9)**, the read-only suggestion endpoint, per-rung telemetry, the shared inbound patterns (idempotency, `.eml`→SPE archival, attachment→Document, RAG indexing), and **the R2 Communication Workspace read/organize layer (§15)** — by-regarding + filtered read endpoints, the participant index, the auto-threading policy, and the two workspace UI surfaces (regarding-mode Timeline, rich workspace widget). Supersedes and absorbs `email-processing-architecture.md`, `email-to-document-architecture.md`, and `email-to-document-automation.md`.
+> **Purpose**: The canonical architecture reference for the Communication Intelligence subsystem — the normalized-message envelope, the 13-rung Association Engine, the confidence→status ladder + auto-file kill-switch, direction-symmetric enrichment, channel seams, **the ACS messaging channel + first-class thread model (§9)**, the read-only suggestion endpoint, per-rung telemetry, the shared inbound patterns (idempotency, `.eml`→SPE archival, attachment→Document, RAG indexing), and **the R2 Communication Workspace read/organize layer (§15)** — by-regarding + filtered read endpoints, the participant index, the auto-threading policy, and the two workspace UI surfaces (regarding-mode Timeline, rich workspace widget). Supersedes and absorbs `email-processing-architecture.md`, `email-to-document-architecture.md`, and `email-to-document-automation.md`.
 
 ---
 
@@ -46,39 +46,56 @@ The engine — and every rung — operates over a channel-neutral **`NormalizedM
 
 `ICommunicationEnrichmentService` (impl `CommunicationEnrichmentService`) is invoked by **both** the inbound path (`IncomingCommunicationProcessor`) and the outbound path (`CommunicationService`) — sent mail receives the same treatment as received mail *by construction* (ADR-045 rule 3). It owns a fixed-order pipeline; each step is wrapped in a try/catch that logs and continues (best-effort / non-fatal, NFR-06):
 
-1. **Association** — run the Association Engine (§4–§7).
-2. **Categorization** — signal categorization.
-3. **AI analysis** — enqueue document/message analysis.
-4. **RAG indexing** — index message + attachment text into the knowledge index (§12).
-5. **Responsive-Intelligence trigger** — emit the `communication_assessed` structured signal (§14).
+1. **Association** — run the Association Engine (§4–§7). **No-op on the enrichment path for inbound** — the engine already ran at the capture boundary (`IncomingCommunicationProcessor`), so re-running here would double-resolve; **outbound** associations come from the client-supplied set at record creation (`CommunicationService.MapAssociationFields`). Direction-symmetric engine invocation through this seam is deferred (tasks 012/013/015/017).
+2. **AI analysis** — **no-op here**: app-only analysis of the archived `.eml` is already enqueued at the archival site in both paths (`DocAnalysis:{documentId}` idempotency); re-enqueuing would be redundant.
+3. **RAG indexing** — index message + attachment text into the knowledge index (§12).
+4. **Email triage** — the AI triage Action: writes `sprk_triagepriority` / `sprk_triagecategory` / `sprk_triagesummary` / `sprk_reviewoutcome` / `sprk_riconfidence`, **reusing the rung-5 classification signal** (reconstructed from provenance — no second LLM pass). Routed via the `email-triage` catalog row (`sprk_playbookconsumer` → `sprk_analysisaction`).
+5. **Email propose (Job B)** — proposes field updates as PENDING `sprk_emailreviewlog` "Proposed" rows (never auto-written), grounded in the hoisted triage result; routed via `email-propose`.
+6. **Email create-task (Job C)** — extracts implied follow-up tasks; routed via `email-create-task`.
+7. **Email attachment-action** — extracts an action stated only in an attachment and feeds the same Job C create leg (no forked create).
+8. **Email regarding-intent** — annotates the persisted triage summary with the regarding-vs-related cross-reference + the gated "create new record" proposal (proposal-only, human-confirmed).
+9. **Assessment event** — emit the `communication_assessed` structured signal (§14).
 
-`EnrichAsync(communicationId, direction, NormalizedMessage, archivedDocumentId?, ct)` is the entry signature. In the shipped R4 state several legs are wired at their more-specific call sites rather than centrally (e.g. inbound RAG indexing runs inline in `IncomingCommunicationProcessor`; the outbound RAG leg runs here); step 5 is **emit-only** (a structured log line, no consumer in R4 — see §13). The invariant that matters architecturally is the ordering and the direction symmetry, not which method physically hosts each leg.
+> A former **"Categorization"** step (originally #2) was a permanently-empty no-op — it had no persistence target, and content-class + urgency are produced by rung 5 and persisted by **email-triage** (step 4). It was **removed 2026-09-03** (email-communication-intelligence-r2, closing task-010 ESCALATION E1) to stop it reading as "broken" on every pipeline review.
+
+`EnrichAsync(communicationId, direction, NormalizedMessage, archivedDocumentId?, ct)` is the entry signature; the order is fixed (FR-08). Steps 4–8 (triage / Job B / Job C / attachment-action / regarding-intent) each resolve their Action through the routing catalog (`IConsumerRoutingService.ResolveAsync`) and are **best-effort / non-fatal** (a missing or disabled catalog row degrades to a silent no-op — which is exactly why an unseeded catalog leaves triage blank without failing capture). Several legs are wired at their more-specific call sites rather than centrally (e.g. inbound RAG indexing runs inline in `IncomingCommunicationProcessor`; the outbound RAG leg runs here). The invariant that matters architecturally is the ordering and the direction symmetry, not which method physically hosts each leg.
 
 ---
 
-## 4. The 6-rung Association Engine
+## 4. The 13-rung Association Engine
 
-`IncomingAssociationResolver` is the Association Engine. (The class name still reads "Incoming" for historical reasons, but it now serves both directions and the read-only evaluate path.) It injects `IEnumerable<IAssociationRung>` and partitions them into a **deterministic tier (rungs 0–3)** and an **AI tier (rungs 4–5)**, each ordered by the rung's `Order`. Each rung implements `IAssociationRung` — `RungKind Kind`, `int Order`, `Task<IReadOnlyList<RungMatch>> EvaluateAsync(NormalizedMessage, AssociationContext, ct)`. A rung that throws is treated as a non-match (NFR-06).
+`IncomingAssociationResolver` is the Association Engine. (The class name still reads "Incoming" for historical reasons, but it now serves both directions and the read-only evaluate path.) It injects `IEnumerable<IAssociationRung>` and partitions them **by `Kind`** (not by number) into a **deterministic tier (11 rungs)** and an **AI tier (2 rungs — `SemanticMatch`, `AiClassification`)**, each ordered by the rung's `Order` (ascending; registration order is cosmetic). Each rung implements `IAssociationRung` — `RungKind Kind`, `int Order`, `Task<IReadOnlyList<RungMatch>> EvaluateAsync(NormalizedMessage, AssociationContext, ct)`. A rung that throws is treated as a non-match (NFR-06). The engine grew from 6 rungs (R4) to **13** across email-communication-intelligence R1/R2 (identifier reverse-lookup, recipient-alias, tracking-token, record-name, contact-name, attachment→document, and the affinity learning rung) — additively, with no change to the mapper, the regarding model, or the review UI.
 
 Two public modes:
 
 - **`ResolveAsync(...)`** — evaluate **and write** the decision to the record (inbound/outbound enrichment path).
 - **`EvaluateAsync(...)`** — evaluate **only**, no write (powers the suggestion endpoint, §11).
 
-The engine runs the deterministic tier first, asks the status mapper to `Decide`, and **only if that did not auto-file** runs the AI tier and re-`Decide`s. This is what makes deterministic matches cheap and keeps AI cost bounded (ADR-016).
+The engine runs the deterministic tier first and asks the status mapper to `Decide`. **The AI tier then ALWAYS runs** (updated from the R4 "only if not auto-filed" behavior): a multi-association engine must still search for the substantive target (the matter/project/invoice the email is *about*) even when a deterministic participant/contact match already auto-filed — a known-sender match must not short-circuit finding the matter. AI matches join the aggregation and can raise Pending Review → Suggested or surface create-suggestions, but **never auto-file** (mapper-enforced, §5.3). AI cost stays bounded by the per-rung kill-switches + ADR-016 budget + ADR-014 cache, not by skipping the tier.
 
 ### 4.1 The rung ladder
 
-| Rung | `RungKind` | Class (`Engine/Rungs/`) | What it matches | Dependency |
-|---|---|---|---|---|
-| **0** | `ExplicitReference` | `ExplicitReferenceRung` | (a) caller-supplied regarding (confidence 1.0) across all mapped targets; (b) matter-reference regex in subject (`MAT-…`, `Matter #…`, `SPRK-…`, `[MATTER:…]`) → `sprk_matter` (0.9) | `ICommunicationDataverseService` |
-| **1** | `ThreadContinuity` | `ThreadContinuityRung` | Walks `In-Reply-To` then `References` (newest→oldest); nearest ancestor that exists as a `sprk_communication` → copies its regarding lookups verbatim (1.0) | `ICommunicationDataverseService` |
-| **2** | `ParticipantCorrelation` | `ParticipantCorrelationRung` | Sender email → contact (`sprk_regardingperson`); user-entity memberships; sender domain → `sprk_organization` **and** `account` as distinct lookups. Skips common providers; caps recipients | `ICommunicationDataverseService` |
-| **3** | `StructuralDetector` | `StructuralDetectorRung` | Runs the structural detectors (§4.2); lifts each `StructuralMatch` into a `RungMatch` carrying category + obligations (metadata signals, usually no target) | `IEnumerable<IStructuralDetector>` |
-| **4** | `SemanticMatch` | `SemanticMatchRung` | Hybrid (vector + keyword, RRF) semantic record match over the records index for matter/project/invoice | `IRecordMatchingAi` (facade) |
-| **5** | `AiClassification` | `AiClassificationRung` | LLM extract + classify → metadata-only signals (category, obligations, rationale) + a separate privilege-flag signal | `ICommunicationClassificationAi` (facade) |
+Registered in `Infrastructure/DI/CommunicationModule.cs`; evaluated by ascending `Order`. The **Auto-file** column is the C-1 eligibility (§5): only the strongest *explicit* deterministic signals auto-file; everything else contributes confidence and/or surfaces for review.
 
-The AI rungs (4/5) reach AI **only through the `Services/Ai/PublicContracts/` facades** (`IRecordMatchingAi`, `ICommunicationClassificationAi`) per ADR-013 — never internal AI types. Both are individually feature-gated (`Communication:SemanticMatch:Enabled`, `Communication:AiClassification:Enabled`). Rung 5 may **flag** privilege but never **decides** it (ADR-015).
+| Order | `RungKind` | Class (`Engine/Rungs/`) | What it matches | Auto-file? |
+|---|---|---|---|---|
+| **0** | `ExplicitReference` | `ExplicitReferenceRung` | (a) caller-supplied regarding (1.0) across all mapped targets; (b) matter-reference regex in subject (`MAT-…`, `Matter #…`, `SPRK-…`, `[MATTER:…]`) → `sprk_matter` (0.9) | ✅ |
+| **0** | `ExplicitReference` | `IdentifierReverseLookupRung` | **FR-01.** Value-based reverse lookup of a well-formed identifier against Dataverse across all **7 core types** (catalog-driven off `sprk_recordtype_ref`; no numbering scheme in code). Bare-numeric tokens emit sub-threshold; multi-entity tokens are capped (never a guessed auto-file) | ✅ |
+| **0** | `RecipientAlias` | `RecipientAliasRung` | **FR-A2.** Per-record intake address (`matter-{ref}@`) in **To/Cc/Bcc** → matter (1.0). A deliberate routing instruction — Bcc-only delivery still associates deterministically | ✅ (unconditional) |
+| **0** | `ExplicitReference` | `TrackingTokenRung` | **FR-A1.** HMAC-signed footer token stamped on outbound Spaarke mail; **verifies the signature** (`ITrackingTokenSigner`, verify-before-trust) → 1.0 signed-valid, or 0.65 for a bare/edited textual reference | ✅ (signed-valid) |
+| **1** | `ThreadContinuity` | `ThreadContinuityRung` | Walks `In-Reply-To` then `References` (newest→oldest); nearest ancestor that exists as a `sprk_communication` → copies its regarding lookups verbatim (1.0; 0.65 from an unconfirmed parent) | ✅ |
+| **2** | `ParticipantCorrelation` | `ParticipantCorrelationRung` | Sender email → contact (`sprk_regardingperson`); user-entity memberships; sender domain → `sprk_organization` **and** `account` as distinct lookups. Skips common providers; caps recipients | ⚙️ kill-switch |
+| **3** | `StructuralDetector` | `StructuralDetectorRung` | Runs the structural detectors (§4.2); lifts each `StructuralMatch` into a `RungMatch` carrying category + obligations (metadata signals, usually no target) | ⚙️ kill-switch |
+| **3** | `RecordNameMatch` | `RecordNameMatchRung` | **Deterministic** verbatim record **name/number** appearance in the email: keyword candidates from the records index, then verifies an exact appearance. Surfaces every verified type (matter/project/invoice) for review | ❌ surface-for-review |
+| **3** | `ContactNameMatch` | `ContactNameMatchRung` | Title-Case full-name phrases from subject/body/attachment → **exact** `fullname → contact` lookup (contacts are not in the records index) → `sprk_regardingperson`, Suggested band | ❌ suggest-only |
+| **3** | `DocumentAssociation` | `AttachmentDocumentAssociationRung` | Incoming attachment → existing `sprk_document` (by filename) → surfaces that document's **own** matter/project/invoice links as candidates (twice-removed evidence) | ❌ surface-only (never written) |
+| **3** | `Affinity` | `AffinityRung` | **FR-A4 learning loop.** Reads the per-tenant `sprk_affinity` store (human-confirmation frequencies: sender / sender-domain / subject-keyword / participant-set → record) and surfaces the highest-frequency record, citing the confirmation count. **Deterministic frequency counting — no AI/ML (ADR-013)** | ❌ suggest-only |
+| **4** | `SemanticMatch` | `SemanticMatchRung` | Hybrid (vector + keyword, RRF) semantic record match over the records index for matter/project/invoice | ❌ AI, never |
+| **5** | `AiClassification` | `AiClassificationRung` | LLM extract + classify → metadata-only signals (category, obligations, rationale) + a separate privilege-flag signal; this is the **triage substrate** reused by the `email-triage` step (§3) | ❌ AI, never |
+
+Legend: ✅ auto-file-eligible · ⚙️ auto-files only when the `Rung2And3AutoFileEnabled` kill-switch is on (§5.2), else Suggested · ❌ never auto-files.
+
+The AI rungs (4/5) reach AI **only through the `Services/Ai/PublicContracts/` facades** (`IRecordMatchingAi`, `ICommunicationClassificationAi`) per ADR-013 — never internal AI types. **Every non-core rung is individually feature-gated** (`Communication:SemanticMatch:Enabled`, `Communication:AiClassification:Enabled`, `Communication:RecordNameMatch:Enabled`, `Communication:ContactNameMatch:Enabled`, `Communication:Affinity:Enabled` — the last per-tenant) and registered unconditionally (ADR-010/032). Rung 5 may **flag** privilege but never **decides** it (ADR-015).
 
 ### 4.2 Structural detectors
 
@@ -96,7 +113,7 @@ The engine writes to the existing ADR-024 regarding family — it **never introd
 
 | Status | Value | When |
 |---|---|---|
-| **Resolved** | 100000000 | Deterministic (rungs 0–3) reinforced confidence ≥ threshold **and** the auto-file kill-switch is ON — writes deterministic winners, `AutoFiled=true` |
+| **Resolved** | 100000000 | An **auto-file-eligible** deterministic signal (§4.1 ✅) on a **core-writable** target (matter/project/service-request) reinforced ≥ threshold **and** the kill-switch is ON. Writes **all** deterministic-write-eligible winners (rungs 0–3, incl. participant/structural fallbacks), `AutoFiled=true` |
 | **Pending Review** | 100000001 | No field winner, or top confidence < `0.50` |
 | **Unresolved** | 100000002 | Legacy value; never written by R4, treated as Pending Review |
 | **Suggested** | 100000003 | Has winners but not auto-file-eligible (includes any AI-derived field, or kill-switch OFF) — writes suggested fields for review |
@@ -106,9 +123,16 @@ The engine writes to the existing ADR-024 regarding family — it **never introd
 
 A field's confidence is combined across the *distinct rung kinds* that voted for it via **Noisy-OR** (`1 − Π(1−cᵢ)`, clamped [0,1]). Per-target contributors are first collapsed to the max per rung kind, so a single rung cannot inflate its own confidence by voting twice. Independent rungs agreeing reinforce; a lone rung does not.
 
-### 5.2 Auto-file kill-switch (ADR-018)
+### 5.2 Auto-file kill-switch + C-1 narrowing (ADR-018)
 
-`AutoFileGate.Resolve(tenantKey)` returns `(Enabled, Threshold)` read from `IOptionsMonitor` **on every call** — so the switch flips **without redeploy**, with per-tenant overrides. R4 ships **auto-file ON for deterministic rungs ≥ 0.85** (owner decision, recorded as ADR-045 Path-A exception). When the switch is OFF, a deterministic match that would have been `Resolved` is **demoted to `Suggested`** (suggest-only mode).
+`AutoFileGate.Resolve(tenantKey)` returns the per-tenant `AutoFileSettings` — `Enabled`, `Threshold`, `Rung2And3AutoFileEnabled`, `CoreWritableEntities` — read from `IOptionsMonitor` **on every call**, so every knob flips **without redeploy**. The engine ships **auto-file ON for eligible deterministic signals ≥ 0.85** (owner decision, ADR-045 Path-A exception).
+
+Two narrowings bound what may auto-file (the **C-1** hardening, email-r4 UAT 2026-07):
+
+- **By rung (`IsAutoFileEligible`)** — only *explicit* deterministic signals (`ExplicitReference`, `ThreadContinuity`, `RecipientAlias`) can trigger an auto-file by default. `ParticipantCorrelation` + `StructuralDetector` contribute confidence and are *written* when an auto-file happens, but cannot *trigger* one unless `Rung2And3AutoFileEnabled` is on. `RecordNameMatch` / `ContactNameMatch` / `Affinity` never auto-file, regardless of the flag.
+- **By target (`IsCoreWritable`)** — only the core substantive entities (matter / project / service-request, config-driven) are auto-written; `contact` / `sprk_organization` / `account` / `invoice` / work-assignment / event / budget / analysis are surfaced as **Suggested**, never auto-associated, even at high confidence (owner rule, 061 UAT 2026-07-31).
+
+When the switch is OFF, a match that would have been `Resolved` is **demoted to `Suggested`** (suggest-only mode). The write set is *independent* of the auto-file set: once a communication auto-files, all deterministic-write-eligible associations (rungs 0–3) are persisted for the review surface (`IsDeterministicWriteEligible`), even the fallbacks that did not clear the auto-file bar.
 
 ### 5.3 AI rungs never auto-file (invariant)
 

@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Services.Office;
 /// Unit tests for <see cref="JobStatusService"/>.
 /// Tests the job status pub/sub functionality for SSE streaming.
 /// </summary>
-public class JobStatusServiceTests : IDisposable
+public class JobStatusServiceTests
 {
     private readonly Mock<IConnectionMultiplexer> _redisMock;
     private readonly Mock<ISubscriber> _subscriberMock;
@@ -38,13 +38,12 @@ public class JobStatusServiceTests : IDisposable
         // default for IsConnected is false; tests for the "connected" path
         // require it to be true.
         _redisMock.Setup(r => r.IsConnected).Returns(true);
+        // Task 068 (#1086): sequence numbers come from Redis INCR on one key per job.
+        var sequences = new System.Collections.Concurrent.ConcurrentDictionary<string, long>();
+        _databaseMock.Setup(d => d.StringIncrementAsync(It.IsAny<RedisKey>(), It.IsAny<long>(), It.IsAny<CommandFlags>()))
+            .ReturnsAsync((RedisKey key, long by, CommandFlags _) => sequences.AddOrUpdate(key.ToString(), by, (_, n) => n + by));
 
         _sut = new JobStatusService(_redisMock.Object, _loggerMock.Object);
-    }
-
-    public void Dispose()
-    {
-        _sut.Dispose();
     }
 
     /// <summary>
@@ -111,8 +110,6 @@ public class JobStatusServiceTests : IDisposable
 
         // Assert
         result.Should().BeFalse();
-
-        serviceWithoutRedis.Dispose();
     }
 
     [Fact]
@@ -385,8 +382,6 @@ public class JobStatusServiceTests : IDisposable
 
         // Assert
         healthy.Should().BeFalse();
-
-        serviceWithoutRedis.Dispose();
     }
 
     [Fact]
@@ -425,8 +420,6 @@ public class JobStatusServiceTests : IDisposable
 
         // Assert
         updates.Should().BeEmpty();
-
-        serviceWithoutRedis.Dispose();
     }
 
     #endregion

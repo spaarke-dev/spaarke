@@ -48,10 +48,10 @@ public static class BffDeployRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing — H9 MUST know the target subscription (ADR-027 D4).</summary>
     public const string MissingSubscriptionId = "missing-subscription-id";
 
-    /// <summary>Run parameter <c>resourceGroupName</c> missing — H9 needs the App Service resource group for slot-swap ARM ops.</summary>
+    /// <summary><c>run.InterStepState.ResourceGroupName</c> (H2a's output) missing — H9 needs the App Service resource group for slot-swap ARM ops.</summary>
     public const string MissingResourceGroupName = "missing-resource-group-name";
 
-    /// <summary>Run parameter <c>appServiceName</c> missing — H9 needs the BFF App Service name for deploy + slot-swap targeting.</summary>
+    /// <summary><c>run.InterStepState.AppServiceName</c> (H2a's output) missing — H9 needs the BFF App Service name for deploy + slot-swap targeting.</summary>
     public const string MissingAppServiceName = "missing-app-service-name";
 
     /// <summary>Run parameter <c>buildId</c> missing — idempotency key requires the BFF CI build number (deterministic per §4.1 preamble).</summary>
@@ -114,6 +114,21 @@ public static class BffDeployRejectionCodes
     /// dedicated; no production impact; the swap step is never reached).
     /// </summary>
     public const string StagingHealthCheckFailed = "staging-health-check-failed";
+
+    // ---- scheduled-jobs slot guard (ADR-036 A1 rule 2, GitHub #987) ----
+
+    /// <summary>
+    /// <see cref="ISlotStickyAppSettingWriter"/> reported that ARM rejected
+    /// setting the scheduled-jobs slot guard (<c>Scheduling__RunScheduledJobs=false</c>,
+    /// slot-sticky) on the staging slot — RetryableWithCleanup, the slot swap's
+    /// class. The Kudu zip-deploy is NOT attempted (fail closed: a slot without
+    /// the guard runs the BFF's scheduled jobs against production data).
+    /// Production is untouched.
+    /// </summary>
+    public const string ScheduledJobsSlotGuardFailed = "scheduled-jobs-slot-guard-failed";
+
+    /// <summary>The slot-guard ARM call threw (timeout, transport fault) — RetryableWithCleanup; no zip-deploy attempted.</summary>
+    public const string ScheduledJobsSlotGuardInfraFault = "scheduled-jobs-slot-guard-infra-fault";
 
     // ---- r3-era gate failures (SUPERSEDED by task 132 — see ArtifactManifestRejected
     //      above; retained per this file's stability policy — "do NOT rename;

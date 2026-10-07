@@ -1,20 +1,41 @@
 /**
  * ResolverWriteHandler tests.
  *
- * Asserts the binding constraints:
- *   1. FR-21 / ADR-024 — `applyResolverFields` from `@spaarke/ui-components` is
- *      the SOLE write path. We mock it and verify it's called once per selection
- *      with the correct arguments.
- *   2. FR-22 — host entity is passed in. NO `sprk_todo` / `sprk_communication`
- *      literals in the handler. We verify by invoking the same handler with
- *      `hostEntity: 'sprk_todo'` AND `hostEntity: 'sprk_communication'` — both
- *      paths must succeed.
- *   3. FR-13 — clear-and-set: when entity X is selected, the OTHER 10
- *      entity-specific lookups must be present in the payload as
- *      `<navProp>@odata.bind = null`.
- *   4. New-record path: when `hostRecordId` is empty, the handler must NOT call
- *      `updateRecord` but must still return the payload for the caller to stage.
+ * # What these drive (changed 2026-09-04, unified-access-control-r2 task 051)
+ *
+ * These tests run against the REAL shared `PolymorphicResolverService` (mapped to
+ * the shared TS source by `jest.config.js`), NOT a stub of it. Only the two I/O
+ * seams are faked: the `IPolymorphicWebApi` shim and `fetch` (nav-prop metadata).
+ *
+ * That is deliberate. FR-26's whole claim is "the core-ancestor stamp reaches the
+ * payload, and a reparent replaces it". A suite that mocks
+ * `buildRegardingSelectionPayload` can only prove the PCF *called something* — it
+ * cannot prove the stamp is there, cannot catch an ordering regression where the
+ * pre-clear nulls the stamp it just set, and cannot catch a missing clear. The
+ * previous version of this file mocked the `@spaarke/ui-components` BARREL, which
+ * the control stopped importing when it moved to ADR-012 deep imports — so every
+ * assertion here had been running against a specifier nothing imported.
+ *
+ * Asserted constraints:
+ *   1. FR-21 / ADR-024 — the shared builder owns payload assembly. The handler
+ *      contributes no derivation and no ordering of its own (asserted
+ *      structurally: no ancestor/derivation identifiers in the handler source).
+ *   2. FR-22 — host entity is a parameter. No `sprk_todo` / `sprk_communication`
+ *      literals in the handler.
+ *   3. FR-13 — clear-and-set: selecting X nulls every OTHER regarding lookup that
+ *      exists on the host.
+ *   4. FR-26 SET — a child-class target with core ancestor M stamps M in the SAME
+ *      updateRecord call as the target lookup.
+ *   5. FR-26 REPARENT — moving between targets with different ancestors leaves
+ *      exactly the new stamp; the old one is nulled in the same payload.
+ *   6. FR-26 CLEAR — clearRegarding nulls the ancestor lookups too, including a
+ *      core lookup the host catalog does not list (`sprk_regardingservicerequest`).
+ *   7. FR-26 CREATE — no updateRecord; stamps + clears are returned for staging.
+ *   8. NFR-01 fail-closed — a derivation error writes NOTHING.
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
 
 import {
   applyRegardingSelection,
@@ -23,452 +44,807 @@ import {
   resolveAllowedCatalog,
   _resetNavPropCacheForTests,
 } from '../RegardingResolver/handlers/ResolverWriteHandler';
+import {
+  _resetNavPropCacheForTests as _resetSharedNavPropCache,
+  _resetRecordNumberFieldCacheForTests,
+  _resetDisplayNameFieldCacheForTests,
+} from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 
-// --- Mock @spaarke/ui-components ---
-jest.mock('@spaarke/ui-components', () => {
-  const TODO_REGARDING_CATALOG = [
-    {
-      entityType: 'sprk_matter',
-      entitySet: 'sprk_matters',
-      lookupAttribute: 'sprk_regardingmatter',
-      navPropHint: 'matter',
-    },
-    {
-      entityType: 'sprk_project',
-      entitySet: 'sprk_projects',
-      lookupAttribute: 'sprk_regardingproject',
-      navPropHint: 'project',
-    },
-    {
-      entityType: 'sprk_event',
-      entitySet: 'sprk_events',
-      lookupAttribute: 'sprk_regardingevent',
-      navPropHint: 'event',
-    },
-    {
-      entityType: 'sprk_communication',
-      entitySet: 'sprk_communications',
-      lookupAttribute: 'sprk_regardingcommunication',
-      navPropHint: 'communication',
-    },
-    {
-      entityType: 'sprk_workassignment',
-      entitySet: 'sprk_workassignments',
-      lookupAttribute: 'sprk_regardingworkassignment',
-      navPropHint: 'workassignment',
-    },
-    {
-      entityType: 'sprk_invoice',
-      entitySet: 'sprk_invoices',
-      lookupAttribute: 'sprk_regardinginvoice',
-      navPropHint: 'invoice',
-    },
-    {
-      entityType: 'sprk_budget',
-      entitySet: 'sprk_budgets',
-      lookupAttribute: 'sprk_regardingbudget',
-      navPropHint: 'budget',
-    },
-    {
-      entityType: 'sprk_analysis',
-      entitySet: 'sprk_analyses',
-      lookupAttribute: 'sprk_regardinganalysis',
-      navPropHint: 'analysis',
-    },
-    {
-      entityType: 'sprk_organization',
-      entitySet: 'sprk_organizations',
-      lookupAttribute: 'sprk_regardingorganization',
-      navPropHint: 'organization',
-    },
-    { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    {
-      entityType: 'sprk_document',
-      entitySet: 'sprk_documents',
-      lookupAttribute: 'sprk_regardingdocument',
-      navPropHint: 'document',
-    },
-  ];
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+const HOST_TODO = '22222222-2222-2222-2222-222222222222';
+const MATTER_1 = '33333333-3333-3333-3333-333333333333';
+const MATTER_2 = '44444444-4444-4444-4444-444444444444';
+/** A Communication whose core ancestor is MATTER_1. */
+const COMM_1 = 'c0000001-0000-0000-0000-000000000001';
+/** A Communication whose core ancestor is MATTER_2. */
+const COMM_2 = 'c0000002-0000-0000-0000-000000000002';
+/** A Communication with no core ancestor at all. */
+const COMM_ORPHAN = 'c0000003-0000-0000-0000-000000000003';
+
+type NavPropRow = {
+  ReferencingAttribute: string;
+  ReferencingEntityNavigationPropertyName: string;
+  ReferencedEntity: string;
+};
+
+/** PascalCase the nav-prop the way Dataverse does (`sprk_RegardingMatter`). */
+function navRow(column: string, referencedEntity: string, pascalSuffix: string): NavPropRow {
   return {
-    TODO_REGARDING_CATALOG,
-    applyResolverFields: jest.fn(
-      async (
-        _webApi: unknown,
-        entity: Record<string, unknown>,
-        _navProps: unknown,
-        parentEntityLogicalName: string,
-        parentEntitySet: string,
-        parentRecordId: string,
-        parentRecordName: string,
-        _entityLookupHint?: string,
-        _options?: unknown
-      ) => {
-        // Mirror the real service's behavior at the payload level: set the
-        // chosen entity-specific @odata.bind + resolver text/url fields.
-        const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
-        entity[`mock_${parentEntityLogicalName}@odata.bind`] = `/${parentEntitySet}(${cleanId})`;
-        entity['sprk_regardingrecordid'] = cleanId;
-        entity['sprk_regardingrecordname'] = parentRecordName;
-        entity['sprk_regardingrecordurl'] = `https://example.com/${parentEntityLogicalName}/${cleanId}`;
-        entity['sprk_regardingrecordnumber'] = `MOCK-${parentEntityLogicalName.toUpperCase()}-001`;
-        entity['mock_recordtype@odata.bind'] = `/sprk_recordtype_refs(rt-${parentEntityLogicalName})`;
-        // SRFR-020 return shape: forwarded by ResolverWriteHandler on
-        // IResolverWriteResult.recordNumber (SRFR-032 propagation).
-        return {
-          recordNumber: `MOCK-${parentEntityLogicalName.toUpperCase()}-001`,
-          recordNumberSourceField: `${parentEntityLogicalName}_number`,
-        };
-      }
-    ),
+    ReferencingAttribute: column,
+    ReferencingEntityNavigationPropertyName: `sprk_Regarding${pascalSuffix}`,
+    ReferencedEntity: referencedEntity,
   };
-});
+}
 
-import * as sharedLib from '@spaarke/ui-components';
+/**
+ * A WIDE host: all 12 catalog targets + all four core-ancestor lookups (the
+ * service-request one is not in the catalog) + the record-type ref.
+ *
+ * ⚠️ Corrected 2026-09-04. An earlier revision of this fixture omitted
+ * `sprk_regardingservicerequest` on the strength of
+ * `notes/phase3-derivation-rules.md` F-050-1, which said `sprk_todo` has no such
+ * column. **Live metadata says it does** (confirmed by the task-052 agent against
+ * the real environment; `CoreAncestorResolver.cs:90` and `:287` carry the same
+ * false claim). No production code depended on it — column presence is resolved
+ * from discovered nav-props at runtime, never from an assumed list, which is
+ * exactly why the wrong belief did not become a wrong behaviour — but a fixture
+ * that encodes a false schema fact teaches the next reader the wrong thing.
+ *
+ * The narrow-host cases below therefore use a CONSTRUCTED host rather than
+ * naming a real entity, since what matters is the runtime resolution, not any
+ * particular entity's column list.
+ */
+const FULL_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_regardingmatter', 'sprk_matter', 'Matter'),
+  navRow('sprk_regardingproject', 'sprk_project', 'Project'),
+  navRow('sprk_regardingevent', 'sprk_event', 'Event'),
+  navRow('sprk_regardingcommunication', 'sprk_communication', 'Communication'),
+  navRow('sprk_regardingworkassignment', 'sprk_workassignment', 'WorkAssignment'),
+  navRow('sprk_regardinginvoice', 'sprk_invoice', 'Invoice'),
+  navRow('sprk_regardingbudget', 'sprk_budget', 'Budget'),
+  navRow('sprk_regardinganalysis', 'sprk_analysis', 'Analysis'),
+  navRow('sprk_regardingorganization', 'sprk_organization', 'Organization'),
+  navRow('sprk_regardingcontact', 'contact', 'Contact'),
+  navRow('sprk_regardingdocument', 'sprk_document', 'Document'),
+  navRow('sprk_regardingreportcard', 'sprk_reportcard', 'ReportCard'),
+  navRow('sprk_regardingservicerequest', 'sprk_servicerequest', 'ServiceRequest'),
+  navRow('sprk_regardingrecordtype', 'sprk_recordtype_ref', 'RecordType'),
+];
 
-const applyResolverFieldsMock = (
-  sharedLib as unknown as {
-    applyResolverFields: jest.Mock;
-  }
-).applyResolverFields;
+/**
+ * A CONSTRUCTED narrow host — carries a communication lookup but NO
+ * service-request column. Not a claim about any real entity's schema; it exists
+ * to exercise the "host cannot store this ancestor" branch, which must stay
+ * correct for whatever the schema actually turns out to be.
+ */
+const NARROW_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_regardingmatter', 'sprk_matter', 'Matter'),
+  navRow('sprk_regardingproject', 'sprk_project', 'Project'),
+  navRow('sprk_regardingcommunication', 'sprk_communication', 'Communication'),
+  navRow('sprk_regardingworkassignment', 'sprk_workassignment', 'WorkAssignment'),
+  navRow('sprk_regardinginvoice', 'sprk_invoice', 'Invoice'),
+  navRow('sprk_regardingrecordtype', 'sprk_recordtype_ref', 'RecordType'),
+];
+
+/** A budget (an intermediate, task 169) whose root columns are typed `sprk_matter` / `sprk_project` lookups. */
+const BUDGET_1 = 'b0000001-0000-0000-0000-000000000001';
+const BUDGET_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+];
+
+/** A document whose `sprk_matter` and `sprk_relatedmatter` name DIFFERENT matters. */
+const DOC_AMBIGUOUS = 'd0000001-0000-0000-0000-000000000001';
+const DOCUMENT_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_relatedmatter', 'sprk_matter', 'RelatedMatter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+  navRow('sprk_relatedproject', 'sprk_project', 'RelatedProject'),
+];
+
+/** An even narrower host with no communication lookup (SRFR-048 guard). */
+const EVENT_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_regardingmatter', 'sprk_matter', 'Matter'),
+  navRow('sprk_regardingproject', 'sprk_project', 'Project'),
+  navRow('sprk_regardinginvoice', 'sprk_invoice', 'Invoice'),
+  navRow('sprk_regardingworkassignment', 'sprk_workassignment', 'WorkAssignment'),
+  navRow('sprk_regardingrecordtype', 'sprk_recordtype_ref', 'RecordType'),
+];
+
+/**
+ * A `fetch` fake for the ONE endpoint the resolver uses it for: the
+ * `EntityDefinitions(...)/ManyToOneRelationships` metadata read. Nav-props are
+ * returned per entity, so the TARGET's column set can differ from the HOST's —
+ * which is exactly the condition FR-26 derivation has to survive.
+ */
+function makeFetch(navPropsByEntity: Record<string, NavPropRow[]>): jest.Mock {
+  return jest.fn(async (url: string) => {
+    const match = /LogicalName='([^']+)'/.exec(String(url));
+    const entity = match?.[1] ?? '';
+    const rows = navPropsByEntity[entity];
+    if (!rows) {
+      return { ok: false, status: 404, json: async () => ({}) };
+    }
+    return { ok: true, json: async () => ({ value: rows }) };
+  });
+}
+
+/**
+ * v1.6.0 (UAC-r2 task 147 r1): a saved child host is re-filed through the BFF (`refileThroughBff`), and a new host is
+ * checked for a secure parent (`isSecureRoot`). These pre-existing cases are about the payload, so the BFF re-file is
+ * wired to hand the payload to the same `updateRecord` mock they assert on, and no parent is secure. The BFF routing
+ * itself is pinned by the "v1.6.0" cases at the end of this file.
+ */
+function bffWired(webApi: { updateRecord: jest.Mock }) {
+  return {
+    refileThroughBff: (entity: string, id: string, payload: Record<string, unknown>) =>
+      webApi.updateRecord(entity, id, payload).then(() => undefined),
+    isSecureRoot: async () => false as boolean | null,
+  };
+}
+
+/**
+ * A `retrieveMultipleRecords` fake covering the three query shapes the shared
+ * service issues: the `sprk_recordtype_ref` catalog read, the target-record
+ * field read, and the FR-26 core-ancestor read.
+ *
+ * `ancestors` maps a communication id → the `_sprk_regarding*_value` row the
+ * ancestor read should return.
+ */
+function makeWebApi(options?: { ancestors?: Record<string, Record<string, unknown>> }): {
+  retrieveMultipleRecords: jest.Mock;
+  updateRecord: jest.Mock;
+} {
+  const ancestors = options?.ancestors ?? {};
+  return {
+    updateRecord: jest.fn().mockResolvedValue({ id: 'ok' }),
+    retrieveMultipleRecords: jest.fn(async (entity: string, query: string) => {
+      if (entity === 'sprk_recordtype_ref') {
+        // Catalog row: no record-number / display-name mapping configured, so the
+        // resolver takes its NFR-06 graceful-blank paths. Keeps these tests about
+        // FR-26 rather than about SRFR-020/052.
+        return { entities: [{ sprk_recordtype_refid: `rt-${entity}`, sprk_name: 'RT' }] };
+      }
+      // FR-26 core-ancestor read — recognisable by its `_..._value` $select. Task 169:
+      // an intermediate's root columns may be typed (`_sprk_matter_value` on a budget,
+      // `_sprk_relatedmatter_value` on a document), not only `_sprk_regarding*_value`.
+      if (/\$select=_sprk_\w+_value/.test(query)) {
+        const idMatch = /eq ([0-9a-f-]+)/i.exec(query);
+        const id = (idMatch?.[1] ?? '').toLowerCase();
+        const row = ancestors[id];
+        return { entities: row ? [row] : [{}] };
+      }
+      return { entities: [] };
+    }),
+  };
+}
+
+function nulledBindKeys(payload: Record<string, unknown>): string[] {
+  return Object.entries(payload)
+    .filter(([k, v]) => k.endsWith('@odata.bind') && v === null)
+    .map(([k]) => k);
+}
+
+function boundValue(payload: Record<string, unknown>, navProp: string): unknown {
+  return payload[`${navProp}@odata.bind`];
+}
+
+// ---------------------------------------------------------------------------
 
 describe('ResolverWriteHandler', () => {
-  let mockUpdateRecord: jest.Mock;
-  let mockRetrieveMultipleRecords: jest.Mock;
-  let mockFetch: jest.Mock;
-
   beforeEach(() => {
     _resetNavPropCacheForTests();
-    applyResolverFieldsMock.mockClear();
+    _resetSharedNavPropCache();
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
 
-    mockUpdateRecord = jest.fn().mockResolvedValue({ id: 'ok' });
-    mockRetrieveMultipleRecords = jest.fn().mockResolvedValue({ entities: [] });
-    // v1.4.1 (SRFR-048): tests must return nav-props matching the host entity's
-    // actual schema. Default: sprk_todo has all 11 lookups. Individual tests
-    // override this to model narrower hosts (sprk_event, sprk_invoice, etc.)
-    // which only carry a subset of parent lookups.
-    mockFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        value: [
-          {
-            ReferencingAttribute: 'sprk_regardingmatter',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
-            ReferencedEntity: 'sprk_matter',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingproject',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
-            ReferencedEntity: 'sprk_project',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingevent',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent',
-            ReferencedEntity: 'sprk_event',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingcommunication',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication',
-            ReferencedEntity: 'sprk_communication',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingworkassignment',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
-            ReferencedEntity: 'sprk_workassignment',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardinginvoice',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
-            ReferencedEntity: 'sprk_invoice',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingbudget',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget',
-            ReferencedEntity: 'sprk_budget',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardinganalysis',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis',
-            ReferencedEntity: 'sprk_analysis',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingorganization',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization',
-            ReferencedEntity: 'sprk_organization',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingcontact',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
-            ReferencedEntity: 'contact',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingdocument',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument',
-            ReferencedEntity: 'sprk_document',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingrecordtype',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
-            ReferencedEntity: 'sprk_recordtype_ref',
-          },
-        ],
-      }),
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-21 / ADR-024 — the shared builder owns payload assembly
+  // -------------------------------------------------------------------------
+
+  test('ADR-024 — the handler contains no derivation or ancestor-ordering logic of its own', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', 'RegardingResolver', 'handlers', 'ResolverWriteHandler.ts'),
+      'utf8'
+    );
+    // Strip comments — the file legitimately DISCUSSES derivation at length.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+
+    // The taxonomy and the derivation entry point must never be re-implemented
+    // here; they are the shared service's job (ADR-024 + notes/phase3-derivation-rules.md §6).
+    expect(code).not.toMatch(/CORE_RECORD_ENTITIES|CHILD_RECORD_ENTITIES/);
+    expect(code).not.toMatch(/deriveCoreAncestorStamps/);
+    // ...and the handler must consume the ONE combined builder that owns ordering.
+    expect(code).toMatch(/buildRegardingSelectionPayload/);
+  });
+
+  test('FR-22 — no host-entity literals in the handler source', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', 'RegardingResolver', 'handlers', 'ResolverWriteHandler.ts'),
+      'utf8'
+    );
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '');
+    expect(code).not.toMatch(/'sprk_todo'|"sprk_todo"/);
+    expect(code).not.toMatch(/'sprk_communication'|"sprk_communication"/);
+  });
+
+  test('FR-22 — the same handler works for sprk_todo AND sprk_communication', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
     });
-  });
+    const selection = { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'Smith v. Jones' };
 
-  // -------------------------------------------------------------------------
-  // FR-21 / ADR-024 — sole write path
-  // -------------------------------------------------------------------------
-
-  test('FR-21 — applyResolverFields is called exactly once per selection', async () => {
-    const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      {
-        entityType: 'sprk_matter',
-        recordId: '33333333-3333-3333-3333-333333333333',
-        recordName: 'Smith v. Jones',
-      },
+    const r1 = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      selection,
       undefined,
-      mockFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
     );
-
-    expect(result.success).toBe(true);
-    expect(applyResolverFieldsMock).toHaveBeenCalledTimes(1);
-    expect(applyResolverFieldsMock).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.any(Object),
-      expect.any(Array),
-      'sprk_matter',
-      'sprk_matters',
-      '33333333-3333-3333-3333-333333333333',
-      'Smith v. Jones',
-      'matter'
-    );
-  });
-
-  test('updateRecord is called with the full payload for existing records', async () => {
-    await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+    const r2 = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: MATTER_2 },
+      selection,
       undefined,
-      mockFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
     );
 
-    expect(mockUpdateRecord).toHaveBeenCalledTimes(1);
-    const [entity, recordId, payload] = mockUpdateRecord.mock.calls[0];
-    expect(entity).toBe('sprk_todo');
-    expect(recordId).toBe('22222222-2222-2222-2222-222222222222');
-    expect(payload).toEqual(
-      expect.objectContaining({
-        sprk_regardingrecordid: '33333333-3333-3333-3333-333333333333',
-        sprk_regardingrecordname: 'X',
-      })
-    );
+    expect(r1.success).toBe(true);
+    expect(r2.success).toBe(true);
+    expect(webApi.updateRecord).toHaveBeenNthCalledWith(1, 'sprk_todo', HOST_TODO, expect.any(Object));
+    expect(webApi.updateRecord).toHaveBeenNthCalledWith(2, 'sprk_communication', MATTER_2, expect.any(Object));
   });
 
-  test('rejects an unknown entity type', async () => {
+  test('rejects an unknown entity type without reading or writing anything', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+
     const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'unknown_entity', recordId: 'x', recordName: 'y' },
       undefined,
-      mockFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
     );
 
     expect(result.success).toBe(false);
     expect(result.error).toMatch(/Unknown entity type/);
-    expect(applyResolverFieldsMock).not.toHaveBeenCalled();
-    expect(mockUpdateRecord).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
-  // FR-13 — clear-and-set (10 other lookups nulled)
+  // FR-13 — clear-and-set
   // -------------------------------------------------------------------------
 
-  test('FR-13 — payload nulls the 10 OTHER entity-specific lookups', async () => {
+  test('FR-13 — selecting one target nulls every OTHER regarding lookup on the host', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+
     await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       undefined,
-      mockFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
     );
 
-    const [, , payload] = mockUpdateRecord.mock.calls[0];
-    // Each "other" entity should have its lookup attribute @odata.bind = null.
-    const cleared = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
-    // 10 OTHER entity-specific lookups should be nulled (catalog has 11 entries; chose 1, so 10 are cleared).
-    expect(cleared.length).toBeGreaterThanOrEqual(10);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    // 12 catalog targets (one chosen → 11 nulled) + the service-request lookup,
+    // which is NOT in the catalog and reaches the payload only through the
+    // core-ancestor union — the union that makes reparent safe.
+    expect(nulledBindKeys(payload)).toHaveLength(12);
+    expect(boundValue(payload, 'sprk_RegardingServiceRequest')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+  });
+
+  test('SRFR-048 — a narrow host only nulls lookups that exist on that entity', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_event: EVENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    const nulled = nulledBindKeys(payload);
+
+    // Writing a column the host lacks makes Dataverse reject the whole update.
+    for (const absent of ['Communication', 'Organization', 'Contact', 'Budget', 'Analysis', 'Document', 'Event']) {
+      expect(nulled.some(k => k.includes(`sprk_Regarding${absent}`))).toBe(false);
+    }
+    for (const present of ['Project', 'Invoice', 'WorkAssignment']) {
+      expect(nulled.some(k => k.includes(`sprk_Regarding${present}`))).toBe(true);
+    }
   });
 
   // -------------------------------------------------------------------------
-  // SRFR-048 v1.4.1 — nav-prop-limited clear (only null lookups that exist on host)
+  // FR-26 — SET
   // -------------------------------------------------------------------------
 
-  test('SRFR-048 — narrower host (sprk_event) only nulls lookups that exist on that entity', async () => {
-    // sprk_event carries only Matter/Project/Invoice/WorkAssignment lookups.
-    // Attempting to null sprk_regardingcommunication / sprk_regardingorganization /
-    // etc. would fail Dataverse validation (v1.4.0 failure mode).
-    const narrowerFetch = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        value: [
-          {
-            ReferencingAttribute: 'sprk_regardingmatter',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
-            ReferencedEntity: 'sprk_matter',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingproject',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
-            ReferencedEntity: 'sprk_project',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardinginvoice',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
-            ReferencedEntity: 'sprk_invoice',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingworkassignment',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
-            ReferencedEntity: 'sprk_workassignment',
-          },
-          {
-            ReferencingAttribute: 'sprk_regardingrecordtype',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
-            ReferencedEntity: 'sprk_recordtype_ref',
-          },
-        ],
-      }),
+  test('FR-26 SET — a child target stamps its core ancestor in the SAME updateRecord call', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 } },
+    });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
     });
 
     const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_event',
-        hostRecordId: '55555555-5555-5555-5555-555555555555',
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'Re: discovery' },
       undefined,
-      narrowerFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
     );
 
     expect(result.success).toBe(true);
-    const [, , payload] = mockUpdateRecord.mock.calls[0];
-    const nulledKeys = Object.entries(payload)
-      .filter(([k, v]) => k.endsWith('@odata.bind') && v === null)
-      .map(([k]) => k);
+    expect(result.ancestorStatus).toBe('derived');
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
 
-    // Must NOT contain any lookup that doesn't exist on sprk_event.
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingCommunication'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingOrganization'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingContact'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingBudget'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingAnalysis'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingDocument'))).toBe(false);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingEvent'))).toBe(false); // event isn't a parent of itself
-
-    // Must include the OTHER 3 lookups that DO exist on sprk_event (not Matter — that's the chosen one).
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingProject'))).toBe(true);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingInvoice'))).toBe(true);
-    expect(nulledKeys.some(k => k.includes('sprk_RegardingWorkAssignment'))).toBe(true);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    // The target lookup AND the ancestor stamp ride the one call.
+    expect(boundValue(payload, 'sprk_RegardingCommunication')).toBe(`/sprk_communications(${COMM_1})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+    expect(result.ancestorStamps).toEqual([
+      expect.objectContaining({
+        entityType: 'sprk_matter',
+        lookupAttribute: 'sprk_regardingmatter',
+        recordId: MATTER_1,
+      }),
+    ]);
   });
 
-  // -------------------------------------------------------------------------
-  // FR-22 — entity is a prop, no entity-specific branching
-  // -------------------------------------------------------------------------
+  test('FR-26 SET — a CORE target stamps only itself (Matter does NOT inherit from Project)', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_matter: FULL_NAV_PROPS });
 
-  test('FR-22 — same handler works for sprk_todo AND sprk_communication', async () => {
-    // Same selection, two different host entities.
-    const selection = {
-      entityType: 'sprk_matter',
-      recordId: '33333333-3333-3333-3333-333333333333',
-      recordName: 'Same Matter',
-    };
-
-    const r1 = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      selection,
-      undefined,
-      mockFetch as unknown as typeof fetch
-    );
-    expect(r1.success).toBe(true);
-
-    const r2 = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_communication',
-        hostRecordId: '44444444-4444-4444-4444-444444444444',
-      },
-      selection,
-      undefined,
-      mockFetch as unknown as typeof fetch
-    );
-    expect(r2.success).toBe(true);
-
-    expect(applyResolverFieldsMock).toHaveBeenCalledTimes(2);
-    // updateRecord called with each host entity in turn.
-    expect(mockUpdateRecord).toHaveBeenNthCalledWith(
-      1,
-      'sprk_todo',
-      '22222222-2222-2222-2222-222222222222',
-      expect.any(Object)
-    );
-    expect(mockUpdateRecord).toHaveBeenNthCalledWith(
-      2,
-      'sprk_communication',
-      '44444444-4444-4444-4444-444444444444',
-      expect.any(Object)
-    );
-  });
-
-  // -------------------------------------------------------------------------
-  // New-record (no hostRecordId) — staged for pre-save handler
-  // -------------------------------------------------------------------------
-
-  test('new-record path: returns payload but does NOT call updateRecord', async () => {
     const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: undefined,
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       undefined,
-      mockFetch as unknown as typeof fetch
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.ancestorStatus).toBe('core-target');
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+    // The Matter's own Project association is NOT an access edge — inverting this
+    // hands every Project holder every Matter beneath it.
+    expect(boundValue(payload, 'sprk_RegardingProject')).toBeNull();
+  });
+
+  test('FR-26 — an orphan child target yields no-ancestor (distinct from error) and still writes', async () => {
+    const webApi = makeWebApi({ ancestors: { [COMM_ORPHAN]: {} } });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_ORPHAN, recordName: 'Orphan' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
     );
 
     expect(result.success).toBe(true);
-    expect(result.payload).toBeDefined();
-    expect(applyResolverFieldsMock).toHaveBeenCalledTimes(1);
-    expect(mockUpdateRecord).not.toHaveBeenCalled();
+    expect(result.ancestorStatus).toBe('no-ancestor');
+    expect(result.ancestorStamps).toEqual([]);
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
   });
 
   // -------------------------------------------------------------------------
-  // resolveAllowedCatalog
+  // FR-26 — intermediate targets (task 169: the client mirrors server task 156's
+  // IntermediateRootColumns, so a typed root on the target is stamped at save time)
   // -------------------------------------------------------------------------
 
-  test('resolveAllowedCatalog returns full catalog when input is empty', () => {
-    expect(resolveAllowedCatalog(undefined)).toHaveLength(11);
-    expect(resolveAllowedCatalog('')).toHaveLength(11);
-    expect(resolveAllowedCatalog(null)).toHaveLength(11);
+  test('FR-26 SET — a budget target stamps the matter named by its typed sprk_matter lookup', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS });
+
+    // Sweep integration (169 on top of 147): a SAVED to-do host re-files through the BFF — wired as 147 wired the
+    // sibling FR-26 tests (bffWired routes the re-file into the webApi double so the payload is asserted as before).
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.ancestorStatus).toBe('derived');
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingBudget')).toBe(`/sprk_budgets(${BUDGET_1})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+  });
+
+  test('NFR-01 — a document naming two different matters refuses the pick on an existing host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(result.error).toMatch(/two different sprk_matter records/);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('NFR-01 — a document naming two different matters stages nothing on a new host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    // Nothing for the CREATE-mode presave bridge to stage.
+    expect(result.payload).toBeUndefined();
+    expect(result.ancestorStamps).toBeUndefined();
+    expect(result.clearLookups).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-26 — REPARENT (the transition the stamp exists for)
+  // -------------------------------------------------------------------------
+
+  test('FR-26 REPARENT — the new ancestor replaces the old one in ONE payload', async () => {
+    const webApi = makeWebApi({
+      ancestors: {
+        [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 },
+        [COMM_2]: { _sprk_regardingmatter_value: MATTER_2 },
+      },
+    });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
+
+    // Parent under C1 (ancestor M1) …
+    await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+    // … then reparent to C2 (ancestor M2).
+    const reparent = await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_communication', recordId: COMM_2, recordName: 'C2' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(reparent.success).toBe(true);
+    const [, , payload] = webApi.updateRecord.mock.calls[1];
+
+    // Exactly the NEW ancestor remains. If the pre-clear ran after the stamp, or
+    // the stamp were skipped, this would still hold M1 — the child would stay
+    // visible to M1's principals (over-grant) and invisible to M2's (under-grant).
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_2})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).not.toBe(`/sprk_matters(${MATTER_1})`);
+    expect(boundValue(payload, 'sprk_RegardingCommunication')).toBe(`/sprk_communications(${COMM_2})`);
+  });
+
+  test('FR-26 REPARENT — moving from a child ancestor to an unrelated CORE nulls the stale stamp', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 } },
+    });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+      sprk_project: FULL_NAV_PROPS,
+    });
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
+
+    await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+    // Reparent onto a Project — a DIFFERENT core entity, so the matter stamp must go.
+    await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_project', recordId: MATTER_2, recordName: 'P2' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    const [, , payload] = webApi.updateRecord.mock.calls[1];
+    expect(boundValue(payload, 'sprk_RegardingProject')).toBe(`/sprk_projects(${MATTER_2})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingCommunication')).toBeNull();
+  });
+
+  test('FR-26 REPARENT — the stale-stamp clear reaches a core lookup the catalog does not list', async () => {
+    // `TODO_REGARDING_CATALOG` has no `sprk_servicerequest` entry (F-050-3). On a
+    // host that DOES carry that column, a catalog-only pre-clear would leave the
+    // stamp standing after a reparent.
+    const webApi = makeWebApi({ ancestors: { [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 } } });
+    const fetchImpl = makeFetch({
+      sprk_communication: FULL_NAV_PROPS,
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingServiceRequest')).toBeNull();
+    expect(result.clearLookups).toContain('sprk_regardingservicerequest');
+  });
+
+  test('FR-26 — a derived ancestor the host cannot store is surfaced, not swallowed (F-050-2)', async () => {
+    // A child regarding a Communication whose ancestor is a Service Request,
+    // hosted on an entity that has no column for it. The ancestor IS derived but
+    // cannot be written — a real inheritance hole that must be reported rather
+    // than silently dropped.
+    //
+    // The host here is the CONSTRUCTED narrow fixture, not a real entity: which
+    // entities lack which column is a schema question that changed under us once
+    // already (see FULL_NAV_PROPS). What this test pins is the BEHAVIOUR when a
+    // host lacks the column, which holds whatever the schema turns out to be.
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingservicerequest_value: MATTER_1 } },
+    });
+    const fetchImpl = makeFetch({
+      sprk_narrowhost: NARROW_NAV_PROPS, // no service-request column
+      sprk_communication: FULL_NAV_PROPS, // has one
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_narrowhost', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.unstampable).toContain('sprk_regardingservicerequest');
+    // …and it must NOT be offered for CREATE-mode staging either.
+    expect(result.ancestorStamps).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-26 — CLEAR
+  // -------------------------------------------------------------------------
+
+  test('FR-26 CLEAR — clearRegarding nulls the ancestor lookups along with the regarding fields', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+
+    const result = await clearRegarding(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const payload = result.payload as Record<string, unknown>;
+
+    // Every core-ancestor lookup the host carries is nulled — a cleared child has
+    // no parent, so it must inherit nothing.
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingProject')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingWorkAssignment')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingServiceRequest')).toBeNull();
+    // 12 catalog lookups + the non-catalog service-request lookup + record-type.
+    expect(nulledBindKeys(payload)).toHaveLength(14);
+    expect(payload['sprk_regardingrecordid']).toBeNull();
+    expect(payload['sprk_regardingrecordname']).toBeNull();
+    expect(payload['sprk_regardingrecordurl']).toBeNull();
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  test('FR-26 CLEAR — a core lookup outside the catalog is nulled too (sprk_regardingservicerequest)', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_communication: FULL_NAV_PROPS });
+
+    const result = await clearRegarding(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    const payload = result.payload as Record<string, unknown>;
+    expect(boundValue(payload, 'sprk_RegardingServiceRequest')).toBeNull();
+    expect(result.clearLookups).toContain('sprk_regardingservicerequest');
+  });
+
+  test('FR-26 CLEAR — never writes a lookup the host does not carry (SRFR-048)', async () => {
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_event: EVENT_NAV_PROPS });
+
+    const result = await clearRegarding(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
+      fetchImpl as unknown as typeof fetch
+    );
+
+    const payload = result.payload as Record<string, unknown>;
+    // `sprk_event` has no service-request column; emitting it would 400 the whole
+    // clear and leave the stale stamps in place.
+    expect(Object.keys(payload).some(k => k.includes('ServiceRequest'))).toBe(false);
+    expect(Object.keys(payload).some(k => k.includes('Communication'))).toBe(false);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBeNull();
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-26 — CREATE mode (staging, never a follow-up update)
+  // -------------------------------------------------------------------------
+
+  test('FR-26 CREATE — returns stamps + clears for staging and calls NO updateRecord', async () => {
+    const webApi = makeWebApi({ ancestors: { [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 } } });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    // The caller stages these onto form attributes so they ride ONE insert. A
+    // post-create update would leave an unscoped child if it crashed in between.
+    expect(result.ancestorStamps).toEqual([
+      expect.objectContaining({ lookupAttribute: 'sprk_regardingmatter', recordId: MATTER_1 }),
+    ]);
+    // Attribute logical names (form attributes), not nav-prop names.
+    expect(result.clearLookups).toContain('sprk_regardingproject');
+    expect(result.clearLookups).not.toContain('sprk_regardingmatter'); // being SET
+    expect(result.clearLookups).not.toContain('sprk_regardingcommunication'); // being SET
+  });
+
+  test('FR-26 CREATE — reparent before first save stages the clear of the previous pick', async () => {
+    const webApi = makeWebApi({
+      ancestors: {
+        [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 },
+        [COMM_2]: { _sprk_regardingproject_value: MATTER_2 },
+      },
+    });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: undefined };
+
+    await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+    const second = await applyRegardingSelection(
+      ctx,
+      { entityType: 'sprk_communication', recordId: COMM_2, recordName: 'C2' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    // The second pick's ancestor is a Project; the Matter staged by the first pick
+    // must be staged for CLEARING or the INSERT carries both.
+    expect(second.ancestorStamps).toEqual([
+      expect.objectContaining({ lookupAttribute: 'sprk_regardingproject', recordId: MATTER_2 }),
+    ]);
+    expect(second.clearLookups).toContain('sprk_regardingmatter');
+  });
+
+  // -------------------------------------------------------------------------
+  // NFR-01 — fail closed
+  // -------------------------------------------------------------------------
+
+  test('NFR-01 — a derivation error writes NOTHING and surfaces the error', async () => {
+    // Target metadata unreadable → the shared derivation cannot tell "no ancestor"
+    // from "could not find out", so it fails closed.
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS }); // sprk_communication → 404
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(result.error).toMatch(/derivation|nav-props/i);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    // No partial stamp is offered to the CREATE-mode bridge either.
+    expect(result.ancestorStamps).toBeUndefined();
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('NFR-01 — an ancestor read that throws also blocks the write', async () => {
+    const webApi = makeWebApi();
+    webApi.retrieveMultipleRecords.mockImplementation(async (entity: string, query: string) => {
+      if (/\$select=_sprk_regarding/.test(query)) throw new Error('403 forbidden');
+      if (entity === 'sprk_recordtype_ref') return { entities: [] };
+      return { entities: [] };
+    });
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/403 forbidden/);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  test('updateRecord failure surfaces the error and the derived state for diagnostics', async () => {
+    const webApi = makeWebApi({ ancestors: { [COMM_1]: { _sprk_regardingmatter_value: MATTER_1 } } });
+    webApi.updateRecord.mockRejectedValueOnce(new Error('403 forbidden'));
+    const fetchImpl = makeFetch({
+      sprk_todo: FULL_NAV_PROPS,
+      sprk_communication: FULL_NAV_PROPS,
+    });
+
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/403 forbidden/);
+    expect(result.ancestorStatus).toBe('derived');
+  });
+
+  // -------------------------------------------------------------------------
+  // resolveAllowedCatalog + nav-prop cache
+  // -------------------------------------------------------------------------
+
+  test('resolveAllowedCatalog returns the full catalog when input is empty', () => {
+    expect(resolveAllowedCatalog(undefined)).toHaveLength(12);
+    expect(resolveAllowedCatalog('')).toHaveLength(12);
+    expect(resolveAllowedCatalog(null)).toHaveLength(12);
   });
 
   test('resolveAllowedCatalog filters to the comma-separated list', () => {
@@ -476,153 +852,301 @@ describe('ResolverWriteHandler', () => {
     expect(filtered.map(c => c.entityType).sort()).toEqual(['contact', 'sprk_matter', 'sprk_project']);
   });
 
-  // -------------------------------------------------------------------------
-  // clearRegarding
-  // -------------------------------------------------------------------------
+  test('a maker-restricted catalog still pre-clears the FULL lookup set', async () => {
+    // `regardingTargets` governs what a user may SELECT. If it also governed the
+    // pre-clear, narrowing the maker list would strand a previously-set lookup —
+    // and with it a stale ancestor stamp.
+    const webApi = makeWebApi();
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+    const restricted = resolveAllowedCatalog('sprk_matter,sprk_project');
 
-  test('clearRegarding produces a payload nulling all 14 nullable fields', async () => {
+    await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
+      restricted,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingCommunication')).toBeNull();
+    expect(boundValue(payload, 'sprk_RegardingDocument')).toBeNull();
+  });
+
+  test('discoverHostNavProps caches per host entity', async () => {
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
+    const a = await discoverHostNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+    const b = await discoverHostNavProps('sprk_todo', fetchImpl as unknown as typeof fetch);
+    expect(a).toBe(b);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  test('discoverHostNavProps returns an empty array on HTTP error (graceful)', async () => {
+    const fetchImpl = makeFetch({});
+    const result = await discoverHostNavProps('sprk_communication', fetchImpl as unknown as typeof fetch);
+    expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.6.0 — UAC-r2 task 147 r1 (owner round 28): saved child hosts re-file through the BFF; a NEW host is never filed
+// under a secure record before it is saved.
+// ---------------------------------------------------------------------------
+
+describe('v1.6.0 BFF re-file (task 147 r1)', () => {
+  test('a SAVED child host is re-filed through the BFF, never through webApi.updateRecord', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockResolvedValue(undefined);
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: `{${HOST_TODO}}` },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(refile).toHaveBeenCalledTimes(1);
+    const [entity, id, payload] = refile.mock.calls[0];
+    expect(entity).toBe('sprk_todo');
+    expect(id).toBe(HOST_TODO);
+    expect(payload).not.toHaveProperty('ownerid@odata.bind');
+  });
+
+  test('a SAVED child host with no BFF connection is REFUSED — nothing is written as the user', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not connected to the Spaarke service');
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  test('the BFF refusal message is the control error', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockRejectedValue(new Error('A record this to-do is filed under was not found.'));
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('A record this to-do is filed under was not found.');
+  });
+
+  test('a CLEAR of a saved child host goes through the BFF too (a re-file out of its parent)', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockResolvedValue(undefined);
     const result = await clearRegarding(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      mockFetch as unknown as typeof fetch
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(refile).toHaveBeenCalledTimes(1);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  test('a host that is not an ownership child (a contact) keeps webApi.updateRecord', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn();
+    await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'contact', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ contact: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(refile).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    [true, 'filed under a secure record'],
+    [null, 'could not be checked'],
+  ])('a NEW host whose parent is secure (%s) is refused — nothing is staged for the form save', async (flag, text) => {
+    const webApi = makeWebApi();
+    const isSecureRoot = jest.fn().mockResolvedValue(flag);
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(text);
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('a NEW host whose parent is NOT secure is staged as before', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot: async () => false, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
     );
 
     expect(result.success).toBe(true);
     expect(result.payload).toBeDefined();
-    const payload = result.payload as Record<string, unknown>;
-
-    // 11 entity-specific lookups + 1 record-type lookup, all @odata.bind = null
-    const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
-    expect(nulledBinds.length).toBeGreaterThanOrEqual(12);
-
-    // 3 text/URL fields explicitly null
-    expect(payload['sprk_regardingrecordid']).toBeNull();
-    expect(payload['sprk_regardingrecordname']).toBeNull();
-    expect(payload['sprk_regardingrecordurl']).toBeNull();
-
-    // updateRecord called
-    expect(mockUpdateRecord).toHaveBeenCalledTimes(1);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
   });
 
-  // -------------------------------------------------------------------------
-  // discoverHostNavProps cache
-  // -------------------------------------------------------------------------
-
-  test('discoverHostNavProps caches per host entity', async () => {
-    const fetchSpy = jest.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        value: [
-          {
-            ReferencingAttribute: 'sprk_regardingmatter',
-            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
-            ReferencedEntity: 'sprk_matter',
-          },
-        ],
-      }),
-    });
-
-    const a = await discoverHostNavProps('sprk_todo', fetchSpy as unknown as typeof fetch);
-    const b = await discoverHostNavProps('sprk_todo', fetchSpy as unknown as typeof fetch);
-
-    expect(a).toBe(b); // cached reference
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
-  });
-
-  test('discoverHostNavProps returns empty array on HTTP error (graceful)', async () => {
-    _resetNavPropCacheForTests();
-    const fetchSpy = jest.fn().mockResolvedValue({
-      ok: false,
-      status: 500,
-      json: async () => ({}),
-    });
-
-    const result = await discoverHostNavProps('sprk_communication', fetchSpy as unknown as typeof fetch);
-    expect(result).toEqual([]);
-  });
-
-  // -------------------------------------------------------------------------
-  // SRFR-032 / FR-A5-04 — recordNumber forwarded on IResolverWriteResult
-  // -------------------------------------------------------------------------
-
-  test('SRFR-032 — successful UPDATE result forwards recordNumber from applyResolverFields', async () => {
+  // r1c: a SAVED ownership-child host with no BFF re-file route (a document) is refused — its owner would not follow.
+  test('a SAVED ownership-child host with no BFF re-file route (sprk_document) is REFUSED — nothing is written', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn();
     const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_document', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
       undefined,
-      mockFetch as unknown as typeof fetch
-    );
-
-    expect(result.success).toBe(true);
-    // The mock returns `MOCK-<ENTITY>-001`; forwarded verbatim.
-    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
-  });
-
-  test('SRFR-032 — CREATE-mode result also forwards recordNumber (no updateRecord call)', async () => {
-    const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: undefined,
-      },
-      { entityType: 'sprk_project', recordId: '55555555-5555-5555-5555-555555555555', recordName: 'X' },
-      undefined,
-      mockFetch as unknown as typeof fetch
-    );
-
-    expect(result.success).toBe(true);
-    expect(result.recordNumber).toBe('MOCK-SPRK_PROJECT-001');
-    expect(mockUpdateRecord).not.toHaveBeenCalled();
-  });
-
-  test('SRFR-032 — graceful-blank: shared service null propagates as null on result', async () => {
-    // Override the mock once to simulate the NFR-06 graceful-blank case
-    // (Contact/Account intentional-null per Q-06, or metadata missing).
-    applyResolverFieldsMock.mockImplementationOnce(async () => ({
-      recordNumber: null,
-      recordNumberSourceField: null,
-    }));
-
-    const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: undefined,
-      },
-      { entityType: 'contact', recordId: '66666666-6666-6666-6666-666666666666', recordName: 'Jane Doe' },
-      undefined,
-      mockFetch as unknown as typeof fetch
-    );
-
-    expect(result.success).toBe(true);
-    expect(result.recordNumber).toBeNull();
-  });
-
-  test('SRFR-032 — updateRecord failure still surfaces recordNumber for diagnostics', async () => {
-    mockUpdateRecord.mockRejectedValueOnce(new Error('403 forbidden'));
-
-    const result = await applyRegardingSelection(
-      {
-        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
-        hostEntity: 'sprk_todo',
-        hostRecordId: '22222222-2222-2222-2222-222222222222',
-      },
-      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
-      undefined,
-      mockFetch as unknown as typeof fetch
+      makeFetch({ sprk_document: FULL_NAV_PROPS }) as unknown as typeof fetch
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toMatch(/403 forbidden/);
-    // Even on failure, the resolved recordNumber is available on the result
-    // (the shared service ran to completion; only updateRecord failed).
-    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
+    expect(result.error).toContain('changes who owns it');
+    expect(refile).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  // 147 x 169 (owner round 28 item 3): a NEW host under a budget is decided by the budget's OWN root, which task 169's
+  // derivation now reads — refused under a secure root, staged under an ordinary one, refused when the root cannot be
+  // derived (fail closed). Before 169 every budget was "unclassified" and refused outright.
+  test.each([
+    ['its root is secure', true, true],
+    ['its root is not secure', false, true],
+    ['its root cannot be derived (no metadata)', false, false],
+  ])('a NEW host filed under a budget whose %s', async (label, rootIsSecure, metadataAvailable) => {
+    // Metadata is cached per entity; this block has no reset of its own, so start from a cold cache.
+    _resetNavPropCacheForTests();
+    _resetSharedNavPropCache();
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(rootIsSecure);
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      makeFetch(
+        metadataAvailable ? { sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS } : { sprk_todo: FULL_NAV_PROPS }
+      ) as unknown as typeof fetch
+    );
+
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    if (!metadataAvailable) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).not.toHaveBeenCalled();
+    } else if (rootIsSecure) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(result.error).toContain('filed under a secure record');
+    } else {
+      expect(result.success).toBe(true);
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(boundValue(result.payload!, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+    }
+    void label;
+  });
+
+  // r1c: on a NEW host the form's own save creates the record OWNED BY THE USER, so the selection may ride it only when
+  // the target is decided NOT to be under a secure record.
+  test('a NEW host filed under a PARTY (contact) is staged — a party is never an ownership parent; no flag is read', async () => {
+    const webApi = makeWebApi();
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'contact', recordId: MATTER_2, recordName: 'A person' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.payload).toBeDefined();
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  // Sweep integration (169 on top of 147): this list also held 'a record outside the core taxonomy (unclassified: budget)'.
+  // Task 169 made the budget an INTERMEDIATE (its sprk_matter / sprk_project name its root), so no to-do catalog target
+  // is unclassified any more; the budget's NEW-host decision is pinned by the test that follows this one.
+  test.each([
+    ['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN],
+  ])(
+    'a NEW host filed under %s is REFUSED — its secure ancestry cannot be seen here',
+    async (_label, entityType, id) => {
+      const webApi = makeWebApi();
+      const isSecureRoot = jest.fn().mockResolvedValue(false);
+      const result = await applyRegardingSelection(
+        { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+        { entityType, recordId: id, recordName: 'X' },
+        undefined,
+        makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('cannot be checked before it is saved');
+      expect(result.payload).toBeUndefined();
+      expect(webApi.updateRecord).not.toHaveBeenCalled();
+    }
+  );
+
+  test('a NEW host under a child whose ONLY ancestor is a service request (never secure) is staged', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingservicerequest_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  test('a NEW host under a child whose derived ancestor is SECURE is refused, even when the host cannot stamp it', async () => {
+    // The host has no project column (NARROW-like): the ancestor is "unstampable" on the host, yet the record would still
+    // sit under the secure project through the target — so it is checked.
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingproject_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(true);
+    const hostWithoutProject = FULL_NAV_PROPS.filter(r => r.ReferencingAttribute !== 'sprk_regardingproject');
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: hostWithoutProject, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(isSecureRoot).toHaveBeenCalledWith('sprk_project', MATTER_2);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('filed under a secure record');
+  });
+
+  test('a NEW host with a root parent and no way to check it is refused (fail closed)', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
   });
 });

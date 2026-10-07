@@ -106,6 +106,7 @@ public sealed class CreateTaskApplySeamTests
 
         return new CommunicationCreateTaskApplyService(
             _callerResolver.Object, _generic.Object, _actionSeam.Object, _envelopeReader.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationCreateTaskApplyService>.Instance);
     }
 
@@ -136,6 +137,8 @@ public sealed class CreateTaskApplySeamTests
         created.RegardingObjectType.Should().Be(TargetEntity);
         created.RegardingObjectId.Should().Be(RegardingRecordId);
         created.OwnerId.Should().Be(AssignedToUserId);
+        created.ActingUserId.Should().Be(AssignedToUserId,
+            "UAC-r2 task 152: the task is FOR the user the confirmer assigned it to — their linked contact names it");
         created.DueDate.Should().NotBeNull("the extracted deadline is carried to the created task");
 
         // The FR-E5 fields PATCH ran AS the confirming user (never app-only), against the newly-created sprk_event.
@@ -178,6 +181,23 @@ public sealed class CreateTaskApplySeamTests
         _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
         result.CreatedTaskId.Should().Be(CreatedTaskId);
+    }
+
+    // UAC-r2 task 152 (verifier round 1 item 8): with no assignee chosen, the task is FOR the confirming user.
+    [Fact]
+    public async Task ApplyAsync_WhenNoAssigneeChosen_TheConfirmingUserNamesTheTask()
+    {
+        var sut = BuildSut();
+        CreateTaskRequest? created = null;
+        _actionSeam
+            .Setup(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateTaskRequest, CancellationToken>((r, _) => created = r)
+            .ReturnsAsync(new CreateTaskResult(true, CreatedTaskId, null));
+
+        await sut.ApplyAsync(ReviewLogId, DefaultRequest() with { AssignedTo = null }, new ClaimsPrincipal(), CancellationToken.None);
+
+        created!.OwnerId.Should().BeNull();
+        created.ActingUserId.Should().Be(CallerSystemUserId);
     }
 
     // NEGATIVE — auth: an unresolved caller fails closed (403); nothing is ever created/patched/audited.
@@ -327,6 +347,7 @@ public sealed class CreateTaskApplySeamTests
         created.RegardingObjectType.Should().Be(TargetEntity);
         created.RegardingObjectId.Should().Be(RegardingRecordId);
         created.OwnerId.Should().Be(AssignedToUserId);
+        created.ActingUserId.Should().Be(AssignedToUserId, "UAC-r2 task 152: the chosen assignee is who the task is FOR");
 
         patched.Should().NotBeNull();
         patched!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
@@ -374,6 +395,22 @@ public sealed class CreateTaskApplySeamTests
         patched!.FieldMappings.Should().Contain(m => m.Field == "sprk_eventstatus" && m.Value == "2")
             .And.Contain(m => m.Field == "sprk_completeddate");
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // UAC-r2 task 152 (verifier round 1 item 8): an ad-hoc task with no assignee is FOR the confirming user.
+    [Fact]
+    public async Task CreateAdHocAsync_WhenNoAssigneeChosen_TheConfirmingUserNamesTheTask()
+    {
+        var sut = BuildSut();
+        CreateTaskRequest? created = null;
+        _actionSeam
+            .Setup(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateTaskRequest, CancellationToken>((r, _) => created = r)
+            .ReturnsAsync(new CreateTaskResult(true, CreatedTaskId, null));
+
+        await sut.CreateAdHocAsync(CommunicationId, AdHocRequest() with { AssignedTo = null }, new ClaimsPrincipal(), CancellationToken.None);
+
+        created!.ActingUserId.Should().Be(CallerSystemUserId);
     }
 
     // FR-E5 (task 056b) NEGATIVE — auth: an unresolved caller fails closed (403); nothing created/audited.

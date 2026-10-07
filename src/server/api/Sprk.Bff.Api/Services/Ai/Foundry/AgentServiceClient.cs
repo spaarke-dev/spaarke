@@ -49,11 +49,31 @@ public sealed class AgentServiceClient : IDisposable
     // ── Redis cache (ADR-009 + FR-05) ─────────────────────────────────────────
     private readonly ITenantCache _cache;
 
-    // ITenantCache resource name (FR-05 redis remediation r1). Final on-wire key:
-    // spaarke:tenant:{tenantId}:agent-thread:thread:v1
+    // ITenantCache resource name. Final on-wire key:
+    //     spaarke:tenant:{tenantId}:agent-thread:{conversationScope}:v2
+    //
+    // 🔴 THE ID IS THE CONVERSATION, AND IT IS NOT A CONSTANT (task 122, D-12 item 6, ADR-009).
+    //
+    // It used to be `thread` — a compile-time constant — so the whole key varied by tenantId alone. A
+    // Foundry thread is a server-side CONVERSATION: CreateMessageAsync appends to it and the agent replies
+    // with the whole accumulated thread as context. So two people in the same tenant, chatting within the
+    // 60-minute TTL, rejoined the SAME conversation, and the agent's answer to the second was conditioned
+    // on the first one's messages and could quote them back.
+    //
+    // The scope is the CONVERSATION, not the user, and that is the stronger choice: a chat session belongs
+    // to exactly one user, so session-keying subsumes user-keying for the leak AND additionally stops one
+    // user's unrelated questions sharing context (ask about Matter X, then Matter Y forty minutes later —
+    // under user-keying X is still in the model's context).
+    //
+    // ⚠️ The tenant segment is NOT a customer boundary. Every Model 1 customer presents Spaarke's tenantId
+    // (D-12), so it separates Entra tenants, not customers. Customer separation is the DEDICATED PER-CUSTOMER
+    // REDIS INSTANCE — Redis access control is per-instance, not per-keyspace (ADR-009 as amended). Do not
+    // read this key as providing it. See notes/D-14-customer-discriminator.md.
+    //
+    // Version bumped 1 → 2 because the key's MEANING changed: a v1 entry is a tenant-wide thread, and
+    // silently resuming one under the new scheme would reintroduce the very sharing this removes.
     private const string CacheResource = "agent-thread";
-    private const string CacheId = "thread";
-    private const int CacheVersion = 1;
+    private const int CacheVersion = 2;
 
     // ── Managed Identity credential (UAMI-pinned via DI singleton) ────────────
     private readonly TokenCredential _credential;
@@ -62,12 +82,36 @@ public sealed class AgentServiceClient : IDisposable
     private readonly ILogger<AgentServiceClient> _logger;
 
     /// <summary>
-    /// Cache key pattern for thread ID storage (ADR-014 — tenant-scoped, centralised).
+    /// Cache key pattern for thread ID storage — tenant-scoped AND conversation-scoped.
     /// </summary>
-    // Legacy method retained for tests asserting tenant-scoped key composition. Runtime uses
-    // ITenantCache directly with (tenantId, CacheResource, CacheId, CacheVersion).
-    internal static string BuildThreadCacheKey(string tenantId) =>
-        $"agent-thread:{tenantId}";
+    /// <remarks>
+    /// Retained for tests asserting key composition. Runtime uses <c>ITenantCache</c> directly with
+    /// <c>(tenantId, CacheResource, conversationScope, CacheVersion)</c>.
+    /// <para>The <paramref name="conversationScope"/> is what makes two conversations two threads. Before
+    /// task 122 this method took only a tenant and the id segment was the constant <c>thread</c>, which is
+    /// why every user in a tenant shared one conversation.</para>
+    /// </remarks>
+    internal static string BuildThreadCacheKey(string tenantId, string conversationScope) =>
+        $"agent-thread:{tenantId}:{conversationScope}";
+
+    /// <summary>
+    /// Validates a conversation scope. FAILS CLOSED (ADR-003): an absent scope is rejected rather than
+    /// defaulted, because any shared default — a constant, an empty string, the tenant id — is exactly the
+    /// defect task 122 removed, and it would return silently as "everyone shares one conversation".
+    /// </summary>
+    private static string RequireConversationScope(string conversationScope)
+    {
+        if (string.IsNullOrWhiteSpace(conversationScope))
+        {
+            throw new ArgumentException(
+                "A conversation scope (chat session id, playbook run id, or equivalent) is required. "
+                + "A Foundry thread is a conversation, so an unscoped thread is shared by every caller "
+                + "that resumes it. There is deliberately no default — see task 122 / ADR-009.",
+                nameof(conversationScope));
+        }
+
+        return conversationScope;
+    }
 
     /// <summary>
     /// Initialises the client. The underlying <see cref="AgentsClient"/> is not created until
@@ -97,21 +141,32 @@ public sealed class AgentServiceClient : IDisposable
     // ── Public API ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns the existing thread ID for the tenant from Redis, or creates a new Foundry
+    /// Returns the existing thread ID for THIS CONVERSATION from Redis, or creates a new Foundry
     /// thread and persists its ID.
     ///
-    /// Cache key: <c>agent-thread:{tenantId}</c> with sliding expiry from
-    /// <see cref="AgentServiceOptions.ThreadCacheExpiryMinutes"/>.
+    /// Cache key: <c>agent-thread:{tenantId}:{conversationScope}:v2</c>, with the TTL from
+    /// <see cref="AgentServiceOptions.ThreadCacheExpiryMinutes"/> refreshed on each access.
     /// </summary>
-    /// <param name="tenantId">Tenant identifier (used for cache isolation, ADR-014).</param>
+    /// <param name="tenantId">Tenant identifier. ⚠️ NOT a customer boundary — every Model 1 customer
+    /// presents Spaarke's tenant id (D-12); customer separation is the dedicated per-customer Redis
+    /// instance.</param>
+    /// <param name="conversationScope">
+    /// Identifies the ONE conversation this thread belongs to — a chat session id, a playbook run id, or
+    /// equivalent. REQUIRED, and deliberately has no default: a Foundry thread accumulates messages and
+    /// the agent replies with the whole thread as context, so any shared scope means shared conversation
+    /// content between callers.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The Foundry thread ID (new or resumed).</returns>
+    /// <exception cref="ArgumentException">When <paramref name="conversationScope"/> is absent (ADR-003 fail closed).</exception>
     /// <exception cref="FeatureDisabledException">When kill switch is off (ADR-018).</exception>
     /// <exception cref="ConcurrencyLimitExceededException">When concurrency gate times out (ADR-016).</exception>
     public async Task<string> CreateOrResumeThreadAsync(
         string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken = default)
     {
+        var cacheId = RequireConversationScope(conversationScope);
         GuardEnabled();
 
         // OTEL span: ai.agent.create_or_resume_thread
@@ -126,7 +181,7 @@ public sealed class AgentServiceClient : IDisposable
             // NOTE: ITenantCache supports only AbsoluteExpiration; the previous SlidingExpiration
             // semantic is now effective-absolute (TTL resets on every refresh write below).
             var cachedThreadId = await _cache.GetAsync<string>(
-                tenantId, CacheResource, CacheId, CacheVersion, ct: cancellationToken);
+                tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
             if (!string.IsNullOrEmpty(cachedThreadId))
             {
                 // ADR-015: log only ID — never content.
@@ -135,7 +190,7 @@ public sealed class AgentServiceClient : IDisposable
                     tenantId, cachedThreadId);
 
                 // Refresh expiry on every access by re-writing with the configured TTL.
-                await SetThreadCacheAsync(tenantId, cachedThreadId, cancellationToken);
+                await SetThreadCacheAsync(tenantId, cacheId, cachedThreadId, cancellationToken);
 
                 // ADR-015: thread.id is an opaque identifier, not PII or content.
                 activity?.SetTag("agent.thread.id", cachedThreadId);
@@ -161,7 +216,57 @@ public sealed class AgentServiceClient : IDisposable
             activity?.SetTag("agent.thread.cache_hit", false);
             activity?.SetTag("agent.thread.created_ms", sw.ElapsedMilliseconds);
 
-            await SetThreadCacheAsync(tenantId, threadId, cancellationToken);
+            await SetThreadCacheAsync(tenantId, cacheId, threadId, cancellationToken);
+            return threadId;
+        }
+        finally
+        {
+            _concurrencyGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Creates a NEW Foundry thread that is never cached and never resumed.
+    /// </summary>
+    /// <remarks>
+    /// For stateless, single-shot uses — the Code Interpreter sandbox is the shipped one — where the
+    /// conversation must not outlive the call.
+    /// <para>Added by task 122. It exists so that "I want a throwaway thread" has an honest way to say so.
+    /// The previous approach was to call <see cref="CreateOrResumeThreadAsync"/> with a constant in the
+    /// tenant argument, which cached and RESUMED under a key shared by every caller in every tenant — the
+    /// exact opposite of ephemeral, while reading as ephemeral at the call site.</para>
+    /// </remarks>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>A fresh Foundry thread ID. Not cached.</returns>
+    /// <exception cref="FeatureDisabledException">When kill switch is off (ADR-018).</exception>
+    /// <exception cref="ConcurrencyLimitExceededException">When concurrency gate times out (ADR-016).</exception>
+    public async Task<string> CreateEphemeralThreadAsync(CancellationToken cancellationToken = default)
+    {
+        GuardEnabled();
+
+        using var activity = AiTelemetry.ActivitySource.StartActivity(
+            "ai.agent.create_ephemeral_thread", ActivityKind.Client);
+
+        await AcquireConcurrencyGateAsync(cancellationToken);
+        try
+        {
+            var sw = Stopwatch.StartNew();
+            var response = await _agentsClient.Value
+                .CreateThreadAsync(cancellationToken: cancellationToken);
+            sw.Stop();
+
+            var threadId = response.Value.Id;
+
+            // ADR-015: thread ID and timing only.
+            _logger.LogInformation(
+                "Created ephemeral Foundry thread: threadId={ThreadId}, durationMs={DurationMs}",
+                threadId, sw.ElapsedMilliseconds);
+
+            activity?.SetTag("agent.thread.id", threadId);
+            activity?.SetTag("agent.thread.ephemeral", true);
+            activity?.SetTag("agent.thread.created_ms", sw.ElapsedMilliseconds);
+
+            // Deliberately NOT cached. That is the whole point of this method.
             return threadId;
         }
         finally
@@ -312,19 +417,27 @@ public sealed class AgentServiceClient : IDisposable
     }
 
     /// <summary>
-    /// Evicts the cached thread ID for a tenant, forcing <see cref="CreateOrResumeThreadAsync"/>
-    /// to create a fresh thread on the next call. Use when the conversation should be restarted.
+    /// Evicts the cached thread ID for ONE CONVERSATION, forcing <see cref="CreateOrResumeThreadAsync"/>
+    /// to create a fresh thread on the next call. Use when that conversation should be restarted.
     /// </summary>
     /// <param name="tenantId">Tenant identifier.</param>
+    /// <param name="conversationScope">
+    /// The conversation to evict — the same scope passed to <see cref="CreateOrResumeThreadAsync"/>.
+    /// Required for the same reason: before task 122 this evicted the single tenant-wide thread, so one
+    /// caller restarting its conversation restarted everyone's.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task InvalidateThreadCacheAsync(
         string tenantId,
+        string conversationScope,
         CancellationToken cancellationToken = default)
     {
+        var cacheId = RequireConversationScope(conversationScope);
         GuardEnabled();
-        await _cache.RemoveAsync(tenantId, CacheResource, CacheId, CacheVersion, ct: cancellationToken);
+        await _cache.RemoveAsync(tenantId, CacheResource, cacheId, CacheVersion, ct: cancellationToken);
         _logger.LogInformation(
-            "Invalidated Foundry thread cache for tenant={TenantId}", tenantId);
+            "Invalidated Foundry thread cache for tenant={TenantId}, conversation={ConversationScope}",
+            tenantId, conversationScope);
     }
 
     // ── IDisposable ────────────────────────────────────────────────────────────
@@ -378,12 +491,13 @@ public sealed class AgentServiceClient : IDisposable
     /// </summary>
     private Task SetThreadCacheAsync(
         string tenantId,
+        string cacheId,
         string threadId,
         CancellationToken cancellationToken)
     {
         var expiry = TimeSpan.FromMinutes(_options.ThreadCacheExpiryMinutes);
         return _cache.SetAsync(
-            tenantId, CacheResource, CacheId, CacheVersion,
+            tenantId, CacheResource, cacheId, CacheVersion,
             threadId, expiry, ct: cancellationToken);
     }
 

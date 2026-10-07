@@ -57,7 +57,7 @@
     <constraint source="ADR-013">Test substitutes for AI clients MUST be in-memory fakes (no real Azure OpenAI in CI). Mock `IOpenAiClient` + `ISearchClient` per existing AI test patterns.</constraint>
     <constraint source="ADR-022">Integration tests live in `tests/integration/Sprk.Bff.Api.Tests/`. Use `WebApplicationFactory&lt;Program&gt;` per existing pattern.</constraint>
     <constraint source="ADR-015">Tests MUST assert audit chain writes Tier 2 hash-only entries per Tool dispatch; MUST NOT log verbatim prompt or response content in assertions.</constraint>
-    <constraint source="ADR-004">Scheduled trigger test MUST exercise `IJobHandler&lt;T&gt;` directly via `ScheduledActionDispatchJobHandler.HandleAsync(...)` — not by waiting on Service Bus.</constraint>
+    <constraint source="ADR-004">Scheduled trigger test MUST exercise the `IJobHandler` directly via `ScheduledActionDispatchJobHandler.ProcessAsync(...)` — not by waiting on Service Bus.</constraint>
     <constraint source="project">No test may persist state across runs; each test creates + tears down its Action + ActionInstance + ActionRun records.</constraint>
   </constraints>
 

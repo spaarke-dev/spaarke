@@ -168,6 +168,13 @@ public sealed class AgentServiceRoutingMiddleware : ISprkChatAgent
     /// </summary>
     private readonly string _tenantId;
 
+    /// <summary>
+    /// The chat session id — the CONVERSATION scope for the Foundry thread (task 122). A session belongs
+    /// to exactly one user, so scoping by it separates users AND keeps one user's unrelated conversations
+    /// apart, which scoping by user alone would not.
+    /// </summary>
+    private readonly string _sessionId;
+
     // ── OpenTelemetry ActivitySource (Sprk.Bff.Api.Ai, registered in TelemetryModule) ───
 
     // NFR-03 canary: log warning when classification exceeds this threshold.
@@ -178,13 +185,19 @@ public sealed class AgentServiceRoutingMiddleware : ISprkChatAgent
         AgentServiceClient agentServiceClient,
         IOptions<AgentServiceOptions> options,
         ILogger logger,
-        string tenantId)
+        string tenantId,
+        string sessionId)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _agentServiceClient = agentServiceClient ?? throw new ArgumentNullException(nameof(agentServiceClient));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _tenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : throw new ArgumentException("tenantId must not be null or empty.", nameof(tenantId));
+        // The CONVERSATION scope for the Foundry thread (task 122). Required and never defaulted:
+        // a Foundry thread accumulates messages, so an unscoped thread is one conversation shared by
+        // every user in the tenant. sessionId was already available one line from tenantId in
+        // SprkChatAgentFactory.CreateAgentAsync and simply was not passed down.
+        _sessionId = !string.IsNullOrWhiteSpace(sessionId) ? sessionId : throw new ArgumentException("sessionId must not be null or empty — it scopes the Foundry conversation.", nameof(sessionId));
     }
 
     /// <inheritdoc />
@@ -373,7 +386,7 @@ public sealed class AgentServiceRoutingMiddleware : ISprkChatAgent
         {
             // Obtain or resume the Foundry thread for this tenant.
             // _tenantId is injected at construction by SprkChatAgentFactory (ADR-014: tenant-scoped keys).
-            threadId = await _agentServiceClient.CreateOrResumeThreadAsync(_tenantId, cancellationToken);
+            threadId = await _agentServiceClient.CreateOrResumeThreadAsync(_tenantId, _sessionId, cancellationToken);
         }
         catch (FeatureDisabledException)
         {

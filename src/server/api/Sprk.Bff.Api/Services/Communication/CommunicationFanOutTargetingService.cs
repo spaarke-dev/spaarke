@@ -41,8 +41,9 @@ namespace Sprk.Bff.Api.Services.Communication;
 ///
 /// <para>
 /// <b>Internal is an authoritative flag, not a record type.</b> A <c>systemuser</c> participant is treated
-/// as internal ONLY when <c>systemuser.sprk_isexternal = false</c> — resolved via
-/// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/> (fail-closed: unresolvable/absent ⇒ external).
+/// as internal unless <c>systemuser.sprk_isexternal = true</c> — resolved via
+/// <see cref="ISystemUserIdentityResolver.IsExternalAsync"/>. A BLANK flag is internal (owner round 67, 2026-10-06:
+/// the same rule as Restricted sharing); an unresolvable user (no id, no row) is still external (fail closed).
 /// An external party CAN be a licensed <c>systemuser</c> (owner confirmation 2026-07-21), so the internal-only
 /// filter (rule 2) is now the LOAD-BEARING exclusion for such a user — it is no longer mere defense-in-depth
 /// behind the systemuserid projection. A <c>contact</c> participant is always external and has no
@@ -153,7 +154,8 @@ public sealed class CommunicationFanOutTargetingService
             // Candidate access context. INTERNAL is the AUTHORITATIVE systemuser.sprk_isexternal flag — NOT
             // "is a systemuser". An external party CAN be a licensed systemuser (owner confirmation
             // 2026-07-21), so inferring internal from record type would leak internal-only content to them.
-            // A contact participant is always external. Fail-closed: an unresolvable/absent flag → external.
+            // A contact participant is always external. Only a stored `true` is external (a blank flag is internal —
+            // owner round 67); an unresolvable systemuser is still external (fail closed).
             // (EvaluateMessage reads only the message flags + IsInternalUser, so a contact's Guid.Empty
             // systemuserid is never dereferenced.)
             var isInternal = systemUserRef is not null

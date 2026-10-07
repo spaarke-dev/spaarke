@@ -357,7 +357,9 @@ public class ReAnalysisFlowTests : IClassFixture<ReAnalysisFlowTestFixture>
 public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
 {
     private const string TestSessionId = "reanalysis-session-001";
-    private const string TestDocumentId = "doc-reanalysis-001";
+    // A sprk_document id (GUID): unified-access-control-r2 task 164 r1 - a chat turn authorizes the session's stored
+    // document as the caller, and a non-GUID, drive-less id cannot be decided (fail closed).
+    private const string TestDocumentId = "a1b2c3d4-0000-4000-8000-0000000001a1";
     private static readonly Guid TestPlaybookId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
     /// <summary>
@@ -453,7 +455,6 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookOrchestrationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
 
@@ -462,10 +463,8 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.SemanticSearch.ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.RecordSearch.IRecordSearchService>(MockBehavior.Loose).Object);
 
-            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
-            // Register its missing dependency stubs so DI can construct it.
+            // ITextChunkingService stub (formerly registered for ReferenceIndexingService, deleted by task 163).
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(MockBehavior.Loose).Object);
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
 
             // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
             services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(MockBehavior.Loose).Object);
@@ -485,7 +484,20 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             services.AddSingleton(_ => new Mock<Spaarke.Dataverse.IDataverseService>(MockBehavior.Loose).Object);
 
             services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
-            services.AddScoped(_ => new Mock<Spaarke.Dataverse.IAccessDataSource>(MockBehavior.Loose).Object);
+            // Task 164 r1: a chat turn also asks the CALLER's rights on the session's playbook row (AuthorizationService
+            // -> IAccessDataSource.GetRecordAccessAsync). This fixture tests re-analysis, not authorization, so the record
+            // path is as permissive as the IAiAuthorizationService mock below.
+            var permissiveAccess = new Mock<Spaarke.Dataverse.IAccessDataSource>(MockBehavior.Loose);
+            permissiveAccess
+                .Setup(a => a.GetRecordAccessAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string userId, string _, Guid recordId, string? _, CancellationToken _) => new Spaarke.Dataverse.AccessSnapshot
+                {
+                    UserId = userId,
+                    ResourceId = recordId.ToString(),
+                    AccessRights = Spaarke.Dataverse.AccessRights.Read,
+                });
+            services.AddScoped(_ => permissiveAccess.Object);
 
             // Mock AI authorization to approve all requests
             services.RemoveAll<IAiAuthorizationService>();

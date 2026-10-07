@@ -6,7 +6,7 @@
  *
  * @see spec.md - Word save flow requirements (FR-09, FR-10)
  * @see SaveView.tsx - Component implementation
- * @see WordHostAdapter.ts - Word-specific host adapter
+ * @see shared/adapters/WordAdapter.ts - the single Word adapter (task 010 / FR-04; the duplicate word/WordHostAdapter.ts was deleted)
  */
 
 import { Page, Locator, expect } from '@playwright/test';
@@ -556,26 +556,6 @@ export class WordTaskPanePage {
           title: message,
           status,
           errorCode,
-        }),
-      });
-    });
-  }
-
-  /**
-   * Mock recent associations API response
-   */
-  async mockRecentApi(
-    recentAssociations: EntitySearchResult[],
-    recentDocuments: Array<{ id: string; name: string }> = []
-  ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, route => {
-      route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          recentAssociations,
-          recentDocuments,
-          favorites: [],
         }),
       });
     });

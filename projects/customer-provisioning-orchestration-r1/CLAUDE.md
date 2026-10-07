@@ -1,5 +1,18 @@
 # CLAUDE.md — customer-provisioning-orchestration-r1
 
+> # 🔴 READ FIRST — [`INCOMING-D12-D13-REMEDIATION.md`](INCOMING-D12-D13-REMEDIATION.md)
+>
+> **The deployment model this project was built around has CHANGED** (owner decisions **D-12** + **D-13**,
+> merged to master 2026-09-28 in `38f48723e`). The "Model 1 = shared trial/SMB tier" is **RETIRED**; both
+> models are dedicated stamps differing only in which **Azure tenant** owns the customer's subscription, and
+> the BFF Entra app registration is **per customer in both models (BINDING)**.
+>
+> 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
+> does the opposite of what D-13 requires. This branch is **812 commits behind master**.
+> **Do not start work, and do not resolve a merge conflict, before reading that file.**
+
+
+
 > **Per-project AI context. This file is loaded automatically when Claude Code operates in this project directory.**
 > **Last Updated**: 2026-08-19 (v3.6 — task 128b Redis Model 1/Model 2 reconciliation; see spec.md/design.md v3.6 CHANGELOG)
 > **Root CLAUDE.md rules apply — this file EXTENDS, does not replace.**
@@ -35,7 +48,7 @@ Per [spec.md § Technical Constraints § Applicable ADRs](./spec.md#applicable-a
 | ADR-014 | `.claude/adr/ADR-014-ai-caching.md` | `spaarke-session-files` tenantId + sessionId dual-filter invariant (§4D I2 strengthens) |
 | ADR-017 | `.claude/adr/ADR-017-job-status.md` | Per-handler job status vs ProvisioningRun (different stores per §5.3) |
 | ADR-020 | `.claude/adr/ADR-020-versioning.md` | Pinned model deployment versions in H2a Bicep OpenAI config |
-| ADR-027 | `.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` | D4 sub-per-customer; Model 1 shared-tier is Path A exception |
+| ADR-027 | `.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` | One Azure subscription **per customer** (ADR amended 2026-09-28); **no** shared-tier exception |
 | ADR-028 | `.claude/adr/ADR-028-spaarke-auth-architecture.md` | H4 KV secrets + UAMI RBAC + `keyVaultReferenceIdentity` PATCH follow 21 MUSTs |
 | ADR-032 | `.claude/adr/ADR-032-bff-nullobject-kill-switch.md` | SignalR feature-gate follows P1/P2/P3 pattern |
 | ADR-034 | `.claude/adr/ADR-034-user-record-membership.md` | Optional SignalR per-customer aligns with realtime pattern |
@@ -96,9 +109,10 @@ Discovery report enumerates the strongest exemplars. Key ones the task POMLs ref
 Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rules). Highlights that come up on EVERY task:
 
 - **MUST** register provisioning handlers in **L2 control-plane service, not the BFF** (§5.2 + D3/D8/D12)
-- **MUST NOT** create per-customer Entra tenant; use one Spaarke tenant + one multitenant BFF app (spec.md §9.1 v3)
+- **MUST NOT** create a per-customer Entra **tenant** — Model 1 uses one Spaarke tenant (still correct under D-12).
+  🔴 **AMENDED 2026-09-28**: the *"+ one multitenant BFF app"* half is **REVERSED**. **MUST** create **one BFF app registration per customer**, in both models — D-13 (BINDING). The app registration determines the Dataverse application user, which determines the business unit every BFF-created record lands in. `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`
 - **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
-- **MUST NOT** provision Redis per-customer **FOR MODEL 1** (Q-E FR-12; per-env via `Deploy-RedisCache.ps1`, unchanged). **MUST** provision Redis per-customer **FOR MODEL 2** (v3.6, task 128b, 2026-08-19 — `customer.bicep` is the sole Model2Dedicated template, env=customer 1:1 there, so `modules/redis.bicep` is wired unconditionally in that file)
+- 🔴 **REVERSED 2026-09-28 (D-12 §3); product + auth set by T242 (owner D12/D13, 2026-10-04).** Was: *"**MUST NOT** provision Redis per-customer **FOR MODEL 1**"*. Now: **MUST provision Redis per-customer in BOTH models** as **Azure Managed Redis (`Microsoft.Cache/redisEnterprise`) Balanced_B0, high availability on, Microsoft Entra only** (access keys disabled; the stamp UAMI holds the only access-policy assignment; the BFF reads the plain setting `Redis__Endpoint` — no key, no connection string, no Key Vault secret). Redis access control is per-instance (not per-keyspace) and it holds OBO tokens + the `uac-access` authorization cache. `customer.bicep` wires `modules/redis.bicep` unconditionally. (The earlier "Standard tier" wording is superseded — ADR-009 as amended by T242.)
 - **MUST** use confidential-client (app-only) token for SPE container-type creation (T6)
 - **MUST** PATCH App Service `keyVaultReferenceIdentity` to UAMI on both slots (T1)
 - **MUST** apply canonical KV secret + resource naming (Phase G / R1–R4); vault name is Bicep parameter
@@ -120,8 +134,8 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--mandatory). 2 Path A (documented exception) + 5 Path C (comply). All rationale concrete. NO Path B (no ADR amendment needed).
 
 **Path A rows** — code-review at PR time expects PR description to cite these:
-- **ADR-004**: L2 orchestration is NEW component pattern (not Durable Functions / not single-shot). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
-- **ADR-027**: Model 1 shared-tier is documented exception. Rationale: D3 (v3) rewrites tenancy to include both tiers; §4D invariants enforce logical isolation.
+- **ADR-004**: L2 orchestration is NEW component pattern — a custom state machine over Cosmos rather than Durable Task, and not single-shot (ADR-052 §7 now also permits Durable Task in its own host). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
+- **ADR-027**: 🔴 **no longer an exception.** ADR-027 was **amended 2026-09-28** to one Azure subscription **per customer** in both models, which is what this project already does — so there is nothing to except. The former rationale (*"§4D invariants enforce logical isolation"*) is **withdrawn**: I2–I4 key on `tenantId`, which is identical for every Model 1 customer, so they cannot separate customers and pass anyway.
 
 ## Sub-Agent Write Boundary (root CLAUDE.md §3)
 
@@ -155,13 +169,20 @@ Applied by `task-create` Step 3.5.5b. r1-specific:
 
 ## Coordination with other worktrees
 
+> **UPDATE 2026-10-02 (owner, T225a escalation):** `ci-cd-unit-test-remediation-r1` **reactivated 2026-08-27**
+> (projects/INDEX.md) — which this file had missed: r1 tasks T245b and T225a edited
+> `publish-provisioning-arm-artifacts.yml` / its manifest schema / `deploy-infrastructure.yml` believing it dormant (its
+> branch tip is stale; its work lands on master). The owner has now ruled that **ci-cd-unit-test-remediation-r1 is
+> CLOSED** and that r1 resolves its own provisioning workflow changes here. Before a future r1 task touches
+> `.github/workflows/**`, check `projects/INDEX.md` (not a branch tip) for an active CI-governance project.
+>
 > **`.github/workflows/**` ownership is TEMPORARY-BY-DEFAULT (added 2026-08-19).** r1 holds direct ownership only because `ci-cd-unit-test-remediation-r1`'s declared 28-day window expired with that worktree dormant. This is NOT a permanent reassignment: if `ci-cd-unit-test-remediation-r1` reactivates, or any new CI-governance project starts, ownership of `.github/workflows/**` reverts to the standard coordination model (declared owner + coord-notes) and r1 goes back to authoring coord-notes for that owner rather than committing directly. Re-check this condition before any FUTURE r1 task touches `.github/workflows/**`.
 
 **Active worktrees to coordinate with** (per r3 handoff §7 + INDEX.md hot-path overlap):
 
 | Worktree | Hot-path overlap | Coordination action |
 |---|---|---|
-| ~~`ci-cd-unit-test-remediation-r1`~~ **[coord window CLOSED 2026-07-23; worktree dormant since 2026-06-28]** | Owner declared window expired 2026-08-19; r1 has taken ownership of `.github/workflows/**` for Phase C'' scope. The 3 queued r1 coord-notes (067 Graph parity, 088 naming-conformance + tenant-isolation, 115 provisioning-sidecar build) were applied directly as of commit `<see git log for the governance commit on this branch>`. If ci-cd-r1 reactivates, coordinate the merge conflict; otherwise proceed. See `projects/INDEX.md` Excluded Worktrees + CI Workflows section for the registry-level record. |
+| ~~`ci-cd-unit-test-remediation-r1`~~ **[reactivated 2026-08-27; CLOSED per owner 2026-10-02]** | Owner declared window expired 2026-08-19; r1 has taken ownership of `.github/workflows/**` for Phase C'' scope. The 3 queued r1 coord-notes (067 Graph parity, 088 naming-conformance + tenant-isolation, 115 provisioning-sidecar build) were applied directly as of commit `<see git log for the governance commit on this branch>`. If ci-cd-r1 reactivates, coordinate the merge conflict; otherwise proceed. See `projects/INDEX.md` Excluded Worktrees + CI Workflows section for the registry-level record. |
 | `code-quality-and-assurance-r3` | BFF=Y (actively decomposing BFF) | Phase E DemoExpirationService migration may bump into r3's dead-code-removal PRs; `/conflict-check` before Phase E PR |
 | `spaarke-ai-architecture-redesign-r1/r2` | BFF=Y (broadest AI touch) | If H0.5 endpoint or DemoExpirationService migration touches `Services/Ai/**`, coordinate. Unlikely per our current scope. |
 | `spaarke-devops-project-tracking-r1` (PR #453) | skill-directives=Y (modifies project-pipeline SKILL.md) | Cosmetic — our pipeline execution uses local copy; no runtime dependency |

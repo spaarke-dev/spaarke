@@ -231,7 +231,7 @@ Because each consumer service is a plain method call graph, debugging is direct:
 |---|---|---|
 | Client sees 500 | Service's logger — every failure is caught and logged with a correlation id | If exception rethrown, endpoint's `try/catch` logs it |
 | Empty AI output | Log `IActionRunner.RunAsync` — the raw `JsonElement` is logged before deserialization | Compare Action's `sprk_outputschemajson` to the JSON received |
-| Field not written | Typed persistence service's own log ("Updated X record" line) | Dataverse plugin trace if a plugin ran |
+| Field not written | Typed persistence service's own log ("Updated X record" line) | Dataverse audit history for the record (Spaarke ships no plugins — ADR-002 — so there is no Spaarke plugin trace) |
 | Wrong prompt used | `IActionResolver` logs which Action row it resolved | `sprk_playbookconsumer` routing row content |
 
 No template context shapes. No node output resolution graphs. No dispatch. Every layer has a stack frame and a log line.

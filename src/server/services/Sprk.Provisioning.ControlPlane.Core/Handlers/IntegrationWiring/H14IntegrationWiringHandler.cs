@@ -8,8 +8,9 @@
 //
 // PURPOSE:
 //   Wires the customer environment into 3 external systems in parallel per
-//   spec.md FR-19: (a) 2 Exchange ApplicationAccessPolicy entries (BFF
-//   app-reg + UAMI, T4 action-and-verify); (b) Graph webhook subscriptions
+//   spec.md FR-19: (a) Exchange mailbox access — the stamp UAMI's group-scoped
+//   "Application Mail.*" roles (RBAC for Applications, task 251; T4
+//   action-and-verify); (b) Graph webhook subscriptions
 //   per Communication/Email module (HMAC signing key from H4); (c) Dataverse
 //   service-endpoint webhook (same HMAC signing key). S2S consent sub-step
 //   (d) is explicitly NOT included per r3 task 060 — see
@@ -23,8 +24,9 @@
 //   rationale — 3 TRUE-parallel writers against the SAME ProvisioningRun
 //   ETag would race on every single invocation). This parent handler:
 //     1. Reads the run ONCE.
-//     2. Extracts + validates every shared input (tenantId, keyVaultName,
-//        InterStepState fields) BEFORE building any sub-envelope — a missing
+//     2. Extracts + validates every shared input (tenantId + other intake
+//        parameters, InterStepState fields incl. the customer keyVaultName)
+//        BEFORE building any sub-envelope — a missing
 //        upstream field fails the WHOLE H14 invocation Resumable (parity
 //        with every other H-series handler's upstream-guard posture) rather
 //        than partially dispatching.
@@ -58,11 +60,11 @@
 //   ┌────────────────────────────────────────────┬───────────────────────────┐
 //   │ Failure mode                               │ §4C class                 │
 //   ├────────────────────────────────────────────┼───────────────────────────┤
-//   │ Missing tenantId/keyVaultName/subscriptionId│ Resumable                 │
-//   │ /exchangePolicyScopeGroupId/                │                           │
-//   │ webhookNotificationBaseUrl (run params)     │                           │
-//   │ Missing bffAppRegId/miClientId/             │ Resumable (upstream       │
-//   │ dataverseEnvUrl (InterStepState)            │ handler hasn't run yet)   │
+//   │ Missing tenantId/subscriptionId/            │ Resumable                 │
+//   │ exchangePolicyScopeGroupId (run params)     │                           │
+//   │ Missing keyVaultName/miClientId/            │ Resumable (upstream       │
+//   │ miObjectId/dataverseEnvUrl/bffApiUrl        │ handler hasn't run yet)   │
+//   │ (InterStepState)                            │                           │
 //   │ Run not found in Cosmos partition           │ Resumable                 │
 //   │ T4 drift (H14a)                             │ QuarantineRequired        │
 //   │ Graph subscription create/renew failure     │ RetryableWithCleanup      │
@@ -94,17 +96,16 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (H14b/H14c signing-key reads).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
+    // The customer Key Vault name (H14b/H14c read the HMAC signing key from it)
+    // is NOT a run parameter (task 245a, G25): H2a writes it to
+    // InterStepState.KeyVaultName. The intake key "keyVaultName" is the Spaarke
+    // PLATFORM vault (IntakeParameterCatalog), not the customer vault.
 
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4; KV read scoping).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the mail-enabled security group id scoping the Exchange ApplicationAccessPolicy.</summary>
+    /// <summary>Non-secret parameter key carrying the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to.</summary>
     public const string ExchangePolicyScopeGroupIdParameterKey = "exchangePolicyScopeGroupId";
-
-    /// <summary>Non-secret parameter key carrying the base URL of the customer's BFF webhook receiver (H14b + H14c).</summary>
-    public const string WebhookNotificationBaseUrlParameterKey = "webhookNotificationBaseUrl";
 
     /// <summary>Non-secret parameter key carrying the Graph resource path for the Communication module subscription (optional; at least one of Communication/Email required).</summary>
     public const string CommunicationGraphResourceParameterKey = "communicationGraphResource";
@@ -228,10 +229,14 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 "Run parameter 'tenantId' is required by H14 (§4D I1 no-hardcoded-tenant).", cancellationToken)
                 .ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // The CUSTOMER vault is an H2a output (task 245a, G25) — read from
+        // InterStepState, never from the intake "keyVaultName" (platform vault).
+        var keyVaultName = run.InterStepState.KeyVaultName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H14 (H14b/H14c read the HMAC signing key from this vault).",
+                "InterStepState.keyVaultName (the CUSTOMER Key Vault) is not populated — H2a (Bicep infra deploy) " +
+                "produces it and must complete before H14 (H14b/H14c read the HMAC signing key from this vault).",
                 cancellationToken).ConfigureAwait(false);
         }
         if (!TryGetNonEmpty(parameters, SubscriptionIdParameterKey, out var subscriptionId))
@@ -246,26 +251,30 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 "Run parameter 'exchangePolicyScopeGroupId' is required by H14a.", cancellationToken)
                 .ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, WebhookNotificationBaseUrlParameterKey, out var notificationBaseUrl))
+        // Task 245b: the webhook receivers are the stamp's own BFF — H9's output (H14 ← H9 in the DAG).
+        var notificationBaseUrl = run.InterStepState.BffApiUrl;
+        if (string.IsNullOrWhiteSpace(notificationBaseUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingWebhookNotificationBaseUrl,
-                "Run parameter 'webhookNotificationBaseUrl' is required by H14 (H14b + H14c both derive their " +
-                "receiver URL from it).", cancellationToken).ConfigureAwait(false);
+                "InterStepState.bffApiUrl is not populated — H9 (BFF deploy) writes the stamp's BFF URL and must " +
+                "complete before H14 (H14b + H14c both derive their receiver URL from it).", cancellationToken)
+                .ConfigureAwait(false);
         }
         TryGetNonEmpty(parameters, CommunicationGraphResourceParameterKey, out var communicationResource);
         TryGetNonEmpty(parameters, EmailGraphResourceParameterKey, out var emailResource);
 
         var interStep = run.InterStepState;
-        if (string.IsNullOrWhiteSpace(interStep.BffAppRegId))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingBffAppRegId,
-                "InterStepState.bffAppRegId is not populated — H3 (Entra app-reg) must complete before H14.",
-                cancellationToken).ConfigureAwait(false);
-        }
         if (string.IsNullOrWhiteSpace(interStep.MiClientId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingUamiClientId,
                 "InterStepState.miClientId is not populated — the UAMI (H2a/uami.bicep) must complete before H14.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (string.IsNullOrWhiteSpace(interStep.MiObjectId))
+        {
+            // H14a registers the stamp identity in Exchange by its Entra service-principal object id (task 251).
+            return await FailAsync(run, etag, FailureClass.Resumable, H14Rejections.MissingUamiObjectId,
+                "InterStepState.miObjectId is not populated — the UAMI (H2a/uami.bicep) must complete before H14.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
@@ -275,15 +284,15 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var bffAppRegId = interStep.BffAppRegId!;
         var uamiClientId = interStep.MiClientId!;
+        var uamiObjectId = interStep.MiObjectId!;
         var dataverseEnvUrl = interStep.DataverseEnvUrl!;
         var dataverseWebhookUrl = $"{notificationBaseUrl.TrimEnd('/')}/api/webhooks/dataverse/communication";
 
         // (4) Compute each sub-step's deterministic expected key + build its
         // dispatch task (pre-completed Success if already recorded, else a
         // real invocation) — Task.WhenAll always awaits exactly 3 tasks.
-        var h14aKey = H14aExchangePolicySubHandler.BuildIdempotencyKey(envelope.CustomerId, new[] { bffAppRegId, uamiClientId });
+        var h14aKey = _h14a.ExpectedIdempotencyKey(envelope.CustomerId, uamiClientId, policyScopeGroupId, _options.ExchangeAssignmentNamePrefix);
         var h14bResources = new List<string>();
         if (!string.IsNullOrWhiteSpace(communicationResource)) h14bResources.Add(communicationResource);
         if (!string.IsNullOrWhiteSpace(emailResource)) h14bResources.Add(emailResource);
@@ -301,7 +310,7 @@ public sealed class H14IntegrationWiringHandler : IProvisioningHandler
                     RunId = envelope.RunId,
                     CustomerId = envelope.CustomerId,
                     ParametersJson = H14aExchangePolicySubHandler.BuildParametersJson(
-                        tenantId, bffAppRegId, uamiClientId, policyScopeGroupId, _options.ExchangePolicyDescriptionPrefix),
+                        tenantId, uamiClientId, uamiObjectId, policyScopeGroupId, _options.ExchangeAssignmentNamePrefix),
                     EnqueuedAt = DateTimeOffset.UtcNow,
                 },
                 cancellationToken));

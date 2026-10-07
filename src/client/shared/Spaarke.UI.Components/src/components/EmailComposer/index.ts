@@ -25,6 +25,11 @@ export type { ISendEmailDialogProps } from './wrappers/SendEmailDialog';
 export { SendEmailPage } from './wrappers/SendEmailPage';
 export type { ISendEmailPageProps } from './wrappers/SendEmailPage';
 
+// Fourth mount (spaarkeai-word-add-in-r1 task 096): a chromeless side pane that owns its own send (the Word
+// add-in's Email tab). Locks `mount='inline'`; forwards the engine's props as they are.
+export { SendEmailPane } from './wrappers/SendEmailPane';
+export type { ISendEmailPaneProps } from './wrappers/SendEmailPane';
+
 // Xrm-backed compose-lookup handler factory (shared by the Email code page +
 // the SpaarkeAi `email` widget mounts — see file docblock). The engine stays
 // context-agnostic; hosts inject these callbacks.

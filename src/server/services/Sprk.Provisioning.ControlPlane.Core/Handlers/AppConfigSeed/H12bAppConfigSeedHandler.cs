@@ -106,13 +106,10 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
     public const string TenantIdParameterKey = "tenantId";
 
-    /// <summary>
-    /// Non-secret parameter key carrying the target customer Dataverse env URL.
-    /// H12b passes this to every registered <see cref="IAppConfigSeeder"/>
-    /// so the wrapped PS scripts hit the correct env (never a default fallback
-    /// per §4D I1).
-    /// </summary>
-    public const string DataverseUrlParameterKey = "dataverseUrl";
+    // The target customer Dataverse env URL is NOT a run parameter: it is H5's
+    // output, read from run.InterStepState.DataverseEnvUrl (task 245a, G25).
+    // H12b passes it to every registered IAppConfigSeeder so the wrapped PS
+    // scripts hit the correct env (never a default fallback per §4D I1).
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IHandlerEnqueuer _enqueuer;
@@ -233,8 +230,11 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (4) §4D I1 parameter guard — seeders need tenantId + dataverseUrl;
-        // fail BEFORE any script fires so the operator sees the specific
+        // (4) §4D I1 input guard — seeders need tenantId (intake run
+        // parameter) + the Dataverse env URL (H5's output, read from
+        // run.InterStepState.DataverseEnvUrl — task 245a, G25: NonSecret is
+        // written only by intake, so reading it there always failed); fail
+        // BEFORE any script fires so the operator sees the specific
         // rejection code and no PS shell-out happens with default env vars.
         if (!run.Parameters.NonSecret.TryGetValue(TenantIdParameterKey, out var tenantId)
             || string.IsNullOrWhiteSpace(tenantId))
@@ -252,11 +252,13 @@ public sealed class H12bAppConfigSeedHandler : IProvisioningHandler
                 diagnostic);
         }
 
-        if (!run.Parameters.NonSecret.TryGetValue(DataverseUrlParameterKey, out var dataverseUrl)
-            || string.IsNullOrWhiteSpace(dataverseUrl))
+        var dataverseUrl = run.InterStepState.DataverseEnvUrl;
+        if (string.IsNullOrWhiteSpace(dataverseUrl))
         {
             const string diagnostic =
-                "Run parameter 'dataverseUrl' is required by H12b app-config seed. " +
+                "InterStepState.DataverseEnvUrl is required by H12b app-config seed and is H5's output. " +
+                "H5 must complete before H12b — if it already has, it did not record the value " +
+                "(a defect to fix, not a retry). " +
                 "The wrapped PS scripts (Deploy-SystemWorkspaceLayouts.ps1 + " +
                 "seed-reconciliation-gridconfig.ps1) call `az account get-access-token --resource {url}` " +
                 "against this exact URL — a missing value cannot be silently defaulted (§4D I1).";

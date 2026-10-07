@@ -4,7 +4,7 @@
     <title>Land/verify PR #690 — Git-LFS corpus fixtures load in CI</title>
     <phase>0 Coordination &amp; Prerequisites</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>No source modified — verifies an external PR landed and that corpus fixtures resolve in CI; produces a note.</rigor-reason>
     <model-tier>sonnet</model-tier>

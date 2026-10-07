@@ -188,10 +188,7 @@ Supports Outlook and Word add-ins for document saving, entity search, and sharin
 /api/office/jobs/{jobId}                  Async job status polling
 /api/office/jobs/{jobId}/stream           SSE job status streaming
 /api/office/search/entities               Entity search from add-in
-/api/office/search/documents              Document search from add-in
 /api/office/quickcreate/{entityType}      Quick create entity from add-in
-/api/office/share/links                   Create sharing links
-/api/office/recent                        Recent documents
 ```
 
 **Rate Limiting**: Per-endpoint limits (5-60/min depending on operation).
@@ -210,7 +207,6 @@ Dataverse Webhook → BFF API → Service Bus → EmailToDocumentJobHandler
 ```
 /api/communications/send                  Send communication
 /api/communications/send-bulk             Bulk send
-/api/communications/{id}/status           Delivery status
 /api/communications/incoming-webhook      Inbound webhook (unauthenticated)
 ```
 
@@ -487,7 +483,7 @@ All background work uses a standard schema. Handlers must be idempotent (at-leas
 
 | ADR | Constraint | Key Rule |
 |-----|-----------|----------|
-| **ADR-001** | Minimal API + BackgroundService | No Azure Functions. Single runtime for HTTP + async. |
+| **ADR-001** | Minimal API | Every BFF endpoint is Minimal API, never hosted in Azure Functions. Where background work runs → [ADR-052](../../.claude/adr/ADR-052-workload-placement.md). |
 | **ADR-004** | Async Job Contract | Idempotent handlers. No content blobs in Service Bus. |
 | **ADR-007** | SpeFileStore Facade | All Graph calls through `SpeFileStore`. No `GraphServiceClient` injection outside facade. |
 | **ADR-008** | Endpoint Filters for Auth | No global middleware for resource authorization. Per-endpoint filters only. |

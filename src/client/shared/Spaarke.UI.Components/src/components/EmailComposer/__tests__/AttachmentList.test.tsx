@@ -154,7 +154,9 @@ describe('AttachmentList — reply/forward include toggles (task 104)', () => {
       items: [item('r1', 'related', 16, { fileName: 'brief.pdf', selected: false, linkUrl: 'https://x/doc' })],
       onToggleLink,
     });
-    const linkBox = screen.getByRole('checkbox', { name: 'Insert a link to brief.pdf in the message body' });
+    const linkBox = screen.getByRole('checkbox', {
+      name: 'Insert a link to the Spaarke record for brief.pdf in the message body',
+    });
     fireEvent.click(linkBox);
     expect(onToggleLink).toHaveBeenCalledWith('r1');
   });

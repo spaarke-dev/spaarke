@@ -1,5 +1,4 @@
 using Azure.Core;
-using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -254,8 +253,6 @@ public class SpeAdminSearchContractTests
             .Build();
 
         return new SpeAdminGraphService(
-            httpClientFactory: new UnusedHttpClientFactory(),
-            secretClient: new SecretClient(new Uri("https://unused.invalid/"), new UnusableCredential()),
             // auth-v4 (merged from master 2026-08-25) made DataverseWebApiClient select a credential in
             // its ctor: with Managed Identity disabled it now REQUIRES TENANT_ID + API_APP_ID + an
             // IConfidentialClientProvider, and threw before any test body ran. Passing the credential
@@ -266,14 +263,7 @@ public class SpeAdminSearchContractTests
             dataverseClient: new DataverseWebApiClient(
                 configuration, NullLogger<DataverseWebApiClient>.Instance, new UnusableCredential()),
             configuration: configuration,
-            logger: NullLogger<SpeAdminGraphService>.Instance,
-            tokenProvider: null);
-    }
-
-    private sealed class UnusedHttpClientFactory : IHttpClientFactory
-    {
-        public HttpClient CreateClient(string name) => throw new InvalidOperationException(
-            $"A method under test requested the '{name}' HttpClient — the call is leaving the fixture.");
+            logger: NullLogger<SpeAdminGraphService>.Instance);
     }
 
     private sealed class UnusableCredential : TokenCredential

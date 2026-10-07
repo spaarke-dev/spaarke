@@ -4,7 +4,7 @@
     <title>Phases 1-2 closure — unified-evaluator seam suite: one closed behavioral contract for terms, max, vetoes and member definition</title>
     <phase>2 One definition of member</phase>
     <gate>after-039-041-042-043</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override (tests/**, tags testing/integration-test) — code-review + adr-check unconditional; pins the authorization contract.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -31,10 +31,10 @@
       <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="039" status="pending">Complete veto pipeline.</dependency>
-      <dependency task="041" status="pending">Column registry.</dependency>
-      <dependency task="042" status="pending">Baseline levels.</dependency>
-      <dependency task="043" status="pending">Org-expansion term + fallback filter.</dependency>
+      <dependency task="039" status="completed">Complete veto pipeline.</dependency>
+      <dependency task="041" status="completed">Column registry.</dependency>
+      <dependency task="042" status="completed">Baseline levels.</dependency>
+      <dependency task="043" status="completed">Org-expansion term + fallback filter.</dependency>
     </dependencies>
   </context>
 

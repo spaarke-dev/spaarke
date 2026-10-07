@@ -206,9 +206,11 @@ export interface WorkspaceRendererProps {
  * (`WorkspaceLayoutWidget`) accepts an injected `WorkspaceRenderer` prop or
  * resolves the default-registered renderer via `getDefaultWorkspaceRenderer()`.
  *
- * `LegalWorkspaceApp` is the default registered renderer today (R4 task 052 /
- * C-4). Default registration happens at host bootstrap in SpaarkeAi's
- * `main.tsx` via `setDefaultWorkspaceRenderer(LegalWorkspaceApp)`.
+ * Today's registered renderer is SpaarkeAi's `SpaarkeAiWorkspaceRenderer`
+ * (`src/solutions/SpaarkeAi/src/main.tsx`): a wrapper around `LegalWorkspaceApp`
+ * that injects a custom section registry (`createLegalWorkspaceSectionRegistry`)
+ * and a tab-scoped `ComposeLaunchContext`. Registering bare `LegalWorkspaceApp`
+ * would bypass both (reuse audit C-6, 2026-10-03).
  *
  * @example
  * ```tsx

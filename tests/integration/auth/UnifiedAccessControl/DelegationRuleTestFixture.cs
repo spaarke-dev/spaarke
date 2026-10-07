@@ -5,10 +5,12 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Tests.Integration.Workspace;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -48,8 +50,29 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
     /// </summary>
     public ConcurrentBag<(string EntitySet, Guid RecordId)> ProbedTargets { get; } = new();
 
+    /// <summary>
+    /// The POA share table behind task 063's system-user share routes. In memory, so a caller WITH Write gets a
+    /// real answer from <c>/user-shares</c> offline, and a test can prove a denied request wrote nothing.
+    /// </summary>
+    public FakeRecordShareTable RecordShares { get; } = new();
+
     /// <summary>Grant rows the stubbed <see cref="DataverseWebApiClient"/> can retrieve by id.</summary>
     private readonly ConcurrentDictionary<Guid, ExternalGrantRow> _grantRows = new();
+
+    /// <summary>
+    /// The root-flag read behind the write-time grant policy (task 138). An unseeded record answers
+    /// <see cref="RootRecordFlags.Unreadable"/> — exactly what the real reader returns offline (its app-only
+    /// token cannot be acquired), so every pre-138 test in a class using this fixture sees what it always saw.
+    /// A test seeds a record id to state that record's Access Permission / Secure flags.
+    /// </summary>
+    internal GrantPolicyTestDoubles.FlagStubParticipationService RootFlags { get; } =
+        new(defaultFlags: RootRecordFlags.Unreadable);
+
+    /// <summary>
+    /// The substituted Dataverse client. Exposed so a test can prove a refused request wrote nothing — no
+    /// grant row, no Contact query or create (the onboarding seam's first step) — by verifying calls on it.
+    /// </summary>
+    public Mock<DataverseWebApiClient> DataverseClient { get; private set; } = null!;
 
     /// <summary>Seeds a grant row so <c>/revoke</c>'s target resolution can read it.</summary>
     public void SeedGrantRow(Guid accessRecordId, Guid contactId, Guid rootId, ExternalGrantRootType rootType)
@@ -133,6 +156,18 @@ public sealed class DelegationRuleTestFixture : WorkspaceTestFixture
                     _grantRows.TryGetValue(id, out var row) ? row : null);
 
             services.AddSingleton(clientMock.Object);
+            DataverseClient = clientMock;
+
+            // Task 138: the grant routes read the root's flags through ExternalParticipationService (the
+            // existing typed-client registration). Replaced by the flag stub so a test can state a record's
+            // policy; unseeded records answer Unreadable, the offline reality.
+            services.RemoveAll<ExternalParticipationService>();
+            services.AddSingleton<ExternalParticipationService>(RootFlags);
+
+            // Task 063's share routes read and write through the one POA seam. Without this the list route
+            // would reach the real DataverseWebApiService — a network call from a unit-test host.
+            services.RemoveAll<IDataverseRecordShareService>();
+            services.AddSingleton<IDataverseRecordShareService>(RecordShares);
         });
     }
 

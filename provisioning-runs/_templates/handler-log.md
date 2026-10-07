@@ -46,7 +46,7 @@
 - Completed: `{ts}`
 - Status: `{Success | Failed}`
 - Resources provisioned: `{N}`
-- Bicep stack: `{stack-name}` (model1-shared / model1-customer / model2-full / customer)
+- Bicep stack: `customer` (the only customer-stamp template, D19) — *`model1-shared` and `model1-customer` retired 2026-09-28 per D-12 (files deleted by task 225a); `model2-full` retired by task 249, 2026-10-02*
 - Duration: `{N} min`
 - Notes: {any errors; deploymentId; RG name}
 
@@ -65,7 +65,7 @@
 - Status: `{Success | Failed}`
 - Notes: {app-reg objectId; client-cred rotation timestamp; per ADR-028 21 MUSTs applied}
 
-## Handler H4 (KV secret seeding — per-tenant + shared)
+## Handler H4 (KV secret seeding — per-customer)
 
 - Started: `{ts}`
 - Completed: `{ts}`
@@ -133,14 +133,15 @@
 - `sprk_dataverseenvironment.sprk_setupstatus`: `Ready`
 - Notes: {timestamp of Ready state per FR-18}
 
-## Handler H11 (Optional user provisioning)
+## Handler H11 (User provisioning — every run)
 
 - Started: `{ts}`
-- Gate opened: `{ts}` — operator asked whether to bootstrap first admin user
-- Gate closed: `{ts}` — operator provided UPN / license / skipped
-- Status: `{Success | Failed | Skipped}`
-- Users created: `{N}`
-- Notes: {UPN(s), license SKU(s)}
+- Identity preset: `{B2BGuest | NativeAccount}` (intake, Step 1e-bis)
+- B2B consent gate (B2BGuest only): opened `{ts}` / verified `{ts}`
+- Status: `{Success | Failed | WaitingOnGate}`
+- Users provisioned: `{N}` of `{userCount}`
+- Notes: {failure code + usersJson entry position if failed, license SKU(s)} — 🔒 **no names, emails or UPNs** here:
+  this folder is committed to git (owner decision D15 — the user list lives only in the L2 run document).
 
 ## Handler H12a/b/c (AI seed chain)
 
@@ -157,7 +158,7 @@
 - Started: `{ts}`
 - Completed: `{ts}`
 - Status: `{Success | Failed}`
-- Probes run: T1-T6 (silent-fail traps) + I2-I5 (tenant-isolation invariants) — see task 204c
+- Probes run: T1-T7 (silent-fail traps) + I2-I5 (tenant-isolation invariants) — see task 204c
 - Notes: {any probe that flipped RED; per punch list HARD BLOCKER for FR-18 acceptance}
 
 ## Handler H14 (Email-processing webhook wire-up)

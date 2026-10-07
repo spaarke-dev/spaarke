@@ -5,32 +5,39 @@ import {
   AuthenticatedFetchFn,
   IndexFileRequest,
   IndexFileResult,
+  AttachDocumentFileResult,
 } from './types';
-import { TokenProvider } from './auth/TokenProvider';
-import { UploadOperation } from './operations/UploadOperation';
+import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
+import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFailure';
 
 /**
  * SDAP API Client for file operations with SharePoint Embedded.
  *
  * Supports:
- * - Small file uploads (< 4MB)
- * - Chunked uploads (≥ 4MB) with progress tracking
- * - File downloads with streaming
+ * - Single-request file uploads (Graph simple PUT — up to 250 MB)
+ * - File downloads
  * - File deletion
- * - Metadata retrieval
+ * - Sync OBO indexing into Azure AI Search
+ *
+ * 🔴 **Corrected 2026-09-02.** This list used to advertise "Small file uploads (< 4MB)" and
+ * "Chunked uploads (≥ 4MB) with progress tracking". Both were false: the chunked path was DELETED
+ * (task 076 — its first request hit a route the BFF maps nowhere, so it never worked), and the 4 MB
+ * figure came from retired OneDrive REST docs. The simple PUT has accepted up to 250 MB since
+ * October 2023. Above 250 MB a resumable session is genuinely required and this client does not yet
+ * wire one. Do not re-derive the 4 MB claim from this file's history — see FAILURE-MODES AP-12.
  *
  * @example
  * ```typescript
  * const client = new SdapApiClient({
  *   baseUrl: 'https://spe-bff-api.azurewebsites.net',
- *   timeout: 300000
+ *   authenticatedFetch,
  * });
  *
- * // Upload file
- * const item = await client.uploadFile(containerId, file, {
+ * // Upload against the owning record — the server resolves the container from it.
+ * const item = await client.uploadFileForRecord('sprk_matter', matterId, file, {
  *   onProgress: (percent) => console.log(`${percent}% uploaded`)
  * });
  *
@@ -41,7 +48,6 @@ import { IndexFileOperation } from './operations/IndexFileOperation';
 export class SdapApiClient {
   private readonly baseUrl: string;
   private readonly timeout: number;
-  private readonly tokenProvider: TokenProvider;
   private readonly authenticatedFetch?: AuthenticatedFetchFn;
   private readonly uploadOp: UploadOperation;
   private readonly downloadOp: DownloadOperation;
@@ -51,12 +57,11 @@ export class SdapApiClient {
   /**
    * Creates a new SDAP API client instance.
    *
-   * @param config - Client configuration. Pass `authenticatedFetch` to enable
-   *   operations that require Spaarke Auth v2 (ADR-028) — currently
-   *   {@link indexFile}. Without it, those operations throw on call.
-   *   Legacy operations (upload/download/delete) still use the internal
-   *   `TokenProvider` shim until the full migration in
-   *   `sdap-client-shared-library-fix-r1`.
+   * @param config - Client configuration. `authenticatedFetch` (from `@spaarke/auth`, ADR-028) is
+   *   required by EVERY operation on this client — upload, download, delete and {@link indexFile}.
+   *   Operations throw a named error if it is absent rather than issuing an unauthenticated
+   *   request. It is typed optional only so a consumer can construct the client before auth is
+   *   initialised; there is no unauthenticated mode.
    */
   constructor(config: SdapClientConfig & { authenticatedFetch?: AuthenticatedFetchFn }) {
     this.validateConfig(config);
@@ -65,10 +70,13 @@ export class SdapApiClient {
     this.timeout = config.timeout ?? 300000; // 5 minutes default
     this.authenticatedFetch = config.authenticatedFetch;
 
-    this.tokenProvider = new TokenProvider();
-    this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.tokenProvider);
-    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.tokenProvider);
-    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.tokenProvider);
+    // Every operation now authenticates through `authenticatedFetch` (ADR-028). Previously
+    // upload/download/delete shared a `TokenProvider` shim that returned '' — so they sent NO
+    // Authorization header to a RequireAuthorization BFF. Passing it here (rather than only to
+    // indexFile) is what makes those three operations usable at all.
+    this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
+    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
+    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
 
     if (this.authenticatedFetch) {
       this.indexFileOp = new IndexFileOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
@@ -97,38 +105,138 @@ export class SdapApiClient {
   }
 
   /**
-   * Uploads a file to SDAP.
+   * 🔴 `uploadFile(containerId, file, options)` was DELETED here 2026-09-03 (unified-access-control-r2
+   * task 076), together with `UploadOperation.uploadSmall` and the BFF route they called,
+   * `PUT /api/obo/containers/{id}/files/{*path}`.
    *
-   * Automatically chooses small upload (< 4MB) or chunked upload (≥ 4MB).
+   * The caller named a CONTAINER, and the server obeyed it with no per-resource authorization
+   * decision behind it. For a SECURE record that meant its documents could be written into the
+   * shared business-unit container — and SPE permissions are additive-only, so nothing retracts that
+   * afterwards. It is replaced, not renamed:
    *
-   * @param containerId - Container ID
-   * @param file - File to upload
-   * @param options - Upload options (progress callback, cancellation)
-   * @returns Uploaded file metadata
-   * @throws Error if upload fails
+   *   · content WITH an owning record  -> {@link uploadFileForRecord}
+   *   · content with genuinely NONE    -> {@link uploadFileWithoutRecord}
+   *
+   * ⚠️ Do not reintroduce a container parameter on either of those "just for one caller". That is
+   * the shape this deletion removed.
    */
-  public async uploadFile(
-    containerId: string,
+
+  /**
+   * The Graph simple-PUT ceiling, enforced in ONE place for both upload methods.
+   *
+   * Extracted 2026-09-03 with the record-keyed/record-less pair, so the two cannot drift on the
+   * limit. This project has already deleted THREE separate copies of a 4 MiB ceiling that no server
+   * ever enforced (`PathValidator.SmallUploadMaxBytes`, the client constant, and
+   * `CHUNKED_UPLOAD_THRESHOLD_BYTES`) — a fourth divergence is the predictable next instance.
+   *
+   * 250 MB is the real, current boundary for `PUT /drives/{d}/root:/{path}:/content` (4 MB ->
+   * 25 MB -> 256 MB -> 250 MB across Oct 2023; stable since) and SharePoint Embedded documents the
+   * same figure for containers. Verified against MS Learn + the docs source repos, 2026-08-20:
+   * src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md
+   */
+  private guardSimpleUploadSize(file: File): void {
+    const SIMPLE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024; // 250 MB — Graph simple-PUT ceiling
+
+    if (file.size > SIMPLE_UPLOAD_MAX_BYTES) {
+      // Fails only where Graph itself would refuse. Above this a caller genuinely needs a resumable
+      // upload session; the record-keyed one is at POST /api/obo/records/{entity}/{id}/upload-session.
+      throw new Error(UploadOperation.fileTooLarge(file.size, SIMPLE_UPLOAD_MAX_BYTES));
+    }
+  }
+
+  /**
+   * Uploads a file against its OWNING RECORD (task 076 contract).
+   *
+   * The server resolves the container from the record — the same record it authorizes the caller
+   * against — so the authorization key and the storage destination are one value and cannot
+   * disagree. There is no container parameter, by design.
+   *
+   * This is THE upload method for content that has an owning record. Use
+   * {@link uploadFileWithoutRecord} only for the flows where bytes genuinely move first.
+   *
+   * @throws UploadNameConflictError on a name collision (nothing was overwritten)
+   * @throws SdapHttpError with the server's typed refusal — notably a secure record with no
+   *   container of its own, which FAILS CLOSED rather than falling back
+   */
+  public async uploadFileForRecord(
+    entityLogicalName: string,
+    recordId: string,
     file: File,
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
-    // Matches the server's PathValidator.SmallUploadMaxBytes, enforced at
-    // UploadSessionManager.cs:131. Kept as an explicit client-side check so the caller gets an
-    // accurate message instead of a server 400 mid-stream.
-    const SMALL_FILE_THRESHOLD = 4 * 1024 * 1024; // 4 MiB
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallForRecord(entityLogicalName, recordId, file, options);
+  }
 
-    if (file.size >= SMALL_FILE_THRESHOLD) {
-      // Fails HONESTLY. Before 2026-08-27 this branch called uploadChunked, which threw
-      // 'Failed to get container drive' because the route it depended on does not exist — so large
-      // uploads have never worked, and the old error pointed at the wrong thing. See
-      // UploadOperation.LARGE_FILE_UNSUPPORTED and task 076's notes.
-      throw new Error(UploadOperation.LARGE_FILE_UNSUPPORTED);
+  /**
+   * Uploads content that has NO owning record yet; the server resolves the container from the acting
+   * user's business unit.
+   *
+   * ⚠️ Only for the flows that genuinely cannot create the record first. If a record exists, use
+   * {@link uploadFileForRecord} — sending it here stores it in the caller's business-unit container
+   * instead of the record's, which for a secure record is the wrong container and is not reversible.
+   */
+  public async uploadFileWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallWithoutRecord(file, options);
+  }
+
+  /**
+   * Attaches a file this caller just uploaded to the `sprk_document` row this caller just created
+   * (unified-access-control-r2 task 166 f1; owner round 21 item 1 (i)).
+   *
+   * Uses: `POST /api/v1/documents/{documentId}/file` with `{ driveId, itemId }` — the ids the upload
+   * route returned.
+   *
+   * 🔴 **The client never writes `sprk_graphdriveid` / `sprk_graphitemid` itself.** Those columns are
+   * the pointer the BFF follows AS THE APPLICATION on every download, so they are field-secured and
+   * writable by the BFF identity only. The client creates the row WITHOUT them and calls this; the BFF
+   * verifies that the caller created the row and uploaded the file, and that the file sits in the
+   * container derived for the row, and only then stamps the pointer (and `sprk_hasfile` /
+   * `sprk_filepath`) server-side. Re-attaching the SAME file is idempotent; any other file on a row
+   * that already has one is refused (409).
+   *
+   * @param documentId - The `sprk_document` GUID (braces / case normalised here)
+   * @param file - The upload response: `id` is the drive item id, `driveId` the drive it landed in
+   * @throws SdapHttpError with the server's refusal (403 not the creator / not the uploader, 409 wrong
+   *   container / already attached)
+   */
+  public async attachDocumentFile(
+    documentId: string,
+    file: { id: string; driveId?: string }
+  ): Promise<AttachDocumentFileResult> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'attachDocumentFile');
+    if (!file?.id || !file.driveId) {
+      throw new Error(
+        'attachDocumentFile needs the uploaded file\'s item id and drive id (the upload response) — nothing was attached.'
+      );
     }
 
-    return await this.uploadOp.uploadSmall(containerId, file, options);
+    const cleanId = documentId.replace(/[{}]/g, '').toLowerCase();
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}/api/v1/documents/${encodeURIComponent(cleanId)}/file`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driveId: file.driveId, itemId: file.id }),
+        signal: AbortSignal.timeout(this.timeout),
+      },
+      'Failed to attach the file to its document'
+    );
+
+    return (await response.json()) as AttachDocumentFileResult;
   }
 
   /**
@@ -163,17 +271,20 @@ export class SdapApiClient {
    * @throws Error if retrieval fails
    */
   public async getFileMetadata(driveId: string, itemId: string): Promise<FileMetadata> {
-    const token = await this.tokenProvider.getToken();
+    // The FOURTH site with the same dead-auth defect — this one inline in the client rather than in
+    // an operation class, which is why converting the three operations did not cover it. Same fix:
+    // `authenticatedFetch` (ADR-028), and a named failure instead of an unauthenticated request.
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'getFileMetadata');
 
-    const response = await fetch(`${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}`, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      signal: AbortSignal.timeout(this.timeout),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Failed to get file metadata: ${response.statusText}`);
-    }
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
+      {
+        method: 'GET',
+        signal: AbortSignal.timeout(this.timeout),
+      },
+      'Failed to get file metadata'
+    );
 
     return await response.json();
   }

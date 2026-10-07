@@ -8,6 +8,8 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose;
 using static Sprk.Bff.Api.Api.ComposeEndpoints;
 
+using Sprk.Bff.Api.Api.Filters;
+
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
@@ -33,6 +35,9 @@ internal static class ComposeTemplateEndpoints
         //      030 part-merge engine and persists a new SPE version through the existing replace
         //      path. Deterministic OOXML packaging — NOT an AI dispatch (ADR-039).
         group.MapPost("/documents/{documentSpeId}/apply-template", ApplyTemplate)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "write" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("write")
             .WithName("ComposeApplyTemplate")
             .WithSummary("Apply a firm/matter template's chrome to a persisted Compose document via the OOXML part-merge engine (FR-05)")
             // SPE persistence (writes a new version) → ai-persist, same bucket as sibling Save (3).
@@ -177,6 +182,28 @@ internal static class ComposeTemplateEndpoints
                 detail: "This document is open in Word — close it there, then try again. It also releases " +
                         "automatically within a few minutes.",
                 type: "https://tools.ietf.org/html/rfc4918#section-11.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.EtagPreconditionFailedException ex)
+        {
+            // #776 — apply-template now asserts the version it MERGED (T1). Reaching here means a sibling
+            // tab saved between that read and this write, so the merged bytes never contained their change
+            // and writing would have erased it at the head version. Unlike the save path this does NOT
+            // retry (`rebaseOnConflict: false`): nothing rebased the merge, so a retry would clobber.
+            //
+            // 409, matching the save route's choice of Conflict over 412: nothing about the caller's state
+            // is stale, so "reload and reapply" would be wrong advice. Their document is untouched and the
+            // template simply did not apply — re-applying is the whole remedy. Without this catch the
+            // precondition would surface through the generic handler as an opaque 500, which would trade
+            // a silent clobber for an unactionable error.
+            logger.LogWarning(ex,
+                "Compose apply-template: If-Match precondition failed — a concurrent save landed inside the merge window; nothing was overwritten. TraceId={TraceId}",
+                httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Document Busy",
+                detail: "Someone else saved this document while the template was being applied, so the " +
+                        "template was not applied. Nothing was overwritten — try applying it again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
         catch (Exception ex)
         {

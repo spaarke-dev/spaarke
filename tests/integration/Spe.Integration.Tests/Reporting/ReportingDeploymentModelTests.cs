@@ -474,32 +474,8 @@ public class ReportingDeploymentModelTests
     // ─────────────────────────────────────────────────────────────────────────────
     // ReportingProfileManager: available in DI for multi-customer isolation
     // ─────────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void MultiCustomerModel_ProfileManager_AvailableForSpProfileResolution()
-    {
-        // Arrange — verify ReportingProfileManager can be constructed (DI contract for multi-customer model).
-        var config = BuildMultiCustomerConfig();
-
-        var services = new ServiceCollection();
-        services.AddLogging();
-
-        // Wire the IOptions<PowerBiOptions> that ReportingProfileManager depends on.
-        services
-            .AddOptions<PowerBiOptions>()
-            .Bind(config.GetSection(PowerBiOptions.SectionName));
-
-        services.AddSingleton<ReportingProfileManager>();
-
-        var provider = services.BuildServiceProvider();
-
-        // Act
-        var profileManager = provider.GetService<ReportingProfileManager>();
-
-        // Assert
-        profileManager.Should().NotBeNull(
-            "ReportingProfileManager must be resolvable from DI for multi-customer SP profile resolution");
-
-        _output.WriteLine("ReportingProfileManager resolved from DI successfully (multi-customer model)");
-    }
+    //
+    // `MultiCustomerModel_ProfileManager_AvailableForSpProfileResolution` removed 2026-08-31 —
+    // ADR-038 §7 B3. It hand-built a ServiceCollection and asserted only that the type resolved
+    // non-null, which tests the container rather than profile-resolution behavior.
 }

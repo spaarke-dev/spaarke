@@ -28,16 +28,22 @@ import type {
     CreateResult,
     EntityDocumentConfig,
     UploadFilesResult,
+    UploadTarget,
 } from "@spaarke/ui-components/services/document-upload";
 import {
-    SdapApiClient,
     FileUploadService,
     MultiFileUploadService,
     NavMapClient,
     DocumentRecordService,
+    withBffChildCreates,
     consoleLogger,
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
+import { cleanGuid, getXrm } from "@spaarke/ui-components";
+
+// The upload client moved OUT of @spaarke/ui-components on 2026-09-03. That package's own
+// SdapApiClient was one of three parallel upload implementations; this is the surviving one.
+import { SdapApiClient, type ConflictBehaviorOption } from "@spaarke/sdap-client";
 
 import { authenticatedFetch } from "@spaarke/auth";
 import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
@@ -67,6 +73,14 @@ export interface OrchestratorFileProgress {
     errorMessage?: string;
     /** Created Dataverse record ID (populated after Phase 2). */
     documentRecordId?: string;
+    /**
+     * Present when this file stopped on a NAME COLLISION rather than a real failure.
+     *
+     * Nothing was written to SPE, so the row can offer "Keep both" (task 171: no replace) and the
+     * caller re-invokes {@link orchestrateUpload} for just this file with the chosen
+     * `conflictBehavior`.
+     */
+    nameConflict?: { fileName: string };
 }
 
 /** Overall result of the orchestrated upload. */
@@ -94,6 +108,8 @@ export interface OrchestratorFileResult {
     success: boolean;
     /** Error message if any critical phase failed. */
     errorMessage?: string;
+    /** Set when the file stopped on a recoverable name collision — see OrchestratorFileProgress. */
+    nameConflict?: { fileName: string };
 }
 
 /** Configuration for the upload orchestrator. */
@@ -116,8 +132,40 @@ export interface UploadOrchestratorConfig {
     onUnauthorized?: () => void;
 }
 
-/** Chunked upload threshold: 4 MB. Files larger than this could use chunked sessions. */
-const CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
+// ---------------------------------------------------------------------------
+// Upload target (task 076)
+// ---------------------------------------------------------------------------
+
+/**
+ * Map the wizard's parent context onto the upload contract the bytes go out on.
+ *
+ * The wizard has exactly two branches and they are decided by the SAME condition
+ * `DocumentRecordService` already uses to decide whether to bind a parent lookup — so a file can
+ * never be uploaded against one record and filed under another.
+ *
+ *   · a parent was resolved (associate branch)  -> `PUT /api/obo/records/{entity}/{id}/files/{path}`
+ *   · the user skipped associate                -> `PUT /api/obo/me/files/{path}`
+ *
+ * The GUID is normalized because the server route is constrained `{recordId:guid}`: a brace-wrapped
+ * id would MISS the route and 404, surfacing as a bare "upload failed" with no clue why. Ids reach
+ * this wizard from `Xrm.Utility.lookupObjects` and from URL parameters, both of which produce
+ * brace-wrapped values.
+ */
+export function resolveUploadTarget(parentContext: ParentContext): UploadTarget {
+    const entity = parentContext.parentEntityName?.trim() ?? "";
+    const recordId = cleanGuid(parentContext.parentRecordId ?? "");
+
+    if (!entity || !recordId) {
+        return { kind: "no-record" };
+    }
+    return { kind: "record", entityLogicalName: entity, recordId };
+}
+
+// `CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 MB` was DELETED here 2026-09-02. It had zero references —
+// no branch ever read it — but it was the third copy of a 4 MiB limit that no server ever enforced
+// (`PathValidator.SmallUploadMaxBytes`, deleted in `4044286a6`, was the same fiction). The simple
+// PUT this pipeline uses accepts up to 250 MB. Do not reintroduce a size constant here: the only
+// honest place for an upload ceiling is the client that actually chooses a transfer strategy.
 
 // ---------------------------------------------------------------------------
 // Upload Orchestrator
@@ -129,23 +177,32 @@ const CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
  * @param files - Files selected by the user in Step 1
  * @param config - Orchestrator configuration
  * @param onProgress - Per-file progress callback
+ * @param conflictBehavior - OMIT on the first attempt: the BFF then defaults to `fail`, so a
+ *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'`
+ *   (never `'replace'` — refused since task 171) only when the caller is RETRYING the files in `files` after the user chose. A
+ *   retry is normally a single-file call, since one decision covers one file.
  * @returns Overall orchestration result
  */
 export async function orchestrateUpload(
     files: File[],
     config: UploadOrchestratorConfig,
     onProgress?: (progress: OrchestratorFileProgress) => void,
+    conflictBehavior?: ConflictBehaviorOption,
 ): Promise<OrchestratorResult> {
     const logger = config.logger ?? consoleLogger;
 
     logger.info("UploadOrchestrator", `Starting upload pipeline for ${files.length} files`);
 
-    // Initialize service graph
+    // Initialize service graph.
+    //
+    // Auth is `authenticatedFetch` (ADR-028) — the same function this file already uses for RAG
+    // indexing below — rather than `config.bffTokenProvider`. Both resolve to the same
+    // SpaarkeAuthProvider token; `authenticatedFetch` additionally owns the 401 retry + cache clear
+    // that `onUnauthorized` was passed in to trigger, so nothing is lost by not forwarding it here.
+    // `bffTokenProvider` / `onUnauthorized` stay on the config: NavMapClient still takes them.
     const sdapClient = new SdapApiClient({
         baseUrl: config.bffBaseUrl,
-        getAccessToken: config.bffTokenProvider,
-        logger,
-        onUnauthorized: config.onUnauthorized,
+        authenticatedFetch,
     });
 
     const fileUploadService = new FileUploadService(sdapClient, logger);
@@ -158,10 +215,15 @@ export async function orchestrateUpload(
         onUnauthorized: config.onUnauthorized,
     });
 
+    // UAC-r2 task 147 r1 (owner round 28 item 1): the document rows are created through the BFF (G5) — the server decides
+    // their owner (the Secure Record Owners team when the parent is secure); nothing is created as the user.
     const documentRecordService = new DocumentRecordService({
-        dataverseClient: config.dataverseClient,
+        dataverseClient: withBffChildCreates(config.dataverseClient, authenticatedFetch, config.bffBaseUrl),
         navMapClient,
         getEntityConfig: config.entityConfigResolver,
+        // unified-access-control-r2 task 166 f1: the row is created WITHOUT its SPE pointer; the BFF attaches the
+        // uploaded file (POST /api/v1/documents/{id}/file) and stamps the pointer after verifying it.
+        attachFile: (documentId, file) => sdapClient.attachDocumentFile(documentId, file),
         logger,
     });
 
@@ -192,10 +254,21 @@ export async function orchestrateUpload(
         });
     }
 
+    // Task 076: the destination is the OWNING RECORD, or an explicit "there is none" — never a
+    // container. `parentContext` already carries the same `(entity, id)` pair the wizard uses for
+    // the Dataverse lookup binding, so the record the bytes are authorized against and the record
+    // they are filed under are the same one by construction.
+    //
+    // "Skip associate" takes the record-less branch: the user declined a parent, so there is no
+    // record to resolve a container from and the server files it in the acting user's business-unit
+    // container. That is the ONLY branch that reaches `PUT /api/obo/me/files/{path}`.
+    const target = resolveUploadTarget(config.parentContext);
+
     const uploadResult: UploadFilesResult = await multiFileUploadService.uploadFiles(
         {
             files,
-            containerId: config.parentContext.containerId,
+            target,
+            conflictBehavior,
         },
         (progress) => {
             // Map MultiFileUploadService progress to orchestrator progress
@@ -208,6 +281,7 @@ export async function orchestrateUpload(
                 phase: progress.status === "failed" ? "error" : "uploading",
                 uploadPercent: percent,
                 errorMessage: progress.error,
+                nameConflict: progress.nameConflict,
             });
         },
     );
@@ -223,11 +297,15 @@ export async function orchestrateUpload(
         const idx = fileResults.findIndex((r) => r.fileName === err.fileName);
         if (idx >= 0) {
             fileResults[idx].errorMessage = err.error;
+            // Carried onto both the result and the progress event: the result drives the wizard's
+            // final counts, the progress event drives the row that offers the user the choice.
+            fileResults[idx].nameConflict = err.nameConflict;
             onProgress?.({
                 fileName: err.fileName,
                 phase: "error",
                 uploadPercent: 0,
                 errorMessage: err.error,
+                nameConflict: err.nameConflict,
             });
         }
     }
@@ -272,14 +350,11 @@ export async function orchestrateUpload(
         // resolves to empty → BFF tenant-default chain applies server-side.
         let resolvedSearchIndexName: string = "";
         try {
-            // Resolver expects host-context Xrm.WebApi. Use the same window-walking
-            // pattern resolveSpeContainerId uses elsewhere — this code runs inside
-            // a code-page hosted in Power Apps, so Xrm is available on window/parent/top.
+            // Resolver expects host-context Xrm.WebApi — this code runs inside a
+            // code-page hosted in Power Apps, so Xrm is available on window/parent/top.
+            // Shared cross-frame walker (task 081 / C-8).
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const xrm: any =
-                (window as any).Xrm ??
-                (window.parent as any)?.Xrm ??
-                (window.top as any)?.Xrm;
+            const xrm: any = getXrm();
             if (xrm?.WebApi) {
                 resolvedSearchIndexName = await resolveSearchIndexNameForRecord(
                     xrm.WebApi,
@@ -446,9 +521,23 @@ async function kickOffBackgroundTasks(
         if (!effectiveTenantId) {
             logger.warn("UploadOrchestrator", `tenantId missing — RAG indexing will fail for ${record.fileName}`);
         }
+        // 🔴 The `?? config.parentContext.containerId` fallback was DELETED here 2026-09-03 with the
+        // record-keyed cutover. It named the container the CLIENT resolved at wizard-open time,
+        // which under this contract is not where the bytes went — indexing there would read the
+        // wrong drive and 404, or worse, index a same-named file that is not this one. `driveId` is
+        // now always the SERVER's answer, carried through `SpeFileMetadata.driveId`. A file that
+        // somehow arrives without one is SKIPPED with a warning rather than indexed at a guess.
+        if (!record.driveId) {
+            logger.warn(
+                "UploadOrchestrator",
+                `RAG indexing skipped for ${record.fileName}: the upload response carried no driveId.`,
+            );
+            continue;
+        }
+
         tasks.push(
             triggerRagIndexing(
-                record.driveId ?? config.parentContext.containerId,
+                record.driveId,
                 record.itemId,
                 record.fileName,
                 effectiveTenantId,

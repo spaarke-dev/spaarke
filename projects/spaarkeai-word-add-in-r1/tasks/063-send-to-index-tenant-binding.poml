@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>F2 — `send-to-index` lets the caller choose the tenant partition and stamps a document row with no write check</title>
+    <phase>5 Remediation — authorization</phase>
+    <gate>blocked — requires 061</gate>
+    <status>completed</status>
+    <completion-note>
+      Done 2026-09-21 — `notes/063-send-to-index-authz.md`. Tenant partition now derives from the `tid`
+      claim (body mismatch ⇒ 403, never silently corrected); every DocumentId is authorized for `Write`
+      as the caller before the app-only stamp; partial permission defined and tested. 8 new contract
+      tests; reproduce-first 6/2 RED, seed A 2/6 RED, seed B 5/3 RED, restored 12/0 GREEN.
+      **Two criteria NOT met, recorded in note §8**: (1) criterion 8 — 061's guard does not govern
+      `Api/Ai/RagEndpoints.cs` at all, so there is nothing to un-flag while 061 is deferred; (2) no
+      live verification that add-in users hold Dataverse `Write` on `sprk_document` — if they do not,
+      Run Index 403s (fail-closed and loud). Must be confirmed before deploy.
+    </completion-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security fix touching a tenant-isolation filter and an app-only Dataverse write. Tags include auth + security + ai.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Tenant-isolation boundary. A wrong fix either breaks the Find view's Run Index (a shipped surface this project built) or leaves cross-tenant index writes open.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches `RagEndpoints.cs` + `TenantAuthorizationFilter.cs` + `FileIndexingService.cs` — disjoint from 064/065/066.</parallel-reason>
+    <deps>061</deps>
+    <tags>bff-api, api, auth, authorization, security, ai, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>`POST /api/ai/rag/send-to-index` never checks the body's `TenantId` against the caller's `tid` claim, and writes `sprk_searchindex*` onto a document row app-only with no write authorization. Bind the tenant to the token and authorize each document.</prompt>
+
+  <role>SPAARKE platform developer. Tenant isolation is the invariant under test here.</role>
+
+  <goal>`send-to-index` indexes only into the caller's own tenant partition, and only documents the caller may write.</goal>
+
+  <context>
+    <background>
+      Found 2026-09-21 by the Fable review (`notes/fable-review-2026-09-21.md` §2, finding F2).
+
+      Route `RagEndpoints.cs:119-128`; chain is `AddTenantAuthorizationFilter` + rate-limit.
+      `TenantAuthorizationFilter.cs:106-141` inspects only `RagSearchRequest`, `KnowledgeDocument`,
+      `EmbeddingRequest` and the query string. **`SendToIndexRequest` (`RagEndpoints.cs:1330-1341`) is not
+      matched**, so `:76-81` passes the request through unexamined.
+
+      The handler then uses `request.TenantId` verbatim (`:705` → `FileIndexingService.cs:103`). The document
+      row is read app-only (`:638`) and **written** app-only (`:748`); only the bytes are downloaded OBO
+      (`FileIndexingService.cs:69`).
+
+      **What a caller gets**: index a document's chunks under **any tenant partition string** they choose —
+      cross-tenant index write in shared stamps, and index poisoning generally; stamp `sprk_searchindexed` /
+      `sprk_searchindexedon` on a row without Dataverse Write; and on success learn the row's parent
+      matter/project/invoice id (`:760-761`).
+
+      **What they need**: a valid token plus a document GUID whose SPE container they can read — a coarser
+      gate than per-document rights.
+
+      Pre-existing on master. **This project made the pane a new caller** — `FindView.tsx:313-316` calls it
+      for the Find view's "Run Index" action — so the route is now reachable from our surface.
+
+      This is the same shape task 032 fixed on the visualization route: a body-supplied scope value trusted
+      over the token.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="this task">The tenant partition MUST derive from the token, not the body. If the body field is kept for compatibility, it MUST be validated to equal `tid` and rejected otherwise — never silently overridden without an error.</constraint>
+    <constraint source="this task">Every document id in the request is authorized for `write` before the app-only `UpdateDocumentAsync` at `:748` — including the case where the request carries several ids and only some are permitted. Define and test the partial-permission behaviour explicitly.</constraint>
+    <constraint source="ADR-008">Prefer the filter for the tenant binding; the per-document write check belongs wherever the existing document authorization mechanism lives.</constraint>
+    <constraint source="CLAUDE.md §10">Publish-size delta against a fresh master build; CVE check.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">REPRODUCE-FIRST: prove a caller can index under a tenant partition that is not their `tid`, and can stamp a document they cannot write. Record both observations verbatim, then fix.</criterion>
+    <criterion testable="true">`SendToIndexRequest` is matched by `TenantAuthorizationFilter.ExtractTenantId` — or the handler ignores the body field and uses `tid`. State which, and why, in the task note.</criterion>
+    <criterion testable="true">A request whose body `TenantId` differs from the token's `tid` is REJECTED with a problem response, not silently corrected.</criterion>
+    <criterion testable="true">Each `DocumentId` is authorized for `write` before the row is stamped. A caller with read-but-not-write on a document gets a refusal, and the row is NOT stamped.</criterion>
+    <criterion testable="true">Partial-permission behaviour is defined and tested: given a request with one permitted and one denied document, the response and the resulting row state are exactly as specified in the task note.</criterion>
+    <criterion testable="true">SEED BOTH DIRECTIONS: disable the tenant binding, show the new test RED; restore, show GREEN. Same for the per-document write check. Record all four observations.</criterion>
+    <criterion testable="true">The Find view's Run Index still works end to end for an authorized user against their own tenant (`FindView.tsx:313-316`). Verify and record — this project shipped that surface.</criterion>
+    <criterion testable="true">Task 061's guard no longer flags this route.</criterion>
+    <criterion testable="true">Full BFF suite green with the count reconciled; ArchTests green; publish size and CVE reported.</criterion>
+    <criterion testable="true">Test scope: the tenant binding, the per-document write check, the partial-permission case and the seed directions named above. Anything beyond that needs a one-line justification.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If another caller of `send-to-index` outside this repo depends on passing a `TenantId` that differs from its token (a background job, a migration tool, an admin path), STOP and escalate per CLAUDE.md §6 — the binding becomes a breaking change needing an explicit service-identity path, not a silent tightening.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>/conflict-check (bff-api hot path).</step>
+    <step>Reproduce both halves of the gap; record verbatim.</step>
+    <step>Grep for every caller of `send-to-index` in the repo before changing the contract.</step>
+    <step>Bind the tenant; add the per-document write authorization; define partial-permission behaviour.</step>
+    <step>Write tests; seed all four directions; record.</step>
+    <step>Verify Run Index still works.</step>
+    <step>Build, full suite, ArchTests, publish size, CVE.</step>
+    <step>Write `notes/063-send-to-index-authz.md`. Update TASK-INDEX.md: 063 → ✅.</step>
+  </steps>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Ai/FileIndexingService.cs</file>
+    <file role="new">tests/integration/contract/Api/Ai/SendToIndexAuthorizationContractTests.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/063-send-to-index-authz.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/fable-review-2026-09-21.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+    </files>
+    <patterns>
+      <pattern name="Body-supplied scope must not outrank the token" location="src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs">
+        Lines 106-141 — the existing request-type match list. `SendToIndexRequest` is the missing entry.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>`TenantAuthorizationFilter` already exists and already binds tenant for four request types (`:106-141`); `AuthorizeRowsAsync` / document authorization already exists for per-row checks.</existing>
+    <extension>Yes — extend both existing mechanisms to cover this request type. No new component. The new test file is new surface only because no authorization test covers this route today.</extension>
+    <cost-of-doing-nothing>A caller writes index chunks into another tenant's partition and stamps Dataverse rows they cannot write — the exact tenant-isolation failure NFR-02 exists to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs</file>
+    <file>tests/integration/contract/Api/Ai/SendToIndexAuthorizationContractTests.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/063-send-to-index-authz.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting. Task 061 must be ✅ first.</protocol>
+  </execution>
+</task>

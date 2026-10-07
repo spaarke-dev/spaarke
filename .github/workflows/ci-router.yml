@@ -23,10 +23,11 @@
 #   The router MUST NOT inspect commit messages for [skip ci]-style markers.
 #   Path-based dispatch via `classify` is the ONLY relief mechanism.
 #
-# SHADOW MODE (Phase 2)
-#   This workflow runs in PARALLEL with the existing `sdap-ci.yml` for ≥14
-#   days. Branch protection is NOT flipped to require `CI / Router` until
-#   task 071 (cutover). Until then, this workflow's result is observational.
+# CUTOVER DONE (was: SHADOW MODE, Phase 2)
+#   The master ruleset requires `Router` — it is the ONLY required status
+#   check (verified 2026-09-30 with
+#   `gh api repos/spaarke-dev/spaarke/rules/branches/master`). The legacy
+#   `sdap-ci.yml` still runs in parallel but is not required.
 #
 # MERGE QUEUE COMPATIBILITY (spec FR-C01)
 #   The `merge_group` trigger is included from day 1. When merge queue is
@@ -165,18 +166,66 @@ jobs:
             ci_workflows:
               - '.github/workflows/**'
 
+      # ----------------------------------------------------------------------
+      # CHANGED 2026-10-06 (ontology task 081 round 8, PR #1309) — owner-approved
+      # extension of that PR's CLAUDE.md §6.5 path-A exception to
+      # ci-cd-unit-test-remediation-r1 FR-A02.
+      #
+      # docs_only used to be "docs changed AND none of bff / spaarke_ai /
+      # ci_workflows changed". Client code was never checked, so client code plus
+      # ANY doc file (a project note, a *.md) classified as docs-only and skipped ALL
+      # of Tier 1 — every blocking gate, the Xrm capability guard included — while
+      # the Router went green (run 32098200093: SprkChat.tsx + project notes).
+      #
+      # Now a diff is docs-only ONLY if EVERY changed file is documentation.
+      # `non_docs` is true iff some changed file is NOT documentation: with
+      # predicate-quantifier 'every', a file matches only if it matches '**' AND
+      # every negation, i.e. none of the docs globs above. The negations are the
+      # docs filter's globs verbatim except '**.md', negated as '!**/*.md': under
+      # picomatch (dot: true) '!**.md' fails to exclude a NESTED .md, while
+      # '**/*.md' matches exactly what '**.md' matches. Checked against all 20,390
+      # tracked files: `non_docs` is the exact complement of `docs` (0 mismatches).
+      # The `docs` filter above stays the definition of documentation; edit both
+      # lists together.
+      # ----------------------------------------------------------------------
+      - name: Classify non-documentation changes
+        id: non-docs
+        uses: dorny/paths-filter@v3
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            non_docs:
+              - '**'
+              - '!docs/**'
+              - '!projects/**'
+              - '!**/*.md'
+              - '!.claude/**'
+              - '!knowledge/**'
+              - '!memory/**'
+              - '!CHANGELOG*'
+              - '!CODEOWNERS'
+              - '!LICENSE*'
+
       - name: Derive docs_only flag
         id: docs-only-flag
-        # docs_only = true iff docs changed AND no production-code surface
-        # changed (no BFF, no SpaarkeAi, no CI workflows). This is the only
-        # classification that allows the entire Tier 1/2 stack to be skipped.
+        # docs_only = true iff docs changed AND NO changed file is outside the docs
+        # globs (see the comment on the step above). This is the only classification
+        # that allows the entire Tier 1/2 stack to be skipped. Fail closed: anything
+        # but an explicit non_docs == 'false' (e.g. an empty output) is NOT docs-only.
+        # A PR with more than 3,000 changed files is NOT docs-only either: on PRs
+        # dorny/paths-filter reads the file list from `pulls.listFiles`, which returns at
+        # most 3,000 files, so a non-doc file beyond that cap would be invisible to
+        # `non_docs` (081 round 9). `changed_files` is empty on push / merge_group, where
+        # paths-filter diffs git directly, and an empty value is not > 3000.
         shell: bash
         run: |
           docs='${{ steps.filter.outputs.docs }}'
-          bff='${{ steps.filter.outputs.bff }}'
-          spaarke_ai='${{ steps.filter.outputs.spaarke_ai }}'
-          ci_workflows='${{ steps.filter.outputs.ci_workflows }}'
-          if [[ "$docs" == "true" && "$bff" != "true" && "$spaarke_ai" != "true" && "$ci_workflows" != "true" ]]; then
+          non_docs='${{ steps.non-docs.outputs.non_docs }}'
+          changed_files='${{ github.event.pull_request.changed_files }}'
+          if [[ "${changed_files:-0}" -gt 3000 ]]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${changed_files} changed files exceed the 3,000-file listing cap; not treated as docs-only."
+          elif [[ "$docs" == "true" && "$non_docs" == "false" ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Docs-only change detected — Tier 1 and Tier 2 will be skipped; router-result will still pass."
           else
@@ -195,6 +244,7 @@ jobs:
             echo "| SpaarkeAi (solutions/SpaarkeAi + AI client libs) | ${{ steps.filter.outputs.spaarke_ai }} |"
             echo "| Docs (docs/, .claude/, *.md, etc.) | ${{ steps.filter.outputs.docs }} |"
             echo "| CI workflows (.github/workflows/) | ${{ steps.filter.outputs.ci_workflows }} |"
+            echo "| Any non-documentation file (every-file check) | ${{ steps.non-docs.outputs.non_docs }} |"
             echo ""
             echo "**docs_only**: ${{ steps.docs-only-flag.outputs.value }}"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -295,6 +345,9 @@ jobs:
       # i.e. repo-wide. Root cause was tier2's 6-minute unit-test budget (raised
       # to 30 in ci-tier2-advisory.yml in the same change), but the gate must
       # survive ANY future tier2 cancellation source, not just that one.
+      # (2026-10-05: the suite outgrew 30 minutes too — 48m50s for the BFF
+      # assembly alone — so tier2 now runs it as four parallel shards; see
+      # `full-unit-tests-shard` in ci-tier2-advisory.yml.)
       #
       # tier2 stays in `needs:` so the Router still sequences after it and the
       # decision summary below still reports its real result.
@@ -314,7 +367,7 @@ jobs:
         # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
         # If this action is ever deprecated, fallback is inline bash gate
         # documented in notes/router-signal-model-decision.md §5.
-        uses: re-actors/alls-green@v1.2.2
+        uses: re-actors/alls-green@v1.3.0
         with:
           jobs: ${{ steps.adjudicate.outputs.json }}
           # tier1 may legitimately be skipped when classify finds no Tier-1

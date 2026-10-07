@@ -1,6 +1,7 @@
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Access;
 using Sprk.Bff.Api.Services.Communication.Membership;
 
 namespace Sprk.Bff.Api.Services.Communication.Access;
@@ -8,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Communication.Access;
 /// <summary>
 /// Default <see cref="IDirectThreadAccessService"/> — see the interface for the mechanism + Component
 /// Justification. Reads/writes <c>sprk_communicationthread</c> via the canonical
-/// <see cref="IGenericEntityService"/> (SDK) and POA shares via <see cref="IDataverseAccessGrantService"/>
+/// <see cref="IGenericEntityService"/> (SDK) and POA shares via <see cref="IDataverseRecordShareService"/>
 /// (Web API). Singleton-safe: all three dependencies are stateless singletons.
 /// </summary>
 public sealed class DirectThreadAccessService : IDirectThreadAccessService
@@ -30,9 +31,12 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// </summary>
     private const int MaxCandidateThreads = 50;
 
+    private const string MessageEntity = "sprk_communication";
+
     private readonly IGenericEntityService _entityService;
-    private readonly IDataverseAccessGrantService _accessGrant;
+    private readonly IDataverseRecordShareService _accessGrant;
     private readonly Lazy<IThreadMembershipDerivationService> _membershipDerivation;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<DirectThreadAccessService> _logger;
 
     /// <param name="membershipDerivation">
@@ -45,15 +49,19 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// <see cref="GrantMessageAccessAsync"/> (well after this singleton is already constructed and cached),
     /// which breaks the cycle without changing either dependency's shape.
     /// </param>
+    /// <param name="configuration">The Secure Record business-unit and owner-team names (task 149 r1): a message owned by
+    /// that team is a secure child, and its shares are <see cref="SecureChildShareSynchronizer"/>'s alone.</param>
     public DirectThreadAccessService(
         IGenericEntityService entityService,
-        IDataverseAccessGrantService accessGrant,
+        IDataverseRecordShareService accessGrant,
         Lazy<IThreadMembershipDerivationService> membershipDerivation,
+        IConfiguration configuration,
         ILogger<DirectThreadAccessService> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _accessGrant = accessGrant ?? throw new ArgumentNullException(nameof(accessGrant));
         _membershipDerivation = membershipDerivation ?? throw new ArgumentNullException(nameof(membershipDerivation));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -88,8 +96,11 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
 
         var threadId = await _entityService.CreateAsync(thread, ct);
 
-        // Establish the explicit two-party list: "Manage access" (POA) share to the other participant.
-        await _accessGrant.GrantAccessAsync(ThreadEntitySet, threadId, otherSystemUserId, ReadAccessRights, ct);
+        // Establish the explicit two-party list: "Manage access" (POA) share to the other participant. The thread was just
+        // created owned by the CALLER with no regarding record, so it is never a secure child and the secure-child share
+        // synchronizer (task 149), which touches only Secure-team-owned rows, never revokes this share.
+        await _accessGrant.GrantAccessAsync(
+            ThreadEntitySet, threadId, DataversePrincipalRef.User(otherSystemUserId), ReadAccessRights, ct);
 
         _logger.LogInformation(
             "Created Direct thread {ThreadId} owned by {Owner}, shared to {Other}",
@@ -121,7 +132,7 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         IReadOnlyList<Guid> shared;
         try
         {
-            shared = await _accessGrant.GetSharedSystemUserIdsAsync(ThreadEntity, threadId, ct);
+            shared = await GetSharedSystemUserIdsAsync(threadId, ct);
         }
         catch (Exception ex)
         {
@@ -148,12 +159,24 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     /// UNCHANGED). <b>Open / record-anchored</b> (topology gate on <see cref="GetParticipantSystemUserIdsAsync"/>
     /// returns empty) → the task-041 <see cref="IThreadMembershipDerivationService.DeriveAuthorizedSetAsync"/>
     /// systemuser participants (contacts skipped — R2 scope). No second grant mechanism: both branches call
-    /// the SAME <see cref="IDataverseAccessGrantService.GrantAccessAsync"/>.
+    /// the SAME <see cref="IDataverseRecordShareService.GrantAccessAsync"/>.
+    /// <para><b>Never on a secure message</b> (unified-access-control-r2 task 149 r1). A message filed under a secure
+    /// project, matter or work assignment is owned by the Secure Record Owners team (task 146), and exactly the root's
+    /// internal sharees may read it — <see cref="SecureChildShareSynchronizer"/> keeps its shares equal to the root's and
+    /// revokes every other. The participant set here comes from the anchor record's membership lookups and explicit
+    /// overlays, not from the root's shares, so granting it would show the message to people the secure record is not
+    /// shared with until the next reconcile revoked them — a per-message over-share and a fight between two writers. Such a
+    /// message is therefore never granted here; its sharees reach it through the synchronizer. When the message's owner
+    /// cannot be determined, nothing is granted (fail closed, ADR-003; a missed grant is this method's documented
+    /// best-effort degradation).</para>
     /// </remarks>
     public async Task GrantMessageAccessAsync(Guid communicationId, Guid threadId, CancellationToken ct = default)
     {
         try
         {
+            if (!await IsOrdinaryMessageAsync(communicationId, threadId, ct))
+                return;
+
             var directParticipants = await GetParticipantSystemUserIdsAsync(threadId, ct);
             if (directParticipants.Count > 0)
             {
@@ -179,6 +202,52 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
     }
 
     /// <summary>
+    /// <c>true</c> when the message is NOT a secure child — owned by a user, or by a team that is not the Secure Record
+    /// Owners team — so its participants may be granted Read. <c>false</c> for a Secure-team-owned message, and whenever
+    /// that cannot be told (the message is not found, or the Secure Record team is ambiguous). A Dataverse fault propagates
+    /// to the caller's catch, which grants nothing.
+    /// </summary>
+    private async Task<bool> IsOrdinaryMessageAsync(Guid communicationId, Guid threadId, CancellationToken ct)
+    {
+        var query = new QueryExpression(MessageEntity) { ColumnSet = new ColumnSet("owningteam"), TopCount = 1, NoLock = true };
+        query.Criteria.AddCondition("sprk_communicationid", ConditionOperator.Equal, communicationId);
+        var message = (await _entityService.RetrieveMultipleAsync(query, ct))?.Entities.FirstOrDefault();
+        if (message is null)
+        {
+            _logger.LogWarning(
+                "Message {CommunicationId} could not be found, so whether it is a secure record's message is unknown; no " +
+                "participant is granted (ThreadId={ThreadId}).", communicationId, threadId);
+            return false;
+        }
+
+        if (message.GetAttributeValue<EntityReference>("owningteam")?.Id is not { } owningTeam || owningTeam == Guid.Empty)
+            return true; // user-owned: never a secure child (the synchronizer touches only the Secure team's rows)
+
+        if (await SecureChildShareSynchronizer.CannotBeSecureOwnerTeamAsync(_entityService, _configuration, owningTeam, ct))
+            return true;
+
+        var secure = await SecureChildShareSynchronizer.ResolveSecureOwnerTeamAsync(_entityService, _configuration, ct);
+        if (secure.Refusal is { } refusal)
+        {
+            _logger.LogWarning(
+                "Message {CommunicationId} is team-owned and the Secure Record team cannot be determined ({Refusal}); no " +
+                "participant is granted (ThreadId={ThreadId}).", communicationId, refusal, threadId);
+            return false;
+        }
+
+        if (secure.TeamId == owningTeam)
+        {
+            _logger.LogInformation(
+                "Message {CommunicationId} belongs to a secure record; its readers are the record's sharees (secure-child " +
+                "share synchronizer), so no thread participant is granted here (ThreadId={ThreadId}).",
+                communicationId, threadId);
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Grants Read access on <paramref name="communicationId"/> to each principal — the ONE grant call
     /// shared by both the Direct two-party branch and the Open derived-set branch. Best-effort per
     /// principal (NFR-02): one failed grant never blocks the rest.
@@ -190,7 +259,8 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         {
             try
             {
-                await _accessGrant.GrantAccessAsync(MessageEntitySet, communicationId, principalId, ReadAccessRights, ct);
+                await _accessGrant.GrantAccessAsync(
+                    MessageEntitySet, communicationId, DataversePrincipalRef.User(principalId), ReadAccessRights, ct);
             }
             catch (Exception ex)
             {
@@ -262,11 +332,32 @@ public sealed class DirectThreadAccessService : IDirectThreadAccessService
         var candidates = await _entityService.RetrieveMultipleAsync(query, ct);
         foreach (var candidate in candidates.Entities)
         {
-            var shared = await _accessGrant.GetSharedSystemUserIdsAsync(ThreadEntity, candidate.Id, ct);
+            var shared = await GetSharedSystemUserIdsAsync(candidate.Id, ct);
             if (shared.Contains(sharedCandidateId))
                 return candidate.Id;
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The <c>systemuser</c> principals holding a POA share on a thread.
+    /// </summary>
+    /// <remarks>
+    /// Task 060: the seam's read is principal-KIND-typed (it must be — teams now share through the same
+    /// client), so the Direct-thread caller projects it back to the systemuser ids this service reasons
+    /// about. That filter is what the pre-060 <c>GetSharedSystemUserIdsAsync</c> primitive merely
+    /// ASSUMED, so this tightens the no-leak property rather than relaxing it: a team share on a thread
+    /// can no longer be mistaken for a participating user.
+    /// </remarks>
+    private async Task<IReadOnlyList<Guid>> GetSharedSystemUserIdsAsync(Guid threadId, CancellationToken ct)
+    {
+        var shares = await _accessGrant.GetPrincipalAccessAsync(ThreadEntity, threadId, ct);
+
+        return shares
+            .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser)
+            .Select(s => s.Principal.Id)
+            .Distinct()
+            .ToList();
     }
 }

@@ -13,6 +13,7 @@
  *   - searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type {
   ICreateWorkAssignmentFormState,
   IAssignWorkState,
@@ -28,10 +29,13 @@ import {
   applyResolverFields,
   findNavProp,
   discoverNavProps,
+  toNavPropMap,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -54,7 +58,7 @@ export {
 /**
  * Resolve the current Dataverse user ID from the host Xrm global.
  *
- * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * Walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) for an `Xrm.Utility.getGlobalContext()`
  * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
  * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
  *
@@ -62,40 +66,9 @@ export {
  * preserves the "current user" semantics of FR-WIZ-04.
  */
 function _getCurrentUserId(): string {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
-        }
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 /**
@@ -135,7 +108,9 @@ export class WorkAssignmentService {
     tenantId?: string
   ) {
     this._tenantId = tenantId ?? '';
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
+    // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     // Stored (not just forwarded to EntityCreationService) so createWorkAssignment
     // can call the Field Mapping Framework engine (task 021 / FR-12) directly.
     this._authenticatedFetch = authenticatedFetch;
@@ -144,7 +119,7 @@ export class WorkAssignmentService {
     // Wrap IDataService to adapt createRecord return type.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
+        const id = await this._dataService.createRecord(entityName, data);
         return { id };
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
@@ -152,7 +127,7 @@ export class WorkAssignmentService {
       retrieveMultipleRecords: (entityName: string, options?: string) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
+        await this._dataService.updateRecord(entityName, id, data);
         return { id };
       },
       deleteRecord: async (entityName: string, id: string) => {
@@ -421,11 +396,9 @@ export class WorkAssignmentService {
       entity['sprk_responseduedate'] = form.responseDueDate;
     }
 
-    // Store the host-resolved SPE container ID on the work assignment record (enables Documents tab).
-    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 DELETED 2026-09-03 by task 076 (harmful write "W1", second half) — same shape and same
+    // reasoning as the CreateInvoiceWizard and CreateMatterWizard twins. The client does not choose
+    // where a record's content is stored; the server derives it from the record at upload time.
 
     // Helper: bind a lookup if the nav-prop exists on the entity
     const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
@@ -540,10 +513,20 @@ export class WorkAssignmentService {
       };
     }
 
+    // -- Step 1b (task 142, owner Q5 + R3): the work assignment's "Assigned *" people get their access NOW --
+    // The client create's L1 trigger (see syncAssignedAccess). Never throws, never fails the wizard.
+    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'workassignment', workAssignmentId);
+
     // -- Step 2: Upload files to SPE -----------------------------------------
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: keyed on the WORK ASSIGNMENT. `sprk_workassignment` was added to
+    // `EntityAccessFilter.EntitySetByType` by item 7 (`f85796f70`) with its `sprk_document` lookup
+    // column verified present against live Dataverse metadata, so the record-keyed route resolves
+    // rather than denying for this type.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_workassignment',
+        workAssignmentId,
         uploadedFiles,
         onUploadProgress
       );
@@ -565,7 +548,7 @@ export class WorkAssignmentService {
             waNavProp,
             uploadResult.uploadedFiles,
             {
-              containerId: this._containerId,
+              // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
               parentRecordName: form.name.trim(),
             }
           );
@@ -655,11 +638,21 @@ export class WorkAssignmentService {
         entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
       }
 
-      // Assigned To (systemuser)
+      // Assigned To (contact) -- task 097. `sprk_event.sprk_assignedto` targets CONTACT
+      // in the live schema (nav prop `sprk_AssignedTo`). The former
+      // `findNavProp(navProps, 'systemuser', 'assignedto')` matched no assignedto
+      // column, fell back to the FIRST systemuser lookup (`createdby`) and bound the
+      // picked user there -- the assignee was silently dropped on every follow-on
+      // event. Resolved by exact column (sprk_event has five contact lookups whose
+      // names contain "assignedto"), never by substring.
       if (eventState.assignedToId) {
-        const assignedNavProp = findNavProp(navProps, 'systemuser', 'assignedto');
+        const assignedNavProp = toNavPropMap(navProps)['sprk_assignedto'];
         if (assignedNavProp) {
-          entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${cleanGuid(eventState.assignedToId)})`;
+          entity[`${assignedNavProp}@odata.bind`] = `/contacts(${cleanGuid(eventState.assignedToId)})`;
+        } else {
+          console.warn(
+            '[WorkAssignmentService] sprk_event.sprk_assignedto nav-prop not found; follow-on event assignee not set'
+          );
         }
       }
 

@@ -36,6 +36,8 @@ import {
 // `@lexical/react` ESM modules that don't resolve `react/jsx-runtime` under
 // React 16's resolution (PCF target per ADR-022). Matches SemanticSearchControl.
 import { RichFilePreviewDialog } from '@spaarke/ui-components/dist/components/FilePreview/RichFilePreviewDialog';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { IInputs } from './generated/ManifestTypes';
 // Task 021: the Layer-1 attachments logic + the promoted AttachmentList
 // presentational core now live in `@spaarke/communication-components` — the
@@ -113,27 +115,17 @@ const useStyles = makeStyles({
   versionText: { fontSize: tokens.fontSizeBase100, color: tokens.colorNeutralForeground3 },
 });
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 /** Resolve the host communication record GUID from the page context / Xrm.Page. */
 function resolveCommunicationId(context: ComponentFramework.Context<IInputs>): string | undefined {
   const page = (context as unknown as { page?: { entityId?: string } }).page;
-  if (page?.entityId && page.entityId.length > 0) return page.entityId.replace(/[{}]/g, '');
-  const xrm = getXrm();
+  if (page?.entityId && page.entityId.length > 0) return cleanGuid(page.entityId);
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
-    if (typeof id === 'string' && id.length > 0) return id.replace(/[{}]/g, '');
+    if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
   } catch {
     /* ignore */
   }
@@ -157,7 +149,8 @@ function normalizeBffBaseUrl(raw: string): string {
 function openExternal(desktopUrl: string | null, webUrl: string | null): void {
   const url = desktopUrl || webUrl;
   if (!url) return;
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  const xrm = getXrm('openUrl');
   try {
     if (typeof xrm?.Navigation?.openUrl === 'function') {
       xrm.Navigation.openUrl(url);
@@ -201,7 +194,8 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
 
     let dataverseUrl: string;
     try {
-      const xrm = getXrm();
+      // Shared cross-frame walker (task 081 / C-8).
+      const xrm = getXrm('clientUrl');
       dataverseUrl =
         typeof xrm?.Utility?.getGlobalContext === 'function'
           ? xrm.Utility.getGlobalContext().getClientUrl()
@@ -318,7 +312,8 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
   }, []);
 
   const openDocumentRecord = React.useCallback((documentId: string): void => {
-    const xrm = getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('openForm');
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {
         Promise.resolve(

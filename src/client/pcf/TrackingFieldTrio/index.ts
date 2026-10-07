@@ -12,7 +12,7 @@
  * v1.0.6 (task 023, FR-14/FR-18) — the rendered component now lives in
  * `@spaarke/ui-components` (entity-agnostic `TrackingFieldTrio`; options
  * injected via props). This `index.ts` is the ONLY place in the tree that
- * knows about `sprk_communication`'s Access Permission choice values —
+ * knows the bound record's Access Permission choice values —
  * `getAccessPermissionOptions()` supplies the real Dataverse OptionSet
  * metadata (value + label + color) when available, falling back to the
  * hardcoded Standard/Limited/Restricted triple (no color — the shared
@@ -39,11 +39,14 @@
  * `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`). BFF writes (grant /
  * invite-and-grant / revoke) go through `@spaarke/auth`'s `authenticatedFetch`
  * (bootstrapped in `init()` via `authInit.ts`, same pattern as
- * `SemanticSearchControl`). `canGrantAccess` now reflects a real
+ * `SemanticSearchControl`).
+ *
+ * Historical note (v1.0.9 through v1.0.30): `canGrantAccess` reflected a
  * `context.utils.hasEntityPrivilege('sprk_externalrecordaccess', Create,
- * Global)` check (fail-open only if the API is unavailable, e.g. a harness
- * environment) — `AccessGrantModal` itself applies a second, defense-in-depth
- * gate on the same prop.
+ * Global)` check that failed OPEN, and this comment asserted that
+ * `AccessGrantModal` applied "a second, defense-in-depth gate on the same
+ * prop". Both halves were wrong — see `evaluateGrantGate()` below, which
+ * replaced them in v1.0.31.
  *
  * v1.0.10 (task 042, teams-app-r1) — replaces the email-members stub with the
  * canonical `SendEmailDialog` (`EmailComposer` engine, `@spaarke/ui-components`,
@@ -64,6 +67,91 @@
  * entity-agnostic `AccessPermissionState` vocabulary — the modal itself
  * never sees the raw Dataverse values (ADR-012). Distinct from, and does
  * not touch, the per-grant `sprk_accesslevel` wiring below.
+ *
+ * v1.0.30 (task 065, unified-access-control-r2, FR-29) — wires two new
+ * `AccessGrantModal` props: `pickUser` opens the host's NATIVE advanced-lookup
+ * side pane for a `systemuser` (mirrors `pickContact`/`pickOrganization`
+ * exactly — `INavigationService.openLookup` already accepts any Dataverse
+ * entity type, so no new navigation-adapter code was needed) for the "+ User"
+ * internal system-user share picker; `fetchSecureOwnerInfo` reads the bound
+ * record's `ownerid`/`owningbusinessunit`/`sprk_issecure` (host-context,
+ * single-entity) and returns the owner + business-unit display names for a
+ * secure record, or `null` otherwise — design.md §5.1a's correction applies
+ * (`ownerid` resolves to the `Secure Project` OWNER TEAM, not a service
+ * account; this file reads whatever Dataverse's polymorphic Owner field
+ * resolves to, generically). Both props are entity-agnostic reads/writes at
+ * the modal boundary — this file remains the ONLY place that knows the raw
+ * Dataverse field names (ADR-012), same discipline as every prior wiring pass.
+ *
+ * v1.0.31 (task 118, unified-access-control-r2, FR-07 / owner decision D-1
+ * option C) — the Manage Access gate now asks THE SERVER'S QUESTION with THE
+ * SERVER'S FAIL DIRECTION. Until now the UI and the BFF asked different
+ * questions about the same action: the BFF asks "do you hold Write on THIS
+ * record?" and denies what it cannot evaluate (`DelegationRuleFilter`); this
+ * control asked "may you create rows in the `sprk_externalrecordaccess` TABLE,
+ * anywhere?" and ALLOWED what it could not evaluate. Two consequences, both
+ * real: a user with the table privilege but no Write on a confidential matter
+ * was offered the button and then refused by the server, and whenever
+ * `hasEntityPrivilege` was unavailable the affordance appeared for everyone.
+ * `evaluateGrantGate()` replaces it with `GET /api/v1/external-access/
+ * can-manage-access`, whose answer IS the filter's own verdict, and the gate
+ * now fails CLOSED: anything other than a 200 naming this record disables the
+ * affordance. The answer is asynchronous while `updateView` is synchronous, so
+ * it resolves into control state and re-renders (the `authInit` pattern this
+ * file already uses) rather than blocking a render on a network call.
+ *
+ * v1.0.32 (task 138, unified-access-control-r2 — the Access Permission levels
+ * made real; owner round 2 item 3 + Q6 + O1 FINAL):
+ * - The modal's state now folds in the record's SECURE flag through the shared
+ *   pure `resolveAccessPermissionState`: Restricted → 'restricted'; Limited, or
+ *   Standard on a secure record, or Standard while `sprk_issecure` is unreadable
+ *   → 'limited' (fail CLOSED); Standard on a record read as not secure →
+ *   'standard'. The secure read used for this GATING is `ensureSecureFlag()`;
+ *   the owner/BU DISPLAY read (`fetchSecureOwnerInfo`) stays fail-soft.
+ * - The pill honours a read-only form: `context.mode.isControlDisabled`
+ *   disables all three controls, and the bound column's `security.editable ===
+ *   false` disables the pill alone (re-read in init and in every updateView).
+ * - On a secure record the closed pill reads "Secure" in red (owner O1 FINAL);
+ *   its menu is the unchanged Standard / Limited / Restricted list, so the
+ *   secure display never rewrites the stored value.
+ * - `accessPermission` is now an OPTIONAL bound property, so the control can sit
+ *   on a form whose table has no such column (the retired
+ *   `sprk_communication.sprk_accesspermission`, owner Q6); unbound → no pill.
+ * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
+ *   standing-grant control since task 073 UAT v1.0.24 #5).
+ *
+ * v1.0.37 (task 114, unified-access-control-r2 — owner test feedback 2026-10-07):
+ * - `pickUser` honours the modal's `excludeExternal` (set on a Restricted record): the "+ User" lookup leaves out
+ *   users flagged `sprk_isexternal = true` (blank counts as internal), and the pick carries the user's email so the
+ *   modal can tell same-named users apart and name the person in a refusal.
+ * - The bundled `AccessGrantModal` keeps itself visible (docked left of the lookup pane, dimmed) while a lookup is
+ *   open instead of hiding — hiding read as the modal closing — and names the person in `/share-user`'s refusals.
+ *
+ * v1.0.36 (task 114, unified-access-control-r2 — owner round 67 amendment 4(c)): no change in this file's logic; the
+ * bundled `AccessGrantModal` labels a user share the BFF marks `externalNoAccess` (a Restricted record, a user flagged
+ * `sprk_isexternal = true`) as "External user — no access" until the server removes it.
+ *
+ * v1.0.35 (task 140, unified-access-control-r2 — contact-side Grant Access, owner C4 / Q2):
+ * `fetchExistingGrants` also reads `_sprk_grantedbycontact_value` (the new contact-typed issuer lookup), and the
+ * bundled `AccessGrantModal` shows a contact-issued grant as "Granted by {contact} (external contact)". Revoking it
+ * from Current Access is unchanged (`/revoke`, Write on the record).
+ *
+ * v1.0.34 (task 142, unified-access-control-r2 — Assigned-To auto-grants, owner Q5 / A3 / A2):
+ * no change in this file's logic; the bundled `AccessGrantModal` now reads the record's Assigned-To ledger from the
+ * BFF (`GET /api/v1/external-access/assigned-access`) and shows SERVER-derived suggestions on a secure record
+ * ("Suggested from Assigned Paralegal 1", Grant / Dismiss — owner A3 = prompt), names the field behind an automatic
+ * grant in Current Access, and — owner A2 reversed (standing and organization access stay) — warns before and after
+ * removing an automatic grant whose contact still reaches the record through a standing or organization term.
+ * `CANDIDATE_ROLE_FIELDS` stays for the email-members feature; a candidate the server already suggests is offered
+ * once, in Suggested Access.
+ *
+ * v1.0.33 (task 139, unified-access-control-r2 — the grant model, owner C4 + Q1):
+ * no change in this file's logic; the bundled `AccessGrantModal` now reports a
+ * `/grant` or `/invite-and-grant` that the server capped at the caller's own
+ * level (the narrowed notice), and shows the server's own sentence for the new
+ * refusals — would-lower-existing (409), grantee on the No Access list (422),
+ * caller cannot grant (403) — and for `/unshare-user`'s refusal to remove the
+ * last person who can open a secure record.
  *
  * @remarks
  * - Uses React 16 APIs per ADR-022 (ReactDOM.render, not createRoot)
@@ -100,8 +188,12 @@ import {
   type IAccessGrantRecord,
   type IContactSearchResult,
   type IOrganizationPick,
+  type IUserPick,
+  type IUserPickOptions,
+  type ISecureOwnerInfo,
   type ExternalGrantRootType,
   type AccessPermissionState,
+  resolveAccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
 // Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
 // host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
@@ -124,18 +216,31 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/compo
 // instead of blanking the whole PCF (defense-in-depth alongside the
 // react/jsx-runtime dedupe in ../webpack.config.js).
 import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
+import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { initializeAuth } from './authInit';
 // Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
 // SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
 // client id / BFF app id / BFF base url come from sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl.
 import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environmentVariables';
 
-// sprk_communication Access Permission choice values — MUST match the
-// Dataverse OptionSet values. Entity-specific: lives ONLY here (the PCF
-// caller), never in the shared `TrackingFieldTrio` core (FR-14).
+// Access Permission choice values of the three grant ROOTS — sprk_project,
+// sprk_matter and sprk_workassignment carry the identical option set (verified
+// live 2026-09-04 and 2026-09-30; the BFF's ExternalParticipationService uses the
+// same integers). Entity-specific: lives ONLY here (the PCF caller), never in the
+// shared `TrackingFieldTrio` core (FR-14). The `sprk_communication` copy of the
+// column is retired (task 138, owner Q6): a communication inherits its parent's
+// permission and has no value of its own.
 const ACCESS_PERMISSION_STANDARD = 100000000;
 const ACCESS_PERMISSION_LIMITED = 100000001;
 const ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+// Owner O1 FINAL (2026-10-01): on a SECURE record the closed pill reads "Secure"
+// (red) for both secure and secure + Restricted. That is a closed-LABEL change
+// only: the menu keeps the record's own Standard / Limited / Restricted options,
+// so Standard stays selectable and no item writes a value other than its own
+// (a two-item "Secure" → Limited menu was not part of O1 FINAL — task 138 r1).
+const SECURE_PILL_LABEL = 'Secure';
 
 // Fallback segments (no per-option color) used when the bound OptionSet's
 // field metadata isn't available (e.g., harness/test environments). The
@@ -199,6 +304,15 @@ const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
   { attr: 'sprk_assignedtointernal', role: 'Assigned To (Internal)' },
 ];
 
+/** One comparable spelling for a Dataverse record id: lowercase, no braces, no surrounding space.
+ *
+ * Exists because the PCF host and the BFF do not agree on GUID formatting — `Xrm`'s `getId()` yields
+ * `{ABC…}` while .NET's default `ToString()` yields `abc…` — and task 118's grant gate compares the id it
+ * ASKED about with the id the server ANSWERED about. That comparison fails closed, so a purely cosmetic
+ * disagreement would hide the Manage Access affordance rather than merely log something. Normalizing is
+ * the cheap end of that trade. */
+const normalizeRecordId = cleanGuid;
+
 /** Resolves the Dataverse org URL for the MSAL redirect URI, mirroring the
  * `Xrm.Utility.getGlobalContext().getClientUrl()` pattern used by every other
  * Spaarke PCF's `authInit.ts` (e.g. `RelatedDocumentCount`,
@@ -227,7 +341,41 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   // bootstrap completes still succeeds (awaits, doesn't fail) rather than
   // racing `@spaarke/auth`'s "not initialized" guard.
   private isGrantModalOpen = false;
-  private canGrantAccessValue = true;
+
+  /** Whether the CALLER may change who can access the bound record, per the server
+   * (`GET /api/v1/external-access/can-manage-access`, task 118).
+   *
+   * Starts `false` and STAYS `false` until the server says otherwise. That is the
+   * fail-closed default the whole task turns on: before v1.0.31 this field started
+   * `true`, so every unanswerable access question resolved to "offer the button".
+   * An affordance that appears while the answer is unknown is a promise the server
+   * may refuse — and when the answer is unknown because authorization is degraded,
+   * it is a promise made in exactly the conditions that warrant caution. */
+  private canGrantAccessValue = false;
+
+  /** The record id the gate has been ASKED about — not the one it has been answered for.
+   *
+   * Three distinct states, and all three are load-bearing:
+   * `undefined` = never asked (the initial state, so the first `updateView` still asks);
+   * `null`      = asked while no record was bound (a harness, or an unsaved form) — re-asked
+   *               the moment an id appears;
+   * a string    = asked about that record; a different id means the form rebound and the
+   *               previous record's verdict must not be carried forward.
+   *
+   * It is set BEFORE the request goes out, which is what keeps `updateView` — called on every
+   * field write and form refresh — from issuing one OBO exchange plus two Dataverse calls per
+   * refresh while an answer is already in flight. */
+  private grantGateRequestedFor: string | null | undefined = undefined;
+
+  /** The bound record's `sprk_issecure`, read for GATING (task 138): `true` / `false` from a successful
+   * read, `null` while unread or when the read fails or the value is hidden (field-level security). The
+   * modal state treats `null` as Limited — an unknown Secure flag must never widen what the dialog offers. */
+  private isSecureValue: boolean | null = null;
+
+  /** The record id the secure read was ASKED about — the same three-state discipline as
+   * {@link grantGateRequestedFor}, so `updateView` does not re-read on every refresh. */
+  private secureFlagRequestedFor: string | null | undefined = undefined;
+
   private authInitPromise: Promise<void> = Promise.resolve();
 
   // Email-members state (task 042). `apiBaseUrl` mirrors the value passed to
@@ -252,7 +400,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     this.monitorValue = context.parameters.monitor?.raw ?? false;
     this.highPriorityValue = context.parameters.highPriority?.raw ?? false;
     this.accessPermissionValue = context.parameters.accessPermission?.raw ?? null;
-    this.canGrantAccessValue = this.computeCanGrantAccess();
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const params = context.parameters as any;
@@ -279,6 +426,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       );
     });
 
+    // Ask the server whether this caller may manage access (task 118). Deliberately NOT awaited: the
+    // control renders immediately with the affordance DISABLED and enables it only if the answer says so,
+    // rather than delaying first paint on a network call. Nothing is swallowed — every failure path
+    // inside `evaluateGrantGate` resolves the gate to `false` and logs.
+    this.ensureGrantGate();
+    // Read the record's Secure flag for the Access Permission gate (task 138) — also not awaited; until it
+    // answers, the modal state is the fail-closed Limited.
+    this.ensureSecureFlag();
+
     this.renderControl();
   }
 
@@ -291,7 +447,101 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     this.highPriorityValue = context.parameters.highPriority?.raw ?? false;
     this.accessPermissionValue = context.parameters.accessPermission?.raw ?? null;
 
+    // Re-ask the server if — and only if — this control is now bound to a different record (task 118).
+    this.ensureGrantGate();
+    // Same for the record's Secure flag (task 138).
+    this.ensureSecureFlag();
+
     this.renderControl();
+  }
+
+  /**
+   * Reads the bound record's `sprk_issecure` for the Access Permission GATE (task 138), unless that read is
+   * already asked or answered for this record. FAIL CLOSED: a failed read, a missing record id or a hidden
+   * value leaves {@link isSecureValue} `null`, which `resolveAccessPermissionState` maps to Limited. Distinct
+   * from the fail-soft owner/BU DISPLAY read in `fetchSecureOwnerInfo`, which is unchanged.
+   */
+  private ensureSecureFlag(): void {
+    const recordId = this.getRecordId();
+    if (recordId === this.secureFlagRequestedFor) {
+      return;
+    }
+
+    this.secureFlagRequestedFor = recordId;
+    this.isSecureValue = null;
+    if (!recordId) {
+      return;
+    }
+
+    void (async () => {
+      let value: boolean | null = null;
+      try {
+        const record = (await this.context.webAPI.retrieveRecord(
+          this.getHostEntity(),
+          recordId,
+          '?$select=sprk_issecure'
+        )) as unknown as Record<string, unknown>;
+        const raw = record['sprk_issecure'];
+        value = raw === true ? true : raw === false ? false : null;
+      } catch (err) {
+        console.warn(
+          '[TrackingFieldTrio] Could not read whether this record is secure; Manage Access offers only named grants.',
+          err
+        );
+      }
+      // Drop a late answer for a record the form has since left.
+      if (this.secureFlagRequestedFor !== recordId) {
+        return;
+      }
+      this.isSecureValue = value;
+      this.renderControl();
+    })();
+  }
+
+  /** Whether the `accessPermission` property is bound to a column on this form (task 138 — the property
+   * is optional so the control can sit on a table without the column). A bound OptionSet parameter
+   * carries its attribute metadata (`attributes.LogicalName`); an unbound optional one does not.
+   * A numeric `raw` value is also proof of a binding (an unbound property never holds one), so a host
+   * that omits the metadata — the case `getAccessPermissionOptions()` falls back for — still shows and
+   * writes back the pill whenever the record has a value. Live gate 16(d) re-checks the three root
+   * forms under v1.0.32 (task 138 r1, verifier finding 7). */
+  private isAccessPermissionBound(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const param = this.context.parameters.accessPermission as any;
+    const logicalName = param?.attributes?.LogicalName;
+    if (typeof logicalName === 'string' && logicalName.length > 0) return true;
+    return typeof param?.raw === 'number';
+  }
+
+  /** Whether the bound access-permission column is editable for this user — `false` only when the
+   * platform says so explicitly (`security.editable === false`, e.g. field-level security). */
+  private isAccessPermissionEditable(): boolean {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const security = (this.context.parameters.accessPermission as any)?.security;
+    return security?.editable !== false;
+  }
+
+  /**
+   * Asks the server about the CURRENTLY bound record, unless that question is already asked or answered.
+   *
+   * Called from both `init` and `updateView`, which is why the guard lives here rather than at either
+   * call site: `updateView` fires on every field write and every form refresh, and each evaluation costs
+   * an OBO exchange plus two Dataverse calls.
+   *
+   * When the record HAS changed, the previous record's verdict is revoked FIRST. Carrying it forward for
+   * even one render would offer Manage Access on a record for which nobody has been authorized — and the
+   * case where a form rebinds from a record you can write to one you cannot is exactly the case that
+   * matters.
+   */
+  private ensureGrantGate(): void {
+    const recordId = this.getRecordId();
+    if (recordId === this.grantGateRequestedFor) {
+      return;
+    }
+
+    this.grantGateRequestedFor = recordId;
+    this.canGrantAccessValue = false;
+    void this.evaluateGrantGate(recordId);
   }
 
   /**
@@ -363,18 +613,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return this.navService;
   }
 
-  /** Cross-frame Xrm accessor (PCF runs in an iframe). */
-  private getXrm(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    try {
-      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-    } catch {
-      return w.Xrm;
-    }
-  }
-
   /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
    * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
    * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
@@ -387,7 +625,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
    * 80%) so it covers the Manage Access footprint. */
   private openContactRecord = (contactId: string): void => {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation');
     const wasGrantOpen = this.isGrantModalOpen;
     const restore = (): void => {
       if (wasGrantOpen && !this.isGrantModalOpen) {
@@ -422,7 +661,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * primary attribute — entity-agnostic, no metadata call. Undefined outside an
    * MDA host (harness) or when unset (chip then shows the humanized entity type). */
   private getRecordDisplayName(): string | undefined {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8). `any` view: typed XrmContext
+    // does not declare Page.data.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = getXrm('page') as any;
     try {
       const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
       return typeof v === 'string' && v.length > 0 ? v : undefined;
@@ -452,24 +694,120 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return this.emailHandlers.handlers;
   }
 
-  /** Real Create-privilege check on `sprk_externalrecordaccess`
-   * (`PrivilegeType.Create = 1`, `PrivilegeDepth.Global = 3` per
-   * `@types/powerapps-component-framework`). Fails open (returns `true`) only
-   * when `hasEntityPrivilege` itself is unavailable/throws (e.g. a harness
-   * environment) — `AccessGrantModal` applies a second, defense-in-depth gate
-   * on the same value, so a fail-open here does not bypass real authorization
-   * (the BFF's own endpoints enforce it server-side regardless). */
-  private computeCanGrantAccess(): boolean {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const utils = this.context.utils as any;
-      if (typeof utils?.hasEntityPrivilege === 'function') {
-        return utils.hasEntityPrivilege(EXTERNAL_ACCESS_ENTITY, /* Create */ 1, /* Global */ 3) as boolean;
-      }
-    } catch {
-      // fall through to fail-open default
+  /**
+   * Asks the SERVER whether this caller may change who can access the bound record, and resolves the
+   * Manage Access affordance from the answer (task 118, spec FR-07 / owner decision D-1 option C).
+   *
+   * WHAT IT ASKS. `GET /api/v1/external-access/can-manage-access?recordType=&recordId=`. That route sits
+   * on the `/api/v1/external-access` group behind `DelegationRuleFilter`, so its 200 is not a second
+   * opinion about the rule — it is the OUTCOME of the rule, produced by the one implementation of it
+   * (`CallerRecordAccessProbe` over OBO: Write on THIS record, evaluated as the caller). A client gate
+   * built on a re-implementation of a server rule drifts; this one cannot, because it never re-implements
+   * anything.
+   *
+   * WHAT IT REPLACED, AND WHY. Through v1.0.30 this was a synchronous
+   * `context.utils.hasEntityPrivilege('sprk_externalrecordaccess', Create, Global)` that returned `true`
+   * on every failure. That asked a DIFFERENT question — table-level Create, anywhere, versus per-record
+   * Write on this record — with the OPPOSITE fail direction. So a caller with the table privilege but no
+   * Write on a confidential matter was offered the affordance and then refused by the server, and a
+   * caller whose privilege could not be read at all was offered it unconditionally.
+   *
+   * 🔴 IT FAILS CLOSED, AND THAT IS THE POINT OF THE CHANGE. Every path that does not produce a 200
+   * naming THIS record leaves the gate `false`: no record bound, auth not initialised, the fetch
+   * throwing, a non-200 (including the filter's own 403), an unparseable body, `canManageAccess` not
+   * exactly `true`, or an answer about a record we are no longer bound to. Each logs, so a disabled
+   * affordance is diagnosable rather than mysterious — the discipline `CallerRecordAccessProbe` already
+   * applies server-side, where it denies on every degraded path rather than degrading to Read.
+   *
+   * HARNESS AND TEST HOSTS ARE INCLUDED IN THAT, DELIBERATELY. A PCF harness has no `Xrm`, no MSAL
+   * bootstrap and no BFF, so the gate stays `false` and the icon renders disabled. That does NOT make the
+   * component untestable: the rendered UI lives in `@spaarke/ui-components`' `TrackingFieldTrio`, which
+   * takes `canGrantAccess` as an explicit prop, and its tests pass the value they mean rather than
+   * relying on a default. The only thing a harness loses is an ENABLED grant icon — an icon that, in a
+   * host with no BFF, could not have completed a grant anyway.
+   */
+  private async evaluateGrantGate(recordId: string | null): Promise<void> {
+    if (!recordId) {
+      // No bound record (a harness, or a form that has not saved yet). There is no record to be
+      // authorized ON, so there is nothing to allow. `ensureGrantGate` re-asks if an id appears later.
+      this.setGrantGate(recordId, false);
+      return;
     }
-    return true;
+
+    const recordType = this.resolveGrantRoot().recordType;
+
+    try {
+      const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
+      // authenticatedFetchGated awaits authInitPromise first, so a gate evaluated before MSAL bootstrap
+      // completes waits rather than racing the "not initialized" guard. If auth init FAILED, this rejects
+      // and the catch below denies — which is the correct direction for an unprovable identity.
+      const res = await this.authenticatedFetchGated(`/api/v1/external-access/can-manage-access?${query}`);
+
+      if (!res.ok) {
+        // The expected denial is the delegation filter's 403 — an answer, not an error. Logged at info so
+        // a legitimately read-only user does not fill the console with warnings on every form load.
+        console.info(
+          `[TrackingFieldTrio] Manage Access is disabled for ${recordType} ${recordId}: the server answered ${res.status}.`
+        );
+        this.setGrantGate(recordId, false);
+        return;
+      }
+
+      const body = (await res.json()) as { recordId?: string; canManageAccess?: boolean } | null;
+
+      // `canManageAccess === true` exactly — not truthy. A body that omits the field, or carries a
+      // truthy-but-wrong value, is an answer this client does not understand, and an answer it does not
+      // understand is not a licence.
+      const answeredYes = body?.canManageAccess === true;
+
+      // The answer must name the record we asked about. Two independent hazards it closes: an in-flight
+      // answer arriving after the form rebound to another record, and a proxy or cache returning some
+      // other record's response.
+      //
+      // Compared through `normalizeRecordId` rather than raw, because the two sides do not agree on GUID
+      // FORMATTING and this check fails CLOSED. The host may hand us a braced id (`Xrm`'s
+      // `getId()` shape) while the server always echoes .NET's "D" format, lowercase and unbraced. Raw
+      // string equality would then be false for the right record, the affordance would vanish, and the
+      // symptom — "Manage Access is gone for everyone" — looks exactly like a broken gate rather than a
+      // formatting mismatch. Fail-closed makes false negatives expensive, so the comparison absorbs the
+      // difference instead of trusting both ends to spell a GUID the same way.
+      const answersThisRecord =
+        typeof body?.recordId === 'string' && normalizeRecordId(body.recordId) === normalizeRecordId(recordId);
+
+      if (answeredYes && !answersThisRecord) {
+        console.warn(
+          `[TrackingFieldTrio] Discarding a can-manage-access answer for '${body?.recordId}' while bound to '${recordId}'.`
+        );
+      }
+
+      this.setGrantGate(recordId, answeredYes && answersThisRecord);
+    } catch (err) {
+      console.warn(
+        `[TrackingFieldTrio] Could not establish whether you may manage access on ${recordType} ${recordId}; ` +
+          'Manage Access is disabled. An unanswerable access question is a denial, not a default.',
+        err
+      );
+      this.setGrantGate(recordId, false);
+    }
+  }
+
+  /**
+   * Applies the gate's verdict and re-renders — but only if the control is still asking about
+   * `answeredFor`.
+   *
+   * Two reasons this is a method rather than two assignments at each exit. First, the answer arrives
+   * after `updateView` has returned, so every exit path in {@link evaluateGrantGate} must repaint; one
+   * that assigned without repainting would leave the toolbar showing the previous verdict. Second, the
+   * staleness check belongs in ONE place: a slow answer for a record the form has since left must be
+   * dropped, and dropping it in four separate places is three chances to forget.
+   */
+  private setGrantGate(answeredFor: string | null, canGrant: boolean): void {
+    if (this.grantGateRequestedFor !== answeredFor) {
+      return;
+    }
+
+    this.canGrantAccessValue = canGrant;
+    this.renderControl();
   }
 
   /** Wraps `authenticatedFetch` so a click that races MSAL bootstrap still
@@ -481,25 +819,18 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   };
 
   /**
-   * Maps the bound `sprk_project.sprk_accesspermission` raw OptionSet value
-   * (task 043, spec FR-14 Option A) to `AccessGrantModal`'s entity-agnostic
-   * `AccessPermissionState`. This is the ONLY place that knows the real
-   * `ACCESS_PERMISSION_*` integers — the shared modal receives only the
-   * semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012).
-   * Defaults to `'standard'` (all grant types available — task 041's
-   * baseline) when the value is unset or unrecognized, matching the modal's
-   * own default and preserving zero regression for records without the
-   * field populated.
+   * Maps the bound root's raw `sprk_accesspermission` value AND its `sprk_issecure` flag (task 043, spec
+   * FR-14 Option A; task 138) to `AccessGrantModal`'s entity-agnostic `AccessPermissionState`. This is the
+   * ONLY place that knows the real `ACCESS_PERMISSION_*` integers and the secure column — the shared modal
+   * receives only the semantic 'standard' | 'limited' | 'restricted' vocabulary (ADR-012). The rules
+   * themselves (Restricted wins; Secure implies Limited; an unreadable Secure flag is Limited) live in the
+   * shared pure `resolveAccessPermissionState`, where tests pin them.
    */
   private mapAccessPermissionToState(value: number | null): AccessPermissionState {
-    switch (value) {
-      case ACCESS_PERMISSION_RESTRICTED:
-        return 'restricted';
-      case ACCESS_PERMISSION_LIMITED:
-        return 'limited';
-      default:
-        return 'standard';
-    }
+    return resolveAccessPermissionState(value, this.isSecureValue, {
+      limited: ACCESS_PERMISSION_LIMITED,
+      restricted: ACCESS_PERMISSION_RESTRICTED,
+    });
   }
 
   /** Reads the current `sprk_project` record's `sprk_assigned*` contact
@@ -595,7 +926,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
       `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+      // v1.0.35 (task 140): + _sprk_grantedbycontact_value — the CONTACT who issued the grant from the external SPA.
+      // ⚠️ Deploy order: the column (scripts/Deploy-ExternalRecordAccessContactGrantor.ps1) must exist first, or this
+      // read 400s and Current Access shows nothing.
+      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,_sprk_grantedbycontact_value,sprk_accesslevel,sprk_granteddate`;
 
     let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
     try {
@@ -624,6 +958,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
         grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
+        grantedByContactName: (row[`_sprk_grantedbycontact_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
         provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
@@ -708,6 +1043,87 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return picked ? { id: picked.id, name: picked.name } : null;
   };
 
+  /** Opens the SHARED side-pane Advanced Lookup for a single `systemuser`
+   * (task 065, FR-29) — the "+ User" internal system-user share picker,
+   * mirroring {@link pickContact}/{@link pickOrganization} exactly.
+   * `INavigationService.openLookup` (task 071) wraps `Xrm.Utility.lookupObjects`
+   * generically by `entityType`/`entityTypes` with no per-entity allow-list, so
+   * `systemuser` works with no adapter change — verified against
+   * `xrmNavigationServiceAdapter.ts`'s `openLookup`, which passes
+   * `entityTypes` straight through. Returns `null` when the user cancels.
+   *
+   * Task 114 (owner test feedback 2026-10-07): with `excludeExternal` (a Restricted record) the lookup leaves out
+   * users flagged `sprk_isexternal = true` — blank counts as internal, hence the `null` branch (FetchXML `ne` drops
+   * nulls). The lookup's "recent records" list may not apply the filter, so `/share-user` still refuses such a user
+   * and the modal names them. The pick is enriched with the user's email, like {@link pickContact}. */
+  private pickUser = async (options?: IUserPickOptions): Promise<IUserPick | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'systemuser',
+      entityTypes: ['systemuser'],
+      allowMultiSelect: false,
+      filters: options?.excludeExternal
+        ? [
+            {
+              entityLogicalName: 'systemuser',
+              filterXml:
+                '<filter type="or"><condition attribute="sprk_isexternal" operator="ne" value="1" />' +
+                '<condition attribute="sprk_isexternal" operator="null" /></filter>',
+            },
+          ]
+        : undefined,
+    });
+    const picked = results[0];
+    if (!picked) return null;
+    try {
+      const rec = (await this.context.webAPI.retrieveRecord(
+        'systemuser',
+        picked.id,
+        '?$select=fullname,internalemailaddress'
+      )) as unknown as { fullname?: string; internalemailaddress?: string };
+      return {
+        id: picked.id,
+        name: rec?.fullname ?? picked.name,
+        email: rec?.internalemailaddress ?? undefined,
+      };
+    } catch {
+      // Email enrichment failed — still return the pick, named as the lookup named it.
+      return { id: picked.id, name: picked.name };
+    }
+  };
+
+  /** Reads the bound record's secure-project owner + business-unit alignment
+   * (task 065, design.md §6) for the modal's read-only display. Host-context,
+   * single-entity read of `ownerid`/`owningbusinessunit`/`sprk_issecure` —
+   * the SAME three standard Dataverse columns on all three grant-root
+   * entities (project/matter/workassignment; verified against task 046's
+   * live metadata pass, `notes/task-046-secure-project-owner-role.md` §7b).
+   * Returns `null` for a non-secure record (`sprk_issecure` is not `true`)
+   * or when the read fails — this is a read-only convenience display, never
+   * a blocking concern, so it fails soft rather than surfacing an error. Per
+   * design §5.1a's correction, `ownerid` is whatever Dataverse's polymorphic
+   * Owner field resolves to (the `Secure Project` OWNER TEAM today, not a
+   * service account) — this method reads the display name generically and
+   * does not assume which principal kind it is. */
+  private fetchSecureOwnerInfo = async (): Promise<ISecureOwnerInfo | null> => {
+    const recordId = this.getRecordId();
+    if (!recordId) return null;
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
+    try {
+      const record = (await this.context.webAPI.retrieveRecord(
+        this.getHostEntity(),
+        recordId,
+        '?$select=sprk_issecure,_ownerid_value,_owningbusinessunit_value'
+      )) as unknown as Record<string, unknown>;
+      if (record['sprk_issecure'] !== true) return null;
+      return {
+        ownerName: (record[`_ownerid_value${FORMATTED}`] as string) ?? '(unknown owner)',
+        businessUnitName: (record[`_owningbusinessunit_value${FORMATTED}`] as string) ?? '(unknown business unit)',
+      };
+    } catch {
+      return null;
+    }
+  };
+
   /** Classifies a contact internal-workforce (has a linked `systemuser` via
    * `sprk_primarycontact`) vs external — drives `AccessGrantModal`'s
    * invite-and-grant vs grant-only routing decision. */
@@ -715,14 +1131,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const options = `?$filter=_sprk_primarycontact_value eq ${contactId}&$select=systemuserid&$top=1`;
     const result = await this.context.webAPI.retrieveMultipleRecords('systemuser', options);
     return result.entities.length > 0;
-  };
-
-  /** Sets/clears the contact's standing-grant flag — a single-field Contact
-   * write via `context.webAPI` (host-context, NOT a `sprk_externalrecordaccess`
-   * write, so it is intentionally outside the BFF grant-endpoint reuse
-   * constraint). */
-  private onSetStandingGrant = async (contactId: string, standingGrant: boolean): Promise<void> => {
-    await this.context.webAPI.updateRecord('contact', contactId, { sprk_standinggrant: standingGrant });
   };
 
   /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
@@ -813,6 +1221,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // VisualHost's showToolbar/showVersion reads.
     const showTitle = this.context.parameters.showTitle?.raw !== false;
     const showVersion = this.context.parameters.showVersion?.raw === true;
+    // Task 138: honour a read-only form. Re-read on every render (init and every updateView), so a form
+    // that becomes read-only — or a column that becomes non-editable — takes effect immediately.
+    const controlDisabled = this.context.mode?.isControlDisabled === true;
+    const accessPermissionBound = this.isAccessPermissionBound();
 
     const props: ITrackingFieldTrioProps = {
       monitor: this.monitorValue,
@@ -823,7 +1235,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.29 • Built 2026-08-12',
+      versionText: 'v1.0.37 • Built 2026-10-07',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -866,8 +1278,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           this.renderControl();
         })();
       },
-      // Real Create-privilege check (task 041) — see computeCanGrantAccess().
+      // The SERVER's answer to "may this caller change who can access this record" (task 118) — see
+      // evaluateGrantGate(). `false` until the server says otherwise, including while the answer is in
+      // flight and on every failure to obtain one.
       canGrantAccess: this.canGrantAccessValue,
+      // Task 138 — read-only form / non-editable column / unbound column / secure display (O1 FINAL).
+      disabled: controlDisabled,
+      accessPermissionDisabled: !this.isAccessPermissionEditable(),
+      showAccessPermission: accessPermissionBound,
+      secureAccessPermission: this.isSecureValue === true ? { label: SECURE_PILL_LABEL } : undefined,
     };
 
     const recordId = this.getRecordId();
@@ -936,14 +1355,19 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // nonBlocking so the lookup pane isn't covered by a backdrop.
                     pickContact: this.pickContact,
                     pickOrganization: this.pickOrganization,
+                    // "+ User" native picker (task 065, FR-29) — mirrors pickContact/pickOrganization.
+                    pickUser: this.pickUser,
                     // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
                     onOpenContact: this.openContactRecord,
                     isInternalContact: this.isInternalContact,
-                    onSetStandingGrant: this.onSetStandingGrant,
-                    // Access-Permission sharing gate (task 043, FR-14 Option A) —
-                    // mapped from the bound field's raw OptionSet value; see
-                    // mapAccessPermissionToState()'s doc comment.
+                    // Access-Permission sharing gate (task 043, FR-14 Option A; task 138) —
+                    // the bound field's raw value folded with the record's Secure flag,
+                    // failing closed; see mapAccessPermissionToState()'s doc comment.
                     accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+                    // Banner copy only ("Secure" / "Secure – Restricted", owner O1 FINAL).
+                    isSecureRecord: this.isSecureValue === true,
+                    // Secure-record owner/BU read-only display (task 065, design.md §6).
+                    fetchSecureOwnerInfo: this.fetchSecureOwnerInfo,
                   })
                 : null,
               // Canonical SendEmailDialog (task 042) — pre-populated with the
@@ -1037,7 +1461,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return {
       monitor: this.monitorValue,
       highPriority: this.highPriorityValue,
-      accessPermission: this.accessPermissionValue ?? undefined,
+      // Task 138: an unbound (optional) property is never written back.
+      accessPermission: this.isAccessPermissionBound() ? (this.accessPermissionValue ?? undefined) : undefined,
     };
   }
 

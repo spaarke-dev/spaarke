@@ -64,7 +64,7 @@ Load when:
 
 - ❌ **MUST NOT** create separate AI microservice
 - ❌ **MUST NOT** call Azure AI directly from PCF
-- ❌ **MUST NOT** host AI BFF endpoints in Azure Functions (Functions are permitted for out-of-band AI integration work — e.g., Dataverse → AI Search sync, closure-extraction pipelines, scheduled re-indexers — see ADR-001)
+- ❌ **MUST NOT** host AI BFF endpoints in Azure Functions (where non-request AI work runs — sync, extraction, re-indexing — is decided per workload under [ADR-052](../adr/ADR-052-workload-placement.md))
 - ❌ **MUST NOT** expose API keys to clients
 
 ### Caching (ADR-014)

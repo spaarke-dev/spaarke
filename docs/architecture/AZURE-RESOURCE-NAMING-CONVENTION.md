@@ -122,7 +122,7 @@ Container Display:     {BusinessUnit} Documents           e.g., "Root BU Documen
 .NET Namespaces:   Sprk.{Area}.{Component}     e.g., Sprk.Bff.Api
 npm Packages:      @spaarke/{package}           e.g., @spaarke/ui-components
 PCF Projects:      Sprk{ControlName}            e.g., SprkDocumentProfile
-Solution Projects: Sprk.{Purpose}               e.g., Sprk.Plugins.Validation
+Solution Projects: Sprk.{Purpose}               e.g., Sprk.Bff.Api   (no plugin projects — ADR-002)
 ```
 
 ### Service Bus Queues
@@ -211,19 +211,119 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | App Insights | `spaarke-demo-insights` | Demo monitoring |
 | Log Analytics | `spaarke-demo-logs` | Demo log aggregation |
 
-### Per-Customer Resources (Future — Production Multi-Tenant)
+### Per-Customer Resources
 
-When production supports multiple paying customers, each gets isolated data resources within the prod subscription:
+Each customer gets its own resource group — and per [ADR-027](../adr/ADR-027-azure-subscription-topology.md)
+as amended, its own **subscription**. Patterns below are taken from the deploying Bicep, not from intent.
+`infrastructure/bicep/customer.bicep` is the **only** customer-stamp template (owner decision D19,
+2026-10-02), deployed by the L2 control plane's handler H2a; the "Source" column names its variable/param:
 
-| Resource Type | Pattern | Example (Acme) |
-|--------------|---------|----------------|
-| Resource Group | `rg-spaarke-prod-{customer}` | `rg-spaarke-prod-acme` |
-| Storage Account | `sprk{customer}sa` | `sprkacmesa` |
-| Key Vault | `sprk-{customer}-kv` | `sprk-acme-kv` |
-| Service Bus Namespace | `spaarke-{customer}-sbus` | `spaarke-acme-sbus` |
-| Redis Cache | `spaarke-{customer}-cache` | `spaarke-acme-cache` |
+| Resource Type | Pattern | Example (`acme`, prod) | Source (`customer.bicep`) |
+|---|---|---|---|
+| Resource Group | `rg-spaarke-{customerId}-{env}` | `rg-spaarke-acme-prod` | `var resourceGroupName` |
+| UAMI | `mi-spaarke-{customerId}-{env}` | `mi-spaarke-acme-prod` | `module uami` → `name` |
+| Key Vault | `take('sprk-{customerId}-{env}-kv', 24)` | `sprk-acme-prod-kv` | `param keyVaultName` (default; overridable only for a registered naming exception) |
+| Storage Account | `sprk{customerId}{env}sa` | `sprkacmeprodsa` | `var storageAccountName` (hyphens stripped, lowercased, capped 24) |
+| Service Bus | `spaarke-{customerId}-{env}-sbus` | `spaarke-acme-prod-sbus` | `var serviceBusName` (`-sb` is reserved by Azure) |
+| Cosmos DB | `spaarke-{customerId}-{env}-cosmos` | `spaarke-acme-prod-cosmos` | `var cosmosAccountName` (capped 44) |
+| Azure OpenAI · AI Search · Document Intelligence · Redis · App Insights · Log Analytics | `sprk-{customerId}-{env}-{openai\|search\|docintel\|redis\|insights\|logs}` | `sprk-acme-prod-openai` | `var openAiName` / `searchServiceName` / `docIntelligenceName` / `redisCacheName` / `appInsightsName` / `logAnalyticsName` |
+| App Service Plan · BFF App Service | `sprk-{customerId}-{env}-{plan\|api}` | `sprk-acme-prod-api` | `module appServicePlan` → `planName`, `module bffApi` → `appServiceName` |
+| SignalR · ACS (only when enabled) | `sprk-{customerId}-{env}-{signalr\|acs}` | `sprk-acme-prod-signalr` | `var signalrName` / `acsResourceName` |
 
-> These customer resources share the environment-level AI services and BFF API from `rg-spaarke-prod`.
+> ⚠️ **Corrected 2026-09-29 (task 124).** This table previously gave `rg-spaarke-prod-{customer}` — env
+> BEFORE customer — which is the reverse of what the Bicep deploys, and omitted `{env}` from the other
+> patterns. It also closed with *"These customer resources share the environment-level AI services and BFF
+> API from `rg-spaarke-prod`"*, which **D-12 retired**: there is no shared tier. Each customer's stamp
+> includes its own BFF, Redis, OpenAI and Search.
+>
+> **One Key Vault form.** `customer.bicep` composes `take('sprk-{customerId}-{env}-kv', 24)`, which is what
+> sets the length limit below. The separator-less `sprk{customerId}{env}-kv` form and the
+> `sprk-{env}-{customerId}-uami` identity name belonged to `stacks/model2-full.bicep`, which deployed no live
+> environment *(retired by task 249, 2026-10-02 — file deleted; git history keeps it)*.
+
+---
+
+### The `customerId` standard
+
+**`customerId` is 3–8 characters, lowercase letters and digits, starting with a letter.**
+
+It is the identifier of record for a customer and the root of every per-customer resource name. Assigned at
+provisioning intake and stored on `sprk_dataverseenvironment.sprk_customerid`; Bicep **consumes** it and
+never mints one.
+
+#### Why 8 — the derivation, not a preference
+
+`customer.bicep` composes its Key Vault name as `take(format('sprk-{0}-{1}-kv', customerId, environmentName), 24)`.
+Azure Key Vault names are 3–24 characters and **may not begin or end with a hyphen**. The binding case is
+`environmentName = 'staging'`, the longest allowed value:
+
+| `customerId` length | Resulting name | Outcome |
+|---|---|---|
+| 8 | `sprk-xxxxxxxx-staging-kv` | ✅ complete, exactly 24 |
+| 9 | `sprk-xxxxxxxxx-staging-k` | ⚠️ truncated — loses the `v` |
+| **10** | `sprk-xxxxxxxxxx-staging-` | 🔴 **INVALID — trailing hyphen; Azure rejects it and the deployment fails** |
+
+The parameter previously allowed 10, so it admitted a value that cannot deploy. `take()` concealed it: the
+name was silently shortened rather than the template refusing, so the failure surfaced from Azure rather
+than from the template.
+
+#### Why lowercase letters and digits only
+
+The storage-account name is `take(toLower(replace('sprk{customerId}{env}sa', '-', '')), 24)` — it **strips
+hyphens**. So `acme-x` and `acmex` resolve to the *same* storage account name, and nothing detects the
+collision.
+
+🔴 **This rule cannot be enforced in Bicep.** ARM has no regex constraint on parameters — there is no
+`@pattern` decorator, and this repo has no `bicepconfig.json` enabling the experimental assertions feature.
+Only the **length** is enforceable in the template, and it is. The character rule is therefore enforced
+**where the value is assigned** — at provisioning intake — and the Bicep parameter documents it so the two
+cannot drift apart unnoticed.
+
+The leading-letter rule is a **readability convention, not an Azure requirement**: every composed name
+already begins with the `sprk` prefix, which satisfies the platform's start-character rules on its own.
+
+#### Which rules are HARD, and where each can be enforced
+
+🔴 **These three rules are not equally binding, and only one of them can be enforced by a Dataverse column.**
+Treating them as one rule is how a late, opaque deploy-time failure gets built in.
+
+| Rule | Hard? | Dataverse column | Bicep/ARM | Consequence if violated |
+|---|---|---|---|---|
+| **max 8** | ✅ Azure-derived | ✅ `MaxLength = 8` | ✅ `@maxLength(8)` | 🔴 deployment **FAILS** — Key Vault name ends in a hyphen |
+| **lowercase letters + digits** | ✅ collision risk | ❌ no regex on text columns | ❌ no `@pattern` | 🔴 **SILENT** — `acme-x` and `acmex` share one storage account |
+| **min 3** | ❌ **convention only** | ❌ Dataverse has no minimum | ✅ `@minLength(3)` | nothing breaks — every composed name is ≥10 chars even at length 1, because of the `sprk` / `rg-spaarke-` prefixes |
+
+**Why this matters for where the value is created.** A Dataverse text column enforces a maximum length but
+has **no minimum and no regex**. If `customerId` is first typed into Dataverse, the column can catch the one
+rule that would break a deployment (set `MaxLength = 8`) and cannot catch the other two.
+
+That is acceptable **only because of how the three rules fall**:
+
+- the rule Dataverse CAN enforce is the one that would otherwise fail a deployment;
+- the rule it cannot enforce and that MATTERS (character set) needs code-level validation at intake anyway,
+  because ARM cannot enforce it either;
+- the rule it cannot enforce and that it would be brittle to depend on (min 3) **has no technical
+  consequence** — it is a readability convention. A 2-character id deploys perfectly well.
+
+**So: set `MaxLength = 8` on the column, validate the character set in the intake code path, and treat
+min-3 as advisory.** Do not let min-3 become a late failure: `@minLength(3)` stays in the template as a
+backstop, but intake should catch it first, and if it is ever hit in practice the correct response is to
+relax it rather than to reject the customer.
+
+#### Recommended form
+
+```
+^[a-z][a-z0-9]{2,7}$        acme · contoso · fabrikam · nwind
+```
+
+Names longer than 8 characters are abbreviated at intake — `northwind` → `nwind`. The abbreviation is a
+decision made once, at onboarding, and recorded on the registry row; it is not re-derived anywhere.
+
+**Reserved: `platform`, `shared`, `byok`.** They match the pattern but already occupy the customerId position in
+non-customer resource-group names — `rg-spaarke-platform-{env}` (the BFF and the L2 control plane),
+`rg-spaarke-shared-{env}` (Spaarke's shared production resources — the Model 1 SPE billing account and, from its first prod deployment, the L2 control plane; formerly the retired Model 1 tier, D23 2026-10-03), `rg-spaarke-byok-prod`. A customer with one of these ids would
+deploy into that group. Intake refuses them (`CustomerIdStandard.ReservedIds`), and the BFF refuses to derive them
+at runtime (`CustomerIdResolver`).
 
 ---
 

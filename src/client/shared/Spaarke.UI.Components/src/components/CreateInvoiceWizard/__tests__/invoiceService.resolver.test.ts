@@ -22,6 +22,8 @@
  * @see CreateEventWizard/__tests__/eventService.resolver.test.ts (sibling reference shape)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { InvoiceService, _resetInvoiceServiceNavPropCacheForTests } from '../invoiceService';
 import { buildEmptyInvoiceForm, todayIsoDate } from '../formTypes';
@@ -242,7 +244,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -271,7 +273,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -289,7 +291,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -318,7 +320,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -342,7 +344,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -360,7 +362,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -380,7 +382,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -405,7 +407,7 @@ describe('InvoiceService.createInvoice', () => {
   describe('file dual-bind (FR-12 / design §5.8)', () => {
     it('binds an uploaded file to BOTH the new Invoice (primary) and the host Matter (additionalBinds)', async () => {
       const ds = makeDataService();
-      const authFetch = stubAuthenticatedFetch();
+      const authFetch = bffChildWriteFetch(ds, stubAuthenticatedFetch());
       const service = new InvoiceService(
         ds,
         authFetch,
@@ -435,7 +437,7 @@ describe('InvoiceService.createInvoice', () => {
 
     it('binds an uploaded file to the Invoice ONLY when no host association is supplied', async () => {
       const ds = makeDataService();
-      const authFetch = stubAuthenticatedFetch();
+      const authFetch = bffChildWriteFetch(ds, stubAuthenticatedFetch());
       const service = new InvoiceService(
         ds,
         authFetch,
@@ -454,11 +456,16 @@ describe('InvoiceService.createInvoice', () => {
       expect('sprk_Project@odata.bind' in docPayload!).toBe(false);
     });
 
-    it('skips upload entirely (with a warning) when files are present but no container ID is configured', async () => {
+    // Converted by task 076: this asserted that an absent client-side container SKIPPED the upload
+    // with a "no SPE container configured" warning. That guard is deleted — the upload is keyed on
+    // the invoice and the server resolves the container — so the surviving guarantee is the
+    // opposite one: the upload proceeds, and `sprk_graphdriveid` records the drive the SERVER
+    // reported rather than anything the client chose.
+    it('uploads and links the document with NO client-side container configured (server-derived)', async () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -467,9 +474,36 @@ describe('InvoiceService.createInvoice', () => {
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), null, [makeUploadedFile()]);
 
-      expect(result.status).toBe('partial');
-      expect(result.warnings.some(w => w.toLowerCase().includes('no spe container configured'))).toBe(true);
-      expect(ds._captured['sprk_document']).toBeUndefined();
+      expect(result.status === 'success' || result.status === 'partial').toBe(true);
+      const docPayload = ds._captured['sprk_document']?.[0];
+      expect(docPayload).toBeDefined();
+      expect(docPayload!['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${NEW_INVOICE_GUID})`);
+      // The SPE pointer is not the client's to write (unified-access-control-r2 task 166 f1): the row is created
+      // without it and the BFF attaches the uploaded file ('drive-1' is what stubAuthenticatedFetch's upload reports).
+      expect('sprk_graphdriveid' in docPayload!).toBe(false);
+      expect('sprk_graphitemid' in docPayload!).toBe(false);
+    });
+  });
+
+  // Added by task 076 — the create payload must name no storage location. Both writes that could
+  // have put one there are deleted: the host-injected `this._containerId` assignment and the
+  // `applyDefaultContainerId` half of the BU cascade.
+  describe('task 076 — no client-written sprk_containerid', () => {
+    it('omits sprk_containerid from the invoice create payload even when a host container is supplied', async () => {
+      const ds = makeDataService();
+      const service = new InvoiceService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example',
+        'host-resolved-container-1',
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
+
+      const result = await service.createInvoice(makeForm({ name: 'X' }), null, []);
+
+      expect(result.status).toBe('success');
+      expect(invoicePayload(ds)).not.toHaveProperty('sprk_containerid');
     });
   });
 
@@ -479,7 +513,7 @@ describe('InvoiceService.createInvoice', () => {
       (ds.createRecord as jest.Mock).mockRejectedValueOnce(new Error('Dataverse unavailable'));
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,

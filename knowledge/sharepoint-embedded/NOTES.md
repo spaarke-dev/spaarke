@@ -386,7 +386,7 @@ If any of these break, Copilot grounding fails silently (it returns no results f
 Spaarke ships a Word add-in for document creation and SPE upload. The flow is:
 
 1. User opens Word, invokes the Spaarke add-in taskpane.
-2. Taskpane reads the current Word document via `WordHostAdapter` (`src/client/office-addins/word/WordHostAdapter.ts`).
+2. Taskpane reads the current Word document via `WordAdapter` (`src/client/office-addins/shared/adapters/WordAdapter.ts`), obtained from `HostAdapterFactory`. (Task 010 / FR-04 consolidated the two Word adapters; `word/WordHostAdapter.ts` was deleted.)
 3. User selects a target (matter, project, BU) and metadata in the taskpane UI.
 4. Taskpane calls Spaarke BFF upload endpoint with the document content + target.
 5. **BFF executes "SPE First, Dataverse Second"**:
@@ -396,8 +396,7 @@ Spaarke ships a Word add-in for document creation and SPE upload. The flow is:
 6. Taskpane shows success state with link to the new Dataverse record.
 
 **Code paths**:
-- `src/client/office-addins/word/WordHostAdapter.ts` — Word-specific host adapter
-- `src/client/office-addins/shared/adapters/WordAdapter.ts` — shared adapter base
+- `src/client/office-addins/shared/adapters/WordAdapter.ts` — the single Word host adapter, reached via `HostAdapterFactory` (task 010 / FR-04 deleted the duplicate `word/WordHostAdapter.ts`)
 - `src/client/office-addins/word/taskpane/` — taskpane UI
 - BFF upload endpoint: _TODO: confirm exact route (likely under `Sprk.Bff.Api/Api/`)_
 
@@ -424,7 +423,7 @@ _TODO: How does the Word add-in handle the case where the user creates a documen
 
 **Flow (via Outlook add-in)**:
 1. User receives an email, invokes the Spaarke Outlook add-in taskpane.
-2. Taskpane reads the current email via `OutlookHostAdapter` (`src/client/office-addins/outlook/OutlookHostAdapter.ts`):
+2. Taskpane reads the current email via `OutlookAdapter` (`src/client/office-addins/shared/adapters/OutlookAdapter.ts`):
    - Email body + headers
    - Attachments (file blobs)
 3. User selects target matter/project (and any categorization) in the taskpane UI.
@@ -441,7 +440,7 @@ Spaarke has **no catch-all email ingestion path** — no Exchange Online connect
 **🚨 Critical**: if a server-side email ingestion path is added later, it MUST route through the same custom save component — never call SPE directly, never create `sprk_communication` directly, never resurrect the OOB `email` entity or server-side sync.
 
 **Code paths**:
-- `src/client/office-addins/outlook/OutlookHostAdapter.ts` — Outlook-specific host adapter (reads email/attachments via Office.js)
+- `src/client/office-addins/shared/adapters/OutlookAdapter.ts` — Outlook-specific host adapter (reads email/attachments via Office.js)
 - `src/client/office-addins/outlook/taskpane/` — taskpane UI
 - `src/client/office-addins/outlook/commands/` — ribbon commands
 - Custom email save component (BFF-side): _TODO: confirm exact path. Likely under `src/server/api/Sprk.Bff.Api/` — search for `sprk_communication` or `EmailToSpe` to locate._
@@ -454,7 +453,7 @@ Spaarke has **no catch-all email ingestion path** — no Exchange Online connect
 
 _TODO: Confirm — do attachments become `sprk_document` records linked to the parent `sprk_communication`, or do they also become `sprk_communication` records (e.g., type=Attachment)? Document the convention so the agent doesn't create the wrong shape._
 
-_TODO: Document the Outlook 1.8+ Mailbox API requirement set dependency and any tenant-side configuration needed (per `OutlookHostAdapter.ts` header)._
+_TODO: Document the Outlook 1.8+ Mailbox API requirement set dependency and any tenant-side configuration needed (per `shared/adapters/OutlookAdapter.ts` header)._
 
 _TODO: Attachment dedup policy — if the same attachment was already saved (different email, same file), does Spaarke detect and link to the existing record, or create a new one?_
 

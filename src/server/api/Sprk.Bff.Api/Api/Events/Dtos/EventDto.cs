@@ -45,7 +45,8 @@ public record EventDto
     public string? RegardingRecordName { get; init; }
 
     /// <summary>
-    /// Entity type of the regarding record (sprk_regardingrecordtype option set value).
+    /// Entity type of the regarding record, as the API's integer (derived from the typed regarding lookup — see
+    /// <see cref="Dtos.RegardingRecordType"/>; <c>sprk_regardingrecordtype</c> itself is a lookup, not this value).
     /// Values: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), Work Assignment (6), Budget (7)
     /// </summary>
     public int? RegardingRecordType { get; init; }
@@ -76,7 +77,9 @@ public record EventDto
     public int StateCode { get; init; }
 
     /// <summary>
-    /// Status reason: Draft (1), Planned, Open, On Hold, Completed (2), Cancelled, Deleted.
+    /// Status reason (statuscode) — live values in <see cref="Spaarke.Dataverse.EventStatusCode"/>:
+    /// Draft (1), Open (659490001), Completed (659490002), Closed (659490003), Cancelled (659490004),
+    /// Transferred (659490005), On Hold (659490006), Reassigned (659490007), No Further Action (2).
     /// </summary>
     public int StatusCode { get; init; }
 
@@ -86,7 +89,8 @@ public record EventDto
     public string Status { get; init; } = string.Empty;
 
     /// <summary>
-    /// Event priority: Low (0), Normal (1), High (2), Urgent (3).
+    /// Event priority (sprk_priority) — live <see cref="Spaarke.Dataverse.EventPriority"/> value: Low (100000000),
+    /// Normal (100000001), High (100000002), Urgent (100000003).
     /// </summary>
     public int? Priority { get; init; }
 
@@ -111,60 +115,18 @@ public record EventDto
     public DateTime ModifiedOn { get; init; }
 }
 
-/// <summary>
-/// Status code values for Event records.
-/// </summary>
-public static class EventStatusCode
-{
-    public const int Draft = 1;
-    public const int Planned = 2;
-    public const int Open = 3;
-    public const int OnHold = 4;
-    public const int Completed = 5;
-    public const int Cancelled = 6;
-    public const int Deleted = 7;
+// Status reason values: Spaarke.Dataverse.EventStatusCode — ONE home, next to the payload builders that write them
+// (task 097; unified-access-control-r2 task 159 fixed the same values independently in a copy here — merged into one).
 
-    /// <summary>
-    /// Converts status code to display name.
-    /// </summary>
-    public static string GetDisplayName(int statusCode) => statusCode switch
-    {
-        Draft => "Draft",
-        Planned => "Planned",
-        Open => "Open",
-        OnHold => "On Hold",
-        Completed => "Completed",
-        Cancelled => "Cancelled",
-        Deleted => "Deleted",
-        _ => "Unknown"
-    };
-}
+// Priority values: Spaarke.Dataverse.EventPriority (task 097 — the former 0..3 set that lived here was rejected by
+// Dataverse; live sprk_priority is Low 100000000 … Urgent 100000003).
 
 /// <summary>
-/// Priority values for Event records.
-/// </summary>
-public static class EventPriority
-{
-    public const int Low = 0;
-    public const int Normal = 1;
-    public const int High = 2;
-    public const int Urgent = 3;
-
-    /// <summary>
-    /// Converts priority value to display name.
-    /// </summary>
-    public static string GetDisplayName(int priority) => priority switch
-    {
-        Low => "Low",
-        Normal => "Normal",
-        High => "High",
-        Urgent => "Urgent",
-        _ => "Normal"
-    };
-}
-
-/// <summary>
-/// Regarding record type values (matches sprk_regardingrecordtype option set).
+/// The API's regarding record type values (0-7). These are NOT Dataverse values: <c>sprk_regardingrecordtype</c> is a
+/// LOOKUP to <c>sprk_recordtype_ref</c>, not an option set (task 159, #1098). The API's integer names which typed
+/// regarding lookup an event uses; the server binds the record-type lookup to the environment's
+/// <c>sprk_recordtype_ref</c> row and derives this integer on read from the typed lookup whose value equals
+/// <c>sprk_regardingrecordid</c>.
 /// </summary>
 public static class RegardingRecordType
 {

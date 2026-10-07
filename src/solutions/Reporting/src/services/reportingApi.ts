@@ -15,8 +15,9 @@ import { getBffBaseUrl } from "../config/runtimeConfig";
 import {
   REPORTING_EMBED_TOKEN_PATH,
   REPORTING_CATALOG_PATH,
+  REPORTING_STATUS_PATH,
 } from "../config/reportingConfig";
-import type { ExportFormat, ExportStatus, UserPrivilege, ReportCatalogItem } from "../types";
+import type { ExportFormat, UserPrivilege, ReportCatalogItem } from "../types";
 
 // Re-export so callers that imported from reportingApi.ts continue to work
 export type { ReportCatalogItem };
@@ -31,10 +32,15 @@ const REPORTING_EXPORT_PATH = "/api/reporting/export";
 // Response shapes
 // ---------------------------------------------------------------------------
 
-/** Embed token response from GET /api/reporting/embed-token */
+/**
+ * Embed token response from GET /api/reporting/embed-token.
+ *
+ * unified-access-control-r2 task 166 r1: field names match the BFF's EmbedConfig (`expiry`, not `expiration`), and
+ * `reportId` / `workspaceId` are the Power BI ids the BFF DERIVED from the catalog row — the client never sends them.
+ */
 export interface EmbedTokenResponse {
   token: string;
-  expiration: string; // ISO-8601 date string
+  expiry: string; // ISO-8601 date string
   /**
    * ISO-8601 timestamp at which the client should proactively refresh the
    * token via report.setAccessToken(). Set by the BFF at 80% of token TTL.
@@ -45,20 +51,15 @@ export interface EmbedTokenResponse {
   workspaceId: string;
 }
 
-/** Response from POST /api/reporting/export */
-export interface ExportInitResponse {
-  exportId: string;
-  status: ExportStatus;
-}
-
-/** Response from GET /api/reporting/export/{exportId}/status */
-export interface ExportStatusResponse {
-  exportId: string;
-  status: ExportStatus;
-  /** Populated when status is "completed" — presigned or relative URL */
-  downloadUrl?: string;
-  /** File name suggestion for the download */
-  fileName?: string;
+/**
+ * The exported file from POST /api/reporting/export.
+ *
+ * unified-access-control-r2 task 166 r1: the BFF runs the Power BI export job to completion and streams the file in
+ * the response — there is no export id and no status endpoint (the client used to poll a route that never existed).
+ */
+export interface ExportedFile {
+  blob: Blob;
+  fileName: string;
 }
 
 /** Generic typed result to avoid raw Response handling in components. */
@@ -73,7 +74,7 @@ export type ApiResult<T> =
 /**
  * Fetch an embed token for the given report.
  *
- * @param reportId   The sprk_report record GUID (Dataverse)
+ * @param reportId   The sprk_report catalog row GUID — the only report id the BFF accepts (task 166 r1)
  * @param allowEdit  When true, requests an edit-capable token (Author/Admin only)
  */
 export async function fetchEmbedToken(
@@ -132,16 +133,16 @@ export async function fetchReports(): Promise<ApiResult<ReportCatalogItem[]>> {
 // ---------------------------------------------------------------------------
 
 /**
- * Initiate an export operation via POST /api/reporting/export.
- * The BFF calls Power BI ExportToFile and polls for completion.
+ * Export a catalog report via POST /api/reporting/export. The BFF runs the Power BI ExportToFile job to completion
+ * (it can take 30-60 seconds) and returns the file itself.
  *
- * @param reportId  Power BI report GUID
+ * @param reportId  The sprk_report catalog row GUID
  * @param format    "PDF" or "PPTX"
  */
 export async function exportReport(
   reportId: string,
   format: ExportFormat
-): Promise<ApiResult<ExportInitResponse>> {
+): Promise<ApiResult<ExportedFile>> {
   try {
     const url = `${getBffBaseUrl()}${REPORTING_EXPORT_PATH}`;
     const response = await authenticatedFetch(url, {
@@ -155,56 +156,45 @@ export async function exportReport(
       return { ok: false, error: body || response.statusText, status: response.status };
     }
 
-    const data = (await response.json()) as ExportInitResponse;
-    return { ok: true, data };
+    const blob = await response.blob();
+    const extension = format === "PDF" ? "pdf" : "pptx";
+    return { ok: true, data: { blob, fileName: fileNameFrom(response, `report.${extension}`) } };
   } catch (err) {
     console.error("[reportingApi] exportReport failed", err);
     return { ok: false, error: String(err) };
   }
 }
 
-/**
- * Poll for export status via GET /api/reporting/export/{exportId}/status.
- *
- * @param exportId  The export job ID returned by exportReport()
- */
-export async function getExportStatus(
-  exportId: string
-): Promise<ApiResult<ExportStatusResponse>> {
-  try {
-    const url = `${getBffBaseUrl()}${REPORTING_EXPORT_PATH}/${encodeURIComponent(exportId)}/status`;
-    const response = await authenticatedFetch(url, { method: "GET" });
-
-    if (!response.ok) {
-      const body = await response.text();
-      return { ok: false, error: body || response.statusText, status: response.status };
+/** The file name the BFF set in Content-Disposition, or the fallback. */
+function fileNameFrom(response: Response, fallback: string): string {
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (encoded) {
+    try {
+      return decodeURIComponent(encoded[1]);
+    } catch {
+      // fall through to the plain form
     }
-
-    const data = (await response.json()) as ExportStatusResponse;
-    return { ok: true, data };
-  } catch (err) {
-    console.error("[reportingApi] getExportStatus failed", err);
-    return { ok: false, error: String(err) };
   }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain ? plain[1] : fallback;
 }
 
 // ---------------------------------------------------------------------------
-// Report management — create, update, save-as
+// Report management — create (also used by Save As: a server-side clone, task 166 r2), update
 // ---------------------------------------------------------------------------
 
 /**
- * Request body for POST /api/reporting/reports — create a blank report.
- * The BFF creates the report in the PBI workspace using CreateReport with
- * the provided datasetId, then creates a sprk_report Dataverse record.
+ * Request body for POST /api/reporting/reports — a new report based on a catalog report the user can read.
+ *
+ * unified-access-control-r2 task 166 r1: the BFF derives the Power BI workspace and dataset from the SOURCE catalog
+ * row (read as the user) and clones its report; the client no longer names a dataset or a workspace.
  */
 export interface CreateReportRequest {
   /** Display name for the new report. */
   name: string;
-  /**
-   * Power BI dataset (semantic model) ID to bind the new report to.
-   * Must belong to the customer's PBI workspace.
-   */
-  datasetId: string;
+  /** The sprk_report catalog row the new report is based on (its dataset is inherited). */
+  sourceReportId: string;
 }
 
 /**
@@ -223,10 +213,10 @@ export interface CreateReportResponse {
  * Create a blank Power BI report bound to the customer's semantic model.
  *
  * Calls POST /api/reporting/reports. The BFF:
- *  1. Calls PBI CreateReport with the given datasetId
- *  2. Creates a sprk_report Dataverse record to track the report in the catalog
+ *  1. Reads the source catalog row as the user and clones its Power BI report (same workspace and dataset)
+ *  2. Creates a sprk_report catalog row as the user
  *
- * @param request  Name and datasetId for the new report
+ * @param request  Name and source catalog row for the new report
  */
 export async function createReport(
   request: CreateReportRequest
@@ -295,57 +285,23 @@ export async function updateReport(
   }
 }
 
-/**
- * Request body for POST /api/reporting/reports (save-as variant).
- * Creates a copy of an existing report with a new name, marked as custom.
- */
-export interface SaveAsReportRequest {
-  /** New display name for the copied report. */
-  name: string;
-  /** Source report's Power BI report ID (used by the BFF to call SaveAs). */
-  sourceReportId: string;
-  /** Power BI workspace ID where the copy should be saved. */
-  targetWorkspaceId: string;
-  /** Always true for SaveAs — flags the record as user-created. */
-  isCustom: boolean;
-}
-
-/**
- * Create a copy of an existing report (Save As).
- *
- * Calls POST /api/reporting/reports with isCustom=true. The BFF calls
- * report.saveAs() in PBI, then creates a new sprk_report Dataverse record
- * with is_custom=true.
- *
- * @param request  SaveAs parameters including new name and source report info
- */
-export async function saveAsReport(
-  request: SaveAsReportRequest
-): Promise<ApiResult<CreateReportResponse>> {
-  try {
-    const url = `${getBffBaseUrl()}${REPORTING_CATALOG_PATH}`;
-    const response = await authenticatedFetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      return { ok: false, error: body || response.statusText, status: response.status };
-    }
-
-    const data = (await response.json()) as CreateReportResponse;
-    return { ok: true, data };
-  } catch (err) {
-    console.error("[reportingApi] saveAsReport failed", err);
-    return { ok: false, error: String(err) };
-  }
-}
-
 export async function fetchUserPrivilege(): Promise<ApiResult<{ privilege: UserPrivilege }>> {
   try {
-    const url = `${getBffBaseUrl()}/api/reporting/privilege`;
+    // Fixed 2026-09-02: this called GET /api/reporting/privilege, which has never existed —
+    // a guaranteed 404, so the hook always fell back to "Viewer" and Author/Admin controls
+    // were unreachable for everyone.
+    //
+    // No new endpoint was needed. GET /api/reporting/status ALREADY returns the resolved
+    // privilege: ReportingAuthorizationFilter maps the caller's Dataverse roles
+    // (sprk_ReportingAccess / sprk_ReportingAuthor / sprk_ReportingAdmin) to a
+    // ReportingPrivilegeLevel, and ReportingStatusResponse carries it as `privilege`
+    // ("Viewer" | "Author" | "Admin") — exactly this function's return shape.
+    //
+    // NOTE: ModuleGate already probes this same endpoint on mount and discards the body.
+    // Collapsing the two into one call means threading privilege through the gate into a
+    // context; deliberately not done here to keep this fix off a working auth gate. The
+    // duplicate request is one lightweight probe.
+    const url = `${getBffBaseUrl()}${REPORTING_STATUS_PATH}`;
     const response = await authenticatedFetch(url, { method: "GET" });
 
     if (!response.ok) {
