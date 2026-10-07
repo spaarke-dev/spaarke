@@ -212,11 +212,20 @@ jobs:
         # globs (see the comment on the step above). This is the only classification
         # that allows the entire Tier 1/2 stack to be skipped. Fail closed: anything
         # but an explicit non_docs == 'false' (e.g. an empty output) is NOT docs-only.
+        # A PR with more than 3,000 changed files is NOT docs-only either: on PRs
+        # dorny/paths-filter reads the file list from `pulls.listFiles`, which returns at
+        # most 3,000 files, so a non-doc file beyond that cap would be invisible to
+        # `non_docs` (081 round 9). `changed_files` is empty on push / merge_group, where
+        # paths-filter diffs git directly, and an empty value is not > 3000.
         shell: bash
         run: |
           docs='${{ steps.filter.outputs.docs }}'
           non_docs='${{ steps.non-docs.outputs.non_docs }}'
-          if [[ "$docs" == "true" && "$non_docs" == "false" ]]; then
+          changed_files='${{ github.event.pull_request.changed_files }}'
+          if [[ "${changed_files:-0}" -gt 3000 ]]; then
+            echo "value=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::${changed_files} changed files exceed the 3,000-file listing cap; not treated as docs-only."
+          elif [[ "$docs" == "true" && "$non_docs" == "false" ]]; then
             echo "value=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Docs-only change detected — Tier 1 and Tier 2 will be skipped; router-result will still pass."
           else
