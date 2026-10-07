@@ -276,6 +276,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Platform rules** (owner, standing): no Dataverse plugins and no form-event `.js` (ADR-002); records are always **team-owned**; `TargetEntity` is never required; access is **BU-assigned, never org-wide**.
 - **Approvals** (owner, standing): every spec amendment needs the owner's sign-off; a dev BFF deploy needs the owner's go (given per deploy); no Dataverse role/security configuration change without the owner's go. The owner prefers the best long-term solution and often delegates the pick — recommend it, then execute it.
 - **CI ownership** (2026-09-09): ci-cd-unit-test-remediation-r1 is CLOSED, so this project owns its own CI changes. React 19 stays; React Testing Library aligns to it.
+- **Business-unit layout** (owner, 2026-10-06): each customer has ONE primary business unit; the secure-record business unit is a SIBLING of the primary one (not a child). Unified-access-control-r2 owns this design — ask them for detail.
 - **Dev data is not indicative** (2026-09-10 / 2026-09-25): legacy/existing documents don't matter. Root-BU users and records are a setup artifact. Verify ownership/BU behaviour as **Test User 1** (`testuser1@spaarke.com`, BU `cb15f587…`), the only child-BU account.
 
 ### Git, PRs, CI
