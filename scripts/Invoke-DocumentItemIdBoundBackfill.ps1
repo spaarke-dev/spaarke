@@ -111,7 +111,7 @@ while ($url) {
         $rows++
         $bound = "$($row.$BoundColumn)".Trim()
 
-        if ($bound -eq $item) { $equal++; continue }
+        if ($bound -ceq $item) { $equal++; continue }   # ordinal, as the BFF compares (round 74 V7)
         if ($bound) {
             # Never overwritten: the BFF bound another item, so this row was re-pointed outside the BFF.
             $mismatches.Add("$($row.sprk_documentid): $ItemColumn='$item' but $BoundColumn='$bound'")

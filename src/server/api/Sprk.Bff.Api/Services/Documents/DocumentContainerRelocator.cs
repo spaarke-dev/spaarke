@@ -600,6 +600,19 @@ public sealed class DocumentContainerRelocator
             return DocumentRelocationOutcome.Of(documentId, RelocationState.NoFile, null, null, null, null, "the row carries no file");
         }
 
+        // Task 171 round 74 (V1): the item must be the one the BFF BOUND to this row before anything is copied, re-pointed
+        // or deleted. A move writes a MATCHING copy for whatever item it moves, so moving a forged pointer would launder it
+        // (and the settle would then delete the item it was forged to). Same rule, same definition as the pointer check.
+        if (_resolver.ItemBindingRefusal(row!, sourceItem) is { } bindingRefusal)
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: {Reason}. Nothing is copied, re-pointed or deleted.",
+                documentId, bindingRefusal);
+            return DocumentRelocationOutcome.Of(
+                documentId, RelocationState.SourceUnverified, sourceDrive, sourceItem, null, null,
+                bindingRefusal + " — an administrator must repair it; it is not moved");
+        }
+
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
         // repeat call completes it whatever the file's placement is now.
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
@@ -2059,7 +2072,8 @@ public sealed class DocumentContainerRelocator
     private async Task<Entity?> ReadRowAsync(Guid documentId, CancellationToken ct)
         => await _dataverse.RetrieveAsync(
             DocumentEntity, documentId,
-            [DriveColumn, ItemColumn, FileNameColumn, SearchIndexNameColumn, RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
+            [DriveColumn, ItemColumn, Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn, FileNameColumn, SearchIndexNameColumn,
+             RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
             .ConfigureAwait(false);
 
     private static bool SameItem(string? driveA, string? itemA, string? driveB, string? itemB)

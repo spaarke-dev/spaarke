@@ -26,7 +26,10 @@ public class DocumentPointerBindingGuardTests
         @"\[\s*(?:""sprk_graphitemid""|(?:\w+\.)?GraphItemIdAttribute|ItemColumn)\s*\]\s*=(?!=)",
         RegexOptions.Compiled);
 
-    private const string BindingMarker = "DocumentPointerBinding";
+    /// <summary>An ASSIGNMENT of the copy — a mention of the type is not enough (round 74 V4).</summary>
+    private static readonly Regex WritesBoundCopy = new(
+        @"\[\s*(?:Spaarke\.Dataverse\.)?DocumentPointerBinding\.BoundItemIdColumn\s*\]\s*=(?!=)",
+        RegexOptions.Compiled);
 
     [Fact(DisplayName = "Task 171 (round 72 F4): every server file that writes sprk_graphitemid also writes the field-secured copy")]
     public void EveryItemIdWriterBindsTheCopy()
@@ -50,7 +53,8 @@ public class DocumentPointerBindingGuardTests
             }
 
             writers.Add(relative);
-            if (!text.Contains(BindingMarker, StringComparison.Ordinal))
+            var boundWrites = text.Split('\n').Count(l => WritesBoundCopy.IsMatch(SourceScan.StripLineComment(l)));
+            if (boundWrites == 0)
             {
                 violations.AddRange(sites);
             }
@@ -60,8 +64,7 @@ public class DocumentPointerBindingGuardTests
             "A file writes sprk_graphitemid without writing sprk_graphitemidbound. sprk_graphitemid cannot be field-secured "
             + "(it is in the alternate key sprk_graphitemid_uk), so the pointer check compares it with the BFF-only copy; a "
             + "writer that sets one without the other makes the document unservable. REMEDY: on the SAME write, set "
-            + "[DocumentPointerBinding.BoundItemIdColumn] = <the same item id> (or call DocumentPointerBinding.Bind / "
-            + "BindFields).\n\nOffending sites:\n  " + string.Join("\n  ", violations));
+            + "[DocumentPointerBinding.BoundItemIdColumn] = <the same item id>.\n\nOffending sites:\n  " + string.Join("\n  ", violations));
 
         // Non-vacuity: the known writers (Dataverse typed update, external upload, three communication archive/attachment
         // writers, Compose create-on-save, the relocator) are found. A count below that means the pattern drifted.
@@ -79,6 +82,8 @@ public class DocumentPointerBindingGuardTests
         Assert.Empty(Scan("D.cs", """new KeyAttributeCollection { { GraphItemIdAttribute, graphItemId } }"""));
         Assert.Empty(Scan("E.cs", """if (entity["sprk_graphitemid"] == null) { }"""));
         Assert.Empty(Scan("F.cs", """// ["sprk_graphitemid"] = x  (a comment)"""));
+        Assert.Matches(WritesBoundCopy, """    [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = item,""");
+        Assert.DoesNotMatch(WritesBoundCopy, """var c = DocumentPointerBinding.BoundItemIdColumn;""");
     }
 
     private static List<string> Scan(string relativeFile, string text)

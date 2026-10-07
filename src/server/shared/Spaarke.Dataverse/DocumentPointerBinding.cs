@@ -1,5 +1,3 @@
-using Microsoft.Xrm.Sdk;
-
 namespace Spaarke.Dataverse;
 
 /// <summary>
@@ -13,8 +11,9 @@ namespace Spaarke.Dataverse;
 /// test no longer tells a legitimate item from another BFF-placed one. <c>sprk_graphitemidbound</c> holds the SAME value,
 /// is field-secured with the "Spaarke BFF-Managed Field Writers" profile (only the BFF writes it), and the pointer check
 /// (<c>RecordContainerResolver.DocumentPointer</c>) requires the two to be equal.</para>
-/// <para><b>The rule for writers.</b> Every BFF code path that sets or changes a document's item id calls
-/// <see cref="Bind(Entity)"/> (or <see cref="BindFields"/>) on the SAME write, so the copy can never lag the pointer. The arch guard
+/// <para><b>The rule for writers.</b> Every BFF code path that sets or changes a document's item id also sets
+/// <c>[<see cref="BoundItemIdColumn"/>] = &lt;the same item id&gt;</c> on the SAME write, so the copy can never lag the
+/// pointer. The arch guard
 /// <c>DocumentPointerBindingGuardTests</c> fails the build when a file writes <c>sprk_graphitemid</c> without it. The
 /// copy is NEVER derived anywhere else: a generic write that carries <c>sprk_graphitemid</c> from configuration or a
 /// playbook is deliberately NOT bound, so such a re-point is refused rather than laundered.</para>
@@ -26,39 +25,6 @@ public static class DocumentPointerBinding
 
     /// <summary>The field-secured copy only the BFF writes.</summary>
     public const string BoundItemIdColumn = "sprk_graphitemidbound";
-
-    /// <summary>
-    /// Stamps <see cref="BoundItemIdColumn"/> with the item id this write sets — from the attributes, or (an upsert) the
-    /// alternate key. No item id on the write: nothing is stamped.
-    /// </summary>
-    public static Entity Bind(Entity document)
-    {
-        ArgumentNullException.ThrowIfNull(document);
-        if (document.Attributes.TryGetValue(ItemIdColumn, out var value))
-        {
-            document[BoundItemIdColumn] = value;
-        }
-        else if (document.KeyAttributes.TryGetValue(ItemIdColumn, out var key))
-        {
-            document[BoundItemIdColumn] = key;
-        }
-
-        return document;
-    }
-
-    /// <summary>
-    /// <see cref="Bind(Entity)"/> for a field dictionary — a generic update's or a Web API body's (both
-    /// <c>Dictionary&lt;string, object&gt;</c> and <c>Dictionary&lt;string, object?&gt;</c> implement the non-generic
-    /// <see cref="System.Collections.IDictionary"/>).
-    /// </summary>
-    public static void BindFields(System.Collections.IDictionary fields)
-    {
-        ArgumentNullException.ThrowIfNull(fields);
-        if (fields.Contains(ItemIdColumn))
-        {
-            fields[BoundItemIdColumn] = fields[ItemIdColumn];
-        }
-    }
 
     /// <summary>
     /// Does the row's bound copy agree with the item a caller is about to follow? <see cref="BindingState.Mismatch"/> when

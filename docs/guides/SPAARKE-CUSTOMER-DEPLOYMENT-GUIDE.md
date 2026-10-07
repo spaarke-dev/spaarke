@@ -576,9 +576,11 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   `sprk_graphitemidbound` (only the BFF writes the copy; `sprk_graphitemid` cannot be secured because it is in an
   alternate key). While unset, a row with an EMPTY copy falls back to the rule in force; set it to `true` only after
   `scripts/Invoke-DocumentItemIdBoundBackfill.ps1 -Verify` passes — from then on a row with no copy is refused.
-  ⚠️ The column must exist and be field-secured (`Set-DocumentRelocationSchema.ps1 -Apply`, then
-  `Set-DocumentPointerFieldSecurity.ps1 -Apply`) **before** this BFF is deployed: it writes the copy on every pointer
-  write, and a write the BFF identity may not make fails.
+  🔴 The column must exist and be field-secured (`Set-DocumentRelocationSchema.ps1 -Apply`, then
+  `Set-DocumentPointerFieldSecurity.ps1 -Apply`) on an environment **before any BFF build containing it can reach that
+  environment** — for the shared dev environment that means before the change merges to master (other projects deploy
+  master there). Without it every pointer WRITE fails (uploads, Office saves, email archives, Compose saves,
+  relocations) and every pointer-check READ is refused 409 `document_storage_unverified` on all content routes.
 - ⚠️ **Schema, then field security, before any file relocation** (task 166 f1-v1 / f1-v2): run
   `scripts/Set-DocumentRelocationSchema.ps1 -Apply` then `-Verify` on the environment's Dataverse, then
   `scripts/Set-DocumentPointerFieldSecurity.ps1` (dry run → `-ClientNoLongerWritesPointers -Apply` → `-Verify`), before

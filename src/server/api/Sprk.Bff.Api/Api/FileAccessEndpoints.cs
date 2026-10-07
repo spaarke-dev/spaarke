@@ -62,42 +62,83 @@ public static class FileAccessEndpoints
 
     /// <summary>
     /// Why a sharing link may NOT be minted for <paramref name="documentId"/> — its record is SECURE or RESTRICTED (owner
-    /// round 72 item 2, task 171 adversarial finding 10) — or <see langword="null"/> for a standard document.
+    /// round 72 item 2; task 171 adversarial findings 10 and V2) — or <see langword="null"/> for a standard document.
     /// </summary>
     /// <remarks>
-    /// <para>Reuses the two existing reads, no new lookup: <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/>
-    /// for every project / matter / work assignment the document is filed to (an id it cannot read comes back
-    /// secure AND restricted — fail closed), and <c>RecordContainerResolver.DeriveDocumentContainersAsync</c>, whose
-    /// <c>IsSecure</c> also covers a document filed to a CHILD of a secure record (an event, invoice or to-do of a
-    /// secure project). A derivation that cannot be decided adds no refusal (the root flags already decided the
-    /// direct links), so a standard document is never newly refused.</para>
+    /// <para><b>Which records.</b> Every record the document is filed to, resolved to its project / matter / work
+    /// assignment: a ROOT link directly; any other link (communication — every email archive and attachment carries only
+    /// <c>sprk_relatedcommunication</c> — event, invoice, to-do, agreement, …) through
+    /// <see cref="CoreAncestorResolver.ResolveStampsAsync"/>, the one-hop ancestor rule the access model already uses (a
+    /// communication inherits its parent's access permission). Party links (contact, organization) carry no protection.</para>
+    /// <para><b>Which flags.</b> <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/> for every such root (an
+    /// id it cannot read comes back secure AND restricted), plus <c>RecordContainerResolver.DeriveDocumentContainersAsync</c>
+    /// <c>.IsSecure</c>.</para>
+    /// <para><b>Fail closed.</b> An unreadable row, an ancestor read that ERRORS, or — when the document has a child link —
+    /// a derivation that cannot be decided answers <see cref="ShareLinkProtectionUnverifiableCode"/>. A document whose
+    /// links are all roots (or none) keeps the earlier behaviour: an undecided derivation adds no refusal there, because
+    /// the root flags already decided every record it is filed to.</para>
     /// </remarks>
     internal static async Task<(string ReasonCode, string Detail)?> ShareLinkProtectionRefusalAsync(
         Guid documentId,
         Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         IGenericEntityService entityService,
         Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
         ILogger logger,
         CancellationToken ct)
     {
-        var rootLinks = DocumentLinkFields.All
-            .Where(l => ShareLinkRootTypes.Contains(l.TargetEntityLogicalName))
-            .ToArray();
         var row = await entityService
-            .RetrieveAsync("sprk_document", documentId, rootLinks.Select(l => l.LogicalName).ToArray(), ct)
+            .RetrieveAsync("sprk_document", documentId, DocumentLinkFields.LogicalNames.ToArray(), ct)
             .ConfigureAwait(false);
         if (row is null)
         {
-            return (ShareLinkProtectionUnverifiableCode,
-                "Whether this document's record allows a sharing link could not be determined, so none was created.");
+            return Unverifiable("the document row could not be read");
         }
 
-        foreach (var group in rootLinks
-                     .Select(l => (l.TargetEntityLogicalName, Id: row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(l.LogicalName)?.Id))
-                     .Where(x => x.Id is { } id && id != Guid.Empty)
-                     .GroupBy(x => x.TargetEntityLogicalName, StringComparer.Ordinal))
+        var roots = new HashSet<(string Entity, Guid Id)>();
+        var hasChildLink = false;
+        foreach (var link in DocumentLinkFields.All)
         {
-            var ids = group.Select(x => x.Id!.Value).Distinct().ToArray();
+            if (row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(link.LogicalName) is not { Id: var linkedId }
+                || linkedId == Guid.Empty)
+            {
+                continue;
+            }
+
+            if (ShareLinkRootTypes.Contains(link.TargetEntityLogicalName))
+            {
+                roots.Add((link.TargetEntityLogicalName, linkedId));
+                continue;
+            }
+
+            var resolved = await ancestors.ResolveStampsAsync(link.TargetEntityLogicalName, linkedId, ct).ConfigureAwait(false);
+            switch (resolved.Status)
+            {
+                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Error:
+                    return Unverifiable($"the record behind {link.LogicalName} could not be resolved ({resolved.Error})");
+                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Unclassified:
+                    // A party (contact, organization) or a non-content type: no protection flag applies to it.
+                    continue;
+                default:
+                    // A CHILD (Derived / NoAncestor) is what makes an undecided derivation unverifiable; a core target that
+                    // is not a flag-bearing root (a service request) carries no protection flag of its own.
+                    hasChildLink |= resolved.Status is Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Derived
+                        or Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.NoAncestor;
+                    foreach (var stamp in resolved.Stamps)
+                    {
+                        if (ShareLinkRootTypes.Contains(stamp.EntityType) && stamp.RecordId != Guid.Empty)
+                        {
+                            roots.Add((stamp.EntityType, stamp.RecordId));
+                        }
+                    }
+
+                    break;
+            }
+        }
+
+        foreach (var group in roots.GroupBy(r => r.Entity, StringComparer.Ordinal))
+        {
+            var ids = group.Select(r => r.Id).ToArray();
             var flags = await participations.GetRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
             foreach (var id in ids)
             {
@@ -125,9 +166,20 @@ public static class FileAccessEndpoints
             return (ShareLinkSecureRecordCode, ShareLinkSecureDetail);
         }
 
-        return null;
-    }
+        if (!derivation.Decided && hasChildLink)
+        {
+            return Unverifiable($"the document's container could not be derived ({derivation.Reason})");
+        }
 
+        return null;
+
+        (string ReasonCode, string Detail) Unverifiable(string why)
+        {
+            logger.LogWarning("CreateShareLink REFUSED | DocumentId: {DocumentId} | protection unverifiable: {Why}.", documentId, why);
+            return (ShareLinkProtectionUnverifiableCode,
+                "Whether this document's record allows a sharing link could not be determined, so none was created.");
+        }
+    }
 
     public static IEndpointRouteBuilder MapFileAccessEndpoints(this IEndpointRouteBuilder app)
     {
@@ -905,6 +957,7 @@ public static class FileAccessEndpoints
             Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             IGenericEntityService entityService,
             Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+            Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
             IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
             TimeProvider timeProvider,
             ILogger<Program> logger,
@@ -939,7 +992,7 @@ public static class FileAccessEndpoints
 
             // Owner round 72 item 2 (task 171, adversarial finding 10): a sharing link reaches people OUTSIDE Dataverse's
             // decision, so it is never minted for a document of a SECURE or RESTRICTED record. Standard documents keep it.
-            if (await ShareLinkProtectionRefusalAsync(docGuid, containerResolver, entityService, participations, logger, ct)
+            if (await ShareLinkProtectionRefusalAsync(docGuid, containerResolver, entityService, participations, ancestors, logger, ct)
                 is { } protection)
             {
                 return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(protection.ReasonCode, protection.Detail, context.TraceIdentifier);

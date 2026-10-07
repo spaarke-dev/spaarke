@@ -153,8 +153,10 @@ public sealed partial class RecordContainerResolver
     /// the copy can only be written by the BFF. A copy naming a DIFFERENT item means the pointer was changed outside the
     /// BFF — refused under both rules. An EMPTY copy is a row not yet backfilled (or written outside the BFF): refused once
     /// <see cref="ItemIdBoundBackfillCompleteKey"/> is set, otherwise left to the rule in force.
+    /// <para>The ONE definition: the pointer check and <c>DocumentContainerRelocator</c> (which must never move — and so
+    /// re-bind — a forged pointer) both call it. <paramref name="row"/> must carry the copy column.</para>
     /// </remarks>
-    private string? ItemBindingRefusal(Entity row, string item)
+    internal string? ItemBindingRefusal(Entity row, string item)
         => Spaarke.Dataverse.DocumentPointerBinding.Compare(
                 row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item) switch
         {
