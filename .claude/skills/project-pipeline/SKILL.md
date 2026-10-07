@@ -68,6 +68,9 @@ Before starting this skill, Claude MUST:
   1. Verify Plan Mode is active (look for "⏸ plan mode on" indicator in UI)
   2. If NOT in Plan Mode → STOP and ask user to press Shift+Tab twice to enter Plan Mode
   3. Do NOT proceed past Step 0 until Plan Mode is confirmed
+  4. NON-INTERACTIVE session (headless / `-p`, nobody to press Shift+Tab): say that Plan Mode cannot be
+     confirmed, then run Steps 0-3 read-only — no file writes until the planning artifacts are reviewed.
+     That is the guarantee Plan Mode exists to give.
 
 WHY: Steps 0-3 analyze spec.md, discover resources, and generate planning artifacts.
      Plan Mode ensures Claude reads and plans before making any file changes.
@@ -116,6 +119,8 @@ ASK user: "Please confirm Plan Mode is active (look for ⏸ indicator)"
 IF not confirmed:
   → STOP — request user to press Shift+Tab twice
   → Do not proceed until confirmed
+IF the session is non-interactive:
+  → State that Plan Mode cannot be confirmed; run Steps 0-3 read-only (see Permission Mode above)
 ```
 
 ---
@@ -218,11 +223,14 @@ VALIDATE:
   - Technical approach
   - Success criteria
   - **ADR Tensions** (per CLAUDE.md §6.5 — MUST exist, even if "no tensions surfaced")
-✓ Minimum 500 words (meaningful content)
+✓ Substantive content — a spec under ~500 words is a prompt to check that each required section is
+  real rather than a placeholder; a short spec for a small project is fine if every section is substantive
 
-IF validation fails:
+IF a required section is missing or is a placeholder:
   → STOP - List missing elements
   → Offer to help complete spec.md
+IF the spec is short but complete:
+  → Proceed, and say so in the Step 1 report
 ```
 
 ### Step 1.7: Process ADR Tensions (per CLAUDE.md §6.5)
@@ -833,7 +841,8 @@ TASK EXECUTION STRATEGY:
      → Execute sequentially via task-execute
   5. AFTER each group/task completes:
      → Check TASK-INDEX.md for next available group
-     → Continue until all tasks complete or context > 70%
+     → Continue until all tasks complete, an escalation is raised, or a compaction notice appears
+       (then checkpoint, compact, and resume from TASK-INDEX.md)
 
 PARALLEL EXECUTION REQUIREMENTS:
   - All tasks in a group must have dependencies satisfied
@@ -882,6 +891,9 @@ FAILURE ISOLATION:
   - At wave completion, report: "Wave X: {N} succeeded, {M} failed"
   - Mark failed tasks in TASK-INDEX as 🔄 (needs retry) not ❌ (abandoned)
   - Main session decides whether to retry failed tasks sequentially or report and stop
+  - Retry only after the failure's cause is named and addressed (a fix, missing context supplied, or a
+    switch to sequential execution). A failure whose cause cannot be named is escalated (report or
+    BLOCKED.md), not retried — retrying an unexplained failure is a loop, not progress
 
 EXAMPLE parallel execution flow:
   Group A (tasks 010, 011, 012) — prerequisite: 001 ✅
@@ -893,8 +905,9 @@ EXAMPLE parallel execution flow:
 
 CONTEXT MANAGEMENT during parallel execution:
   - Checkpoint after each completed group (not each individual task)
-  - If context > 60%: checkpoint + compact before next group
-  - If context > 70%: checkpoint + STOP + report remaining tasks
+  - If the user/harness reports context is high, or a compaction notice appears: checkpoint, compact, then
+    continue with the next group (Claude cannot measure its own usage — root CLAUDE.md §5)
+  - If the user asks to stop: checkpoint + STOP + report remaining tasks
 
 INTERACTIVE MODE (when user says "run interactively" or "with approvals"):
   → Execute one task at a time

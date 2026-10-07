@@ -170,7 +170,7 @@ Binding for ≥ 6 months from 2026-06-29 (added by `spaarkeai-compose-r1`); revi
 
 ## Conventions
 
-- Always check all ADRs in the current ADR index (`docs/adr/README-ADRs.md`)
+- Check the ADRs that apply to the change: those mapped to the touched resource types (adr-aware Rule 1) plus the always-check set in code-review Step 6. Done = each applicable ADR reported Compliant / Warning / Violation. Sweep the whole index (`.claude/adr/INDEX.md`) only for an explicit full scan or a project's 090 wrap-up
 - Report warnings for potential issues that need human judgment
 - Provide specific file paths and line numbers for violations
 - Reference ADR documents by full path: `/docs/adr/ADR-XXX-*.md`
@@ -363,7 +363,7 @@ gh workflow run adr-audit.yml
 
 ## Operator Notes
 
-- Be thorough: check all ADRs in the ADR index even when changes seem small
+- Be thorough within scope: every ADR that applies to the change, even when the change seems small; a whole-index sweep is for full scans and wrap-up
 - Be specific: always include file paths and line numbers
 - Be actionable: provide concrete fixes, not just problem descriptions
 - When in doubt, report as warning rather than skipping

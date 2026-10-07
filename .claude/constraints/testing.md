@@ -26,7 +26,7 @@ Load when:
 
 ### 1. Eight KEEP path categories (deletion-protected)
 
-Tests under these eight paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
+Tests under these eight paths are **KEEP-protected**. Deleting a file under any of these paths in a PR requires **a same-PR replacement** covering the same scenario — or, when the scenario itself no longer exists (the feature or path was removed), a statement in the PR saying so, which code-review approves explicitly. Enforced at code-review (`task-execute` Step 9.5) by path inspection — NOT by CSV lookup.
 
 | Path | Category | What lives here |
 |---|---|---|
@@ -104,7 +104,7 @@ The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffol
 1. ❌ **MUST NOT** use `Mock<HttpMessageHandler>` — transport-level mock encodes wire format into the test; breaks on production refactors without catching real bugs. **Use a fake `HttpClient` via test-double + integration boundary instead.**
 2. ❌ **MUST NOT** use `Mock<IServiceClient>` or other typed HttpClient wrappers as test doubles when they hide the HttpMessageHandler antipattern.
 3. ❌ **MUST NOT** write DI-registration tests (`Assert.NotNull(services.GetRequiredService<X>())` or similar container-introspection assertions). DI wiring is verified by the app actually starting; tests should assert behavior.
-4. ❌ **MUST NOT** write constructor null-argument tests (`Assert.Throws<ArgumentNullException>(() => new X(null))`). Add `ArgumentNullException.ThrowIfNull(x)` in production code if needed; do not test it.
+4. ❌ **MUST NOT** write constructor null-argument tests (`Assert.Throws<ArgumentNullException>(() => new X(null))`). Add `ArgumentNullException.ThrowIfNull(x)` in production code only where null can actually arrive (a nullable type or external input — code-review flags it on a non-nullable parameter as noise); do not test it.
 5. ❌ **MUST NOT** mock the class-under-test's collaborators when an in-memory test double + a real integration boundary is cheaper and more honest.
 
 **B6-B17 — Scaffolding-class debt** (new 2026-06-26; see [ADR-038 §7](../adr/INDEX.md) for full BAD/GOOD examples):
@@ -126,7 +126,7 @@ The first 5 (B1-B5) attack wiring antipatterns; B6-B17 attack the deeper scaffol
 
 - ❌ **MUST NOT** test implementation details (private methods directly)
 - ❌ **MUST NOT** use production databases or services
-- ❌ **MUST NOT** ignore or skip tests without a `[Trait("skip-reason", "<concrete reason + ticket>")]` marker and a follow-up issue
+- ❌ **MUST NOT** ignore or skip tests without a `[Trait("status", …)]` marker (`repaired` / `real-bug-pending-fix` / `flaky-quarantined` — the taxonomy in `.claude/constraints/bff-extensions.md`) and a tracked follow-up (project ledger entry or issue)
 - ❌ **MUST NOT** use `Thread.Sleep` or arbitrary delays (use `TimeProvider`/`FakeTimeProvider`)
 - ❌ **MUST NOT** mock value objects or DTOs
 - ❌ **MUST NOT** introduce a new test under any path OTHER than the eight KEEP categories (§1) — if you have a test that doesn't fit, the test is the wrong shape OR a new KEEP category needs an ADR amendment first.

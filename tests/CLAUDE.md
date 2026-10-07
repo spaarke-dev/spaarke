@@ -29,7 +29,7 @@ tests/
 └── Spaarke.ArchTests/**  # structural fitness functions (eighth KEEP path, ADR-038 Amendment A1)
 ```
 
-Removing a file under any KEEP path requires a same-PR replacement covering the same scenario (enforced at code-review, `task-execute` Step 9.5).
+Removing a file under any KEEP path requires a same-PR replacement covering the same scenario — or, when the scenario no longer exists (feature or path removed), a statement in the PR saying so, approved explicitly at code-review (`task-execute` Step 9.5).
 
 **Where they compile.** The seven `integration/*` and `unit/domain` folders have no project file of their own; they are compiled into `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` (`Compile Include` per folder). The globs already exist: a new file under a KEEP folder needs no csproj change, and a second identical glob breaks the build (NETSDK1022 — it happened once, from two branches each adding it). `Spaarke.ArchTests` is its own project and is **not** in `Spaarke.sln`.
 
@@ -112,9 +112,9 @@ Do not write tests of these shapes. Bad/good examples for every ban: **ADR-038 �
 | B1 | `Mock<HttpMessageHandler>` — use the `WebApplicationFactory` boundary | B10 | Coverage-fillers (`NotThrow()` / `NotNull()` to lift %) |
 | B2 | `Mock<IServiceClient>` or typed-HttpClient wrapper mocks hiding B1 | B11 | Tests of what the compiler enforces (`required`, record equality) |
 | B3 | DI-registration tests (`GetRequiredService<X>()` not null) | B12 | Snapshot tests of trivial output (JSON round-trip, default `ToString`) |
-| B4 | Constructor null-argument tests — use `ArgumentNullException.ThrowIfNull` | B13 | Names without scenario + expected result |
+| B4 | Constructor null-argument tests — guard with `ThrowIfNull` only where null can arrive, and don't test it | B13 | Names without scenario + expected result |
 | B5 | Mocking the class-under-test's own collaborators when a real boundary is cheaper | B14 | Exhaustive-switch / sealed-hierarchy coverage tests |
-| B6 | Mirror tests (one test per production method) | B15 | Setup-to-assertion ratio > 10:1 |
+| B6 | Mirror tests (one test per production method) | B15 | Setup-to-assertion ratio > 10:1 — a signal to move to an integration boundary; where the arrange is inherent (multi-record fixture), say so in a comment |
 | B7 | All-mocks + trivial assertion (`Verify(Times.Once)`) | B16 | Pure getter/setter/auto-property tests |
 | B8 | Reflection into non-public members (`InternalsVisibleTo` is allowed — Amendment A2) | B17 | Generated-code field-by-field tests (record equality, AutoMapper, EF projections) |
 | B9 | Pass-through wrapper tests (`=> _service.DoIt(x)`) | | |

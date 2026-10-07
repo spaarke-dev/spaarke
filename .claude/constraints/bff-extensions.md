@@ -37,7 +37,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 2. **MUST** cite the relevant ADRs (and any constraints) that bind the design. ADR-001 (Minimal API), ADR-007 (SpeFileStore), ADR-008 (endpoint filters), ADR-010 (DI minimalism), ADR-013 (AI architecture) are the most common. If unsure which apply, load [`.claude/adr/INDEX.md`](../adr/INDEX.md).
 
-3. **MUST** verify the addition does not regress the publish baseline (currently ~60 MB compressed, ~240 entries per [`azure-deployment.md`](azure-deployment.md)). New direct package references are the most common bloat source. Run `dotnet publish --runtime linux-x64` locally and inspect output size before merging if adding packages.
+3. **MUST** report the publish-size delta against a fresh master build on every BFF-touching task — rule: [`.claude/rules/bff-hygiene.md`](../rules/bff-hygiene.md) item 4; procedure and current baseline: [`azure-deployment.md`](azure-deployment.md) "BFF Publish-Size Per-Task Verification Rule". Do not compare against a remembered baseline. New direct package references are the most common bloat source.
 
 4. **MUST NOT** add a new direct CRUD→AI dependency. If CRUD code (Finance, Workspace, Jobs handlers outside `Services/Ai/`, etc.) needs AI capability, it MUST consume through `Services/Ai/PublicContracts/` facade types — not by injecting `IOpenAiClient`, `IPlaybookService`, or other AI-internal interfaces directly. The 2026-05-20 extraction assessment found 20 existing direct deps; the BFF remediation project is migrating them. New code MUST NOT add to that backlog.
 
@@ -47,7 +47,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 
 ### B. New Package References (Binding)
 
-- **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph.
+- **MUST** check `dotnet list package --vulnerable --include-transitive` before adding any package. New packages MUST NOT introduce HIGH-severity CVEs into the transitive graph. When no fixed version exists upstream, follow the escalation in [`.claude/rules/bff-hygiene.md`](../rules/bff-hygiene.md) item 5 (owner sign-off in the PR).
 - **MUST** verify package version compatibility with the pinned chains documented inline in [`Sprk.Bff.Api.csproj`](../../src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj) — particularly Microsoft.Graph + Kiota (all Kiota packages MUST stay version-matched), Microsoft.Extensions.AI chain, Azure.AI.OpenAI chain.
 - **MUST NOT** add pre-release packages (`-beta`, `-rc`, `-preview`) without an inline csproj comment justifying the chain-compat reason. Pre-release packages are a known risk surface; three already exist (`Azure.AI.Projects beta.8`, `Microsoft.Agents.AI rc1`, `Azure.AI.OpenAI 2.8.0-beta.1`).
 
@@ -321,7 +321,7 @@ Any project that touches BFF (`src/server/api/Sprk.Bff.Api/**`, `src/server/shar
 
 - **MUST NOT** add new code to the BFF without considering "should this go elsewhere?" — even one sentence in the PR description satisfies the rule; absence does not
 - **MUST NOT** add new direct CRUD→AI dependencies (use `Services/Ai/PublicContracts/` facades)
-- **MUST NOT** add packages that introduce known HIGH-severity CVEs
+- **MUST NOT** add packages that introduce known HIGH-severity CVEs (no upstream fix → escalation in `.claude/rules/bff-hygiene.md` item 5)
 - **MUST NOT** add `<PublishTrimmed>true</PublishTrimmed>` or `<PublishAot>true</PublishAot>` — the BFF's reflection-heavy stack (Graph SDK, Identity.Web, EF, DI, JSON serializers) breaks silently under trimming
 - **MUST NOT** publish from `/tmp` or any directory outside `deploy/api-publish/` (per [`azure-deployment.md`](azure-deployment.md) — produces incomplete ~22 MB packages, missing DLLs, silent 404s)
 - **MUST NOT** bypass the `bff-deploy` skill for deploys (it enforces hash-verify, health-check window, slot-swap rollback)
@@ -347,7 +347,7 @@ Use this table when designing new functionality. **All four "BFF" answers → BF
 If you are scoping a new project that will add code to the BFF, the project's `design.md` MUST include:
 
 1. **Placement justification section**: which new code lives in BFF, which lives in Functions, which (if any) lives in a future separate deployable. Cite the decision criteria above with a one-sentence answer per row for each major component.
-2. **Size impact estimate**: rough estimate of compressed publish-size delta. If >2 MB, requires explicit owner ack before merging.
+2. **Size impact estimate**: rough estimate of the whole project's compressed publish-size delta. If >2 MB, the owner acknowledges it at design review. (Project-level; separate from the per-task measurement and its ≥ +5 MB justification trigger in `.claude/rules/bff-hygiene.md` item 4.)
 3. **Boundary preservation statement**: confirmation that new code follows facade patterns where applicable (no new direct CRUD→AI deps); follows feature-module DI; follows endpoint-filter auth.
 4. **Reference to this file**: cite `.claude/constraints/bff-extensions.md` in the project's design.md as a binding constraint.
 

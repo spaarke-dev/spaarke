@@ -17,9 +17,9 @@ The BFF is the single backend for every Spaarke client surface. When a task adds
    - Zip both with the same tool (`Compress-Archive`, as `scripts/Deploy-BffApi.ps1` does).
    - File counts must match; if they differ, one publish is incomplete and the delta is meaningless.
    - Report both sizes, the delta and the zip tool.
-   - Thresholds: ≥ +5 MB per task needs explicit justification; ≥ 55 MB cumulative triggers an architecture review; ≥ 60 MB is a hard stop.
+   - Thresholds: ≥ +5 MB per task needs explicit justification in the PR (a trigger, not a ban); ≥ 55 MB cumulative triggers an architecture review; ≥ 60 MB is a hard stop — roll back or extract, or the owner approves an ADR-029 amendment first.
    - Procedure, measured hazards and current baseline: `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule".
-5. **No new HIGH-severity CVE** from `dotnet list package --vulnerable --include-transitive`.
+5. **No new HIGH-severity CVE** from `dotnet list package --vulnerable --include-transitive`. Fix it by upgrading (or replacing) the package. If no fixed version exists upstream, do not ship it silently: record in the PR the advisory ID, why the vulnerable code path is not reachable here (or what mitigates it), and the follow-up that removes it, and get the owner's explicit sign-off in the PR. Any audit suppression added carries the advisory link and a dated comment.
 6. **Update tests.** Changes under `Sprk.Bff.Api/Services/` add or update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally need unconditional service registration. Exceptions need explicit code-review sign-off with the reason (`bff-extensions.md` § F). When a service must stay feature-gated, ADR-030 is the canonical mechanism for satisfying this. Enforcement is the PR template, the code-review checklist and reviewer judgment — **not** a CI script, by design.
 
 **Conditional DI registrations.** When a `*Module.cs` change sits inside an `if (flag) { … }` block, the reviewer applies `bff-extensions.md` § F.1 (static scan + ADR-032 Null-Object kill switch), § F.2 (inspect fixture/config first when a test is skipped as a suspected DI issue) and § F.3 (reproduce empirically before applying a ledger fix).

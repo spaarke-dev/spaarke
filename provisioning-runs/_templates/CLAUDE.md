@@ -20,7 +20,7 @@
 
 ## Applicable prereqs
 
-Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) by `scope` + `tenancy-model` for this run. Failures at Step 0.5 HARD STOP the run before Step 2 preflight.
+Filter [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) by `scope` + `tenancy-model` for this run. Failures at Step 0.5 HARD STOP the run before Step 2 preflight: record the failure in [`manual-gates.md`](manual-gates.md), apply the prerequisite's `remediation`, then resume from Step 0.5.
 
 ## Run-scoped invariants (per project design.md §4D tenant-isolation)
 
