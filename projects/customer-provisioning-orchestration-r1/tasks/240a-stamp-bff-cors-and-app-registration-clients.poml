@@ -32,7 +32,10 @@
       `notes/t240-plan.md` F1–F3: CorsModule throws at startup outside Development/Testing when `Cors:AllowedOrigins` is
       empty and no provisioning step sets it; H3 registers no SPA redirect and no preAuthorizedApplications; code pages
       use the Dataverse org origin as their redirect. The add-in client is `c1258e2d…` "Spaarke Office Add-in"
-      (single-tenant, Spaarke's tenant). Dev's BFF lists the Dataverse, Power Pages, add-in and Teams origins by hand.
+      (single-tenant, Spaarke's tenant). Dev's BFF lists the Dataverse, Power Pages, add-in and Teams origins by hand, and
+      its app pre-authorizes 9 clients (t240-plan F9). Production client origins (t240-plan "Production client origins"):
+      the add-in moves to a Spaarke custom domain (recommended `addins.spaarke.com`, owner decision pending); the Teams tab
+      is the External Access SPA, whose origin and sign-in shape come from spaarke-SPA-external-access-platform-r3.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/CorsModule.cs (contract only — not changed)</file>
@@ -57,7 +60,7 @@
     <constraint source="cors">Origins are exact (scheme + host, no path, no trailing slash, https only). The customer's Dataverse origin and its `.api.` variant come from the run (H5's DataverseEnvUrl); the shared client origins are platform values (per platform environment), never per-customer intake.</constraint>
     <constraint source="isolation">H3 changes only the customer's own BFF app registration. It never edits a shared Spaarke app (the add-in client, SDAP-PCF-CLIENT).</constraint>
     <constraint source="live">No live Entra or App Service change in this task; tests run against hand-written fakes (never Mock&lt;HttpMessageHandler&gt;).</constraint>
-    <constraint source="scope">The Teams client app does not exist yet: its pre-authorization is wired as configuration that is empty until 240c.</constraint>
+    <constraint source="scope">Shared client origins and pre-authorized client ids are platform configuration lists. Prod values not yet decided stay empty (the BFF still starts on its Dataverse origins); no value is guessed. Teams' first-party client ids are added only if spaarke-SPA-external-access-platform-r3 confirms Teams SSO with the BFF as resource.</constraint>
   </constraints>
 
   <steps mode="directional">
@@ -75,7 +78,7 @@
   </acceptance-criteria>
 
   <escalation>
-    <trigger>The production add-in / Teams origins are not known yet — ask the owner rather than guess (dev values are known).</trigger>
+    <trigger>Answered 2026-10-07: no production add-in site exists yet (custom domain pending the owner); the Teams/External Access origin is pending spaarke-SPA-external-access-platform-r3. Build the configuration; do not invent prod values.</trigger>
     <trigger>Graph refuses preAuthorizedApplications for a client in this shape — stop and report.</trigger>
   </escalation>
 

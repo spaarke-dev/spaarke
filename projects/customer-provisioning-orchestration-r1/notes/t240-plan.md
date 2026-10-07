@@ -9,41 +9,62 @@ on 2026-10-07, the split into three tasks, and the live test plan.
 - **The add-ins and the Teams tab are used only by Dataverse-licensed users, internal or B2B guest. No external contact
   uses them.**
 - Coordinate add-in and Teams client changes with spaarkeai-word-add-in-r1 directly, or give the owner a message to relay.
+- Production client sites get a Spaarke name, not a random one (with the word-add-in-r1 reply).
 
-## Facts re-checked in code (2026-10-07)
+## Facts re-checked (2026-10-07)
 
 | # | Fact | Where |
 |---|---|---|
 | F1 | 🔴 A customer BFF does not start: outside Development/Testing, empty `Cors:AllowedOrigins` throws at startup, and nothing in provisioning (manifest, H4b, `customer.bicep`) sets it. H13's CORS probe would fail too. Dev works only because its origins were set by hand. | `CorsModule.cs:17-45`; `git grep AllowedOrigins` |
 | F2 | H3 sets no `preAuthorizedApplications` and no SPA redirect URIs on the customer's BFF app registration. | `GraphAppRegistrationProvisioner.cs` |
 | F3 | Code pages use `redirectUri = window.location.origin` (the Dataverse org). H7 defaults `sprk_MsalClientId` to the customer's BFF app, which has no SPA redirect, so code-page sign-in fails on a provisioned stamp. Dev uses the shared client `SDAP-PCF-CLIENT`, whose redirect list names each org by hand. | `Spaarke.Auth/src/config.ts:113`; H7 `:331` |
-| F4 | The add-in has no Dataverse context, so `@spaarke/auth` falls back to the `/organizations` authority: a Model 1 guest signs in to their HOME tenant. A customer BFF validates Spaarke's tenant and exchanges OBO to Spaarke-tenant Dataverse, so it needs a Spaarke-tenant token. | `Spaarke.Auth/src/config.ts:13`, `OfficeNaaStrategy` |
+| F4 | *(corrected by word-add-in-r1)* The add-in already signs in to **Spaarke's tenant**: both task panes pass `TENANT_ID`, and the ribbon commands get it from `deploy-office-addins.yml`. `@spaarke/auth` falls back to `/organizations` only when neither an authority nor a tenant id is given. | add-in `outlook/taskpane/index.tsx:24`, `word/taskpane/index.tsx:20` |
 | F5 | Every BFF self-describes anonymously: `GET /api/config` returns the authority, client id and scope. | `ConfigEndpoints.cs:83-140` |
-| F6 | Model 1 users are members of the environment security group `sprk-{customerId}-users` in Spaarke's tenant (T232; Dataverse requires it). | `provisioning.md` "Model 1 users" |
-| F7 | The only guest in Spaarke's tenant today is a personal Microsoft account. The test needs a work account from another Entra tenant. | read-only `az ad user list`, 2026-10-07 |
+| F6 | Model 1 users are members of the environment security group `sprk-{customerId}-users` in Spaarke's tenant (T232; Dataverse requires it). The registry row records that group (`sprk_securitygroupid`), the customer id, App Service name, tenant id and tenancy model. | `provisioning.md` "Model 1 users"; `DataverseEnvironmentRecord.cs` |
+| F7 | The only guest in Spaarke's tenant today is a personal Microsoft account. The test needs a work account from another Entra tenant. | read-only `az ad user list` |
+| F8 | The add-in app `c1258e2d` "Spaarke Office Add-in" is single-tenant, has Graph `User.Read`/`email`/`profile` only, so `/me/memberOf` returns group ids without names. | word-add-in-r1; Graph read 2026-10-07 |
+| F9 | The dev BFF app `1e40baad` (SDAP-BFF-SPE-API) pre-authorizes 9 clients, including the add-in `c1258e2d`, `SDAP-PCF-CLIENT` `170c98e1` and Microsoft Teams' first-party clients `1fec8e78` (desktop/mobile) and `5e3ce6c0` (web); it carries SPA redirects for the Teams tab host (`brk-multihub://green-dune…`). Its access tokens carry the optional claim `acct` (1 = guest). | Graph read 2026-10-07 |
+| F10 | There is no production add-in site; only dev `spaarke-office-addins` (`icy-desert-0bfdbb61e.6.azurestaticapps.net`, `spe-infrastructure-westus2`). The admin guide's `spe-office-addins-prod` does not exist. Azure generates `*.azurestaticapps.net` host names; they cannot be chosen. | word-add-in-r1 |
+| F11 | `spaarke.com` DNS is hosted at the registrar (Namecheap, `dns1/dns2.registrar-servers.com`), not Azure DNS. | `Resolve-DnsName`, 2026-10-07 |
+| F12 | The Teams tab is the **External Access SPA** (`swa-spaarke-external-spa-dev`, `green-dune-0c4f1221e.7.azurestaticapps.net`); its Teams package is `src/client/external-spa/appPackage`, owned by spaarke-SPA-external-access-platform-r3, not word-add-in-r1. | word-add-in-r1; repo |
 
-## Changed recommendation: customer discovery by group membership
+## Recommendation (2026-10-07, after the word-add-in-r1 reply): a Spaarke directory endpoint
 
-Because every add-in or Teams user is Dataverse-licensed (owner, 2026-10-07), every Model 1 user is a member of their
-customer's `sprk-{customerId}-users` group in Spaarke's tenant (F6). That membership **is** the user → customer mapping,
-and it is authoritative, so no separate directory and no home-tenant heuristic are needed:
+The earlier recommendation (the client reads `/me/memberOf`) is withdrawn: it needs `GroupMember.Read.All` on the shared
+client, depends on what a guest may read in Spaarke's directory, and bakes the BFF naming into the client. Instead,
+as word-add-in-r1 recommends:
 
-1. The client signs in to **Spaarke's tenant** (Model 1) and reads the user's own group memberships
-   (`/me/memberOf` or `checkMemberGroups`), keeping the `sprk-*-users` groups.
-2. `customerId` → the BFF at its predictable address `sprk-{customerId}-prod-api` (`customer.bicep`) → `GET /api/config`
-   (F5) gives the authority and scope.
-3. The client requests a token for that scope (pre-authorized by H3, so no consent prompt) and calls that BFF.
-4. A user in several customers' groups picks one, once; the choice is remembered.
+1. The client signs in to Spaarke's tenant (it already does, F4) and calls **one Spaarke-run directory endpoint** with
+   that token.
+2. The directory returns only the caller's own environments: `[{customerId, displayName, apiBaseUrl, authority, scope}]`,
+   from the registry rows (active, `Setup Status = Ready`) whose `sprk_securitygroupid` the caller is a member of.
+3. The client requests that BFF's scope (pre-authorized by H3, so no consent prompt) and calls it. A user in several
+   environments picks one; the add-in remembers it in per-origin local storage.
 
-Model 2: the customer has its own tenant, so the sign-in tenant identifies the customer; the same lookup runs there.
+Server-side details (decided in 240c):
+- **Membership:** the directory's token carries the caller's `sprk-*-users` groups (`groupMembershipClaims =
+  ApplicationGroup`, each environment group assigned to the directory app where provisioning creates the group). No Graph
+  permission on either the client or the directory, and no Graph call per request.
+- **Host:** its own minimal service in `rg-spaarke-shared-prod`, with its own managed identity that can only read the
+  registry. Not the L2 control plane: L2 holds Owner on every customer subscription, and an end-user endpoint does not
+  belong on that host.
+- **Address:** a Spaarke custom domain, like the production add-in site.
 
-No anonymous endpoint is exposed and no customer list is published. It depends on step 1 working for guests; the live
-test (240b) checks that first.
+No anonymous endpoint, no published customer list, and Model 2 later becomes data (the `authority` field), not code.
+
+## Production client origins
+
+- **Add-in:** one production site on a Spaarke custom domain, recommended `addins.spaarke.com` (F10, F11). The owner adds
+  a CNAME at Namecheap; the add-in app gets `brk-multihub://addins.spaarke.com` and
+  `https://addins.spaarke.com/auth-callback.html` as SPA redirects when the site is created.
+- **Teams tab / External Access SPA:** production origin and Teams sign-in shape from spaarke-SPA-external-access-platform-r3
+  (F12). If the tab keeps Teams SSO with the BFF as resource, each customer BFF app must also pre-authorize Teams'
+  first-party clients (F9).
 
 ## Split
 
 | Task | Scope | Depends on |
 |---|---|---|
-| **240a** server side, needed either way | (1) **CORS:** provisioning sets `Cors__AllowedOrigins__N` on every stamp BFF (the customer's Dataverse origins + the shared client origins), so the BFF starts (F1). (2) **H3:** SPA redirect = the customer's own Dataverse origin(s) on its BFF app registration (fixes code pages, F3; H7's default kept); `preAuthorizedApplications` for the shared add-in client `c1258e2d` (and the Teams client once it exists). | — |
-| **240b** live test (owner-approved 2026-10-07) | A work-account guest from another tenant, in Outlook and Word (desktop + web) and Teams: (S1) get a Spaarke-tenant token through Office's nested app auth; (S2) read their own group memberships; (S3) the Teams tab in Spaarke's tenant vs. their home tenant. | a guest account; spaarkeai-word-add-in-r1 for the add-in test build |
-| **240c** client discovery | The client steps above in `@spaarke/auth` + add-in/Teams configuration, a dedicated Teams client app, and H3 pre-authorizing it. | 240b; spaarkeai-word-add-in-r1 |
+| **240a** server side, needed either way | (1) **CORS:** provisioning sets `Cors__AllowedOrigins__N` on every stamp BFF (the customer's Dataverse origins + the platform's shared client origins), so the BFF starts (F1). (2) **H3:** SPA redirect = the customer's own Dataverse origin(s) on its BFF app registration (fixes code pages, F3; H7's default kept); `preAuthorizedApplications` for the platform's configured client ids (the add-in `c1258e2d` now; Teams' clients if F12's answer needs them). | — |
+| **240b** live test (owner-approved 2026-10-07) | A work-account guest from another tenant, in Outlook and Word (desktop + web): get a Spaarke-tenant token for the dev BFF through Office's nested app auth, and record `tid`, `oid`, `acct`, `idp`, `iss`, `aud`. Teams moves to the external-access project. | a guest account; the word-add-in-r1 diagnostics build |
+| **240c** directory + client discovery | The directory service (owner OK for a new shared-prod service), H-step assigning each environment group to the directory app, the registry fields it needs (e.g. the BFF app id for `scope`), the directory app registration with the add-in pre-authorized (one-time); the client change in the add-in (word-add-in-r1). | 240a, 240b; owner OK; word-add-in-r1 |

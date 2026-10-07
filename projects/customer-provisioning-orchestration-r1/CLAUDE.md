@@ -128,6 +128,8 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - **spaarke-auth-v4-dataverse-MI** (archived). Owns `Dataverse-ClientSecret` retirement after 2026-11-23.
 - **spaarkeai-compose-r8** task 063. The Blob keyless proof stays `not-in-use` until that task lands.
 - **`.github/workflows/**`.** ci-cd-unit-test-remediation-r1 is closed (owner 2026-10-02); this project changes its own provisioning workflows. Check `projects/INDEX.md` for an active CI-governance project first.
+- **spaarkeai-word-add-in-r1.** Owns the Office add-ins and `@spaarke/auth`'s OfficeNaaStrategy use. Agreed 2026-10-07: a Spaarke directory endpoint (T240c) instead of client-side `/me/memberOf`; a dev diagnostics build for T240b. Messages: `notes/coordination/2026-10-07-*word-add-in-r1*`.
+- **spaarke-SPA-external-access-platform-r3.** Owns the External Access SPA, which is also the Teams tab (`src/client/external-spa/appPackage`). Asked 2026-10-07 for its production origin and Teams sign-in shape (`notes/coordination/2026-10-07-to-external-access-r3.md`); no answer yet.
 - **Hot paths:** BFF, skill directives, CI workflows. Registry: `projects/INDEX.md`.
 
 ## 5. Environment and live actions

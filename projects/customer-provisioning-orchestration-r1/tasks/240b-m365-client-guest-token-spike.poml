@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="240b" project="customer-provisioning-orchestration-r1">
   <metadata>
-    <title>Live test (owner-approved 2026-10-07): a work-account B2B guest gets a Spaarke-tenant token in Outlook/Word (NAA, desktop + web) and Teams, and can read its own group memberships</title>
+    <title>Live test (owner-approved 2026-10-07): a work-account B2B guest gets a Spaarke-tenant token for the dev BFF in Outlook/Word (NAA, desktop + web)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D11 "spike first")</phase>
     <gate>after 240a can run in parallel; needs a guest account + spaarkeai-word-add-in-r1</gate>
     <status>pending</status>
@@ -24,9 +24,10 @@
   <context>
     <background>
       `notes/t240-plan.md`. The add-in signs in through `@spaarke/auth` OfficeNaaStrategy and may not construct MSAL itself
-      (spaarkeai-word-add-in-r1 binding rule). Today it falls back to `/organizations`, i.e. the guest's HOME tenant.
-      The only guest in Spaarke's tenant is a personal Microsoft account; the test needs a work account from another
-      Entra tenant (owner to provide), invited as a guest and added to a test `sprk-*-users` group.
+      (spaarkeai-word-add-in-r1 binding rule). Its authority is already Spaarke's tenant (t240-plan F4). The only guest in
+      Spaarke's tenant is a personal Microsoft account; the test needs a work account from another Entra tenant (owner to
+      provide), invited as a guest. Membership discovery moved to a server-side directory (240c), so the guest's own
+      directory reads are no longer tested. Teams moved to spaarke-SPA-external-access-platform-r3 (t240-plan F12).
     </background>
   </context>
 
@@ -36,15 +37,13 @@
   </constraints>
 
   <steps mode="directional">
-    <step order="1">Owner provides a work-account guest; invite it to Spaarke's tenant; add it to a test environment group.</step>
-    <step order="2">S1: with a dev test build whose authority is Spaarke's tenant, acquire `api://{devBffAppId}/user_impersonation` through NAA in Outlook desktop + web and Word desktop + web; record the token's `tid`, `oid`, `idtyp`.</step>
-    <step order="3">S2: same session, Graph `/me/memberOf` (or `checkMemberGroups`) as the guest; record whether the `sprk-*-users` group is visible.</step>
-    <step order="4">S3: Teams — the tab inside Spaarke's tenant (guest switched in) and in the home tenant; record what signs in.</step>
-    <step order="5">Write the results and the design consequence into `notes/t240-plan.md`; update 240c.</step>
+    <step order="1">Owner provides a work-account guest; invite it to Spaarke's tenant (live, owner OK).</step>
+    <step order="2">S1: with word-add-in-r1's dev diagnostics build, acquire `api://{devBffAppId}/user_impersonation` through NAA in Outlook desktop + web and Word desktop + web; record the token's `tid`, `oid`, `acct`, `idp`, `iss`, `aud`, and that a BFF call succeeds.</step>
+    <step order="3">Write the results and the design consequence into `notes/t240-plan.md`; update 240c.</step>
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">S1–S3 each have a recorded result for each client listed, with the token claims that prove it.</criterion>
+    <criterion testable="true">S1 has a recorded result for each of the four clients, with the token claims that prove it (`tid` = Spaarke's tenant, `acct` = 1).</criterion>
     <criterion testable="true">`notes/t240-plan.md` states the confirmed or changed discovery design.</criterion>
   </acceptance-criteria>
 
