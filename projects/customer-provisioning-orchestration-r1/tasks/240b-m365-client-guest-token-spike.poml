@@ -37,7 +37,7 @@
   </constraints>
 
   <steps mode="directional">
-    <step order="1">Owner provides a work-account guest; invite it to Spaarke's tenant (live, owner OK).</step>
+    <step order="1">Test organization (owner 2026-10-07: none exists). Owner creates a workforce tenant "Spaarke Test Partner" (Entra admin center, portal-only) and starts a Microsoft 365 Business Standard trial there (desktop + web Outlook/Word/Teams). Then, each a live action with owner OK: create 1-2 licensed test users in it (Graph); invite one as a guest to Spaarke's tenant; install word-add-in-r1's dev diagnostics manifest in the test tenant (Integrated apps) — the same step a real customer's admin performs in its own tenant, since a Model 1 user's Outlook lives in their home tenant.</step>
     <step order="2">S1: with word-add-in-r1's dev diagnostics build, acquire `api://{devBffAppId}/user_impersonation` through NAA in Outlook desktop + web and Word desktop + web; record the token's `tid`, `oid`, `acct`, `idp`, `iss`, `aud`, and that a BFF call succeeds.</step>
     <step order="3">Write the results and the design consequence into `notes/t240-plan.md`; update 240c.</step>
   </steps>

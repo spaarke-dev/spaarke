@@ -69,6 +69,14 @@ No anonymous endpoint, no published customer list, and Model 2 later becomes dat
   external-access-r3). Recommended: drop the Teams-SSO fallback for the multi-customer build, because a single manifest can
   name only one audience; then Teams' first-party clients (F9) need no pre-authorization on customer BFFs.
 
+## Test organization for external-org tests (2026-10-07)
+
+The owner has no account in another organization. Plan: a dedicated workforce tenant "Spaarke Test Partner" with a
+Microsoft 365 Business Standard trial (1 month free, 25 seats; keep 1-2 paid seats if the tests recur), test users, one
+invited as a guest to Spaarke's tenant. Finding: a Model 1 user's Outlook/Word runs in their HOME tenant, so the Spaarke
+add-in must be installed there (by the customer's admin, Integrated apps) — a customer onboarding step to document in
+240c, and the test tenant exercises it.
+
 ## Live actions (each owner-approved)
 
 | Date | Action | Result |
