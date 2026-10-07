@@ -18,7 +18,7 @@ Spaarke deliberately rejects coverage-percentage as a quality signal. Coverage i
 ### Rules
 
 1. **MUST** structure new tests as integration-first where a meaningful integration boundary exists (per §2)
-2. **MUST** place new tests under one of the six KEEP path conventions (per §3)
+2. **MUST** place new tests under one of the eight KEEP path conventions (per §3)
 3. **MUST** use `TimeProvider` for any time-dependent test (per §4)
 4. **MUST** mock at module boundaries only — never at the HTTP-handler level or DI-registration level (per §5)
 5. **MUST NOT** introduce coverage-% targets or "<N ms per test" rules to any directive file
@@ -155,7 +155,7 @@ Mock at **module boundaries**, not inside the system. A module boundary is a sea
 
 ### Banned mocks (explicit ban list)
 
-The following mocks are **forbidden** in any new test. Existing tests using these patterns are DELETE candidates (per the six KEEP categories in §3 — no ban-list pattern fits any KEEP category).
+The following mocks are **forbidden** in any new test. Existing tests using these patterns are DELETE candidates (per the eight KEEP categories in §3 — no ban-list pattern fits any KEEP category).
 
 | # | Forbidden pattern | Why it's wrong | What to do instead |
 |---|-------------------|---------------|--------------------|
