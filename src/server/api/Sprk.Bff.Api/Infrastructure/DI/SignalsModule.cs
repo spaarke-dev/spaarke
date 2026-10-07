@@ -61,6 +61,10 @@ public static class SignalsModule
         services.AddScoped<SignalCoreRecordAccess>();
         services.AddScoped<DecisionPlanService>();
 
+        // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
+        // compiler and the shared sysadmin entity service, both singletons.
+        services.AddSingleton<RuleBodyDescriber>();
+
         return services;
     }
 }

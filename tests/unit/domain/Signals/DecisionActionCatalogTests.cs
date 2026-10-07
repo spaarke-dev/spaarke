@@ -344,7 +344,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), new CapturingLogger<DecisionPlanService>());
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         var body = result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
         body.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
@@ -352,6 +352,7 @@ public class DecisionActionCatalogTests
         body.Actions.Should().OnlyContain(a => a.RecordClass == "Judgement");
         body.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
         body.DismissalReasons.Should().HaveCount(6);
+        body.RuleDescription.Should().BeNull("a version with no describable rule body is served without a description, never a guess");
     }
 
     [Fact]
@@ -361,7 +362,7 @@ public class DecisionActionCatalogTests
         var entities = EntitiesReturningPlan(SeededPlan);
         var plans = new DecisionPlanService(entities, NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(404);
         await entities.DidNotReceive().RetrieveAsync("sprk_policyversion", Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>());
@@ -373,7 +374,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: Fail(0, DataverseUserClientErrorCodes.UserContextRequired), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan(SeededPlan), NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(403);
     }
@@ -384,7 +385,7 @@ public class DecisionActionCatalogTests
         var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
         var plans = new DecisionPlanService(EntitiesReturningPlan("""{"actions":["send-budget-inquiry","bogus"]}"""), NullLogger<DecisionPlanService>.Instance);
 
-        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, CancellationToken.None);
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, NoRuleDescriber(), CancellationToken.None);
 
         result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(422);
     }
@@ -445,6 +446,16 @@ public class DecisionActionCatalogTests
         }
 
         return Ok(row);
+    }
+
+    // The rule body is absent from these fixtures, so the describer refuses; the plan must still be served (task 026 wiring).
+    private static RuleBodyDescriber NoRuleDescriber() =>
+        new(Validator(), Substitute.For<IGenericEntityService>());
+
+    private static PolicyVersionValidator Validator()
+    {
+        var schema = new RuleBodySchemaValidator();
+        return new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
     }
 
     private static IGenericEntityService EntitiesReturningPlan(string plan)

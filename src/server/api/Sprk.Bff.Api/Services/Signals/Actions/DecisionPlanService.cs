@@ -15,6 +15,9 @@ public sealed record ResolvedDecisionPlan(
 public sealed record DecisionPlanResolution(ResolvedDecisionPlan? Plan, string? RefusalReason)
 {
     public bool IsRefused => Plan is null;
+
+    /// <summary>The version's <c>sprk_rulebody</c>, read with the plan so <see cref="RuleBodyDescriber"/> describes the same version.</summary>
+    public string? RuleBodyJson { get; init; }
 }
 
 /// <summary>
@@ -37,6 +40,7 @@ public sealed record DecisionPlanResolution(ResolvedDecisionPlan? Plan, string? 
 public sealed class DecisionPlanService
 {
     private const string PlanColumn = "sprk_decisionplan";
+    private const string RuleBodyColumn = "sprk_rulebody";
 
     private readonly IGenericEntityService _entities;
     private readonly ILogger<DecisionPlanService> _logger;
@@ -54,10 +58,13 @@ public sealed class DecisionPlanService
     public async Task<DecisionPlanResolution> GetAsync(Guid policyVersionId, DecisionLane lane, CancellationToken ct)
     {
         var version = await _entities
-            .RetrieveAsync("sprk_policyversion", policyVersionId, [PlanColumn], ct)
+            .RetrieveAsync("sprk_policyversion", policyVersionId, [PlanColumn, RuleBodyColumn], ct)
             .ConfigureAwait(false);
 
-        var resolution = Resolve(version.GetAttributeValue<string>(PlanColumn), lane);
+        var resolution = Resolve(version.GetAttributeValue<string>(PlanColumn), lane) with
+        {
+            RuleBodyJson = version.GetAttributeValue<string>(RuleBodyColumn),
+        };
         if (resolution.IsRefused)
         {
             _logger.LogWarning(

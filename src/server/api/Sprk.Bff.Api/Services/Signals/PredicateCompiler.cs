@@ -323,7 +323,7 @@ public sealed partial class PredicateCompiler
         return CompileParsed(doc.RootElement, subjectId);
     }
 
-    private static JsonDocument ParseBounded(string? ruleBodyJson)
+    internal static JsonDocument ParseBounded(string? ruleBodyJson)
     {
         // Bounded refusal BEFORE any parsing (review finding #9): reject a pathological body by length alone.
         if ((ruleBodyJson?.Length ?? 0) > MaxRuleBodyLength)

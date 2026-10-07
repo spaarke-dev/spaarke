@@ -47,6 +47,7 @@ public static class DecisionPlanEndpoints
         HttpContext httpContext,
         SignalCoreRecordAccess signalAccess,
         DecisionPlanService planService,
+        RuleBodyDescriber describer,
         CancellationToken ct)
     {
         var decision = await signalAccess.AuthorizeAsync(signalId, ct);
@@ -83,7 +84,10 @@ public static class DecisionPlanEndpoints
                 });
         }
 
-        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan));
+        // "How this was determined" (task 026). A body that cannot be described is shown without the description, never
+        // as a guess; it does not stop the decision from being taken.
+        var described = await describer.DescribeAsync(resolution.RuleBodyJson, ct);
+        return Results.Ok(DecisionPlanResponse.From(signalId, lane, versionId, plan, described.Description));
     }
 }
 
@@ -94,15 +98,18 @@ public sealed record DecisionPlanResponse(
     Guid PolicyVersionId,
     IReadOnlyList<DecisionActionDto> Actions,
     IReadOnlyList<DecisionActionDto> NextSteps,
-    IReadOnlyList<DismissalReasonDto> DismissalReasons)
+    IReadOnlyList<DismissalReasonDto> DismissalReasons,
+    RuleDescription? RuleDescription)
 {
-    internal static DecisionPlanResponse From(Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan) =>
+    internal static DecisionPlanResponse From(
+        Guid signalId, DecisionLane lane, Guid policyVersionId, ResolvedDecisionPlan plan, RuleDescription? ruleDescription = null) =>
         new(signalId,
             lane.ToString(),
             policyVersionId,
             plan.Actions.Select((a, i) => DecisionActionDto.From(a, isRecommended: i == 0)).ToList(),
             plan.NextSteps.Select(a => DecisionActionDto.From(a, isRecommended: false)).ToList(),
-            plan.DismissalReasons.Select(r => new DismissalReasonDto(r.Code, r.Label, r.CountsTowardSuppression, r.RequiresDetail)).ToList());
+            plan.DismissalReasons.Select(r => new DismissalReasonDto(r.Code, r.Label, r.CountsTowardSuppression, r.RequiresDetail)).ToList(),
+            ruleDescription);
 }
 
 public sealed record DecisionActionDto(
