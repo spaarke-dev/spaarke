@@ -361,3 +361,6 @@ word/commands/__tests__/quickSaveDialog.test.ts
 shared/taskpane/components/__tests__/SaveFlow.alreadySaved.test.tsx
 shared/taskpane/services/__tests__/documentFilingService.test.ts
 shared/taskpane/services/__tests__/documentIdentityService.stampById.test.ts
+# Task 113 (2026-10-07, provisioning request R1): dev-only sign-in Diagnostics view (token claims, never the token).
+shared/taskpane/services/__tests__/tokenDiagnostics.test.ts
+shared/taskpane/components/views/__tests__/DiagnosticsView.test.tsx
