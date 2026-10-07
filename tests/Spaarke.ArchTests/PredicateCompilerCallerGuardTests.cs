@@ -218,7 +218,8 @@ internal static class PredicateCompilerGuardControlFixtures
 
     internal static CompiledPredicate Forge() =>
         new("sprk_matter", "sprk_matterid", "<fetch/>", DateTimeOffset.UnixEpoch,
-            new HashSet<string>(), new HashSet<string>(), new HashSet<string>());
+            new HashSet<string>(), new HashSet<string>(), new HashSet<string>(),
+            PredicateCompiler.DefaultQuietWindowDays, new HashSet<string>());
 
     internal static CompiledPredicate AlterWithWith(CompiledPredicate validated) => validated with { FetchXml = "<fetch/>" };
 }

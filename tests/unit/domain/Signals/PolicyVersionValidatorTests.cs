@@ -837,6 +837,51 @@ public class PolicyVersionValidatorTests
     }
 
     // =====================================================================================
+    // Task 024 (D-16): the Do-lane grammar passes the save gate and the evaluation gate; the refusals it did not
+    // widen are still refused at BOTH.
+    // =====================================================================================
+
+    private const string OverdueEventBody = """
+        {"type":"Existence","subject":"sprk_event",
+         "when":{"statuscode":659490001,"sprk_duedate":{"<":"now-5d"}},"all":[]}
+        """;
+
+    [Fact]
+    public void ValidateForSave_SubjectOnlyEventBody_ReturnsSuccess_AndEvaluationGetsOneFetchWithNoLinkEntity()
+    {
+        var sut = Sut();
+
+        sut.ValidateForSave("Existence", OverdueEventBody, "Task overdue since {{sprk_duedate}}.").IsValid.Should().BeTrue();
+
+        sut.TryPrepareForEvaluation(Snapshot("Existence", OverdueEventBody), subjectId: null, out var compiled).Should().BeTrue();
+        compiled!.FetchXml.Should().NotContain("link-entity");
+        compiled.QuietWindowDays.Should().Be(PredicateCompiler.DefaultQuietWindowDays);
+        compiled.DateOnlyWhenFields.Should().Equal("sprk_duedate");
+    }
+
+    [Theory]
+    // a clause whose join is not in VerifiedJoins (D-16 adds none)
+    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"exists":"sprk_communication","path":"sprk_regardingevent","filter":{"sprk_direction":1}}]}""")]
+    // a notExists over a table the writer reads below org-wide depth (task 030 finding (b))
+    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"notExists":"sprk_document","path":"sprk_regardingevent","filter":{"statecode":0}}]}""")]
+    public void DoLaneSubject_UnverifiedJoinOrNotExistsOverBasicDepthTable_IsRefusedAtSaveAndAtEvaluation(string body)
+    {
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
+        var logger = new CapturingLogger<PolicyVersionValidator>();
+        var sut = Sut(logger);
+
+        sut.ValidateForSave("Existence", body, null).Reason.Should().Be(OntologyWriterFailureReason.CompileRefused);
+
+        sut.TryPrepareForEvaluation(Snapshot("Existence", body), subjectId: null, out var compiled).Should().BeFalse();
+        compiled.Should().BeNull();
+        reasons().Should().Equal(OntologyWriterFailureReason.CompileRefused);
+        logger.Entries.Should().ContainSingle(e => e.EventId.Id == OntologyWriterEvents.PolicyVersionInvalid.Id);
+    }
+
+    // =====================================================================================
     // Metric scaffolding — same AsyncLocal-scoped MeterListener pattern as SignalWriterTests
     // (OntologyWriterTelemetry's Meter/Counter are process-global statics). Captures the REASON tag value,
     // not only the count, closing review finding #7's "assert the metric's reason tag in tests".

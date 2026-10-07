@@ -166,6 +166,62 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
         }
     }
 
+    // ── Task 024 (D-16, D-40): the three Do-lane rules, compiled and run against the hand-written references ─
+
+    /// <summary>The instant the Do-rule references are anchored at (notes/024-progress.md).</summary>
+    private static readonly DateTimeOffset DoAnchor = new(2026, 10, 7, 0, 0, 0, TimeSpan.Zero);
+
+    [Theory]
+    // fixture, subject, a row that must come back, a row that must not (dev data as of 2026-10-07)
+    [InlineData("do-overdue-task", "sprk_event", "edfef460-43bc-f111-aaaf-0022482913fc", "7300ed8f-8fbf-f111-aaaf-0022482913fc")] // due 09-30 / 10-04
+    [InlineData("do-task-due-within-3-days", "sprk_event", "08021954-a0c1-f111-a05c-0022482913fc", "edfef460-43bc-f111-aaaf-0022482913fc")] // due 10-07 / overdue
+    [InlineData("do-workassignment-past-due", "sprk_workassignment", "2dec2df5-551e-f111-88b3-7ced8d1dc988", "425fa95a-3060-f111-ab0b-7c1e521b425f")] // due 03-05 / no due date
+    public async Task DoRuleFixture_ReturnsExactlyTheRowsOfTheHandWrittenFetchXml(string fixture, string subject, string inRow, string outRow)
+    {
+        if (!_dv.IsLive) return;
+
+        var compiled = new PredicateCompiler(new RuleBodySchemaValidator(), new FakeTimeProvider(DoAnchor))
+            .Compile(File.ReadAllText(FixturePath(fixture + ".rulebody.json")));
+        var reference = File.ReadAllText(FixturePath(fixture + ".reference.fetchxml"));
+
+        var fromCompiler = await RunAsync(compiled);
+        var fromReference = await _dv.RunFetchAsync(reference, subject + "id");
+
+        fromCompiler.Should().BeEquivalentTo(fromReference);
+        fromCompiler.Should().Contain(Guid.Parse(inRow)).And.NotContain(Guid.Parse(outRow));
+        fromCompiler.Count.Should().BeLessThan(await _dv.CountAsync(subject), "a rule that returns every row is not a filter");
+    }
+
+    [Fact]
+    public async Task DateOnlyColumns_MatchTheLiveSchema_InBothDirections()
+    {
+        if (!_dv.IsLive) return;
+
+        // Every sprk_ column with Format = DateOnly on an allow-listed table, read from live metadata. A column missing
+        // from the catalog would be judged as an instant by the evaluator (off by a day near midnight, D-25).
+        var live = new HashSet<(string, string)>();
+        foreach (var entity in PredicateCompiler.EvaluatorGlobalReadableEntities)
+        {
+            foreach (var column in await _dv.GetDateOnlyColumnsAsync(entity))
+            {
+                live.Add((entity, column));
+            }
+        }
+
+        PredicateCompiler.DateOnlyColumns.Should().BeEquivalentTo(live);
+    }
+
+    private static string FixturePath(string name)
+    {
+        var dir = new DirectoryInfo(System.AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs")))
+        {
+            dir = dir.Parent;
+        }
+
+        return Path.Combine(dir?.FullName ?? throw new InvalidOperationException("repository root not found"), "tests", "fixtures", "signals", name);
+    }
+
     private async Task<string> LiveBodyAsync()
     {
         _out.WriteLine($"principal: {await _dv.WhoAmIAsync()}");
@@ -245,6 +301,32 @@ public sealed class SignalPredicateTests : IClassFixture<SignalPredicateTests.Li
             var result = await _client!.RetrieveMultipleAsync(new FetchExpression(compiled.FetchXml));
             result.MoreRecords.Should().BeFalse("the seed is far below one page; paging is the evaluator's job (task 031)");
             return result.Entities.Select(e => e.GetAttributeValue<Guid>(compiled.SubjectIdAttribute)).ToList();
+        }
+
+        /// <summary>Runs a hand-written reference query (task 024) through the same SDK call.</summary>
+        public async Task<IReadOnlyList<Guid>> RunFetchAsync(string fetchXml, string idAttribute)
+        {
+            var result = await _client!.RetrieveMultipleAsync(new FetchExpression(fetchXml));
+            result.MoreRecords.Should().BeFalse("the dev data is far below one page");
+            return result.Entities.Select(e => e.GetAttributeValue<Guid>(idAttribute)).ToList();
+        }
+
+        public async Task<int> CountAsync(string entity)
+        {
+            var result = await _client!.RetrieveMultipleAsync(new FetchExpression(
+                $"""<fetch aggregate="true"><entity name="{entity}"><attribute name="{entity}id" alias="n" aggregate="count" /></entity></fetch>"""));
+            return (int)((AliasedValue)result.Entities[0]["n"]).Value;
+        }
+
+        /// <summary>The <c>sprk_</c> columns of <paramref name="entity"/> whose Format is DateOnly (task 024).</summary>
+        public async Task<IReadOnlyList<string>> GetDateOnlyColumnsAsync(string entity)
+        {
+            var attributes = ((RetrieveEntityResponse)await _client!.ExecuteAsync(
+                new RetrieveEntityRequest { LogicalName = entity, EntityFilters = EntityFilters.Attributes })).EntityMetadata.Attributes;
+            return attributes.OfType<DateTimeAttributeMetadata>()
+                .Where(a => a.LogicalName.StartsWith("sprk_", StringComparison.Ordinal) && a.Format == DateTimeFormat.DateOnly)
+                .Select(a => a.LogicalName)
+                .ToList();
         }
 
         public async Task<string> ReadRuleBodyAsync(Guid policyVersionId)

@@ -1,0 +1,12 @@
+<fetch distinct="true">
+  <entity name="sprk_event">
+    <attribute name="sprk_eventid" />
+    <order attribute="sprk_eventid" />
+    <filter type="and">
+      <condition attribute="sprk_eventtype_ref" operator="eq" value="124f5fc9-98ff-f011-8406-7c1e525abd8b" />
+      <condition attribute="statuscode" operator="eq" value="659490001" />
+      <condition attribute="sprk_duedate" operator="ge" value="2026-10-07T00:00:00Z" />
+      <condition attribute="sprk_duedate" operator="le" value="2026-10-10T00:00:00Z" />
+    </filter>
+  </entity>
+</fetch>

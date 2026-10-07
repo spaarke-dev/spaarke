@@ -1,0 +1,10 @@
+<fetch distinct="true">
+  <entity name="sprk_workassignment">
+    <attribute name="sprk_workassignmentid" />
+    <order attribute="sprk_workassignmentid" />
+    <filter type="and">
+      <condition attribute="statecode" operator="eq" value="0" />
+      <condition attribute="sprk_responseduedate" operator="lt" value="2026-10-07T00:00:00Z" />
+    </filter>
+  </entity>
+</fetch>

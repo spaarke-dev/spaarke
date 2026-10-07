@@ -1,0 +1,9 @@
+{
+  "type": "Existence",
+  "subject": "sprk_workassignment",
+  "when": {
+    "statecode": 0,
+    "sprk_responseduedate": { "<": "now" }
+  },
+  "all": []
+}

@@ -1,0 +1,10 @@
+{
+  "type": "Existence",
+  "subject": "sprk_event",
+  "when": {
+    "sprk_eventtype_ref": "124f5fc9-98ff-f011-8406-7c1e525abd8b",
+    "statuscode": 659490001,
+    "sprk_duedate": { "<": "now-5d" }
+  },
+  "all": []
+}

@@ -44,6 +44,14 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="UnpinnedTemplateFields">Field names read only by <c>exists</c> clause(s), on one entity, where at
 /// least one occurrence does NOT pin the field to exactly one value (finding F3). Disjoint from the other two
 /// sets; consumed by <see cref="PolicyVersionValidator"/> to give the author a specific "not pinned" refusal.</param>
+/// <param name="QuietWindowDays">The rule body's <c>quietWindowDays</c> knob (D-13, spec FR-17a): the days after a
+/// dismissal before the subject may re-raise. <see cref="PredicateCompiler.DefaultQuietWindowDays"/> (14) when the
+/// body omits it. Carried, not applied: re-raise is the evaluator's job (task 031).</param>
+/// <param name="DateOnlyWhenFields">The subject's <c>when</c> fields that are Date Only columns (in
+/// <see cref="PredicateCompiler.DateOnlyColumns"/>), task 024. Every relative date in <see cref="FetchXml"/> is
+/// resolved against the ONE <see cref="WindowAnchorUtc"/>; for these fields a "day" is a calendar date, so the
+/// evaluator (task 031) re-judges each returned item against that item's own "today" (D-25: assignee's time zone,
+/// then owner's, then UTC). The compiler itself applies no time-zone logic.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
@@ -51,7 +59,9 @@ public sealed record CompiledPredicate(
     DateTimeOffset WindowAnchorUtc,
     IReadOnlySet<string> TemplateEligibleFields,
     IReadOnlySet<string> AmbiguousTemplateFields,
-    IReadOnlySet<string> UnpinnedTemplateFields);
+    IReadOnlySet<string> UnpinnedTemplateFields,
+    int QuietWindowDays,
+    IReadOnlySet<string> DateOnlyWhenFields);
 
 /// <summary>
 /// Thrown when a rule body cannot be compiled into a single FetchXML filter. The message names the offending
@@ -90,14 +100,22 @@ public sealed class PredicateCompilationException : Exception
 /// from its own JSON; nothing one clause produces is visible to another. The task 020 schema already refuses a
 /// <c>bind</c> property and any <c>$</c>-prefixed value; this compiler runs that same validator first and ALSO
 /// refuses a <c>$</c>-prefixed string itself, so it cannot reintroduce the path even if the schema loosens.</para>
-/// <para><b>Relative dates.</b> A string value <c>now</c> or <c>now-{N}d</c> resolves against
-/// <see cref="TimeProvider"/> at compile time to an absolute UTC instant emitted with a <c>Z</c> suffix
-/// (verified on <c>spaarkedev1</c> to be honored as UTC, not the caller's local zone). The body's operator is
-/// kept as written: <c>{"&gt;=": "now-30d"}</c> compiles to <c>operator="ge"</c>. FetchXML's
-/// <c>last-x-days</c> is deliberately NOT used — it truncates to the start of day in the calling user's time zone
-/// and caps the range at "now", which is a different predicate from the one the author wrote. Any other string
-/// shaped like a relative date but outside that grammar (<c>NOW-30d</c>, <c>now-30</c>, <c>now+1d</c>) is refused
-/// rather than sent to Dataverse as a literal.</para>
+/// <para><b>Relative dates.</b> A string value <c>now</c>, <c>now-{N}d</c> or <c>now+{N}d</c> (task 024, D-16)
+/// resolves against <see cref="TimeProvider"/> at compile time — ONE anchor per compile — to an absolute UTC instant
+/// emitted with a <c>Z</c> suffix (verified on <c>spaarkedev1</c> to be honored as UTC, not the caller's local zone).
+/// The body's operator is kept as written: <c>{"&gt;=": "now-30d"}</c> compiles to <c>operator="ge"</c>. FetchXML's
+/// <c>last-x-days</c> / <c>next-x-days</c> are deliberately NOT used — they truncate to the start of day in the
+/// calling user's time zone and cap the range at "now", which is a different predicate from the one the author
+/// wrote. Any other string shaped like a relative date but outside that grammar (<c>NOW-30d</c>, <c>now-30</c>,
+/// <c>now+1h</c>, <c>now+-3d</c>) is refused rather than sent to Dataverse as a literal.</para>
+/// <para><b>Two-bound date range (owner decision D-40, task 024).</b> A field may take
+/// <c>{"&gt;=": "now", "&lt;=": "now+3d"}</c>: exactly one lower bound (<c>&gt;=</c>/<c>&gt;</c>) plus exactly one
+/// upper bound (<c>&lt;=</c>/<c>&lt;</c>), both relative dates. It becomes two conditions in the SAME AND filter
+/// — still one Dataverse filter, no OR, no join. A range that can match nothing (lower after upper, or equal bounds
+/// with a strict operator) is refused, like an empty <c>in</c> list.</para>
+/// <para><b>Subject-only bodies (task 024, D-16).</b> <c>all</c> may be empty when <c>when</c> holds at least one
+/// condition: the query is the subject with its own filter and no <c>link-entity</c>. An empty <c>all</c> with no
+/// <c>when</c> condition is refused — it would mean "every row of the subject".</para>
 /// <para><b>FR-07.</b> A clause or <c>when</c> filter that reads <c>sprk_budget.modifiedon</c> is refused at
 /// compile time: any unrelated field edit bumps it, so it would read as "the budget was revised" and suppress a
 /// true Signal — a false negative, the direction decision 13 rules against.</para>
@@ -144,6 +162,11 @@ public sealed partial class PredicateCompiler
     /// silently drops subjects. Every one of those reads as a working predicate, so the compiler fails closed.
     /// <b>This list mirrors role configuration and can drift from it</b>: widening it is a code change with review,
     /// and the evaluator (task 030) is responsible for verifying the principal's live read depth at run time.
+    /// <para><b><c>sprk_workassignment</c></b> was added by task 024 (D-16, a Do-lane subject) after the writer's read
+    /// depth was confirmed live on 2026-10-07 with the §9.2 method: Global on the user side, rows identical as admin
+    /// and as the writer (<c>notes/024-progress.md</c>). <c>sprk_servicerequest</c> stays out (not a D-16 subject).
+    /// Being listed makes a table a valid SUBJECT; as a clause entity it still needs a <see cref="VerifiedJoins"/>
+    /// entry, and none exists for the three Do-lane tables.</para>
     /// </remarks>
     public static readonly FrozenSet<string> EvaluatorGlobalReadableEntities = new[]
     {
@@ -156,7 +179,54 @@ public sealed partial class PredicateCompiler
         "sprk_event",
         "sprk_memo",
         "sprk_todo",
+        "sprk_workassignment",
     }.ToFrozenSet(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Every <c>sprk_</c> column whose Dataverse <c>Format</c> is <c>DateOnly</c> on a table in
+    /// <see cref="EvaluatorGlobalReadableEntities"/>, read from live <c>spaarkedev1</c> metadata on 2026-10-07
+    /// (task 024). Feeds <see cref="CompiledPredicate.DateOnlyWhenFields"/> so the evaluator can apply per-item
+    /// "today" (D-25) to a Date Only comparison.
+    /// </summary>
+    /// <remarks>
+    /// The seam test <c>SignalPredicateTests.DateOnlyColumns_MatchTheLiveSchema_InBothDirections</c> fails if a
+    /// listed column is not Date Only, or a Date Only column on a listed table is missing. A missing entry would make
+    /// the evaluator treat a calendar date as an instant, which is off by a day near midnight; adding a table to the
+    /// allow-list therefore means adding its Date Only columns here. System columns (<c>overriddencreatedon</c>) are
+    /// out of scope. <c>sprk_todo.sprk_duedate</c> is Date Only in format but still <c>UserLocal</c> in behavior;
+    /// a separate task (owner-approved 2026-10-07) converts it.
+    /// </remarks>
+    public static readonly FrozenSet<(string Entity, string Column)> DateOnlyColumns = new[]
+    {
+        ("sprk_matter", "sprk_closeddate"),
+        ("sprk_matter", "sprk_lastreviewdate"),
+        ("sprk_matter", "sprk_nextreviewdate"),
+        ("sprk_matter", "sprk_openeddate"),
+        ("sprk_budget", "sprk_budgetenddate"),
+        ("sprk_budget", "sprk_budgetstartdate"),
+        ("sprk_invoice", "sprk_invoicedate"),
+        ("sprk_invoice", "sprk_invoiceduedate"),
+        ("sprk_project", "sprk_closeddate"),
+        ("sprk_project", "sprk_lastreviewdate"),
+        ("sprk_project", "sprk_nextreviewdate"),
+        ("sprk_project", "sprk_openeddate"),
+        ("sprk_event", "sprk_approveddate"),
+        ("sprk_event", "sprk_basedate"),
+        ("sprk_event", "sprk_completeddate"),
+        ("sprk_event", "sprk_duedate"),
+        ("sprk_event", "sprk_finalduedate"),
+        ("sprk_event", "sprk_meetingdate"),
+        ("sprk_event", "sprk_tododuedate"),
+        ("sprk_todo", "sprk_duedate"),
+        ("sprk_workassignment", "sprk_responseduedate"),
+    }.ToFrozenSet();
+
+    /// <summary>The quiet window when a body omits <c>quietWindowDays</c> (D-13: 14 days).</summary>
+    public const int DefaultQuietWindowDays = 14;
+
+    /// <summary>Upper bound on <c>quietWindowDays</c> (ten years), matching the schema's <c>maximum</c>, so a
+    /// date computed from it can never overflow.</summary>
+    public const int MaxQuietWindowDays = 3650;
 
     /// <summary>
     /// The verified joins: for each <c>(subject, clause entity)</c> pair, the ONE lookup on the clause entity that
@@ -333,11 +403,33 @@ public sealed partial class PredicateCompiler
             rootConditions.Add(Condition(subjectIdAttribute, "eq", id.ToString("D")));
         }
 
+        var dateOnlyWhenFields = new List<string>();
+        var whenConditionCount = 0;
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object)
         {
-            rootConditions.AddRange(CompileFilterConditions(subject, when, nowUtc, "when",
-                (field, _) => UseOf(positiveUses, field).RecordWhen(subject)));
+            var whenConditions = CompileFilterConditions(subject, when, nowUtc, "when",
+                (field, _) =>
+                {
+                    UseOf(positiveUses, field).RecordWhen(subject);
+                    if (DateOnlyColumns.Contains((subject, field)))
+                    {
+                        dateOnlyWhenFields.Add(field);
+                    }
+                }).ToList();
+            whenConditionCount = whenConditions.Count;
+            rootConditions.AddRange(whenConditions);
         }
+
+        if (clauses.GetArrayLength() == 0 && whenConditionCount == 0)
+        {
+            // Task 024 (D-16): a subject-only rule is a 'when' filter with zero clauses. With neither, the query
+            // would return every row of the subject -- a Signal per row. Defence in depth over the schema's if/then.
+            throw new PredicateCompilationException(
+                "all: a body with no exists/notExists clause must scope its subject with at least one 'when' " +
+                "condition; otherwise it matches every row of the subject.");
+        }
+
+        var quietWindowDays = ReadQuietWindowDays(root);
 
         var index = 0;
         foreach (var clause in clauses.EnumerateArray())
@@ -417,7 +509,28 @@ public sealed partial class PredicateCompiler
             WindowAnchorUtc: nowUtc,
             TemplateEligibleFields: eligible.ToFrozenSet(StringComparer.Ordinal),
             AmbiguousTemplateFields: ambiguous.ToFrozenSet(StringComparer.Ordinal),
-            UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal));
+            UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal),
+            QuietWindowDays: quietWindowDays,
+            DateOnlyWhenFields: dateOnlyWhenFields.ToFrozenSet(StringComparer.Ordinal));
+    }
+
+    /// <summary>The optional <c>quietWindowDays</c> knob (D-13, FR-17a): absent → <see cref="DefaultQuietWindowDays"/>;
+    /// otherwise an integer in 0..<see cref="MaxQuietWindowDays"/>. Re-checked here because
+    /// <see cref="CompileSchemaValidated"/> skips the schema.</summary>
+    private static int ReadQuietWindowDays(JsonElement root)
+    {
+        if (!root.TryGetProperty("quietWindowDays", out var knob))
+        {
+            return DefaultQuietWindowDays;
+        }
+
+        if (knob.ValueKind != JsonValueKind.Number || !knob.TryGetInt32(out var days) || days < 0 || days > MaxQuietWindowDays)
+        {
+            throw new PredicateCompilationException(
+                $"quietWindowDays: {knob.GetRawText()} is not a whole number of days between 0 and {MaxQuietWindowDays}.");
+        }
+
+        return days;
     }
 
     private static PositiveFieldUse UseOf(Dictionary<string, PositiveFieldUse> uses, string field)
@@ -558,9 +671,18 @@ public sealed partial class PredicateCompiler
 
                 case JsonValueKind.Object:
                     var ops = value.EnumerateObject().ToList();
+                    if (ops.Count == 2)
+                    {
+                        // D-40: a two-bound relative-date range. Never pins (it can match many values).
+                        conditions.AddRange(CompileDateRange(attribute, ops, nowUtc, at));
+                        break;
+                    }
+
                     if (ops.Count != 1)
                     {
-                        throw new PredicateCompilationException($"{at}: a comparison object must hold exactly one operator.");
+                        throw new PredicateCompilationException(
+                            $"{at}: a comparison object must hold exactly one operator, or one lower plus one upper " +
+                            "relative-date bound (D-40).");
                     }
 
                     var op = MapOperator(ops[0].Name, at);
@@ -580,6 +702,77 @@ public sealed partial class PredicateCompiler
         }
 
         return conditions;
+    }
+
+    /// <summary>
+    /// Owner decision D-40 (task 024): <c>{"&gt;=": "now", "&lt;=": "now+3d"}</c> — exactly one lower bound
+    /// (<c>&gt;=</c>/<c>&gt;</c>) and one upper bound (<c>&lt;=</c>/<c>&lt;</c>), both relative dates resolved against
+    /// the compile's one anchor. Emitted as two conditions in the caller's AND filter: one Dataverse filter, no OR.
+    /// </summary>
+    private static IEnumerable<XElement> CompileDateRange(
+        string attribute, List<JsonProperty> ops, DateTimeOffset nowUtc, string at)
+    {
+        (string Op, DateTimeOffset Instant)? lower = null;
+        (string Op, DateTimeOffset Instant)? upper = null;
+
+        foreach (var bound in ops)
+        {
+            var op = bound.Name switch
+            {
+                ">=" => "ge",
+                ">" => "gt",
+                "<=" => "le",
+                "<" => "lt",
+                _ => throw new PredicateCompilationException(
+                    $"{at}: '{bound.Name}' cannot bound a date range; use one of >= / > plus one of <= / < (D-40)."),
+            };
+
+            if (bound.Value.ValueKind != JsonValueKind.String
+                || !TryResolveRelativeDate(bound.Value.GetString(), nowUtc, out var instant))
+            {
+                throw new PredicateCompilationException(
+                    $"{at}: a two-bound range takes relative-date bounds only ('now', 'now-{{N}}d', 'now+{{N}}d'); " +
+                    $"'{bound.Name}' has {bound.Value.GetRawText()} (D-40).");
+            }
+
+            var isLower = op is "ge" or "gt";
+            if ((isLower ? lower : upper) is not null)
+            {
+                throw new PredicateCompilationException(
+                    $"{at}: a date range takes exactly ONE lower bound (>= or >) and ONE upper bound (<= or <) (D-40).");
+            }
+
+            if (isLower) lower = (op, instant);
+            else upper = (op, instant);
+        }
+
+        var (lowerOp, from) = lower!.Value;
+        var (upperOp, to) = upper!.Value;
+        if (from > to || (from == to && (lowerOp == "gt" || upperOp == "lt")))
+        {
+            // Like an empty 'in' list: a range no instant satisfies is never a meaningful rule.
+            throw new PredicateCompilationException($"{at}: the range's lower bound is not before its upper bound, so it matches nothing.");
+        }
+
+        return new[] { Condition(attribute, lowerOp, FormatInstant(from)), Condition(attribute, upperOp, FormatInstant(to)) };
+    }
+
+    private static string FormatInstant(DateTimeOffset instant) =>
+        instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+
+    /// <summary><c>now</c> / <c>now-{N}d</c> / <c>now+{N}d</c> → the instant against <paramref name="nowUtc"/>.</summary>
+    private static bool TryResolveRelativeDate(string? token, DateTimeOffset nowUtc, out DateTimeOffset instant)
+    {
+        var match = RelativeDateToken().Match(token ?? string.Empty);
+        if (!match.Success)
+        {
+            instant = default;
+            return false;
+        }
+
+        var days = match.Groups["days"].Success ? int.Parse(match.Groups["days"].Value, CultureInfo.InvariantCulture) : 0;
+        instant = nowUtc.AddDays(match.Groups["sign"].Value == "+" ? days : -days);
+        return true;
     }
 
     private static XElement Condition(string attribute, string op, string value) =>
@@ -615,17 +808,13 @@ public sealed partial class PredicateCompiler
 
                 if (LooksLikeRelativeDate().IsMatch(s))
                 {
-                    var match = RelativeDateToken().Match(s);
-                    if (!match.Success)
+                    if (!TryResolveRelativeDate(s, nowUtc, out var instant))
                     {
                         throw new PredicateCompilationException(
-                            $"{at}: '{s}' is not a supported relative date. Use 'now' or 'now-{{N}}d'.");
+                            $"{at}: '{s}' is not a supported relative date. Use 'now', 'now-{{N}}d' or 'now+{{N}}d'.");
                     }
 
-                    var instant = match.Groups["days"].Success
-                        ? nowUtc.AddDays(-int.Parse(match.Groups["days"].Value, CultureInfo.InvariantCulture))
-                        : nowUtc;
-                    return instant.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss'Z'", CultureInfo.InvariantCulture);
+                    return FormatInstant(instant);
                 }
 
                 return s;
@@ -700,7 +889,7 @@ public sealed partial class PredicateCompiler
 
     // All anchors are \z, never $: in .NET, $ also matches before a trailing '\n', so "modifiedon\n" would pass a $-anchored
     // name check and slip past the FR-07 string comparison.
-    [GeneratedRegex(@"^now(?:-(?<days>[0-9]{1,4})d)?\z", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^now(?:(?<sign>[-+])(?<days>[0-9]{1,4})d)?\z", RegexOptions.CultureInvariant)]
     private static partial Regex RelativeDateToken();
 
     // Anything an author plausibly MEANT as a relative date ('now', 'NOW-30d', 'now-30', 'now+1d', ' now', 'now\n').
