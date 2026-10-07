@@ -73,3 +73,8 @@ Note: the Web API action is `Assign`, not `AssignRecord` (the first attempt retu
 ## 7. Is task 039 unblocked?
 
 **Partly.** The refusal evidence (039 constraint "each citing its recorded live refusal") is complete, and task 008 can now apply the Secure Record Owner Read. 039's coordination gate (uac-r2's review, PR linked) is **not** yet satisfied, and the Decision Record entry also waits on task 007. No code, role or config change was made by this task.
+
+
+## 6. uac-r2 review received (2026-10-07)
+
+https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6047438504 — approved with conditions: (A) list only lookup columns that already exist (their one-pass reconciliation fails for every secure child table on a missing column); (B) ONE PR for SecureChildLineage.cs + secure-record-owner-role.json. Deploy order per environment: schema (both tables + every lookup) -> role edits (+ Assign and Share for the BFF identity where not System Administrator) -> BFF. Their role script never removes privileges (our early Reads are safe). Basic User Read is needed (unsecure hands children to the BU default team). Census extension deferred to #1379. Both jobs run in dev (21:40Z). Required change for us: no nightly lastevaluated stamp on every open Signal (100k changed-rows-per-pass limit) -> D-61. Their question (can users create Signals/DRs directly?) -> answered by D-62. Their own defect filed: #1378. 079 complete; 039 unblocked.

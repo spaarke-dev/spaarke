@@ -266,6 +266,20 @@ listed as D-6/D-7 were pulled INTO scope rather than deferred.)*
 
 ---
 
+### ISS-007 - source freshness + landing-contract columns (D-50)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Filed** | 2026-10-07 (task 057) |
+| **Source** | D-50; `notes/v4-prototype-vs-solution.md` #8; `notes/v4-reconciliation.md` H-5 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1381 |
+
+Not built in R1: per-source freshness (sources, last sync, cadence) and the landing columns `sourcesystem` /
+`sourceid` / `sourceetag` / `sourceasof` (spec section 2.1). R1 renders a null fact as Missing (`EvidenceLine`).
+
+---
+
 ## Owner decisions 2026-10-03 (cleanup placement)
 
 | Item | Decision | Where it lands |

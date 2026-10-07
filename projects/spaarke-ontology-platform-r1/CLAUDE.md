@@ -101,8 +101,9 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — D-29 To Do score on calendar days · D-30 severity column · D-31/D-35 all To Dos, no-core owner-only · D-32 Off→On re-raises.
 - 2026-10-07 — D-33 secure-child Signals/Decision Records · D-34/D-36/D-37 core-record grouping, extensible · D-38 no skips · D-39 per-item suppression · D-40 two-bound dates · D-41 To Do dates → Date Only (task 106).
 - 2026-10-07 — D-42..D-56 close every open point: rank sev→highpriority→oldest→number · overdue 1 day · WA in both assigner's and assignee's Do lane · reassign/extend Routine · drop RowMenu/OutcomeCard reuse · DR tab in R1 · association-confirmed trigger · recall columns on triage category · Missing + freshness issue · Know rule offers Assign Work · Confirm = confirmation, no chat · templated drafts · WA response columns (task 047) · budget amount as the user · no inquiry due date.
+- 2026-10-07 — D-57 Briefing uses IsOpenWork (no Draft data change) · D-58/D-59 work-assignment response columns + create via uac-r2's RecordCreationService · D-60 drop foreign tables from our solution · **D-61 never stamp unchanged Signals nightly** (uac-r2 100k-row limit) · D-62 users lose Create on Decision Records with 049.
 - 2026-10-05 — SmartTodo's palette is the one due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey).
-- (verify) 2026-10-07 — Writer credential vs tenant-isolation rule I5: proposed fix = build it like the central factory (DefaultAzureCredential + TenantId + writer client id, every non-MI source excluded, a test pins the exclusions); **awaiting owner**.
+- 2026-10-07 — Writer credential vs tenant-isolation rule I5 (owner): tenant-pinned `DefaultAzureCredential` locked to the writer's own UAMI — every non-MI source excluded, `AZURE_TOKEN_CREDENTIALS` refused unless MI, both pinned by tests; I5 satisfied (spec §6 ADR-028 row).
 
 ## 4. Coordination
 

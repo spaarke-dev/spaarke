@@ -30,7 +30,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 
 | Date | Outcome | Source | Status |
 |---|---|---|---|
-| 2026-10-04 | **ADR-028 path A**: the Signal writer uses its own managed identity (`mi-ontology-writer-dev`), never the BFF's System Administrator identity, with no credential-chain fallback | spec §6; task 006 | Binding — implementation shape under review 2026-10-07 (tenant-isolation rule I5; see CLAUDE.md §3) |
+| 2026-10-04 | **ADR-028 path A**: the Signal writer uses its own managed identity (`mi-ontology-writer-dev`), never the BFF's System Administrator identity, with no credential-chain fallback | spec §6; task 006 | Binding — shape amended 2026-10-07 (owner): tenant-pinned `DefaultAzureCredential` locked to the writer's UAMI, every other source excluded + `AZURE_TOKEN_CREDENTIALS` refused unless MI, pinned by tests; I5 satisfied |
 | 2026-10-05 | Task 022: validate rule bodies **at evaluation** and fail closed; model-driven app authoring stays allowed | task 022 | Binding |
 | 2026-10-05 | **ADR-009 path A** for task 096's in-process verdict cache | spec §6 | Done (#1294) |
 | 2026-10-05 | Prototype **v4 `HANDOFF.md` @ `ae1cc9f`** is the UI/UX baseline; where v4 shows something the solution can't do, flag it to the owner | design header, spec §8.2 | Binding |
@@ -92,6 +92,17 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-54 | **Response columns on `sprk_workassignment`** (exact set decided in task 047, with the WA owner and uac-r2) | Binding (047, 044, 061) |
 | D-55 | Budget **amount written as the signed-in user**; the writer only creates the revision | Binding (044) |
 | D-56 | **No response-due date** on the inquiry in R1 | Binding (070) |
+
+## Execution decisions (2026-10-07, late) — spec §9 D-57..D-62
+
+| ID | Outcome | Status |
+|---|---|---|
+| D-57 | Draft events: **no data change**; the Daily Briefing uses `IsOpenWork` (task 060 re-scoped, own PR) | Binding |
+| D-58 | Work-assignment response columns `sprk_respondedon` + `sprk_responseoutcome` approved by the owner as area owner | Binding (task 047) |
+| D-59 | Server-side work-assignment create on uac-r2's `RecordCreationService` (team-owned), under their review | Binding (task 046) |
+| D-60 | Remove the 11 foreign tables from `OntologyPlatformSolution` (reference only) | Binding |
+| D-61 | Evaluator writes Signal fields **only when the result changes** (uac-r2 100k-rows-per-pass limit) | Binding (task 031) |
+| D-62 | Remove Console User **Create on Decision Record** with task 049 | Binding |
 
 ## Superseded or withdrawn
 

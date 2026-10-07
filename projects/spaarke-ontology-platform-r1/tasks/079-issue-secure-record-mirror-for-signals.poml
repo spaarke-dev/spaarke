@@ -4,7 +4,7 @@
     <title>Coordinate with uac-r2: recorded live refusals and review of the two secure-child entries</title>
     <phase>3 Evaluator, Signal lifecycle and read</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Cross-project coordination plus two live refusal probes in dev; no code.</rigor-reason>
     <model-tier>sonnet</model-tier>
