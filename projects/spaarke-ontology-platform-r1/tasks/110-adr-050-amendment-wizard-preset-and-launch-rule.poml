@@ -4,7 +4,7 @@
     <title>ADR-050 path B amendment: WizardShell is the wizard preset, in-app launch rule (MAIN SESSION ONLY)</title>
     <phase>5b Modal system (D-26)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>ADR amendment with repo-wide blast radius; edits .claude/ files.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -105,7 +105,7 @@ AMENDMENT TEXT FOR THE MAIN SESSION (from notes/modal-wizard-canonical-approach.
 Alternatives (for the ADR record): A (project exception) rejected because the conflict is general; C (comply) rejected because it means building on WizardModal, a second wizard engine. spec.md FR-60; D-26.
   </notes>
 
-  <completion>DONE pending merge 2026-10-07 (main session): PR #1380 (branch docs/adr-050-wizard-amendment off master). Amendment points 1-8 applied to the concise ADR-050 (no full ADR-050 under docs/adr - recorded in the CHANGELOG entry); companion fixes (point 9) applied to MODAL-DECISION-CRITERIA.md, MODAL-DESIGN-SYSTEM.md section 7, record-modal-selection.md, modal-shell.md, ui-dialog-shell-architecture.md, ADR-026 matrix row; CHANGELOG entry names D-26 and task 110. All acceptance criteria verified by grep (preset list, retired WizardModal, MUSTs/MUST NOT, no legal-workspace / raw-Dialog confirm / compose-RecordNavigationModalShell instructions; Layout 1 + fullCover unchanged). Deviation: also fixed seven PRE-EXISTING broken relative links in the touched files (finding-triage rule: in-scope defect); link check 8 files / 0 broken. Mark completed when the owner merges #1380.</completion>
+  <completion>DONE pending merge 2026-10-07 (main session): PR #1380 (branch docs/adr-050-wizard-amendment off master). Amendment points 1-8 applied to the concise ADR-050 (no full ADR-050 under docs/adr - recorded in the CHANGELOG entry); companion fixes (point 9) applied to MODAL-DECISION-CRITERIA.md, MODAL-DESIGN-SYSTEM.md section 7, record-modal-selection.md, modal-shell.md, ui-dialog-shell-architecture.md, ADR-026 matrix row; CHANGELOG entry names D-26 and task 110. All acceptance criteria verified by grep (preset list, retired WizardModal, MUSTs/MUST NOT, no legal-workspace / raw-Dialog confirm / compose-RecordNavigationModalShell instructions; Layout 1 + fullCover unchanged). Deviation: also fixed seven PRE-EXISTING broken relative links in the touched files (finding-triage rule: in-scope defect); link check 8 files / 0 broken. MERGED 2026-10-07 (owner-approved "merge when green").</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
