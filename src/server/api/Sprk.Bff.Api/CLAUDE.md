@@ -1,383 +1,64 @@
-# CLAUDE.md - Sprk.Bff.Api Module
+<!--
+Maintainer notes (stripped before Claude reads this file):
+- Loads whenever Claude reads or edits a file under src/server/api/Sprk.Bff.Api/ — i.e. on most backend tasks.
+  Keep it to orientation + load-bearing facts. Do not restate .claude/rules/bff-hygiene.md (it auto-loads for
+  this folder) or ADR text; point to them.
+- Size target: about 8 KB — a target, not a cap; exceed it when the content is load-bearing and say why in the PR. No generic C# samples (Claude knows ProblemDetails); point to .claude/patterns/api/.
+- The heading "Package Management" is cited by a comment in Sprk.Bff.Api.csproj — do not rename it.
+- Auth state is time-boxed and environment-specific: point to ADR-028 / constraints, do not paraphrase status.
+- Previous full version: .claude/archive/2026-10-07/modules/Sprk.Bff.Api.CLAUDE.md
+-->
+# Sprk.Bff.Api — module notes
 
-> **Last Updated**: March 4, 2026
->
-> **Purpose**: Module-specific instructions for the Spaarke BFF (Backend-for-Frontend) API.
->
-> **See also**: [SDAP System Overview](../../../docs/architecture/sdap-overview.md) for full platform architecture and component model.
+The .NET 10 Minimal API that is the single backend for every client surface (SPE documents, AI/chat, Office add-ins, email/communication, finance, workspace, background jobs). Platform overview: [`docs/architecture/sdap-overview.md`](../../../../docs/architecture/sdap-overview.md).
 
-## Module Overview
+**Also loaded automatically when you edit here:** [`.claude/rules/bff-hygiene.md`](../../../../.claude/rules/bff-hygiene.md) — placement decision, AI `PublicContracts` facade, publish-size delta vs fresh master, CVE check, tests (root `CLAUDE.md` §10). Design-time: [`.claude/constraints/bff-extensions.md`](../../../../.claude/constraints/bff-extensions.md).
 
-**Sprk.Bff.Api** is the unified .NET 10 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
+## Where things are
 
-- **SPE / Documents**: SharePoint Embedded file operations, OBO token exchange, container management
-- **AI Platform**: Chat (SSE), document analysis, RAG search, playbooks, knowledge bases, semantic search
-- **Office Add-ins**: Outlook/Word document save, entity search, sharing
-- **Email / Communication**: Email-to-document automation, outbound communications
-- **Finance Intelligence**: Invoice classification, field extraction, financial aggregation
-- **Workspace / Portfolio**: Portfolio analytics, priority scoring, briefing generation
-- **Background Processing**: 13+ async job handlers via Azure Service Bus
+| To find… | Start at |
+|---|---|
+| Startup, DI, middleware | `Program.cs`; endpoint mapping `Infrastructure/DI/EndpointMappingExtensions.cs` |
+| Endpoints | `Api/**` — one `*Endpoints.cs` per area (`Api/Ai/`, `Api/Office/`, `Api/SpeAdmin/`, `Compose*Endpoints.cs`, …) |
+| Resource authorization filters | `Api/Filters/` (e.g. `DocumentAuthorizationFilter.cs`) |
+| SPE operations facade | `Infrastructure/Graph/SpeFileStore.cs` |
+| Graph clients / OBO | `Infrastructure/Graph/GraphClientFactory.cs`; OBO token cache `Services/GraphTokenCache.cs` |
+| Confidential-client credentials | `Infrastructure/Auth/OrderedCredentialClientProvider.cs` (reads `Graph:Credentials:Order`) |
+| Settings inventory (each key with a `_comment` explaining it) | `appsettings.template.json` |
+| Startup config validation | `Configuration/` (`IdentityConfigurationValidator.cs`, `GraphOptionsValidator.cs`) |
+| Audit enrichment (`oid`, `appid`, `obo`, `tenantId`, `correlationId`) | `Infrastructure/Logging/AuditEnrichmentMiddleware.cs` |
+| Chat pipeline | `Api/Ai/ChatEndpoints.cs` → `Services/Ai/Chat/ChatSessionManager.cs` → `SprkChatAgentFactory.cs` → `PlaybookChatContextProvider.cs` → `AgentToolCatalogProjector.cs` (closed catalog, ADR-039) → `Services/Ai/RagService.cs` |
+| AI analysis pipeline | `Services/Ai/AnalysisOrchestrationService.cs`; design: `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` |
+| Background jobs | `Services/Jobs/ServiceBusJobProcessor.cs` (queue, ADR-004); scheduled: ADR-036 `IScheduledJob` |
+| Code patterns (endpoint, filter, errors, DI, workers, resilience) | `.claude/patterns/api/` |
+| Local dev secrets | `docs/SPE.BFF.API-SECRETS-SETUP.md` (short answer: `az login` covers everything except OBO) |
 
-**Scale**: 120+ endpoints, 99+ DI registrations, 13+ background job types.
+## Binding rules
 
-## Key Files
+- **ADR-007** — SPE access goes through `SpeFileStore`; never inject `GraphServiceClient` into endpoints.
+- **ADR-008** — resource authorization uses endpoint filters (`.AddEndpointFilter<…AuthorizationFilter>()` + `.RequireAuthorization()`), not global middleware.
+- Every endpoint requires auth except `/healthz` and `/ping` (root §9).
+- **ADR-010** — DI minimalism: register concretes; add an interface only as a real seam.
+- Errors return `ProblemDetails` (`Results.Problem(...)`), never raw exception text. Log with structured properties, not string interpolation. Keep endpoints thin; logic lives in services.
 
-```
-Sprk.Bff.Api/
-├── Program.cs                 # Entry point, DI configuration, middleware
-├── Api/
-│   ├── Ai/
-│   │   ├── ChatEndpoints.cs               # /api/ai/chat/* — session, message, playbook discovery
-│   │   ├── DocumentIntelligenceEndpoints.cs
-│   │   ├── AnalysisEndpoints.cs
-│   │   └── SemanticSearchEndpoints.cs
-│   ├── DocumentEndpoints.cs
-│   ├── ContainerEndpoints.cs
-│   └── HealthEndpoints.cs
-├── Models/Ai/Chat/
-│   ├── ChatSession.cs                     # Session record (includes HostContext)
-│   ├── ChatContext.cs                     # ChatContext + ChatKnowledgeScope
-│   └── ChatHostContext.cs                 # Entity-aware host context record
-├── Services/
-│   ├── SpeFileStore.cs                    # SPE operations facade (ADR-007)
-│   ├── AuthorizationService.cs
-│   ├── GraphClientFactory.cs
-│   └── Ai/
-│       ├── IRagService.cs                 # RAG search with extended filter options
-│       ├── RagService.cs                  # OData filter builder (search.in, boolean logic)
-│       ├── ScopeResolverService.cs        # Resolves knowledge source IDs from playbook
-│       └── Chat/
-│           ├── ChatSessionManager.cs      # Session lifecycle + HostContext storage
-│           ├── IChatContextProvider.cs     # Context resolution interface
-│           ├── PlaybookChatContextProvider.cs # Playbook-driven context + entity scope
-│           ├── SprkChatAgentFactory.cs     # Agent construction with context
-│           └── AgentToolCatalogProjector.cs # Closed-catalog tool projection (ADR-039)
-├── Filters/                               # Endpoint filters for auth (ADR-008)
-│   └── DocumentAuthorizationFilter.cs
-└── appsettings.json                       # Configuration template
-```
+## Auth — load-bearing facts ([ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`.claude/constraints/auth.md`](../../../../.claude/constraints/auth.md))
 
-## Architecture Constraints
+- **OBO needs a confidential *credential*, not a secret.** Here it is a managed-identity-issued federated client assertion (ADR-028 A4). Do not re-derive "OBO needs a secret" from any doc; if you find a doc that says so, fix it.
+- The BFF identity is **secret-free**. `OrderedCredentialClientProvider` resolves the credential named in `Graph:Credentials:Order`; `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if `ClientSecret` returns to the order. App-only Graph and Dataverse use the managed identity when `Graph:ManagedIdentity:Enabled=true`; it is a user-assigned identity selected by `Graph:ManagedIdentity:ClientId` (validated at startup in `Configuration/`). Mailbox-scoped Graph (`Mail.*`) also needs an Exchange `ApplicationAccessPolicy`.
+- ⚠️ **Never add a `.WithClientSecret(...)` site.** `tests/Spaarke.ArchTests/CredentialGuardTests.cs` fails the build on one and `CredentialCensusTests` asserts the construction-site count. The only sanctioned secret-bearing credentials are ADR-028's listed exceptions — read their current text there.
+- Inbound from trusted external systems uses named API-key schemes (`AuthenticationHandler<>` per scheme, constant-time compare with `CryptographicOperations.FixedTimeEquals`).
+- Clients call with `@spaarke/auth` (`authenticatedFetch`). Never add `accessToken` props or custom auth headers to the client contract.
+- Key Vault secrets or credential order: root §9 (and `.claude/rules/credentials.md`). New environment: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
 
-### From ADR-007: SpeFileStore Facade
-```csharp
-// ✅ CORRECT: Use SpeFileStore facade
-public class DocumentEndpoints
-{
-    public static async Task<IResult> GetDocument(
-        string id,
-        SpeFileStore fileStore)  // Inject concrete facade
-    {
-        var stream = await fileStore.GetFileContentAsync(id);
-        return Results.Stream(stream);
-    }
-}
+## Testing
 
-// ❌ WRONG: Don't inject GraphServiceClient directly
-public class BadEndpoint(GraphServiceClient graph) { }
-```
-
-### From ADR-008: Endpoint Filters
-```csharp
-// ✅ CORRECT: Use endpoint filters for resource authorization
-app.MapGet("/obo/drives/{driveId}/items/{itemId}", GetItem)
-   .AddEndpointFilter<DocumentAuthorizationFilter>()
-   .RequireAuthorization();
-
-// ❌ WRONG: Don't use global middleware for resource checks
-app.UseMiddleware<AuthorizationMiddleware>();
-```
-
-### From ADR-010: DI Minimalism
-```csharp
-// ✅ CORRECT: Minimal registrations with concretes
-services.AddSingleton<SpeFileStore>();
-services.AddSingleton<AuthorizationService>();
-services.AddSingleton<GraphClientFactory>();
-
-// ❌ WRONG: Interface for everything
-services.AddScoped<ISpeFileStore, SpeFileStore>();  // Unnecessary interface
-```
-
-## Auth (Spaarke Auth v2 — [ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
-
-> **⚠️ Corrected 2026-08-20 by `spaarke-auth-v4-dataverse-MI` task 002.** This file previously stated that
-> OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"*. **That was wrong**, and it
-> is the exact sentence that caused three prior audits to conclude the secret could never be removed. OAuth
-> requires a confidential **credential**; a secret is one of three ways to satisfy it, and Microsoft ranks it
-> last. Proven empirically on 2026-08-20: OBO to Graph/SPE, OBO to Dataverse `user_impersonation`, and
-> long-running OBO all succeed under a Managed-Identity-issued client assertion. Evidence:
-> `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md`.
->
-> **Do not re-derive "OBO needs a secret" from any doc you encounter. If you find one, fix it.**
->
-> **✅ COMPLETED 2026-08-24 by task 033 — ADR-028 exception E-3 is CLOSED.** The transitional secret is gone
-> from every deployed surface: four app settings deleted, and both Key Vault copies
-> (`BFF-API-ClientSecret` + `bff-api-client-secret`) deleted. The credential order is
-> `[ManagedIdentityFederated]` — a **single entry, with nothing beneath it** — and
-> `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if
-> `ClientSecret` ever returns to the order. Verified with a byte-exact SPE round-trip over OBO.
-
-**Server outbound (canonical)**: the BFF identity is **secret-free** (ADR-028 **A4**). Confidential-client
-credentials — for **OBO** and app-only alike — come from `OrderedCredentialClientProvider`, which resolves
-the credential named in `Graph:Credentials:Order`. Graph + Dataverse app-only additionally use
-`DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`.
-
-> ⚠️ **Never add a new `.WithClientSecret(...)` site.** `tests/Spaarke.ArchTests/CredentialGuardTests.cs`
-> fails the build on one, and `CredentialCensusTests` asserts the construction-site count. E-3 is closed;
-> it never licensed expansion in the first place. The only sanctioned secret-bearing credentials left are
-> ADR-028 **E-1** (per-customer SPE owning apps) and `PowerBi:ClientSecret` (task 042, deferred).
->
-> `ClientSecretCredential` is **not** a local-dev fallback for OBO any more either — see
-> [`docs/SPE.BFF.API-SECRETS-SETUP.md`](docs/SPE.BFF.API-SECRETS-SETUP.md) for what local development
-> actually needs (short answer: `az login` covers everything except OBO).
-
-**Three auth paths** in the BFF:
-
-| Path | When | Mechanism |
-|---|---|---|
-| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Requires a **confidential credential** — as of ADR-028 **A4** that is a **Managed-Identity-issued federated client assertion**, not a secret. `BFF-API-ClientSecret` is the transitional fallback (exception **E-3**) until `spaarke-auth-v4-dataverse-MI` task 033 removes it. |
-| **Managed Identity** (app-only, canonical) | Background jobs, system-level container ops, polling, indexing — no acting user | `DefaultAzureCredential` resolves the App Service's system-assigned MI. Mailbox-scoped Graph (`Mail.*`) ALSO requires Exchange `ApplicationAccessPolicy` scoping the MI to allowed mailboxes (Phase C). |
-| **Named API key schemes** | Inbound from trusted external systems (BuilderAdmin, Rag) | `AuthenticationHandler<>` per-scheme with `CryptographicOperations.FixedTimeEquals` constant-time compare. |
-
-### OBO flow (delegated path)
-
-```
-PCF Control / Code Page         BFF API                      Graph API
-    |                              |                            |
-    |-- Token A (user) ---------->|                            |
-    |  via authenticatedFetch     |                            |
-    |                              |-- OBO Exchange ---------->|
-    |                              |<-- Token B (graph) -------|
-    |                              |                            |
-    |                              |-- Graph Call (Token B) -->|
-    |<-- Response ----------------|<-- Response --------------|
-```
-
-**Token Scopes:**
-- Client requests: `api://{bff-client-id}/SDAP.Access`
-- BFF exchanges for: `FileStorageContainer.Selected`, `Files.Read.All` (per operation)
-
-### Client contract (read this when authoring PCFs, Code Pages, or Office Add-ins)
-
-Per ADR-028, clients use `useAuth()` + `authenticatedFetch` from `@spaarke/auth`. The BFF is on the server side of this contract — endpoint handlers receive validated JWT, do OBO exchange when needed, return data. Do NOT add `accessToken: string` props to client components or require clients to send custom headers; clients use the `@spaarke/auth` standard contract.
-
-### Auth-related infrastructure files in this module
-
-- `Infrastructure/Graph/GraphClientFactory.cs` — Graph client construction (OBO + MI cascade per `Graph__ManagedIdentity__Enabled`)
-- `Services/GraphTokenCache.cs` — Server-side OBO token cache (Redis, ADR-009)
-- `Infrastructure/Auth/` — Webhook HMAC validation, named API key schemes (Phase C)
-- `Middleware/AuditEnrichmentMiddleware.cs` — Per-request enrichment with `oid`, `appid`, `obo`, `tenantId`, `correlationId`
-
-**Operator setup**: New environments follow [`docs/guides/auth-deployment-setup.md`](../../../../docs/guides/auth-deployment-setup.md) — 10-section runbook including §3 App Service settings, §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy (required for Email/Communication modules).
-
-## Endpoint Patterns
-
-### Standard Response Format
-```csharp
-// Success
-return Results.Ok(new { id = item.Id, name = item.Name });
-
-// Created
-return Results.Created($"/items/{id}", item);
-
-// Error - use ProblemDetails
-return Results.Problem(
-    detail: "Container not found",
-    statusCode: 404,
-    title: "Not Found");
-```
-
-### Health Check
-```csharp
-app.MapGet("/healthz", async (SpeFileStore store) =>
-{
-    var healthy = await store.CanConnectAsync();
-    return healthy ? Results.Ok() : Results.StatusCode(503);
-});
-```
-
-## Testing Guidelines
-
-```csharp
-// Unit test pattern
-[Fact]
-public async Task GetDocument_ReturnsStream_WhenDocumentExists()
-{
-    // Arrange
-    var mockStore = new Mock<SpeFileStore>();
-    mockStore.Setup(s => s.GetFileContentAsync("doc-1"))
-             .ReturnsAsync(new MemoryStream());
-    
-    // Act
-    var result = await DocumentEndpoints.GetDocument("doc-1", mockStore.Object);
-    
-    // Assert
-    result.Should().BeOfType<StreamHttpResult>();
-}
-```
-
-## Configuration
-
-**Required settings** — full canonical inventory in [`docs/guides/auth-deployment-setup.md`](../../../../docs/guides/auth-deployment-setup.md) §3:
-
-```json
-{
-  "AzureAd": {
-    "Instance": "https://login.microsoftonline.com/",
-    "TenantId": "{tenant-id}",
-    "ClientId": "{bff-client-id}"
-    // NO ClientSecret. Removed 2026-08-24 by auth-v4 task 033; ADR-028 E-3 CLOSED.
-    // OBO needs a confidential CREDENTIAL, not a secret -- here it is a MI-issued federated
-    // client assertion (A4). Adding one back re-arms the silent fall-through this removed.
-  },
-  "Graph": {
-    "ManagedIdentity": {
-      "Enabled": "true"  // CANONICAL in Azure environments per ADR-028
-    },
-    "Credentials": {
-      "Order": ["ManagedIdentityFederated"],   // single entry -- nothing to fall through to
-      "RequireSecretFreeIdentity": true        // refuses startup outside Development if ClientSecret returns
-    }
-  },
-  "SharePointEmbedded": {
-    "ContainerTypeId": "{container-type-id}"
-  },
-  "Communication": {
-    "WebhookSigningKey": "{kv-ref}",     // HMAC-SHA256 for Graph subscription webhooks
-    "WebhookClientState": "{kv-ref}"     // Graph-native subscription validation
-  },
-  "EmailProcessing": {
-    "WebhookSigningKey": "{kv-ref}"      // HMAC-SHA256 for Dataverse Service Endpoint webhooks
-  }
-}
-```
-
-> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained only as the **transitional** OBO fallback (exception **E-3**). After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
-
-## Common Patterns
-
-### Logging with Correlation
-```csharp
-logger.LogInformation(
-    "Processing document {DocumentId} for user {UserId}",
-    documentId,
-    context.User.Identity?.Name);
-```
-
-### Error Handling
-```csharp
-try
-{
-    return await fileStore.UploadAsync(file);
-}
-catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound)
-{
-    return Results.Problem(
-        detail: "Container not found",
-        statusCode: 404);
-}
-catch (Exception ex)
-{
-    logger.LogError(ex, "Upload failed for {FileName}", file.FileName);
-    return Results.Problem(
-        detail: "An error occurred during upload",
-        statusCode: 500);
-}
-```
-
-## AI Chat System
-
-The Chat system provides playbook-driven conversational AI with entity-scoped RAG search.
-
-### Chat Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/ai/chat/sessions` | Create session (accepts `HostContext`) |
-| POST | `/api/ai/chat/sessions/{id}/switch` | Switch playbook/document context |
-| POST | `/api/ai/chat/sessions/{id}/messages` | Send message (SSE streaming) |
-| GET | `/api/ai/chat/playbooks` | List available playbooks (pre-session) |
-
-### Key Models
-
-- **ChatHostContext**: Record describing where SprkChat is embedded (EntityType, EntityId, WorkspaceType). Validates against `ParentEntityContext.EntityTypes`.
-- **ChatKnowledgeScope**: Carries knowledge source IDs, entity scope, and inline content for tool construction.
-- **RagSearchOptions**: Extended with `ExcludeKnowledgeSourceIds`, `RequiredTags`, `ExcludeTags`, `ParentEntityType`, `ParentEntityId` for boolean filter logic.
-
-### Pipeline Flow
-
-```
-ChatEndpoints → ChatSessionManager → SprkChatAgentFactory
-  → PlaybookChatContextProvider → ChatKnowledgeScope
-    → AgentToolCatalogProjector (sprk_analysistool rows → DocumentSearchHandler /
-      KnowledgeRetrievalHandler / ...) → RagService → Azure AI Search
-```
-
-HostContext flows through every layer. When null, search remains tenant-wide (backward compatible).
-
-**See**: [SPAARKE-AI-ARCHITECTURE.md Section 18](../../../../docs/guides/SPAARKE-AI-ARCHITECTURE.md#18-sprkchat-system--conversational-ai-with-rag-scoping-2026-02-24)
-
----
-
-## Do's and Don'ts
-
-| ✅ DO | ❌ DON'T |
-|-------|----------|
-| Use `SpeFileStore` for all SPE operations | Inject `GraphServiceClient` into endpoints |
-| Use endpoint filters for authorization | Use global authorization middleware |
-| Return `ProblemDetails` for errors | Return raw exception messages |
-| Log with structured properties | Use string interpolation in logs |
-| Keep endpoints thin (delegate to services) | Put business logic in endpoints |
-
----
+Follow [`tests/CLAUDE.md`](../../../../tests/CLAUDE.md): a new endpoint gets a contract test, a bug fix gets a regression test, integration-first through a `WebApplicationFactory<Program>` fixture. Do not unit-test endpoint handlers against mocked facades.
 
 ## Package Management
 
-### Microsoft.Graph and Kiota Packages
+**Microsoft.Graph / Kiota.** The BFF references `Microsoft.Graph` 6.x directly (`Sprk.Bff.Api.csproj`); Kiota is **transitive only**. Every resolved `Microsoft.Kiota.*` assembly must be the same version or the app fails at runtime with binding errors — Graph.Core's own dependency graph guarantees that today. Do not add direct `Microsoft.Kiota.*` `PackageReference`s unless a genuine transitive conflict forces one. If it does:
+1. Confirm: `dotnet list package --include-transitive | grep -i kiota` shows more than one Kiota version.
+2. Pin **all** `Microsoft.Kiota.*` references to the same version (never a partial set), with an inline comment naming the conflict.
+3. Re-run the check, then build and test locally before deploying.
 
-> **Updated 2026-08-13 (dotnet-10-upgrade-r1 task 033)**: bumped `Microsoft.Graph` 5.105.0 → 6.5.0.
-> Kiota is now a **transitive-only** dependency (pulled via `Microsoft.Graph.Core 4.0.1`) at
-> **2.0.0** — the 7 direct `Microsoft.Kiota.*` `PackageReference`s that previously pinned the
-> version-match invariant have been **deleted**. See
-> `projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md` for the full call-site
-> sizing and `notes/kiota-cve-finding.md` for the CVE history (CVE-2026-44503 /
-> GHSA-7j59-v9qr-6fq9, High — fixed at Kiota ≥1.22.0; transitive 2.0.0 is well above that floor).
-
-The BFF API uses the Microsoft.Graph SDK, which depends on Kiota packages. **All resolved Kiota
-assemblies must be the same version** to avoid assembly binding errors at runtime — this is now
-satisfied **transitively** by Graph 6.x, not by direct pins.
-
-#### Required Package (direct)
-
-```xml
-<!-- Microsoft Graph SDK v6.x — pulls Microsoft.Graph.Core 4.0.1 + transitive
-     Microsoft.Kiota.* 2.0.x. Do NOT add direct Microsoft.Kiota.* PackageReferences
-     unless a genuine transitive-version conflict forces one (document the reason inline
-     if you do). -->
-<PackageReference Include="Microsoft.Graph" Version="6.5.0" />
-```
-
-#### Why No Direct Kiota Pins Anymore
-
-Previously, 7 direct `Microsoft.Kiota.*` pins existed solely to float the transitive graph to
-1.22.0 to clear CVE-2026-44503 while staying on `Microsoft.Graph 5.x`. Under `Microsoft.Graph
-6.5.0`, the transitive Kiota version (2.0.0) is already above that CVE floor, so the pins became
-pure maintenance burden (7 lines to keep in lockstep on every Graph bump) with no remaining
-purpose. Deleting them does **not** reintroduce the historical assembly-binding-conflict risk —
-that risk was from *partial* direct updates (e.g., bumping `Abstractions` but not
-`Serialization.Json`); with zero direct pins, NuGet resolves every Kiota assembly to the single
-version Graph.Core's own dependency graph specifies.
-
-#### If a Transitive Kiota Conflict Ever Forces a Direct Pin
-
-1. Confirm the conflict is real: `dotnet list package --include-transitive | grep -i kiota` —
-   look for more than one distinct Kiota version across the resolved graph.
-2. If forced to pin, pin **ALL** `Microsoft.Kiota.*` references to the SAME version (never a
-   partial set) and add an inline comment explaining which conflict required it.
-3. Re-verify with `dotnet list package --include-transitive | grep -i kiota` before committing.
-4. Build and test locally before deploying.
-
----
-
-*Refer to root `CLAUDE.md` for repository-wide standards.*
+History (CVE-2026-44503 and the retired direct pins): the csproj comment and `projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md`.

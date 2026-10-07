@@ -57,9 +57,11 @@ Spaarke inverts the classical unit-heavy pyramid. The shape is:
 
 ---
 
-## 3. Six KEEP Categories
+## 3. Eight KEEP Categories
 
-These six categories are the **only** test categories Spaarke maintains. Path conventions encode them at runtime — `task-execute` Step 9.5 (code-review) checks paths, not CSVs.
+> **Corrected 2026-10-07.** This section listed six categories. ADR-038 has had eight since 2026-08-24: `tests/integration/seam/**` (added 2026-07-09, E-40) and `tests/Spaarke.ArchTests/**` (Amendment A1). Read as "six", its "not a KEEP category → DELETE candidate" rule below made every seam test and every fitness function a delete candidate. ADR-038 §2 is canonical.
+
+These eight categories are the **only** test categories Spaarke maintains. Path conventions encode them at runtime — `task-execute` Step 9.5 (code-review) checks paths, not CSVs.
 
 | # | Category | Path convention | Definition | Concrete example |
 |---|----------|-----------------|------------|------------------|
@@ -69,14 +71,16 @@ These six categories are the **only** test categories Spaarke maintains. Path co
 | 4 | **tenant-isolation** | `tests/integration/tenant/**` | Tenant boundary enforcement — that user A in tenant X cannot read/write resources in tenant Y, that queries filter by tenant, that cross-tenant references are rejected. | `tests/integration/tenant/CrossTenantDocumentAccessTests.cs` — provisions documents in tenant A, authenticates as user in tenant B, asserts every `GET`/`PATCH`/`DELETE` returns 404 ProblemDetails (not 403, to avoid information disclosure). |
 | 5 | **endpoint-contract** | `tests/integration/contract/**` | Every new endpoint must have at least one integration test asserting the request/response contract (route, verbs, status codes, ProblemDetails shape, content-type). | `tests/integration/contract/SemanticSearchEndpointContractTests.cs` — asserts `POST /api/ai/search` accepts `application/json`, returns `200 + SearchResultsDto` for happy path, `400 + ProblemDetails` for missing `query` field, `401 + ProblemDetails` for missing bearer token. |
 | 6 | **domain-logic** | `tests/unit/domain/**` | Pure logic — no I/O, no mocks, no DI. Validators, parsers, formatters, transforms, state machines. Fast (in-process), deterministic, no `TimeProvider` ceremony needed beyond passing `DateTimeOffset` parameters. | `tests/unit/domain/DocumentNameValidatorTests.cs` — asserts `DocumentNameValidator.IsValid("doc<>name.pdf") == false` and `IsValid("doc.pdf") == true`. Twenty assertions per file is fine; the file is small, the test is fast, the failure is localized. |
+| 7 | **vertical-slice-seam** | `tests/integration/seam/**` | End-to-end slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render) using production types, with only the LLM, catalog-data and side-effect-transport boundaries doubled. A green router-unit or contract-shape test is not a substitute. Definition of done for any dispatch-spine change (ADR-038 §2). | `tests/integration/seam/Ai/ComposeDocSessionDispatchSeamTests.cs` |
+| 8 | **structural fitness function** | `tests/Spaarke.ArchTests/**` | Asserts an invariant over source or assemblies rather than runtime behaviour; the sanctioned replacement for the wiring tests banned by B1–B5 (ADR-038 Amendment A1). Each rule carries negative and positive controls; each allowlist entry carries a reason and an ADR citation. Naming (B13) and setup-ratio (B15) heuristics do not apply — see `tests/CLAUDE.md`. | `tests/Spaarke.ArchTests/CredentialGuardTests.cs` — fails the build on a new `.WithClientSecret(...)` site. |
 
 ### Deletion safety (binding)
 
-Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these six paths requires a **same-PR replacement** of equivalent coverage in the same category. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
+Per `ci-cd-unit-test-remediation-r1` spec FR-B06, any deletion under one of these eight paths requires a **same-PR replacement** of equivalent coverage in the same category. Code-review at Step 9.5 enforces this path check. A test in `tests/integration/auth/**` may be deleted only if another test in `tests/integration/auth/**` lands in the same PR exercising the same auth path.
 
 ### What is NOT a KEEP category
 
-If a test does not fit one of the six, it is a DELETE candidate — even if it passes. The most common DELETE patterns are exhaustively listed in §5's ban list.
+If a test does not fit one of the eight, it is a DELETE candidate — even if it passes. The most common DELETE patterns are exhaustively listed in §5's ban list.
 
 ---
 
