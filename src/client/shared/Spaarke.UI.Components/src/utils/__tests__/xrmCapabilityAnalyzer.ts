@@ -944,10 +944,15 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     if (seen.has(key)) return;
     seen.add(key);
 
-    // A declaration's own name (`let x;`) or an assignment target (`x = …`) is not a read.
+    // A declaration's own name (`let x;`), an assignment target (`x = …`), or an import /
+    // export specifier (`import { xrm }`; the imported binding's uses are references of the
+    // same resolved symbol, so they are followed anyway) is not a read.
     {
       const p = node.parent;
       if (
+        ts.isImportSpecifier(p) ||
+        ts.isExportSpecifier(p) ||
+        ts.isImportClause(p) ||
         ((ts.isVariableDeclaration(p) ||
           ts.isParameter(p) ||
           ts.isBindingElement(p) ||

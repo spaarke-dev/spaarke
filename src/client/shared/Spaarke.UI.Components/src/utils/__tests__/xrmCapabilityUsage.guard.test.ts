@@ -597,6 +597,21 @@ describe('getXrm capability guard — round 8 shapes fire', () => {
     ).toBe(true);
   });
 
+  it('an exported lookup imported elsewhere: no import-specifier blind spot, and its uses are followed (round 9)', () => {
+    const quiet = run({
+      'shared.ts': IMPORT + "export const xrm = getXrm('navigation');\n",
+      'a.ts': "import { xrm } from './shared';\nxrm!.Navigation.navigateTo({});",
+    });
+    expect(quiet.blindSpots).toEqual([]);
+    expect(quiet.violations).toEqual([]);
+    const firing = run({
+      'shared.ts': IMPORT + "export const xrm = getXrm('navigation');\n",
+      'a.ts': "import { xrm as x } from './shared';\nx!.Navigation.openForm({});",
+    });
+    expect(firing.blindSpots).toEqual([]);
+    expect(firing.violations.map(v => `${v.file} ${v.use}`)).toEqual(['a.ts Navigation.openForm']);
+  });
+
   it('quiet: R.m.bind(R) and an untouched let capability', () => {
     const r = run({
       'a.ts':
