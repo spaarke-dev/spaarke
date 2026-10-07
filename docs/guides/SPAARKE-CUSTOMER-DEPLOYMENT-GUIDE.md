@@ -444,7 +444,8 @@ same rules for batch mode.
 
 | Intake key | Read by | Rule (400 `errorCode`) |
 |---|---|---|
-| `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`) |
+| `identityPreset` | H11 | `B2BGuest` \| `NativeAccount`, exact case (`userprov-missing-identity-preset` / `userprov-invalid-identity-preset`); **a `Model1` run takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`) |
+| `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment (`PRQ-C-10`) — `userprov-missing-security-group-id` / `userprov-invalid-security-group-id` (T232) |
 | `usersJson` | H11 | JSON array, 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName`; `B2BGuest`: `email` (`userprov-missing-users` / `userprov-malformed-users-payload` / `userprov-invalid-user-entry` / `userprov-too-many-users`). Personal data: stored in the L2 run document (owner decision D15); never in git; diagnostics and logs identify users by position / Entra object id. |
 | `exchangePolicyScopeGroupId` | H14a | non-blank (`h14a-missing-policy-scope-group-id`). The mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (only its **direct** members' mailboxes are reachable) — **created by the Exchange admin of the stamp's tenant before the run** (prerequisite `PRQ-C-08`; L2 never creates it — its membership is the customer's access decision). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one non-blank (`h14b-no-webhook-targets-configured`) |
@@ -550,7 +551,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H8** | SPE container | Creates ONE customer container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s). **Binds the container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1), so it needs **H5**. Before creating, grants the customer's BFF identities on the container-type registration (stamp UAMI application `full`, BFF app delegated `full` — task 227b). **Records what it created at once and RESUMES with it** (rounds 41 + 49): a recorded container is never created again, and one whose activation failed is re-activated. A create whose answer was lost is QuarantineRequired `spe-container-creation-in-doubt`: never repeated, never auto-adopted (§7.5). **A later run reuses the customer's existing container** — the one the environment records in `sprk_SharePointEmbeddedContainerId` — and never removes it; the run's record and the environment naming different containers stops the run naming both (task 227e). After the bind it writes the `spaarkeCustomerId` marker the BFF recognises its containers by (T227d) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Runs right after H3 + H5 and **before H6** (T228 — H6 and H7 sign in as the BFF app registration it makes an application user). Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
-| **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
+| **H11** | User provisioning | `B2BGuest` (every Model 1 run): checks the environment's security group (`sprk-{customerId}-users`) and guest access, invites each user (an existing guest is reused — no second email), then adds each redeemed guest to the group and makes it a Dataverse user with the Spaarke role. `NativeAccount` (Model 2): creates + licenses users | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
@@ -1130,7 +1131,29 @@ customer's group. Exchange adds the two sources together, so an Entra mailbox gr
 **T2 verification**: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1.
 **T3 verification**: UAMI SP `appRoleAssignments` holds the 11 Entra-granted roles and **none** of the 4 mailbox roles.
 
-**H11** provisions users per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow.
+**H11** provisions the customer's users (T232, owner D2 — Model 1 users are **B2B guests in Spaarke's tenant**, and a
+Model 1 run takes only `B2BGuest`):
+
+1. **Before inviting anyone** it refuses (Resumable, nothing written) a run whose environment security group
+   (`environmentSecurityGroupId`, `PRQ-C-10`) is not named `sprk-{customerId}-users` or not security-enabled
+   (`userprov-security-group-rejected`), or whose environment restricts guests
+   (`organization.restrictguestuseraccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
+   isolation boundary between Model 1 environments: all live in Spaarke's tenant, so an environment without it admits
+   every user of that tenant, including other customers' guests.
+2. Each user becomes a guest: an existing guest with that address is **reused without a second invitation email**; an
+   address that belongs to a member of the tenant is refused.
+3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`; re-run H11 to re-check).
+4. It adds each guest to the group, then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
+   alternate key — Dataverse adds a group member who is not yet a user on that read (Microsoft's documented app-only
+   path; no Power Platform admin role) — and associates `H11UserProvisioningOptions:GuestSecurityRoleNames`
+   (default `Spaarke Basic User`, root business unit). A missing role → `userprov-security-role-not-found` naming it.
+   A refusal right after the group add can be membership propagation — resume.
+
+**Licensing**: Model 1 guests get **no licence**. Spaarke pays for their access **pay-as-you-go** on the customer's
+stamp subscription (owner 2026-10-07): the operator links the environment to a billing policy on that subscription
+(`PRQ-C-11`, checked by the skill — L2 cannot see billing). Meter: Power Apps per app, **per active user per app per
+month**. `NativeAccount` (Model 2) still assigns the configured licence SKUs and refuses to create anyone when none is
+configured (`userprov-license-sku-not-configured`).
 
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 

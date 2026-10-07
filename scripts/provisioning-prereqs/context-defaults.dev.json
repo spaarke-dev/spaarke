@@ -130,6 +130,12 @@
       "populatedBy": "nonSecretParameters environmentName (default 'prod', owner D6)",
       "note": "Distinct from {env} (the L2 control-plane tier). Used by PRQ-E-05 — not substituted by Step 0.5b."
     },
+    "environmentSecurityGroupId": {
+      "source": "intake",
+      "shape": "Object id (GUID) of the security group sprk-{customerId}-users",
+      "populatedBy": "intake.schema.json environmentSecurityGroupId property (skill Step 1b-quinquies); the operator creates the group and sets it on the environment (PRQ-C-10)",
+      "note": "PRQ-C-10 is once_per_customer — documented for the operator, not run by Step 0.5b. Required for B2BGuest (every Model 1 run)."
+    },
     "exchangePolicyScopeGroupId": {
       "source": "intake",
       "shape": "Email address or object id of a mail-enabled security group",

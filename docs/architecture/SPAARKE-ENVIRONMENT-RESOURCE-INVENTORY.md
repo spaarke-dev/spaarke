@@ -22,7 +22,7 @@
 | Azure | **Own subscription + resource group per customer** (ADR-027 amended 2026-09-28), Spaarke-owned and Spaarke-billed |
 | Dataverse | **Own environment per customer**, **managed** solutions |
 | SharePoint Embedded | Containers in Spaarke's tenant, container type `Spaarke Model 1` (`standard` — Spaarke pays) |
-| Users | **B2B guests** in Spaarke's tenant; **Spaarke pays licenses** |
+| Users | **B2B guests** in Spaarke's tenant; **Spaarke pays** — pay-as-you-go on the stamp subscription, no per-user licences (owner 2026-10-07, T232) |
 | Environments per customer | **prod only** (`{env}` = `prod`) |
 
 **Model 2** (customer-tenant stamp, `directToCustomer` container type) is **out of scope** for this project (D3) —
@@ -77,7 +77,8 @@ Created by the operator before the provisioning run; the run verifies them and n
 | App user — the customer's **UAMI** | Dedicated | `systemuser` where `azureactivedirectoryobjectid` = UAMI **principalId** (never clientId); System Administrator, root BU | **H10** post-step; trap **T2** query verifies exactly one row | ✅ per-customer UAMI `mi-spaarke-{customerId}-prod` (`customer.bicep:214`) |
 | Graph app-role grants on the UAMI (~15) | Dedicated | Per [`GraphAppRoles.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs) | **H10** (trap **T3**) | ✅ — 11 of 14 null `AppRoleId` GUIDs must be completed before the first production customer (project MUST rule) |
 | Custom security roles `Spaarke User`, `Spaarke AI Analysis User`, `Spaarke AI Analysis Admin` | Dedicated (shipped in the solution) | Defined in the solution package | **H6** (solution import) | 🔲 **T218** — the package that ships them is being redefined (D7) |
-| Customer users | Dedicated (guest accounts in Spaarke's tenant) | **B2B guests**; **Spaarke-paid licenses** (D2) | **H11** | 🔲 **T232** — H11 sends B2B invitations (`GraphRestB2BConsentVerifier.cs`); license assignment and guest → Dataverse user sync are unverified |
+| Customer users | Dedicated (guest accounts in Spaarke's tenant) | **B2B guests** (D2); access paid **pay-as-you-go** on the stamp subscription (`PRQ-C-11`) | **H11** | ✅ **T232** — invites (an existing guest reused, no second mail), adds each redeemed guest to `sprk-{customerId}-users`, makes it a Dataverse user with the Spaarke role. Live behaviour (on-demand user add under PAYG) is a T186 check |
+| Environment security group `sprk-{customerId}-users` | Dedicated | Entra security group set on the Dataverse environment — keeps other customers' guests out | Operator (`PRQ-C-10`); H11 adds members | ✅ T232 |
 | Email (Graph API mailbox configuration) | Dedicated | — | Configured per customer **outside this project** (D2) | Out of scope |
 
 ## Solution package

@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-07 — Model 1 guests: environment security group + pay-as-you-go (T232)
+
+`customer-provisioning-orchestration-r1` T232 (owner D2; owner 2026-10-07: Spaarke pays guest access pay-as-you-go).
+
+- **`.claude/skills/provision-environment/SKILL.md`** Step 1e-bis: a Model1 run's preset is fixed to `B2BGuest`; new
+  intake `environmentSecurityGroupId` (GUID of `sprk-{customerId}-users`); the step checks PRQ-C-10 (group) and
+  PRQ-C-12 (guest access) as the operator — hard stop — and shows PRQ-C-11 (`pac licensing
+  get-environment-billing-policy`) for confirmation; Step 4.0 sends the group id.
+- **`.claude/constraints/provisioning.md`**: new binding section "Model 1 users — B2B guests, environment security group,
+  pay-as-you-go".
+
+---
 ###### 2026-10-06 — Optional per-customer OpenAI spend limit at intake (T254)
 
 `customer-provisioning-orchestration-r1` T254 (owner G37: no cap by default, a per-customer limit if desired).

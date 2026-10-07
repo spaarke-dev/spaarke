@@ -1,6 +1,6 @@
 # Provisioning Constraints
 
-> **Last Reviewed**: 2026-10-06 (T244 — keyless stamp resources rule added; T246 — Content Safety joins the keyless set)
+> **Last Reviewed**: 2026-10-07 (T232 — Model 1 guest access rule added; 2026-10-06 T244 keyless stamp resources; T246 Content Safety)
 > **Reviewed By**: customer-provisioning-orchestration-r1 task 203a per punch list row A08
 > **Load when**: task tags include `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning`
 > **Wired into**: `.claude/skills/task-execute/SKILL.md` Step 4a tag map
@@ -164,6 +164,22 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **H5 adopts, never creates**: URL rule → `GET /WhoAmI` as the L2 Worker identity (401/403 → Resumable `worker-not-app-user`; the operator adds that identity as a System Administrator application user, PRQ-C-09).
 - **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7 sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7.
 - **The L2 identity holds Owner on each customer subscription** (owner decision 2026-10-06 — customer.bicep writes role assignments): granted by the operator with `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04). It is never deployed on the platform subscription, and L2 never grants itself access to a subscription.
+
+## Model 1 users — B2B guests, environment security group, pay-as-you-go (BINDING — owner D2 + 2026-10-07; T232)
+
+- A Model 1 run takes only `B2BGuest` (`UserProvisioningIntake`). Every B2BGuest run names the environment's security
+  group `sprk-{customerId}-users` (`environmentSecurityGroupId`, PRQ-C-10). **The group is the isolation boundary between
+  Model 1 environments** (all in Spaarke's tenant): H11 refuses a group with another name or not security-enabled before
+  inviting anyone, and adds guests to that group only. **MUST NOT** add a guest to any other group or make it a user of
+  another environment.
+- Guests get **no licence**: Spaarke pays pay-as-you-go on the customer's stamp subscription (PRQ-C-11 — an operator
+  check; L2 cannot see billing). **MUST NOT** add per-user licence assignment for B2BGuest. NativeAccount refuses a run
+  with no SKU configured.
+- A guest's Dataverse user is made through the `azureactivedirectoryobjectid` alternate key (on-demand add of a group
+  member) as the L2 Worker identity. **MUST NOT** grant L2 a Power Platform admin role or register it as a management
+  app for this (force sync) — ask the owner first if a live run shows the alternate key is not enough.
+- An existing guest is reused — **never re-invite** (it re-sends the email). `restrictguestuseraccess` must be off
+  (PRQ-C-12); H11 checks it before inviting. Decisions + known limits: `projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md`.
 
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 

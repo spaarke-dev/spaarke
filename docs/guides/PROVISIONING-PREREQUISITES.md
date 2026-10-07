@@ -1,9 +1,16 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
-> **Version**: 6 · **Last Updated**: 2026-10-06
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 8)
+> **Version**: 7 · **Last Updated**: 2026-10-07
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 9)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v9 (2026-10-07, `customer-provisioning-orchestration-r1` T232 — owner D2 + PAYG decision 2026-10-07)**: Model 1
+> users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
+> `sprk-{customerId}-users` — intake `environmentSecurityGroupId`), `PRQ-C-11` **added** (the environment linked to a
+> pay-as-you-go billing policy on the stamp subscription), `PRQ-C-12` **added** (guest access allowed —
+> `restrictguestuseraccess` off). All three are checked by the skill (Step 1e-bis) as the operator; H11 enforces C-10
+> and C-12 again server-side.
 >
 > **v8 (2026-10-06, `customer-provisioning-orchestration-r1` T228 — owner D4 / Q1)**: the operator creates the customer's
 > subscription and Dataverse environment; L2 creates neither. `PRQ-S-00` **added** (the customer's own subscription —
@@ -85,8 +92,8 @@ Prereqs are grouped by **scope**:
 |---|---|---|
 | `once_per_tenant` | 6 active (+1 retired) | `PRQ-T-01` … `PRQ-T-06`; ~~`PRQ-T-07`~~ **retired 2026-09-28 per D-12 + D-13** |
 | `once_per_env` | 12 active (+1 retired) | `PRQ-E-01` … `PRQ-E-12` except `PRQ-E-05`, plus `PRQ-E-14` (T225b) and `PRQ-E-15` (T251); ~~`PRQ-E-06`~~ **retired 2026-09-30 (T226)** |
-| `once_per_customer` | 15 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-09` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
-| **Total** | **37** (33 active) | Authoritative count: `validate.ps1` over the YAML |
+| `once_per_customer` | 18 active (+2 retired) | `PRQ-S-00` … `PRQ-S-05` (T228: one subscription per customer), `PRQ-C-01` … `PRQ-C-12` (~~`PRQ-C-04`~~, ~~`PRQ-C-05`~~ retired; C-10 … C-12 T232), `PRQ-E-13` (id kept; scope corrected 2026-09-30), `PRQ-E-05` (id kept; scope corrected 2026-10-01, T225a) |
+| **Total** | **40** (36 active) | Authoritative count: `validate.ps1` over the YAML |
 
 ### Prereqs the owner explicitly named (SESSION 5 verbatim directive)
 
@@ -179,6 +186,9 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
 | PRQ-C-09 | The customer's Dataverse environment, created by the operator: domain `spaarke-{customerId}` (or `-{environmentName}`), URL = intake `dataverseEnvUrl`; the L2 Worker identity is its System Administrator application user (T228) | Spaarke admin (Power Platform admin) | POST /api/runs 400 `dataverse-env-url-invalid`; H5 `worker-not-app-user` / `env-health-check-failed` |
+| PRQ-C-10 | The environment's security group `sprk-{customerId}-users` (Entra security group, assigned membership) exists and is set on the Dataverse environment; its object id is the intake value `environmentSecurityGroupId` (T232) | Spaarke admin (Entra + Power Platform admin) | POST /api/runs 400 `userprov-missing-security-group-id`; H11 `userprov-security-group-rejected`; **not set on the environment → every user of Spaarke's tenant (other customers' guests included) is admitted** |
+| PRQ-C-11 | The environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Spaarke pays guest access; no per-user licences — owner 2026-10-07, T232) | Spaarke admin (Power Platform admin) | Guests are refused at sign-in; L2 cannot detect it (billing is not visible to Dataverse) |
+| PRQ-C-12 | Guest access allowed in the environment (`organization.restrictguestuseraccess = false`; new environments default to restricted) (T232) | Spaarke admin (System Administrator of the environment) | H11 `userprov-guest-access-restricted` before any invitation |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |
 | PRQ-E-05 | L2 UAMI Website Contributor on the customer stamp's BFF App Service (id kept; scope corrected to `once_per_customer` 2026-10-01, T225a — an H2a postcondition: `customer.bicep` emits it — **Model 1** stamps only since T249; a Model 2 stamp is reached through Lighthouse) | Spaarke admin (Bicep) | H4b Kudu docker-log fetcher degraded to generic diagnostic |
 | PRQ-E-13 | `sprk_dataverseenvironment` placeholder record with `sprk_environmentid` (id kept; scope corrected to `once_per_customer` 2026-09-30) | Operator (skill Step 1) | L2 `POST /api/runs` returns 400 |

@@ -611,7 +611,8 @@ if ($BatchIntakeFile) {
   $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
-  $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case)
+  $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case); Model1 → B2BGuest only (T232)
+  $environmentSecurityGroupId  = $intake.environmentSecurityGroupId   # T232 — B2BGuest: object id of sprk-{customerId}-users (PRQ-C-10)
   $users                       = if ($null -ne $intake.users) { @($intake.users) } else { @() }   # sent as nonSecretParameters.usersJson (Step 4.0); never @($null) — its Count is 1
   $exchangePolicyScopeGroupId  = $intake.exchangePolicyScopeGroupId   # created by the stamp tenant's Exchange admin (PRQ-C-08)
   $communicationGraphResource  = $intake.communicationGraphResource   # at least one of these two
@@ -667,6 +668,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "confirmationAcknowledgment": "proceed with provisioning",
   "identityPreset": "B2BGuest",
   "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
+  "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
   "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
   "communicationGraphResource": "users/legal-comms@acme.example/messages",
   "communicationDefaultMailbox": "legal-comms@acme.example"
@@ -939,7 +941,8 @@ registry placeholder (the same "validate everything, then write" order `POST /ap
 
 | Value | Read by | Rule (same at `POST /api/runs`) |
 |---|---|---|
-| `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case |
+| `identityPreset` | H11 | `B2BGuest` (invite guests; consent gate) or `NativeAccount` (create users in the stamp's tenant) — exact case. **`Model1` takes only `B2BGuest`** (owner D2, T232 — `userprov-model1-requires-b2b-guest`); this step sets it for a Model 1 run |
+| `environmentSecurityGroupId` | H11 | **B2BGuest (every Model 1 run)**: object id (GUID) of the environment's security group `sprk-{customerId}-users`, created by the operator and set on the environment before the run (`PRQ-C-10`). H11 adds each redeemed guest to it, then makes the guest a Dataverse user with the Spaarke role — the group keeps other customers' guests out of this environment. The environment must also allow guests (`PRQ-C-12`) and be linked to a pay-as-you-go billing policy on the stamp subscription (`PRQ-C-11` — Spaarke pays guest access PAYG, owner 2026-10-07; no licences are assigned). This step checks all three as the operator |
 | `users` → `usersJson` | H11 | 1–500 entries; `NativeAccount`: non-blank `firstName` + `lastName` (the UPN is built from them); `B2BGuest`: `email` (the invitation goes to it; names optional) |
 | `exchangePolicyScopeGroupId` | H14a | the mail-enabled security group H14a scopes the stamp identity's Exchange mailbox roles to (Entra object id or email address; only DIRECT members' mailboxes are reachable). **The Exchange admin of the stamp's tenant creates it before the run — prerequisite `PRQ-C-08`. This skill never creates or edits it** (owner decision 2026-10-01: its membership is the customer's decision about which mailboxes Spaarke may use). |
 | `communicationGraphResource` / `emailGraphResource` | H14b | at least one, e.g. `users/{mailbox}/messages` |
@@ -958,6 +961,11 @@ function Stop-IfBatch([string]$message) {
   Write-Host $message -ForegroundColor Yellow
 }
 
+# T232 (owner D2): Model 1 customer users are B2B guests in Spaarke's tenant — the preset is not a choice there.
+if ($tenancyModel -ceq 'Model1') {
+  if ($identityPreset -and $identityPreset -cne 'B2BGuest') { Stop-IfBatch "identityPreset '$identityPreset' — a Model1 run takes only B2BGuest (owner D2)." }
+  $identityPreset = 'B2BGuest'
+}
 while ($identityPreset -cnotin @('B2BGuest', 'NativeAccount')) {
   if ($identityPreset -or $script:SkipInteractiveIntake) { Stop-IfBatch "identityPreset '$identityPreset' must be B2BGuest or NativeAccount (exact case)." }
   $identityPreset = Read-Host 'identityPreset (B2BGuest = invite guests; NativeAccount = create users in the stamp tenant)'
@@ -1004,6 +1012,35 @@ foreach ($u in $users) {
   if ($bad) {
     Write-Error "[skill] HARD STOP: users entry $position needs $(if ($identityPreset -ceq 'B2BGuest') { 'an email' } else { 'firstName + lastName' })."
     exit 1
+  }
+}
+
+# T232 — B2BGuest: the environment's security group (PRQ-C-10), guest access (PRQ-C-12) and PAYG billing (PRQ-C-11),
+# checked now as the operator — H11 enforces C-10 / C-12 too, but only after H0–H10 have built the stamp.
+if ($identityPreset -ceq 'B2BGuest') {
+  $groupGuid = [guid]::Empty
+  while (-not [guid]::TryParse([string]$environmentSecurityGroupId, [ref]$groupGuid) -or $groupGuid -eq [guid]::Empty) {
+    Stop-IfBatch 'environmentSecurityGroupId is required for B2BGuest — the object id (GUID) of sprk-{customerId}-users (PRQ-C-10).'
+    $environmentSecurityGroupId = Read-Host "environmentSecurityGroupId (object id of sprk-$customerId-users — PRQ-C-10)"
+  }
+  $environmentSecurityGroupId = $groupGuid.ToString('D')
+  $group = az rest --method get --url "https://graph.microsoft.com/v1.0/groups/$environmentSecurityGroupId`?`$select=displayName,securityEnabled" -o json | ConvertFrom-Json
+  if (-not $group -or $group.displayName -ne "sprk-$customerId-users" -or -not $group.securityEnabled) {
+    Write-Error "[skill] HARD STOP (PRQ-C-10): group $environmentSecurityGroupId is '$($group.displayName)' (securityEnabled=$($group.securityEnabled)) — it must be the security group sprk-$customerId-users set on the environment. H11 would refuse it (userprov-security-group-rejected)."
+    exit 1
+  }
+  $dvRes = $dataverseEnvUrl.TrimEnd('/')
+  $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv
+  if ($restricted -ne 'false') {
+    Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictguestuseraccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
+    exit 1
+  }
+  # PRQ-C-11: L2 cannot see billing (no Dataverse-visible setting) — the operator confirms the policy's subscription.
+  Write-Host "PRQ-C-11 — the environment's pay-as-you-go billing policy must be on subscription $subscriptionId (the stamp's):" -ForegroundColor Cyan
+  pac licensing get-environment-billing-policy --environment $dataverseEnvUrl
+  if (-not $script:SkipInteractiveIntake) {
+    $payg = Read-Host "Is the policy above Enabled and on subscription $subscriptionId? (yes/no)"
+    if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to a pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
   }
 }
 
@@ -1137,6 +1174,7 @@ INTAKE SUMMARY
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   identityPreset:  B2BGuest
   users:           3 entries          (names/emails are NOT printed or written to intake.md)
+  env group:       6f1c2b3a-...  sprk-acme-users  (PRQ-C-10; guest access PRQ-C-12 ✓; PAYG PRQ-C-11 confirmed)
   exchange group:  spaarke-mail-scope@acme.example  (PRQ-C-08)
   graph resources: communication=users/legal-comms@acme.example/messages  email=(none)
   default mailbox: legal-comms@acme.example
@@ -1461,6 +1499,7 @@ $runRequest = @{
     # T245c (Step 1e-bis) — required; L2 refuses the run with the handler's own code when a rule is broken
     identityPreset              = $identityPreset         # H11 — userprov-missing/invalid-identity-preset
     usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)
+    environmentSecurityGroupId  = $environmentSecurityGroupId   # H11 (T232) — required for B2BGuest: userprov-missing/invalid-security-group-id; null for NativeAccount
     exchangePolicyScopeGroupId  = $exchangePolicyScopeGroupId   # H14a — h14a-missing-policy-scope-group-id
     communicationGraphResource  = $communicationGraphResource   # H14b — at least one of these two,
     emailGraphResource          = $emailGraphResource           #        else h14b-no-webhook-targets-configured

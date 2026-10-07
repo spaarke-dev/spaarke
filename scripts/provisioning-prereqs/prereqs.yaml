@@ -31,9 +31,13 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 8
-last_updated: 2026-10-06
+manifest_version: 9
+last_updated: 2026-10-07
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 9 (2026-10-07, customer-provisioning-orchestration-r1 T232): PRQ-C-10 (the environment's security
+# group sprk-{customerId}-users — intake environmentSecurityGroupId), PRQ-C-11 (the environment linked to a
+# pay-as-you-go billing policy on the stamp subscription — owner 2026-10-07: Spaarke pays guest access PAYG, no
+# per-user licences) and PRQ-C-12 (guest access allowed in the environment) ADDED — Model 1 guests (owner D2).
 # manifest_version 7 (2026-10-06, customer-provisioning-orchestration-r1 T227a): PRQ-C-05 RETIRED (Model 2 only,
 # out of scope per D-12; its check needed the customer's BFF app id, which H3 creates during the run, so no
 # pre-run recipe can hold it — the shared `bffApiAppId` constant it read is removed).
@@ -611,3 +615,58 @@ prereqs:
       3. Enter the environment URL as `dataverseEnvUrl` at intake. After the run, set up secure records per
          docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md (deployment guide §7.11).
     related_findings: [T228, D4, Q1]
+
+  - id: PRQ-C-10
+    name: The customer environment's security group sprk-{customerId}-users exists and is set on the Dataverse environment (Model 1 / every B2BGuest run)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the environment is created (PRQ-C-09 step 1 selects it) — its object id is the intake value environmentSecurityGroupId
+    owner: Spaarke platform admin (Entra + Power Platform admin of Spaarke's tenant for Model 1)
+    consequence_of_absence: "POST /api/runs refuses a B2BGuest run (every Model 1 run) without environmentSecurityGroupId (400 userprov-missing-security-group-id). H11 refuses a group not named sprk-{customerId}-users or not security-enabled (userprov-security-group-rejected) before inviting anyone. A group that is NOT set on the environment admits every user of Spaarke's tenant — including other customers' guests — on first sign-in: the group is the isolation boundary between Model 1 environments (T232)."
+    check_recipe:
+      cli: |
+        az rest --method get --url "https://graph.microsoft.com/v1.0/groups/{environmentSecurityGroupId}?\$select=displayName,securityEnabled" --query "[displayName,securityEnabled]" -o tsv
+      expect: "`sprk-{customerId}-users	true` — AND the Power Platform admin center shows this group as the environment's security group (Environments → the environment → Edit → Security group)"
+    remediation: |
+      1. Entra admin center → Groups → New group: type Security, name `sprk-{customerId}-users`, membership Assigned,
+         no members (H11 adds each guest as a DIRECT member — Dataverse ignores nested groups).
+      2. Select it as the security group when creating the environment (PRQ-C-09 step 1), or later: Power Platform admin
+         center → Environments → the environment → Edit → Security group.
+      3. Enter the group's object id as `environmentSecurityGroupId` at intake.
+    related_findings: [T232, D2, G10]
+
+  - id: PRQ-C-11
+    name: The customer's Dataverse environment is linked to a pay-as-you-go billing policy on the customer's stamp subscription (Model 1 — Spaarke pays guest access)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run
+    owner: Spaarke platform admin (Power Platform admin of Spaarke's tenant)
+    consequence_of_absence: "Model 1 guests hold no licence (owner 2026-10-07: Spaarke pays pay-as-you-go, not per user). Without the link the environment has no way to bill their access: H11 still makes each guest a Dataverse user, but the guest is refused at sign-in. L2 cannot see billing (no Dataverse-visible setting; the licensing API needs a Power Platform admin, which L2 is not) — this check is the operator's."
+    check_recipe:
+      cli: |
+        pac licensing get-environment-billing-policy --environment {dvUrl}
+      expect: 'a billing policy with status Enabled whose Azure subscription is {stampSubscriptionId} (the customer''s own stamp subscription — not Spaarke''s platform subscription); cross-check with `pac licensing list-billing-policies` (preview commands — Microsoft Learn "pac licensing")'
+    remediation: |
+      Power Platform admin center → Billing → Billing policies → New billing policy: name `sprk-{customerId}-payg`, the
+      customer's stamp subscription {stampSubscriptionId} and its stamp resource group, region = the environment's
+      region; then add the environment to the policy (Billing policies → the policy → Add environments). Linking makes
+      it a Managed Environment. Meter: Power Apps per app — billed per ACTIVE user per app per month (Microsoft Learn
+      "Pay-as-you-go meters").
+    related_findings: [T232, D2, G10]
+
+  - id: PRQ-C-12
+    name: Guest access is allowed in the customer's Dataverse environment (organization.restrictguestuseraccess = false)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (new environments default to restricted)
+    owner: Spaarke platform admin (System Administrator of the environment)
+    consequence_of_absence: 'Guests cannot use Dataverse at all while the setting is on (Microsoft Learn "Guest access"). H11 reads it as the L2 Worker identity and refuses the run before inviting anyone (userprov-guest-access-restricted, Resumable).'
+    check_recipe:
+      cli: |
+        res=$(echo "{dvUrl}" | sed 's#/$##')
+        az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv
+      expect: '`false`'
+    remediation: |
+      As the operator (System Administrator of the environment), PATCH the organization row:
+        res=$(echo "{dvUrl}" | sed 's#/$##')
+        org=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/organizations?\$select=organizationid" --query "value[0].organizationid" -o tsv)
+        az rest --method patch --resource "$res" --url "$res/api/data/v9.2/organizations($org)" --body '{"restrictguestuseraccess": false}' --headers "Content-Type=application/json"
+      then re-run the check. L2 never changes it (an environment-wide access decision).
+    related_findings: [T232, D2, G10]
