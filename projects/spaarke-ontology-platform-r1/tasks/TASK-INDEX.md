@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-39
-> (spec §9) · **93 tasks** across 14 phases (35 ✅ · 2 🔄 (079, 098) · 55 🔲 · 1 superseded)
+> (spec §9) · **93 tasks** across 14 phases (36 ✅ · 2 🔄 (079, 098) · 54 🔲 · 1 superseded)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -113,7 +113,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 024 | [Grammar extension: subject-only rules, now+Nd, Do subjects, quiet-window knob](024-grammar-extension-do-lane.poml) | FULL | **opus**/high | 021, 022 | K | **D-16**, **D-13** (FR-17a knob). Still one filter per body; everything else still refused. **Before 031** (feeds 037) · **[uac]** |
+| ✅ [done] 024 | [Grammar extension: subject-only rules, now+Nd, Do subjects, quiet-window knob](024-grammar-extension-do-lane.poml) | FULL | **opus**/high | 021, 022 | K | **D-16**, **D-13** (FR-17a knob). Still one filter per body; everything else still refused. **Before 031** (feeds 037) · **[uac]** |
 | 🔲 [open] 025 | [Threshold rule type: schema + compiler (spend threshold)](025-threshold-rule-type-schema-and-compiler.poml) | FULL | sonnet/high | 024, 031 | C | **D-16**. Proves the 031 job runs it with **no evaluator change**. Switch stays refused. **After 031** |
 | 🔲 [open] 026 | [Rule-body describer (plain-language condition, read-side)](026-rule-body-describer.poml) | FULL | sonnet/high | 024 | — | #11. Feeds the wizard's *How this was determined* (058) and the admin rule page (100) |
 
