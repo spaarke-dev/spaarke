@@ -73,15 +73,33 @@ carries it (`assignedaccess_postsave.js` 1.1.0 refreshes the command bar when it
 a read that fails hides Share.
 
 The command it is appended to is the PLATFORM's, never authored here: `Set-AccessRibbon.ps1 -Apply` reads the live
-effective ribbon, takes the `Command` of the `Mscrm.Form.<entity>.Share` button (an id it never assumes) and its
-CommandDefinition, and `Merge-AccessRibbon.ps1 -ShareCommandXml` copies that definition into the RibbonDiff with the
-rule appended — every platform enable and display rule is kept, a re-run replaces the copy (idempotent), and `-Verify`
-checks the live Share command carries the rule. The dry run uses `fixtures/share-command.dry-run-sample.xml`, a
-stand-in that only exercises the transformation (never imported).
+effective ribbon, takes the `Command` of each form Share button and its CommandDefinition, and
+`Merge-AccessRibbon.ps1 -ShareCommandXml` copies each definition into the RibbonDiff with the rule appended — every
+platform enable and display rule is kept, a re-run replaces the copy (idempotent), and `-Verify` checks every live
+Share command carries the rule. The dry run without `-EnvironmentUrl` uses `fixtures/share-command.dry-run-sample.xml`,
+a stand-in that only exercises the transformation (never imported); **with `-EnvironmentUrl` it reads the live Share
+commands read-only, exactly as `-Apply` does** — run it that way before `-Apply`.
+
+Where the platform's Share actually is (read from spaarkedev1's live effective ribbons, 2026-10-07; there is **no**
+`Mscrm.Form.<entity>.Share` or `Mscrm.HomepageGrid.<entity>.Share` button — the first version assumed those ids and
+`-Verify`/`-Apply` failed on all three entities):
+
+| Surface | Button | Command | Notes |
+|---|---|---|---|
+| Form (UCI command bar) | `Mscrm.Form.<entity>.Permissions.Sharing` | `Mscrm.SharePrimaryRecordRefresh` | display rule `Mscrm.HideInLegacyRibbon` — the Unified Interface Share; required |
+| Form (legacy flyout) | `Mscrm.Form.<entity>.Permissions.SharingNonRefresh` | `Mscrm.SharePrimaryRecord` | inside the `Permissions` flyout, which is `Mscrm.HideOnModern`; ruled when present |
+| Home grid | `Mscrm.HomepageGrid.<entity>.Sharing` | `Mscrm.ShareSelectedRecord` | required |
+| Subgrid | `Mscrm.SubGrid.<entity>.Sharing` | `Mscrm.ShareSelectedRecord` | when present |
+
+Not ruled: `Permissions.Grant*` (column-security "secured fields" sharing, not record access) and `Chart.Share`.
+`Mscrm.SharePrimaryRecordRefresh` also carries the platform's `Mscrm.CollabNotEnabled` rule
+(`XrmCore.Commands.Share.showLegacyShareAndEmailALink`): where the platform's collaboration Share is switched on, the
+platform disables this button itself, and that experience is not a ribbon command RibbonDiff can rule — the
+server-side `RestrictedExternalShareRemover` is the backstop either way.
 
 The GRID and SUBGRID Share (on selected rows) get the same treatment (task 114 follow-up): `Set-AccessRibbon.ps1 -Apply`
-reads the live ribbon (location `All`), takes the `Command` of `Mscrm.HomepageGrid.<entity>.Share` (required) and
-`Mscrm.SubGrid.<entity>.Share` (when present), and `Merge-AccessRibbon.ps1 -GridShareCommandXml` appends
+reads the live ribbon (location `All`), takes the `Command` of `Mscrm.HomepageGrid.<entity>.Sharing` (required) and
+`Mscrm.SubGrid.<entity>.Sharing` (when present), and `Merge-AccessRibbon.ps1 -GridShareCommandXml` appends
 `sprk.Access.{{entity}}.ShareAllowedSelection.EnableRule` → `isShareAllowedForSelection(SelectedControlSelectedItemIds,
 SelectedEntityTypeName)`, which hides Share when ANY selected row is Restricted (one batched read; a row that does not come
 back, or a failed read, hides it). A command the form and grid buttons share is refused (one copy cannot carry both rules).
