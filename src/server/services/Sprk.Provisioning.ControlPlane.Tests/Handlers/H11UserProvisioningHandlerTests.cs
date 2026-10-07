@@ -343,6 +343,36 @@ public sealed class H11UserProvisioningHandlerTests
     }
 
     [Fact]
+    public async Task T232_AConsentCheckTimeout_IsAResumableFailure_SayingItTimedOut()
+    {
+        // An HttpClient timeout is a TaskCanceledException while the CALLER's token is not cancelled.
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
+            FakeInvitationClient.Success(), FakeConsentVerifier.Throwing(new TaskCanceledException("HttpClient.Timeout")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.B2BInvitationFailed);
+        failure.Diagnostic.Should().Contain("timed out");
+    }
+
+    [Fact]
+    public async Task T232_TheCallersCancellation_Propagates()
+    {
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
+            FakeInvitationClient.Success(), FakeConsentVerifier.Throwing(new OperationCanceledException(cancelled.Token)));
+
+        var act = () => handler.HandleAsync(BuildEnvelope(), cancelled.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>("a shutdown is not a provisioning failure");
+    }
+
+    [Fact]
     public void T232_ConfiguredGuestRoles_ReplaceTheDefault_NotAppendToIt()
     {
         // The configuration binder APPENDS to an initialised list — the default must not survive a configured value.
@@ -924,10 +954,18 @@ public sealed class H11UserProvisioningHandlerTests
     private sealed class FakeConsentVerifier : IB2BConsentVerifier
     {
         private readonly B2BConsentVerificationResult _result;
+        private readonly Exception? _throws;
         public int CallCount { get; private set; }
         public IReadOnlyList<string>? LastInvitedUserIds { get; private set; }
 
-        private FakeConsentVerifier(B2BConsentVerificationResult result) => _result = result;
+        private FakeConsentVerifier(B2BConsentVerificationResult result, Exception? throws = null)
+        {
+            _result = result;
+            _throws = throws;
+        }
+
+        public static FakeConsentVerifier Throwing(Exception ex)
+            => new(new B2BConsentVerificationResult.Verified(0, 0, Evidence: null), ex);
 
         public static FakeConsentVerifier Verified() => new(new B2BConsentVerificationResult.Verified(2, 2, Evidence: null));
 
@@ -939,7 +977,7 @@ public sealed class H11UserProvisioningHandlerTests
         {
             CallCount++;
             LastInvitedUserIds = invitedUserIds;
-            return Task.FromResult(_result);
+            return _throws is null ? Task.FromResult(_result) : Task.FromException<B2BConsentVerificationResult>(_throws);
         }
     }
 }

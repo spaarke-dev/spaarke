@@ -1,6 +1,6 @@
 # Current Task State — `customer-provisioning-orchestration-r1`
 
-> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure 2026-10-06): F1–F4 fix now / K1–K4 known limit; ≤ 2 fix rounds re-verifying only the fix diff + direct callers/callees; 1 verifier pass per task (2 for auth/security); escalate an F1 still open instead of a round 3.
+> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure, owner-corrected 2026-10-06, PR #1336): F1–F4 fix now / K1–K4 known limit; NO cap on fixing real defects — re-verify only the fix diff + direct callers/callees and re-run affected suites; 1 full verifier pass per task (2 for auth/security/tenant-isolation); the limits cap review ceremony, never fixing.
 
 > **Last Updated**: 2026-10-07 SESSION 41 — T254 closed (f06296312); T232 POML created; owner chose PAYG licensing.
 
@@ -9,9 +9,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
-| **Step** | Step 9.5 done to the round cap: round 1 `07a92eca3`, round 2 `79ca02b3c`. ControlPlane 2273/0 (1 skip), ArchTests 836/836, Worker + Api 0 warnings. **Final verifier: 1 Critical OPEN (C1) — ESCALATED to owner, no round 3.** |
-| **Status** | blocked — awaiting owner decision on C1 (2026-10-07). |
-| **Next Action** | On owner approval: fix C1 — SKILL.md Step 1e-bis PRQ-C-10 `$ppEnvId` call: `az.cmd` on Windows breaks on the `)` in `RetrieveCurrentOrganization(AccessType=@p)` → use `az account get-access-token --resource $dvRes` + `Invoke-RestMethod` (recommended), also W1 (anchor `Enabled` with -cmatch once T186 shows the shape; record in K3), W2 (tests for the consent-timeout filter + timeout message), S1 (two stale lines). Then close: POML notes, TASK-INDEX ✅, current-task → T233, devops sync (Tasks Completed 193). |
+| **Step** | Step 9.5 round 3 (owner-approved; master merged `512cd2304` — round cap withdrawn): C1 skill az.cmd fix + W1/W2/S1–S3 applied. ControlPlane 2275/0 (1 skip), Worker + Api 0 warnings; BFF + ArchTests (post-merge) running in background. |
+| **Status** | in-progress — final fix-diff re-verification, then close. Owner 2026-10-07: PAYG per-app meter ACCEPTED. |
+| **Next Action** | Check BFF + ArchTests (bj7k1dm0j); re-verify the round-3 fix diff (skill Step 1e-bis + H11 catches); close T232 (POML notes, TASK-INDEX ✅, current-task → T233, devops sync → Tasks Completed 193). |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 

@@ -323,7 +323,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 creationOutcome = await _userProvisioner.CreateUserAsync(entry, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.UserCreationFailed,
                     $"User creation infrastructure error for usersJson entry {position}: " +
@@ -346,7 +346,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 licenseOutcome = await _userProvisioner.AssignLicenseAsync(created.UserId, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.RetryableWithCleanup, H11Rejections.LicenseAssignmentFailed,
                     $"License assignment infrastructure error for usersJson entry {position} (Entra user " +
@@ -460,7 +460,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 invitationOutcome = await _b2bInvitationClient.InviteAsync(entry, tenantId, cancellationToken)
                     .ConfigureAwait(false);
             }
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
                     $"B2B invitation infrastructure error for usersJson entry {position}: {ex.GetType().Name}: {ex.Message}",
@@ -485,14 +485,15 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             consentResult = await _consentVerifier.VerifyAsync(tenantId, invitedUserIds, cancellationToken)
                 .ConfigureAwait(false);
         }
-        // T232: an HttpClient timeout is an OperationCanceledException too — only the CALLER's cancellation propagates.
-        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        catch (Exception ex) when (IsFailureNotCallerCancellation(ex, cancellationToken))
         {
             _logger.LogError(ex,
                 "H11 B2B consent verifier threw unexpected exception: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
-                $"B2B consent-verification infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                (ex is OperationCanceledException
+                    ? "B2B consent verification timed out."
+                    : $"B2B consent-verification infrastructure error: {ex.GetType().Name}: {ex.Message}.") + " " +
                 $"{invitedUserIds.Count} invitation(s) WERE sent — only consent verification failed. Resumable.",
                 cancellationToken).ConfigureAwait(false);
         }
@@ -569,6 +570,14 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             run, etag, idempotencyKey, guestUsers, envelope, setB2BConsentGate: true, verified.Evidence,
             cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// T232: true for a collaborator failure H11 turns into a Resumable result — including an HttpClient timeout, which
+    /// is an <see cref="OperationCanceledException"/> while the caller's token is NOT cancelled. Only the caller's own
+    /// cancellation propagates.
+    /// </summary>
+    private static bool IsFailureNotCallerCancellation(Exception ex, CancellationToken cancellationToken)
+        => ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested;
 
     /// <summary>
     /// Task 232: <c>null</c> when <paramref name="groupId"/> is this customer's environment security group

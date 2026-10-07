@@ -984,6 +984,9 @@ if (-not $script:SkipInteractiveIntake -and $users.Count -eq 0) {
     }
     if ($isGuest) {
       $email = $key
+      if (@($users | Where-Object { "$($_.email)".Trim() -eq $email.Trim() }).Count -gt 0) {
+        Write-Host '  Not added: this email is already in the list (a guest is invited once).' -ForegroundColor Yellow; continue
+      }
       $first = Read-Host '  first name (optional — display name only)'
       $last  = Read-Host '  last name (optional)'
     } else {
@@ -1045,14 +1048,23 @@ if ($identityPreset -ceq 'B2BGuest') {
   # from the Power Platform admin API (the operator is a Power Platform admin; L2 is not, so H11 cannot check this).
   $dvRes = $dataverseEnvUrl.TrimEnd('/')
   # The environment's Power Platform id, from the environment itself — then ONE admin-API read (no list, no paging).
-  $ppEnvId = az rest --method get --resource $dvRes `
-    --url "$dvRes/api/data/v9.2/RetrieveCurrentOrganization(AccessType=@p)?@p=Microsoft.Dynamics.CRM.EndpointAccessType'Default'" `
-    --query "Detail.EnvironmentId" -o tsv
-  if ($LASTEXITCODE -ne 0 -or -not $ppEnvId) { Write-Error '[skill] HARD STOP (PRQ-C-10): reading the environment id (RetrieveCurrentOrganization) failed (az output above).'; exit 1 }
-  $bapJson = az rest --method get --resource "https://service.powerapps.com/" `
-    --url "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$ppEnvId`?api-version=2021-04-01" -o json
-  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-10): reading the environment from the Power Platform admin API failed (az output above) — the operator must be a Power Platform admin.'; exit 1 }
-  $boundGroup = "$((($bapJson | ConvertFrom-Json).properties.linkedEnvironmentMetadata).securityGroupId)"
+  # Tokens from az, requests via Invoke-RestMethod: on Windows `az` is az.cmd, and cmd breaks on the `)` in
+  # RetrieveCurrentOrganization(...) ("?@p was unexpected at this time", 2026-10-07).
+  $dvToken = az account get-access-token --resource $dvRes --query accessToken -o tsv
+  $ppToken = az account get-access-token --resource 'https://service.powerapps.com/' --query accessToken -o tsv
+  if ($LASTEXITCODE -ne 0 -or -not $dvToken -or -not $ppToken) { Write-Error '[skill] HARD STOP (PRQ-C-10): az could not get a Dataverse / Power Platform token (az output above).'; exit 1 }
+  try {
+    $org = Invoke-RestMethod -Headers @{ Authorization = "Bearer $dvToken" } `
+      -Uri "$dvRes/api/data/v9.2/RetrieveCurrentOrganization(AccessType=@p)?@p=Microsoft.Dynamics.CRM.EndpointAccessType'Default'"
+    $ppEnvId = "$($org.Detail.EnvironmentId)"
+    if (-not $ppEnvId) { throw 'RetrieveCurrentOrganization returned no Detail.EnvironmentId' }
+    $bap = Invoke-RestMethod -Headers @{ Authorization = "Bearer $ppToken" } `
+      -Uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$ppEnvId`?api-version=2021-04-01"
+  } catch {
+    Write-Error "[skill] HARD STOP (PRQ-C-10): reading the environment's security group failed — $($_.Exception.Message). The operator must be a Power Platform admin."
+    exit 1
+  }
+  $boundGroup = "$($bap.properties.linkedEnvironmentMetadata.securityGroupId)"
   if ($boundGroup -ne $environmentSecurityGroupId) {
     Write-Error "[skill] HARD STOP (PRQ-C-10): environment $ppEnvId ($dvRes) has security group '$boundGroup' — it must be $environmentSecurityGroupId (sprk-$customerId-users). Without it every user of the tenant, other customers' guests included, is admitted. Set it (admin center → Environments → Edit → Security group), then rerun."
     exit 1
@@ -1067,12 +1079,13 @@ if ($identityPreset -ceq 'B2BGuest') {
   }
 
   # PRQ-C-11: billed pay-as-you-go on the STAMP subscription. The command is preview and its output shape is not yet
-  # verified live (T186), so the subscription id is matched in the text; batch stops when it is absent, interactive asks.
+  # verified live (T186), so the text must name the stamp subscription AND `Enabled` (case-sensitive): batch stops when
+  # either is absent; interactive always asks. Anchor to the status field once T186 shows the shape (K3).
   $billing = pac licensing get-environment-billing-policy --environment $dataverseEnvUrl 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-11): pac licensing failed:`n$billing"; exit 1 }
   Write-Host "PRQ-C-11 — billing policy of the environment:`n$billing" -ForegroundColor Cyan
   $stampSub = ([guid]$subscriptionId).ToString('D')   # pac prints the hyphenated form
-  $billingOk = $billing -match [regex]::Escape($stampSub) -and $billing -match '\bEnabled\b'
+  $billingOk = $billing -match [regex]::Escape($stampSub) -and $billing -cmatch '\bEnabled\b'
   if ($script:SkipInteractiveIntake) {
     if (-not $billingOk) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy is not shown as Enabled on the stamp subscription $stampSub — link it to an enabled pay-as-you-go policy on that subscription first."; exit 1 }
   } else {
