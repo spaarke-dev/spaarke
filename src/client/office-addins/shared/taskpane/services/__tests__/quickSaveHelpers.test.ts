@@ -7,6 +7,8 @@ import {
   describeQuickSaveSuccess,
   describeQuickSaveFailure,
   describeUnsavableIdentity,
+  buildQuickSaveRecordLink,
+  isUrlOnConfiguredOrigin,
   type QuickSaveEmailContext,
 } from '../quickSaveHelpers';
 import type { EntitySearchResult } from '../../hooks/useEntitySearch';
@@ -363,5 +365,51 @@ describe('arrayBufferToBase64', () => {
 
   it('handles an empty buffer', () => {
     expect(arrayBufferToBase64(new ArrayBuffer(0))).toBe('');
+  });
+});
+
+describe('buildQuickSaveRecordLink / isUrlOnConfiguredOrigin (task 110 — the "Open in Spaarke" link)', () => {
+  const ID = '2bcfc5d2-0000-4000-8000-000000000001';
+
+  it('builds the sprk_document record URL with the shared builder, tolerating a trailing slash on ORG_URL', () => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com/', 'sprk_MatterManagement', ID)).toBe(
+      `https://org.crm.dynamics.com/main.aspx?appname=sprk_MatterManagement&etn=sprk_document&id=${ID}&pagetype=entityrecord&navbar=off`
+    );
+  });
+
+  it('canonicalizes a braced / upper-case id', () => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com', '', `{${ID.toUpperCase()}}`)).toContain(
+      `id=${ID}&`
+    );
+  });
+
+  it.each([undefined, '', '   '])('NEGATIVE: ORG_URL %p → no link', orgUrl => {
+    expect(buildQuickSaveRecordLink(orgUrl, 'app', ID)).toBeNull();
+  });
+
+  it.each([null, undefined, '', 'not-a-guid'])('NEGATIVE: id %p → no link', id => {
+    expect(buildQuickSaveRecordLink('https://org.crm.dynamics.com', 'app', id)).toBeNull();
+  });
+
+  it('accepts only a URL on the configured origin', () => {
+    const org = 'https://org.crm.dynamics.com';
+    expect(isUrlOnConfiguredOrigin(`${org}/main.aspx?etn=sprk_document`, org)).toBe(true);
+    expect(isUrlOnConfiguredOrigin(`${org}/main.aspx`, `${org}/`)).toBe(true);
+  });
+
+  it.each([
+    ['another host', 'https://evil.example.com/main.aspx'],
+    ['a look-alike prefix host', 'https://org.crm.dynamics.com.evil.example/x'],
+    ['another scheme on the same host', 'http://org.crm.dynamics.com/x'],
+    ['a javascript: URL', 'javascript:alert(1)'],
+    ['a non-URL', 'main.aspx'],
+    ['a non-string', 42],
+  ])('NEGATIVE: refuses %s', (_label, url) => {
+    expect(isUrlOnConfiguredOrigin(url, 'https://org.crm.dynamics.com')).toBe(false);
+  });
+
+  it('NEGATIVE: refuses everything when ORG_URL is unset', () => {
+    expect(isUrlOnConfiguredOrigin('https://org.crm.dynamics.com/x', undefined)).toBe(false);
+    expect(isUrlOnConfiguredOrigin('https://org.crm.dynamics.com/x', '')).toBe(false);
   });
 });
