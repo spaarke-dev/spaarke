@@ -174,6 +174,7 @@ Inventoried on 2026-10-05 by grepping all of `src/` for the six columns. Every *
 | Daily Briefing server (`DailyBriefingCollector`: High Priority Overdue/DueToday/DueSoon, the overdue-task cutoff, the to-do "today or later" floor) | read | Judged against the **caller's local today**. The time zone is read AS the caller, through the existing impersonated seam, so no app-only client is added. Before, from 20:00 Eastern a task due today was Overdue, the cutoff was a day late, and a to-do due today dropped out. |
 | Playbook "Query Overdue Tasks" (`sprk_duedate`/`sprk_finalduedate lt {{todayUtc}}`) | read | `PlaybookSchedulerJob` runs one playbook per recipient and sets `{{todayUtc}}`/`{{dueSoonWindowUtc}}` to **that user's** local `yyyy-MM-dd` (it was the UTC timestamp). `QueryDataverseNodeExecutor`'s own substitution does the same with the run user, and uses the UTC date when the run has no user. The names are kept because live node configs use them. |
 | Daily Briefing (`useInlineTodoCreate.computeDueDate`, `notificationService.filterByDueWithinDays`) | read | A notification's bare `yyyy-MM-dd` due date is that local day: "Add to To Do" dated the To Do a day early, and the "due within N days" window was measured from UTC midnight. |
+| `TodoGenerationService` Rule 1 (overdue) and Rule 3 (due within N days) | read | Owner decision **D-25** (2026-10-06): each event is judged on the "today" of the person its To Do is for. That is the **assignee's** zone, else the **owner's**, else **UTC** with a `todo_today_utc_fallback` warning. The queries take the union over every possible today (the UTC date ± 1), and each event is then judged. An event whose verdict is the same on all three days needs no lookup. Each distinct user's zone is read once per run (`DataverseRecipientDays`, beside `DataverseUserTimeZone`; task 031 reuses it, spec FR-47). Before, from 20:00 Eastern an event due today was "Overdue". |
 
 **Fixed by PR #1309 (task 081), which merges first, so it is not duplicated here**
 - The Daily Briefing `formatDueDate` ("Due today" / "Overdue by Nd"), which moves to `parseDueDate`.
@@ -190,12 +191,14 @@ Every "today" the surfaces above compute for a user is now that user's local day
 - **Field-mapping push and the playbook UpdateRecord node.** These copy configured values. No live `sprk_fieldmappingrule` or `sprk_fieldmappingprofile` targets the six columns (checked 2026-10-05).
 - **`$filter` with a timestamp literal** on these columns is still accepted (HTTP 200, probed live).
 
-**Open — needs a decision (not changed)**
+**How D-25 maps "assignee" and "owner" to a time zone**
 
-- **`TodoGenerationService`** rule 2 (overdue events) and rule 3 (deadline window) compute "today" as the UTC day (`DateTime.UtcNow.Date`) against the Date Only due dates. Rule 3 creates nothing unless `EnableEventSourcedGeneration` is on.
-  - This is a tenant-wide scheduled job with **no single user**, so there is no "the user's today" to use.
-  - The candidates are each event's own assignee or owner zone (one read per distinct user), or an organization-wide zone.
-  - Choosing between them is a product decision, so the job is reported rather than guessed at (task 098, 2026-10-06).
+A time zone belongs to a `systemuser` (`usersettings.timezonecode`), but the people on an event are contacts and teams.
+
+- **Assignee.** This is the person `AssignedToDefaults` assigns the generated To Do to: the event's `sprk_assignedtointernal`, else `sprk_assignedattorney1`. Both are contacts. The event's own `sprk_assignedto` is not consulted, because `AssignedToDefaults` does not consult it. A contact's user is the enabled user that task 141 links to it: `systemuser.sprk_primarycontact`, else the user whose Entra oid is in the contact's `sprk_externalobjectid`. A contact with no user (an external person) or with several users (a collision) gives no zone.
+- **Owner.** The owner gives a zone only when it is a `systemuser`. **A team has no time zone.** In spaarkedev1 the sampled events are owned by the business-unit team, so for them the owner step does not apply.
+- **Live effect.** The sampled events (2026-10-07) fill `sprk_assignedto` but not `sprk_assignedtointernal`. Their generated To Dos would be unassigned, so they are judged on the UTC date with the warning. That judgement only differs for events due within a day of a boundary.
+- **Event-sourced creation is still gated.** Rules 1 and 3 create nothing unless `EnableEventSourcedGeneration` is on.
 
 ## 5. References
 

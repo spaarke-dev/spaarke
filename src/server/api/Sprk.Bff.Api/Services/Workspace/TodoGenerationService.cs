@@ -229,14 +229,20 @@ public sealed class TodoGenerationService : IScheduledJob
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
 
+    // Task 098 (D-25): the run's instant, from which each recipient's "today" is taken. TimeProvider is registered by
+    // WorkspaceModule; tests pin it (an evening west of UTC).
+    private readonly TimeProvider _clock;
+
     public TodoGenerationService(
         IServiceProvider serviceProvider,
         ILogger<TodoGenerationService> logger,
-        Microsoft.Extensions.Options.IOptions<TodoGenerationOptions> options)
+        Microsoft.Extensions.Options.IOptions<TodoGenerationOptions> options,
+        TimeProvider? clock = null)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _clock = clock ?? TimeProvider.System;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -349,14 +355,16 @@ public sealed class TodoGenerationService : IScheduledJob
 
         _logger.LogInformation("TodoGenerationService: starting generation pass");
 
-        var today = DateTime.UtcNow.Date;
+        // Task 098 (owner decision D-25, 2026-10-06): "today" is the recipient's — the assignee's zone, else the owner's,
+        // else UTC with a warning — judged per event. One resolver per run, so each distinct user's zone is read once.
+        var recipients = new DataverseRecipientDays(_dataverse, _clock.GetUtcNow());
         var totalCreated = 0;
         var totalSkipped = 0;
         var totalFailed = 0;
 
         // ── Rule 1: Overdue events ────────────────────────────────────────────
         var (created1, skipped1, failed1) =
-            await ProcessOverdueEventsAsync(today, ct);
+            await ProcessOverdueEventsAsync(recipients, ct);
         totalCreated += created1;
         totalSkipped += skipped1;
         totalFailed += failed1;
@@ -370,7 +378,7 @@ public sealed class TodoGenerationService : IScheduledJob
 
         // ── Rule 3: Deadline within window ───────────────────────────────────
         var (created3, skipped3, failed3) =
-            await ProcessDeadlineProximityAsync(today, ct);
+            await ProcessDeadlineProximityAsync(recipients, ct);
         totalCreated += created3;
         totalSkipped += skipped3;
         totalFailed += failed3;
@@ -403,11 +411,11 @@ public sealed class TodoGenerationService : IScheduledJob
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Scans for overdue <c>sprk_event</c> records (duedate &lt; today) and creates
+    /// Scans for overdue <c>sprk_event</c> records (duedate &lt; the recipient's today) and creates
     /// "Overdue: {event name}" <c>sprk_todo</c> records regarding each event.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessOverdueEventsAsync(
-        DateTime today, CancellationToken ct)
+        DataverseRecipientDays recipients, CancellationToken ct)
     {
         var created = 0;
         var skipped = 0;
@@ -423,8 +431,11 @@ public sealed class TodoGenerationService : IScheduledJob
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
             // Task 097 review F5: the not-open-work statuses are excluded IN the query (live values). Round 11: every page
-            // is read (ReadAllPagesAsync), not only the first 100. The due-date bound is task 098's and is unchanged.
-            overdueEvents = await ReadAllPagesAsync("Rule 1", EventPages(dueDateFrom: null, dueDateTo: today.AddDays(-1)), ct);
+            // is read (ReadAllPagesAsync), not only the first 100. Task 098 (D-25): the bound admits everything overdue for
+            // SOMEONE — before the latest today anyone has (the UTC date + 1), i.e. due on or before the UTC date — and each
+            // event is then judged by its own recipient's today.
+            overdueEvents = await ReadAllPagesAsync(
+                "Rule 1", EventPages(dueDateFrom: null, dueDateTo: AsQueryDate(recipients.UtcToday)), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -437,6 +448,12 @@ public sealed class TodoGenerationService : IScheduledJob
             var todoTitle = $"Overdue: {evt.Name}";
             try
             {
+                if (evt.DueDate is not { } due
+                    || !await HoldsForRecipientAsync("Rule 1", evt, recipients, today => due < today, ct))
+                {
+                    continue; // not overdue yet where its recipient is (D-25)
+                }
+
                 if (await TodoExistsAsync(todoTitle, ct))
                 {
                     _logger.LogDebug(
@@ -567,18 +584,23 @@ public sealed class TodoGenerationService : IScheduledJob
     /// "Deadline: {event name} (due {date})" <c>sprk_todo</c> records regarding each event.
     /// </summary>
     private async Task<(int Created, int Skipped, int Failed)> ProcessDeadlineProximityAsync(
-        DateTime today, CancellationToken ct)
+        DataverseRecipientDays recipients, CancellationToken ct)
     {
         var created = 0;
         var skipped = 0;
         var failed = 0;
 
-        var windowEnd = today.AddDays(_options.DeadlineWindowDays);
+        // Task 098 (D-25): the window is [recipient's today, + N days]. The query takes the union over every today anyone
+        // can have (UTC date ± 1); each event is then judged by its own recipient's today.
+        var window = _options.DeadlineWindowDays;
+        var queryFrom = recipients.UtcToday.AddDays(-1);
+        var queryTo = recipients.UtcToday.AddDays(1 + window);
         var wouldCreate = 0;
 
         _logger.LogDebug(
-            "TodoGeneration Rule 3: scanning for events due between {From:yyyy-MM-dd} and {To:yyyy-MM-dd}",
-            today, windowEnd);
+            "TodoGeneration Rule 3: scanning for events due between {From:yyyy-MM-dd} and {To:yyyy-MM-dd} "
+            + "(every recipient's {Window}-day window)",
+            queryFrom, queryTo, window);
 
         IEnumerable<EventEntity> upcomingEvents;
         try
@@ -586,7 +608,8 @@ public sealed class TodoGenerationService : IScheduledJob
             // IEventDataverseService (real sprk_event query), NOT the _dataverse
             // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
             // Task 097 review F5: the not-open-work statuses are excluded in the query (live values). Round 11: every page.
-            upcomingEvents = await ReadAllPagesAsync("Rule 3", EventPages(dueDateFrom: today, dueDateTo: windowEnd), ct);
+            upcomingEvents = await ReadAllPagesAsync(
+                "Rule 3", EventPages(dueDateFrom: AsQueryDate(queryFrom), dueDateTo: AsQueryDate(queryTo)), ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -596,14 +619,20 @@ public sealed class TodoGenerationService : IScheduledJob
 
         foreach (var evt in upcomingEvents)
         {
-            if (!evt.DueDate.HasValue)
+            if (evt.DueDate is not { } due)
                 continue;
 
-            var dueDateDisplay = evt.DueDate.Value.ToString("yyyy-MM-dd");
+            var dueDateDisplay = due.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
             var todoTitle = $"Deadline: {evt.Name} (due {dueDateDisplay})";
 
             try
             {
+                if (!await HoldsForRecipientAsync(
+                        "Rule 3", evt, recipients, today => today <= due && due <= today.AddDays(window), ct))
+                {
+                    continue; // outside its recipient's window (D-25)
+                }
+
                 if (await TodoExistsAsync(todoTitle, ct))
                 {
                     _logger.LogDebug(
@@ -660,6 +689,56 @@ public sealed class TodoGenerationService : IScheduledJob
 
         return (created, skipped, failed);
     }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Task 098 (D-25): a Date Only rule judged on the recipient's "today"
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether <paramref name="holds"/> is true on the "today" of the person <paramref name="evt"/>'s To Do is FOR —
+    /// the person <see cref="AssignedToDefaults"/> assigns it to (the event's responsible internal contact), else the
+    /// event's owner, else UTC with a warning (owner decision D-25).
+    /// </summary>
+    /// <remarks>
+    /// When the judgement is the same on every today anyone can have at this instant (UTC date ± 1), it is decided
+    /// without a lookup — so only events due within a day of a boundary cost the event read and, per distinct person,
+    /// the time-zone read. A failed event read is a UTC judgement with a warning, never a failed rule.
+    /// </remarks>
+    private async Task<bool> HoldsForRecipientAsync(
+        string rule, EventEntity evt, DataverseRecipientDays recipients, Func<DateOnly, bool> holds, CancellationToken ct)
+    {
+        var verdicts = recipients.PossibleTodays.Select(holds).Distinct().ToList();
+        if (verdicts.Count == 1)
+            return verdicts[0];
+
+        RecipientDay day;
+        try
+        {
+            var row = await _dataverse!.RetrieveAsync(
+                "sprk_event", evt.Id, AssignedToDefaults.ResponsibleContactColumns.Append(FieldOwnerId).ToArray(), ct);
+            day = await recipients.ForAsync(
+                AssignedToDefaults.ResponsibleContactOf(row), row?.GetAttributeValue<EntityReference>(FieldOwnerId), ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "todo_today_utc_fallback: TodoGeneration {Rule}: event {EventId}'s assignee and owner could not be read; "
+                + "judged on the UTC date {Today:yyyy-MM-dd}", rule, evt.Id, recipients.UtcToday);
+            return holds(recipients.UtcToday);
+        }
+
+        if (day.Source == RecipientDaySource.Utc)
+        {
+            _logger.LogWarning(
+                "todo_today_utc_fallback: TodoGeneration {Rule}: event {EventId} has no assignee or owner with a time zone "
+                + "({Reason}); judged on the UTC date {Today:yyyy-MM-dd}", rule, evt.Id, day.FallbackReason, day.Today);
+        }
+
+        return holds(day.Today);
+    }
+
+    /// <summary>A calendar date as the event query's due-date bound (it formats <c>yyyy-MM-dd</c>).</summary>
+    private static DateTime AsQueryDate(DateOnly date) => date.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
 
     // ──────────────────────────────────────────────────────────────────────────
     // Rule 4: Pending invoices
