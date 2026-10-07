@@ -11,7 +11,7 @@
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
 | **Status** | **SPE Admin is secret-free and LIVE in dev.** PR #1291 merged (`a5be02f0`); BFF deployed by the operator 2026-10-05 from master `2677d48c` — **verified in the running DLL** (new members present, `SpeAdminTokenProvider` absent, `/healthz` 200). SPE Admin page deployed 2026-10-05. Model 1 config secret field already blank |
-| **Tasks** | **27 ✅ · 2 🔄 (029 = operator UAT render; 050 = platform-blocked, §9 of its findings) · 1 🔲 (090)** of 30 |
+| **Tasks** | **27 ✅ · 2 🔄 (029 = operator UAT render; 050 = platform-blocked, §9 of its findings) · 1 🔲 (090)** of 30. 042 closed — its last item was fixed upstream by uac-r2 #1312 |
 | **Next Action** | **Operator**: (1) Consuming Tenants → grant `5967251e-…` `full`/`full` on Spaarke Model 1; (2) `SecurityEvents.Read.All` on `mi-bff-api-dev` (az command in the 2026-10-07 session reply: SP `9fd47efb…`, Graph SP `ba630d35…`, role `bf394140…`); (3) UAT incl. 029's billing render. **Then** 090 wrap-up |
 | **Blocked?** | Nothing is code-blocked. Security **Alerts** will still fail after (2): Graph says the tenant "is not provisioned" for the Security API — a licensing condition, unchanged from the old identity |
 

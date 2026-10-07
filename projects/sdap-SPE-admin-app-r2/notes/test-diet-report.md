@@ -57,10 +57,11 @@ concrete production behaviour it protects.
 
 ## Path-move commands (reviewer judgment required)
 
-> ✅ **APPLIED 2026-10-07** — moved as below, and resolution **1 (offline Dataverse double)** taken for
-> `SearchItems_WithToken_ValidConfigIdNotFound_Returns400`: the lookup goes to a `DataverseWebApiClient`
-> subclass whose `RetrieveAsync` returns null with no network call, and the assertion is now exactly 400.
-> 7/7 pass. Nothing added to the reliability registry.
+> ✅ **RESOLVED UPSTREAM 2026-10-06 by uac-r2 PR #1312** — the network dependency is gone: the tests run on
+> `AdminSurfaceHostFixture` with in-memory `FakeDataverseTables` (resolution 1, done more thoroughly), and an
+> unknown config now gets the tenant-scope **404**. The **move below was NOT applied**: uac-r2 actively edits
+> this file, so relocating it would only create merge conflicts for that project. r2's own parallel fix
+> (2026-10-07) was discarded at merge in favour of master's.
 
 ```bash
 # HTTP contract tests sitting at a non-KEEP path.
