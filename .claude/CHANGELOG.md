@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 ###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
 
 `.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.
+
 ###### 2026-10-06 — Correction (owner): round limits cap review ceremony, never fixing; every found defect is fixed or surfaced
 
 The throughput entry below capped Step 9.5 at "2 fix rounds … never start round 3". In practice that left a confirmed F1 (task 171 in `unified-access-control-r2`) waiting on a round count. The owner corrected the intent the same day: the limits exist to stop unnecessary checks and pseudo-fixes, not to leave known-broken code unfixed.
