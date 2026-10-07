@@ -106,6 +106,16 @@ export interface IOrganizationPick {
 export interface IUserPick {
   id: string;
   name: string;
+  /** The user's primary email, when the host could read it. Shown beside the name because several users can share
+   * one (owner test feedback 2026-10-07). */
+  email?: string;
+}
+
+/** What the modal asks of the "+ User" lookup (task 114). */
+export interface IUserPickOptions {
+  /** Leave out users flagged external (`sprk_isexternal = true`): set on a Restricted record, where they cannot
+   * receive a share (owner round 67). Blank counts as internal. */
+  excludeExternal?: boolean;
 }
 
 /** The secure-project owner + business-unit alignment read-only display (task
@@ -273,7 +283,7 @@ export interface IAccessGrantModalProps {
    * a `sprk_externalrecordaccess` row (distinct write path from
    * pickContact/pickOrganization's `/grant` | `/invite-and-grant`). Omit → the
    * "+ User" button is hidden. */
-  pickUser?: () => Promise<IUserPick | null>;
+  pickUser?: (options?: IUserPickOptions) => Promise<IUserPick | null>;
   /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
    * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
    * access to the Contact can view/edit it. When supplied, each contact name in

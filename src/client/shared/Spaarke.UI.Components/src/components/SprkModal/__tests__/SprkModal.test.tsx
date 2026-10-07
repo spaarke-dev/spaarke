@@ -143,4 +143,26 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     );
     expect(screen.getByText('dark body')).toBeInTheDocument();
   });
+  it('yieldToSidePane keeps the surface visible but dimmed and click-through while a native side pane is open', () => {
+    const { rerender } = renderWithProviders(
+      <SprkModal open onClose={noop} title="Manage Access" nonBlocking yieldToSidePane>
+        <div>Body</div>
+      </SprkModal>
+    );
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.style.visibility).not.toBe('hidden');
+    expect(dialog.style.opacity).toBe('0.6');
+    expect(dialog.style.pointerEvents).toBe('none');
+    expect(within(dialog).getByText('Body')).toBeInTheDocument();
+
+    // `rerender` reuses renderWithProviders' FluentProvider wrapper.
+    rerender(
+      <SprkModal open onClose={noop} title="Manage Access" nonBlocking>
+        <div>Body</div>
+      </SprkModal>
+    );
+    const restored = screen.getByRole('dialog');
+    expect(restored.style.opacity).toBe('');
+    expect(restored.style.pointerEvents).toBe('');
+  });
 });

@@ -228,7 +228,7 @@ export function createXrmNavigationService(): INavigationService {
       }
 
       // Build the lookupObjects options
-      // Xrm.Utility.lookupObjects accepts: entityTypes, allowMultiSelect, defaultEntityType, defaultViewId
+      // Xrm.Utility.lookupObjects accepts: entityTypes, allowMultiSelect, defaultEntityType, defaultViewId, filters
       const lookupObjectsOptions: Record<string, unknown> = {
         entityTypes: options.entityTypes ?? [options.entityType],
         allowMultiSelect: options.allowMultiSelect ?? false,
@@ -239,6 +239,9 @@ export function createXrmNavigationService(): INavigationService {
       }
       if (options.defaultViewId !== undefined) {
         lookupObjectsOptions['defaultViewId'] = options.defaultViewId;
+      }
+      if (options.filters !== undefined && options.filters.length > 0) {
+        lookupObjectsOptions['filters'] = options.filters;
       }
 
       try {

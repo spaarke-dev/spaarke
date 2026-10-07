@@ -804,4 +804,101 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       warnSpy.mockRestore();
     });
   });
+  describe('task 114 — owner test feedback 2026-10-07', () => {
+    const EXTERNAL_PICK: IUserPick = { id: 'systemuser-ext', name: 'Ralph Schroeder', email: 'ralph.schroeder@hotmail.com' };
+
+    function refusingFetch(reasonCode: string, detail: string): jest.Mock {
+      return baseAuthenticatedFetch(url =>
+        url.includes('/share-user') ? jsonResponse({ title: 'Not shared', detail, reasonCode }, false, 422) : null
+      );
+    }
+
+    async function pickAndAdd(name: string): Promise<void> {
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText(name);
+      await pickLevelFor(name, 'View Only');
+      fireEvent.click(addButton());
+    }
+
+    it('on a Restricted record the "+ User" lookup is asked to leave out users flagged external', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser, accessPermissionState: 'restricted' })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: true }));
+    });
+
+    it('on a standard record the "+ User" lookup is not filtered', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => null);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalledWith({ excludeExternal: false }));
+    });
+
+    it('a picked user row shows the email beside the name', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      expect(await screen.findByText('Internal system user · ralph.schroeder@hotmail.com')).toBeInTheDocument();
+    });
+
+    it('the external-user refusal names the person and says why, instead of "1 failed. Please try again."', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
+      const authenticatedFetch = refusingFetch(
+        'sdap.access.user_share.user_not_internal',
+        'This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them.'
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            accessPermissionState: 'restricted',
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Ralph Schroeder');
+      expect(
+        await screen.findByText(
+          /System user Ralph Schroeder \(ralph\.schroeder@hotmail\.com\) is an external user\. Restricted records cannot be shared with external users\./
+        )
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+    });
+
+    it('a disabled-user refusal names the person in front of the server sentence', async () => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = refusingFetch(
+        'sdap.access.user_share.user_disabled',
+        'This user is disabled, so the record was not shared with them.'
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Uma Userton');
+      expect(
+        await screen.findByText(/System user Uma Userton: This user is disabled, so the record was not shared with them\./)
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
+    });
+
+    it('while the lookup is open the modal stays visible (dimmed), instead of disappearing', async () => {
+      let resolvePick: (v: IUserPick | null) => void = () => {};
+      const pickUser = jest.fn(() => new Promise<IUserPick | null>(r => (resolvePick = r)));
+      renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await waitFor(() => expect(pickUser).toHaveBeenCalled());
+
+      const dialog = screen.getByRole('dialog');
+      expect(dialog.style.visibility).not.toBe('hidden');
+      expect(dialog.style.opacity).toBe('0.6');
+
+      resolvePick(null);
+      await waitFor(() => expect(screen.getByRole('dialog').style.opacity).toBe(''));
+    });
+  });
 });

@@ -23,6 +23,7 @@ export type {
   // because the host file had been reviewed and never compiled — the first production build of
   // v1.0.31 failed on TS2305 for exactly these two names.
   IUserPick,
+  IUserPickOptions,
   ISecureOwnerInfo,
   ExternalGrantRootType,
   IAccessLevelOption,
