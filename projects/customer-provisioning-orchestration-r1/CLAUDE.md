@@ -1,290 +1,183 @@
-# CLAUDE.md — customer-provisioning-orchestration-r1
+# customer-provisioning-orchestration-r1 — project operating manual
 
-> # 🔴 READ FIRST — [`INCOMING-D12-D13-REMEDIATION.md`](INCOMING-D12-D13-REMEDIATION.md)
->
-> **The deployment model this project was built around has CHANGED** (owner decisions **D-12** + **D-13**,
-> merged to master 2026-09-28 in `38f48723e`). The "Model 1 = shared trial/SMB tier" is **RETIRED**; both
-> models are dedicated stamps differing only in which **Azure tenant** owns the customer's subscription, and
-> the BFF Entra app registration is **per customer in both models (BINDING)**.
->
-> 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
-> does the opposite of what D-13 requires. *(2026-10-06: the four D-13 changes are done — T222/T227/T228; the branch is 23 behind / 44 ahead of `origin/master` — re-measure with `git rev-list --count HEAD..origin/master` before a merge.)*
-> **Do not start work, and do not resolve a merge conflict, before reading that file.**
+> Read with `current-task.md` (current state). Repo-wide rules are in root `CLAUDE.md`; this file holds only what is
+> specific to this project. Template: `.claude/skills/project-setup/references/claudemd-template.md`. Rationale and
+> superseded rules: `notes/decisions.md`. Previous version: `notes/handoff-history/CLAUDE-archive-2026-10-07.md`.
 
+## 1. Scope and status
 
+The customer-provisioning platform. An operator runs `/provision-environment {customerId}` under their own identity.
+The skill drives the L2 control plane (REST API + Worker, `src/server/services/Sprk.Provisioning.ControlPlane.*`). L2
+runs handlers H0–H14 over Service Bus + Cosmos and finishes with one customer's stamp at `Setup Status = Ready`.
 
-> **Per-project AI context. This file is loaded automatically when Claude Code operates in this project directory.**
-> **Last Updated**: 2026-08-19 (v3.6 — task 128b Redis Model 1/Model 2 reconciliation; see spec.md/design.md v3.6 CHANGELOG)
-> **Root CLAUDE.md rules apply — this file EXTENDS, does not replace.**
+Deployment model (UAC-r2 D-12/D-13, 2026-09-28; owner 2026-09-30): every customer gets a **dedicated stamp** with its
+own subscription, resource group, Dataverse environment, BFF app registration and Redis. Model 1 stamps live in
+Spaarke's tenant, and customer users are B2B guests. **Model 2 is out of scope** (plan D3): add no Model 2 work and
+break no existing Model 2 path.
 
----
+Out of scope:
+- per-customer staging/dev (D6);
+- BI;
+- VNet (off for MVP);
+- a provisioning web UI (follow-on: `notes/follow-on-customer-deployment-webapp-proposal.md`);
+- data migration (`spaarke-data` CLI);
+- registry-aware decommission and fleet management (r2).
 
-## What this project does
+Status: `tasks/TASK-INDEX.md` and `current-task.md`. The work now in progress is the Model 1 remediation in
+`notes/model1-dedicated-remediation-plan.md`: §2 owner decisions D1–D29, §4 gaps, §7 task list (tasks without a POML
+are created from it). Also `spec.md` · `design.md` · `plan.md`.
 
-Enterprise customer-provisioning platform for Spaarke. See [README.md](./README.md) overview + [design.md](./design.md) v3.3 (1,884 lines) for full context.
+## 2. Binding rules for this project
 
-**One-sentence contract**: An operator invokes `/provision-environment {customerId}`; Claude Code calls L2 REST API; L2 sequences 19 handlers (`IProvisioningHandler`) via Service Bus + Cosmos state; customer environment reaches `Setup Status = Ready` end-to-end.
+Full list: `spec.md` "MUST Rules". These come up on most tasks.
 
-## Load these first (per task)
+**Architecture**
+- Handlers implement the L2-local `IProvisioningHandler` and register in the L2 control plane, never the BFF. They take no compile reference to the BFF's `IJobHandler` (spec §5.2).
+- `POST /api/runs` enqueues on Service Bus and returns 202; no handler runs in the HTTP path (FR-22). Dispatch uses `ServiceBusSessionProcessor`, `SessionId = CustomerId`, `MaxConcurrentCallsPerSession = 1` (FR-22b).
+- Every handler input has one producer. The intake endpoint and the handler validate with the same shared code (`IntakeParameterCatalog`, `HandlerRunInputs`, the `*Intake` validators — `provisioning.md` "Run-context contract").
+- The L2 main site never shells out to pwsh/az/pac; the only PowerShell path is the H14a Exchange sidecar.
+- H9 deploys the BFF from the CI-published artifact, never `dotnet publish` at provision time (FR-12).
+- One BFF app registration per customer, both models (D-13, binding). No per-customer Entra tenant.
+- Tenant isolation I1–I5 (FR-28–FR-32): `provisioning.md` "Tenant-isolation invariants". Every app-only SPE call gets its Graph client from `SpeContainerOwnershipGuard`, never `.ForApp()` (T227d; `SpeAppOnlyContainerGuardTests`). This includes code that arrives in a master merge.
+- Stamps are keyless (D13). Stamp Redis is Azure Managed Redis, Microsoft Entra only (D12). See `provisioning.md` "Stamp resources are keyless" and "Stamp Redis".
+- SPE: one container type per model and one root container per customer. Never propose a container type per customer (D28). SPE Admin on a stamp reaches only that stamp's containers (D29). Container-type creation is delegated-only, an operator one-time step (topology doc §R5).
+- Model 1 users are B2B guests in the environment security group `sprk-{customerId}-users`. Spaarke pays pay-as-you-go on the customer's stamp subscription; guest access must be on (D2, owner 2026-10-07; `provisioning.md` "Model 1 users").
+- The customer's subscription and Dataverse environment are operator prerequisites; H5 adopts, never creates (D4, T228). Cost: one envelope per dedicated stamp (T229).
 
-**On every task** (via `<knowledge>` in POML):
+**Credentials and Key Vault**
+- Read the current text of `provisioning.md` "KV credential lifecycle" before touching any secret. In short:
+  - never create, seed or restore `BFF-API-ClientSecret` (either casing) or `Dataverse-ClientSecret` in secret-free environments;
+  - before 2026-11-23, never delete `Dataverse-ClientSecret` and never purge soft-deleted rollback copies;
+  - E-1 secrets are protected indefinitely.
+- No secret or certificate on the Model 1 owning app `bfac7f6e`: L2 signs in with MI-FIC (D16). No secret, certificate or Entra directory role on `Spaarke Exchange Admin` (D24/D25).
+- PATCH App Service `keyVaultReferenceIdentity` to the UAMI on both slots (trap T1).
+- Use canonical KV and resource naming; the vault name is a Bicep parameter.
+- Pre-check the live App Service, KV and Dataverse before removing any alias (FR-35).
+- The operator authenticates with their own AAD identity, never a service principal (NFR-11).
 
-1. **[spec.md](./spec.md)** — authoritative Functional/Non-Functional Requirements (FR-01..FR-37, NFR-01..NFR-12), Success Criteria (22), Governance sections
-2. **[design.md](./design.md)** — full design context, decisions D1–D20, handler catalog H0–H14, §4B trap catalog, §4C rollback, §4D tenant isolation, §14A upgrade model
-3. **[notes/r3-handoff.md](./notes/r3-handoff.md)** — r3-shipped mechanisms r1 consumes (tasks 060/061/062/017)
-4. **[notes/resource-discovery-2026-08-16.md](./notes/resource-discovery-2026-08-16.md)** — canonical implementations, ADR files, patterns, constraints
+**BFF-touching tasks**
+- `.claude/rules/bff-hygiene.md` applies.
+- Report the publish size and delta from fresh short-path worktrees of both sides (NFR-01).
+- Run `/conflict-check` before every BFF PR.
 
-**Per-task-tag** — task POMLs pick from `<knowledge>` based on tags. The Tag-to-Knowledge mapping is in `.claude/skills/task-create/SKILL.md` Step 3.4.
+**Process**
+- Deferred work and newly found issues go through `/project-defer-issue-tracking`: `notes/defer-issues.md` AND a GitHub issue.
 
-## Applicable ADRs
+**ADR tensions approved here** (root §6.5; detail in `spec.md` "ADR Tensions", `design.md` §17):
+- ADR-004 A — L2 orchestration is a custom state machine over Cosmos.
+- ADR-027/028 A — one L2 identity holds Owner on every customer subscription (T228, owner 2026-10-06).
+- ADR-027 management groups — A, deferred (G36, awaiting the owner).
+- ADR-020 A — the `POST /api/runs` intake map rejects or requires keys (T245a/b/c, T225b).
+- ADR-020 A — the stamp deployment `gpt-4o-mini` runs gpt-4.1-mini (T247).
+- ADR-007 A — L2 calls Graph SPE APIs directly (T248).
+- ADR-038 A — L2 test project location.
+- ADR-028 A — time-boxed: only the dev/demo Document Intelligence key remains, until T235.
+- T254, owner-approved 2026-10-07:
+  - `Set-AiSpendLimit.ps1` single-setting writes;
+  - no `ValidateOnStart` for the AiSpendLimit options;
+  - the 17th `SystemCacheKeys` entry `AiSpendMonth`.
+- Withdrawn exceptions are listed in `notes/decisions.md` §2.
 
-Per [spec.md § Technical Constraints § Applicable ADRs](./spec.md#applicable-adrs). Concise summaries at `.claude/adr/`; full history at `docs/adr/`.
+## 3. Owner directives and standing decisions
 
-| ADR | Concise | Why relevant |
-|---|---|---|
-| ADR-004 | `.claude/adr/ADR-004-job-contract.md` | L1 handlers implement the L2-local `IProvisioningHandler` contract (ADR-004-shaped); L2 orchestration is Path A exception (see spec.md ADR Tensions) |
-| ADR-010 | `.claude/adr/ADR-010-di-minimalism.md` | Provisioning handlers register in L2 (not BFF); BFF DI additions strictly bounded |
-| ADR-013 | `.claude/adr/ADR-013-ai-architecture.md` | H0.5 endpoint MUST NOT inject `IActionResolver`/`IActionRunner`; use `Services/Ai/PublicContracts/` facade if AI needed |
-| ADR-014 | `.claude/adr/ADR-014-ai-caching.md` | `spaarke-session-files` tenantId + sessionId dual-filter invariant (§4D I2 strengthens) |
-| ADR-017 | `.claude/adr/ADR-017-job-status.md` | Per-handler job status vs ProvisioningRun (different stores per §5.3) |
-| ADR-020 | `.claude/adr/ADR-020-versioning.md` | Pinned model deployment versions in H2a Bicep OpenAI config |
-| ADR-027 | `.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md` | One Azure subscription **per customer** (ADR amended 2026-09-28); **no** shared-tier exception |
-| ADR-028 | `.claude/adr/ADR-028-spaarke-auth-architecture.md` | H4 KV secrets + UAMI RBAC + `keyVaultReferenceIdentity` PATCH follow 21 MUSTs |
-| ADR-032 | `.claude/adr/ADR-032-bff-nullobject-kill-switch.md` | SignalR feature-gate follows P1/P2/P3 pattern |
-| ADR-034 | `.claude/adr/ADR-034-user-record-membership.md` | Optional SignalR per-customer aligns with realtime pattern |
-| ADR-036 | `.claude/adr/ADR-036-background-job-infrastructure.md` | Background-job infrastructure pattern (Service Bus + `IJobHandler` + Redis idempotency) — L2's `ProvisioningHandlerDispatcher` follows the same shape (Redis idempotency reused directly; no compile reference to `IJobHandler`) |
-| ADR-038 (full) | `docs/adr/ADR-038-testing-strategy.md` | Integration-heavy pyramid; 5 new ArchTests I1–I5 sequence into r3 forcing-functions |
-| ADR-039 | `.claude/adr/ADR-039-grounded-execution-closed-catalogs.md` | Single AI routing surface; H12a seeds `playbook consumers`; `spaarke-playbook-embeddings` retired |
-| ADR-044 | `.claude/adr/ADR-044-dataverse-guid-canonicalization.md` | Registry key patterns — `sprk_currentrunid`, `sprk_tenantid`, `sprk_bffversion`, `sprk_solutionversion` |
+Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 
-## Constraints (`.claude/constraints/`)
+**How to work**
+- Build the process, not the environment (2026-08-23). Never `pac admin copy` from another environment as a shortcut; every gap found is fixed here.
+- End state: provisioning runs E2E with no human interaction (2026-09-01). L2 has no web UI in r1.
+- T186 (first live E2E) goes through `/provision-environment`, never direct L2 REST calls (2026-08-30).
+- T218 defines the complete solution package and is a hard blocker for T186 (2026-09-28). All solutions ship to every customer (2026-09-01).
+- Every defect found is fixed in scope, or filed and reported. Review limits cap ceremony, never fixing (2026-10-06; task-execute Step 9.5).
+- Fix what can be fixed now, including drift and broken CI elsewhere. Implement the owner's design and absorb the follow-on work.
+- Decide a doubtful mechanism by necessity: needed → build it, otherwise remove it. Give one recommendation, not a menu of variants (2026-10-06).
+- No Microsoft support case: find the root cause (2026-10-04).
 
-Per root CLAUDE.md §10 + §11 governance:
+**Live actions**
+- Every live Azure/Entra/Dataverse/Exchange change and every deploy needs the owner's OK, per action. Read-only checks are fine. Record each action in the task POML notes.
 
-| Constraint | Load when |
-|---|---|
-| `.claude/constraints/bff-extensions.md` | **ANY task touching `src/server/api/Sprk.Bff.Api/**`** (H0.5 endpoint, DemoExpirationService migration, `GraphAppRoles.cs` completion) — MUST load before adding to BFF |
-| `.claude/constraints/azure-deployment.md` | H2a Bicep tasks — includes BFF publish-size ≤60 MB ceiling |
-| `.claude/constraints/testing.md` | Any tests-modifying task (unconditional code-review + adr-check per root §8) |
-| `.claude/constraints/auth.md` | H3, H4, H10 — auth ceremony, KV secrets, MI-Dataverse-App-User |
-| `.claude/constraints/jobs.md` | H0.5 endpoint, L1 handler tasks — `IProvisioningHandler` contract (ADR-004-shaped; BFF `IJobHandler` reference-only) |
-| `.claude/constraints/data.md` | H5, H6, H7, H10, registry schema extension |
-| `.claude/constraints/api.md` | H0.5 endpoint, L2 REST API endpoint tasks |
-| `.claude/constraints/ai.md` | H12a AI seed chain |
-| `.claude/constraints/config.md` | H4 secrets + FR-35 canonical naming; NFR-05 fail-fast config validation |
-| `.claude/constraints/pcf.md` | (No PCF tasks in r1 scope — reserved for reference only) |
+**Keep — never delete or alter without the owner**
+- `rg-spaarke-shared-prod` (subscription "Spaarke Shared Production" `cd95fcec…`) and the `Spaarke Model 1` SPE billing account (Syntex) in it (D23). Add no lock and no tags to the RG (2026-10-03). *(verify: it already carries five Bicep tags, e.g. `scope: platform-shared`. Did the decision mean no new protective tags, or no tags at all?)*
+- `sprk-prod-kv`: not before 2026-11-23 (T241; KV lifecycle).
+- Registry rows (`sprk_dataverseenvironment`): never delete, deactivate instead (T237).
+- `Spaarke Exchange Admin` `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`, `Spaarke SPE Model 1 Owner` `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, and Graph Explorer's grant on `Spaarke Model 1` (2026-10-03).
+- Exchange group `sprk-t251-spike-scope` (Entra `c709af95-0332-4ea2-a9d4-6925b1666bad`, member testuser1@), the test group for `Verify-Sidecar-Live.ps1 -InTenant` (2026-10-04). `Enable-OrganizationCustomization` has been run (irreversible).
+- The dev BFF MI `mi-bff-api-dev` holds application `full` on the `Spaarke Model 1` container type `fb3817a8` (option A, 2026-10-06). Only the ownership guard and `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev confine it.
+- A spike/test cleanup never deletes Key Vault secrets; the `Exchange-Connect-Cert` sentinel stays. Planned deletions follow the KV lifecycle rule.
 
-## Patterns (`.claude/patterns/`)
+**Settled — do not re-litigate**
+- D-13: a per-customer BFF app registration.
+- D28: no container type per customer.
+- No BI in MVP: a per-customer Power BI F-SKU comes later; do not procure it (2026-09-28).
+- The M365 Copilot agent is per customer (2026-09-28).
+- VNet stays off for MVP (2026-09-01).
+- `SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` is authoritative; never merge an SPE owning app with a BFF app registration (2026-08-30).
+- Demo is the next environment for testing the orchestration (D27).
+- The prod L2 control plane goes into `rg-spaarke-shared-prod` from its first deploy (D23).
 
-| Pattern dir | Load when |
-|---|---|
-| `.claude/patterns/api/` | H0.5 endpoint, L2 REST API endpoint tasks |
-| `.claude/patterns/auth/` | H3, H4, H10 — auth binding + OBO + SSO |
-| `.claude/patterns/dataverse/` | H5, H6, H7, H10, H12a/b/c — Dataverse operations |
-| `.claude/patterns/caching/` | Redis usage in idempotency service |
-| `.claude/patterns/testing/` | Test-adding tasks (the god-class LOC ratchet was RETIRED 2026-08-20 — complexity is judged at review, root CLAUDE.md §11.5) |
-| `.claude/patterns/ui/` | (No UI in r1) |
+## 4. Coordination
 
-## Canonical implementations (pattern exemplars)
+- **unified-access-control-r2.** Shares the BFF SPE/access code (`SpeContainerMembershipService`, `DriveItemOperations`, `UploadSessionManager`, `DemoProvisioningService`) and H8.
+  - It owns the INCOMING doc §8 items (Secure Record rename, Redis subject keys); leave them alone.
+  - Owed to us: the `sprk_noaccessentry` hand-off; T256 and T218 depend on it.
+  - Owed by us: an acknowledgement of INCOMING-141/145 (accepted as T255/T256), and the §13.9(b) do-not-mint note (`notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md`). Ask the owner how to deliver each.
+- **sdap-SPE-admin-app-r2.** SPE Admin as the BFF identity (master `bb8ba7251`) probably supersedes T250; raise it with the owner when T250 is reached.
+- **spaarke-auth-v4-dataverse-MI** (archived). Owns `Dataverse-ClientSecret` retirement after 2026-11-23.
+- **spaarkeai-compose-r8** task 063. The Blob keyless proof stays `not-in-use` until that task lands.
+- **`.github/workflows/**`.** ci-cd-unit-test-remediation-r1 is closed (owner 2026-10-02); this project changes its own provisioning workflows. Check `projects/INDEX.md` for an active CI-governance project first.
+- **Hot paths:** BFF, skill directives, CI workflows. Registry: `projects/INDEX.md`.
 
-Discovery report enumerates the strongest exemplars. Key ones the task POMLs reference by name:
+## 5. Environment and live actions
 
-| Exemplar | For |
-|---|---|
-| `src/server/api/Sprk.Bff.Api/Services/Jobs/**/*Handler.cs` (any of 13 production handlers) | L1 `IJobHandler` implementation pattern |
-| `src/server/api/Sprk.Bff.Api/Services/Ai/Jobs/**/*Handler.cs` | L1 handler with AI ties (use for H12a/b/c) |
-| `src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs` | 3-level idempotency (MessageId + Redis + Dataverse alt-key) |
-| `src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs` (9-step) | H11 user provisioning pattern |
-| `src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs` | Cross-env token cache + multi-URL ops |
-| `src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs` | H11 user creation + UPN + license |
-| `src/server/api/Sprk.Bff.Api/Api/Registration/**` endpoints | Endpoint filter pattern for L2 REST API |
-| `.claude/skills/deploy-new-release/SKILL.md` | Reference model for L3 skill `/provision-environment` (Phase D) |
-| `infrastructure/bicep/customer.bicep` | H2a Bicep extension (reference — extend, don't recreate) |
-| `scripts/Provision-Customer.ps1` | 13-step orchestrator — basis for handler port |
-| `scripts/ai-search/Deploy-AllIndexes.ps1` | H2b — 7 canonical indexes; script IS the catalog authority |
-| `scripts/Deploy-DataverseSolutions.ps1` | H6 — dependency-ordered solution import (9 solutions in `CanonicalSolutionCatalog`; T218 redefines the package) |
+- Dev BFF `spaarke-bff-dev`: deploy only from master at or after `c8b93b294`. Dev Redis, its alerts and App Insights `spe-insights-dev-67e2xz` are in `spe-infrastructure-westus2`, not `rg-spaarke-dev`.
+- The L2 control plane deploys with `scripts/provisioning/Deploy-ControlPlane.ps1`; see the gotcha below. Current blockers: `current-task.md` owner items.
+- Operator documents:
+  - prerequisites: `docs/guides/PROVISIONING-PREREQUISITES.md` + `scripts/provisioning-prereqs/prereqs.yaml` (`validate.ps1`);
+  - operator guide: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`;
+  - resources per environment: `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`.
+- Azure OpenAI model pins need a refresh before about 2027-01-14 (`PinnedModelCatalog`, T247).
+- `runs/trial1-intake.json` (gitignored) predates D-12; do not use it. T186's target customer is not yet defined.
 
-## MUST rules (spec-cited, task-execute must enforce)
+## 6. Gotchas — do not re-learn
 
-Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rules). Highlights that come up on EVERY task:
+**Naming and process**
+- Three "D" decision series exist: design.md D1–D20, plan §2 D1–D29 (owner) and UAC-r2's hyphenated D-12/D-13/D-14. Always name the series (2026-10-07).
+- After every master merge, grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests` (2026-10-07). A clean auto-merge can lose the ownership guard: master's task 171 added app-only twins and shared `*CoreAsync` bodies, and the merge spliced our guard line into a shared core, where it shadowed the OBO client.
+- `sdap-ci.yml` is not a required check and its jobs are `continue-on-error`. A gate that must block goes in `ci-tier1-blocking.yml` (Router) (2026-10-06).
+- Before declaring a per-run H13 check fixed, ask where its inputs live at runtime. The Worker publish has no `scripts/` or `infrastructure/`, and the host has no pwsh or pac (2026-10-06).
+- A prereq recipe's tokens must resolve at the step that runs its scope; `validate.ps1` checks documentation only (2026-10-06).
+- Check Microsoft's per-feature region table before defaulting a regional AI resource to the stamp location. Content Safety defaults to westus (2026-10-06).
 
-- **MUST** register provisioning handlers in **L2 control-plane service, not the BFF** (§5.2 + D3/D8/D12)
-- **MUST NOT** create a per-customer Entra **tenant** — Model 1 uses one Spaarke tenant (still correct under D-12).
-  🔴 **AMENDED 2026-09-28**: the *"+ one multitenant BFF app"* half is **REVERSED**. **MUST** create **one BFF app registration per customer**, in both models — D-13 (BINDING). The app registration determines the Dataverse application user, which determines the business unit every BFF-created record lands in. `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`
-- **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
-- 🔴 **REVERSED 2026-09-28 (D-12 §3); product + auth set by T242 (owner D12/D13, 2026-10-04).** Was: *"**MUST NOT** provision Redis per-customer **FOR MODEL 1**"*. Now: **MUST provision Redis per-customer in BOTH models** as **Azure Managed Redis (`Microsoft.Cache/redisEnterprise`) Balanced_B0, high availability on, Microsoft Entra only** (access keys disabled; the stamp UAMI holds the only access-policy assignment; the BFF reads the plain setting `Redis__Endpoint` — no key, no connection string, no Key Vault secret). Redis access control is per-instance (not per-keyspace) and it holds OBO tokens + the `uac-access` authorization cache. `customer.bicep` wires `modules/redis.bicep` unconditionally. (The earlier "Standard tier" wording is superseded — ADR-009 as amended by T242.)
-- **MUST NOT** expect app-only SPE container-TYPE creation: creation is delegated-only (topology doc §R5 / H8-B — an operator one-time step); L2 acts as an owning app only via MI-FIC (`provisioning.md` "SPE owning app") *(corrected 2026-10-06)*
-- **MUST** PATCH App Service `keyVaultReferenceIdentity` to UAMI on both slots (T1)
-- **MUST** apply canonical KV secret + resource naming (Phase G / R1–R4); vault name is Bicep parameter
-- **KV credential lifecycle**: follow `.claude/constraints/provisioning.md` §KV credential lifecycle (never create/seed/restore the BFF secrets in secret-free environments; never delete `Dataverse-ClientSecret` or purge rollback copies before 2026-11-23; E-1 secrets protected) — the old r3 blanket never-delete rule is superseded *(corrected 2026-10-06)*
-- **MUST** pre-check LIVE App Service + KV + Dataverse before removing any alias (FR-35 pre-check gate)
-- **MUST** ensure all AI Search queries include unconditional `tenantId eq` filter (§4D I2 / FR-29)
-- **MUST** ensure all Cosmos reads/writes include partition-key predicate (§4D I3 / FR-30)
-- **MUST** take SPE container IDs from the record being served or the stamp's own settings, and pass every app-only SPE call through `SpeContainerOwnershipGuard` — the one definition of this stamp's containers (§4D I4 / FR-31; T227d/T227f)
-- **MUST** acquire Graph tokens per-tenant scoped (§4D I5 / FR-32)
-- **MUST NOT** hardcode default tenant in provisioning scripts (§4D I1 / FR-28)
-- **MUST** report BFF publish size + delta in every BFF-touching task's PR description (NFR-01)
-- **MUST** ensure BFF `/health` fails fast at boot on any Tier-1 IOptions misconfig (r3 task 061)
-- ✅ `GraphAppRoles.cs` `AppRoleId`s: all 14 populated 2026-08-17, a 15th added by task 144 — keep them live-verified when adding one *(corrected 2026-10-06)*
-- **MUST** enqueue handlers via Service Bus + return 202 Accepted (FR-22 / R20 — no synchronous handler in HTTP path)
-- **MUST** use `PublicContracts/` facade if H0.5 needs AI (ADR-013 forcing-function ArchTest per r3 task 040)
-
-## ADR Tensions (per CLAUDE.md §6.5)
-
-Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--mandatory). 2 Path A (documented exception) + 5 Path C (comply). All rationale concrete. NO Path B (no ADR amendment needed).
-
-**Path A rows** — code-review at PR time expects PR description to cite these:
-- **ADR-004**: L2 orchestration is NEW component pattern — a custom state machine over Cosmos rather than Durable Task, and not single-shot (ADR-052 §7 now also permits Durable Task in its own host). Rationale: ADR-004 applies at handler level; L2 orchestration uses its own `ProvisioningHandlerDispatcher` + custom state machine over Cosmos (§5.4 rejected alts).
-- **ADR-027**: 🔴 **no longer an exception.** ADR-027 was **amended 2026-09-28** to one Azure subscription **per customer** in both models, which is what this project already does — so there is nothing to except. The former rationale (*"§4D invariants enforce logical isolation"*) is **withdrawn**: I2–I4 key on `tenantId`, which is identical for every Model 1 customer, so they cannot separate customers and pass anyway.
-
-## Sub-Agent Write Boundary (root CLAUDE.md §3)
-
-**Sub-agents CANNOT write to `.claude/` paths.** Applies to r1 tasks touching:
-- `.claude/skills/provision-environment/SKILL.md` (Phase D) — main-session-only **(LANDED 2026-08-18 tasks 075 + 076)**
-- `.claude/patterns/**` additions (if any) — main-session-only
-- `.claude/constraints/**` additions (if any) — main-session-only
-
-task-create Step 3.8 auto-marks these as `parallel-safe: false`. If a parallel agent is accidentally dispatched to a `.claude/` task, it will fail with "Edit denied" — main session picks up sequentially.
-
-## Rigor level defaults for this project (per root CLAUDE.md §8)
-
-Applied by `task-create` Step 3.5.5 per task tags. r1-specific:
-
-| Rigor | When |
-|---|---|
-| **FULL** | Every task tagged `bff-api` (H0.5 endpoint, DemoExpirationService migration, GraphAppRoles.cs completion), `plugin` (none in r1), `auth` (H3/H4/H10), `deploy` (H9, Phase F acceptance). Also POST-COMPACTION recovery. Also L2 control-plane task groups. |
-| **STANDARD** | New file creation without BFF touch (Bicep modules, PowerShell scripts, docs) |
-| **MINIMAL** | Documentation-only (Phase A doc consolidation, U-CB customer-comms templates, version-compat matrix) |
-| **TEST-MODIFYING (unconditional FULL override per root §8)** | Any task touching `tests/**` OR tagged `testing`/`integration-test` — 5 new ArchTests (I1–I5) all trigger this |
-
-## Model tier defaults for this project (per root CLAUDE.md §8.5)
-
-Applied by `task-create` Step 3.5.5b. r1-specific:
-
-| Tier / Effort | When |
-|---|---|
-| **Sonnet 5 @ high** (default) | 80% of tasks — mechanical Bicep authoring, PowerShell hardening, doc consolidation, script ports |
-| **Opus 4.8 / Fable 5 @ high** | High-blast-radius: Phase C UAMI migration (structural refactor); Phase H canonical secret-catalog manifest generator; L2 control-plane scaffold; any ADR-migration-adjacent task |
-| **Sonnet 5 @ xhigh** | Only where clearly justified: complex brownfield DemoExpirationService migration (Phase E — 3 obsolete-option touches into DataverseEnvironmentService); tenant-isolation ArchTest authoring (must think through every AI Search / Cosmos / Graph / SPE call site) |
-
-## Coordination with other worktrees
-
-> **UPDATE 2026-10-02 (owner, T225a escalation):** `ci-cd-unit-test-remediation-r1` **reactivated 2026-08-27**
-> (projects/INDEX.md) — which this file had missed: r1 tasks T245b and T225a edited
-> `publish-provisioning-arm-artifacts.yml` / its manifest schema / `deploy-infrastructure.yml` believing it dormant (its
-> branch tip is stale; its work lands on master). The owner has now ruled that **ci-cd-unit-test-remediation-r1 is
-> CLOSED** and that r1 resolves its own provisioning workflow changes here. Before a future r1 task touches
-> `.github/workflows/**`, check `projects/INDEX.md` (not a branch tip) for an active CI-governance project.
->
-> **`.github/workflows/**` ownership is TEMPORARY-BY-DEFAULT (added 2026-08-19).** r1 holds direct ownership only because `ci-cd-unit-test-remediation-r1`'s declared 28-day window expired with that worktree dormant. This is NOT a permanent reassignment: if `ci-cd-unit-test-remediation-r1` reactivates, or any new CI-governance project starts, ownership of `.github/workflows/**` reverts to the standard coordination model (declared owner + coord-notes) and r1 goes back to authoring coord-notes for that owner rather than committing directly. Re-check this condition before any FUTURE r1 task touches `.github/workflows/**`.
-
-**Active worktrees to coordinate with** (per r3 handoff §7 + INDEX.md hot-path overlap):
-
-| Worktree | Hot-path overlap | Coordination action |
-|---|---|---|
-| ~~`ci-cd-unit-test-remediation-r1`~~ **[reactivated 2026-08-27; CLOSED per owner 2026-10-02]** | Owner declared window expired 2026-08-19; r1 has taken ownership of `.github/workflows/**` for Phase C'' scope. The 3 queued r1 coord-notes (067 Graph parity, 088 naming-conformance + tenant-isolation, 115 provisioning-sidecar build) were applied directly as of commit `<see git log for the governance commit on this branch>`. If ci-cd-r1 reactivates, coordinate the merge conflict; otherwise proceed. See `projects/INDEX.md` Excluded Worktrees + CI Workflows section for the registry-level record. |
-| `code-quality-and-assurance-r3` | BFF=Y (actively decomposing BFF) | Phase E DemoExpirationService migration may bump into r3's dead-code-removal PRs; `/conflict-check` before Phase E PR |
-| `spaarke-ai-architecture-redesign-r1/r2` | BFF=Y (broadest AI touch) | If H0.5 endpoint or DemoExpirationService migration touches `Services/Ai/**`, coordinate. Unlikely per our current scope. |
-| `spaarke-devops-project-tracking-r1` (PR #453) | skill-directives=Y (modifies project-pipeline SKILL.md) | Cosmetic — our pipeline execution uses local copy; no runtime dependency |
-| **19 active BFF worktrees total** | BFF=Y | `/conflict-check` before EVERY BFF PR |
-
-## Task Execution Protocol
-
-**MANDATORY** — When executing r1 tasks, Claude Code MUST invoke `task-execute` skill (per root CLAUDE.md §4). DO NOT read POML files directly and implement manually. See root CLAUDE.md §4 for auto-detection rules.
-
-**Rigor level declaration at task start (per root §8)**: Claude Code MUST output the 🔒 RIGOR LEVEL block. Non-negotiable.
-
-**`/goal` wave loop eligibility**: assigned per-wave by `task-create` Step 3.85 + recorded in TASK-INDEX.md. Wave eligibility is capped for r1 by: security/deploy/irreversible tasks (H4 KV secret writes, H9 BFF deploy, Phase F acceptance, Phase G/H naming remediation) are NEVER goal-eligible. Mechanical Bicep authoring waves + PowerShell hardening waves may be goal-eligible if ≥3 tasks and machine-verifiable end-state.
-
-## Context Management
-
-Per root CLAUDE.md §5. r1-specific:
-- `/checkpoint` at 60% context usage (proactive)
-- `/checkpoint` + STOP + request `/compact` at 70%
-- Checkpoint files: [`current-task.md`](./current-task.md) + [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) + this `CLAUDE.md`
-
-## Human Escalation Triggers
-
-Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
-- Any **`GraphAppRoles.cs`** `az` enumeration returning unexpected role IDs (all 15 are populated; a mismatch means drift)
-- Any **KV secret rename/delete** without prior LIVE App Service + KV + Dataverse pre-check (§7.9 BINDING pre-check)
-- Any **tenant-isolation invariant** (I1–I5) failure detected outside expected Phase-A ArchTest work
-- Any **Model 2 customer commitment** trigger (unblocks TF migration path — spec.md § Unresolved Questions)
-- Any **live-dev KV drift** encountered while executing Phase G/H (owner directive #3: don't remediate live-dev)
-
-## Related Projects
-
-- **Superseded**: `projects/spaarke-environment-factory-r1/` (this project inherits the mission)
-- **Predecessor**: `spaarke-environment-provisioning-app` (r1, complete PR #390) — user-provisioning + registry foundation
-- **Dependency**: `code-quality-and-assurance-r3` (tasks 060/061/062/017 landed 2026-08-14 per [`notes/r3-handoff.md`](./notes/r3-handoff.md))
-- **Coordinated**: `ci-cd-unit-test-remediation-r1` (Phase H CI-wiring)
-- **Follow-on (r2)**: registry-aware decommission + fleet management web app
-- **Data migration**: `spaarke-data` CLI (separate project — new customers start empty-but-functional)
-
-## Standing directives & gotchas
-
-> **Why this section exists (repo procedure change, 2026-10-06).**
-> - **What changed:** `current-task.md` now holds CURRENT state only and is rewritten at each checkpoint (`.claude/skills/context-handoff/SKILL.md` "State, not history").
-> - **Why:** here it had grown to 450 KB, because every checkpoint stacked a new block over the old ones, and task-execute reads it at Step 0 + Step 2 of every task.
-> - **What this section is:** the items below were stated in that file as standing or binding and are still in force. They moved here so they survive the rewrite and are read on every recovery.
-> - **Where the rest went:** the old file is archived verbatim at `notes/handoff-history/current-task-archive-2026-10-06.md`. Items the conversion could not classify, plus stale lines it noticed in THIS file, are in `notes/handoff-history/2026-10-06-conversion-review.md`; resolve them when convenient.
-> - **Going forward:** add a new standing directive or gotcha HERE (one dated bullet), not in `current-task.md`.
->
-> **Also new, repo-wide:** task-execute Step 9.5 "Finding triage and review scope". 🔴 **Corrected by the owner 2026-10-06 (PR #1336). The earlier "at most 2 fix rounds, never start round 3" is WITHDRAWN.**
-> - F1–F4 fix-now / K1–K4 known-limit. A K class never holds a confirmed real-path defect.
-> - **The limits cut review CEREMONY, never FIXING.** Fix → re-verify the fix diff plus its direct callers and callees → repeat until no F-class finding remains. There is no round cap on fixing.
-> - One full verifier pass per task (two for auth/security/tenant-isolation). Every later re-check covers the fix diff only.
-> - **Every defect found is fixed in scope, or filed and reported to the owner.** This holds whether the work caused it directly or indirectly, or only uncovered it (pre-existing code, another project's code, config, data).
-> - Escalate when fixes are not converging, or when the fix needs an owner decision. Never on a round count.
->
-> The skill files reach this worktree on the next master merge (PRs #1335 + #1336); the rules apply now.
->
-> Items already in `.claude/constraints/provisioning.md`, root `CLAUDE.md` or project memory are NOT repeated here.
-
-**Owner directives**
-- **Build the process, not the environment** (owner verbatim 2026-08-23): "The goal is not to install a new environment as quick and easy as we can — it's to build a customer provisioning and deployment process." Never `pac admin copy` from another env as a shortcut; every gap found is fixed here.
-- **End state** (2026-08-23 / 2026-09-01): provisioning runs E2E with no human interaction. L2 has no web UI in r1 (REST API + `/provision-environment` only); a "Customer Deployment" web app is a follow-on (`notes/follow-on-customer-deployment-webapp-proposal.md`).
-- **T186 (first live E2E) MUST go through `/provision-environment`** — never direct L2 REST calls (standing since 2026-08-30).
-- **T218 = DEFINE the complete Spaarke solution package** (owner 2026-09-28; T217 folded in, T216 dropped): audit + consolidate/redesign solutions so ALL components (entities, roles, forms, MDA, Copilot agent, per-customer app regs) ship. Hard blocker for T186.
-- **All solutions ship to every customer** — no core/optional split (owner 2026-09-01).
-- **No BI in MVP** (owner 2026-09-28 §9 Q1): per-customer Power BI F-SKU later — do NOT procure; placeholder only. **M365 Copilot agent is per customer** (§9 Q2). Do not re-litigate.
-- **VNet is optional and stays off for MVP** (owner 2026-09-01).
-- **`SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` is authoritative for r1** (owner 2026-08-30). Never merge an SPE owning app with a BFF app registration.
-- **INCOMING doc §8 items belong to unified-access-control-r2** — leave alone (Secure Project→Secure Record rename + 3 Redis subject-discrimination keys) (2026-09-28).
-- **`rg-spaarke-shared-prod` (D23, 2026-10-02)** is the single home for shared PROD resources: the prod L2 control plane goes there from its first deploy (change `platform-controlplane.bicep`'s RG name then). Owner chose no lock, no tags for now (2026-10-03).
-- **Live Azure/Entra/Dataverse changes need an explicit owner OK per action** ("live; ask first"); record each one in the task POML notes.
-
-**Keep (do not delete)**
-- `Spaarke Exchange Admin` (appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`) and `Spaarke SPE Model 1 Owner` (appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`); Graph Explorer's grant on the `Spaarke Model 1` registration (owner KEEP 2026-10-03).
-- **Dev BFF identity `mi-bff-api-dev` (appId `5967251e…`) holds application `full` / delegated `none` on the `Spaarke Model 1` container-type registration `fb3817a8`** — owner option A, 2026-10-06: the dev BFF can reach every Model 1 customer's containers; only T227d's ownership guard + `SharePointEmbedded__OwnedContainerIds` (set on spaarke-bff-dev 2026-10-06) confine it. Dev SPE config `68f9a952` `sprk_keyvaultsecretname` was changed from `"null"` to empty the same day.
-- Exchange group `sprk-t251-spike-scope` (Entra `c709af95-0332-4ea2-a9d4-6925b1666bad`, member testuser1@) = the test group for `Verify-Sidecar-Live.ps1 -InTenant` (owner 2026-10-04). `Enable-OrganizationCustomization` has been run (irreversible).
-- Never delete Key Vault secrets during a spike/test CLEANUP — the `Exchange-Connect-Cert` sentinel stays (2026-10-04). Planned deletions follow `provisioning.md` §KV credential lifecycle (e.g. T241's `sprk-prod-kv` only after 2026-11-23) *(scoped 2026-10-06)*.
-
-**Environment gotchas**
-- `sdap-ci.yml` is not a required check and its jobs are `continue-on-error`; a gate that must block goes in `ci-tier1-blocking.yml` (Router) (2026-10-06).
-- Before declaring a per-run H13 check fixed, ask where its inputs live at runtime: the Worker publish has no `scripts/` or `infrastructure/`, and the host has no pwsh/pac (2026-10-06).
-- `string.Create(IFormatProvider, …)` does not accept `$"" + $""` concatenation — format with `ToString("F2", CultureInfo.InvariantCulture)` (2026-10-06).
-- `tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1` fails 27/27 locally under Pester 6.2 at HEAD (pre-existing; not in CI) (2026-10-06).
-- Dev Redis, its alerts and App Insights (`spe-insights-dev-67e2xz`) live in `spe-infrastructure-westus2`, NOT `rg-spaarke-dev` (2026-10-06).
-- Dev BFF deploys come only from master ≥ `c8b93b294` (2026-10-06).
+**Shell, az, pac**
+- Never `az account set`; pass `--subscription`. To target another subscription without touching the shared context, use a private `AZURE_CONFIG_DIR` copy and delete it afterwards (2026-10-04).
+- Never run destructive az commands as a "clean slate": `az account clear` wiped the credential cache (2026-08-23).
+- pac: never run a command with flags to "check its usage". On 2026-08-23 that executed `pac admin create-service-principal`. Use a no-argument call or Microsoft's docs; az `--help` is safe. Traps: `pac admin create` silently appends a digit to a taken domain, and `create-environment` is not the command.
+- Windows `az.cmd` breaks on `)` in an argument (e.g. `RetrieveCurrentOrganization(...)`). Use `az account get-access-token` + `Invoke-RestMethod` (2026-10-07).
+- Git Bash rewrites a leading `/subscriptions/...` argument; `export MSYS_NO_PATHCONV=1` first (2026-10-06).
+- `az ad app permission admin-consent` fails ("Consent validation failed"). Consent Graph app roles with `POST /servicePrincipals/{graph}/appRoleAssignedTo` (2026-10-02).
 - Granting an MI on an SPE container-type registration: Graph v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}` via `Connect-MgGraph -Scopes FileStorageContainerTypeReg.Manage.All`. `Set-SPOApplicationPermission` fails for an MI (2026-10-06).
-- `az ad app permission admin-consent` fails ("Consent validation failed"); consent Graph app roles with `POST /servicePrincipals/{graph}/appRoleAssignedTo` (2026-10-02).
-- `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt — run it in-process with `-Confirm:$false` (`-SkipBuild` to reuse a build) (2026-10-04).
-- To target another subscription without touching the shared az context, use a private `AZURE_CONFIG_DIR` copy and delete it afterwards (2026-10-04).
-- Never run destructive az commands as a "clean slate" (`az account clear` wiped the credential cache, 2026-08-23).
-- **pac: never run a pac command with flags to "check its usage"** — on 2026-08-23 that EXECUTED `pac admin create-service-principal` (created an Entra app, exposed a secret). Use a no-argument invocation or Microsoft's docs. az: `--help` is safe. Known traps: `pac admin create` silently appends a digit to a taken domain; `create-environment` is not the command (2026-10-06).
-- A prereq recipe's tokens must be resolvable at the step that runs its scope — `validate.ps1` checks documentation only (2026-10-06).
-- Check Microsoft's per-feature region table before defaulting a regional AI resource to the stamp location ("service available" ≠ "every feature available"; Content Safety defaults to westus) (2026-10-06).
+- `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt. Run it in-process with `-Confirm:$false`; `-SkipBuild` reuses a build (2026-10-04).
+
+**Code and tests**
+- The .NET configuration binder appends to an initialised list. Apply a list default after binding (e.g. `EffectiveGuestSecurityRoleNames`) (2026-10-07).
+- To separate a timeout from caller cancellation, catch with `ex is not OperationCanceledException || !ct.IsCancellationRequested` (2026-10-07).
+- A process-wide `Meter` leaks between tests running in parallel. Select your own measurement by a tag unique to the fixture (2026-10-07).
+- `string.Create(IFormatProvider, …)` rejects `$"" + $""`; format with `ToString("F2", CultureInfo.InvariantCulture)` (2026-10-06).
 - A Bicep `@description('…')` string must not contain an apostrophe (2026-10-06).
-- Pester for `tests/scripts/*.Tests.ps1` needs `Import-Module Pester -RequiredVersion 3.4.0` (6.x rejects `-Script` / `Should Be`) (2026-10-06).
-- Edit scripts: write them with the Write tool (bash heredocs fail on quoting). In Python use `'''` when the text holds `"` before `"""` or C# raw strings, and restrict line-prefix replacements to the intended line (2026-10-06).
-- Parallel sub-agents share the git index: `git commit --only <paths>`, never `git add -A` / `git add .` (2026-08-19). Dispatch prompts must say "commit AND push on success" (five agents stalled without it); index-race recovery: `git reset --soft` + `git stash push --keep-index -m <tag>` (tagged, never bare).
-- **Never `az account set`** — pass `--subscription` on every az command (the az context is shared with other sessions).
-- Git Bash rewrites a leading `/subscriptions/...` argument into a Windows path → `export MSYS_NO_PATHCONV=1` before `az ... --ids /subscriptions/...` (2026-10-06).
-- Do NOT resume with the gitignored `runs/trial1-intake.json` — it is pre-D-12 (Model1Shared / shared-trial, no subscriptionId / containerTypeId / dataverseEnvUrl). T186's target customer is not yet defined (2026-10-06).
-- `scripts/check-task-status-drift.ps1` reports false "unpaired" entries for this project: its parser expects `| <marker> <id> |`, but TASK-INDEX uses `| <id> | <marker> |`. Known; not remediated (2026-09-29).
-- Azure OpenAI pin refresh due before ~2027-01-14 (T247 one-source set; `PinnedModelCatalog`) (2026-10-06).
+- Pester for `tests/scripts/*.Tests.ps1`: `Import-Module Pester -RequiredVersion 3.4.0`. 6.x rejects `-Script` / `Should Be`, so `Auth-V4-Operator-Script-Gates.Tests.ps1` fails 27/27 under 6.2; it is not in CI (2026-10-06).
 
----
+**Git and editing**
+- Write edit scripts with the Write tool; bash heredocs fail on quoting. In Python use `'''` when the text holds `"` before `"""` or C# raw strings, and restrict line-prefix replacements to the intended line (2026-10-06).
+- Parallel sub-agents share the git index (2026-08-19):
+  - commit with `git commit --only <paths>`, never `git add -A` / `git add .`;
+  - dispatch prompts must say "commit AND push on success";
+  - index-race recovery: `git reset --soft`, then a tagged `git stash push --keep-index -m <tag>`.
+- Never bare `git stash`, never stage `.husky/_/*`, never `--no-verify`. A fresh worktree needs a root `npm install` before the pre-commit hook works.
+- The pre-commit hook skips lint-staged on a merge commit. After resolving conflicts by hand, run `dotnet format <csproj> --include <files>` on those files. Its LF→CRLF "WHITESPACE/ENDOFLINE" reports are line endings only; check with `git diff --ignore-cr-at-eol` (2026-10-07).
 
-*Load this file first when operating in this project directory. Individual task POMLs augment with per-task knowledge under `<knowledge>`.*
+## 7. Key documents
+
+- `spec.md` · `design.md` (§4D tenant isolation, §17 placement + tensions) · `plan.md` · `notes/decisions.md` · `notes/model1-dedicated-remediation-plan.md` · `INCOMING-D12-D13-REMEDIATION.md` (reference) · `COMPONENT-INVENTORY.md`
+- Rules: `.claude/constraints/provisioning.md` · `.claude/patterns/provisioning/INDEX.md` · `.claude/skills/provision-environment/SKILL.md`
+- Architecture: `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` · `docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md`
+- ADRs: 004, 007, 009, 010, 013, 020, 027, 028, 032, 036, 038, 039, 044, 052 (`.claude/adr/`)
+- Related projects: unified-access-control-r2 · sdap-SPE-admin-app-r2 · spaarke-auth-v4-dataverse-MI (archived) · code-quality-and-assurance-r3 (r3 hand-off: `notes/r3-handoff.md`) · superseded `spaarke-environment-factory-r1`
