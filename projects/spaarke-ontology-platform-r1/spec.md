@@ -167,6 +167,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Why*: the key is a unique alternate key and the built writer keeps a Resolved row Resolved, so without an
   episode a dismissed, acted, superseded or cleared Signal can never come back — and Path B's subject is the
   matter, so one dismissal would mute it on that matter for good (`notes/v4-prototype-vs-solution.md` #13, #40).
+  *Amended 2026-10-07, D-34/D-35*: the key stays **per subject**; nothing in it is matter-specific. "Not suppressed"
+  in the re-raise rule is evaluated per **(policy, core record)** (FR-17 as amended); for a D-35 item with no core
+  record it is per (policy, subject).
 - **FR-04**: Re-verify privileges after the FR-01/FR-02 column adds.
   *Acceptance*: `prvWritesprk_DecisionRecord` and `prvDeletesprk_DecisionRecord` remain **absent** from all
   three Spaarke Ontology roles, and the union check still shows only platform/admin roles holding them
@@ -259,6 +262,11 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   → today's path (owner = writer, owning BU = the matter's BU). A **To Do with no matter** (D-31) takes the **To Do
   owner's business unit** — a second, non-matter ownership path. A resolver **refusal** skips, logs and counts the
   subject.
+  *Amended 2026-10-07, D-34/D-35*: read "grouping matter" throughout as the item's **core record** — a **matter or a project** — derived by uac-r2's `CoreAncestorResolver` (FR-26 stamps; both are CORE; a matter does not inherit from a project). The Signal carries it in
+  `sprk_matter` **or** the new `sprk_project` (task 007); the resolver's parents are the core record and the subject;
+  the non-secure owning BU is the **core record's** BU. **D-35 replaces D-31's ownership wording**: an item with **no
+  matter and no project** gets a Signal **owned by the To Do's owner and visible to that owner only** (shown in their
+  Do lane under a **"Not filed"** group); both core-record columns are null for this case only.
 - **FR-14a** *(added 2026-10-07, D-15; **amended 2026-10-07, D-33 — the Restricted/Limited skip is withdrawn**)*:
   ~~The evaluator **skips Restricted and Limited matters**.~~ **Signals and Decision Records on Secure matters are
   secure children** (D-33); Restricted and Limited matters get Signals normally.
@@ -271,6 +279,12 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   Record would have no lineage) — skipped, logged and counted. The load the nightly pass adds to the 2-minute secure
   sync is measured. *Why*: Restricted/Limited exclude **external contacts** only (ADR-003); the staff wall is the
   **Secure** flag (`sprk_issecure`), which the D-15 skip missed (`notes/secure-signals-scoping.md` §1).
+  *Amended 2026-10-07, D-34*: "Secure matter" reads **Secure core record** — a Secure **project** (`sprk_issecure` is
+  on all three secure-root types: project, matter, work assignment; spaarkedev1 holds 2 Secure projects, 0 Secure
+  matters, read-only 2026-10-07) protects its Signals and Decision Records the same way, through a `sprk_project`
+  lineage entry on both tables. D-34 gives a project-filed To Do a core record, which removes the premise of the narrow
+  skip above (its Decision Record now has a lineage lookup); whether the skip is therefore retired is **not decided**
+  (§11.1 O-24) and it stays until the owner says otherwise.
   *Original D-15 text, superseded:*
   *Acceptance*: no `sprk_signal` row is written for a subject whose grouping matter's Access Permission is
   Restricted or Limited — the subject is skipped, logged and counted (never an error and never a silent drop);
@@ -313,6 +327,10 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   fatigue case criterion 4 exists to prevent.
   *Why the expiry*: a permanent mute is indistinguishable from a broken rule, and the condition may still be
   true and by then more serious.
+  *Amended 2026-10-07, D-34*: the grain is **(policy, core record)** — matter **or project** (D-11 as amended by
+  D-34): three dismissals for one policy on one core record suppress that pair. A D-35 item (no core record) counts per
+  (policy, subject), since it has no shared record to group under (**not decided** beyond D-35's owner-only rule:
+  §11.1 O-25).
 - **FR-17a** *(added 2026-10-07, D-13)*: **Quiet window.** After a Decide-lane Signal is dismissed, the same
   subject is **not re-raised** under that policy until the policy's quiet window has passed.
   *Acceptance*: the window is a knob **in the rule body** (decision 14, knobs on the row; A-1), defaulting to
@@ -339,6 +357,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   the BFF closes Signals, **Spaarke Console User loses `prvWritesprk_Signal`**, so no client path can close a
   Signal without a record — the "no null `sprk_decisionrecord`" acceptance above becomes privilege-enforced rather
   than a convention (`notes/v4-prototype-vs-solution.md` #16).
+  *Amended 2026-10-07, D-34/D-35*: the record's **subject is the item's core record** — `sprk_matter` **or** the new
+  `sprk_decisionrecord.sprk_project` (task 007), the same record its Signal groups under; for a D-35 item both are null.
 - **FR-19**: Type each record with **`sprk_recordclass`** — `Judgement` · `Routine` · `Dismissal`.
   *Acceptance*: the Report Card and the action-rate metric **filter on read**; a bare completion or reschedule
   of one's own assigned work is `Routine`; any Do resolution that sends mail, creates a follow-on or closes a
@@ -372,7 +392,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   backwards.
 - **FR-23**: Write the record from `RuleGatedAssessedConsumer`, which **already holds the decision object on
   both the authorize and deny paths** — one line before the branch. **The gate itself is not touched.**
-  *Acceptance*: every authorize **and** every deny writes a record; the deny path is queryable per matter.
+  *Acceptance*: every authorize **and** every deny writes a record; the deny path is queryable per matter. *(Amended
+  2026-10-07, D-34: per core record — the communication's matter or project from `CoreAncestorResolver`.)*
   *Why*: `CommunicationRuleDecision` already carries the full decision and is currently written to `ILogger`
   and lost.
 
@@ -389,6 +410,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Amended 2026-10-07, D-33*: the read route and Do-lane scoping stand. On a Secure matter the caller's read of the
   matter comes through its share, and the Signal itself reaches them through the mirrored share, so the two checks
   agree. A **matterless To Do** Signal (D-31) has no matter to check: what the route checks instead is open (§11.1 O-21).
+  *Amended 2026-10-07, D-34/D-35*: the route checks the caller can read each row's **core record** (matter or project);
+  a D-35 row (no core record) is returned **only to the To Do's owner**, in their Do lane under **"Not filed"**. The
+  grid configuration selects both core-record columns and orders a core record's items together.
 - **FR-25**: Build **one** row component rendering **every** signal shape, with data-driven variants.
   *Acceptance*: the three signal shapes (threshold, cross-source, SLA) and the Do-lane items all render
   through the same component; **a second row component is a design failure, not a feature.**
@@ -455,7 +479,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   collector's entities, columns and status values are the **reference for the rule bodies**; the collector itself
   is **not** made to read policy rows (that would be a second evaluator). Event due date is **`sprk_duedate`**
   (D-27, FR-61); "today" for a Date Only comparison is judged **per item** (D-25, FR-47). The Do lane shows each
-  reader only their own work (D-15, FR-54). What a task filed under a **project** (no matter) does — skip, or
+  reader only their own work (D-15, FR-54). *(Amended 2026-10-07, D-34: a task filed under a project groups under the
+  project; the following sentence is answered.)* What a task filed under a **project** (no matter) does — skip, or
   group under the project's matter — is decided and flagged in the grammar/writer task (D-16).
 - **FR-31**: Know items become **narrative + Context pane**, not rows.
   *Acceptance*: new/updated matters, projects, documents and monitored-record activity do not appear as Work
@@ -577,6 +602,10 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Amended 2026-10-07 (D-31, D-33)*: **except a To Do**: the overdue-To-Do rule covers **all** To Dos, and a To Do with
   no matter gets a Signal with no `sprk_matter`, owned by the To Do owner's BU (FR-14 as amended) — unless it is filed
   under a **Secure** project, the one narrow skip (FR-14a as amended).
+  *Amended 2026-10-07, D-34/D-35*: the grouping record is the subject's **core record** from `CoreAncestorResolver`
+  (matter or project), not only `sprk_regardingmatter`: a task or To Do filed under a **project** groups under that
+  project (this answers D-16's "task filed under a project"). Only an item with **no matter and no project** is
+  matterless, and D-35 makes its Signal owner-only.
   *Why*: only Path B can be written or evaluated today; the Do lane, the overdue rules and the To Do subject are
   hard refusals in the validator, the compiler and the writer (#12). D-16 chose the smallest extension that keeps
   **one** evaluator.
@@ -623,7 +652,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Acceptance*: nothing executes before *Record decision*; on any failure **no record is written** and the
   response tells the user **which writes landed**; the route is **idempotent per review** (a retry of the same
   review neither duplicates a write nor writes a second record); a decision may close several **Decide** Signals on
-  the same matter, only those the user ticked (*Also resolve*), and a Do item never resolves another; the route is
+  the same matter, only those the user ticked (*Also resolve*), and a Do item never resolves another (*amended
+  2026-10-07, D-34*: "same matter" reads "same core record"); the route is
   classified in the #1312 route-authorization census and checks, **as the caller**, that they can write each
   Signal's subject and append to the matter; a caller who cannot be resolved gets #1312's single **403** (D-29).
 - **FR-52** *(added 2026-10-07; D-18, D-19)*: **Executors** the commit route calls. *Revise budget*: the BFF
@@ -645,7 +675,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
 
 #### Group M — Reading Signals and the decision wizard (D-15, D-26)
 
-- **FR-54** *(added 2026-10-07, D-15; amended 2026-10-07, D-33 — stands unchanged in purpose; see FR-24's D-33 note)*: **The BFF Signal read route.** The worklist (and anything else in the
+- **FR-54** *(added 2026-10-07, D-15; amended 2026-10-07, D-33; amended 2026-10-07, D-34/D-35 — read access on the
+  core record, owner-only for rows with none; see FR-24)*: **The BFF Signal read route.** The worklist (and anything else in the
   Console) reads `sprk_signal` only through this route.
   *Acceptance*: the route runs the worklist configuration's FetchXML (FR-24), then removes every row whose grouping
   matter the **caller** cannot read; in the Do lane it returns **only the caller's own work**; it passes the #1312
@@ -784,7 +815,7 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
 - ✅ MUST express every rule body as **one Dataverse filter** (CM-3) with **no cross-clause variable passing**
 - ✅ MUST keep the rule-type set **closed**; adding one is a code change with review
 - ✅ MUST write the Decision Record on **both** the authorize and the deny path
-- ✅ MUST set the Signal owner from its grouping matter at creation (FR-14)
+- ✅ MUST set the Signal owner from its grouping core record (matter or project) at creation (FR-14; *amended 2026-10-07, D-34*)
 - ✅ MUST have deterministic **membership and rank** — the model never selects the queue or the order
 - ❌ MUST NOT read `sprk_budget.modifiedon` as evidence of a revision (FR-07)
 - ❌ MUST NOT let a predicate be evaluated by the model. *A predicate evaluated by a model makes the Decision
@@ -908,7 +939,7 @@ proposed from a single case; (C) comply — keep the guard advisory in legacy SD
 | 1 | A Policy row's predicate can be changed and the change takes effect **with no deployment** | Edit `sprk_rulebody`, re-run the evaluator, observe new membership |
 | 2 | The cross-source rule fires on a matter with **both** an over-budget snapshot and a scope/fee-classified communication, and does **not** fire when either is absent | The §8.1 exit triple **plus two negative controls** (see Assumptions A-3) |
 | 3 | Every authorize **and** every deny writes a Decision Record; the deny path is queryable per matter | FetchXML per matter over both outcomes |
-| 4 | A Signal dismissed three times on the same matter stops being raised | Three dismissals → `sprk_suppresseduntil` set; per D-11 grain and expiry |
+| 4 | A Signal dismissed three times on the same matter stops being raised *(amended 2026-10-07, D-34: same core record — matter or project)* | Three dismissals → `sprk_suppresseduntil` set; per D-11 grain (as amended by D-34) and expiry |
 | 5 | `sprk_confidencethreshold` is set from the observed confirmed-vs-dismissed distribution, not by guess | Query the Decision Records and show the derivation |
 | 6 | A second producer (`sprk_memo`) writes the **same** `sprk_signal` shape, with no consumer change | Diff the consumer; it must be untouched |
 | 7 | **Membership and column/action configuration** come from a `sprk_gridconfiguration` row with no code change; **one** row component renders every shape | Config edit + component count = 1 |
@@ -959,7 +990,7 @@ control. Such a task (tagged **[uac]** in `tasks/TASK-INDEX.md`; today 008, 024,
 040, 042, 043, 044, 045, 046, 049, 079, 101, 104) MUST: (1) before starting, fetch `origin/master`, re-read the uac-r2
 implementation it depends on (`SecureChildLineage.cs`, `config/secure-record-owner-role.json`, `RecordOwnershipResolver`
 (I-6), `RecordRouteAccessAuthorizationFilter`, `CallerRecordAccessProbe`, `RouteAuthorizationGuardTests.Ledger.cs`,
-ADR-034 and its amendments, `ExternalCallerContext` (ADR-003)) and name the files in its completion record; (2) check
+ADR-034 and its amendments, `ExternalCallerContext` (ADR-003), `CoreAncestorResolver` (FR-26 stamps, D-34)) and name the files in its completion record; (2) check
 uac-r2's open PRs and active work and run `/conflict-check`; (3) reuse uac-r2's mechanisms and never build a parallel
 one, routing any change to uac-r2-owned files through uac-r2's review with the PR linked; (4) stop and escalate if
 uac-r2's code has changed in a way that invalidates the task's plan.
@@ -1071,7 +1102,11 @@ where noted.
 | O-18 | Does the Inquiry still stamp `sprk_responseduedate` now the SLA is deferred? | D-20 | 070 |
 | ~~O-19~~ | ✅ **Decided D-32**: yes, still-true subjects re-raise as new episodes | D-13 | 031, 033 |
 | ~~O-20~~ | ✅ **Dissolved by D-33**: Restricted/Limited restrict only external contacts; gate records on Secure matters are secure children like any Decision Record | D-15 | 042 |
-| O-21 | A **matterless To Do** Signal / Decision Record (D-31): is `sprk_matter` Required at the platform level on either table (relax it?), what does the read route check instead of the matter, and where does the worklist group it (no MatterCard)? | D-31 | 007, 038, 059 |
+| ~~O-21~~ | ✅ **Decided D-35**: no matter and no project → owner-only Signal in the owner's Do lane under "Not filed"; the core-record columns are optional for this case only | D-31 | 007, 037, 038, 059 |
+| O-22 | `CoreAncestorResolver` also returns **work assignment** and **service request** as CORE records; D-34 names only matter or project. What does a Signal group under when the core record is a work assignment? This hits the **work-assignment response-overdue rule directly** (its subject IS a work assignment, so its own `sprk_regardingmatter` is not an ancestor) and any To Do or event filed under a work assignment | D-34 | 007, 037, 059 |
+| O-23 | The resolver can return **more than one** core stamp for a child (e.g. both a matter and a project set): which one is THE core record? | D-34 | 037 |
+| O-24 | Does D-34 retire D-33's narrow skip (a project-filed To Do now has a core record and a lineage lookup)? Kept until answered | D-33, D-34 | 031, 037 |
+| O-25 | Suppression and the Decision Record subject for a D-35 item (no core record): per (policy, subject)? | D-35 | 034, 040 |
 
 ---
 

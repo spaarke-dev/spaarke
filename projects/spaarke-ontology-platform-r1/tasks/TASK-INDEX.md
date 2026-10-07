@@ -1,6 +1,6 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
-> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-33
+> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-35
 > (spec §9) · **92 tasks** across 14 phases (31 ✅ · 1 🔄 (098) · 59 🔲 · 1 superseded)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
@@ -8,8 +8,12 @@
 > **Second pass (D-30..D-33)**: new task **039** (secure-child registration + writer ownership); 007, 008, 031, 032, 033,
 > 037, 038, 040, 042, 059, 061 amended; **079 is now the uac-r2 coordination step**, not a deferred issue. D-33 **replaces
 > D-15's Restricted/Limited skip**: Signals and Decision Records on **Secure** matters become secure children.
+> **Third pass (D-34, D-35)**: Signals and Decision Records group under the item's **core record — matter OR project** (uac-r2's
+> `CoreAncestorResolver`; 007 adds a typed `sprk_project` lookup on both tables); suppression is per (policy, core record); an item
+> with no matter and no project is **owner-only** under "Not filed". Amended: 007, 031, 033, 034, 037, 038, 039, 040, 042, 043, 050,
+> 051, 058, 059, 061, 064. New open points O-22..O-25 (spec §11.1); O-21 decided.
 > Undecided points are carried as `<escalation><trigger>` in the named task and listed in spec §11.1 (open: O-2..O-4,
-> O-6..O-16, O-18, O-21; decided: O-1, O-5, O-17, O-19; dissolved: O-20).
+> O-6..O-16, O-18, O-22..O-25; decided: O-1, O-5, O-17, O-19, O-21; dissolved: O-20).
 > **uac-r2 coordination (owner, 2026-10-07)**: tasks marked **[uac]** below must re-read uac-r2's current code on
 > `origin/master`, check its open PRs and active work, reuse its mechanisms, route edits to its files through its review,
 > and stop if its code invalidates the plan (spec §8.3).

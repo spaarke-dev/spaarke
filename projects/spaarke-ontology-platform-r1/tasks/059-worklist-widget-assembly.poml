@@ -38,6 +38,7 @@
     <constraint source="project">Scope: the narrative slot shows the existing Briefing narrative (task 062 makes it summarise Do volume) and is hidden while any filter is on; it may not name an item that is not on the list (#38).</constraint>
     <constraint source="project">Scope: the widget lands in a shared library and is registered through WorkspaceWidgetRegistry; nothing but registration in src/solutions/SpaarkeAi (FR-28).</constraint>
     <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct; keyboard reachable.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): both lanes render one card per CORE record (matter or project); the reader's own items with no core record appear in their Do lane under a "Not filed" group (last in the lane, included in the Do counts). Filters and the "+1 other open item" line work per core record.</constraint>
   </constraints>
 
   <knowledge>
@@ -66,7 +67,7 @@
 
   <escalation>
     <trigger>If a behaviour in HANDOFF section 1.2 needs data the 038 route does not return, STOP and extend the route through its own task rather than reading Dataverse from the widget.</trigger>
-    <trigger>Where a matterless To Do item (D-31) appears in the Do lane, since there is no matter card for it, is NOT decided (spec section 11.1 O-21). Ask the owner before choosing a grouping.</trigger>
+    <trigger>CoreAncestorResolver also treats sprk_workassignment and sprk_servicerequest as CORE; D-34 names only matter or project. If an item's core record is a work assignment or service request (spec section 11.1 O-22), STOP and ask the owner; do not fall back to a matter or to Not filed on your own.</trigger>
   </escalation>
 
   <justification>
@@ -113,6 +114,7 @@
     <criterion testable="true">Given the Closed today, Suppressed and Closed earlier disclosures, when opened, then each lists its set (Suppressed with the until-date) and opens the wizard read-only.</criterion>
     <criterion testable="true">Negative: the widget performs no direct sprk_signal read and never re-sorts the route's order.</criterion>
     <criterion testable="true">Tests cover the behaviours above; anything beyond needs a one-line justification in task notes. The packages build.</criterion>
+    <criterion testable="true">Given project-grouped items and Not filed items, when the worklist renders, then each project has its own card and the reader's Not filed items appear only in their Do lane under Not filed (D-34, D-35).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-24 (amended), FR-29, FR-34, FR-54; D-15, D-26. Reconciliation W-2, W-9..W-12.</notes>

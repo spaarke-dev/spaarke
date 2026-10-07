@@ -36,7 +36,7 @@
     <constraint source="owner">Scope (D-27): event rules compare sprk_duedate, never sprk_finalduedate.</constraint>
     <constraint source="project">Scope: each policy declares sprk_lane Do, sprk_shortname, sprk_worktype (Finish or reschedule for overdue task; Coming due for due within 3 days; Chase a response for the work assignment) and sprk_enabled No until the owner reviews; each version's sprk_decisionplan uses only task 036's Do-lane codes (overdue task: mark-complete, reschedule, reassign; due soon: mark-complete, reschedule; work assignment: send-reminder, extend-response-date).</constraint>
     <constraint source="project">Scope: the overdue threshold is a knob in the body (criterion 1); its INITIAL value is not decided (v4's 1 day vs the collector's 5; reconciliation C-6, spec section 11.1 O-4): see escalation.</constraint>
-    <constraint source="owner">AMENDED 2026-10-07 (D-31): author a FOURTH policy, overdue To Do, covering ALL To Dos (sprk_todo, open, sprk_duedate before today per item), lane Do, work type Finish or reschedule, plan mark-complete, reschedule, reassign. A To Do filed under a matter groups under that matter; a To Do with no matter gets a Signal owned by the To Do owner's business unit (task 037); a To Do with no matter under a Secure project is D-33's narrow skip. The To Do rule is per-user by construction (FR-30 note).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-31): author a FOURTH policy, overdue To Do, covering ALL To Dos (sprk_todo, open, sprk_duedate before today per item), lane Do, work type Finish or reschedule, plan mark-complete, reschedule, reassign. A To Do or task groups under its CORE record, matter OR project (D-34; a project-filed item is no longer "no matter", which also answers D-16's open project question); a To Do with no matter and no project gets a Signal owned by and visible only to the To Do's owner, under "Not filed" (D-35, task 037); a To Do with no matter under a Secure project is D-33's narrow skip until the owner rules on O-24. The To Do rule is per-user by construction (FR-30 note).</constraint>
     <constraint source="project">Scope: Do-lane policies are evaluated NIGHTLY ONLY (cadence from sprk_lane).</constraint>
     <constraint source="project">Scope: these are NOT differentiated (every matter-management system shows overdue tasks). They join for completeness and adoption, never for the pitch. That is why the lane split exists.</constraint>
     <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: each message template is literal or uses only TemplateEligibleFields, and passes ValidateForSave.</constraint>
@@ -71,6 +71,7 @@
   <escalation>
     <trigger>The initial overdue threshold (1 day per v4, or 5 days per the collector for a like-for-like cutover) is NOT decided (C-6, O-4). STOP and ask the owner before authoring the overdue-task body.</trigger>
     <trigger>If a body cannot reproduce the collector's predicate as a single subject-only filter, STOP and escalate rather than modifying the collector or adding a join.</trigger>
+    <trigger>The work-assignment policy's subject IS a work assignment, which CoreAncestorResolver treats as its own CORE record; D-34 names only matter or project (spec section 11.1 O-22). STOP and ask the owner before authoring or enabling that policy.</trigger>
   </escalation>
 
   <justification>
@@ -96,6 +97,7 @@
     <criterion testable="true">Negative: DailyBriefingCollector is unchanged in the diff; no body reads sprk_finalduedate.</criterion>
     <criterion testable="true">Negative: Do-lane policies are not evaluated by the event triggers.</criterion>
     <criterion testable="true">Each version has a decision plan using only task 036's Do-lane codes, and each policy has a work type.</criterion>
+    <criterion testable="true">Given a task or To Do filed under a project, when evaluated, then its Signal groups under the project; given a To Do with no matter and no project, then its Signal is owner-only (D-34, D-35).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-30 (amended: D-16, D-25, D-27), FR-45 (amended, D-31), FR-47, FR-49; D-31 (overdue To Do for all To Dos, decided), D-33; reconciliation W-8, W-15, W-17, C-6, C-7 and B.2 row 061. Amended 2026-10-07: the original framing (move the predicates into the collector) is replaced by D-16's single evaluator.</notes>

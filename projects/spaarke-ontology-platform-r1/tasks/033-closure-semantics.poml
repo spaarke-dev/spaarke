@@ -39,6 +39,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-22 slice a; FR-16 amended; reconciliation M-5): split Off from Retire. Off (sprk_enabled = No): open Signals close as PolicyRetired at the next pass. Retire (statuscode Retired + sprk_retiredreason, task 007): expose ClosePolicyRetiredNow(policyId) so task 100 closes them immediately. Neither writes a Decision Record.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (#15): no closure path touches a Signal that is already Resolved.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-32): Off is reversible. A policy switched On again after Off has its still-true subjects re-raised as new episodes by task 031; this task's Off closure must therefore leave each Signal's policy, subject and episode intact (no data cleared) so 031 can find the PolicyRetired episode. Retire (statuscode Retired) is not reversed by switching On.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34): wherever a closure or a supersede re-raise touches suppression, the grain is (policy, core record) (matter or project), not (policy, matter); an auto-closure still never counts.</constraint>
   </constraints>
 
   <knowledge>
@@ -94,6 +95,7 @@
     <criterion testable="true">Negative: a Signal already Resolved (e.g. Acted) is not changed by any closure path.</criterion>
     <criterion testable="true">Given a policy switched Off (Signals closed PolicyRetired) and then On again, when the next pass runs, then subjects that still hold are raised as new episodes and the PolicyRetired Signals are unchanged (D-32, with task 031).</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Negative: an auto-closure of a project-grouped Signal does not increment the (policy, project) dismissal counter.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-16 (amended 2026-10-07: D-13, D-14, Retire), FR-03 (episodes). design.md section 8.3 closing note covers the aged-out mapping. Reconciliation B.2 row 033; #15, #40. D-32 (Off then On re-raise).</notes>

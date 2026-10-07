@@ -38,6 +38,7 @@
     <constraint source="project">AMENDED 2026-10-07 (reconciliation W-12): add three secondary queries in the same row: closed today (Resolved with sprk_resolvedon today), suppressed (sprk_suppresseduntil in the future, with the until-date), closed earlier (Resolved before today, bounded to a window stated in the row).</constraint>
     <constraint source="project">AMENDED 2026-10-07: the order clause uses only columns that exist and are decided: sprk_firstdetected (oldest first) then matter number. Severity and sprk_highpriority are NOT added (spec section 11.1 O-1, O-2); sprk_rankscore is not written by anything yet.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (D-23): select the display columns the row needs, including sprk_signal.sprk_duedate (task 007) and the policy short name via a link to sprk_policy.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the queries select both core-record columns (sprk_matter, sprk_project) and order a core record's items together; rows with neither (D-35) are included in the Do-lane query and left for task 038 to return only to their owner under "Not filed". "Grouped by matter" reads "grouped by core record".</constraint>
   </constraints>
 
   <knowledge>
@@ -113,6 +114,7 @@
     <criterion testable="true">Rows are grouped by matter.</criterion>
     <criterion testable="true">Given the row, when read, then it holds one membership query per lane and the three secondary queries, and no action definitions.</criterion>
     <criterion testable="true">Negative: the order clause references neither sprk_rankscore nor a severity or high-priority column.</criterion>
+    <criterion testable="true">Given the Do-lane query, when run, then project-grouped rows and rows with no core record are both included, and each core record's items are contiguous.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-24 (amended, D-15) and success criterion 7 (the membership half). Amended 2026-10-07 per reconciliation B.2 row 050: membership + order only; the ui-tests below run through the worklist widget (task 059) once 038 exists, or as a direct server-side query before then.</notes>

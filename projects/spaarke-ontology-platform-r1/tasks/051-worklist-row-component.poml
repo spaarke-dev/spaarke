@@ -42,6 +42,7 @@
     <constraint source="ADR-021">Scope: Fluent v9 semantic tokens only; light and dark both correct; no hardcoded colors; keyboard reachable (Enter/Space opens).</constraint>
     <constraint source="project">Scope: the card is a CARD per ASSISTANT-UI-ELEMENT-CRITERIA (a persistent act-on item), not a chip or a bubble.</constraint>
     <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): a MatterCard renders one CORE record: a matter OR a project (the card shows which, by name and number). A Do-lane "Not filed" card holds the reader's items with no core record (D-35). Still one row component; the name MatterCard is kept.</constraint>
   </constraints>
 
   <knowledge>
@@ -129,6 +130,7 @@
     <criterion testable="true">Negative: the row resolves to an object; no row renders only a text string.</criterion>
     <criterion testable="true">Negative: the component source contains no hex, rgb or named color literal.</criterion>
     <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. The package builds.</criterion>
+    <criterion testable="true">Given a project-grouped item and a Not filed item, when rendered, then the same component renders a project card and a Not filed card, with no second row component.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-25, FR-26 (requirements 1-2 here; 3-5 in the wizard, task 058), FR-28 (amended, D-24), FR-48; D-23, D-24; reconciliation W-3..W-6 and B.2 row 051. Amended 2026-10-07: was "WorkItemRow" with evidence block, disclosure and action area; those moved to the wizard. Can build against fixtures now; no longer depends on 050. The prototype is the DESIGN contract, not the implementation: do NOT port its source.</notes>

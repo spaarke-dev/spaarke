@@ -43,6 +43,7 @@
     <constraint source="project">Scope: Approve variance's step says the Decision Record is the approval and nothing else is written (D-19); Revise budget offers a budget picker when the matter has several (D-18). Confirm says "a new Decision Record", never a predicted number (#6), and does not claim the record counts in a Report Card (#37).</constraint>
     <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct; keyboard reachable; FollowOnGrid cards toggle with Space/Enter.</constraint>
     <constraint source="project">Scope: the component lives in @spaarke/ui-components (FR-28); only its mount point is in SpaarkeAi.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): "the matter" in What was found (other open items) and Also resolve reads the item's CORE record (matter or project); a Not filed item (D-35) shows no other items and no Also resolve.</constraint>
   </constraints>
 
   <knowledge>

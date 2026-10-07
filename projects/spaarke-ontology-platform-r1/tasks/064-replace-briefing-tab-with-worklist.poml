@@ -39,6 +39,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-15, D-26): the Workspace tab points at task 059's worklist widget, which reads Signals only through the BFF read route (each reader sees only their own Do-lane work and only matters they can read) and opens decisions in the in-app wizard. Verify both on dev as a non-admin reader before the swap.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-27): the old Briefing kept behind the flag is the task 065 version (due date = sprk_duedate), so reverting does not reintroduce the finalduedate disagreement.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (reconciliation B.6): use HANDOFF v4 section 1.4 (the full list) as the cutover check, recorded in notes/briefing-cutover.md, against real Dataverse.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the cutover check covers project cards and the reader's "Not filed" group as well as matter cards, verified with a non-admin reader who owns a Not filed To Do and one who does not.</constraint>
   </constraints>
 
   <knowledge>
@@ -116,6 +117,7 @@
     <criterion testable="true">The client builds and the cutover is documented.</criterion>
     <criterion testable="true">Given a non-admin reader on dev, when the worklist opens, then the Do lane shows only that reader's own work and no Signal on a matter they cannot read.</criterion>
     <criterion testable="true">Given the cutover notes, when read, then every HANDOFF section 1.4 rule has a pass or a recorded refinement.</criterion>
+    <criterion testable="true">Given a non-admin reader on dev, when the worklist opens, then project-grouped items appear under their project, and Not filed items appear only for their owner.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-35, FR-54, FR-55, FR-61. design.md BR-4, BR-5. Amended 2026-10-07 for D-15, D-26, D-27 and reconciliation B.6.</notes>
