@@ -1,14 +1,5 @@
 import React, { Suspense, lazy, useEffect, useRef, useState, useCallback } from 'react';
-import {
-  FluentProvider,
-  Spinner,
-  Button,
-  MessageBar,
-  MessageBarBody,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import { MailRegular } from '@fluentui/react-icons';
+import { FluentProvider, Spinner, MessageBar, MessageBarBody, makeStyles, tokens } from '@fluentui/react-components';
 import { authService } from '@shared/services';
 import type { IHostAdapter, IHostContext } from '@shared/adapters';
 import { useTheme } from './hooks/useTheme';
@@ -706,26 +697,20 @@ export const App: React.FC<AppProps> = ({
         onThemeChange={setPreference}
         showErrorDetails={showErrorDetails}
         onError={handleError}
+        // Send Email — Outlook only by capability (`canComposeEmail`, NFR-10), once there is a document and/or
+        // related record to link: opens Outlook's native compose window (task 036 / FR-15). Task 106 (owner UAT
+        // round 8): rendered in the toolbar after Find as "Send", no longer a full-width button in the body.
+        {...(canSendEmail
+          ? { onSendEmail: () => void handleSendEmail(), isSendingEmail: sendEmailStatus === 'sending' }
+          : {})}
       >
-        {/* Send Email — Outlook only by capability (`canComposeEmail`, NFR-10), visible on any tab once there is
-            a document and/or related record to link: opens Outlook's native compose window (task 036 / FR-15).
-            Task 096 removed task 086's Word row here — Word emails a document from its Email tab. */}
-        {canSendEmail && (
+        {/* Send Email's live region and error stay in the body; the button itself is in the toolbar (task 106). */}
+        {canSendEmail && sendEmailLiveRegion}
+        {canSendEmail && sendEmailError && (
           <div className={styles.sendEmailRow}>
-            {sendEmailLiveRegion}
-            <Button
-              appearance="secondary"
-              icon={sendEmailStatus === 'sending' ? <Spinner size="tiny" /> : <MailRegular />}
-              onClick={handleSendEmail}
-              disabled={sendEmailStatus === 'sending'}
-            >
-              Send Email
-            </Button>
-            {sendEmailError && (
-              <MessageBar intent="error">
-                <MessageBarBody>{sendEmailError}</MessageBarBody>
-              </MessageBar>
-            )}
+            <MessageBar intent="error">
+              <MessageBarBody>{sendEmailError}</MessageBarBody>
+            </MessageBar>
           </div>
         )}
 
