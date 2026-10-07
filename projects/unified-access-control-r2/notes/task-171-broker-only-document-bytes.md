@@ -360,17 +360,21 @@ record-keyed / record-less uploads are app-only since this task, so Graph's `cre
 `DocumentContainerRelocator.AttachFileAsync` still required `createdBy.user.id == caller` → `POST /api/v1/documents/{id}/file`
 403 `document_file_attach_refused` / NotTheUploader. Fix branch `fix/uac-r2-171-attach-app-upload`.
 
-**Design — the uploader binding comes from the SERVER** (`Services/Documents/UploadAttribution.cs`, over the existing
-`ITenantCache`/Redis, TTL 24 h, key-versioned; no table or column):
-- small PUT (record-keyed and `/me/files`): after Graph returns the created item, `item:{itemId}` → (caller oid, drive, time);
-- upload session: BEFORE the session opens, `path:{drive}:{path}` → (caller, drive, time); sessions now use conflict
-  behaviour `fail` (default; `rename` → 400) so the item's name cannot change; the attach matches the item's folder +
-  name and requires its `createdDateTime` ≥ the binding time (−5 min skew) — and never matches by path an item that
-  carries another user's ITEM binding;
+**Design — the uploader binding comes from the SERVER, tied to the ITEM** (`Services/Documents/UploadAttribution.cs`,
+over the existing tenant-scoped `ITenantCache`/Redis — key `spaarke:tenant:{tid}:spe-upload-attribution:{itemId}:v1`, TTL
+24 h; no system-level key, no table or column):
+- small PUT (record-keyed and `/me/files`): after Graph returns the created item, `{itemId}` → (caller oid, drive, time) in
+  the caller's `tid` partition; if the binding cannot be written the upload answers 503 `upload_attribution_unavailable`
+  and the just-uploaded item is deleted (best effort, logged when it fails) — no orphan nobody can attach;
 - `AttachFileAsync`: a PERSON-uploaded item keeps the existing rule (uploader == caller); a BFF-uploaded item
-  (`RecordContainerResolver.IsUploadedByTheBffIdentity`) needs a binding naming the caller (consumed on success); no
-  binding / another user's → the existing NotTheUploader 403; a cache READ fault → new `UploaderUnverifiable` 503 "try
-  again" (never allow); a binding WRITE fault fails the upload with 503 `upload_attribution_unavailable`.
+  (`RecordContainerResolver.IsUploadedByTheBffIdentity`) is admitted ONLY by an item binding naming the caller, in the
+  caller's tenant and the same drive — consumed after the pointer is written; no binding / another user's / another
+  drive / no tenant → the existing NotTheUploader 403; a cache READ fault → `UploaderUnverifiable` 503 "try again".
+- **Upload sessions (verifier F1, 2026-10-07): option (b).** `POST /api/obo/records/{e}/{id}/upload-session` is kept
+  (no client calls it; it is the only >250 MB path) but records NO binding, so a session-uploaded item CANNOT be attached
+  through `/file`. The earlier path/name binding was removed: recorded before the item existed, it could be matched by
+  another user's file at that path (a pre-planted or abandoned session), and it survived a session open Graph refused.
+  A future client needing large uploads must add a completion step that binds the created item id.
 - Other server paths comparing `createdBy.user.id`: the pointer check's interim ITEM rule and the relocation-source check
   (`ItemWasCreatedByTheRowsCreatorAsync`) — both already accept a BFF-uploaded item on a BFF-created row (every wizard
   row since task 147), so reads keep working; no change.

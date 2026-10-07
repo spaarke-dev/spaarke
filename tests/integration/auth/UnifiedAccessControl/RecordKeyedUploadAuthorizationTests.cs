@@ -544,6 +544,7 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.RestampQueue.Children.Clear();
         _fixture.Attribution.Recorded.Clear();
         _fixture.Attribution.RecordFaults = false;
+        _fixture.Deleted.Clear();
     }
 
     [Fact(DisplayName = "Attach fix: a record-keyed small upload records the created item as uploaded FOR THE CALLER")]
@@ -554,10 +555,10 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
         var recorded = _fixture.Attribution.Recorded.Should().ContainSingle().Subject;
-        recorded.Session.Should().BeFalse();
-        recorded.Target.Should().Be("item-155", "the item id Graph returned for the upload");
+        recorded.Item.Should().Be("item-155", "the item id Graph returned for the upload");
         recorded.Drive.Should().Be(RecordKeyedUploadRouteFixture.BusinessUnitContainer);
         recorded.Caller.Should().NotBeNullOrWhiteSpace("the binding names the signed-in caller");
+        recorded.Tenant.Should().NotBeNullOrWhiteSpace("the binding lives in the caller's tenant partition");
     }
 
     [Fact(DisplayName = "Attach fix: when the upload binding cannot be recorded the upload answers 503 — a file nobody can attach is not reported as uploaded")]
@@ -571,32 +572,20 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable, body);
         body.Should().Contain("upload_attribution_unavailable");
+        _fixture.Deleted.Should().ContainSingle().Which.Should().Be(
+            RecordKeyedUploadRouteFixture.BusinessUnitContainer + "/item-155",
+            "K2: an upload reported as failed must not leave an orphan file nobody can attach");
     }
 
-    [Fact(DisplayName = "Attach fix: an upload session records its exact target for the caller BEFORE it opens, with conflict behaviour fail")]
-    public async Task UploadSession_RecordsItsTarget_AndUsesFail()
+    [Fact(DisplayName = "Verifier F1: an upload SESSION records NO binding (a binding made before the item exists could be matched by another user's file)")]
+    public async Task UploadSession_RecordsNothing()
     {
         var response = await _fixture.Client().PostAsync(
             $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf", content: null);
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
-        var recorded = _fixture.Attribution.Recorded.Should().ContainSingle().Subject;
-        recorded.Session.Should().BeTrue();
-        recorded.Target.Should().Be("big.pdf");
-        _fixture.Conflicts.Should().ContainSingle().Which.Should().Be(ConflictBehavior.Fail,
-            "the session's item is attached by its exact name, so Graph may not rename it");
-    }
-
-    [Fact(DisplayName = "Attach fix: an upload session asking to RENAME is refused 400 and opens nothing")]
-    public async Task UploadSession_Rename_IsRefused()
-    {
-        var response = await _fixture.Client().PostAsync(
-            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf&conflictBehavior=rename",
-            content: null);
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest, await response.Content.ReadAsStringAsync());
-        _fixture.Uploads.Should().BeEmpty();
-        _fixture.Attribution.Recorded.Should().BeEmpty();
+        _fixture.Attribution.Recorded.Should().BeEmpty(
+            "a session-uploaded item can never be attached through /file — so a failed or abandoned session leaves nothing behind");
     }
 
     [Theory(DisplayName = "Task 171 (finding 1): an app-only upload asking to REPLACE is refused 409 upload_replace_not_supported before any Graph call")]
@@ -927,6 +916,9 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     /// <summary>Task 171 (finding 1): the conflict behaviour each upload reached Graph with.</summary>
     public ConcurrentQueue<ConflictBehavior> Conflicts { get; } = new();
 
+    /// <summary>K2: every item the routes deleted (the orphan cleanup after a failed binding).</summary>
+    public ConcurrentQueue<string> Deleted { get; } = new();
+
     /// <summary>Task 171 attach fix: what the upload routes recorded as "uploaded for whom".</summary>
     internal RecordingAttribution Attribution { get; } = new();
 
@@ -941,22 +933,15 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
         {
         }
 
-        public ConcurrentQueue<(string Caller, string Drive, string Target, bool Session)> Recorded { get; } = new();
+        public ConcurrentQueue<(string Tenant, string Caller, string Drive, string Item)> Recorded { get; } = new();
 
         public bool RecordFaults { get; set; }
 
-        public override Task RecordItemAsync(string caller, string drive, string item, CancellationToken ct = default)
+        public override Task RecordItemAsync(string tenantId, string caller, string drive, string item, CancellationToken ct = default)
         {
             if (RecordFaults) return Task.FromException(new TimeoutException("Redis unavailable"));
-            Recorded.Enqueue((caller, drive, item, false));
-            return base.RecordItemAsync(caller, drive, item, ct);
-        }
-
-        public override Task RecordSessionAsync(string caller, string drive, string path, CancellationToken ct = default)
-        {
-            if (RecordFaults) return Task.FromException(new TimeoutException("Redis unavailable"));
-            Recorded.Enqueue((caller, drive, path, true));
-            return base.RecordSessionAsync(caller, drive, path, ct);
+            Recorded.Enqueue((tenantId, caller, drive, item));
+            return base.RecordItemAsync(tenantId, caller, drive, item, ct);
         }
     }
 
@@ -989,7 +974,7 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
 
             // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
             services.RemoveAll<SpeFileStore>();
-            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts));
+            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts, Deleted));
 
             services.RemoveAll<Sprk.Bff.Api.Services.Documents.UploadAttribution>();
             services.AddSingleton<Sprk.Bff.Api.Services.Documents.UploadAttribution>(Attribution);
@@ -1223,8 +1208,10 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     {
         private readonly ConcurrentQueue<string> _uploads;
         private readonly ConcurrentQueue<ConflictBehavior> _conflicts;
+        private readonly ConcurrentQueue<string> _deleted;
 
-        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads, ConcurrentQueue<ConflictBehavior> conflicts)
+        public RecordingSpeFileStore(
+            IServiceProvider sp, ConcurrentQueue<string> uploads, ConcurrentQueue<ConflictBehavior> conflicts, ConcurrentQueue<string> deleted)
             : base(sp.GetRequiredService<ContainerOperations>(),
                    sp.GetRequiredService<DriveItemOperations>(),
                    sp.GetRequiredService<UploadSessionManager>(),
@@ -1232,6 +1219,13 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
         {
             _uploads = uploads;
             _conflicts = conflicts;
+            _deleted = deleted;
+        }
+
+        public override Task<bool> DeleteFileAsync(string driveId, string itemId, CancellationToken ct = default)
+        {
+            _deleted.Enqueue(driveId + "/" + itemId);
+            return Task.FromResult(true);
         }
 
         // Task 171: the record-keyed routes write APP-ONLY (the record filter decided; the container came from the

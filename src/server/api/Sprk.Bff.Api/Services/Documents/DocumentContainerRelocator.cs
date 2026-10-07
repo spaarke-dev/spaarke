@@ -423,7 +423,8 @@ public sealed class DocumentContainerRelocator
     /// </list>
     /// </remarks>
     public async Task<PointerAttachResult> AttachFileAsync(
-        Guid documentId, string? callerObjectId, string? driveId, string? itemId, CancellationToken ct = default)
+        Guid documentId, string? callerObjectId, string? driveId, string? itemId, CancellationToken ct = default,
+        string? callerTenantId = null)
     {
         if (documentId == Guid.Empty || string.IsNullOrWhiteSpace(driveId) || string.IsNullOrWhiteSpace(itemId)
             || driveId.Length > 512 || itemId.Length > 512)
@@ -493,7 +494,7 @@ public sealed class DocumentContainerRelocator
         }
 
         var facts = await _spe.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false);
-        string? attributionKey = null;
+        var consumeBinding = false;
         if (facts is not null && Guid.TryParse(facts.UserObjectId, out var uploader) && uploader != Guid.Empty)
         {
             // Uploaded BY A PERSON (Graph createdBy.user): it must be the caller.
@@ -507,7 +508,9 @@ public sealed class DocumentContainerRelocator
             // Uploaded APP-ONLY by the BFF (every record-keyed / record-less upload since task 171): Graph cannot say for
             // whom, so the binding the BFF recorded at upload time must name the caller. "Any BFF-uploaded item" would
             // admit everyone's files — that is exactly what this check exists to stop.
-            if (_uploadAttribution is null)
+            // The ONLY admission for a BFF-uploaded item is an ITEM binding naming the caller, in the caller's tenant
+            // (verifier F1, 2026-10-07: a path / name binding could be matched by another user's file at that path).
+            if (_uploadAttribution is null || string.IsNullOrWhiteSpace(callerTenantId))
             {
                 return NotTheUploader(documentId, drive, item, caller);
             }
@@ -515,7 +518,7 @@ public sealed class DocumentContainerRelocator
             UploadAttribution.MatchOutcome match;
             try
             {
-                (match, attributionKey) = await _uploadAttribution.MatchAsync(caller, drive, item, facts, ct).ConfigureAwait(false);
+                match = await _uploadAttribution.MatchAsync(callerTenantId, caller, drive, item, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -530,6 +533,8 @@ public sealed class DocumentContainerRelocator
             {
                 return NotTheUploader(documentId, drive, item, caller);
             }
+
+            consumeBinding = true;
         }
         else
         {
@@ -538,9 +543,11 @@ public sealed class DocumentContainerRelocator
         }
 
         await WritePointerAsync(documentId, drive, item, facts.WebUrl, alsoWrite: null, ct).ConfigureAwait(false);
-        if (attributionKey is not null)
+        if (consumeBinding)
         {
-            await _uploadAttribution!.ConsumeAsync(attributionKey, ct).ConfigureAwait(false);
+            // After the pointer is written: the binding has served its one purpose. Consuming it opens no other way of
+            // attaching — a BFF-uploaded item has no admission but its item binding.
+            await _uploadAttribution!.ConsumeAsync(callerTenantId!, item, ct).ConfigureAwait(false);
         }
 
         _logger.LogInformation(

@@ -132,9 +132,7 @@ public record SpeItemCreator(
     long? Size = null,
     string? QuickXorHash = null,
     string? WebUrl = null,
-    DateTimeOffset? LastModified = null,
-    DateTimeOffset? Created = null,
-    string? ParentPath = null);
+    DateTimeOffset? LastModified = null);
 
 /// <summary>
 /// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).
