@@ -341,8 +341,8 @@ module serviceBus 'modules/service-bus.bicep' = {
 // COSMOS DB (Per-customer AI platform state — Wave C2 prep, task 014)
 // Per spec §5.3 + FR-04 + R11 + § MUST rules: Cosmos MUST be per-customer (BFF prereq —
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
-// (Wave C2's multi-stack plan is moot: this is the template H2a deploys — Model 2 today, Model 1
-// with tasks 225b + 228 (D-12); task 225a retired stacks/model1-shared.bicep.)
+// (Wave C2's multi-stack plan is moot: this is the template H2a deploys for both models (D-12;
+// Model 1 since task 228); task 225a retired stacks/model1-shared.bicep.)
 // Redis is per-customer too (see the REDIS CACHE section below + the header note). It is
 // grouped with the other supporting-infra resources after AI Search per §7.6.
 // Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.

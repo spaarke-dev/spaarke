@@ -526,7 +526,7 @@ Enumerated `gateStates` + `interStepState` shapes per `design.md` §6.2.
 
 - `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_provisionedon`
 - `sprk_currentrunid` (I5 concurrency serialization)
-- `sprk_tenancymodel` (Choice) — 🔴 **MIGRATE, DO NOT RELABEL** (D-12 §6): value `1` (`Model2Dedicated`) holds **both** old-2a and old-2b, which now split across **different** models and need **opposite** Lighthouse answers; value `0` (`Model1Shared`) has **no successor**
+- `sprk_tenancymodel` (Choice) — `0` = `Model1` (stamp in Spaarke's tenant), `1` = `Model2` (stamp in the customer's tenant). Task 224 renamed the labels from `Model1Shared` / `Model2Dedicated` and kept the values. D-12 §6 had asked for a migration instead of a relabel; no registry row carried a tenancy value when the relabel landed (checked 2026-10-07), so nothing needed migrating
 - `sprk_tenantid` (populated from H0.5 or run params)
 - `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` (§14A upgrade compat)
 
@@ -905,8 +905,8 @@ root check alone cannot confine them; the deployment setting `SpeAdmin__Platform
 own environments — **today only `dev`** (round 57 item 1; Spaarke's production operator environment adds it in the change
 that stands it up). It is a deployment setting, not a Dataverse column, because a customer administrator can edit a column.
 
-- **Customer environments never carry it** — Model 1 shared stamp, Model 2 stamp, every per-customer setting set. Customer
-  provisioning (the L2 control plane, the canonical app-settings catalog, `customer.bicep`, the Model 1 stack) does not emit
+- **Customer environments never carry it** — no customer stamp (Model 1 or Model 2) and no per-customer setting set. Customer
+  provisioning (the L2 control plane, the canonical app-settings catalog, `customer.bicep`) does not emit
   it, and since task 249 removed the Model 2 stack no Bicep template names it at all — the marker reaches an App Service
   only through `Deploy-BffApi.ps1`. `SpeAdminOperatorEnvironmentMarkerGuardTests` fails the build if any template names it.
 - **Missing = false = refused** (fail closed); a value that is not a boolean stops the BFF at startup.

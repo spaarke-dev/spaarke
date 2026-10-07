@@ -16,7 +16,7 @@ last-reviewed: 2026-08-18
 > **Procedure**: [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) (operator runbook — §12 interim manual sequence until this skill supersedes)
 > **Companion**: [Task 076 Fallback Matrix](#) — added by follow-on task; do not remove the placeholder if empty.
 
-Interactive Claude Code skill for provisioning a **new Spaarke customer environment** (Model 1 shared trial/SMB OR Model 2 dedicated stamp) end-to-end via the **L2 control-plane REST API**. The skill provides the **operator UX layer** — prerequisite checks, intake wizard, preflight, confirmation gate, execute loop with poll + manual-gate handling, and structured handoff report.
+Interactive Claude Code skill for provisioning a **new Spaarke customer environment** (a dedicated stamp in either model since D-12: Model 1 in Spaarke's tenant, Model 2 in the customer's) end-to-end via the **L2 control-plane REST API**. The skill provides the **operator UX layer** — prerequisite checks, intake wizard, preflight, confirmation gate, execute loop with poll + manual-gate handling, and structured handoff report.
 
 **The actual provisioning is performed by**: L2 control-plane (`Sprk.Provisioning.ControlPlane` — enqueues via Service Bus + tracks state in Cosmos + runs `IJobHandler` handlers H0-H14) and its underlying handler catalog. This skill is thin — it drives the operator experience, not the provisioning logic itself.
 

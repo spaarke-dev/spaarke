@@ -792,9 +792,9 @@ public sealed class H4bBulkAppSettingsHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model1SharedTrial",
+            TenancyModel = "Model1",
             Status = RunStatus.Running,
-            Profile = "spaarke-hosted-model1",
+            Profile = "spaarke-hosted-model2",
         };
         // Intake values (IntakeParameterCatalog) — the only things in Parameters.NonSecret.
         var p = run.Parameters.NonSecret;

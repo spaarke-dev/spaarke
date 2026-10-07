@@ -2,18 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-07 SESSION 42 — master merged (PRs #1335/#1336/#1354/#1356, task-171 broker-only SPE bytes); project CLAUDE.md restructured to the operating-manual template; next T233.
+> **Last Updated**: 2026-10-07 SESSION 42 — T233 ✅ (BFF TenancyModel names + tenancy wording); PR #1365 open (CI green); next T240.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T233** — BFF `TenancyModel` enum rename (G8): `Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs:37` still `Model1Shared`/`Model2Dedicated` — would not parse post-T224 Dataverse labels → `Model1`/`Model2`; BFF §10 checks (publish size, tests). **No POML yet** — create it from plan §7 row T233 (copy `tasks/228-…poml`), add the TASK-INDEX row. |
-| **Step** | 0 — not started. T232 ✅ (SESSION 41) — see its POML notes + `notes/t232-guest-access-decisions.md`. |
+| **Task** | **T240** — Shared M365 clients → per-customer BFFs (G14; owner D9/D11 approach approved: ONE shared add-in + ONE Teams package, runtime customer discovery, H3 pre-authorizes the shared client apps on every customer BFF app-reg). **No POML yet** — create it from plan §7 row T240 + `notes/g14-shared-clients-auth-chain.md` (copy `tasks/233-…poml` shape), add the TASK-INDEX row (7 columns). |
+| **Step** | 0 — not started. T233 ✅ (SESSION 42) — see its POML notes. |
 | **Status** | pending. |
-| **Next Action** | Create `tasks/233-…poml` (copy `tasks/228-…poml`, plan §7 row T233 / G8) + TASK-INDEX row, then `task-execute` 233. BFF-touching → publish-size from fresh short-path worktrees (CLAUDE.md §10). Post-merge BFF suite: 18331/1 fail (54 skip) — the 1 was master's `PinnedMemoryEndpointsContractTests` picking another class's measurement from the process-wide meter; fixed (selects its own tenant), memory tests 31/31. No live action without owner approval. |
+| **Next Action** | Read plan §7 T240 + `notes/g14-shared-clients-auth-chain.md`; create `tasks/240-…poml` + TASK-INDEX row; `task-execute` 240. Watch PR #1365 (CI: all green except the legacy SDAP "Build & Test (Debug)", continue-on-error); merging it is the owner's call. No live action without owner approval. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — master merged again 2026-10-07 SESSION 42 (0 behind at merge). Measure with `git rev-list --count HEAD..origin/master`; merge master again before T186 and before any BFF deploy from this branch. The merge re-routed master's new task-171 app-only SPE calls through `SpeContainerOwnershipGuard` (see CLAUDE.md §6). |
-| **Order** | T254 ✅ → T232 ✅ → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
+| **Order** | T254 ✅ → T232 ✅ → T233 ✅ → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145; waits on #1364) → T186. T252 also carries the Bicep "shared BFF app-reg" description fix (T233 hand-off). T242c / T241 when the owner wants them. |
 
 ## Owner items
 

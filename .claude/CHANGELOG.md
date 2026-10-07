@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-07 — Tenancy wording follows D-12 everywhere (T233)
+
+`customer-provisioning-orchestration-r1` T233 (plan G8).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: the opening line no longer offers a "Model 1 shared trial/SMB" stamp; both models are dedicated stamps.
+- **`.claude/skills/azure-deploy/SKILL.md`**: the retired Model 1 stack row no longer says H2a refuses Model 1 runs (it deploys them with `customer.bicep` since task 228).
+- **`.claude/patterns/provisioning/operator-rbac-bootstrap.md`**: the multiple-vault anti-pattern no longer cites the retired shared tier.
+
+---
 ###### 2026-10-07 — Model 1 guests: environment security group + pay-as-you-go (T232)
 
 `customer-provisioning-orchestration-r1` T232 (owner D2; owner 2026-10-07: Spaarke pays guest access pay-as-you-go).

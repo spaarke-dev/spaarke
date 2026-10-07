@@ -163,7 +163,7 @@ public sealed class TenancyModelDagParityTests
     //     - H12bAppConfigSeedHandler
     //     - H13E2EAcceptanceGateHandler
     //     - H14IntegrationWiringHandler
-    //     - H05ConsentCaptureHandler  (Model 2 entry-point ONLY — should reject Model1Shared)
+    //     - H05ConsentCaptureHandler  (Model 2 entry-point ONLY — should reject Model1)
     //
     //   TEST DEFERRED TO MAIN-SESSION INTEGRATION LANE — per EXEC-09
     //   proposed_fix, each of the above handlers needs a Model1Shared

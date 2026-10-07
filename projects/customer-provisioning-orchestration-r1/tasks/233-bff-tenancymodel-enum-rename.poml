@@ -4,7 +4,7 @@
     <title>BFF TenancyModel enum names follow D-12 (Model1Shared/Model2Dedicated → Model1/Model2); stale tenancy wording in the schema script, the ARM-manifest workflow and its schema corrected</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T233 (G8)</phase>
     <gate>after 232 (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs (bff-api) and adds a BFF unit test (test-modifying override).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -76,5 +76,35 @@
     <criterion testable="true">BFF builds with 0 warnings; ArchTests pass; publish-size delta reported against fresh master.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-07 (SESSION 42).
+    - Premise corrected: the BFF never failed to parse T224's labels; it reads sprk_tenancymodel by integer value and T224
+      kept 0/1. Nothing in the BFF reads TenancyModelValue, and no endpoint returns the record. This was naming drift.
+      The registry holds no tenancy value today (Dev, Demo 1, trial-2026-08-18 all null; checked 2026-10-07), so
+      nothing needed migrating.
+    - BFF: enum Model1 = 0 / Model2 = 1, doc comments per D-12 (enum, KeyVaultName, TenancyModelValue).
+    - Tests (tests/unit/domain/Registration/DataverseEnvironmentRecordSchemaTests.cs): option value 0/1 → Model1/Model2;
+      absent / null / label-shaped → null.
+    - Stale wording fixed: L2 TenancyModel.cs parallel-enum note (it claimed the BFF would fail to parse); H1 and H10
+      comments; customer.bicep; Deploy-AllIndexes.ps1; deployment guide (sprk_tenancymodel row; marker paragraph);
+      completeness-sweeps runbook; Extend-DataverseEnvironmentSchema-v3.3.ps1 header; ARM-manifest workflow
+      resolutionHint + schema (2 descriptions); provision-environment and azure-deploy skills; operator-rbac-bootstrap
+      pattern (CHANGELOG entry). ControlPlane test names and fixtures moved to Model1/Model2 (H2a x2, RunsEndpoints,
+      serializer fixture, H4b fixture, DAG-parity note).
+    - Kept on purpose (AC1 reading): legacy Cosmos-document fixtures with "Model2Dedicated"
+      (ProvisioningRunProductionSerializerTests :83/:132), TenancyModelParserTests' retired-name rejections, history
+      comments and one history sentence in an H2b message.
+    - Handed to T252 (POML note): the Bicep descriptions calling BFF-API-ClientSecret the "shared multitenant BFF app-reg"
+      secret (controlplane-worker-app-service.bicep, platform-controlplane.bicep/.json). The right wording depends on
+      H6/H7's credential chain, which is T252's subject.
+    - Verified: BFF build 0 warnings; ControlPlane 2275/0 (1 skip); record tests 14/14; registration tests 125/125;
+      ArchTests 841/841; customer.bicep builds; manifest schema is valid JSON. Publish size: fresh master e6218e5ba 36.22 MB
+      / 192 files vs branch a43f52fd4 36.24 MB / 192 files (+0.02 MB, Compress-Archive, PDBs included); no package
+      changes.
+    - Step 9.5 (code-review + adr-check, independent reviewer): no ADR violations. Findings fixed: the stale L2 note and
+      current-tense claims listed above (F2), the AC1 test names and fixtures (F4), and the missing evidence (F4).
+      Known limits:
+      - K4: an out-of-range option number maps to an undefined enum value, not null; nothing consumes it.
+      - K4: the absent/null/label test shares one guard.
+  </notes>
 </task>

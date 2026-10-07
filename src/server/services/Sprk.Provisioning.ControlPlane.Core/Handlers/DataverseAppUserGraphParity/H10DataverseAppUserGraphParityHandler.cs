@@ -101,7 +101,7 @@
 //     - Model 1 (dedicated stamp in Spaarke's Azure tenant — D-12/D-13, 2026-09-28):
 //       the same shape as Model 2 below — a per-customer BFF app-reg (H3) and a
 //       per-stamp UAMI (H2a), so H10 writes this customer's own systemuser rows.
-//       (H2a refuses Model 1 runs until tasks 225b + 228 land — task 225a.)
+//       (H2a deploys Model 1 stamps since task 228.)
 //       The former shared shape (one multitenant app-reg + `sprk-{env}-shared-bff-uami`
 //       registered once per DV environment for every Model 1 customer) is retired:
 //       H3's shared branch by task 222, the shared stack by task 225a.

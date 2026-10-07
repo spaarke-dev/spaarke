@@ -75,10 +75,10 @@ public sealed class H2aBicepInfraDeployHandlerTests
         string.Join(",", outputNames.Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}")) + "}}";
     private const string ExpectedUamiRid = "/subscriptions/x/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
-    // ---------- T1 happy path — Model 2 dedicated ----------
+    // ---------- T1 happy path — Model 2 ----------
 
     [Fact]
-    public async Task HappyPath_Model2Dedicated_AllCollaboratorsGreen_SucceedsAndAdvancesState()
+    public async Task HappyPath_Model2_AllCollaboratorsGreen_SucceedsAndAdvancesState()
     {
         var run = BuildRun(tenancyModel: "Model2");
         var repo = new FakeRepository(run, etag: "etag-1");
@@ -127,10 +127,10 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest.Template.Should().BeSameAs(runner.Template);
     }
 
-    // ---------- T2 happy path — Model 1 shared ----------
+    // ---------- T2 happy path — Model 1 (dedicated stamp, D-12) ----------
 
     [Fact]
-    public async Task HappyPath_Model1Shared_TenancyModelFlowsToRunner()
+    public async Task HappyPath_Model1_TenancyModelFlowsToRunner()
     {
         var run = BuildRun(tenancyModel: "Model1");
         var repo = new FakeRepository(run, etag: "etag-2");

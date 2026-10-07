@@ -1339,7 +1339,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Fact]
-    public async Task PostRuns_Model2Dedicated_ValidSubscriptionId_Returns202_AndFlowsToRunParameters()
+    public async Task PostRuns_Model2_ValidSubscriptionId_Returns202_AndFlowsToRunParameters()
     {
         var (status, _, factory) = await PostT228RunAsync("Model2", p => p["subscriptionId"] = "abcdef01-2345-6789-abcd-ef0123456789");
         using (factory)

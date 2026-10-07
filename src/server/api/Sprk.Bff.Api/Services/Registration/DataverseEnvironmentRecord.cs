@@ -78,7 +78,7 @@ public class DataverseEnvironmentRecord
     public string? ResourceGroupName { get; set; }
     /// <summary>BFF App Service name (pattern: sprk-{customerId}-{env}-api).</summary>
     public string? AppServiceName { get; set; }
-    /// <summary>Customer Key Vault name (Model 1 shared vs Model 2 per-customer; canonical per §7.9).</summary>
+    /// <summary>The stamp's own Key Vault name (one per customer stamp in both models, D-12; canonical per §7.9).</summary>
     public string? KeyVaultName { get; set; }
     /// <summary>SPE container-type ID (distinct from SpeContainerId which is the container instance).</summary>
     public string? ContainerTypeId { get; set; }
@@ -88,7 +88,7 @@ public class DataverseEnvironmentRecord
     // ---- task 023 v3 additions (design.md §4D I5, §3A A1, D18) ----
     /// <summary>Active ProvisioningRun ID (Cosmos document ID). L2 sets null→newRunId; conflict = 409. Cleared on terminal state. ADR-044 canonical.</summary>
     public string? CurrentRunId { get; set; }
-    /// <summary>Deployment tenancy tier. Drives Bicep composition + handler behavior (§4.1a).</summary>
+    /// <summary>Tenancy model: which Azure tenant holds the customer's dedicated stamp (D-12). Both models deploy the same customer.bicep; handlers branch on it (§4.1a).</summary>
     public TenancyModel? TenancyModelValue { get; set; }
     /// <summary>Entra tenant ID. Model 1: Spaarke tenant. Model 2: customer tenant via H0.5 consent. IMMUTABLE post-placeholder-create (§4D I1). ADR-044 canonical.</summary>
     public string? TenantId { get; set; }
