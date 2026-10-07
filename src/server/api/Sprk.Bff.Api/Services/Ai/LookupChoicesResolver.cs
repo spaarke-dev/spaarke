@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -30,6 +31,32 @@ namespace Sprk.Bff.Api.Services.Ai;
 public sealed class LookupChoicesResolver
 {
     private static readonly string[] SupportedPrefixes = ["lookup:", "optionset:", "multiselect:", "boolean:"];
+
+    /// <summary>Prefix of the side-channel key that carries prompt guidance next to a reference's bare names.</summary>
+    private const string GuidanceKeyPrefix = "guidance:";
+
+    private const int MaxGuidanceChars = 1000;
+
+    /// <summary>
+    /// Lookup taxonomies that carry authored classifier guidance: entity logical name to guidance column.
+    /// Adding a taxonomy here is the whole extension; a reference to any other entity is unaffected and
+    /// issues no extra query.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string> GuidanceColumns =
+        new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_triagecategory"] = "sprk_classifierguidance",
+        };
+
+    /// <summary>
+    /// The key under which <see cref="ResolveFromJpsAsync"/> places the prompt-facing "name — guidance" lines
+    /// for <paramref name="choicesRef"/>. The value at <paramref name="choicesRef"/> itself stays the bare names
+    /// (the constrained-decoding enum), so the schema enum can never carry guidance text.
+    /// </summary>
+    public static string GuidanceKey(string choicesRef) => GuidanceKeyPrefix + choicesRef;
+
+    /// <summary>True when <paramref name="key"/> is a guidance side-channel key rather than a reference.</summary>
+    public static bool IsGuidanceKey(string key) => key.StartsWith(GuidanceKeyPrefix, StringComparison.Ordinal);
 
     private readonly IScopeResolverService _scopeResolver;
     private readonly ILogger<LookupChoicesResolver> _logger;
@@ -108,10 +135,68 @@ public sealed class LookupChoicesResolver
             if (values != null)
             {
                 result[choicesRef] = values;
+
+                var guidanceLines = await ResolveGuidanceLinesAsync(choicesRef, values, cancellationToken);
+                if (guidanceLines != null)
+                {
+                    result[GuidanceKey(choicesRef)] = guidanceLines;
+                }
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// For a <c>lookup:</c> reference to a taxonomy with a guidance column, builds the prompt-facing
+    /// "name — guidance" lines, one per resolved name in enum order (names without guidance stay bare).
+    /// Returns null when the reference has no guidance column, no row carries guidance, or the guidance read
+    /// failed; the caller then simply has bare names, which is the pre-existing behavior (never worse).
+    /// </summary>
+    private async Task<string[]?> ResolveGuidanceLinesAsync(
+        string choicesRef, string[] names, CancellationToken cancellationToken)
+    {
+        if (!choicesRef.StartsWith("lookup:", StringComparison.OrdinalIgnoreCase)
+            || !TryParseReference(choicesRef, "lookup:", "guidance", out var entity, out var nameField)
+            || !GuidanceColumns.TryGetValue(entity, out var guidanceField))
+        {
+            return null;
+        }
+
+        IReadOnlyDictionary<string, string>? guidance;
+        try
+        {
+            guidance = await _scopeResolver.QueryLookupGuidanceAsync(
+                ToEntitySetName(entity), nameField, guidanceField, cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "$choices guidance read failed for {Ref}; the prompt carries bare names (enum unaffected)", choicesRef);
+            ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonGuidanceReadFailed);
+            return null;
+        }
+
+        if (guidance is not { Count: > 0 })
+            return null;
+
+        // Bound to the names already behind the enum: guidance for a row that is not in the enum is dropped,
+        // so the prompt can never offer a category the schema would reject.
+        var lines = new string[names.Length];
+        for (var i = 0; i < names.Length; i++)
+        {
+            lines[i] = guidance.TryGetValue(names[i], out var g) && !string.IsNullOrWhiteSpace(g)
+                ? $"{names[i]} — {Normalize(g)}"
+                : names[i];
+        }
+
+        return lines;
+    }
+
+    private static string Normalize(string guidance)
+    {
+        var flat = string.Join(' ', guidance.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return flat.Length <= MaxGuidanceChars ? flat : flat[..MaxGuidanceChars].TrimEnd() + "…";
     }
 
     /// <summary>
@@ -284,6 +369,7 @@ public sealed class LookupChoicesResolver
                 _logger.LogWarning(
                     "$choices lookup for field '{FieldName}': no values found in {Entity}.{Field}",
                     fieldName, entityLogicalName, selectField);
+                ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonNoValues);
                 return null;
             }
 
@@ -298,6 +384,7 @@ public sealed class LookupChoicesResolver
             _logger.LogWarning(ex,
                 "$choices lookup for field '{FieldName}' failed querying {Entity}.{Field}",
                 fieldName, entityLogicalName, selectField);
+            ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonReadFailed);
             return null;
         }
     }
@@ -321,6 +408,7 @@ public sealed class LookupChoicesResolver
                 _logger.LogWarning(
                     "$choices {Prefix} for field '{FieldName}': no options found in {Entity}.{Attribute}",
                     prefix.TrimEnd(':'), fieldName, entityLogicalName, attributeName);
+                ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonNoValues);
                 return null;
             }
 
@@ -335,6 +423,7 @@ public sealed class LookupChoicesResolver
             _logger.LogWarning(ex,
                 "$choices {Prefix} for field '{FieldName}' failed querying {Entity}.{Attribute}",
                 prefix.TrimEnd(':'), fieldName, entityLogicalName, attributeName);
+            ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonReadFailed);
             return null;
         }
     }
@@ -358,6 +447,7 @@ public sealed class LookupChoicesResolver
                 _logger.LogWarning(
                     "$choices boolean for field '{FieldName}': no labels found in {Entity}.{Attribute}",
                     fieldName, entityLogicalName, attributeName);
+                ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonNoValues);
                 return null;
             }
 
@@ -372,6 +462,7 @@ public sealed class LookupChoicesResolver
             _logger.LogWarning(ex,
                 "$choices boolean for field '{FieldName}' failed querying {Entity}.{Attribute}",
                 fieldName, entityLogicalName, attributeName);
+            ChoicesResolutionTelemetry.RecordFailure(choicesRef, ChoicesResolutionTelemetry.ReasonReadFailed);
             return null;
         }
     }

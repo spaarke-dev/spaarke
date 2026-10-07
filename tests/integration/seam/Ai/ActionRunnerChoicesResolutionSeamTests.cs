@@ -98,6 +98,53 @@ public sealed class ActionRunnerChoicesResolutionSeamTests
             "with no scope factory there is no resolver to query Dataverse");
     }
 
+    [Fact]
+    public async Task RunAsync_TaxonomyWithGuidance_PromptCarriesNameAndGuidance_SchemaEnumStaysBareNames()
+    {
+        // FR-38 / task 072: the authored sprk_classifierguidance reaches the PROMPT; the constrained-decoding
+        // enum must stay the bare names, or the model could emit text that maps to no taxonomy row.
+        var h = new Harness();
+        h.Scope
+            .Setup(s => s.QueryLookupGuidanceAsync(
+                "sprk_triagecategories", "sprk_name", "sprk_classifierguidance", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Dictionary<string, string>
+            {
+                ["Invoice / Billing"] = "Bills and payment requests for work already done.",
+                ["Court / Filing"] = "Court notices,\n filings and hearing dates.",
+                ["Not In Enum"] = "Guidance for a row the enum does not contain.",
+            });
+
+        await h.RunTriageActionAsync(withScopeFactory: true);
+
+        h.CapturedPrompt.Should().Contain("- Invoice / Billing — Bills and payment requests for work already done.");
+        h.CapturedPrompt.Should().Contain("- Court / Filing — Court notices, filings and hearing dates.",
+            "newlines in authored guidance are flattened so one category stays one prompt line");
+        h.CapturedPrompt.Should().Contain("- Scheduling", "a category with no guidance is still listed, bare");
+        h.CapturedPrompt.Should().NotContain("- Scheduling —");
+        h.CapturedPrompt.Should().NotContain("Not In Enum",
+            "guidance is bound to the rows behind the enum, so the prompt cannot offer a category the schema rejects");
+
+        h.CategoryEnumValues().Should().BeEquivalentTo(TaxonomyNames,
+            "the schema enum is the bare names only");
+        h.CategoryEnumValues()!.Should().OnlyContain(v => !v.Contains('—'));
+    }
+
+    [Fact]
+    public async Task RunAsync_GuidanceReadFails_DegradesToBareNames_EnumStillEnforced()
+    {
+        var h = new Harness();
+        h.Scope
+            .Setup(s => s.QueryLookupGuidanceAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("dataverse down"));
+
+        await h.RunTriageActionAsync(withScopeFactory: true);
+
+        h.CapturedPrompt.Should().NotContain("## Allowed values for 'category'");
+        h.CategoryEnumValues().Should().BeEquivalentTo(TaxonomyNames,
+            "a guidance failure must not weaken the enum: categories still resolve exactly as before");
+    }
+
     private sealed class Harness
     {
         public Mock<IScopeResolverService> Scope { get; } = new();

@@ -692,6 +692,59 @@ public class ScopeResolverService : IScopeResolverService
         }
     }
 
+    /// <summary>
+    /// The relative Web API URL for the guidance read. Same filter + cap as <see cref="QueryLookupValuesAsync"/>
+    /// so the guidance covers exactly the rows behind the enum. Public so the live-schema test runs the very
+    /// string production sends.
+    /// </summary>
+    public static string BuildLookupGuidanceUrl(string entitySet, string nameField, string guidanceField) =>
+        $"{entitySet}?$select={nameField},{guidanceField}&$orderby={nameField} asc&$top=200&$filter=statecode eq 0";
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, string>> QueryLookupGuidanceAsync(
+        string entitySetName,
+        string nameField,
+        string guidanceField,
+        CancellationToken cancellationToken)
+    {
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        var safeEntitySet = entitySetName.Replace("'", "").Replace("/", "");
+        var safeName = nameField.Replace("'", "").Replace("/", "");
+        var safeGuidance = guidanceField.Replace("'", "").Replace("/", "");
+
+        var url = BuildLookupGuidanceUrl(safeEntitySet, safeName, safeGuidance);
+
+        // No catch: a failed read must reach the caller (LookupChoicesResolver), which emits it to telemetry.
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        await EnsureSuccessWithDiagnosticsAsync(response, $"QueryLookupGuidance({safeEntitySet}.{safeGuidance})", cancellationToken);
+
+        using var doc = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken),
+            cancellationToken: cancellationToken);
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!doc.RootElement.TryGetProperty("value", out var valueArray) ||
+            valueArray.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var item in valueArray.EnumerateArray())
+        {
+            if (item.TryGetProperty(safeName, out var n) && n.ValueKind == JsonValueKind.String &&
+                item.TryGetProperty(safeGuidance, out var g) && g.ValueKind == JsonValueKind.String)
+            {
+                var name = n.GetString();
+                var guidance = g.GetString();
+                if (!string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(guidance))
+                    result[name] = guidance;
+            }
+        }
+
+        return result;
+    }
+
     /// <inheritdoc />
     public async Task<string[]> QueryOptionSetLabelsAsync(
         string entityLogicalName,
