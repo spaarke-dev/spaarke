@@ -1,22 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  DRY-RUN FIXTURE ONLY - never imported, and NOT a copy of the platform's definition.
+  DRY-RUN FIXTURE ONLY - never imported, and NOT a copy of the platform's definitions.
 
-  unified-access-control-r2 task 114 (owner round 67 amendment 4(a)). Set-AccessRibbon.ps1's dry run has no Dataverse to
-  read the platform's form Share command from, so it hands Merge-AccessRibbon.ps1 this stand-in, which has the SHAPE the
-  merge works on (one CommandDefinition with EnableRules, DisplayRules and Actions) so the transformation - copy, strip
-  sprk.Access.* rule references, append sprk.Access.<entity>.ShareAllowed.EnableRule, idempotent - is exercised before
-  any import. -Apply never uses this file: it reads the live command with RetrieveEntityRibbon (the Command of the
-  Mscrm.Form.<entity>.Share button) and merges THAT, so the platform's real rules are what ship.
+  unified-access-control-r2 task 114 (owner round 67 amendment 4(a)). Set-AccessRibbon.ps1's dry run WITHOUT
+  -EnvironmentUrl has no Dataverse to read the platform's form Share commands from, so it hands Merge-AccessRibbon.ps1
+  this stand-in, which has the SHAPE the merge works on (the two form Share commands the live ribbon has: the Unified
+  Interface Share, Mscrm.Form.<entity>.Permissions.Sharing -> Mscrm.SharePrimaryRecordRefresh, and the legacy flyout's
+  Mscrm.Form.<entity>.Permissions.SharingNonRefresh -> Mscrm.SharePrimaryRecord) so the transformation - copy, strip
+  sprk.Access.* rule references, append sprk.Access.<entity>.ShareAllowed.EnableRule, idempotent - is exercised. -Apply
+  (and the dry run WITH -EnvironmentUrl) reads the live commands with RetrieveEntityRibbon and merges THOSE.
 -->
-<CommandDefinition Id="Mscrm.SharePrimaryRecord">
-  <EnableRules>
-    <EnableRule Id="Mscrm.FormStateNotNew" />
-  </EnableRules>
-  <DisplayRules>
-    <DisplayRule Id="Mscrm.SharePrimaryEntityPermission" />
-  </DisplayRules>
-  <Actions>
-    <JavaScriptFunction FunctionName="isNaN" Library="$webresource:sprk_/scripts/access_ribbon.js" />
-  </Actions>
-</CommandDefinition>
+<ShareCommands>
+  <CommandDefinition Id="Mscrm.SharePrimaryRecordRefresh">
+    <EnableRules>
+      <EnableRule Id="Mscrm.FormStateNotNew" />
+    </EnableRules>
+    <DisplayRules>
+      <DisplayRule Id="Mscrm.SharePrimaryPermission" />
+    </DisplayRules>
+    <Actions />
+  </CommandDefinition>
+  <CommandDefinition Id="Mscrm.SharePrimaryRecord">
+    <EnableRules>
+      <EnableRule Id="Mscrm.FormStateNotNew" />
+    </EnableRules>
+    <DisplayRules>
+      <DisplayRule Id="Mscrm.SharePrimaryPermission" />
+    </DisplayRules>
+    <Actions />
+  </CommandDefinition>
+</ShareCommands>

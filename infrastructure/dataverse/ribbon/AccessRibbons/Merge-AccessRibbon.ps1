@@ -31,16 +31,17 @@
     Where to write the merged RibbonDiff.xml (normally back over the unpacked export before packing).
 
 .PARAMETER ShareCommandXml
-    Task 114 (owner round 67 amendment 4(a)): a file holding ONE CommandDefinition - the PLATFORM's form Share command
-    for -Entity, exactly as the live effective ribbon has it (Set-AccessRibbon.ps1 -Apply reads it with
-    RetrieveEntityRibbon: the command of the Mscrm.Form.<entity>.Share button). The merge copies it into the
+    Task 114 (owner round 67 amendment 4(a)): a file holding the PLATFORM's form Share CommandDefinition(s) for -Entity,
+    exactly as the live effective ribbon has them (Set-AccessRibbon.ps1 reads them with RetrieveEntityRibbon: the
+    commands of Mscrm.Form.<entity>.Permissions.Sharing - the Unified Interface Share - and, when present,
+    Mscrm.Form.<entity>.Permissions.SharingNonRefresh in the legacy Permissions flyout). The merge copies each into the
     RibbonDiff (replacing an earlier copy), strips any sprk.Access.* rule reference from it, and appends
     sprk.Access.<entity>.ShareAllowed.EnableRule - so Share keeps every platform rule and is also hidden on a Restricted
     record. Without it the Share rule is NOT applied (a warning says so); never hand-author the platform command.
 
 .PARAMETER GridShareCommandXml
     Task 114 follow-up: a file holding the PLATFORM's GRID and SUBGRID Share CommandDefinition(s) for -Entity, as the live
-    effective ribbon has them (the commands of Mscrm.HomepageGrid.<entity>.Share and Mscrm.SubGrid.<entity>.Share - one
+    effective ribbon has them (the commands of Mscrm.HomepageGrid.<entity>.Sharing and Mscrm.SubGrid.<entity>.Sharing - one
     definition when both buttons use the same command). Each is copied with sprk.Access.<entity>.ShareAllowedSelection
     .EnableRule appended: Share is hidden when ANY selected row is Restricted. A command shared with the FORM button is
     refused (one copy cannot carry both rules). Without it the grid Share rule is NOT applied (a warning says so).
@@ -187,8 +188,7 @@ $gridShareRuleId = "sprk.Access.$Entity.ShareAllowedSelection.EnableRule"
 $shareCommandIds = @()
 $gridShareCommandIds = @()
 if ($ShareCommandXml) {
-    $shareCommandIds = @(Add-PlatformCommandRule $ShareCommandXml $shareRuleId "the command of Mscrm.Form.$Entity.Share")
-    if ($shareCommandIds.Count -ne 1) { throw "-ShareCommandXml must hold exactly ONE command (the form Share command)." }
+    $shareCommandIds = @(Add-PlatformCommandRule $ShareCommandXml $shareRuleId "the form Share command")
 }
 else {
     Write-Warning ("No -ShareCommandXml: the platform's FORM Share command is NOT hidden on Restricted $Entity records. " +
