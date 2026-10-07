@@ -104,6 +104,10 @@ export interface TaskPaneShellProps {
   children: React.ReactNode;
   /** Whether to remove padding from content area */
   noPadding?: boolean;
+  /** Task 106: Outlook's Send Email action, rendered in the toolbar after Find (see `TaskPaneToolbar`). */
+  onSendEmail?: () => void;
+  /** Task 106: Send Email is opening the compose window. */
+  isSendingEmail?: boolean;
 }
 
 /**
@@ -155,6 +159,8 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
   showErrorDetails = false,
   children,
   noPadding = false,
+  onSendEmail,
+  isSendingEmail = false,
 }) => {
   const styles = useStyles();
   const { isCompact } = useResponsiveLayout();
@@ -230,6 +236,7 @@ export const TaskPaneShell: React.FC<TaskPaneShellProps> = ({
         themePreference={themePreference}
         {...(onThemeChange ? { onThemeChange } : {})}
         {...(resizeSupported ? { onToggleExpand: handleToggleExpand, isExpanded, isResizing } : {})}
+        {...(onSendEmail ? { onSendEmail, isSendingEmail } : {})}
       />
 
       {/* Main Content with Error Boundary */}

@@ -258,8 +258,17 @@ Rigor level and reason are logged in current-task.md:
 ### Step 0: Context Recovery Check
 
 ```
+SIZE GUARD (every start, before reading):
+  IF current-task.md > 20 KB:
+    → It is carrying history, not state. Do NOT load it whole.
+    → Read only its newest block, then clean it up per context-handoff
+      "State, not history" (archive verbatim to notes/handoff-history/,
+      move standing items to project CLAUDE.md, rewrite as current state)
+      BEFORE starting the task.
+
 IF resuming work (not fresh start):
   READ projects/{project-name}/current-task.md
+  READ the project CLAUDE.md "Standing directives & gotchas" section (if present)
 
   IF current-task.md exists AND status == "in-progress":
     → This is a continuation
@@ -589,7 +598,7 @@ FOR each <step> in <steps>:
 #### Checkpoint Behavior
 
 ```
-WHEN checkpointing:
+WHEN checkpointing (REWRITE the file, never prepend a new block; see context-handoff "State, not history"):
 
 1. UPDATE current-task.md Quick Recovery section:
    | Field | Value |
@@ -664,15 +673,19 @@ AFTER all implementation steps and acceptance criteria verified:
    → Get list from current-task.md "Files Modified" section
    → Execute /code-review {file-list}
 
-   IF critical issues found:
-     → LIST critical issues
-     → FIX each issue before proceeding
-     → RE-RUN code-review to verify fixes
+   TRIAGE every finding (Critical, Warning and Suggestion alike) using
+   "Finding triage and review scope" below. Act on the class, not the severity label:
+     → FIX-NOW classes (F1-F4): fix in this task. When a defect is outside this
+       task's scope (pre-existing, another project's code, found in passing),
+       file it AND report it to the operator. Never drop a real defect.
+     → KNOWN-LIMIT classes (K1-K4): one line each in task notes + PR, no fix round
+     → A genuine product or policy choice: ask the user (batch the questions)
 
-   IF warnings found:
-     → REPORT warnings to user
-     → ASK: "Fix warnings now or proceed?"
-     → Address per user preference
+   AFTER fixing: RE-RUN code-review on the FIX SCOPE: the fix diff plus the code that
+   directly calls or is called by the changed lines (not the whole task surface).
+   RE-RUN the affected test suites.
+   REPEAT until no F-class finding remains. There is no round cap on fixing;
+   the limits below are on review ceremony.
 
 2. RUN adr-check on modified files:
    → Execute /adr-check {file-list}
@@ -728,6 +741,41 @@ UPDATE current-task.md:
     - ADR Check: ✅ Passed (or violations found/fixed)
     - Lint: ✅ Passed (or N/A)
 ```
+
+#### Finding triage and review scope (BINDING — added 2026-10-06, corrected by the owner 2026-10-06)
+
+**Why this exists.** `code-review` is coverage-first by design: it reports every finding, including low-confidence ones, and leaves filtering to this step. But this step never defined the filter. It said "fix critical issues → re-run code-review", and each re-run reviewed the whole surface again and surfaced new findings. Adversarial-verifier workflows followed the same pattern. In `unified-access-control-r2`, tasks reached fix round `-r6`, owner decision rounds passed 50, and the owner recorded the project at ~10× budget. The owner named the cause as "static-guard arms races and edge-case machinery … without real-world benefit". The classes below are the owner's own rule from that project (owner rounds 56 and 59, 2026-10-05), made repo-wide.
+
+**🔴 Owner correction (2026-10-06, BINDING).** The limits below cut CEREMONY: unnecessary review passes, re-reviews of untouched code, speculative findings and pseudo-fixes. They **never** limit FIXING. The first version of this section capped work at "2 fix rounds … never start round 3", which let a confirmed security defect wait on a round count. That reading is wrong and is withdrawn. Owner: *"we should never allow known broken code to not be fixed just because it takes more than 2 rounds."*
+
+**Every defect found is fixed or surfaced, whatever its origin (BINDING).** This holds whether the defect was caused directly or indirectly by the current work, or was only uncovered or found in the course of it (pre-existing code, another project's code, configuration, data, the environment):
+- **In this task's scope:** fix it in this task.
+- **Outside this task's scope:** surface it to the operator. File it (`/project-defer-issue-tracking`, a GitHub issue) **and** name it in the task's completion report, with the concrete failure scenario. The operator decides when and where it is fixed.
+- **Never** drop it silently, never leave it unreported because it is "not ours" or "pre-existing", and never reclassify it as a known limit to make it go away.
+
+**Classify every finding before acting:**
+
+| Class | Meaning | Action |
+|---|---|---|
+| **F1** | Runtime defect: security hole, fail-open, data loss, cross-customer exposure, broken real path | Fix (in scope) or file + report (out of scope) |
+| **F2** | Maintainability defect that compounds: duplicates an existing mechanism, a comment contradicting the code, important behaviour with no test | Fix (in scope) or file + report (out of scope) |
+| **F3** | Measurable performance problem | Fix (in scope) or file + report (out of scope) |
+| **F4** | Unmet acceptance criterion, or required/promised functionality missing | Fix. **Never trimmed**: robustness and completeness of required functionality is not "over-engineering" |
+| **K1** | Guard or static-analysis bypass reachable only by deliberately adversarial code in our own repo | Known limit: one line in notes + PR |
+| **K2** | Rare edge that already fails closed | Known limit |
+| **K3** | Seeding proof (mutation check) of a minor branch | Known limit |
+| **K4** | Low-confidence finding with no concrete failure scenario you can state | Known limit |
+
+A K class is for something that is **not a defect on a real path**. A confirmed defect with a stateable failure scenario on a real path is F-class, even if it is old or rare.
+
+**Over-engineering check (applies to every fix).** A new column, job, setting or abstraction needs a realistic failure behind it, and a fix is never bigger than the problem. Prefer reusing an existing component (CLAUDE.md §11). This check limits the SIZE of a fix, never whether a real defect gets fixed.
+
+**Review scope (this is what is limited):**
+1. **Review → fix → re-verify the fix scope → repeat until no F-class finding remains.** There is no round cap on fixing real defects.
+2. **Re-verification scope is the fix diff plus its direct callers and callees,** not the task's whole surface. Including callers and callees catches a fix that breaks adjacent code. Re-running the affected test suites remains mandatory. A fresh full review after every fix is what generated an endless supply of new findings.
+3. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) use the same classes. Allow **one** full verifier pass per task, or two for tasks tagged `auth`, `security` or `tenant-isolation`. Every later re-check is scoped to the fix diff (rule 2) and is not a new full pass.
+4. **Escalate when fixes are not converging, not because of a count.** That means the same defect returns after a fix, a fix keeps exposing new F-class defects in the same area, or the right fix needs a decision only the owner can make (root §6). Escalate with the findings and a recommendation. Never stop fixing silently, and never ship the defect.
+5. **Flag diminishing returns proactively.** If a round produced only K-class findings, say so and stop. Don't continue rounds silently.
 
 ### Step 9.7: UI Testing (PCF/Frontend Tasks)
 
@@ -900,9 +948,11 @@ REASONING:
 ```
 TRANSITION current-task.md:
 
-1. ARCHIVE completed task info (optional - for session notes):
-   - Add to "Session Notes > Key Learnings" if significant discoveries
-   - Add to "Handoff Notes" if important context for future tasks
+1. MOVE OUT anything worth keeping (do NOT leave it in current-task.md):
+   - A gotcha or standing directive that outlives this task → project CLAUDE.md
+     "Standing directives & gotchas"
+   - Decisions and rationale → the task's notes file / POML <notes>
+   - The narrative → the completion commit message
 
 2. RESET for next task:
    - Clear "Completed Steps" section
@@ -953,6 +1003,7 @@ TRANSITION current-task.md:
   - Individual `.poml` files (status + notes sections)
   - Git commits (what changed when)
 - Keeping it focused prevents file bloat and faster recovery
+- Measured cost of not doing this (2026-10-06): three active projects had 150 / 445 / 483 KB files, read at Step 0 and Step 2 of every task (~120k tokens at the top end) before any work began
 
 ---
 
