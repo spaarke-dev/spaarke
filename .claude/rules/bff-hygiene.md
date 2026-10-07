@@ -20,7 +20,7 @@ The BFF is the single backend for every Spaarke client surface. When a task adds
    - Thresholds: ≥ +5 MB per task needs explicit justification; ≥ 55 MB cumulative triggers an architecture review; ≥ 60 MB is a hard stop.
    - Procedure, measured hazards and current baseline: `.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule".
 5. **No new HIGH-severity CVE** from `dotnet list package --vulnerable --include-transitive`.
-6. **Update tests.** Changes under `Sprk.Bff.Api/Services/` add or update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally need unconditional service registration. Exceptions need explicit code-review sign-off with the reason (`bff-extensions.md` § F).
+6. **Update tests.** Changes under `Sprk.Bff.Api/Services/` add or update tests in `tests/unit/Sprk.Bff.Api.Tests/`. Endpoints that map unconditionally need unconditional service registration. Exceptions need explicit code-review sign-off with the reason (`bff-extensions.md` § F). When a service must stay feature-gated, ADR-030 is the canonical mechanism for satisfying this. Enforcement is the PR template, the code-review checklist and reviewer judgment — **not** a CI script, by design.
 
 **Conditional DI registrations.** When a `*Module.cs` change sits inside an `if (flag) { … }` block, the reviewer applies `bff-extensions.md` § F.1 (static scan + ADR-032 Null-Object kill switch), § F.2 (inspect fixture/config first when a test is skipped as a suspected DI issue) and § F.3 (reproduce empirically before applying a ledger fix).
 

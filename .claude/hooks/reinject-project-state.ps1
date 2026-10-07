@@ -19,12 +19,21 @@ function Write-CappedSection([string]$Title, [string]$Text) {
 }
 
 try {
-    $branch = (git rev-parse --abbrev-ref HEAD 2>$null)
-    if (-not $branch -or $branch -notmatch '^work/(.+)$') { exit 0 }
-    $project = $Matches[1]
     $root = (git rev-parse --show-toplevel 2>$null)
+    if (-not $root) { exit 0 }
+    $branch = (git rev-parse --abbrev-ref HEAD 2>$null)
+
+    # Identify the project: the work/<project> branch first, then the spaarke-wt-<project> worktree folder.
+    $candidates = @()
+    if ($branch -match '^work/(.+)$') { $candidates += $Matches[1] }
+    $leaf = Split-Path $root -Leaf
+    if ($leaf -match '^spaarke-wt-(.+)$') { $candidates += $Matches[1] }
+    $project = $null
+    foreach ($c in $candidates) {
+        if (Test-Path (Join-Path $root "projects/$c")) { $project = $c; break }
+    }
+    if (-not $project) { exit 0 }
     $dir = Join-Path $root "projects/$project"
-    if (-not (Test-Path $dir)) { exit 0 }
 
     Write-Output "## Re-injected after compaction: project '$project' (branch $branch)"
     Write-Output ""
@@ -35,8 +44,11 @@ try {
     $claude = Join-Path $dir 'CLAUDE.md'
     if (Test-Path $claude) {
         $content = Get-Content $claude -Raw
-        $m = [regex]::Match($content, '(?ms)^## Standing directives & gotchas.*?(?=^## |\z)')
-        if ($m.Success) { Write-CappedSection "projects/$project/CLAUDE.md — Standing directives & gotchas" $m.Value }
+        # Sections that carry standing rules: "Standing directives & gotchas" (current projects) and the
+        # template's "2. Binding rules", "3. Owner directives and standing decisions", "6. Gotchas".
+        $pattern = '(?ms)^## (?:\d+\.\s*)?(?:Standing directives|Owner directives|Binding rules|Gotchas)[^\n]*\n.*?(?=^## |\z)'
+        $sections = ([regex]::Matches($content, $pattern) | ForEach-Object { $_.Value }) -join "`n"
+        if ($sections) { Write-CappedSection "projects/$project/CLAUDE.md — standing rules and gotchas" $sections }
     }
 }
 catch {

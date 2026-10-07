@@ -1,8 +1,13 @@
 ---
 paths:
   - "scripts/Seed-*KeyVault*.ps1"
+  - "scripts/provisioning/**"
   - "scripts/Rotate-Secrets.ps1"
   - "scripts/*SpeConfigSecret*.ps1"
+  - "scripts/Provision-Customer.ps1"
+  - "scripts/Decommission-Customer.ps1"
+  - "scripts/Register-EntraAppRegistrations.ps1"
+  - "scripts/Configure-ProductionAppSettings.ps1"
   - "scripts/canonical-secret-catalog/**"
   - "infrastructure/bicep/**"
   - "src/server/services/Sprk.Provisioning.ControlPlane.*/**"

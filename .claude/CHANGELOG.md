@@ -7,7 +7,7 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
-###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 16,993 bytes (−49,664), 499 → 210 lines; 15.2 KB / 184 lines as injected (claude-md-cleanup-r1)
+###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 18,569 bytes (−48,088), 499 → 215 lines; 16.6 KB / 187 lines as injected (claude-md-cleanup-r1)
 
 The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows alone were 30 KB; incident write-ups sat inside rules; nothing limited growth. It now holds only binding every-turn rules, safety guards and one-line triggers, per Anthropic's guidance (< 200 lines per CLAUDE.md). Section numbers are unchanged. The previous file is archived verbatim at `.claude/archive/2026-10-07/CLAUDE.md`.
 
@@ -37,6 +37,17 @@ The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows a
 - `project-setup`: the project `CLAUDE.md` template is rewritten to a 7-section operating manual that does not copy repo-wide rules, with guidance on size and upkeep.
 
 Three docs had anchor links to the old §6.5 / §10 headings and were repointed. Run `/doctor prompt-audit` (Claude Code ≥ 2.1.283) after merge.
+
+**Fixes from the independent audit (same PR):**
+- §11 now states that the rule covers new surface added inside an existing file; the earlier wording read as a loophole.
+- §10 keeps the publish-size thresholds and the SpaarkeAi half of the hot-path rule.
+- §5 defers to `task-execute` Step 8.5 for checkpoint cadence.
+- A §17 trigger for new code pages restores the Navigator registrar step.
+- The auth trigger points at the live constraint and pattern, not the retired setup stub.
+- The hook finds the project by branch **or** `spaarke-wt-<project>` folder, and re-injects the template's binding-rule, directive and gotcha sections as well as the legacy heading.
+- The `ask` rules also cover lowercase `*client-secret*`, `restore` and `set-attributes`.
+- `credentials.md` also covers `scripts/provisioning/**` and the provision, decommission and app-registration scripts.
+- `azure-deployment.md` MUST 1 now requires fresh short-path worktrees for both sides, and MUST 4 makes the CVE check unconditional, matching root.
 
 ###### 2026-10-06 — SPE byte identity: broker-only replaces writer-identity matching (unified-access-control-r2 task 171)
 

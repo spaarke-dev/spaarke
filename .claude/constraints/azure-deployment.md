@@ -51,10 +51,10 @@ Load when:
 
 Every task that touches `src/server/api/Sprk.Bff.Api/` (or `Spaarke.Core` / `Spaarke.Dataverse` consumed by BFF) — including endpoint additions, service additions, DI registration changes, NuGet package additions/upgrades, and background-job work — **MUST**:
 
-1. **MUST** run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER changes land and BEFORE merge.
+1. **MUST** run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER changes land and BEFORE merge, for **both** the branch and master, each from a **fresh worktree at a short path** (see "Measure the delta against a fresh build of master" below — publishing in a worktree you have been iterating in is not comparable).
 2. **MUST** measure compressed size of `deploy/api-publish/` (or the resulting zip if packaging) and report the absolute size + the delta **against a fresh build of master, never against a recorded baseline** (see "Measure the delta against a fresh build of master" below) in the task notes / PR description.
 3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). Recorded baselines are a sanity check only, never the comparison point. The measured baseline as of 2026-08-13 was **44.96 MB incl. PDBs** (`dotnet-10-upgrade-r1` task 031, Compress-Archive Optimal over `deploy/api-publish/*`, .NET 10 framework-dependent linux-x64 — state the PDB convention when reporting; 44.05 MB excl. PDBs). Prior net8 baseline: 49.63 MB incl. PDBs (2026-07-08 task 055). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
-4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` if NuGet packages were added or upgraded.
+4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` on every BFF-touching task (root `CLAUDE.md` §10 / `.claude/rules/bff-hygiene.md` item 5); it matters most when NuGet packages were added or upgraded.
 5. **MUST** cross-reference CLAUDE.md §10 in the task notes / PR description (e.g., "BFF Hygiene §10 + NFR-01 verified: publish size = X MB, delta = Y MB, no new HIGH CVEs").
 
 ### ⚠️ Measurement convention is BINDING, not descriptive (added 2026-08-27 by `unified-access-control-r2` Wave A)
@@ -98,7 +98,7 @@ cd /tmp/wt-master/src/server/api/Sprk.Bff.Api && dotnet publish -c Release -o /t
 ```
 Report **both** absolute sizes and the delta, and name the zip tool. Worked example: `spaarkeai-compose-r8` measured master **45.42 MB** vs branch **45.43 MB** = **+0.01 MB**, where the stale-baseline comparison had suggested +0.47 MB — a 46× overstatement, enough to trigger a spurious investigation, or to let a real regression pass as "probably baseline drift again".
 
-**Baseline (re-measured 2026-09-02)**: `origin/master` @ `a826cf347` = **45.42 MB** incl. PDBs via PowerShell `Compress-Archive` (the method `scripts/Deploy-BffApi.ps1` uses). Supersedes the 2026-08-13 44.96 MB figure, which was not wrong — master simply grew. **Re-measuring master is the measurement; the recorded number is only a sanity check.** Later projects report master at ~36.1 MB (2026-10-06, Release publish); re-measure rather than trusting any figure here.
+**Baseline (re-measured 2026-09-02)**: `origin/master` @ `a826cf347` = **45.42 MB** incl. PDBs via PowerShell `Compress-Archive` (the method `scripts/Deploy-BffApi.ps1` uses). Supersedes the 2026-08-13 44.96 MB figure, which was not wrong — master simply grew. **Re-measuring master is the measurement; the recorded number is only a sanity check.**
 
 **Threshold for escalation**:
 - Diff ≥ +5 MB single-task: explicit justification required in PR description; reviewer must explicitly accept.

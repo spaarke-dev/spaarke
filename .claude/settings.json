@@ -44,13 +44,21 @@
       "Bash(az keyvault secret delete *)",
       "Bash(az keyvault secret purge *)",
       "Bash(az keyvault secret recover *)",
+      "Bash(az keyvault secret restore *)",
+      "Bash(az keyvault secret set-attributes *)",
       "Bash(az keyvault secret set *ClientSecret*)",
+      "Bash(az keyvault secret set *client-secret*)",
       "PowerShell(az keyvault secret delete *)",
       "PowerShell(az keyvault secret purge *)",
       "PowerShell(az keyvault secret recover *)",
+      "PowerShell(az keyvault secret restore *)",
+      "PowerShell(az keyvault secret set-attributes *)",
       "PowerShell(az keyvault secret set *ClientSecret*)",
+      "PowerShell(az keyvault secret set *client-secret*)",
       "PowerShell(Remove-AzKeyVaultSecret *)",
-      "PowerShell(Set-AzKeyVaultSecret *ClientSecret*)"
+      "PowerShell(Undo-AzKeyVaultSecretRemoval *)",
+      "PowerShell(Set-AzKeyVaultSecret *ClientSecret*)",
+      "PowerShell(Set-AzKeyVaultSecret *client-secret*)"
     ],
     "allow": [
       "Read(**)",
