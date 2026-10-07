@@ -211,7 +211,7 @@ jobs:
             "templates": {
               "customer": {
                 "sourcePath": "infrastructure/bicep/customer.bicep",
-                "resolutionHint": "Selected by ArmDeploymentRunner.ResolveArmTemplateAsync for TenancyModel.Model2 (Model1 fails closed until tasks 225b + 228; task 225a).",
+                "resolutionHint": "Selected by ArmDeploymentRunner.ResolveArmTemplateAsync for both TenancyModel.Model1 and TenancyModel.Model2 (D-12: both are dedicated customer stamps; Model1 since task 228).",
                 "armJsonBlobName": "customer-arm-${{ steps.build-id.outputs.build_id }}.json",
                 "sha256": "${{ steps.hashes.outputs.customer_sha256 }}",
                 "sizeBytes": ${{ steps.hashes.outputs.customer_size }}

@@ -29,15 +29,16 @@ public enum EnvironmentSetupStatus
 }
 
 /// <summary>
-/// Tenancy model values (maps to sprk_tenancymodel local Choice option-set;
-/// added by customer-provisioning-orchestration-r1 task 023 v3 addition per
-/// design.md §3A A1). Model1Shared = trial/SMB shared-platform tier;
-/// Model2Dedicated = regulated/enterprise dedicated stamp.
+/// Tenancy model values: the sprk_tenancymodel local Choice option set, read by its integer value. Added by
+/// customer-provisioning-orchestration-r1 task 023 (design.md §3A A1). Since D-12 (2026-09-28) both models are
+/// dedicated stamps: Model1 = in Spaarke's Azure tenant, Model2 = in the customer's. Named as Dataverse and the L2
+/// control plane name them (T224, 2026-09-29: option labels renamed, values kept). Was Model1Shared / Model2Dedicated
+/// until T233. The values are the Dataverse option values: never renumber them.
 /// </summary>
 public enum TenancyModel
 {
-    Model1Shared = 0,
-    Model2Dedicated = 1
+    Model1 = 0,
+    Model2 = 1
 }
 
 /// <summary>

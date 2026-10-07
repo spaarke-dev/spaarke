@@ -71,8 +71,8 @@
 //
 // TENANCY MODEL NORMALIZATION:
 //   The POML uses colloquial names (SpaarkeOwned / CustomerOwned); the
-//   ProvisioningRun.TenancyModel typed field uses (Model1Shared /
-//   Model2Dedicated) per design.md §6.2 property comment. Both name
+//   ProvisioningRun.TenancyModel typed field uses Model1 / Model2 (T224; pre-T224
+//   Model1Shared / Model2Dedicated) per design.md §6.2 property comment. Both name
 //   conventions are accepted at read time — the handler normalizes to an
 //   internal enum-like set (CustomerOwned requires the Lighthouse branch).
 //   Any unrecognized value returns HandlerResult.Failure(Resumable,
