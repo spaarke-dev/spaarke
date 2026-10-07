@@ -1,9 +1,9 @@
 # Task 097: `/api/communications/send` authorization and the archive id
 
-> **Status (2026-10-06)**: RE-SCOPED per §6 and executed; see **§7** for the re-scoped work. The authorization is
-> UAC-r2 task 161's (on master via #1312, `d254d7166`). This task fixed the outbound archive pointer, switched the
-> Word Email tab on in the deploy workflow, and recorded how 161 treats the Word tab's request. The live checks
-> stay open.
+> **Status (2026-10-06, final)**: COMPLETED with owner **option A** (§9, §10): each archived outbound attachment is
+> now its own new SPE file in the communication's container, and its `sprk_document` points at that file. The
+> authorization is UAC-r2 task 161's (on master via #1312, `d254d7166`). This task also switched the Word Email tab on
+> in the deploy workflow and recorded how 161 treats the Word tab's request (§7). The live checks stay open (§10.6).
 >
 > **History (2026-10-04)**: blocked before any code edit. `/conflict-check` found another active project
 > already fixing the authorization half of this task on the same three files, and editing the archive code
@@ -278,3 +278,268 @@ would be refused with the same 403.
   communication's container, like inbound archiving) / B (no duplicate; the attachment row already links the source) /
   C (ship as is — no). The draft code + its red/green regression test are kept at
   `notes/097-archive-pointer-fix-draft.patch`, NOT in the tree.
+
+## 9. Owner decision (2026-10-06): option A
+
+Owner: *"yes option A"* — and the expectation, in the owner's words: *"why would the attachments not just create/save
+normal documents/files (to SPE); and with association to the email from which they were attached?"* That is option A:
+each outbound attachment is saved to SPE as its **own new file** (in the communication's container), with a normal
+`sprk_document` row pointing at THAT file and associated to the communication — the same thing inbound archiving
+already does. Never share a file between two document rows. Today's code creates the row and the association but never
+writes a file (it fills the pointer fields with a non-file id); the 2026-10-06 draft (`097-archive-pointer-fix-draft.patch`)
+is superseded except for its test harness.
+
+## 10. What shipped (option A, 2026-10-06)
+
+### 10.1 The inbound path, and what is reused
+
+Inbound archiving is `IncomingCommunicationProcessor.ProcessIncomingAttachmentsAsync`
+(`Services/Communication/IncomingCommunicationProcessor.cs:938-1121`). Per attachment it: resolves the container once with
+`CommunicationContainerResolver.ResolveContainerAsync(communicationId, ArchiveContainerId)` (`:1007`, via
+`ResolveContainerForContentAsync` `:1148`); uploads the bytes it already holds with `SpeFileStore.UploadSmallAsync` to
+`{communicationId:N}_{SpeUploadPath.SanitizeFileName(name)}` (`:1045-1047`); creates a `sprk_document` with
+`sprk_graphitemid = fileHandle.Id`, `sprk_graphdriveid = driveId`, `sprk_relatedcommunication`, owned like the
+communication (task 146) (`:1053-1065`); and enqueues the Document Profile job (`:1072`). It is inline code, not a shared
+helper. **Inbound has no large-file path**: the app-only upload session was deleted 2026-08-27
+(`UploadSessionManager.cs:206`), and `UploadSmallAsync` is Graph's simple PUT, good to 250 MB (`:231-235`).
+
+The outbound archive now runs the same steps with the same building blocks: the same container call, the same
+`SpeFileStore.UploadSmallAsync` (its explicit-conflict overload), the same `{C:N}_` naming and sanitizer, the same row
+shape, `ResolveContentOwnerAsync` / `ApplyContentOwner` (146) and `EnqueueDocumentAnalysisAsync`. Extracting the
+inbound loop into a shared helper was not done: it is Graph-typed (`FileAttachment`), owned by the inbound pipeline,
+and also writes `sprk_communicationattachment` rows and RAG jobs the outbound archive does not. `MessageAttachmentMaterializer`
+(the chat twin) was rejected: its chat policy gate (25 MB, four MIME types) would refuse ordinary email attachments
+(`.xlsx`, `.pptx`, images), and it writes its own `sprk_communicationattachment` row.
+
+### 10.2 The new flow (`Services/Communication/CommunicationService.cs`)
+
+- Both send paths (SharedMailbox `:1332-1350`, User `:1648-1666`) pass the attachments the send already downloaded
+  (`fileAttachments`, from `DownloadAndBuildAttachmentsAsync`) to the archive. **No second download.** The
+  `_options.ArchiveContainerId` drive and the raw id array are no longer passed.
+- `ArchiveOutboundAttachmentsAsync` (`:2518`): (1) owner first (146): a refusal archives nothing, so no bytes and no rows;
+  (2) the container, once, through the new `ResolveCommunicationContentContainerAsync` (`:2333`), which is the exact call
+  `ArchiveToSpeAsync` made for the `.eml` and which `ArchiveToSpeAsync` now also uses (`:2276`). One decision for the email
+  and its attachments; (3) per attachment: upload the in-memory bytes to `{communicationId:N}_{sanitized name}` with
+  `ConflictBehavior.Fail`, create the `sprk_document` pointing at the item the upload returned and the container it went
+  into, owned like the communication, `sprk_relatedcommunication` set; enqueue the Document Profile job.
+- **Never two rows on one file**: a name repeated within one send gets a ` (n)` suffix (`UniqueArchivePath`, `:2604`), and
+  `ConflictBehavior.Fail` means an archive upload never replaces an existing file (a collision is a logged, non-fatal
+  failure of that attachment). The source document's file is never written, moved or deleted.
+- An upload that returns no item creates **no row** (before, every row was created, pointing at nothing).
+- Unchanged: the `sprk_communicationattachment` rows (step 7) still link the SOURCE documents; the Word Email tab sends
+  `archiveToSpe: false` and does not reach this code.
+
+**Container choice**: the communication's container from `CommunicationContainerResolver`: a secure regarding's own
+container when the communication regards a secure record (fail closed with `secure_record_container_missing` when it
+has none), else `Communication:ArchiveContainerId`. It is the container the `.eml` goes to and the one inbound uses,
+and it is the container task 166's derivation names for a document linked by `sprk_relatedcommunication`
+(`RecordContainerResolver.DocumentPointer.cs:438`), so the copy reads under both the STRICT rule and the INTERIM rule's
+archive-path clause (b) (`{C:N}_` name, `IsArchivePathItem` `:807`).
+
+**Failure semantics** (unchanged in kind): the email is already sent. An owner refusal logs and archives nothing; a
+container fault or a missing container throws into the caller's existing `catch` ("Outbound attachment archival failed
+(non-fatal)", warning log, the response still succeeds); a per-attachment upload or row failure logs a warning and the
+next attachment continues. The archive still runs only after the `.eml` archived (`archivedDocumentId.HasValue`).
+
+### 10.3 Tests (ADR-038, no `Mock<HttpMessageHandler>`)
+
+`tests/unit/Sprk.Bff.Api.Tests/Services/Communication/OutboundAttachmentArchiveTests.cs` (reuses the draft's harness):
+real `SendAsync`, real `CommunicationContainerResolver` (non-secure → archive container), real document-pointer check on
+the download, real `GraphMetadataCache`; doubles only at the channel sender, the `SpeFileStore` virtuals, the document
+read, the Dataverse writer and the job queue.
+
+| Test | Pins |
+|---|---|
+| `…SavesEachAttachmentAsItsOwnNewFile_AndTheRowPointsAtIt` (theory: SharedMailbox, User) | one upload per attachment carrying exactly the sent bytes, into the communication's container, named `{C:N}_…`; each row's (drive, item) = its upload's result, never the source's item, never a `sprk_document` id; `sprk_relatedcommunication`; team owner (146); a Document Profile job per row; no upload to the source drives and no `DeleteFileAsync` |
+| `…LargeAttachment_IsSavedWholeThroughTheSameUploadAsInbound` | a 5 MB + 17 B attachment is saved whole, once, through the same simple upload inbound uses; the row points at it |
+| `…TwoAttachmentsWithOneName_GetTwoFiles_AndUploadsNeverReplace` | two `scan.pdf` → two paths, two items, rows on different files; no attachment upload with a conflict behaviour other than `Fail` |
+
+**Red / green:**
+
+| Code | Result |
+|---|---|
+| HEAD's `CommunicationService.cs` (`git show HEAD:…`) | **4/4 failed**: "Expected attachmentUploads to contain 2 item(s) … but found 0" (both modes), same for the duplicate-name test, "Expected … to contain a single item, but the collection is empty" (large) |
+| The superseded shared-pointer draft (`097-archive-pointer-fix-draft.patch`, service hunks, applied to HEAD) | **4/4 failed** (no upload is made; the row points at the source file) |
+| The fix | **4/4 passed** |
+| Seed S1: name de-duplication removed | 1 failed (duplicate-name test), 3 passed |
+| Seed S2: `ConflictBehavior.Replace` instead of `Fail` | 1 failed (duplicate-name test), 3 passed |
+| Seed S3: row's `sprk_graphitemid` = the upload path instead of the returned item | 4/4 failed |
+| Restored | 4/4 passed |
+
+### 10.4 Gates
+
+| Gate | Result |
+|---|---|
+| `/conflict-check` | Open PRs touching `Services/Communication/**`: only #1302 (`RegardingNameFields.cs`, a different file). #1314 merged 2026-10-06 (`891cfd9a3`); it changes the template read near `:446`, which this diff does not touch. |
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | 0 warnings, 0 errors (test project also 0/0) |
+| Unit project, filter `Communication\|Office` (includes the linked contract/auth tests, among them 161's `CommunicationRecordAuthorizationContractTests`) | **1906 passed, 16 skipped, 0 failed** (final code; the 4 new tests included) |
+| `tests/Spaarke.ArchTests` | First run: **3 failed** — the new upload is a new SPE write sink. (a) `SpeUploadPathIsFlatGuardTests` rule 2 + its positive control: every `spePath` local must be initialized through `SpeUploadPath.SanitizeFileName` at the call site, and the first draft sanitized inside the helper. Fixed by sanitizing at the call site (`UniqueArchivePath` now takes the sanitized name). (b) `SpeWriteSinkContainerProvenanceGuardTests` Rule A: `CommunicationService.cs` `UploadSmallAsync` #2 had no declared container provenance. Declared as `ServerDerivedRecord` (traced: `CommunicationContainerResolver.ResolveContainerAsync(communicationId, ArchiveContainerId)`, the same call as the `.eml`). Re-run: **806 passed, 0 failed**. |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
+| Publish size (final code): fresh worktrees `C:\code_files\wt097m` (origin/master `891cfd9a3`) and `C:\code_files\wt097b` (HEAD `84eff4523` + the changed `CommunicationService.cs`), `dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` | master **37,886,342 B (36.13 MB)**, branch **37,886,995 B (36.13 MB)**, delta **+653 B**; 192 files each side. (An earlier measurement before the sanitizer move gave +539 B; the same master measured 64 B apart between runs, which is zip noise.) Both worktrees removed. |
+
+### 10.5 Review (inline code-review + adr-check)
+
+- ADR-007: SPE only through `SpeFileStore`; no Graph client. ADR-010: no new DI registration. ADR-002: no plugin. ADR-028:
+  no auth change; the upload is app-only, the same identity as the `.eml` and the inbound archive. ADR-003: the container
+  decision fails closed before any upload. ADR-045: no provider type in the orchestrator (`ChannelAttachment` is
+  channel-neutral). ADR-038: no `Mock<HttpMessageHandler>`; the test is in `tests/unit/…` as the POML asks (ADR-038 would
+  prefer `tests/integration/regression/` for a bug regression — low).
+- CLAUDE.md §10 placement: an existing service is modified; no endpoint, service, package or registration. §11: two private
+  helpers; `ResolveCommunicationContentContainerAsync` replaces an inline call so the `.eml` and the attachments share
+  one decision; `UniqueArchivePath` is the name de-duplication.
+- ArchTest declaration: `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` gains the entry for the
+  new sink (`CommunicationService.cs` `UploadSmallAsync` #2, `ServerDerivedRecord`). Pre-existing, not changed here (low):
+  the entry for ordinal #1 (the `.eml`) still says `ServerDerivedConfig` / `_options.ArchiveContainerId`, although task 076
+  routed that site through `CommunicationContainerResolver`; it is stale wording, not a hole.
+- **Observation for the owner (medium, by design of option A):** the copy goes where the COMMUNICATION's content goes. If
+  a user attaches a document from a SECURE record to an email filed against a NON-secure record, the copy lands in the
+  shared archive container and is readable by that record's audience. Before, the row existed but named no file. This is
+  the same rule inbound applies and the container option A named, and the sender already passed 161's Read check on the
+  source; it is recorded so the owner can confirm it. **RESOLVED by the owner the same day — see §11 (the copy of a
+  secure source goes to the source's secure container).**
+- Low: the copies upload inside the send request (as the `.eml` already did), so a send with archiving on now waits for up
+  to 35 MB of uploads. Low: if the request is cancelled after the send, each remaining attachment logs a warning (the
+  existing pattern). Low: inbound has the same-name overwrite hazard this task closes for outbound (`image001.png` twice in
+  one email → `Replace` → two rows on one file); not changed here.
+
+### 10.6 Open
+
+- **Live (main session, after a BFF deploy)**: from the Spaarke email page, send with archiving on and two attachments
+  (one over 4 MB); the archived documents open, and each is a separate file in the communication's container (its
+  `sprk_graphitemid` differs from the source document's). Deleting an archived copy leaves the original openable.
+- **Live (still open from §7.5)**: the Word Email tab sends the user's own document; a foreign document id is refused with
+  `sdap.access.deny.communication.send`.
+
+## 11. Owner decision (2026-10-06): the copy is as protected as the original
+
+Owner, on the §10.5 medium observation: *"keep the copy as protected as the original"*. The rule given: a copy of a
+SECURE source goes to the source's secure container (with the secure ownership the source's records get under 146),
+still associated to the communication; a non-secure source keeps option A's rule (the communication's container); never
+put a secure source's bytes in a less-protected container; if the source's security cannot be determined, do not archive
+that attachment (log it; the send already succeeded) and never fall back to the shared archive container; if the
+communication and the source are secure in DIFFERENT containers, use the source's.
+
+### 11.1 What "secure source" means (one notion, no ambiguity)
+
+The codebase has ONE notion: a securable root (project / matter / work assignment) with `sprk_issecure = true` and its own
+`sprk_containerid`, read only through task 166's `RecordContainerResolver`. `sprk_document` carries no `sprk_issecure`
+(it is not in the securable registry). The resolver asks that notion in two directions, and the archive uses both — they
+are the owner's two phrasings:
+
+| Owner's phrase | Resolver call | file:line |
+|---|---|---|
+| "is marked secure" — its records put it in a secure container | `DeriveDocumentContainersAsync(sourceDocumentId)` → `IsSecure`, `PrimaryContainer` (the strict pointer rule's reference and Make Secure's target) | `RecordContainerResolver.DocumentPointer.cs:454` |
+| "lives in a secure record's own container" | `ResolveOwningRecordAsync(the drive the source row points at)` (the drive the send read the bytes from, already pointer-checked) | `RecordContainerResolver.cs:2264` |
+
+### 11.2 What shipped (`Services/Communication/CommunicationService.cs`)
+
+- The download now returns each attachment's source (`OutboundAttachmentSource(DocumentId, DriveId)`, `:2833`, recorded at
+  `:3110`) beside the bytes; both send paths pass them to the archive. No second document read for the drive.
+- `ResolveArchiveCopyPlacementAsync` (`:2680`) decides per attachment:
+
+| Source | Copy goes to |
+|---|---|
+| derivation not decided, or any lookup fault | **nowhere** — logged warning "NOT archived (fail closed; the email was sent)"; the next attachment continues |
+| not marked secure, file not in a secure record's container | the communication's container (option A, unchanged) |
+| not marked secure, but the file sits in a secure record's own container | nowhere (the two answers disagree) |
+| marked secure | the derivation's secure container — also when the communication is secure in a DIFFERENT container |
+| marked secure, file in a different secure container | nowhere (disagreement) |
+| marked secure only through its parent document or a communication link | nowhere (the copy cannot carry that filing; see 11.4) |
+
+- A secure copy **carries the source's record links that resolve to that secure container** (same link vocabulary and
+  kinds as the derivation: `DocumentLinkFields`, root/intermediate targets, never a party or a communication), plus
+  `sprk_relatedcommunication`. Its owner is resolved by task 146's resolver over the copy's own parents
+  (`RecordOwnershipContext.ForChild(row, primary = the secure record)`, `RequestedBy` = the sender) — secure-if-any gives
+  the named Secure team. A refusal skips that attachment before any upload. A non-secure copy keeps the communication's
+  content owner (`ResolveContentOwnerAsync`).
+- Unchanged: one upload per attachment from the bytes already read, `{C:N}_` + sanitized name, `ConflictBehavior.Fail`,
+  no row without an item, the Document Profile job, best-effort (the email is never failed by the archive).
+
+### 11.3 Tests (`OutboundAttachmentArchiveTests.cs`; ADR-038, no `Mock<HttpMessageHandler>`)
+
+The harness now runs over task 166's REAL `RecordContainerResolver` in its document-pointer test world
+(`TestRecordContainerResolver.DocumentPointerWorld`): the same instance answers the download's pointer check and the
+archive's secure question. The communication's container comes from the real `CommunicationContainerResolver`.
+
+| New test | Pins |
+|---|---|
+| `…SecureSource_NonSecureCommunication_CopyGoesToTheSourcesSecureContainer` | the copy is uploaded to the source matter's secure container, not the archive; the row points at it, keeps `sprk_relatedcommunication`, carries `sprk_matter` = the secure matter; ownership asked with the secure matter primary and the sender as requester |
+| `…NonSecureSource_CopyGoesToTheCommunicationsContainer` | a source filed to an ordinary matter → the archive container, no record link on the copy |
+| `…SourceSecurityCannotBeDetermined_ThatAttachmentIsNotArchived_OthersAre` | the source's matter cannot be read → no upload of its bytes anywhere, no row; the other attachment is archived; the send and `.eml` succeed |
+| `…SecureSourceAndSecureCommunicationInDifferentContainers_UsesTheSourcesContainer` | the `.eml` goes to M2's container (the communication's), the copy to M1's (the source's); still linked to the communication |
+
+| Code | Result |
+|---|---|
+| Option A as committed (`378729b3b`) | **3 failed / 5 passed**: secure source → "Expected upload.DriveId to be "drive-secure-m1" … but "drive-archive""; different containers → "… "drive-secure-m1", but "drive-secure-m2""; undetermined → "Expected AttachmentUploads(h, undetermined) to be empty … but found" an upload. (The non-secure test pins unchanged behaviour, so it is green on both.) |
+| The fix | **8/8 passed** |
+| Seed S4: the secure branch returns the communication container | 2 failed (secure source; different containers) |
+| Seed S5: a skip falls back to the communication container | 1 failed (undetermined) |
+| Seed S6: the non-secure classification removed (every source takes the secure path) | 6 failed (incl. the non-secure test and all four option-A tests) |
+| Seed S7: a secure communication's container preferred over the source's | 1 failed (different containers) |
+| Restored | 8/8 passed |
+
+### 11.4 Consequences the owner should know
+
+- **Different secure containers (recorded as the owner asked):** the copy is in M1's container and carries `sprk_matter`
+  = M1 AND `sprk_relatedcommunication` → the communication under M2. Its own derived container therefore sees two
+  secure containers and is *undecided*. Under the INTERIM pointer rule (today's default) its app-only reads work (the
+  carried M1 link satisfies the secure-container clause; the BFF uploaded the item and created the row). Under the
+  STRICT rule (after the `DocumentPointer__StrictDerivedContainer` flip) app-only reads of that copy — including its
+  Document Profile job — are refused, and the legacy migration / Make Secure would report it as underivable. Owner: both
+  are acceptable consequences of "the source's container wins", or the copy should drop `sprk_relatedcommunication` in
+  that one case (the owner said "still associated", so it is kept).
+  - **Checked 2026-10-06 (main session's question), NO code change:** (1) the ONLY link on the copy that pulls the
+    communication's secure container Y into its derivation is `sprk_relatedcommunication` — `DeriveCoreAsync` resolves a
+    `sprk_communication` target with `ResolveForRecordWithFixedFallbackAsync` (`RecordContainerResolver.DocumentPointer.cs:545-549`);
+    the copy carries no regarding copied from the communication. (2) Omitting it would NOT keep the copy associated with
+    the email: the `sprk_communicationattachment` rows link the communication to the **SOURCE** documents
+    (`CreateAttachmentRecordsAsync`, `CommunicationService.cs:2480`, called with `request.AttachmentDocumentIds` at
+    `:1373` / `:1691`), never to the copy. The copy's only association to the email is `sprk_relatedcommunication`.
+    **Lost if omitted:** the copy would no longer be a document of that communication (the communication's related-documents
+    relationship) — it would be filed only to the source's secure record; the email's attachment list (which shows the
+    sources) is unaffected. Options for the owner: accept the strict-rule refusal for this rare case; drop the link and
+    accept that loss; or associate the copy another way (for example an additional `sprk_communicationattachment` row
+    pointing at the copy — which changes what the email's attachment list shows, so it is a product decision).
+- A secure copy now also appears in the secure record's document list (it carries the record link) and is owned by the
+  Secure team. A non-secure copy is unchanged (listed only under the communication).
+- Fail-closed skips, each logged: a source whose secure filing comes only through its parent document or its own
+  `sprk_relatedcommunication` (a forwarded archive copy of a secure email's attachment); a non-secure source whose
+  container cannot be derived (its business unit stamps none and `EmailProcessing:DefaultContainerId` is unset). Before
+  this change both would have gone to the communication's container.
+
+### 11.5 Gates
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | 0 warnings, 0 errors (test project 0/0) |
+| Unit project, filter `Communication\|Office` (incl. the linked contract/auth tests, among them 161's) | **1910 passed, 16 skipped, 0 failed** |
+| `tests/Spaarke.ArchTests` | **806 passed, 0 failed**. `SpeWriteSinkContainerProvenanceGuardTests`: the ordinal-2 entry's trace and rationale amended for the secure-source drive (still `ServerDerivedRecord`, one sink, ordinal unchanged). |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
+| Publish size: fresh worktrees `C:\code_files\wt097m` at the branch's merge base with master `dc469d4a2` (origin/master has since moved to `c339d6920` with UAC-r2 commits this branch does not contain, so the merge base isolates this task) and `C:\code_files\wt097b` (HEAD `378729b3b` + the changed `CommunicationService.cs`; the only server file that differs from the base), `dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` | master **37,886,373 B (36.13 MB)**, branch **37,890,561 B (36.14 MB)**, delta **+4,188 B** (option A + this rule); **192 files each side**. Both worktrees removed. |
+| Inline code-review + adr-check | below |
+
+### 11.6 Review (inline code-review + adr-check)
+
+- ADR-003: every undecidable case skips the attachment before any upload; no fallback to a less-protected container.
+  ADR-007: SPE only through `SpeFileStore`. ADR-010: no new DI registration (the Scoped `RecordContainerResolver` is
+  resolved from the existing scope, as the download already does). ADR-002: no plugin. ADR-028: no auth or role change.
+  ADR-038: no `Mock<HttpMessageHandler>`; the real resolvers run; tests stay in `tests/unit/…` beside the other
+  CommunicationService tests (ADR-038 would prefer `tests/integration/regression/` for a regression — low).
+- CLAUDE.md §10/§11: no new service, endpoint, package or registration; two private records and one private method in
+  the existing service, over task 166's and task 146's existing resolvers. No new authorization service.
+- Low: `ResolveArchiveCopyPlacementAsync` uses `RecordContainerResolver.ChildAncestorLinks.KindOf` (internal, same
+  assembly) — the same predicate the derivation uses, so the carried links match what the derivation consulted; it
+  couples to that internal type.
+- Low: per attachment the archive now makes the derivation reads plus the container-claimant probes (one per securable
+  table, a second pass only when a secure claimant exists) inside the send request, after the email is out.
+- Low: when the communication's own content owner is refused (146), nothing is archived — secure copies included
+  (unchanged invariant).
+- Not touched: `tests/integration/auth/UnifiedAccessControl/*`, `SecureBuRoleDepthAssertion*`, `Api/Office/CommunicationsEndpoints.cs`.
+
+### 11.7 Open
+
+- Owner: accept or adjust 11.4's first bullet (the copy's undecided derivation in the different-containers case under
+  the STRICT rule).
+- Live (main session, after a BFF deploy): from the Spaarke email page with archiving on, attach a document of a secure
+  matter to an email filed to an ordinary record → the archived copy is in the matter's container, owned by the Secure
+  team, listed under the matter and the communication. §10.6's live checks stay open.

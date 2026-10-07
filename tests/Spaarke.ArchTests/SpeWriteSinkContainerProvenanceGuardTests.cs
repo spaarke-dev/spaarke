@@ -706,6 +706,29 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "previously archived to the shared container unconditionally, which is the defect task 075 "
             + "closed (ADR-003; ADR-045)."),
 
+        // ── ADDED 2026-10-06 by spaarkeai-word-add-in-r1 task 097 (owner option A) — a NEW site. ──
+        // Traced backwards: driveId <- ResolveCommunicationContentContainerAsync(speScope, communicationId) <-
+        // CommunicationContainerResolver.ResolveContainerAsync(communicationId, _options.ArchiveContainerId) — the SAME
+        // call ArchiveToSpeAsync makes for this communication's .eml (ordinal 1) and the inbound rows above make. The
+        // communication id is the row this send just created; the request supplies only the attachment BYTES (read from
+        // the source documents' own pointers after 161's Read check and 166's pointer check), never a drive or container.
+        // AMENDED 2026-10-06 (same task, owner decision "keep the copy as protected as the original"): when the SOURCE
+        // document is secure the drive is instead the source's secure container — RecordContainerResolver
+        // .DeriveDocumentContainersAsync(source sprk_document id), cross-checked with ResolveOwningRecordAsync(the drive
+        // the source row points at) — never a request value. An undeterminable source is not uploaded at all.
+        new SinkSite("Services/Communication/CommunicationService.cs", "UploadSmallAsync", 2,
+            Provenance.ServerDerivedRecord, "",
+            "ResolveCommunicationContentContainerAsync -> CommunicationContainerResolver.ResolveContainerAsync("
+            + "communicationId, _options.ArchiveContainerId); for a SECURE source, ResolveArchiveCopyPlacementAsync -> "
+            + "RecordContainerResolver.DeriveDocumentContainersAsync(sourceDocumentId).PrimaryContainer",
+            "The outbound twin of the inbound attachment row above (task 097 option A): each outbound attachment is "
+            + "saved as its own new file — in the communication's container (a secure regarding's own container, or "
+            + "Communication:ArchiveContainerId only when nothing is secure) for a non-secure source, and in the "
+            + "SOURCE's own secure container for a secure source, so the copy is at least as protected as the "
+            + "original; a source whose security cannot be determined is not uploaded (ADR-003 fail-closed; ADR-045 "
+            + "communication architecture; ADR-007). Flat, {communicationId:N}_ + sanitized name, and "
+            + "ConflictBehavior.Fail, so it never replaces an existing file and no two document rows ever share one."),
+
         // ORDINAL CHANGED 2 -> 1 on 2026-09-01 (#776), and this is the entry that proves the ordinal
         // keying earns its keep. Nothing about this SITE changed — same call, same method, same
         // Dataverse-derived drive. It renumbered only because #776 removed the apply-template sink that

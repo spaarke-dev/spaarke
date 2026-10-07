@@ -23,6 +23,7 @@ import {
   OpenRegular,
   CopyRegular,
   EditRegular,
+  CheckmarkRegular,
 } from '@fluentui/react-icons';
 import { RelatedToPicker, type CreateRecordResult } from './RelatedToPicker';
 import { RelatedRecordCard } from './RelatedRecordCard';
@@ -111,6 +112,9 @@ const DEMO_RELATED_CANDIDATES: RelatedCandidate[] = [
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
  */
+/** Task 105: how long a button's confirmation ("Copied" / "Opened") shows before it reverts. */
+const BUTTON_FEEDBACK_MS = 2000;
+
 const useStyles = makeStyles({
   container: {
     display: 'flex',
@@ -262,6 +266,8 @@ const useStyles = makeStyles({
   },
   // Task 099: the confirmation takes programmatic focus after a save (tabIndex -1); no focus ring box needed.
   savedBarWrap: { outlineStyle: 'none' },
+  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump).
+  savedBarButton: { minWidth: '8.5rem' },
   savedBarDetail: {
     display: 'block',
     marginTop: tokens.spacingVerticalXXS,
@@ -870,6 +876,28 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     }
   }, []);
 
+  // Task 105: transient per-button feedback state ('done' = check + "Copied"/"Opened", 'failed' = error label).
+  const [buttonFeedback, setButtonFeedback] = useState<{
+    copy?: 'done' | 'failed';
+    view?: 'done' | 'failed';
+  }>({});
+  const feedbackTimers = useRef<Partial<Record<'copy' | 'view', ReturnType<typeof setTimeout> | undefined>>>({});
+  const flashButton = useCallback((which: 'copy' | 'view', outcome: 'done' | 'failed') => {
+    const existing = feedbackTimers.current[which];
+    if (existing) clearTimeout(existing);
+    setButtonFeedback(prev => ({ ...prev, [which]: outcome }));
+    feedbackTimers.current[which] = setTimeout(() => {
+      setButtonFeedback(prev => ({ ...prev, [which]: undefined }));
+      feedbackTimers.current[which] = undefined;
+    }, BUTTON_FEEDBACK_MS);
+  }, []);
+  useEffect(() => {
+    const timers = feedbackTimers.current;
+    return () => {
+      Object.values(timers).forEach(t => t && clearTimeout(t));
+    };
+  }, []);
+
   // Task 088 (UAT-1/7): View Document, Open Document and the duplicate card's View Existing Document all open
   // the Spaarke `sprk_document` RECORD — in the Spaarke app, by the launcher's `appname=` (SPAARKE_APP_NAME) —
   // never the stored file's Graph webUrl. One handler, so the three cannot drift apart.
@@ -882,6 +910,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     if (result.opened) {
       hasOpenedExternalRecordRef.current = true;
     }
+    return result.opened;
   }, []);
 
   // The document "Open Document" opens: the one this pane just saved, else the one identity resolution found.
@@ -1401,12 +1430,24 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     if (savedDocumentUrl) {
       try {
         await navigator.clipboard.writeText(savedDocumentUrl);
-        announce('Link copied to clipboard', 'polite');
+        announce('Link copied', 'polite');
+        flashButton('copy', 'done');
       } catch {
         announce('Failed to copy link', 'assertive');
+        flashButton('copy', 'failed');
       }
     }
-  }, [savedDocumentUrl, announce]);
+  }, [savedDocumentUrl, announce, flashButton]);
+
+  // Task 105 (UAT round 7 item 3): View Document / Copy Link confirm the click for ~2 s, then revert.
+  const handleViewDocument = useCallback(
+    (documentId: string) => {
+      const opened = openDocumentRecord(documentId);
+      announce(opened ? 'Opened' : 'Could not open the document', opened ? 'polite' : 'assertive');
+      flashButton('view', opened ? 'done' : 'failed');
+    },
+    [openDocumentRecord, announce, flashButton]
+  );
 
   // Task 099: a save just completed (the Save button the user pressed is gone) — focus the confirmation.
   useEffect(() => {
@@ -1497,20 +1538,30 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             <Button
               appearance="outline"
               size="small"
-              icon={<OpenRegular />}
-              onClick={() => openDocumentRecord(saved.documentId)}
+              className={styles.savedBarButton}
+              icon={buttonFeedback.view === 'done' ? <CheckmarkRegular /> : <OpenRegular />}
+              onClick={() => handleViewDocument(saved.documentId)}
             >
-              View Document
+              {buttonFeedback.view === 'done'
+                ? 'Opened'
+                : buttonFeedback.view === 'failed'
+                  ? "Couldn't open"
+                  : 'View Document'}
             </Button>
           )}
           <Button
             appearance="outline"
             size="small"
-            icon={<CopyRegular />}
+            className={styles.savedBarButton}
+            icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
             onClick={handleCopyLink}
             disabled={!savedDocumentUrl}
           >
-            Copy Link
+            {buttonFeedback.copy === 'done'
+              ? 'Copied'
+              : buttonFeedback.copy === 'failed'
+                ? "Couldn't copy"
+                : 'Copy Link'}
           </Button>
         </MessageBarActions>
       </MessageBar>

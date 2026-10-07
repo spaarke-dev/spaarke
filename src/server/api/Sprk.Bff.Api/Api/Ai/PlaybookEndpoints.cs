@@ -207,9 +207,20 @@ public static class PlaybookEndpoints
                 });
         }
 
+        // Gate D-G6-2: the row is OWNED by the caller's Dataverse systemuserid (WhoAmI over OBO — the same resolution
+        // OwnerOnly compares with), never left owned by the BFF application user the create runs as, which would lock
+        // its creator out of PUT / share / unshare. Unresolvable → refuse; nothing is created (ADR-003).
+        var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+            httpContext, httpContext.RequestAborted);
+        if (ownerSystemUserId is null)
+        {
+            logger.LogWarning("Creating a playbook for user {UserId}: the caller's systemuserid is unresolvable; refusing", userId);
+            return OwnerUnresolved();
+        }
+
         try
         {
-            var playbook = await playbookService.CreatePlaybookAsync(request, userId);
+            var playbook = await playbookService.CreatePlaybookAsync(request, ownerSystemUserId.Value);
             logger.LogInformation("Created playbook {Id}: {Name}", playbook.Id, playbook.Name);
 
             return Results.Created($"/api/ai/playbooks/{playbook.Id}", playbook);
@@ -778,9 +789,18 @@ public static class PlaybookEndpoints
                 detail: "User identity not found");
         }
 
+        // The clone is the caller's own, by the same owner rule as a create (gate D-G6-2).
+        var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+            httpContext, httpContext.RequestAborted);
+        if (ownerSystemUserId is null)
+        {
+            logger.LogWarning("Cloning playbook {Id} for user {UserId}: the caller's systemuserid is unresolvable; refusing", id, userId);
+            return OwnerUnresolved();
+        }
+
         try
         {
-            var clonedPlaybook = await playbookService.ClonePlaybookAsync(id, userId, request?.NewName);
+            var clonedPlaybook = await playbookService.ClonePlaybookAsync(id, ownerSystemUserId.Value, request?.NewName);
             logger.LogInformation("Cloned playbook {SourceId} to {CloneId} for user {UserId}",
                 id, clonedPlaybook.Id, userId);
 
@@ -803,4 +823,14 @@ public static class PlaybookEndpoints
                 detail: "Failed to clone playbook");
         }
     }
+
+    /// <summary>
+    /// The refusal for a create or clone whose caller has no resolvable Dataverse user: the playbook would have no person
+    /// to own it. The same 403 shape OwnerOnly answers.
+    /// </summary>
+    private static IResult OwnerUnresolved() =>
+        Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "Your Dataverse user could not be resolved, so the playbook cannot be created for you");
 }

@@ -40,18 +40,25 @@ function setScreenWidth(value: number): void {
   Object.defineProperty(window.screen, 'availWidth', { configurable: true, value });
 }
 
-describe('taskPaneWidthService expand/collapse (task 103)', () => {
+function setOuterWidth(value: number): void {
+  Object.defineProperty(window, 'outerWidth', { configurable: true, value });
+}
+
+describe('taskPaneWidthService expand/collapse (task 103, 104)', () => {
   const originalOffice = (globalThis as unknown as { Office?: unknown }).Office;
   const originalWidth = window.innerWidth;
+  const originalOuter = window.outerWidth;
   const originalScreen = window.screen.availWidth;
   beforeEach(() => {
     jest.useFakeTimers();
     setInnerWidth(330);
+    setOuterWidth(0); // no window width unless a test sets one (screen fallback)
   });
   afterEach(() => {
     jest.useRealTimers();
     (globalThis as unknown as { Office?: unknown }).Office = originalOffice;
     setInnerWidth(originalWidth);
+    setOuterWidth(originalOuter);
     setScreenWidth(originalScreen);
   });
 
@@ -68,15 +75,44 @@ describe('taskPaneWidthService expand/collapse (task 103)', () => {
     expect(isTaskPaneResizeSupported()).toBe(false);
   });
 
-  it('builds candidates widest-first: 3x default, screen fractions, then the web cap', () => {
-    expect(expandCandidateWidths('OfficeOnline', 330, 1920)).toEqual([990, 960, 768, 576, 500]);
-    expect(expandCandidateWidths('PC', 395, 1920)).toEqual([960, 768, 576]);
-    expect(expandCandidateWidths('Mac', 345, 0)).toEqual([810]);
-    expect(expandCandidateWidths('iOS', 300, 1920)).toEqual([]);
+  it('no usable window width: screen fallback, widest-first (3x default, screen fractions, then the web cap)', () => {
+    expect(expandCandidateWidths('OfficeOnline', 330, 1920, 0)).toEqual([990, 960, 768, 576, 500]);
+    expect(expandCandidateWidths('PC', 395, 1920, 0)).toEqual([960, 768, 576]);
+    expect(expandCandidateWidths('Mac', 345, 0, 0)).toEqual([810]);
+    expect(expandCandidateWidths('iOS', 300, 1920, 0)).toEqual([]);
   });
 
   it('drops candidates that are not wider than the current pane', () => {
-    expect(expandCandidateWidths('OfficeOnline', 600, 1920)).toEqual([990, 960, 768]);
+    expect(expandCandidateWidths('OfficeOnline', 600, 1920, 0)).toEqual([990, 960, 768]);
+  });
+
+  it('web: a 1200 px browser window on a 2560 px screen never requests more than 600', () => {
+    const candidates = expandCandidateWidths('OfficeOnline', 330, 2560, 1200);
+    expect(candidates).toEqual([600, 500, 480, 360]);
+    expect(Math.max(...candidates)).toBe(600);
+  });
+
+  it('window cap is the smaller of 3x default and 50% of the window', () => {
+    expect(expandCandidateWidths('OfficeOnline', 330, 2560, 3000)[0]).toBe(990);
+    expect(expandCandidateWidths('PC', 395, 2560, 1000)[0]).toBe(500);
+  });
+
+  it('desktop: outerWidth about the pane size is not a window width, so the screen fallback applies', () => {
+    expect(expandCandidateWidths('PC', 395, 1920, 400)).toEqual([960, 768, 576]);
+  });
+
+  it('window width wins over the screen when both are available', () => {
+    expect(expandCandidateWidths('PC', 395, 2560, 1000)).toEqual([500, 400]);
+  });
+
+  it('expandTaskPane reads window.outerWidth and requests nothing above half of it', async () => {
+    const setWidth = installHost({ platform: 'OfficeOnline', min: 330, max: 5000 });
+    setScreenWidth(2560);
+    setOuterWidth(1200);
+    const pending = expandTaskPane();
+    await jest.advanceTimersByTimeAsync(5000);
+    await expect(pending).resolves.toBe(600);
+    expect(setWidth.mock.calls.map(c => c[0])).toEqual([600]);
   });
 
   it('web: steps down past ignored requests until 500 takes', async () => {
