@@ -104,7 +104,8 @@ Restored / corrected / not applicable — each item above:
 | Audit 8 (H12a 4 of 12 seeds; wrong GroupMember GUID) | **Restored** (H12a → T186 checks) / **Fixed** (GUID `…6695` in the guide + `Setup-EntraInfrastructure.ps1`) | current-task; code |
 | Wrongly carried: KV never-delete too broad | **Corrected** (scoped to cleanup; planned deletions follow the KV lifecycle rule) | CLAUDE.md |
 | Wrongly carried: MSYS gotcha in owner-items cell | **Moved** | CLAUDE.md gotchas |
-| INCOMING-141 / INCOMING-145 | **Accepted** as tasks T255 / T256 (before T186); acknowledgment to UAC-r2 pending (owner or #1094 — ask first) | TASK-INDEX, plan, current-task |
+| `sprk_noaccessentry` prerequisite (owner item d) | **Not received** as a hand-off — documented only in UAC-r2's own notes; requested via the owner | current-task, T256 |
+| INCOMING-141 / INCOMING-145 | **Received** (on master since #1312) and **accepted** as tasks T255 / T256 (before T186); acknowledgment to UAC-r2 pending (owner or #1094 — ask first) | TASK-INDEX, plan, current-task |
 | Owner note "branch 309 behind master" | **Measured** 23 behind / 44 ahead of `origin/master` on 2026-10-06 | CLAUDE.md header, current-task |
 | Owner note "[open]/[done] token rule, Secure Projects BU name" | **N/A here** — neither appears in this project's CLAUDE.md or current-task (the BU name in use is `Secure Record`) | — |
 

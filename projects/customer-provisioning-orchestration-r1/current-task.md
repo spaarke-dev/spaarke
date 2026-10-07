@@ -27,6 +27,7 @@
 ## Cross-project deliveries (track until delivered)
 
 - **INCOMING-141 + INCOMING-145 from UAC-r2** — on master since #1312; ACCEPTED here as T255 / T256 (2026-10-06). Still to do: acknowledge to UAC-r2 (owner relays, or a #1094 comment — **ask the owner first**).
+- **`sprk_noaccessentry` prerequisite — NOT RECEIVED as a hand-off** (2026-10-06). UAC-r2 documents it only in its own notes (`DEPLOY-CHECKLIST.md`, `batch4-integration-steps.md`, `docs/data-model/INDEX.md`); no INCOMING file tells provisioning how a new environment gets the table (solution component? which solution? before H9?). Ask UAC-r2 (via the owner) for it; T256 / T218 depend on it.
 - **To UAC-r2: do NOT run `task-165-admin-surfaces.md` §13.9(b)/§14.9(b) step 2 (`-MintClientSecret` on `bfac7f6e`)** — conflicts with D16/T250 and is unnecessary since SPE Admin runs as the BFF identity (2026-10-04). Note: `notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md`. **NOT YET DELIVERED** — ask the owner how to deliver (relay or #1094).
 
 ## Open items (no task yet)
