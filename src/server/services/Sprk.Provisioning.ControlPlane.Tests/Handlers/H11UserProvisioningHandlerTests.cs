@@ -364,12 +364,14 @@ public sealed class H11UserProvisioningHandlerTests
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
         var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var consent = FakeConsentVerifier.Throwing(new OperationCanceledException(cancelled.Token));
         var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
-            FakeInvitationClient.Success(), FakeConsentVerifier.Throwing(new OperationCanceledException(cancelled.Token)));
+            FakeInvitationClient.Success(), consent);
 
         var act = () => handler.HandleAsync(BuildEnvelope(), cancelled.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>("a shutdown is not a provisioning failure");
+        consent.CallCount.Should().Be(1, "the cancellation came from the consent check, so its catch filter decided");
     }
 
     [Fact]

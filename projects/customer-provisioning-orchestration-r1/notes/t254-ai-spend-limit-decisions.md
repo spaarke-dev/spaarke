@@ -75,4 +75,5 @@ Owner G37 (2026-10-06): "no cap but allow for a per customer spend limit if desi
 ADR tensions recorded in `design.md` §17 (T254 bullet): Path A for `provisioning.md`'s "no manual single-setting app
 setting writes in production" (`Set-AiSpendLimit.ps1` writes an operator-owned runtime policy value, not deploy
 configuration — the owner asked for exactly this change path) and for ADR-010's `ValidateOnStart` (D4: a bad value must
-not stop the BFF). Owner approval requested for the 17th `SystemCacheKeys` entry (`AiSpendMonth`).
+not stop the BFF). **Owner-approved 2026-10-07**: both Path A exceptions and the 17th `SystemCacheKeys` entry
+(`AiSpendMonth`).

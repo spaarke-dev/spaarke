@@ -4,7 +4,7 @@
     <title>H11 makes Model 1 guests usable: B2BGuest required for Model 1; no duplicate invitation mail; guests join the customer's environment security group; each guest becomes a Dataverse user with the Spaarke user role; access is paid pay-as-you-go on the customer's stamp subscription (operator prerequisite)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T232 (D2, G10)</phase>
     <gate>after 228 (✅), 230b (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 handler + intake + DAG inputs, Graph and Dataverse writes as the Worker identity, tenant-isolation guard (environment security group), operator skill and binding docs.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -101,5 +101,36 @@
     <trigger>A live action would be required to verify — ask the owner first.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-07 (SESSION 41). Commits c5df5f07c (code), tests, 466e75e75 (docs/PRQs), 07a92eca3 (round 1),
+    79ca02b3c (round 2), master merge 512cd2304 (+ 7f908c2dc merge semantic fix), 67a7bf446 (round 3, owner-approved),
+    plus this close. Decisions D1–D12 + known limits K1–K10: notes/t232-guest-access-decisions.md.
+    - Owner 2026-10-07: Spaarke pays guest access PAY-AS-YOU-GO on the customer's stamp subscription (no per-user
+      licences); the per-app meter (~$10 per active user per app per month) ACCEPTED.
+    - Intake: Model1 → B2BGuest only (userprov-model1-requires-b2b-guest); B2BGuest needs environmentSecurityGroupId
+      (canonical GUID; userprov-missing/invalid-security-group-id); a repeated guest email refused. Schema + catalog +
+      endpoint + HandlerRunInputs (+ Output DataverseEnvUrl) in parity.
+    - H11 B2BGuest: before inviting anyone — H5's DataverseEnvUrl, the group named sprk-{customerId}-users and
+      security-enabled (userprov-security-group-rejected), restrictguestuseraccess off (userprov-guest-access-restricted),
+      the guest roles resolved once in the root BU (reusing H8's IDataverseRootBusinessUnitReader; missing → named,
+      ambiguous → refused). An existing guest is reused — no second invitation email; a Member address refused. After
+      every guest redeems: group membership (idempotent), systemuser via the azureactivedirectoryobjectid alternate key
+      (Dataverse adds a group member on demand — Microsoft's app-only path; no Power Platform admin role), role
+      association if not held; systemuserid in ProvisionedUsers. NativeAccount with no licence SKU creates nobody.
+      Every collaborator timeout is a named Resumable failure.
+    - New seams: IEnvironmentSecurityGroupClient (Graph), IDataverseGuestUserWriter (Web API); options validated at start
+      (GuestSecurityRoleNames default applied after binding).
+    - PRQ-C-10 (group, and that it is SET ON the environment — operator-only, checked by the skill through the Power
+      Platform admin API), PRQ-C-11 (PAYG billing policy on the stamp subscription), PRQ-C-12 (guest access) — prereqs
+      manifest v9; skill Step 1e-bis checks all three as the operator (deviation D9: not Step 0.5 — once-per-customer
+      checks are deferred there by design). Guide, inventory, PROVISIONING-PREREQUISITES v7, constraints section, CHANGELOG.
+    - Step 9.5: code-review (4 W, 12 S) + adr-check (1 V ADR-044, 10 W) → round 1; verifier → 8 new (round 2); final
+      verifier → 1 Critical (skill az.cmd broke on ')' in RetrieveCurrentOrganization — every Model 1 run would hard-stop)
+      escalated under the old 2-round cap; owner approved the fix and withdrew the cap repo-wide (merged from master) →
+      round 3; fix-diff re-verification: all verified, K-notes only.
+    - Tests: ControlPlane 2275/0 (1 skip); ArchTests 836/836; BFF full (post-merge): see the close commit. Worker + Api
+      0 warnings. No BFF code changed by T232.
+    - T186 live checks: on-demand add of an unlicensed guest under PAYG (alternate key); the BAP / RetrieveCurrentOrganization
+      response shapes the skill reads (K6); pac licensing output shape (K3 — anchor the Enabled match then).
+  </notes>
 </task>

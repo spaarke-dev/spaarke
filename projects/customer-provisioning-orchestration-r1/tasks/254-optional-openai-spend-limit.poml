@@ -89,7 +89,7 @@
       per-tid keying matches no Model 1 caller; the ledger was per process; 3 of 10 OpenAiClient methods recorded usage.
     - D1 one OPTIONAL limit per STAMP (AiSpendLimit__MonthlyLimitUsd; unset = no limit) — replaces TenantBudget*;
       D2 Redis ledger (integer micro-USD, {InstanceName}ai-spend:month:{yyyy-MM}, SystemCacheKeys.AiSpendMonth = 17th
-      entry, owner approval requested); D3 both seams (every public OpenAiClient method + AiSpendLimitChatClient inside
+      entry, owner-approved 2026-10-07); D3 both seams (every public OpenAiClient method + AiSpendLimitChatClient inside
       UseFunctionInvocation; usage now recorded on every completion path); D4 fail-open on the store (250 ms bounded read)
       and on unbindable settings (logged once); D5 429 ProblemDetails + Retry-After (next UTC month), chat SendMessage +
       RefineText pre-check before SSE, in-band code mid-turn; client shows the server message (describeTooManyRequests /
@@ -97,8 +97,8 @@
       (OpenAiMonthlyLimitRule, POST /api/runs) → H4b required:false entry (generator now supports optional per-env
       sources) → scripts/Set-AiSpendLimit.ps1 for later add/change/remove (both slots, idempotent, -WhatIf).
     - Step 9.5: code-review (5 W, 17 S) + adr-check (13 W, 3 V) → round 1 fixed all W and most S; V1 (single-setting
-      script writes vs provisioning.md) + V2 (no ValidateOnStart) = Path A recorded in design §17, owner confirmation
-      requested; V3 eviction = K4. Verifier pass on the fix diff: 1 W (refine 429 rendered raw JSON client-side) +
+      script writes vs provisioning.md) + V2 (no ValidateOnStart) = Path A recorded in design §17, owner-approved
+      2026-10-07; V3 eviction = K4. Verifier pass on the fix diff: 1 W (refine 429 rendered raw JSON client-side) +
       suggestions → round 2 fixed. No round 3.
     - BFF §10: publish (fresh short-path worktrees, Compress-Archive Optimal, PDBs incl.) pre-task 3eeb76788 36.15 MB / 192
       files, origin/master fdfd4cec5 36.15 MB / 192, branch 105db5087 36.16 MB / 192 = +0.01 MB; CVE none; ADR-010

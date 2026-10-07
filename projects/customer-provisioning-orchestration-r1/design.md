@@ -1887,11 +1887,11 @@ Before every U3 (Bicep infra) upgrade, run `az deployment group what-if` to dete
     `IChatClient` pipeline) — no other host makes or sees those calls; ADR-052 — no background work (two fire-and-forget
     Redis commands on the calling path). Decision criteria: latency — one Redis GET per model call only when a limit is
     set, bounded at 250 ms then fail-open; state — the stamp's existing Redis (system key `SystemCacheKeys.AiSpendMonth`,
-    17th entry — **owner approval requested**); ADR-013 — no CRUD→AI dependency (consumers are AI endpoints and
+    17th entry — **owner-approved 2026-10-07**); ADR-013 — no CRUD→AI dependency (consumers are AI endpoints and
     `OpenAiClient`). **Publish size** (fresh short-path worktrees, `Compress-Archive` Optimal, PDBs incl.): pre-task
     `3eeb76788` **36.15 MB / 192 files**, fresh `origin/master` `fdfd4cec5` **36.15 MB / 192 files**, branch `105db5087`
     **36.16 MB / 192 files** = **+0.01 MB**. `dotnet list package --vulnerable --include-transitive`: none. ADR-010
-    ceiling 159 → 157 (both weak 077 seams gone). **ADR Tensions (§6.5) recorded at T254 Step 9.5**: (a) **Path A,
+    ceiling 159 → 157 (both weak 077 seams gone). **ADR Tensions (§6.5) recorded at T254 Step 9.5 — (a) and (b) owner-approved 2026-10-07**: (a) **Path A,
     `provisioning.md` "NO manual `az webapp config appsettings set` single-setting fixes in production"** —
     `scripts/Set-AiSpendLimit.ps1` writes ONE setting on both slots outside H4b. Accepted because the limit is
     operator-owned runtime policy, not deploy configuration, and the owner asked for exactly this change path

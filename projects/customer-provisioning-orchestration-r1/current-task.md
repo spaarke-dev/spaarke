@@ -2,22 +2,22 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure, owner-corrected 2026-10-06, PR #1336): F1–F4 fix now / K1–K4 known limit; NO cap on fixing real defects — re-verify only the fix diff + direct callers/callees and re-run affected suites; 1 full verifier pass per task (2 for auth/security/tenant-isolation); the limits cap review ceremony, never fixing.
 
-> **Last Updated**: 2026-10-07 SESSION 41 — T254 closed (f06296312); T232 POML created; owner chose PAYG licensing.
+> **Last Updated**: 2026-10-07 SESSION 41 (context-handoff before /compact) — T232 closed (owner: PAYG accepted; round cap withdrawn, master merged); next T233.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
-| **Step** | Step 9.5 round 3 (owner-approved; master merged `512cd2304` — round cap withdrawn): C1 skill az.cmd fix + W1/W2/S1–S3 applied. ControlPlane 2275/0 (1 skip), Worker + Api 0 warnings; BFF + ArchTests (post-merge) running in background. |
-| **Status** | in-progress — final fix-diff re-verification, then close. Owner 2026-10-07: PAYG per-app meter ACCEPTED. |
-| **Next Action** | Check BFF + ArchTests (bj7k1dm0j); re-verify the round-3 fix diff (skill Step 1e-bis + H11 catches); close T232 (POML notes, TASK-INDEX ✅, current-task → T233, devops sync → Tasks Completed 193). |
-| **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
-| **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
+| **Task** | **T233** — BFF `TenancyModel` enum rename (G8): `Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs:37` still `Model1Shared`/`Model2Dedicated` — would not parse post-T224 Dataverse labels → `Model1`/`Model2`; BFF §10 checks (publish size, tests). **No POML yet** — create it from plan §7 row T233 (copy `tasks/228-…poml`), add the TASK-INDEX row. |
+| **Step** | 0 — not started. T232 ✅ (SESSION 41) — see its POML notes + `notes/t232-guest-access-decisions.md`. |
+| **Status** | pending. |
+| **Next Action** | **FIRST** confirm the post-merge BFF full suite (master merged `512cd2304` + semantic fix `7f908c2dc`; the SESSION 41 run was still in flight at handoff): `dotnet test tests/unit/Sprk.Bff.Api.Tests --nologo` — expect ~18.1k pass / 0 fail; fix any merge fallout first. THEN create `tasks/233-…poml` (copy `tasks/228-…poml`, plan §7 row T233 / G8) + TASK-INDEX row, then `task-execute` 233. BFF-touching → publish-size from fresh short-path worktrees (CLAUDE.md §10). No live action without owner approval. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — master merged 2026-10-07 (`512cd2304`); **1 behind / 65 ahead of `origin/master`** at handoff. Merge master again before T186 and before any BFF deploy from this branch. |
+| **Order** | T254 ✅ → T232 ✅ → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 
 ## Owner items
 
-0. **T254 owner asks** (raise at close): approve the 17th `SystemCacheKeys` entry `AiSpendMonth` (stamp-wide Redis key); confirm the two §6.5 Path A exceptions in design §17 (Set-AiSpendLimit.ps1 single-setting writes vs provisioning.md; no ValidateOnStart for AiSpendLimit options). Client change (`useSseStream.ts`, `SprkChat.tsx`) reaches users only with the next code-page/PCF build.
+0. ✅ 2026-10-07: owner approved T254's `AiSpendMonth` cache key and both §6.5 Path A exceptions, and T232's PAYG per-app meter. T254's client change (`useSseStream.ts`, `SprkChat.tsx`) reaches users only with the next code-page/PCF build.
 
 1. **W7 (approved, open)**: deploy the L2 Api control-plane template so the Api gets `CustomerRunGuard` config — the code defaults `CustomerRunGuard:Enabled=true`, the Worker sets it false; the Api ACQUIRES the guard and the Worker RELEASES it. **Blocked by item 3 below** (every `platform-controlplane` deploy fails its Api module on the pending slot swap). Ask before deploying.
 2. ✅ SESSION 41: `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev; L2 UAMI's platform-subscription Contributor removed.
