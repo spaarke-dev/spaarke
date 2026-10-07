@@ -23,7 +23,11 @@
         the dedicated ribbon solution -SolutionName (never SpaarkeCore - the ribbon-edit skill), unpacks it, checks the
         work-assignment RibbonDiff.xml into WorkAssignmentRibbons/Entities/sprk_workassignment/ BEFORE editing it (task
         142 UX (f)), merges each entity with Merge-AccessRibbon.ps1, packs, imports with publish, then runs -Verify
-        against the recorded before-list.
+        against the recorded before-list. THE EFFECTIVE RIBBON LAGS THE PUBLISH: on spaarkedev1 (2026-10-07) the verify
+        run right after "Published All Customizations" reported partial FAILs that differed per entity, and a read-only
+        -Verify 75 s later PASSED on all three. So -Apply retries its verify with a bounded backoff (15, 30, 45, 60 and
+        30 s - about 3 minutes in all) and reports VERIFY FAILED only when the last attempt still fails. The read-only
+        -Verify mode does not retry: run it again after a few minutes if it is run straight after an import.
 
       -Verify (read-only): reads each main form's EFFECTIVE ribbon (RetrieveEntityRibbon, Form) and checks that every
         command of the before-list is still present, that Update Access and Remove Secure are present with their
@@ -516,7 +520,23 @@ if ($LASTEXITCODE -ne 0) { throw "pac solution pack failed ($LASTEXITCODE)." }
 & pac solution import --environment $EnvironmentUrl --path $packed --publish-changes
 if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
 
+# The effective ribbon (RetrieveEntityRibbon) lags the publish by up to a minute or more, so a verify run straight after
+# the import can fail on rules that are in fact applied (see the header). Retry with a bounded backoff; only the last
+# attempt's failures decide.
+$retryDelaysSeconds = @(15, 30, 45, 60, 30)
 $failed = Invoke-Verify $beforeByEntity
-if ($failed -gt 0) { Write-Host "APPLIED, but VERIFY FAILED on $failed entities - see above." -ForegroundColor Red; exit 1 }
+$attempt = 1
+foreach ($delay in $retryDelaysSeconds) {
+    if ($failed -eq 0) { break }
+    Write-Host ("Verify attempt $attempt of $($retryDelaysSeconds.Count + 1) failed on $failed entit$(if ($failed -eq 1) { 'y' } else { 'ies' }); " +
+        "the effective ribbon can lag the publish - retrying in $delay s.") -ForegroundColor Yellow
+    Start-Sleep -Seconds $delay
+    $attempt++
+    $failed = Invoke-Verify $beforeByEntity
+}
+if ($failed -gt 0) {
+    Write-Host "APPLIED, but VERIFY FAILED on $failed entities after $attempt attempts over about 3 minutes - see above." -ForegroundColor Red
+    exit 1
+}
 Write-Host 'APPLIED and VERIFIED. Then run the ui-tests (task 150 POML) on the three forms.' -ForegroundColor Green
 exit 0
