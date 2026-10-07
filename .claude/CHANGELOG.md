@@ -7,6 +7,37 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 16,993 bytes (−49,664), 499 → 210 lines; 15.2 KB / 184 lines as injected (claude-md-cleanup-r1)
+
+The root file had regrown from 18 KB (May rewrite) to 66 KB. §17 pointer rows alone were 30 KB; incident write-ups sat inside rules; nothing limited growth. It now holds only binding every-turn rules, safety guards and one-line triggers, per Anthropic's guidance (< 200 lines per CLAUDE.md). Section numbers are unchanged. The previous file is archived verbatim at `.claude/archive/2026-10-07/CLAUDE.md`.
+
+**Relocated, not deleted** (each verified present at its destination):
+- §17's 58 rows → new `docs/INDEX.md`, verbatim.
+- The Calendar two-variant detail → `src/client/shared/Spaarke.Events.Components/README.md`.
+- §10 → new path-scoped rule `.claude/rules/bff-hygiene.md` (loads when editing the BFF / `Spaarke.Core` / `Spaarke.Dataverse`; items 1–6 keep their numbering). §10's publish-size text, including hazards 3 and 4 that existed only in root → `.claude/constraints/azure-deployment.md`. That file's own rule also changes: it now says to measure the delta against a fresh master build, not "the prior measured baseline".
+- §6.5's enforcement points, limits and anti-patterns → `adr-check` Step 5.5.
+- §11's anti-pattern examples → `task-create` Step 3.5.6.
+- §7 and §8 → pointers to `task-execute`, which already held them.
+
+**Changed:**
+- §5: event-based checkpoints, replacing context-percentage triggers. Claude cannot see its own context percentage; the docs say only the user can.
+- §9: the Key Vault rule is no longer paraphrased. It now points at the current text, which is time-boxed and environment-specific; issue #1348 tracks the stale E-1 statements in ADR-028 / `provisioning.md`.
+- §16: describes the real hooks.
+- Maintainer notes moved into a block-level HTML comment, which is stripped before injection.
+- Paths are backticked rather than linked, and wording is plain (no emphasis inflation).
+
+**New:**
+- `.claude/rules/credentials.md`: path-scoped pointer to the Key Vault lifecycle rule and ADR-028, for secret-handling code.
+- `.claude/hooks/reinject-project-state.ps1`, plus a `SessionStart`/`compact` hook in `.claude/settings.json`. It re-injects the project's `current-task.md` and its standing directives after compaction. PreCompact cannot inject context; SessionStart can.
+- `permissions.ask` rules for `az keyvault secret delete|purge|recover`, `set *ClientSecret*`, and the PowerShell equivalents. The human confirms each time; `ask` takes precedence over the blanket Bash allow. These are not `deny` rules, so the time-boxed lifecycle (auth-v4's retirement runbook) is never blocked.
+
+**Skills:**
+- `ai-procedure-maintenance` no longer sends additions to root tables that don't exist; it states the budget and placement rules, and adds `.claude/rules/` as a home.
+- `doc-drift-audit` reports instruction-file size and dead paths.
+- `project-setup`: the project `CLAUDE.md` template is rewritten to a 7-section operating manual that does not copy repo-wide rules, with guidance on size and upkeep.
+
+Three docs had anchor links to the old §6.5 / §10 headings and were repointed. Run `/doctor prompt-audit` (Claude Code ≥ 2.1.283) after merge.
+
 ###### 2026-10-06 — SPE byte identity: broker-only replaces writer-identity matching (unified-access-control-r2 task 171)
 
 Three files change: `.claude/patterns/auth/spe-writer-identity-matching.md` (marked SUPERSEDED, decision-matrix row marked historical), `.claude/constraints/auth.md` (the SPE File Access section is rewritten: app-only behind a Dataverse decision plus the pointer check; no new `*AsUserAsync` callers; container roles only through `GrantMarkedWriterAsync`) and `.claude/constraints/bff-extensions.md` §D (background SPE reads are app-only after the pointer check). This follows owner rounds 69/70.

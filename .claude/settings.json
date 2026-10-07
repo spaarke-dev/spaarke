@@ -25,10 +25,33 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -File \"$CLAUDE_PROJECT_DIR/.claude/hooks/reinject-project-state.ps1\""
+          }
+        ]
+      }
     ]
   },
   "permissions": {
     "defaultMode": "acceptEdits",
+    "ask": [
+      "Bash(az keyvault secret delete *)",
+      "Bash(az keyvault secret purge *)",
+      "Bash(az keyvault secret recover *)",
+      "Bash(az keyvault secret set *ClientSecret*)",
+      "PowerShell(az keyvault secret delete *)",
+      "PowerShell(az keyvault secret purge *)",
+      "PowerShell(az keyvault secret recover *)",
+      "PowerShell(az keyvault secret set *ClientSecret*)",
+      "PowerShell(Remove-AzKeyVaultSecret *)",
+      "PowerShell(Set-AzKeyVaultSecret *ClientSecret*)"
+    ],
     "allow": [
       "Read(**)",
       "Glob(**)",
