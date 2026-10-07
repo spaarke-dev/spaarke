@@ -256,6 +256,28 @@ public sealed class FilePerEnvSettingsManifestTests
     }
 
     [Fact]
+    public async Task ReadAsync_RealEmbeddedManifest_CorsAllowedOrigins_AreTheSharedClientSites_AsExactHttpsOrigins()
+    {
+        // T240a: CorsModule throws at startup outside Development when Cors:AllowedOrigins is empty, so every stamp
+        // needs these. They must be exact origins (https, no path, no trailing slash) — CorsModule matches origins
+        // exactly and refuses a non-https one at startup, so a malformed literal here would stop every stamp BFF.
+        var entries = ((PerEnvSettingsManifestReadResult.Success)await NewManifest().ReadAsync(CancellationToken.None)).Entries;
+
+        var cors = entries.Where(e => e.Key.StartsWith("Cors__AllowedOrigins__", StringComparison.Ordinal)).ToList();
+
+        cors.Select(e => e.Key).Should().Equal("Cors__AllowedOrigins__0", "Cors__AllowedOrigins__1");
+        cors.Select(e => e.LiteralValue).Should().Equal("https://addins.spaarke.com", "https://external.spaarke.com");
+        foreach (var entry in cors)
+        {
+            entry.PerEnvSource.Should().Be(PerEnvSettingSource.Literal);
+            entry.Required.Should().BeTrue();
+            Uri.TryCreate(entry.LiteralValue, UriKind.Absolute, out var uri).Should().BeTrue();
+            uri!.Scheme.Should().Be(Uri.UriSchemeHttps);
+            uri.GetLeftPart(UriPartial.Authority).Should().Be(entry.LiteralValue, "an origin has no path or trailing slash");
+        }
+    }
+
+    [Fact]
     public async Task ReadAsync_RealEmbeddedManifest_TwoConsecutiveCalls_ReturnSameEntryCount()
     {
         var manifest = NewManifest();

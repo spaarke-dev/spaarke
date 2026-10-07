@@ -20,13 +20,18 @@
 //   - NEW Model 2 FIC fields (auth-v4 §3.1 recipe) — federated identity
 //     credential trusting the shared BFF UAMI, per spec.md FR-39 / design.md
 //     §4.1 H3 row v3.5 split.
+//   - T240a (2026-10-07): PreAuthorizedClientAppIds (shared M365 clients H3
+//     pre-authorizes on each customer BFF app). The three shell-out-era fields
+//     (PwshExecutable / RegisterEntraAppRegistrationsScriptPath / ProvisionTimeout)
+//     were removed: the retired script provisioner they served is gone.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 
 /// <summary>
 /// Bound options for <see cref="H3EntraAppRegHandler"/> collaborators.
-/// Configuration key: <c>EntraAppReg</c>.
+/// Configuration key: <c>EntraAppRegOptions</c> (Worker/Program.cs binds <c>nameof(EntraAppRegOptions)</c>; the Worker
+/// Bicep sets <c>EntraAppRegOptions__SpaarkeTenantId</c> and <c>EntraAppRegOptions__PreAuthorizedClientAppIds__N</c>).
 /// </summary>
 public sealed class EntraAppRegOptions
 {
@@ -105,19 +110,11 @@ public sealed class EntraAppRegOptions
     /// <summary>Timeout for a single KV SecretClient call (parity with KvSecretsPopulationOptions.KvOperationTimeout).</summary>
     public TimeSpan KvOperationTimeout { get; set; } = TimeSpan.FromSeconds(15);
 
-    // ---- RETIRED (task 130) — referenced ONLY by the unregistered
-    // RegisterEntraAppRegScriptProvisioner.cs (kept on disk, inert, per that
-    // file's retirement banner). Kept here so the retired file still
-    // compiles without resurrecting its shell-out code path. Do NOT wire
-    // these into new code — see EntraAppRegOptions class header. ----
-
-    /// <summary>RETIRED (task 130) — see class-header note. Path to the pwsh executable (shell-out era, unused by GraphAppRegistrationProvisioner).</summary>
-    public string PwshExecutable { get; set; } = "pwsh";
-
-    /// <summary>RETIRED (task 130) — see class-header note. Absolute path to the retired Register-EntraAppRegistrations.ps1 script.</summary>
-    public string RegisterEntraAppRegistrationsScriptPath { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "scripts", "Register-EntraAppRegistrations.ps1");
-
-    /// <summary>RETIRED (task 130) — see class-header note. Max wait for the retired script invocation.</summary>
-    public TimeSpan ProvisionTimeout { get; set; } = TimeSpan.FromMinutes(10);
+    /// <summary>
+    /// T240a: the shared client apps (application ids) H3 pre-authorizes on every customer BFF app registration for
+    /// its <c>user_impersonation</c> scope, so they get that BFF's token without a consent prompt — today the Office
+    /// add-in; the Teams client when it exists (T240c). Platform-wide, never per customer; H3 sets exactly this list.
+    /// Empty by default; the Worker Bicep supplies it. Each entry must be a GUID.
+    /// </summary>
+    public List<string> PreAuthorizedClientAppIds { get; set; } = [];
 }

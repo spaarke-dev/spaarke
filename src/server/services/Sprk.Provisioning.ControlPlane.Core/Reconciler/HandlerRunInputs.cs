@@ -114,6 +114,8 @@ public static class HandlerRunInputs
             [HandlerIds.H3] =
             [
                 Tenant,
+                RunInput.Intake(IntakeParameterCatalog.DataverseEnvUrl),   // T240a: the code pages' SPA redirect
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),   // T240a: the URL rule's domain
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
                 RunInput.Output(nameof(InterStepState.S2SAppRegId), required: false),   // refused if present

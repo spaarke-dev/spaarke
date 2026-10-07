@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "10339792521466403144"
+      "templateHash": "3102753934286215886"
     }
   },
   "parameters": {
@@ -1552,7 +1552,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "13662544885713775605"
+              "templateHash": "2507025047034401311"
             }
           },
           "parameters": {
@@ -1718,6 +1718,15 @@
                 "description": "SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run's intake containerTypeId; ownerAppId = the owning app registration's client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker's UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0's SpeOwnerCredential probe, H8 (container creation) and H13's T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice."
               }
             },
+            "preAuthorizedClientAppIds": {
+              "type": "array",
+              "defaultValue": [
+                "c1258e2d-1688-49d2-ac99-a7485ebd9995"
+              ],
+              "metadata": {
+                "description": "Client apps H3 pre-authorizes on every customer BFF app registration for user_impersonation, so they get a token for that BFF without a consent prompt (T240a). Platform-wide, never per customer. Default: the shared Office add-in client (Spaarke Office Add-in). The Teams client joins when it exists (T240c)."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -1755,7 +1764,8 @@
                 "value": "true"
               }
             ],
-            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]"
+            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]",
+            "entraAppRegSettings": "[concat(createArray(createObject('name', 'EntraAppRegOptions__SpaarkeTenantId', 'value', tenant().tenantId)), map(range(0, length(parameters('preAuthorizedClientAppIds'))), lambda('i', createObject('name', format('EntraAppRegOptions__PreAuthorizedClientAppIds__{0}', lambdaVariables('i')), 'value', parameters('preAuthorizedClientAppIds')[lambdaVariables('i')]))))]"
           },
           "resources": [
             {
@@ -1782,7 +1792,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'), variables('entraAppRegSettings'))]"
                 }
               }
             },

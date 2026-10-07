@@ -885,3 +885,27 @@ per_env_settings:
       deployment runs gpt-4.1-mini (openai.bicep / PinnedModelCatalog) — the
       name is what the BFF addresses, so it stays. Global literal: every
       stamp deploys the same set.
+
+  - key: 'Cors__AllowedOrigins__0'
+    per_env_source: 'literal'
+    literal_value: 'https://addins.spaarke.com'
+    iOptionsModule: 'CorsModule'
+    required: true
+    notes: >-
+      T240a (2026-10-07). The production Office add-in site (Static Web App
+      swa-spaarke-office-addins-prod, owner-chosen custom domain). CorsModule
+      throws at startup outside Development when Cors:AllowedOrigins is empty,
+      so without these entries no stamp BFF starts. The customer's Dataverse
+      origins need no entry: CorsModule already admits *.dynamics.com and
+      *.powerapps.com by suffix. Global literal: every stamp is reached by the
+      same shared client sites.
+
+  - key: 'Cors__AllowedOrigins__1'
+    per_env_source: 'literal'
+    literal_value: 'https://external.spaarke.com'
+    iOptionsModule: 'CorsModule'
+    required: true
+    notes: >-
+      T240a (2026-10-07). The production External Access SPA, which is also the
+      Teams tab (Static Web App swa-spaarke-external-spa-prod, owner-chosen
+      custom domain). One origin covers the browser and Teams.

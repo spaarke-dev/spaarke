@@ -1443,9 +1443,9 @@ RUN PLAN
     H1        resource-group provisioning
     H2a       Bicep infra apply (30-min timeout)
     H2b       AI Search index deploy (7 canonical indexes)
-    H3        KV secret bootstrap
+    H3        per-customer BFF Entra app registration (FIC; SPA redirect = Dataverse origin + pre-authorized shared clients, T240a)
     H4        canonical secret population (per-tenant KV; literal values)
-    H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201)
+    H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201; incl. CORS shared client origins, T240a)
     H5        adopt the operator's Dataverse environment (URL rule + WhoAmI as the Worker identity; never creates — T228)
     H10       Dataverse application users + Graph parity (T228: before H6, which signs in as the BFF app it registers)
     H6        Dataverse solutions import (8 solutions, dependency-ordered)

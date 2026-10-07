@@ -2,8 +2,7 @@
 // GraphAppRegistrationProvisioner.cs
 //
 // Task 130 (Wave G-3, xhigh) — production IEntraAppRegProvisioner. Ports the
-// retired PS script's (see RegisterEntraAppRegScriptProvisioner.cs's
-// retirement banner for the exact filename) 5-step app-registration
+// retired PS script's (scripts/Register-EntraAppRegistrations.ps1) 5-step app-registration
 // reconciler (create-or-get / signInAudience / identifierUri / exposed scope /
 // requiredResourceAccess / client secret) to Microsoft.Graph 6.5.0
 // (Applications / ServicePrincipals), and ADDS the Model 2 federated-
@@ -46,10 +45,9 @@
 //
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with the established project precedent for every other live-Graph/live-KV
-// collaborator (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator,
-// CreateNewContainerTypeScriptProvisioner, the retired
-// RegisterEntraAppRegScriptProvisioner — each documents this same posture in
-// its own file header). Handler unit tests (H3EntraAppRegHandlerTests)
+// collaborator (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator — each
+// documents this same posture in its own file header). The pure planners here
+// (PlanKeylessProofAppRoles, PlanClientAccess) ARE unit-tested. Handler unit tests (H3EntraAppRegHandlerTests)
 // substitute a fake IEntraAppRegProvisioner — that is the real coverage
 // surface for H3's orchestration logic. Live-Graph coverage belongs in
 // env-guarded smoke tests when a dedicated dev tenant is available.
@@ -78,6 +76,12 @@
 // spaarke-hosted-model2 + Model 1 (UAMI lives in Spaarke's subscription for
 // both — intra-Spaarke-tenant) OR the customer's own tenant for
 // customer-owned-model2 (UAMI lives in the customer's subscription).
+//
+// CLIENT ACCESS (T240a, 2026-10-07): H3 sets the app's spa.redirectUris to exactly the customer's Dataverse origin
+// (its code pages sign in through this app with redirectUri = window.location.origin) and its
+// api.preAuthorizedApplications to exactly the platform's shared clients on user_impersonation (Office add-in; the
+// Teams client later), so they get this BFF's token without a consent prompt. It only ever PATCHes this customer's own
+// app object; the client apps themselves are never touched. A second run with the same inputs sends no PATCH.
 //
 // KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
 // KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
@@ -192,6 +196,13 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             if (!created)
             {
                 await ReconcileExistingAppAsync(graph, app, cancellationToken).ConfigureAwait(false);
+            }
+
+            // (2b) T240a: the code pages' SPA redirect + the pre-authorized shared clients, set exactly.
+            var accessFailure = await EnsureClientAccessAsync(graph, app.Id!, request, cancellationToken).ConfigureAwait(false);
+            if (accessFailure is not null)
+            {
+                return accessFailure;
             }
 
             // (3) Ensure service principal.
@@ -437,6 +448,155 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             {
                 // The assignment step reads the role from the app object it was handed.
                 app.AppRoles = plannedRoles;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Client access (T240a) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>What <see cref="PlanClientAccess"/> decided: a PATCH body, nothing to do (both null), or an error.</summary>
+    internal sealed record ClientAccessPlan(Application? Patch, string? Error);
+
+    /// <summary>
+    /// Plans the PATCH that makes the app's <c>spa.redirectUris</c> exactly <paramref name="spaRedirectUris"/> and its
+    /// <c>api.preAuthorizedApplications</c> exactly <paramref name="preAuthorizedClientAppIds"/> on the enabled
+    /// <c>user_impersonation</c> scope. Order-insensitive; the app's own id is never pre-authorized on itself. When the
+    /// pre-authorization changes, the PATCH carries the app's existing scopes and other <c>api</c> values unchanged, so it
+    /// cannot drop them whether Graph merges or replaces the <c>api</c> object.
+    /// </summary>
+    internal static ClientAccessPlan PlanClientAccess(
+        Application current, IReadOnlyList<string> spaRedirectUris, IReadOnlyList<string> preAuthorizedClientAppIds)
+    {
+        ArgumentNullException.ThrowIfNull(current);
+        ArgumentNullException.ThrowIfNull(spaRedirectUris);
+        ArgumentNullException.ThrowIfNull(preAuthorizedClientAppIds);
+
+        var desiredSpa = spaRedirectUris.Distinct(StringComparer.Ordinal).ToList();
+        var currentSpa = current.Spa?.RedirectUris ?? new List<string>();
+        var spaChanged = !currentSpa.ToHashSet(StringComparer.Ordinal).SetEquals(desiredSpa);
+
+        var clients = preAuthorizedClientAppIds
+            .Where(id => !string.Equals(id, current.AppId, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var scopes = current.Api?.Oauth2PermissionScopes ?? new List<PermissionScope>();
+        var scopeId = scopes.FirstOrDefault(s =>
+            string.Equals(s.Value, "user_impersonation", StringComparison.Ordinal) && s.IsEnabled == true)?.Id;
+        if (clients.Count > 0 && scopeId is null)
+        {
+            return new ClientAccessPlan(null,
+                $"application {current.AppId} has no enabled user_impersonation scope to pre-authorize " +
+                $"{string.Join(", ", clients)} on");
+        }
+
+        var scopeIdText = scopeId?.ToString("D");
+        var currentPre = current.Api?.PreAuthorizedApplications ?? new List<PreAuthorizedApplication>();
+        var preChanged = currentPre.Count != clients.Count
+            || !clients.All(client => currentPre.Any(p =>
+                string.Equals(p.AppId, client, StringComparison.OrdinalIgnoreCase)
+                && p.DelegatedPermissionIds is { Count: 1 } ids
+                && string.Equals(ids[0], scopeIdText, StringComparison.OrdinalIgnoreCase)));
+
+        if (!spaChanged && !preChanged)
+        {
+            return new ClientAccessPlan(null, null);
+        }
+
+        var patch = new Application();
+        if (spaChanged)
+        {
+            patch.Spa = new SpaApplication { RedirectUris = desiredSpa };
+        }
+        if (preChanged)
+        {
+            var api = new ApiApplication
+            {
+                Oauth2PermissionScopes = scopes.ToList(),
+                PreAuthorizedApplications = clients
+                    .Select(client => new PreAuthorizedApplication
+                    {
+                        AppId = client,
+                        DelegatedPermissionIds = new List<string> { scopeIdText! },
+                    })
+                    .ToList(),
+            };
+            // Carried only when set: an explicit null would ask Graph to clear them.
+            if (current.Api?.KnownClientApplications is { } known)
+            {
+                api.KnownClientApplications = known;
+            }
+            if (current.Api?.RequestedAccessTokenVersion is { } version)
+            {
+                api.RequestedAccessTokenVersion = version;
+            }
+            if (current.Api?.AcceptMappedClaims is { } acceptMapped)
+            {
+                api.AcceptMappedClaims = acceptMapped;
+            }
+            patch.Api = api;
+        }
+        return new ClientAccessPlan(patch, null);
+    }
+
+    /// <summary>
+    /// Reads the app fresh (the create response and a reconcile PATCH leave the in-memory object without its current
+    /// <c>api</c> / <c>spa</c>), plans with <see cref="PlanClientAccess"/>, and PATCHes this app only when something
+    /// differs. Retries a 404 while Entra propagates a just-created app. Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureClientAccessAsync(
+        GraphServiceClient graph, string appObjectId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+                var current = await graph.Applications[appObjectId].GetAsync(rc =>
+                {
+                    rc.QueryParameters.Select = ["id", "appId", "api", "spa"];
+                }, timeoutCts.Token).ConfigureAwait(false);
+                if (current is null)
+                {
+                    return new EntraAppRegOutcome.Failure(
+                        $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
+                }
+
+                var plan = PlanClientAccess(
+                    current, request.SpaRedirectUris ?? [], request.PreAuthorizedClientAppIds ?? []);
+                if (plan.Error is not null)
+                {
+                    return new EntraAppRegOutcome.Failure($"{plan.Error}. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
+                }
+                if (plan.Patch is null)
+                {
+                    return null;
+                }
+
+                await graph.Applications[appObjectId].PatchAsync(plan.Patch, cancellationToken: timeoutCts.Token)
+                    .ConfigureAwait(false);
+                _logger.LogInformation(
+                    "H3 set client access: customerId={CustomerId} appId={AppId} spaRedirects={SpaCount} preAuthorizedClients={ClientCount}",
+                    request.CustomerId, current.AppId, request.SpaRedirectUris?.Count ?? 0,
+                    request.PreAuthorizedClientAppIds?.Count ?? 0);
+                return null;
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode == 404 && attempt < _options.RoleAssignmentRetryCount)
+            {
+                _logger.LogInformation(ex,
+                    "H3 client-access read attempt {Attempt}/{Max} returned 404 — retrying after propagation delay.",
+                    attempt, _options.RoleAssignmentRetryCount);
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
+            }
+            catch (ODataError ex)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Setting the SPA redirect and pre-authorized clients on application {appObjectId} failed: Graph " +
+                    $"ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. " +
+                    $"[{EntraAppRegRejectionCodes.ClientAccessFailed}]");
             }
         }
     }

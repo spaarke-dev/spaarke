@@ -310,8 +310,36 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 EntraAppRegRejectionCodes.MissingUamiObjectId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (4c) T240a: the customer's code pages sign in through this app registration (H7's default
+        //      sprk_MsalClientId) with redirectUri = their Dataverse origin, so that origin is the app's SPA
+        //      redirect. Derived with the rule POST /api/runs and H5 apply to the same intake value.
+        parameters.TryGetValue(IntakeParameterCatalog.DataverseEnvUrl, out var dataverseEnvUrl);
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule.TryNormalize(
+                dataverseEnvUrl,
+                envelope.CustomerId,
+                IntakeParameterCatalog.ResolveEnvironmentName(parameters),
+                out var normalizedDataverseUrl,
+                out var dataverseUrlError))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.DataverseEnvUrlInvalid,
+                $"Run parameter '{IntakeParameterCatalog.DataverseEnvUrl}' {dataverseUrlError} H3 derives the code " +
+                "pages' SPA redirect from it; nothing was written to Entra.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (!TryNormalizeClientAppIds(_options.PreAuthorizedClientAppIds, out var preAuthorizedClientAppIds, out var badClientAppId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                EntraAppRegRejectionCodes.PreAuthorizedClientAppIdInvalid,
+                $"EntraAppRegOptions:PreAuthorizedClientAppIds contains '{badClientAppId}', which is not an application " +
+                "(client) id GUID. Fix the Worker setting (Bicep preAuthorizedClientAppIds); nothing was written to Entra.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var provisionResult = await HandlePerCustomerProvisionAsync(
-            run, etag, envelope, tenantId, keyVaultName, run.InterStepState.MiObjectId!, cancellationToken)
+            run, etag, envelope, tenantId, keyVaultName, run.InterStepState.MiObjectId!,
+            [ToSpaRedirectUri(normalizedDataverseUrl)], preAuthorizedClientAppIds, cancellationToken)
             .ConfigureAwait(false);
         if (provisionResult.Failure is not null)
         {
@@ -419,7 +447,9 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     private async Task<(HandlerResult? Failure, EntraAppRegOutputs? Outputs, IReadOnlyList<PendingKvSecretWrite>? PendingKvWrites)>
         HandlePerCustomerProvisionAsync(
             ProvisioningRun run, string etag, HandlerEnvelope envelope,
-            string tenantId, string keyVaultName, string uamiPrincipalId, CancellationToken cancellationToken)
+            string tenantId, string keyVaultName, string uamiPrincipalId,
+            IReadOnlyList<string> spaRedirectUris, IReadOnlyList<string> preAuthorizedClientAppIds,
+            CancellationToken cancellationToken)
     {
         EntraAppRegOutcome outcome;
         try
@@ -448,7 +478,9 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 // behavior. If a future non-secret-free profile is introduced,
                 // THIS is the line that decides — opt-in with `false` after
                 // documenting the exception path.
-                RequireSecretFreeIdentity: true);
+                RequireSecretFreeIdentity: true,
+                SpaRedirectUris: spaRedirectUris,
+                PreAuthorizedClientAppIds: preAuthorizedClientAppIds);
             outcome = await _provisioner.ProvisionAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (CrossTenantFicRefusedException ex)
@@ -499,6 +531,41 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
     // (see the (1) I6 ENFORCEMENT block above). The rejection code EntraAppRegRejectionCodes.
     // MissingOrInvalidTenancyModel is unchanged (external contract preserved). Do NOT reintroduce
     // a local recognizer — the shared parser owns this decision.
+
+    /// <summary>
+    /// T240a: the SPA redirect URI for a Dataverse environment URL in <c>DataverseEnvironmentUrlRule</c>'s canonical
+    /// form (<c>https://{host}/</c>) — the origin without the trailing slash, exactly what the code pages send as
+    /// <c>window.location.origin</c>.
+    /// </summary>
+    internal static string ToSpaRedirectUri(string normalizedDataverseUrl) => normalizedDataverseUrl.TrimEnd('/');
+
+    /// <summary>
+    /// T240a: validates the configured pre-authorized client ids — each must be a GUID — and returns them in canonical
+    /// form (lowercase, hyphenated), de-duplicated, in configuration order. Blank entries are refused like any other
+    /// non-GUID: an empty slot is configuration drift, not "no client".
+    /// </summary>
+    internal static bool TryNormalizeClientAppIds(
+        IEnumerable<string>? configured, out IReadOnlyList<string> normalized, out string? invalid)
+    {
+        var result = new List<string>();
+        foreach (var raw in configured ?? [])
+        {
+            if (!Guid.TryParse(raw, out var id))
+            {
+                normalized = [];
+                invalid = raw ?? string.Empty;
+                return false;
+            }
+            var canonical = id.ToString("D");
+            if (!result.Contains(canonical, StringComparer.Ordinal))
+            {
+                result.Add(canonical);
+            }
+        }
+        normalized = result;
+        invalid = null;
+        return true;
+    }
 
     /// <summary>
     /// Computes the deterministic H3 idempotency key:

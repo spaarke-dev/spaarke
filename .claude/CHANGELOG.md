@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-07 — Stamp BFF clients: CORS + H3 client access (T240a)
+
+`customer-provisioning-orchestration-r1` T240a (owner 2026-10-07: `addins.spaarke.com`, `external.spaarke.com`).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp BFF clients — CORS + app-registration client
+  access": the manifest's literal CORS origins are the two shared client sites; H3 sets exactly the SPA redirect and the
+  pre-authorized clients on the customer's own registration; `EntraAppRegOptions__SpaarkeTenantId` is required.
+- **`.claude/skills/provision-environment/SKILL.md`**: the handler list's H3 line said "KV secret bootstrap"; it is the
+  per-customer BFF app registration (now with client access). H4b notes the CORS origins.
+
+---
 ###### 2026-10-07 — Tenancy wording follows D-12 everywhere (T233)
 
 `customer-provisioning-orchestration-r1` T233 (plan G8).

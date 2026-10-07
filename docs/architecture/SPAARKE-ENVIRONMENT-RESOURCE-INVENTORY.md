@@ -228,6 +228,7 @@ permissions in Entra (Exchange adds the two together). Owner decisions D24–D26
 |---|---|---|---|---|
 | Outlook + Word add-in manifests | Shared | Outlook `id c1258e2d-1688-49d2-ac99-a7485ebd9995` ([`manifest.json`](../../src/client/office-addins/outlook/manifest.json)) | `scripts/Deploy-OfficeAddins.ps1` (not per customer) | ⚠️ see note below |
 | Add-in hosting (Static Web App) | Shared | Dev: `spaarke-office-addins` (RG `spe-infrastructure-westus2`). Prod: `swa-spaarke-office-addins-prod` (RG `rg-spaarke-shared-prod`, Standard, created 2026-10-07; custom domain `addins.spaarke.com`; no content deployed yet) | `Deploy-OfficeAddins.ps1` | ✅ dev / ⚠️ prod empty |
+| External Access SPA + Teams tab hosting (Static Web App) | Shared | Dev: `swa-spaarke-external-spa-dev` (RG `rg-spaarke-dev`). Prod: `swa-spaarke-external-spa-prod` (RG `rg-spaarke-shared-prod`, Standard, created 2026-10-07; custom domain `external.spaarke.com`; no content deployed yet) | spaarke-SPA-external-access-platform-r3 | ✅ dev / ⚠️ prod empty |
 | Teams app package + hosting | Shared | Teams `id 23610794-67de-4e6c-be61-ff80cc8cbe7f`; external-spa SWA | M365 Agents Toolkit / external-spa deploy | ⚠️ see note below |
 | Teams app Entra registration | Shared | `SDAP-BFF-SPE-API` (`1e40baad-…`), multi-tenant workforce app (ADR-028 A2) | once | ⚠️ see note below |
 

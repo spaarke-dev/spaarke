@@ -77,7 +77,7 @@ No anonymous endpoint, no published customer list, and Model 2 later becomes dat
 | 2026-10-07 | Owner added CNAME `addins` → `green-plant-09ecafa1e.1.azurestaticapps.net` at Namecheap; custom domain `addins.spaarke.com` added to the site (`az staticwebapp hostname set`, CNAME validation) | Ready; `https://addins.spaarke.com` serves HTTP 200 with a valid managed certificate |
 
 | 2026-10-07 | Created Static Web App `swa-spaarke-external-spa-prod` (Standard, westus2, RG `rg-spaarke-shared-prod`, same subscription and tags) for the External Access SPA | default host `orange-stone-09288801e.3.azurestaticapps.net`; empty until external-access-r3 deploys |
-| 2026-10-07 | Owner adds CNAME `external` → `orange-stone-09288801e.3.azurestaticapps.net` at Namecheap; then custom domain `external.spaarke.com` on the site | pending |
+| 2026-10-07 | Owner added CNAME `external` → `orange-stone-09288801e.3.azurestaticapps.net` at Namecheap; custom domain `external.spaarke.com` added (CNAME validation) | Ready; `https://external.spaarke.com` serves HTTP 200 with a valid managed certificate |
 
 ## Split
 

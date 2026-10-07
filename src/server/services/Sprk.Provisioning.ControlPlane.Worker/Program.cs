@@ -322,7 +322,7 @@ builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 // Task 046 / task 130: H3 Entra app-registration handler + two collaborator
 // seams. Task 130 (Wave G-3, xhigh, Option D hybrid) REPLACED the shell-out
 // scaffold (RegisterEntraAppRegScriptProvisioner + NullAdminConsentVerifier —
-// both RETIRED, kept on disk unregistered per their retirement banners) with
+// the script provisioner since deleted; NullAdminConsentVerifier kept unregistered) with
 // pure Microsoft.Graph 6.5.0 SDK ports: GraphAppRegistrationProvisioner
 // (Applications/ServicePrincipals/FederatedIdentityCredentials/AddPassword —
 // Model 2 ensure/create + FIC trusting the shared BFF UAMI per auth-v4 §3.1)

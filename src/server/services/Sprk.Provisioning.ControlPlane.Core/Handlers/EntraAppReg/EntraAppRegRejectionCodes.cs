@@ -164,6 +164,25 @@ public static class EntraAppRegRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H3 was in flight.</summary>
     public const string RunDeletedDuringProvisioning = "appreg-run-deleted-during-provisioning";
+
+    /// <summary>
+    /// T240a: the intake <c>dataverseEnvUrl</c> fails <c>DataverseEnvironmentUrlRule</c> (the rule POST /api/runs and H5
+    /// apply), so H3 cannot derive the code pages' SPA redirect. A run that passed intake cannot reach this; it guards a
+    /// run document that predates the rule. Resumable after the operator corrects the run.
+    /// </summary>
+    public const string DataverseEnvUrlInvalid = "appreg-dataverse-env-url-invalid";
+
+    /// <summary>
+    /// T240a: <c>EntraAppRegOptions:PreAuthorizedClientAppIds</c> holds a value that is not a GUID — platform
+    /// configuration drift. Nothing is written to Entra. Resumable after the Worker setting is fixed.
+    /// </summary>
+    public const string PreAuthorizedClientAppIdInvalid = "appreg-preauthorized-client-invalid";
+
+    /// <summary>
+    /// T240a: the app registration has no enabled <c>user_impersonation</c> scope to pre-authorize clients on, after H3's
+    /// own reconcile added it — Entra state H3 cannot repair. Resumable.
+    /// </summary>
+    public const string ClientAccessFailed = "appreg-client-access-failed";
 }
 
 /// <summary>

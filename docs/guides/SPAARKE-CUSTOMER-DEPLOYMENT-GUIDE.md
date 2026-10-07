@@ -543,7 +543,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
 | **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
-| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
+| **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). Exposes the application role `Provisioning.KeylessProof` and assigns it to the L2 Worker identity (T230b; Model 1 — a Model 2 app-reg is in the customer's tenant, where L2 has no service principal). **Client access (T240a):** sets the SPA redirect to exactly the customer's Dataverse origin (from intake `dataverseEnvUrl`; the code pages sign in through this registration) and pre-authorizes exactly the platform's shared clients on `user_impersonation` (Worker setting `EntraAppRegOptions__PreAuthorizedClientAppIds__N`; today the Office add-in `c1258e2d…`). The FIC issuer for Model 1 is `EntraAppRegOptions__SpaarkeTenantId` (set by the Worker Bicep). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
 | **H5** | Dataverse env **adoption** | Adopts the environment the **operator created** (intake `dataverseEnvUrl`; PRQ-C-09) — never creates one (T228). Checks the URL is this customer's (`spaarke-{customerId}[-{environmentName}]`, the rule POST /api/runs applies) and that `GET /WhoAmI` answers for the L2 Worker identity | `InterStepState.DataverseEnvUrl` = the canonical URL; `env-url-invalid` / `worker-not-app-user` / `env-health-check-failed` are Resumable | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
@@ -965,17 +965,23 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 
 ### 7.3 Phase 3 — Identity & Secrets (H3, H4)
 
-**H3** creates the customer's Entra app registration via `scripts/Register-EntraAppRegistrations.ps1`:
-- `-TenantId` is **mandatory** (I1 enforcement — no default per v3.3 code fix `1834b77bc`)
-- Grants ~14 permissions per `Infrastructure/Auth/GraphAppRoles.cs`
-- Client secret stored as KV URI reference (never cleartext)
+**H3** creates the customer's Entra app registration in C# with the Graph SDK (`GraphAppRegistrationProvisioner`; the
+former `scripts/Register-EntraAppRegistrations.ps1` path was retired by task 130):
+- the run's `tenantId` is **mandatory** (I1 enforcement — no default)
+- grants the delegated permissions in `EntraAppRegPermissionCatalog`; the exposed scope is `user_impersonation`
+- no client secret on a new stamp (secret-free identity, ADR-028 A4); a federated credential trusts the stamp's UAMI
+- **client access (T240a, 2026-10-07):** `spa.redirectUris` = exactly the customer's Dataverse origin
+  (`https://spaarke-{customerId}[-{environmentName}].crm[N].dynamics.com`, from intake `dataverseEnvUrl` — the code pages
+  sign in through this registration with `redirectUri = window.location.origin`), and `api.preAuthorizedApplications` =
+  exactly the platform's shared clients on `user_impersonation` (`EntraAppRegOptions__PreAuthorizedClientAppIds__N`, set by
+  the Worker Bicep parameter `preAuthorizedClientAppIds`; default the Office add-in `c1258e2d…`). A manual extra redirect
+  or pre-authorization is removed on the next run.
 
-**Office add-in SPA redirect URIs (Outlook/Word add-in sign-in — REQUIRED, per add-in host).** If the environment serves the Spaarke Office add-in, register BOTH of the following as **Single-page application (SPA)** platform redirect URIs on the app registration:
-
-- `brk-multihub://<addin-host>` — the Nested-App-Authentication (NAA) broker redirect used by **desktop** Office (Windows/Mac).
-- `https://<addin-host>/auth-callback.html` — the standard MSAL popup redirect used by **Office on the web** (which does not support NAA, so `OfficeNaaStrategy` falls back to a standard `PublicClientApplication`).
-
-`<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
+**Office add-in and Teams sign-in redirects are NOT on the customer's registration.** The shared clients sign in with
+their OWN app registrations (the add-in: `c1258e2d…` "Spaarke Office Add-in"), so `brk-multihub://<host>` and
+`https://<host>/auth-callback.html` are registered ONCE, on that client app, for the production site
+(`addins.spaarke.com`) — never per customer. A customer BFF only pre-authorizes the client (above) and lists its origin in
+CORS (H4b). Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts).
 
 **The `acct` optional claim (access tokens) — REQUIRED on every per-customer BFF registration** (task 141).
 The BFF's first-sign-in identity binding admits only a MEMBER of a configured customer tenant (§6.5.2), and
@@ -995,6 +1001,11 @@ Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
 **H4** populates KV secrets from the canonical catalog manifest + PATCHes `keyVaultReferenceIdentity` to UAMI on both slots (**T1 verification**).
+
+**H4b CORS (T240a).** The BFF refuses to start outside Development when `Cors:AllowedOrigins` is empty, so the manifest
+carries the shared client sites as literals on every stamp: `Cors__AllowedOrigins__0` = `https://addins.spaarke.com`
+(Office add-ins) and `__1` = `https://external.spaarke.com` (External Access SPA and Teams tab). The customer's Dataverse
+origins need no entry — `CorsModule` admits `*.dynamics.com` and `*.powerapps.com` by suffix.
 
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 

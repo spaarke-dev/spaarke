@@ -182,6 +182,19 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - An existing guest is reused — **never re-invite** (it re-sends the email). `restrictguestuseraccess` must be off
   (PRQ-C-12); H11 checks it before inviting. Decisions + known limits: `projects/customer-provisioning-orchestration-r1/notes/t232-guest-access-decisions.md`.
 
+## Stamp BFF clients — CORS + app-registration client access (BINDING, task 240a)
+
+- **CORS:** a stamp BFF does not start outside Development with an empty `Cors:AllowedOrigins`. The manifest's literal
+  `Cors__AllowedOrigins__0/1` are the shared client sites `https://addins.spaarke.com` and `https://external.spaarke.com`
+  (exact https origins, same on every stamp). Never add a customer's Dataverse origin (`CorsModule` admits
+  `*.dynamics.com` / `*.powerapps.com` by suffix), never a wildcard, never a `*.azurestaticapps.net` host.
+- **H3 sets exactly** the customer BFF registration's `spa.redirectUris` (the customer's Dataverse origin from intake
+  `dataverseEnvUrl`, via `DataverseEnvironmentUrlRule`) and `api.preAuthorizedApplications` (Worker setting
+  `EntraAppRegOptions__PreAuthorizedClientAppIds__N` on `user_impersonation`). It PATCHes only that registration — never a
+  shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
+- **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
+  it every Model 1 run fails at H3.
+
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 
 - Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke, Model 2 by the customer. No cost concept may assume a shared platform: no `shared-trial` tier, no "marginal" or "shared floor" envelope, no per-model cost branch.
