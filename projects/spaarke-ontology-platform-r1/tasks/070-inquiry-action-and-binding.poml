@@ -33,7 +33,7 @@
   <constraints>
     <constraint source="project">Scope: R1 needs the Action ROW plus the shipped ADR-039 spine (ConfirmationPolicyEngine, GateDecisionV2, SideEffectGateAIFunction, OutputRouter). Do NOT build the Action ENGINE: the management plane above the spine is R2, and R1 rows are its input, not a rewrite.</constraint>
     <constraint source="project">Scope: the LLM may DRAFT the Inquiry body; the human edits and sends. Nothing is sent without confirmation.</constraint>
-    <constraint source="project">Scope: set sprk_direction Outbound (task 001). AMENDED 2026-10-07 (D-20): the inquiry SLA is deferred after R1: no SLA rule, no Escalate / Extend SLA / Close inquiry actions. Whether sprk_responseduedate is still stamped is not decided (spec section 11.1 O-18): see escalation.</constraint>
+    <constraint source="owner">Scope: set sprk_direction Outbound (task 001). AMENDED 2026-10-07 (D-20, D-56): the inquiry SLA is deferred after R1 (no SLA rule, no Escalate / Extend SLA / Close inquiry actions), and the inquiry carries NO response-due date in R1: leave sprk_responseduedate unset.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-17): the executor does NOT write the Decision Record or close the Signal. It is called by the commit route (task 043) as the LAST external step (email last), returns the service request id, the send outcome and any error, and the commit route writes the one record and closes the Signal as Acted.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (ADR-013; #32): the executor makes no AI call; the inquiry body arrives as a field value from the wizard. Drafting help inside the wizard is open (O-14).</constraint>
     <constraint source="project">AMENDED 2026-10-07 (NFR-10): the executor checks, as the caller, Create on sprk_servicerequest and AppendTo on the matter before writing.</constraint>
@@ -42,6 +42,7 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-52): no chat session is opened by this executor; the human confirmation is the wizard's Confirm step (task 043 records the tier).</constraint>
   </constraints>
 
   <knowledge>
@@ -77,8 +78,8 @@
 
   <escalation>
     <trigger>If the Inquiry cannot be dispatched without building management-plane machinery (a registry, templates, triggers, scheduling), STOP and escalate. That is the Action ENGINE and it is explicitly out of scope; R1 needs a row on the existing spine.</trigger>
-    <trigger>Whether the Inquiry still stamps sprk_responseduedate now the SLA is deferred is NOT decided (D-20, O-18). Leave it unset and ask the owner.</trigger>
-    <trigger>The ADR-039 gate is reachable only through the chat session route (#25). If dispatching through the spine requires a chat session, STOP and escalate with task 043's gate-tier question (O-13) rather than opening a session from the executor.</trigger>
+    <trigger>If anything requires sprk_responseduedate to be set on the inquiry, STOP: D-56 says no response-due date in R1.</trigger>
+    <trigger>If dispatching through the ADR-039 spine requires a chat session, STOP and escalate: D-52 says the wizard's Confirm step is the confirmation and the gate tier comes from a pure PublicContracts function (task 043).</trigger>
   </escalation>
 
   <justification>
@@ -105,6 +106,7 @@
     <criterion testable="true">Negative: given an unconfirmed Signal, when nothing is confirmed, then NO service request is created and nothing is sent.</criterion>
     <criterion testable="true">Negative: no management-plane machinery (registry, templates, triggers, scheduling) was built.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Negative: the created sprk_servicerequest has no sprk_responseduedate (D-56).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-36 (amended: D-17, D-20) and success criterion 10 (amended). design.md CM-11 and section 1.1 on the Action versus Action Engine distinction. Amended 2026-10-07 per reconciliation B.2 row 070: deps 001 + 036 (no longer 053); the gate tier outside chat is O-13 (task 043).</notes>

@@ -7,7 +7,7 @@
 > CLAUDE.md §3 in the same commit; when a decision is replaced, move it to "Superseded" below with the date.
 
 Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §10 (29 settled items) ·
-**spec** = [`spec.md`](../spec.md) §9 Owner clarifications (D-9..D-41) and §6 ADR tensions ·
+**spec** = [`spec.md`](../spec.md) §9 Owner clarifications (D-9..D-56) and §6 ADR tensions ·
 **v4** = [`v4-prototype-vs-solution.md`](v4-prototype-vs-solution.md) (`#n` entries) and
 [`v4-reconciliation.md`](v4-reconciliation.md) (R-/C-/S- rows).
 
@@ -45,7 +45,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | 2026-10-06 | To Do generation's "today" = the **To Do recipient's** time zone (→ owner if a systemuser → UTC), cached per user | task 098 (PR #1359) | Binding |
 | 2026-10-06 | The Xrm capability guard is a **blocking Tier 1 job**; `ci-router.yml` docs-only = every changed file is documentation — **path A exception** to ci-cd-unit-test-remediation-r1 FR-A02 | spec §6 | Done (#1309) |
 
-## v4 consolidated decisions (2026-10-07) — spec §9 D-13..D-41
+## v4 consolidated decisions (2026-10-07) — spec §9 D-13..D-56
 
 | ID | Outcome | Status |
 |---|---|---|
@@ -77,6 +77,21 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-39 | No-core items: suppression per **(policy, item)**; their Decision Record is owned by the item's owner | Binding |
 | D-40 | Rule date fields may take **one lower + one upper bound** (nothing more) | Binding (done, task 024) |
 | D-41 | **To Do date columns → Date Only**, own task 106 (031 depends on it) | Binding |
+| D-42 | Rank: **severity → `sprk_highpriority` → oldest → record number** | Binding (tasks 038, 062) |
+| D-43 | Do-lane overdue starts at **1 day** (a knob; tune in UAT) | Binding (061, 064) |
+| D-44 | A work assignment shows in the Do lane of **both** assigner and assignee | Binding (038) |
+| D-45 | *Reassign* and *Extend response date* are **Routine** | Binding (036) |
+| D-46 | **Drop** the `DocumentRowMenu` / `OutcomeCard` reuse (FR-27); status bar on `MessageBar`; C-9 continues on its own | Binding (052) |
+| D-47 | Console **Decision Record tab** in R1 | Binding (045) |
+| D-48 | **Association-confirmed** trigger (third enqueue site; email project calls it) | Binding (032) |
+| D-49 | Recall stored in **three `sprk_triagecategory` columns** (task 074, conflict-check with email project) | Binding (074, 103) |
+| D-50 | Null fact renders **Missing**; source freshness filed as a **GitHub issue** | Binding (057) |
+| D-51 | Know-promotion rule offers **Assign Work** | Binding (063) |
+| D-52 | Wizard **Confirm is the confirmation**; gate tier from a pure `PublicContracts` function; no chat session | Binding (043, 070) |
+| D-53 | **Templated (non-AI) drafts** in R1 | Binding (058) |
+| D-54 | **Response columns on `sprk_workassignment`** (exact set decided in task 047, with the WA owner and uac-r2) | Binding (047, 044, 061) |
+| D-55 | Budget **amount written as the signed-in user**; the writer only creates the revision | Binding (044) |
+| D-56 | **No response-due date** on the inquiry in R1 | Binding (070) |
 
 ## Superseded or withdrawn
 

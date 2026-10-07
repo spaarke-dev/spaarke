@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
-> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-39
-> (spec §9) · **93 tasks** across 14 phases (36 ✅ · 2 🔄 (079, 098) · 54 🔲 · 1 superseded)
+> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-56
+> (spec §9) · **94 tasks** across 14 phases (37 ✅ · 2 🔄 (079, 098) · 54 🔲 · 1 superseded)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -18,8 +18,10 @@
 > (on `sprk_decisionrecord`: matter, project, work assignment). Direct filed-under core record wins, then matter over project (D-37);
 > **no skips** (D-38); no-core items suppress per (policy, item) and their record is owner-owned (D-39). 039 covers Secure work
 > assignments; service requests cannot be Secure. Amended: 007, 031, 033, 034, 037, 038, 039, 040, 042, 050, 051, 059, 061, 064.
-> Undecided points are carried as `<escalation><trigger>` in the named task and listed in spec §11.1 (open: O-2..O-4,
-> O-6..O-16, O-18; decided: O-1, O-5, O-17, O-19, O-21..O-25; dissolved: O-20).
+> **Fifth pass (D-42..D-56)**: every open point decided. New task **047** (WA response columns, D-54); 074 adds three recall columns
+> (D-49); 057 files the source-freshness issue (D-50); 052 drops the RowMenu/OutcomeCard reuse (D-46); 045 in R1 (D-47).
+> Amended: 031, 032, 036, 038, 043, 044, 045, 050, 052, 057, 058, 061, 062, 063, 064, 070, 074, 103.
+> **Open points: none.** All O-1..O-25 are decided (O-20 dissolved); see spec §11.1.
 > **uac-r2 coordination (owner, 2026-10-07)**: tasks marked **[uac]** below must re-read uac-r2's current code on
 > `origin/master`, check its open PRs and active work, reuse its mechanisms, route edits to its files through its review,
 > and stop if its code invalidates the plan (spec §8.3).
@@ -32,9 +34,63 @@
 
 ---
 
+## Parallel work streams (owner: speed) — updated 2026-10-07
+
+Status from the POMLs today: ✅ done includes 001-012, 020-024, 030, 065, 007, 008, 009, 080-097, 099; 🔄 079, 098.
+**Startable now** = every dep done. **Gate** = the one thing still blocking. **PR** = *own PR to master* when it changes
+shared UI / modal code other projects consume (or another domain's surface); otherwise it lands on this branch.
+Streams do not share files, with one exception noted: every new BFF route edits the #1312 route ledger
+(`RouteAuthorizationGuardTests.Ledger.cs`), so 036, 044, 046, 043, 038, 104, 100, 101, 103 merge their ledger edits one at a time.
+
+| Stream | Task | Deps (POML) | Deps met today? | Gate | PR |
+|---|---|---|---|---|---|
+| **1 Evaluator critical path** (`Services/Signals`, compiler, writer) | 079 🔄 | — | yes (in progress) | uac-r2 review of the two entries | branch |
+| | 039 | 007, 008, 079 | no | **079** + uac-r2 batch 4 in dev | branch (uac-r2 files reviewed by uac-r2) |
+| | 037 | 007, 008, 024, 039 | no | 039 (same file: `SignalWriter.cs`) | branch |
+| | 106 | 098 | no | **098 merged** (PR #1359) | own PR |
+| | 031 | 030, 003, 007, 008, 009, 024, 037, 039, 098, 106 | no | 037, 039, 098, 106 | branch |
+| | 026 | 024 | **yes** | — | branch |
+| | 025, 032, 033 | 024/031 | no | 031 | branch |
+| | 034 | 031, 036 | no | 031 (+036) | branch |
+| | 035 | 034 | no | 034 | branch (deploy) |
+| | 038 | 050, 031, 037 | no | 031, 050 | branch |
+| | 050 | 034, 007 | no | 034 | branch |
+| **2 UI + modal foundation** (`@spaarke/ui-components`, wizards) | 110 | — | **yes** | main session only (`.claude/`) | own PR |
+| | 056 | 110 | no | 110 | **own PR** (shared WizardShell, 8 consumers) |
+| | 111, 112 | 056 | no | 056 | **own PR** |
+| | 113 → 114 | 112 / 111, 113 | no | 112 | **own PR** |
+| | 057 | 012 | **yes** | — | **own PR** (changes shared `StatusBadge` + barrel) |
+| | 051 | 057, 012, 007 | no | 057 | branch (worklist-only component in the shared lib) |
+| | 052 | 051 | no | 051 | **own PR** for C-9 (migrates 4 existing menus); MetricCard part with it |
+| | 054 | 051, 057 | no | 051 | branch |
+| | 058 | 056, 057, 036, 026, 034, 043 | no | 056, 057 (build on fixtures); 043 for live wiring | branch |
+| | 059 → 055 | 038, 051, 052, 054, 058 / 059, 043, 035 | no | 058, 038 | branch |
+| **3 Decision backend** (BFF actions, commit route, DR) | 036 | 007 | **yes** | — | branch |
+| | 046 | 008 | **yes** | WA area owner review | branch (another domain's create path; reviewed) |
+| | 047 | — | **yes** | WA area owner + uac-r2 agreement | branch (schema) |
+| | 070 | 001, 036 | no | 036 | branch |
+| | 044 | 036, 008, 047 | no | 036, 047 | branch |
+| | 040 | 001, 030, 007, 036, 008, 039 | no | 036, 039 | branch |
+| | 041, 042 | 040 | no | 040 | branch |
+| | 043 | 040, 036, 044, 046, 070 | no | 040, 044, 046, 070 | branch |
+| | 049 | 043, 055 | no | 055 deploy | branch (role edit) |
+| **4 Classifier + recall gate** (`Services/Ai`, triage category) | 072 | 004 | **yes** | — | branch |
+| | 073 | 030, 072 | no | 072 | branch |
+| | 074 | 072 | no | 072 (+ email-project conflict-check for D-49) | branch |
+| | 071 | 070 | no | 070 | branch |
+| **5 Cleanups** (other domains, own worktrees) | 060 | — | **yes** | — | branch (data fix) |
+| | 066 | 098 | no | 098 | own PR |
+| | 067 | 081, 098 | no | 098 | **own PR** (SmartTodo scorer) |
+| **Later** (admin, Do lane, cutover) | 061-064, 100-105 | see registry | no | 031-034, 059 | branch |
+
+**Startable right now (deps met): 026, 036, 046, 047, 057, 060, 072, 110** (110 in the main session), plus 079 continuing.
+Run them as five parallel agents at most, one per stream: **026** (stream 1), **057** (stream 2; 110 alongside in the main
+session), **036 → then 046 or 047** (stream 3; 036 and 046 both touch the route ledger), **072** (stream 4), **060** (stream 5).
+The first gates to clear for speed: **079** (uac-r2 review → 039 → 037 → 031), **098** (→ 106 → 031, 066, 067) and **110** (→ 056 → 058).
+
 ## Critical path to 031 (the evaluator — writes the first real Signals)
 
-**031 must not start until 007, 008, 009, 024, 039, 037 and 098 have landed.** D-13 requires the episode-scoped key
+**031 must not start until 007, 008, 009, 024, 039, 037, 098 and 106 have landed** (007, 008, 009 and 024 are done). D-13 requires the episode-scoped key
 before the first Signal is written; D-33 drops D-15's skip, so 031's **first write** on a Secure matter must already be
 owned by the Secure Record Owners team, which only **039** provides (otherwise the first Secure-matter Signals are
 written with the wrong visibility and need a re-own); D-25's per-item today is only testable once Do-lane Signals exist.
@@ -123,14 +179,14 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 |---|---|---|---|---|---|---|
 | ✅ [done] 030 | [Signal writer + dedupe + **ownership**](030-signal-writer-dedupe-and-ownership.poml) | FULL | sonnet/high | 021, 006 | — | Two independent reviews. Writer owns, owning BU from matter; create-first + reconcile; fail-closed MI; refusals logged (EventId 50300) + metered. Live as writer: matter PASS; **communication blocked by F26 (owner role decision)** |
 | 🔲 [open] 031 | [Nightly re-evaluating `IScheduledJob` (+ episodes, secured skip, per-item today)](031-nightly-reevaluating-scheduled-job.poml) | FULL | sonnet/**xhigh** | 030, 003, 007, 008, 009, 024, 037, 039, 098, 106 | — | ONE evaluator, not evaluator + sweep. **Amended 2026-10-07**: episode key before the first Signal (**D-13**); **no Restricted/Limited skip** — Secure-matter ownership via 039, one narrow skip (**D-33**); Off→On re-raise (**D-32**); per-item today via 098's helper (**D-25**); witness evidence lines (**D-23**); side-effect-free `Evaluate(version, scope)` · **[uac]** |
-| 🔲 [open] 032 | [Two event triggers](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish. **Amended**: shared core (D-13, D-33); never re-closes a decision-Acted Signal (X-6). Filing trigger = **C-15 (O-9)**, not added · **[uac]** |
+| 🔲 [open] 032 | [Three event triggers (D-48)](032-event-triggers-classification-and-budgetrevision.poml) | FULL | sonnet/high | 031 | — | Budget-revision hook is correctness, not polish. **Amended**: shared core (D-13, D-33); never re-closes a decision-Acted Signal (X-6). **Association-confirmed trigger added (D-48)** · **[uac]** |
 | 🔲 [open] 033 | [Closure semantics](033-closure-semantics.poml) | FULL | sonnet/high | 031 | C | Aged-out maps to `ConditionCleared`. **Amended**: Superseded → new episode (D-13), reads `sprk_inforceto` (D-14); Off (next pass, reversible: **D-32**) vs Retire (immediate) |
 | 🔲 [open] 034 | [Suppression per (policy, matter), 30d](034-suppression-policy-matter-30-days.poml) | FULL | sonnet/high | 031, 036 | C | D-11 grain; auto-close never counts. **Amended**: lapse → new episode (D-13); *misresolved* never counts (R-10); count read for wizard/admin · **[uac]** |
 | 🔲 [open] 035 | [**Deploy** BFF](035-deploy-bff-evaluator.poml) | FULL | sonnet/high | 034 | — | Merge master first; hash-verify |
 | 🔄 [wip] 079 | [uac-r2 coordination: two recorded live refusals + review of the secure-child entries](079-issue-secure-record-mirror-for-signals.poml) | STANDARD | sonnet/medium | — | — | **D-33** (was the D-15 "later mirror" issue). Refusals must be recorded **before** 008's Secure Record Owner edit; the review gates 039. **Start now** · **[uac]** |
 | 🔲 [open] 039 | [**Secure children: register Signal + Decision Record; writer owner from the resolver**](039-secure-signals-and-decision-records.poml) | FULL | **opus**/high | 007, 008, 079 | — | 🔴 **D-33** (replaces D-15's skip): two entries each in `SecureChildLineage.cs` and `config/secure-record-owner-role.json` (uac-r2 review via 079); task-146-shaped writer change; 2-minute secure-sync load measured; live gate on a provisioned Secure matter. ~3 dev-days. **Before 031** · **[uac]** |
 | 🔲 [open] 037 | [Signal writer accepts Do-lane subjects (event, To Do, WA)](037-signal-writer-do-lane-subjects.poml) | FULL | sonnet/high | 007, 008, 024, 039 | — | **D-16** matter via `sprk_regardingmatter`; `sprk_duedate` (D-27) refreshed while open. Decides + flags project-filed tasks (D-16); **D-31** matterless To Do owned by the To Do owner's BU; **D-33** resolver parents + narrow skip. **Before 031** · **[uac]** |
-| 🔲 [open] 038 | [BFF Signal read route: matter-access filter, Do-lane reader scope, order](038-signal-read-route-and-do-lane-scoping.poml) | FULL | **opus**/high | 050, 031, 037 | — | **D-15** (stands under D-33). #1312 census. Event "mine" = 097 decision B; **WA "mine" = O-6**; rank keys **O-2**; matterless To Do check **O-21** · **[uac]** |
+| 🔲 [open] 038 | [BFF Signal read route: matter-access filter, Do-lane reader scope, order](038-signal-read-route-and-do-lane-scoping.poml) | FULL | **opus**/high | 050, 031, 037 | — | **D-15** (stands under D-33). #1312 census. Event "mine" = 097 decision B; WA in **both** assigner's and assignee's Do lane (**D-44**); rank **D-42**; no-core rows owner-only (D-35) · **[uac]** |
 
 ### Phase 4 — The Decision Record
 
@@ -144,10 +200,11 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 036 | [Closed BFF action catalog + decision-plan read endpoint](036-action-catalog-and-decision-plan-read.poml) | FULL | sonnet/high | 007 | L | Approve variance record-only (**D-19**); dismissal reasons per lane; class of reassign / extend = **C-3 (O-3)** · **[uac]** |
-| 🔲 [open] 043 | [**The decision commit route** (record last, idempotent)](043-decision-commit-route.poml) | FULL | **opus**/high | 040, 036, 044, 046, 070 | — | 🔴 **D-17**: validate → writes → email last → one record → close. Failure = no record + which writes landed. Gate tier outside chat = **O-13** · **[uac]** |
-| 🔲 [open] 044 | [Executors: Revise budget, Approve variance, Do actions, Next steps](044-decision-action-executors.poml) | FULL | sonnet/high | 036, 008 | — | **D-18** writer creates the revision after a caller check; budget-amount writer identity = **O-16**; reschedule writes `sprk_duedate` (D-27); record-the-response = **O-15** · **[uac]** |
+| 🔲 [open] 036 | [Closed BFF action catalog + decision-plan read endpoint](036-action-catalog-and-decision-plan-read.poml) | FULL | sonnet/high | 007 | L | Approve variance record-only (**D-19**); dismissal reasons per lane; reassign / extend **Routine (D-45)**; adds record-the-response (D-54) and assign-work as a plan action (D-51) · **[uac]** |
+| 🔲 [open] 043 | [**The decision commit route** (record last, idempotent)](043-decision-commit-route.poml) | FULL | **opus**/high | 040, 036, 044, 046, 070 | — | 🔴 **D-17**: validate → writes → email last → one record → close. Failure = no record + which writes landed. Confirm = confirmation; gate tier from a pure `PublicContracts` function (**D-52**) · **[uac]** |
+| 🔲 [open] 044 | [Executors: Revise budget, Approve variance, Do actions, Next steps](044-decision-action-executors.poml) | FULL | sonnet/high | 036, 008, 047 | — | **D-18** writer creates the revision after a caller check; budget amount written **as the signed-in user (D-55)**; reschedule writes `sprk_duedate` (D-27); record-the-response writes the **D-54** columns (047) · **[uac]** |
 | 🔲 [open] 046 | [Server-side work-assignment create](046-server-side-work-assignment-create.poml) | FULL | **opus**/high | 008 | — | **D-21**. Preserve the wizard's BU cascade; area owner reviews · **[uac]** |
+| 🔲 [open] 047 | [Schema: response columns on `sprk_workassignment` (D-54)](047-schema-work-assignment-response-columns.poml) | FULL | sonnet/high | — | — | **D-54**: responded-on + outcome (exact set agreed with the WA owner); 007 recipe; WA is a secure root · **[uac]**. Feeds 044, 061. **Start now** |
 | 🔲 [open] 049 | [Remove Console User Write on `sprk_signal`](049-revoke-console-user-signal-write.poml) | STANDARD | sonnet/medium | 043, 055 | — | **D-17**, after the deployed Console closes Signals only via the BFF. Union re-verify · **[uac]** |
 
 ### Phase 5 — The worklist surface
@@ -156,14 +213,14 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 |---|---|---|---|---|---|---|
 | 🔲 [open] 050 | [Worklist grid configuration row (membership + order)](050-worklist-gridconfiguration-row.poml) | STANDARD | sonnet/medium | 034, 007 | — | Membership by rule evaluation, never a user filter. **Amended**: per-lane + 3 secondary sets; executed server-side by 038 (D-15); no actions |
 | 🔲 [open] 051 | [**The one row component: MatterCard + IssueLine**](051-worklist-row-component.poml) | FULL | **sonnet/xhigh** | 057, 012, 007 | — | 🔴 A second row component is a design failure. **Amended**: v4 row (no controls in a line; whole line opens the wizard); UI-composed headline (**D-23**). Builds on fixtures |
-| 🔲 [open] 052 | [Extend MetricCard (count filters); RowMenu / OutcomeCard await C-10](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | E | **D-24** selected / note / progress. DocumentRowMenu, OutcomeCard and C-9 gated on **C-10 (O-7)** |
+| 🔲 [open] 052 | [Extend MetricCard (count filters); C-9 RowActionMenu cleanup](052-extend-metriccard-rowmenu-outcomecard.poml) | FULL | sonnet/high | 051 | E | **D-24** selected / note / progress. DocumentRowMenu/OutcomeCard reuse **dropped (D-46)**; C-9 continues on its own (shared UI: own PR) |
 | ⛔ [superseded] 053 | [~~Gate host + acting~~](053-gate-host-and-acting.poml) | FULL | sonnet/high | — | — | **Superseded 2026-10-07** by **058** (wizard) + **043** (commit route), per D-17 / D-26. POML status `deferred`; do not execute |
 | 🔲 [open] 054 | [Reconciliation tab + aggregate item](054-reconciliation-tab-and-aggregate-item.poml) | STANDARD | sonnet/medium | 051, 057 | E | ONE registration (already exists, #18 — verify). **Amended**: AggregateCard at the top of the Do lane; count from the Email Review feed (#36) |
 | 🔲 [open] 055 | [**Deploy** Console + shared components](055-deploy-console-and-shared-components.poml) | FULL | sonnet/high | 059, 043, 035 | — | **Real Dataverse** verification. **Amended**: one full wizard review (2 actions + 1 Next step) live; BFF with 038/043 deployed first |
 | 🔲 [open] 057 | [Console UI kit: EvidenceLine, StatusBar, RecordRow, AggregateCard](057-console-ui-kit.poml) | FULL | sonnet/high | 012 | K | **D-24** reuse first (Accordion, MessageBar, Link, ConfirmModal, StatusBadge + success). Can start now |
-| 🔲 [open] 058 | [**The decision wizard** (WizardShell, in-app)](058-decision-wizard-consumer.poml) | FULL | sonnet/**xhigh** | 056, 057, 036, 026, 034, 043 | — | **D-26**, **D-17**: writes nothing itself. Assistant drafts = **O-14**. Build on fixtures before 043 is live |
+| 🔲 [open] 058 | [**The decision wizard** (WizardShell, in-app)](058-decision-wizard-consumer.poml) | FULL | sonnet/**xhigh** | 056, 057, 036, 026, 034, 043 | — | **D-26**, **D-17**: writes nothing itself. **Templated (non-AI) drafts (D-53)**. Build on fixtures before 043 is live |
 | 🔲 [open] 059 | [Worklist widget assembly](059-worklist-widget-assembly.poml) | FULL | sonnet/high | 038, 051, 052, 054, 058 | — | Two lanes, honest filters, narrative slot, aggregate row, disclosures; reads only via 038 (**D-15**); matterless To Do grouping = **O-21** |
-| 🔲 [open] 045 | [Decision Record tab (pending owner C-14)](045-decision-record-tab.poml) | STANDARD | sonnet/medium | 058, 043 | — | ⛔ Starts only if the owner puts it in R1 (**C-14, O-8**) · **[uac]** |
+| 🔲 [open] 045 | [Decision Record tab (D-47)](045-decision-record-tab.poml) | STANDARD | sonnet/medium | 058, 043 | — | In R1 (**D-47**) · **[uac]** |
 
 ### Phase 5b — Modal system (D-26)
 
@@ -181,11 +238,11 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
 | 🔲 [open] 060 | [ISS-003 stranded Draft events](060-iss003-stranded-draft-events.poml) | FULL | sonnet/high | — | — | **Blocks the Do lane** or it under-reports |
-| 🔲 [open] 061 | [Do lane: four policies as subject-only rules (incl. overdue To Do)](061-do-lane-temporal-policies.poml) | FULL | sonnet/high | 060, 034, 024, 036, 037 | — | **Amended (D-16)**: evaluated by the one evaluator; the collector is the reference, **not modified**. Initial overdue value = **C-6 (O-4)**; **fourth policy: overdue To Do for ALL To Dos (D-31)** |
-| 🔲 [open] 062 | [Know → narrative; retire Critical Today; remove LLM Top action](062-know-narrative-and-retire-critical-today.poml) | FULL | sonnet/high | 061, 038, 059 | F | Rank is deterministic or it is not explainable. `sprk_highpriority` as rank key = **C-9 (O-2)** |
-| 🔲 [open] 063 | [First Know-promotion rule](063-first-know-promotion-rule.poml) | STANDARD | sonnet/medium | 061, 036 | F | Needs a plan action (**C-19, O-12**) and a (matter, budget) verified join — escalates |
+| 🔲 [open] 061 | [Do lane: four policies as subject-only rules (incl. overdue To Do)](061-do-lane-temporal-policies.poml) | FULL | sonnet/high | 060, 034, 024, 036, 037, 047 | — | **Amended (D-16)**: evaluated by the one evaluator; the collector is the reference, **not modified**. Overdue starts at **1 day (D-43)**; WA rule reads the **D-54** response columns; **fourth policy: overdue To Do for ALL To Dos (D-31)** |
+| 🔲 [open] 062 | [Know → narrative; retire Critical Today; remove LLM Top action](062-know-narrative-and-retire-critical-today.poml) | FULL | sonnet/high | 061, 038, 059 | F | Rank is deterministic or it is not explainable. `sprk_highpriority` is the 2nd rank key (**D-42**) |
+| 🔲 [open] 063 | [First Know-promotion rule](063-first-know-promotion-rule.poml) | STANDARD | sonnet/medium | 061, 036, 046 | F | Offers **Assign Work (D-51)**; needs a (matter, budget) verified join — escalates |
 | 🔲 [open] 064 | [Replace the Briefing tab](064-replace-briefing-tab-with-worklist.poml) | FULL | sonnet/high | 062, 063, 055, 059, 065 | — | Only once BOTH lanes exist. **Amended**: HANDOFF §1.4 as the cutover check |
-| 🔲 [open] 065 | [Daily Briefing reads `sprk_duedate`](065-briefing-reads-sprk-duedate.poml) | FULL | sonnet/high | 098 | R | **D-27**; other `sprk_finalduedate` readers listed, not changed |
+| ✅ [done] 065 | [Daily Briefing reads `sprk_duedate`](065-briefing-reads-sprk-duedate.poml) | FULL | sonnet/high | 098 | R | **D-27**; other `sprk_finalduedate` readers listed, not changed |
 | 🔲 [open] 066 | [Deprecate `sprk_eventstatus`: inventory, move readers to `statuscode`](066-deprecate-sprk-eventstatus-inventory.poml) | FULL | sonnet/high | 098 | — | **D-28**. Column removal needs the owner after the inventory |
 | 🔲 [open] 067 | [To Do composite score on calendar days, one shared function](067-todo-composite-score-calendar-days.poml) | FULL | sonnet/high | 081, 098 | R | **D-29**; boards re-rank once |
 
@@ -193,11 +250,11 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 
 | # | Task | Rigor | Tier/Effort | Deps | Wave | Note |
 |---|---|---|---|---|---|---|
-| 🔲 [open] 070 | [The Inquiry: Action + Binding, an executor the commit route calls](070-inquiry-action-and-binding.poml) | FULL | sonnet/high | 001, 036 | — | The Action **row**, not the Action **Engine**. **Amended**: SLA deferred (**D-20**); record written by 043 (D-17); `sprk_responseduedate` = **O-18** |
+| 🔲 [open] 070 | [The Inquiry: Action + Binding, an executor the commit route calls](070-inquiry-action-and-binding.poml) | FULL | sonnet/high | 001, 036 | — | The Action **row**, not the Action **Engine**. **Amended**: SLA deferred (**D-20**); record written by 043 (D-17); **no response-due date (D-56)**; no chat session (D-52) |
 | 🔲 [open] 071 | [Disposition accrual](071-disposition-accrual.poml) | FULL | sonnet/high | 070 | **G** | Do-rule action rate reads `sprk_resolutiontype` |
 | 🔲 [open] 072 | [Guidance injection](072-classifier-guidance-injection.poml) | FULL | sonnet/high | 004 | **G** | Prompt changes; the schema `enum` does NOT |
 | 🔲 [open] 073 | [`sprk_memo` as source #2](073-memo-as-second-signal-source.poml) | FULL | sonnet/high | 030, 072 | **G** | The consumer diff must be **empty** |
-| 🔲 [open] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items |
+| 🔲 [open] 074 | [**Recall measurement (exit gate)**](074-classifier-recall-measurement-gate.poml) | FULL | **opus/xhigh** | 072 | — | 🔴 **CAN FAIL THE PROJECT.** ≥80% on ≥50 items; writes **three recall columns on `sprk_triagecategory` (D-49)** after `/conflict-check` with the email project |
 
 ### Phase 8 — Remaining cleanup and repairs
 
@@ -232,7 +289,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | 🔲 [open] 100 | [Slice (a): Rules read-only + On/Off + Retire](100-ontology-admin-rules-readonly-on-off-retire.poml) | FULL | sonnet/high | 104, 033, 034, 057, 026 | — | Writes as the caller; Retire closes at once |
 | 🔲 [open] 101 | [Slice (b) BFF: catalog from the compiler, dry run, save, publish](101-ontology-admin-authoring-bff.poml) | FULL | **opus**/high | 104, 031, 033, 022, 036, 024 | — | `ValidateForSave`; catalog from verified joins (#46); dry run as the evaluator, filtered by caller (#39); publish stamps `sprk_inforceto` (**D-14**) · **[uac]** |
 | 🔲 [open] 102 | [Slice (b) UI: the rule-authoring wizard](102-ontology-admin-rule-wizard-ui.poml) | FULL | sonnet/**xhigh** | 056, 101, 057, 058 | — | Test gates Publish; no free-text JSON |
-| 🔲 [open] 103 | [Slice (c): Classification admin](103-ontology-admin-classification.poml) | FULL | sonnet/high | 104, 008, 057, 072 | — | Rename blocked while a rule reads it; recall storage = **C-16 (O-10)** |
+| 🔲 [open] 103 | [Slice (c): Classification admin](103-ontology-admin-classification.poml) | FULL | sonnet/high | 104, 008, 057, 072, 074 | — | Rename blocked while a rule reads it; recall from 074's columns (**D-49**) |
 
 ### Phase 11 — UAT
 

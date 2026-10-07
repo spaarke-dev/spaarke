@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="032" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>The two event triggers: classification and budget-revision create</title>
+    <title>The three event triggers: classification, budget-revision create, association confirmed (D-48)</title>
     <phase>3 Evaluator and Signal lifecycle</phase>
     <gate>031 complete</gate>
     <status>not-started</status>
@@ -43,6 +43,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-13, D-33): the triggers call task 031's Evaluate(version, scope) for the one matter and its writing path, so the episode-scoped key, the re-raise rule and the secure-child ownership (task 039; no Restricted/Limited skip) apply here exactly as nightly.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-17, D-18; reconciliation X-6, #15): a budget revision recorded THROUGH a decision has already closed its Signal as Acted via the commit route (task 043). The budget-revision trigger must not close that Signal again as ConditionCleared: it only touches Signals that are still Open or Acknowledged.</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-48): add a THIRD trigger, association confirmed: the SAME handler, a third enqueue site, called when a communication is filed (association confirmed) to a core record, so a classified email filed later raises its Work Item without waiting for the nightly pass. The email-communication-intelligence project owns the filing path and makes the call; this task exposes the enqueue and agrees the call site with that project (link the agreement in notes; /conflict-check first).</constraint>
   </constraints>
 
   <knowledge>
@@ -76,7 +77,7 @@
 
   <escalation>
     <trigger>If sprk_budgetrevision create cannot be hooked (for example rows are written by a path with no event), STOP and escalate. Without that hook the Work Item asserts something untrue for up to 24 hours, and that is a section 0.3 failure in the product primary surface, not a latency nicety.</trigger>
-    <trigger>A third trigger, association confirmed (a classified email filed to a matter later wakes the evaluator; reconciliation X-4 / C-15, prototype finding F-39), is NOT decided by D-13..D-29 (spec section 11.1 O-9). Do not add it; ask the owner.</trigger>
+    <trigger>If the email project does not accept calling the association-confirmed enqueue from its filing path, STOP and escalate rather than adding a polling substitute.</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
@@ -105,6 +106,8 @@
     <criterion testable="true">Given a Signal already closed as Acted by a decision that recorded a budget revision, when the budget-revision trigger runs, then the Signal stays Acted.</criterion>
     <criterion testable="true">Given a classification on a Secure matter, when the trigger runs, then the Signal is owned by the Secure Record Owners team; on a Restricted or Limited matter it is written normally (D-33).</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a communication classified as a fee or scope change BEFORE it had a core record, when it is filed (association confirmed), then the trigger is enqueued and the Signal exists for that core record shortly after (D-48).</criterion>
+    <criterion testable="true">Negative: the association-confirmed path calls the same handler; no second evaluation path exists.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-13, FR-14a (amended, D-33), FR-16 (amended). design.md section 8.3 explains why the budget-revision hook is correctness rather than polish. Amended 2026-10-07 for D-13, D-15, D-17, D-18.</notes>

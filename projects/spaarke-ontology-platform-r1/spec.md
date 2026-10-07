@@ -249,6 +249,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   to 24 hours after one was — a sentence that is no longer true, in the surface the product's credibility
   rests on. That is §0.3 in a new costume, and prototype finding 3's "absence clause over a stale source is a
   false negative wearing a confident face."
+  *Amended 2026-10-07, D-48*: add **(c) association confirmed** — the same handler, a third enqueue site, called by
+  the email project's filing path when a communication is filed to a core record (task 032).
 - **FR-14**: 🔴 **Set the Signal's owner (or owning business unit) from its grouping matter at creation.**
   *Acceptance*: every `sprk_signal` row created by the evaluator has an owner derived from
   `sprk_matter`, never the service identity by default.
@@ -461,6 +463,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   with the Signal statuses for the post-action surface.
   *Why*: building past a named existing component is a CLAUDE.md §11 violation with no cost-of-doing-nothing
   to cite.
+  *Amended 2026-10-07, D-46*: the **`DocumentRowMenu` and `OutcomeCard` reuse requirements are dropped** — the worklist
+  row has no menu (v4) and post-decision state is the status bar on Fluent `MessageBar`. `MetricCard`/`MetricCardRow`
+  remain the count filters. The C-9 `RowActionMenu` cleanup continues on its own (task 052).
 - **FR-28**: Anything genuinely new **lands in a shared library**, not in the Console app.
   *Acceptance*: the one legitimately-new component — a **generic status/severity badge** (every badge in the
   shared libraries is domain-specific: `CitationBadge`, `PinnedMemoryProvenanceBadge`, `ChannelBadge`) —
@@ -504,6 +509,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   reader only their own work (D-15, FR-54). *(Amended 2026-10-07, D-34: a task filed under a project groups under the
   project; the following sentence is answered.)* What a task filed under a **project** (no matter) does — skip, or
   group under the project's matter — is decided and flagged in the grammar/writer task (D-16).
+  *Amended 2026-10-07, D-43/D-54*: the overdue threshold starts at **1 day** (v4), a knob on the rule, tuned in UAT. The
+  work-assignment rule reads new **response columns on `sprk_workassignment`** (responded-on, outcome; task 047):
+  "active, past `sprk_responseduedate`, no response recorded".
 - **FR-31**: Know items become **narrative + Context pane**, not rows.
   *Acceptance*: new/updated matters, projects, documents and monitored-record activity do not appear as Work
   Items — they fail row-contract requirement 4 (nothing to do that changes anything).
@@ -511,10 +519,13 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Acceptance*: `sprk_highpriority` becomes a **rank input** and `sprk_monitor` a **subscription** to Know;
   the first row **is** the top action because rank is deterministic.
   *Why*: a model choosing priority breaks row-contract requirement 2 and decision 15.
+  *Amended 2026-10-07, D-42*: rank per lane is **severity → `sprk_highpriority` → oldest → record number**, applied by the
+  read route (FR-54); `sprk_highpriority` is the second key. This closes §11 Q1.
 - **FR-33**: Ship the first Know-promotion rule — *new matter with no budget after 5 days* (`Absence` shape
   over Spaarke-held data).
   *Acceptance*: it fires on seeded data. **Document-based `Absence` rules are deferred** until documents are
   mirrored — an Absence rule is impossible over reference-mode data.
+  *Amended 2026-10-07, D-51*: the rule offers **Assign Work** (FR-26 req 4).
 - **FR-34**: Lane order and volume: **Decide always above Do**; each lane carries its own count filters; the
   narrative **summarises** Do volume rather than listing it.
   *Why*: on the production Briefing's own numbers, 11 overdue tasks would push 5 decisions off the screen —
@@ -534,6 +545,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   actions. The budget-inquiry send and the reply disposition (FR-37) stay. How the confirmation tier is computed
   outside a chat session (the gate is reachable only from chat today, `notes/v4-prototype-vs-solution.md` #25) is
   **not decided** and is an escalation point in task 043.
+  *Amended 2026-10-07, D-52/D-56*: the wizard's **Confirm step is the confirmation**; the gate tier text comes from a pure
+  function exposed through the AI `PublicContracts` facade, with no chat session. The inquiry carries **no response-due
+  date** in R1.
 - **FR-37**: The reply resolves the Inquiry with a **`sprk_disposition`** queryable per matter and per outside
   firm.
   *Acceptance*: the association ladder links the reply to the Inquiry; `sprk_disposition` accrues for the
@@ -560,6 +574,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Why*: the predicate is a **conjunction**, so it inherits its weakest input — and that input is the LLM
   classifier. At 70% recall the differentiated claim **silently misses 30% of real cases while every other
   success criterion passes green.** The floor is what turns criterion 11 from an observation into a gate.
+  *Amended 2026-10-07, D-49*: the measured recall, labelled-set size and measured-on date are stored in **three columns on
+  `sprk_triagecategory`** (task 074, after `/conflict-check` with the email project).
 
 #### Group I — Component cleanup (C-1..C-27, per the §5.0 scope rule)
 
@@ -670,6 +686,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   record-only) and the Do-lane actions the Do policies' plans name; *Approve variance*'s effect lines say the
   Decision Record is the approval and nothing else is written. The record class of *Reassign* and *Extend response
   date* is **not decided** (reconciliation C-3) — escalation in task 036.
+  *Amended 2026-10-07, D-45/D-51/D-54*: *Reassign* and *Extend response date* are **Routine**; the catalog adds *Record the
+  response* (writes the D-54 columns) and *Assign Work* as a plan action.
 - **FR-51** *(added 2026-10-07, D-17)*: **One BFF decision commit route, record last.** Order: validate → run the
   internal (Dataverse) writes → send email **last** → write the **one** Decision Record listing actual outcomes and
   the Next steps created → close the resolved Signals.
@@ -691,6 +709,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Acceptance*: a revision recorded through a decision closes the Path B Signal as `Acted`, and the
   budget-revision trigger (FR-13b) does not re-close it as `ConditionCleared`. Which identity writes the new
   budget **amount** onto `sprk_budget` is **not decided** — escalation in task 044.
+  *Amended 2026-10-07, D-54/D-55*: *Record the response* writes the new work-assignment response columns as the caller. The
+  new budget **amount is written as the signed-in user** (their rights, their audit); the writer only creates the revision.
 - **FR-53** *(added 2026-10-07, D-21)*: **Server-side work-assignment create.** `sprk_workassignment` is created
   through the BFF (WP-3; a work assignment is a secure-record root), so *Assign Work* can be a Next step inside the
   decision.
@@ -706,6 +726,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   matter the **caller** cannot read; in the Do lane it returns **only the caller's own work**; it passes the #1312
   census; a caller who reads nothing gets an empty list, not an error. Which subject field makes a work assignment
   "mine" (assignee or assigner) is **not decided** — escalation in task 038.
+  *Amended 2026-10-07, D-42/D-44*: the route orders by D-42's rank; a **work assignment** appears in the Do lane of **both**
+  its assigner (`sprk_createdbyperson`) and its assignee.
 - **FR-55** *(added 2026-10-07, D-26 and the v4 baseline)*: **Every decision happens in one decision wizard**,
   `WizardShell` launched **in-app** from the worklist widget (never a `navigateTo` code page): *What was found* →
   one step per plan action (skip allowed; `excludes` honoured) → Next steps → Confirm (record class shown) →
@@ -713,6 +735,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   wizard, read-only**, showing its fact snapshot under a status bar.
   *Acceptance*: HANDOFF §1.1 and §1.4 "The wizard" (L127-136) @ `ae1cc9f` hold, checked per the reconciliation
   §B.6 pre-start rule; the wizard writes nothing itself — it calls the commit route (FR-51).
+  *Amended 2026-10-07, D-47/D-50/D-53*: drafts are **templated (non-AI)** in R1; a Console **Decision Record tab** (DataGrid
+  configuration, reopening a decided item read-only) is in R1 (task 045); a null fact renders as **Missing**, and source
+  freshness / the landing-contract columns are filed as a GitHub issue (task 057).
 
 #### Group N — Ontology admin (D-22, D-14)
 
@@ -736,6 +761,7 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   On/Off, which rules read each, 30-day volume; edit in a form; a rename is blocked while a rule reads the
   category; a new category saves Off. Where measured recall is stored (reconciliation C-16) is **not decided** —
   escalation in task 103.
+  *Amended 2026-10-07, D-49*: recall shows from the three `sprk_triagecategory` columns task 074 writes.
 
 #### Group O — Modal system (D-26)
 
@@ -1066,6 +1092,21 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 | **D-39** (O-25) | No-core items | Suppression per **(policy, item)**; the Decision Record is **owned by the item's owner** and visible like its Signal | 034, 040 |
 | **D-40** (2026-10-07, task 024 escalation) | Date ranges in rules | A date field may take **one lower plus one upper bound** (e.g. `{">=": "now", "<=": "now+3d"}`) — nothing more (no OR, no third bound, no join); still one Dataverse filter. Needed so "due within 3 days" excludes overdue items | Task 024 |
 | **D-41** (2026-10-07, task 024 finding) | To Do dates | `sprk_todo` due dates are UTC timestamps of the user's local midnight (not converted by 098). **Convert To Do date columns to Date Only as their own task**, modelled on 098 (inventory columns + readers/writers first, convert in spaarkedev1 with before/after evidence, fix readers/writers, per-environment procedure, own PR) | New task 106; 031 depends on it for per-item "today" (D-25) |
+| **D-42** (O-2, 2026-10-07) | Rank | **Severity → `sprk_highpriority` → oldest → record number** | 038, 062 |
+| **D-43** (O-4) | Overdue threshold | Do-lane overdue starts at **1 day** (v4), a knob on the rule; tune in UAT | 061, 064 |
+| **D-44** (O-6) | Work assignment "mine" | Shown in the Do lane of **both** the assigner (`sprk_createdbyperson`) and the assignee | 038 |
+| **D-45** (O-3) | Record class | *Reassign* and *Extend response date* are **Routine** | 036 |
+| **D-46** (O-7) | Row menu / OutcomeCard | **Drop** the `DocumentRowMenu` and `OutcomeCard` reuse requirements (FR-27 amended); status bar on Fluent `MessageBar`; C-9 `RowActionMenu` cleanup continues on its own | 052 |
+| **D-47** (O-8) | Decisions tab | A Console **Decision Record tab** in R1 (DataGrid config; reopens a decided item read-only) | 045 |
+| **D-48** (O-9) | Filing trigger | Add an **association-confirmed** trigger (third enqueue site of the same handler; the email project calls it) | 032 |
+| **D-49** (O-10) | Recall storage | Task 074 writes **three columns on `sprk_triagecategory`** (recall, sample size, measured-on), after `/conflict-check` with the email project | 007-style schema add in 074; 103 |
+| **D-50** (O-11) | Source freshness | R1 renders a null fact as **Missing**; freshness / landing-contract columns filed as a GitHub issue | 057; issue |
+| **D-51** (O-12) | Know-promotion action | The first Know-promotion rule offers **Assign Work** | 063 |
+| **D-52** (O-13) | Gate outside chat | The decision wizard's **Confirm step is the confirmation**; the gate tier text comes from a pure function exposed through the AI `PublicContracts` facade; no chat session | 043, 070 |
+| **D-53** (O-14) | Drafts | **Templated (non-AI) drafts in R1**; AI drafts later | 058 |
+| **D-54** (O-15) | Record the response | **Add response columns to `sprk_workassignment`** (responded-on, outcome; exact set decided in the task) — coordinate with the work-assignment owner and uac-r2 (secure root); the rule reads them | 044, 061; schema task |
+| **D-55** (O-16) | Budget amount write | The budget amount is written **as the signed-in user** (their rights, their audit); the writer only creates the revision | 044 |
+| **D-56** (O-18) | Inquiry due date | **No** response-due date on the inquiry in R1 | 070 |
 | **D-29** | Smaller | To Do composite score → **calendar days**, one shared function (boards re-rank once). Writer gets **AppendTo** on `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_workassignment` (closes F26). Caller-unresolved stays **#1312's single 403**. Tier 2 ADR Compliance timeout → **5 min** (own small PR) | Role edits; To Do scoring task; CI PR |
 
 ---
@@ -1093,7 +1134,7 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 
 ## 11. Unresolved questions
 
-- [ ] **Which rank function?** Criterion 7 and row-contract requirement 2 both demand a **deterministic**
+- [x] **Which rank function?** *(Decided 2026-10-07, D-42: severity → `sprk_highpriority` → oldest → record number.)* Criterion 7 and row-contract requirement 2 both demand a **deterministic**
   rank, and `sprk_rankscore` exists, but no formula is specified. Inputs available: severity, policy priority,
   `sprk_highpriority` on the subject (BR-3), age. *Blocks*: the worklist ordering task, not the evaluator.
   Resolvable at task-creation time; must not be left to the implementer's taste, because rank chosen ad hoc is
@@ -1113,23 +1154,23 @@ where noted.
 | # | Open point | Source | Task |
 |---|---|---|---|
 | ~~O-1~~ | ✅ **Decided D-30**: a severity column on `sprk_policy` | reconciliation C-2, #1 | 007 |
-| O-2 | **Rank formula** — §11 Q1 above; whether `sprk_highpriority` is the 2nd key | C-9, W-13, W-14 | 038, 062 |
-| O-3 | **Record class** of *Reassign* and *Extend response date* | C-3 | 036 |
-| O-4 | **Initial overdue threshold** — v4's 1 day or the collector's 5 | C-6 | 061 |
+| ~~O-2~~ | ✅ **Decided D-42**: Rank: severity → `sprk_highpriority` → oldest → record number | C-9, W-13, W-14 | 038, 062 |
+| ~~O-3~~ | ✅ **Decided D-45**: *Reassign* and *Extend response date* are Routine | C-3 | 036 |
+| ~~O-4~~ | ✅ **Decided D-43**: Overdue starts at 1 day, a knob; tune in UAT | C-6 | 061, 064 |
 | ~~O-5~~ | ✅ **Decided D-31**: overdue-To-Do rule for all To Dos; no matter → Signal owned by the To Do owner's BU | C-7, W-15, S-4 | 037, 061 |
-| O-6 | **Work assignment "mine"** — assignee or assigner (`sprk_createdbyperson`) | C-8, #3 | 038 |
-| O-7 | Drop the row ⋮ menu (`DocumentRowMenu`) and the `OutcomeCard` extension | C-10, W-4, Z-15 | 052 |
-| O-8 | **Console Decision Record tab** in R1 | C-14 | 045 |
-| O-9 | **Association-confirmed trigger** (filing wakes the evaluator) | C-15, X-4 | 032 |
-| O-10 | Where measured **recall** is stored for Classification admin | C-16, S-11 | 103 |
-| O-11 | Source freshness / *Missing* beyond rendering a null fact as Missing | C-17, H-5 | 057 |
-| O-12 | Which action the **Know-promotion rule** offers | C-19, X-5 | 063 |
-| O-13 | **Gate tier outside a chat session** (the gate is chat-only) | #25 | 043, 070 |
-| O-14 | **Assistant drafts** inside the wizard (facade call vs templated drafts) | #32 | 058 |
-| O-15 | *Record the response* on a work assignment (no column; #3 recommends deactivate + record) | #3, #30 | 044 |
-| O-16 | Which identity writes the **new budget amount** onto `sprk_budget` (D-18) | D-18, #26 | 044 |
+| ~~O-6~~ | ✅ **Decided D-44**: Do lane of both the assigner and the assignee | C-8, #3 | 038 |
+| ~~O-7~~ | ✅ **Decided D-46**: Drop the `DocumentRowMenu`/`OutcomeCard` reuse (FR-27); C-9 continues on its own | C-10, W-4, Z-15 | 052 |
+| ~~O-8~~ | ✅ **Decided D-47**: Console Decision Record tab in R1 | C-14 | 045 |
+| ~~O-9~~ | ✅ **Decided D-48**: Association-confirmed trigger added | C-15, X-4 | 032 |
+| ~~O-10~~ | ✅ **Decided D-49**: Three recall columns on `sprk_triagecategory` (task 074) | C-16, S-11 | 074, 103 |
+| ~~O-11~~ | ✅ **Decided D-50**: Null fact renders Missing; freshness filed as a GitHub issue | C-17, H-5 | 057 |
+| ~~O-12~~ | ✅ **Decided D-51**: Know-promotion rule offers Assign Work | C-19, X-5 | 063 |
+| ~~O-13~~ | ✅ **Decided D-52**: Confirm step is the confirmation; gate tier from a pure `PublicContracts` function | #25 | 043, 070 |
+| ~~O-14~~ | ✅ **Decided D-53**: Templated (non-AI) drafts in R1 | #32 | 058 |
+| ~~O-15~~ | ✅ **Decided D-54**: Response columns on `sprk_workassignment` (task 047) | #3, #30 | 044, 047, 061 |
+| ~~O-16~~ | ✅ **Decided D-55**: Budget amount written as the signed-in user | D-18, #26 | 044 |
 | ~~O-17~~ | ✅ **Decided D-33** (replaces D-15's skip): Signals and Decision Records become secure children; one narrow skip | D-15 | 031, 039 |
-| O-18 | Does the Inquiry still stamp `sprk_responseduedate` now the SLA is deferred? | D-20 | 070 |
+| ~~O-18~~ | ✅ **Decided D-56**: No response-due date on the inquiry in R1 | D-20 | 070 |
 | ~~O-19~~ | ✅ **Decided D-32**: yes, still-true subjects re-raise as new episodes | D-13 | 031, 033 |
 | ~~O-20~~ | ✅ **Dissolved by D-33**: Restricted/Limited restrict only external contacts; gate records on Secure matters are secure children like any Decision Record | D-15 | 042 |
 | ~~O-21~~ | ✅ **Decided D-35**: no matter and no project → owner-only Signal in the owner's Do lane under "Not filed"; the core-record columns are optional for this case only | D-31 | 007, 037, 038, 059 |

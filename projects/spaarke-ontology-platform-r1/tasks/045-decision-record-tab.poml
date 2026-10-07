@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="045" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Decision Record tab in the Console (pending owner decision C-14)</title>
+    <title>Decision Record tab in the Console (D-47)</title>
     <phase>5 The worklist surface</phase>
-    <gate>blocked: owner decision C-14; then 058, 043 complete</gate>
+    <gate>058, 043 complete</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>A DataGrid configuration plus one registration, reusing the read-only wizard.</rigor-reason>
@@ -17,12 +17,12 @@
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
 
-  <prompt>If the owner puts it in R1, add a Console tab listing Decision Records filtered by record class, where each row's Open reopens the item in the decision wizard read-only.</prompt>
+  <prompt>Add (D-47: in R1) a Console tab listing Decision Records filtered by record class, where each row's Open reopens the item in the decision wizard read-only.</prompt>
   <role>SPAARKE front-end developer.</role>
   <goal>A Decision Record tab with an All / Judgements / Routine / Dismissals filter whose Open action reopens the decided item read-only.</goal>
 
   <context>
-    <background>v4 has a Decision Record tab (HANDOFF section 1.2 L84-85; reconciliation W-18). Design D-3 left auditing to the model-driven app. Reconciliation C-14 asked the owner whether a Console tab is in R1; D-13..D-29 do not answer it (spec section 11.1 O-8). This task is planned so the work is scheduled, and starts only on a yes.</background>
+    <background>v4 has a Decision Record tab (HANDOFF section 1.2 L84-85; reconciliation W-18). Design D-3 left auditing to the model-driven app. Reconciliation C-14 asked the owner whether a Console tab is in R1; D-13..D-29 do not answer it (spec section 11.1 O-8). D-47 (2026-10-07): the tab is in R1.</background>
     <relevant-files>
       <file role="new">Dataverse: sprk_gridconfiguration row for the Decision Record tab</file>
       <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
@@ -48,7 +48,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8. Confirm the owner's answer to C-14 is recorded; if not, stop (escalation).</step>
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8. D-47 put the tab in R1.</step>
     <step order="1">Author the grid configuration with the record-class filter.</step>
     <step order="2">Register the tab; wire Open to the read-only wizard.</step>
     <step order="3">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
@@ -56,7 +56,7 @@
   </steps>
 
   <escalation>
-    <trigger>Reconciliation C-14 (is a Console Decision Record tab in R1?) is NOT decided. Do not start until the owner answers; on a no, set this task to deferred with the owner's answer in notes.</trigger>
+    <trigger>If the tab cannot read Decision Records through a caller-authorized path that respects secure-child and owner-only records, STOP and escalate.</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
@@ -93,10 +93,9 @@
     <criterion testable="true">Given the tab, when a class filter is chosen, then only records of that class show.</criterion>
     <criterion testable="true">Given a row, when Open is clicked, then the item opens in the decision wizard read-only.</criterion>
     <criterion testable="true">Negative: no row offers edit or delete.</criterion>
-    <criterion testable="true">The owner's C-14 answer is recorded in notes before any work.</criterion>
   </acceptance-criteria>
 
-  <notes>Reconciliation W-18, C-14; spec section 11.1 O-8.</notes>
+  <notes>Reconciliation W-18; D-47 (O-8 decided).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

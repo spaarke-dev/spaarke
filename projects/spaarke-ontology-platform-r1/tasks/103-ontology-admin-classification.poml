@@ -3,7 +3,7 @@
   <metadata>
     <title>Ontology admin slice (c): Classification admin</title>
     <phase>10 Ontology admin (D-22)</phase>
-    <gate>104, 008, 057, 072 complete</gate>
+    <gate>104, 008, 057, 072, 074 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Admin writes to sprk_triagecategory, a cross-domain table that changes classifier behaviour on the next enrichment.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>104, 008, 057, 072</deps>
+    <deps>104, 008, 057, 072, 074</deps>
     <tags>bff-api,frontend,admin,classifier,endpoints</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
@@ -34,7 +34,7 @@
   <constraints>
     <constraint source="owner">Scope (D-22): every write runs AS THE CALLER (IDataverseUserClient); no service-identity write to sprk_triagecategory.</constraint>
     <constraint source="project">Scope: "which rules read each" is computed by scanning the enabled and draft policy versions' bodies for the category GUID; rename (sprk_name change) is refused while any version references it; a new category saves with enabled = No.</constraint>
-    <constraint source="project">Scope: recall is NOT built: where it is stored is undecided (C-16, spec section 11.1 O-10). Show recall only if task 074 or an owner decision has provided a source; otherwise omit the column.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-49): show each category's recall, labelled-set size and measured-on date from the three sprk_triagecategory columns task 074 creates and fills, against the 80% / 50-item floor; a category not yet measured shows Not measured.</constraint>
     <constraint source="project">Scope: no confidence calibration (#5: no classifier confidence exists).</constraint>
     <constraint source="project">Scope (NFR-10, D-29): census entries; single 403 for an unresolved caller.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
@@ -62,7 +62,7 @@
   </steps>
 
   <escalation>
-    <trigger>Recall storage (C-16) is undecided: before adding any recall column or reading 074's fixture for admin, STOP and ask the owner.</trigger>
+    <trigger>If task 074's recall columns do not exist when this task runs, STOP and wait for 074 rather than reading its notes file.</trigger>
   </escalation>
 
   <justification>
@@ -102,7 +102,7 @@
     <criterion testable="true">Given a new category, when saved, then it is created disabled; given an edit of guidance, then it is saved as the caller.</criterion>
     <criterion testable="true">Negative: renaming a category referenced by any policy version is refused, naming the rule.</criterion>
     <criterion testable="true">Negative: a Console User is refused by every write route; an unresolved caller gets 403; every route is in the census.</criterion>
-    <criterion testable="true">Negative: no recall or calibration figure is shown unless a decided source exists.</criterion>
+    <criterion testable="true">Given a measured category, when listed, then its recall, set size and date show against the floor (D-49); negative: no confidence calibration is shown.</criterion>
     <criterion testable="true">Tests cover the stated contract and authorization cases; anything beyond needs a one-line justification in task notes. Both sides build.</criterion>
   </acceptance-criteria>
 

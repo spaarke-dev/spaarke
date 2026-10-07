@@ -47,6 +47,7 @@
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check.</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34): "same matter" for Also resolve reads "same CORE record" (matter or project). A D-35 Signal (no core record) can never be an Also-resolve target and never resolves another.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-52): the decision wizard's Confirm step IS the human confirmation. The gate tier text for each taken action comes from a PURE function exposed through the AI PublicContracts facade (ADR-013), with no chat session and no ConfirmationPolicyEngine session state; the strictest tier is written to sprk_gatetier.</constraint>
   </constraints>
 
   <knowledge>
@@ -76,7 +77,7 @@
 
   <escalation>
     <trigger>If an external action (the email send) succeeds and the record write then fails, STOP and escalate with the observed state: the review id, the landed writes and the send. The owner decides what the user is told and whether a retry may write the record; do not invent a compensating action.</trigger>
-    <trigger>How the confirmation gate tier is computed outside a chat session is NOT decided (#25, spec section 11.1 O-13): the gate is reachable only through the chat session route. Before wiring send-budget-inquiry's gate, STOP and ask the owner whether a pure tier function behind the PublicContracts facade is acceptable.</trigger>
+    <trigger>If the gate-tier text cannot be produced by a pure function behind the PublicContracts facade without opening a chat session, STOP and escalate (D-52).</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
@@ -105,6 +106,7 @@
     <criterion testable="true">Negative: a caller who cannot read the matter gets 404 before any write; one who cannot write an action's target is refused before any write; an unresolved caller gets 403; the route is in the census.</criterion>
     <criterion testable="true">Negative: a dismissal without a reason, or Other without detail, is refused; an action with an unresolved record class is refused.</criterion>
     <criterion testable="true">Tests cover the stated contract and failure points; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given a review taking send-budget-inquiry, when committed, then no chat session is opened and sprk_gatetier holds the tier from the PublicContracts pure function (D-52).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-18 (amended), FR-22, FR-36 (amended), FR-51, FR-52, NFR-10; D-17, D-18, D-19, D-29. Supersedes task 053's gate-host wiring. Reconciliation X-6: a revision recorded here closes the Signal as Acted, and task 032's trigger must not re-close it.</notes>

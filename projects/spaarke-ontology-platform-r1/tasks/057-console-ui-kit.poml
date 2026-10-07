@@ -41,6 +41,7 @@
     <constraint source="ADR-021">Scope: Fluent v9 semantic tokens only; light and dark both correct; no hex, rgb or named colour literals.</constraint>
     <constraint source="project">Scope: fixtures use the BUILT schema's shapes (sprk_signal, sprk_decisionrecord columns from task 007), never v4's mock types. A Mode-2 harness via /prototype-harness-setup is allowed for visual iteration; prototype source is never ported.</constraint>
     <constraint source="project">Scope: everything lands in @spaarke/ui-components, nothing in src/solutions/SpaarkeAi (FR-28).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-50): R1 renders a null fact as Missing (already in scope). Source freshness and the landing-contract columns are NOT built in R1: this task files ONE GitHub issue for them (sources, last sync, cadence, the sourcesystem / sourceid / sourceetag / sourceasof landing columns, spec section 2.1), with the evidence (v4-prototype-vs-solution #8, H-5), and records its URL in notes/defer-issues.md.</constraint>
   </constraints>
 
   <knowledge>
@@ -72,7 +73,7 @@
 
   <escalation>
     <trigger>If a kit piece the wizard or worklist needs is not on D-24's list and cannot be composed from it, STOP and ask the owner rather than adding a fifth new component.</trigger>
-    <trigger>Source freshness (sources, last sync, cadence) beyond rendering a null fact as Missing is NOT decided (O-11, C-17); do not build a freshness component.</trigger>
+    <trigger>If rendering Missing needs freshness data that does not exist, STOP: freshness is the D-50 issue, not this task.</trigger>
   </escalation>
 
   <justification>
@@ -119,6 +120,7 @@
     <criterion testable="true">Negative: no kit component renders an edit or delete control for a Decision Record, and none shows a classifier confidence percentage.</criterion>
     <criterion testable="true">Negative: the component sources contain no hex, rgb or named colour literal.</criterion>
     <criterion testable="true">Each new component has a written section 11 justification in notes; tests cover the stated contract; the package builds.</criterion>
+    <criterion testable="true">Given notes/defer-issues.md, when read, then it lists the URL of the source-freshness / landing-contract GitHub issue filed by this task (D-50).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-28 (amended, D-24), FR-48; v4 HANDOFF section 1.3. Off the critical path to 031; can start now.</notes>

@@ -44,6 +44,7 @@
     <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct; keyboard reachable; FollowOnGrid cards toggle with Space/Enter.</constraint>
     <constraint source="project">Scope: the component lives in @spaarke/ui-components (FR-28); only its mount point is in SpaarkeAi.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): "the matter" in What was found (other open items) and Also resolve reads the item's CORE record (matter or project); a Not filed item (D-35) shows no other items and no Also resolve.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-53): drafts in R1 are TEMPLATED (non-AI): each action and Next-step field may be prefilled from a deterministic template over the item's own data (for example the inquiry body from the rule's literal sentence and the core record's name); no AI call, no "Assistant draft" badge. AI drafts are after R1.</constraint>
   </constraints>
 
   <knowledge>
@@ -76,7 +77,7 @@
   </steps>
 
   <escalation>
-    <trigger>Assistant-drafted field values inside the wizard are NOT decided (#32, O-14): there is no non-chat draft endpoint. Ship plain inputs (no "Assistant draft" badge) and ask the owner before adding any AI call.</trigger>
+    <trigger>If a templated draft would need data the plan endpoint does not return, STOP and extend task 036's endpoint rather than calling an AI service (D-53).</trigger>
     <trigger>If any v4 behaviour cannot be built on WizardShell plus task 056's props, STOP and escalate rather than adding a second wizard engine or a wrapper Dialog.</trigger>
   </escalation>
 
@@ -137,7 +138,7 @@
     <criterion testable="true">Given Record decision, when clicked, then exactly one request goes to the commit route with a review id; nothing is written before it; a partial-failure response lists the writes that landed and no record.</criterion>
     <criterion testable="true">Given a decided item, when opened, then it is read-only under the status bar with the fact snapshot, and Back walks the values sent.</criterion>
     <criterion testable="true">Negative: Escape and backdrop never close; closing with unrecorded choices on any browsed item asks Discard and close / Keep deciding; the wizard is never opened via navigateTo or WizardModal.</criterion>
-    <criterion testable="true">Negative: no edit or delete affordance for a record; no predicted record number; no Report Card claim; no Assistant-draft badge (O-14).</criterion>
+    <criterion testable="true">Negative: no edit or delete affordance for a record; no predicted record number; no Report Card claim; no Assistant-draft badge and no AI call (D-53).</criterion>
     <criterion testable="true">Tests cover the binding behaviours listed above; anything beyond needs a one-line justification in task notes. The package and SpaarkeAi build.</criterion>
   </acceptance-criteria>
 

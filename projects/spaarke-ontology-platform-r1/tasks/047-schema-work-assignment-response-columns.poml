@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Schema: response columns on sprk_workassignment (D-54)</title>
+    <phase>4b Commit and actions</phase>
+    <gate>startable (owner-approved D-54; coordination with the work-assignment owner and uac-r2 first)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Column adds on a table another domain owns that is also a uac-r2 secure root; logical names are immutable.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Repeats task 007's recorded Web API recipe for a small, owner-approved column set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse metadata only; touches no file another task edits.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,schema,security,coordination</tags>
+    <estimated-effort>2-3 hours plus coordination</estimated-effort>
+  </metadata>
+
+  <prompt>Add the response columns D-54 calls for to sprk_workassignment (responded-on and outcome, with the exact set decided here), using task 007's Web API recipe, after agreeing them with the work-assignment area owner and checking uac-r2, so the Record the response action can write them and the work-assignment rule can read them.</prompt>
+  <role>SPAARKE platform developer. Another domain's table: agree first, then add exactly what was agreed.</role>
+  <goal>sprk_workassignment carries the agreed response columns in the agreed solution, verified by a live describe, with the work-assignment owner's and uac-r2's sign-off recorded.</goal>
+
+  <context>
+    <background>D-54 (spec section 9, O-15): add response columns to sprk_workassignment (responded-on, outcome; the exact set is decided in this task), coordinated with the work-assignment owner and uac-r2 because the table is a secure root; the work-assignment rule reads them (task 061) and the Record the response action writes them (task 044). Today the table has statuscode Active/Inactive only and no response, outcome or responded-on column (v4-prototype-vs-solution #3). D-56 is separate: the INQUIRY (sprk_servicerequest) carries no response-due date in R1.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/007-schema-verification.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/047-work-assignment-response-columns.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-54): add sprk_respondedon (Date Only, behaviour DateOnly) and sprk_responseoutcome (choice) to sprk_workassignment; the outcome choice values and any further column (for example a response note) are decided HERE with the work-assignment area owner and recorded, then created exactly as agreed. No other table and no other column.</constraint>
+    <constraint source="project">Scope: use task 007's recipe: explicit PascalCase SchemaName, the MSCRM.SolutionUniqueName header, DateTimeBehavior on every date column; NEVER MCP create_table or any tool without a publisher parameter. Which solution the columns land in (the table's owning solution or OntologyPlatformSolution) is agreed with the work-assignment owner and recorded.</constraint>
+    <constraint source="owner">Scope: get the work-assignment area owner's agreement on the column set, the choice values and the solution BEFORE any metadata change; record it (who, when, where) in notes/047-work-assignment-response-columns.md.</constraint>
+    <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
+    <constraint source="project">Scope: sprk_workassignment is a uac-r2 SECURE ROOT. Confirm with uac-r2 that plain data columns need no lineage, census or role change (none is expected: they are not lookups); record the answer.</constraint>
+    <constraint source="ADR-038">Scope: later tests asserting these column names are paired with this task's live describe.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema creation on another domain's table</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/007-schema-verification.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8; fetch origin/master; re-read the uac-r2 files and record their commit; check uac-r2's open PRs and active work; run /conflict-check.</step>
+    <step order="1">Describe sprk_workassignment live and record its owning solution and existing columns.</step>
+    <step order="2">Agree the column set, outcome values and solution with the work-assignment area owner; confirm with uac-r2 that no lineage change is needed; record both.</step>
+    <step order="3">Create the agreed columns with the recipe; publish.</step>
+    <step order="4">Describe again and record every new column in notes/047-work-assignment-response-columns.md.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the work-assignment area owner does not agree, or wants the columns in a form that tasks 044 and 061 cannot read as plain columns, STOP and bring it to the owner.</trigger>
+    <trigger>If uac-r2 says the columns need a lineage, census or role change, STOP and escalate.</trigger>
+    <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_workassignment has statuscode Active/Inactive, sprk_responseduedate and assignee lookups; no response, outcome or responded-on column (live describe, v4-prototype-vs-solution #3).</existing>
+    <extension>Yes: columns on the existing table, no new table (D-54).</extension>
+    <cost-of-doing-nothing>Record the response has nowhere to write, and the work-assignment rule cannot tell an answered assignment from an unanswered one, so it keeps firing after the response came in.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Web API calls per the recipe</tool>
+    <tool name="dataverse-mcp">Read-only describe for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: sprk_workassignment response columns</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/047-work-assignment-response-columns.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a live describe, when read, then sprk_workassignment has sprk_respondedon (DateOnly behaviour) and sprk_responseoutcome (choice with the agreed values), plus any further agreed column, in the agreed solution.</criterion>
+    <criterion testable="true">The work-assignment area owner's agreement and uac-r2's "no lineage change" answer are recorded with who and when.</criterion>
+    <criterion testable="true">Negative: no other table or column changed; no tool without a publisher parameter was used.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-52 (amended, D-54); D-54. Tasks 044 (writes) and 061 (reads) depend on this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

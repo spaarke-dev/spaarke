@@ -100,6 +100,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — D-22 admin = gated tab writing as the caller · D-26 canonical modal + migrate wizards · D-27 `sprk_duedate` always · D-28 `statuscode` authoritative.
 - 2026-10-07 — D-29 To Do score on calendar days · D-30 severity column · D-31/D-35 all To Dos, no-core owner-only · D-32 Off→On re-raises.
 - 2026-10-07 — D-33 secure-child Signals/Decision Records · D-34/D-36/D-37 core-record grouping, extensible · D-38 no skips · D-39 per-item suppression · D-40 two-bound dates · D-41 To Do dates → Date Only (task 106).
+- 2026-10-07 — D-42..D-56 close every open point: rank sev→highpriority→oldest→number · overdue 1 day · WA in both assigner's and assignee's Do lane · reassign/extend Routine · drop RowMenu/OutcomeCard reuse · DR tab in R1 · association-confirmed trigger · recall columns on triage category · Missing + freshness issue · Know rule offers Assign Work · Confirm = confirmation, no chat · templated drafts · WA response columns (task 047) · budget amount as the user · no inquiry due date.
 - 2026-10-05 — SmartTodo's palette is the one due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey).
 - (verify) 2026-10-07 — Writer credential vs tenant-isolation rule I5: proposed fix = build it like the central factory (DefaultAzureCredential + TenantId + writer client id, every non-MI source excluded, a test pins the exclusions); **awaiting owner**.
 

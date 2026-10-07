@@ -14,7 +14,7 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>A project exit gate; its result must be singular and unambiguous.</parallel-reason>
     <deps>072</deps>
-    <tags>ai,classifier,testing,quality-gate</tags>
+    <tags>ai,classifier,testing,quality-gate,dataverse,schema</tags>
     <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
 
@@ -36,6 +36,7 @@
     <constraint source="project">Scope: report RECALL specifically (of the communications that ARE fee or scope changes, what fraction did the classifier catch). Precision is informative but is not the floor, because a miss is worse than noise for NOTIFYING (decision 13).</constraint>
     <constraint source="project">Scope: report the number measured. If it is below the floor, say so plainly and escalate; do not re-label to reach the floor.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-49): persist the measurement on sprk_triagecategory in three NEW columns (recall, labelled-set size, measured-on), one value set per measured category. Create them with the task 007 Web API recipe (explicit PascalCase SchemaName, MSCRM.SolutionUniqueName = OntologyPlatformSolution, DateTimeBehavior on the date; never MCP create_table): sprk_measuredrecall (decimal, 0-100, 2 places), sprk_labelledsetsize (whole number), sprk_recallmeasuredon (date only). sprk_triagecategory is shared with the email-communication-intelligence project: run /conflict-check and record that project's agreement BEFORE the column adds. Writing the values uses an identity that holds Write on sprk_triagecategory (the administrator role, task 008), recorded.</constraint>
   </constraints>
 
   <knowledge>
@@ -68,6 +69,7 @@
 
   <escalation>
     <trigger>If measured recall is BELOW 80 percent, STOP and escalate per CLAUDE.md section 6. Do not proceed to project wrap-up. The options are to improve the classifier (guidance, prompt, model tier) or to re-scope the section 0 claim with the owner, and both are owner decisions rather than implementer ones.</trigger>
+    <trigger>If the email project objects to the three columns on sprk_triagecategory, STOP and escalate before creating them (D-49).</trigger>
   </escalation>
 
   <justification>
@@ -92,6 +94,8 @@
     <criterion testable="true">Given the recorded recall, when compared with 80 percent, then a plain pass or fail is stated.</criterion>
     <criterion testable="true">Negative: if recall is below the floor, the task escalates rather than proceeding, and no label was changed to reach the floor.</criterion>
     <criterion testable="true">The labelled set is committed as a repeatable fixture.</criterion>
+    <criterion testable="true">Given sprk_triagecategory, when described, then sprk_measuredrecall, sprk_labelledsetsize and sprk_recallmeasuredon exist in OntologyPlatformSolution; given the two measured categories, then each row holds the measured recall, the set size and the date (D-49).</criterion>
+    <criterion testable="true">The email project's agreement (conflict-check result) is recorded in notes before the column adds.</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-40 and success criterion 11. design.md section 8.0c (D-10). This task CAN FAIL THE PROJECT and that is its purpose.</notes>

@@ -41,6 +41,7 @@
     <constraint source="project">AMENDED 2026-10-07 (reconciliation B.6): use HANDOFF v4 section 1.4 (the full list) as the cutover check, recorded in notes/briefing-cutover.md, against real Dataverse.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the cutover check covers project cards and the reader's "Not filed" group as well as matter cards, verified with a non-admin reader who owns a Not filed To Do and one who does not.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-36): the cutover check also covers work-assignment and service-request cards.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-43): the Do lane fires at 1 day overdue while the old Briefing used 5 days, so Do volume after the cutover is higher by design; record the before/after counts in notes/briefing-cutover.md and tell users in the cutover note.</constraint>
   </constraints>
 
   <knowledge>

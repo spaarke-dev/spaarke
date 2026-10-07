@@ -33,7 +33,7 @@
 
   <constraints>
     <constraint source="project">Scope: the catalog contains exactly: Decide lane send-budget-inquiry (Judgement), revise-budget (Judgement; parameter: which sprk_budget when the matter has several, D-18), approve-variance (Judgement; record-only, effect line "The Decision Record is the approval; nothing else is written", D-19; excludes revise-budget per v4 Z-4). Do lane mark-complete (Routine; excludes reschedule and reassign), reschedule (Routine; writes sprk_duedate, D-27), reassign, send-reminder (Judgement), extend-response-date. Next-step creators add-todo, create-event, send-email, assign-work (Next steps make the record Judgement, reconciliation R-2).</constraint>
-    <constraint source="project">Scope: the record class of reassign and extend-response-date is NOT decided (reconciliation C-3, spec section 11.1 O-3). See escalation. Do not include escalate, extend-sla, close-inquiry (D-20: inquiry SLA deferred) or record-the-response (O-15).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-45, D-51, D-54): reassign and extend-response-date are ROUTINE (D-45). Add record-the-response (Do lane, work assignment; writes the D-54 response columns from task 047; record class Judgement per the v4 baseline, reconciliation R-3). assign-work is also usable as a PLAN action (Decide lane, Judgement) so the Know-promotion rule can offer it (D-51). Still excluded: escalate, extend-sla, close-inquiry (D-20).</constraint>
     <constraint source="project">Scope: dismissal reasons per lane are a closed list with Other requiring detail (reconciliation R-8, v4 baseline): Decide = Already approved offline, Not material, Wrong matter - misresolved, Duplicate, Handled outside Spaarke, Other; Do = Already done outside Spaarke, Not mine, No longer needed, Duplicate, Other. Wrong matter - misresolved carries countsTowardSuppression = false (R-10). The stored form is "code - detail".</constraint>
     <constraint source="project">Scope: the read endpoint takes a Signal id, authorizes it as the caller with a caller-identity read of the Signal's grouping matter (IDataverseUserClient; put the check in one place under Services/Signals so task 038 reuses it rather than writing a second one), reads the Signal's policy version's sprk_decisionplan, and returns the resolved plan. An unknown code in a plan is a logged, metered refusal for that plan (fail closed), never a silent skip.</constraint>
     <constraint source="project">Scope (NFR-10, D-29): census entry, RequireAuthorization, single 403 for an unresolved caller.</constraint>
@@ -64,7 +64,6 @@
   </steps>
 
   <escalation>
-    <trigger>Before fixing the record class of reassign and extend-response-date, STOP and ask the owner (C-3; v4 and the reconciliation recommend Routine for own-work moves). Until answered, mark both as unresolved in the catalog so the commit route refuses them rather than guessing a class.</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
   </escalation>
 
@@ -88,12 +87,13 @@
     <criterion testable="true">Given POL-COMMIT-BUDGET v2's plan, when resolved, then three actions return in plan order with labels, parameters, effect lines and record class Judgement, and approve-variance lists revise-budget in excludes.</criterion>
     <criterion testable="true">Given the Decide and Do lanes, when the dismissal reasons are read, then each list is exactly as stated and only Wrong matter - misresolved has countsTowardSuppression false.</criterion>
     <criterion testable="true">Negative: a plan naming an unknown code is refused for that plan, logged with a stable EventId and metered.</criterion>
-    <criterion testable="true">Negative: the catalog contains no escalate, extend-sla, close-inquiry or record-the-response action.</criterion>
+    <criterion testable="true">Negative: the catalog contains no escalate, extend-sla or close-inquiry action.</criterion>
     <criterion testable="true">Negative: a caller who cannot read the Signal's matter gets 404 (no read) per the 097/#1312 pattern; an unresolved caller gets 403; the route is in the census.</criterion>
     <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+    <criterion testable="true">Given reassign and extend-response-date, when resolved, then each has record class Routine (D-45); given record-the-response, then Judgement; given assign-work as a plan action, then it resolves (D-51).</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-49, FR-50; D-17, D-18, D-19, D-20, D-27. Reconciliation C-3 open (O-3).</notes>
+  <notes>spec.md FR-49, FR-50; D-17, D-18, D-19, D-20, D-27. D-45 (C-3 decided: Routine), D-51, D-54.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

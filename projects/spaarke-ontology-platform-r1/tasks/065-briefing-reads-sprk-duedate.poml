@@ -4,7 +4,7 @@
     <title>Daily Briefing reads sprk_duedate as the event due date (sprk_finalduedate informational)</title>
     <phase>6 Do lane and Briefing fold-in</phase>
     <gate>098 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which events a shipped user surface reports as overdue or due soon.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -74,6 +74,7 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-61; D-27.</notes>
+  <completion>COMPLETED 2026-10-07, FOLDED INTO TASK 098 (PR #1359) on the coordinator's instruction. DailyBriefingCollector reads sprk_duedate ALWAYS: High Priority sprk_event spec (sprk_duedate, no finalduedate fallback), Upcoming/Overdue task filters (NextXDays / OnOrBefore on sprk_duedate only), channel order (sprk_duedate asc, sprk_eventid) and the displayed due date; sprk_finalduedate is no longer selected. Task 098's user-local today unchanged. Tests: DailyBriefingCollectorTests CollectHighPriorityAsync_ClassifiesAndOrdersTaskEventsBySprkDuedate_NotTheFinalDueDate and CollectAsync_TaskChannels_SelectOrderAndShowBySprkDuedate_NotTheFinalDueDate both fail on the previous collector. Live (spaarkedev1, EventRoutesLiveTests.LiveMode_DailyBriefing_JudgesTasksBySprkDuedate_NotTheFinalDueDate): two real Open Task events with differing dates, read back, then the production collector as the operator: due 09-29/final 10-09 in Overdue, rescheduled due 10-09/final 09-29 in Upcoming (High Priority Overdue / DueSoon); the previous collector put both in Upcoming and none in Overdue; 0 records left. Other sprk_finalduedate readers listed with file:line in notes/065-finalduedate-readers.md (unchanged; comments that described the old precedence corrected). OPEN for the owner: the live Dataverse playbook node "Query Overdue Tasks" (348b6395-...) still ORs sprk_finalduedate lt today (not changed: Dataverse data, outside 098's approval). TASK-INDEX.md left to the coordinator.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
