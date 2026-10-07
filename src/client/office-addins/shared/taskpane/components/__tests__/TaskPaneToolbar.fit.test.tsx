@@ -2,7 +2,6 @@
  * Task 107 (owner UAT round 9): in Word the Expand button sat on top of the last tab when the row was too narrow.
  * The toolbar now steps down until it fits — Expand into "⋮", then icon-only tabs — and steps back up when wide.
  */
-import React from 'react';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { TaskPaneToolbar } from '../TaskPaneToolbar';
