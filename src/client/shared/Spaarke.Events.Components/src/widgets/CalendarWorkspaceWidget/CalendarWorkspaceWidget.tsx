@@ -430,7 +430,19 @@ const useStyles = makeStyles({
 // own window/parent/top chain inside ONE try, so a cross-origin parent
 // stopped the walk before `top` was tried. Typed as the @types/xrm surface.
 function getHostXrmFor(capability: 'webApi' | 'navigation'): typeof Xrm | null {
-  return (getXrm(capability) as unknown as typeof Xrm | undefined) ?? null;
+  const xrm = getXrm(capability);
+  return isHostXrm(xrm, capability) ? xrm : null;
+}
+
+/**
+ * Whether `value` exposes the @types/xrm member this widget uses for `capability` — `WebApi` (event-type options) or
+ * `Navigation` (the event-detail modal). A type guard rather than the former `as unknown as typeof Xrm` double cast
+ * (task 081 review R4-5, applied by task 098 — the same approach as `hasEntityMetadata` in XrmDataverseClient).
+ */
+function isHostXrm(value: unknown, capability: 'webApi' | 'navigation'): value is typeof Xrm {
+  const host = value as { WebApi?: unknown; Navigation?: unknown } | undefined;
+  const member = capability === 'webApi' ? host?.WebApi : host?.Navigation;
+  return typeof member === 'object' && member !== null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
