@@ -4,7 +4,7 @@
     <title>Server-side work-assignment create through the BFF</title>
     <phase>4b Commit and actions</phase>
     <gate>008 complete</gate>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves the create of a secure-record root from the browser to the server; business-unit cascade semantics must survive exactly.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -102,6 +102,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-53, NFR-10; D-21.</notes>
+
+  <completion>BLOCKED 2026-10-07 at both escalation triggers (stream C2): no code, no route, no ledger edit, no wizard change, no zz-046- records. Step 1 done: field-by-field parity table in notes/046-work-assignment-parity.md (19 rows). Trigger 1: no work-assignment area owner is named anywhere, so the table has no reviewer. Trigger 2: on origin/master 0ea74d1c3, uac-r2 task 166 retired POST /api/v1/work-assignments (DeadRouteRetirementTests pins it to 404) and RecordCreationService is now the server root-create pattern: G5 caller checks, app-only create owned by the BU default team (owner decision 2026-09-22), sprk_createdbyperson stamp, SecureRootFilingGate create-into-isolation (I-13 L1), AssignedAccessMaterializer (I-12 L1). That pattern makes owner, owning business unit and creator differ from the wizard (parity rows 13-16), so acceptance criterion 1 and the coordination constraint (no parallel mechanism) cannot both hold. Recommended: option A in the notes (extend RecordCreationService under uac-r2 review; accept rows 13-16 as intended differences; amend criterion 1). Request text for uac-r2 is in the notes.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
