@@ -146,7 +146,13 @@
     "identityPreset": {
       "type": "string",
       "enum": ["B2BGuest", "NativeAccount"],
-      "description": "T245c — H11 identity preset (design.md D6): B2BGuest invites each user as a guest (email required per user, consent gate); NativeAccount creates each user in the stamp's tenant (UPN from first/last name). Exact case. Same rule as POST /api/runs (UserProvisioningIntake) — pinned by IntakeSchemaProfileParityTests."
+      "description": "T245c — H11 identity preset (design.md D6): B2BGuest invites each user as a guest (email required per user, consent gate); NativeAccount creates each user in the stamp's tenant (UPN from first/last name). Exact case. A Model1 run takes only B2BGuest (owner D2, T232 — allOf below). Same rule as POST /api/runs (UserProvisioningIntake) — pinned by IntakeSchemaProfileParityTests."
+    },
+    "environmentSecurityGroupId": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "description": "T232 — object id of the customer environment's security group (displayName sprk-{customerId}-users), created by the operator and set as the Dataverse environment's security group before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model1 run — allOf below): H11 adds each guest to it, then makes the guest a Dataverse user. Without it every Model 1 environment would admit any user of Spaarke's tenant."
     },
     "users": {
       "type": "array",
@@ -200,6 +206,18 @@
       }
     },
     {
+      "description": "T232 (owner D2) — Model 1 customer users are B2B guests in Spaarke's tenant: a Model1 run takes only identityPreset B2BGuest (same rule as POST /api/runs: userprov-model1-requires-b2b-guest).",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model1" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "identityPreset": { "const": "B2BGuest" }
+        }
+      }
+    },
+    {
       "description": "tenancyModel × profile invariant — Model2 pairs ONLY with customer-owned-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
       "if": {
         "properties": { "tenancyModel": { "const": "Model2" } },
@@ -238,6 +256,16 @@
           "users": { "items": { "required": ["email"] } }
         }
       }
+    },
+    {
+      "description": "T232 — a B2BGuest run names the environment security group H11 adds each guest to (same rule as POST /api/runs: userprov-missing-security-group-id).",
+      "if": {
+        "properties": { "identityPreset": { "const": "B2BGuest" } },
+        "required": ["identityPreset"]
+      },
+      "then": {
+        "required": ["environmentSecurityGroupId"]
+      }
     }
   ],
   "examples": [
@@ -261,8 +289,11 @@
       "onFailedPolicy": "abandon",
       "onQuarantinedPolicy": "failFast",
       "onManualGatePolicy": "waitAndExit",
-      "identityPreset": "NativeAccount",
-      "users": [{ "firstName": "Trial", "lastName": "Admin", "companyName": "Spaarke" }],
+      "identityPreset": "B2BGuest",
+      "users": [
+        { "firstName": "Trial", "lastName": "Admin", "email": "trial.admin@trial1.example", "companyName": "Trial 1" }
+      ],
+      "environmentSecurityGroupId": "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
       "exchangePolicyScopeGroupId": "spaarke-trial1-mail-scope@spaarke.com",
       "communicationGraphResource": "users/trial1-comms@spaarke.com/messages",
       "communicationDefaultMailbox": "trial1-comms@spaarke.com"
@@ -286,6 +317,7 @@
       "onManualGatePolicy": "waitAndExit",
       "identityPreset": "B2BGuest",
       "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
+      "environmentSecurityGroupId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
       "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
       "communicationGraphResource": "users/legal-comms@acme.example/messages",
       "emailGraphResource": "users/legal-intake@acme.example/messages",

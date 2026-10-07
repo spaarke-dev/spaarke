@@ -537,7 +537,7 @@ public static class RunsEndpoints
         // Intake is fixed here (there is no add-parameter endpoint), so a value a handler would refuse must be
         // refused now — before the run guard, the registry lookup, any Cosmos write or enqueue — not after
         // H0–H10 have built the stamp.
-        if (ValidateOperatorIntake(request.NonSecretParameters) is { } intakeViolation)
+        if (ValidateOperatorIntake(request.TenancyModel, request.NonSecretParameters) is { } intakeViolation)
         {
             return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
         }
@@ -1228,15 +1228,18 @@ public static class RunsEndpoints
 
     /// <summary>
     /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
-    /// runs), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
+    /// runs; T232: Model1 takes only B2BGuest, and B2BGuest needs the environment security group), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
     /// H4's Communication default mailbox, and (task 229) H0's cost tier + estimate (<see cref="CostEnvelopeIntake"/>).
     /// <c>null</c> when the values are usable.
     /// </summary>
-    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(IDictionary<string, string> parameters)
+    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(
+        string? tenancyModel, IDictionary<string, string> parameters)
     {
         parameters.TryGetValue(IntakeParameterCatalog.IdentityPreset, out var identityPreset);
         parameters.TryGetValue(IntakeParameterCatalog.UsersJson, out var usersJson);
-        if (UserProvisioningIntake.Validate(identityPreset, usersJson) is UserProvisioningIntakeOutcome.Invalid users)
+        parameters.TryGetValue(IntakeParameterCatalog.EnvironmentSecurityGroupId, out var securityGroupId);
+        if (UserProvisioningIntake.Validate(tenancyModel, identityPreset, usersJson, securityGroupId)
+            is UserProvisioningIntakeOutcome.Invalid users)
         {
             return (users.RejectionCode, $"nonSecretParameters: {users.Diagnostic}");
         }

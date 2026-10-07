@@ -43,6 +43,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [PAYG + B2B guest Dataverse users (2026-10-07)](payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md) — guests covered w/o licence; `pac licensing *billing-policy*` (not pac admin); JIT role-assoc by oid alternate key; BAP addUser = tenant admin only
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values
 - [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification app-wide/persists; setFormNotification text-only; PCF MessageBar REC
 - [Impersonation for async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — documented for services; trust = S2S app controls access; SB SAS → forgeable caller id

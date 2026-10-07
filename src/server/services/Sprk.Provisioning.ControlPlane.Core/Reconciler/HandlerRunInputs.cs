@@ -216,6 +216,10 @@ public static class HandlerRunInputs
                 // T245c: required intake, validated at POST /api/runs by UserProvisioningIntake (H11's own rules).
                 RunInput.Intake(IntakeParameterCatalog.IdentityPreset),
                 RunInput.Intake(IntakeParameterCatalog.UsersJson),
+                // T232: required for B2BGuest only (every Model 1 run) — UserProvisioningIntake enforces that at intake.
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentSecurityGroupId, required: false),
+                // T232: each guest becomes a Dataverse user of the environment H5 adopted (H5 → H10 → H11).
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H12a] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],
             [HandlerIds.H12b] = [Tenant, RunInput.Output(nameof(InterStepState.DataverseEnvUrl))],

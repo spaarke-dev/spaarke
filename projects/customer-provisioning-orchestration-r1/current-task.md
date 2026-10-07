@@ -9,9 +9,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
-| **Step** | 0 — not started. T254 ✅ (SESSION 41) — see its POML notes. |
-| **Status** | pending. |
-| **Next Action** | `task-execute` 232 — Step 1 research (researcher subagent): PAYG + B2B guest systemuser creation, force-sync need, billing-policy check recipe. No live action without owner approval. |
+| **Step** | Steps 1–5 code DONE (builds, 0 warnings; NOT yet tests): research → `notes`-worthy findings in `.claude/agent-memory/researcher/payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md`; intake (Model1→B2BGuest, `environmentSecurityGroupId`), invitation lookup (no 2nd mail), group client, Dataverse guest writer (alternate-key on-demand add, `restrictguestuseraccess` check), NativeAccount no-SKU refusal. |
+| **Status** | in-progress (started 2026-10-07). |
+| **Next Action** | Update tests (H11UserProvisioningHandlerTests ctor + new cases; RunsEndpointsTests WithOperatorIntake → B2BGuest + group id, NativeAccount Model1 → 400; IntakeSchemaProfileParityTests ValidateOperatorIntake(tenancyModel, …) + new rules); new HTTP tests for GraphRestB2BInvitationClient, GraphRestEnvironmentSecurityGroupClient, DataverseWebApiGuestUserWriter; then Step 6 docs (prereqs PRQ-C-10 group, C-11 PAYG, C-12 guest access; skill; guide; inventory; constraints; notes/t232-guest-access-decisions.md). Owner note for close: PAYG meter is per active user PER APP. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 

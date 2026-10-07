@@ -161,8 +161,8 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH8] = new[] { HandlerH3, HandlerH5 },                   // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 is a data edge (T227b): H8 grants H3's BffAppRegId (and H2a's MiClientId — H2a is upstream of H3) on the container-type registration before creating the container; it authenticates as the container type's OWNING app (SpeContainerOptions.ContainerTypeOwners), not as the BFF app.
             [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).
             // T228: H10 needs only H3 (BffAppRegId), H2a (MiClientId / MiObjectId — upstream of H3 and H5) and H5
-            // (DataverseEnvUrl); it registers the application users the later Dataverse handlers act as. H11 keeps its old
-            // position after H7 (its users get the solution's roles, imported by H6).
+            // (DataverseEnvUrl); it registers the application users the later Dataverse handlers act as. H11 stays after H7:
+            // T232 — it makes each B2B guest a Dataverse user holding the solution's role(s), which H6 imports (H6 → H7).
             [HandlerH10] = new[] { HandlerH3, HandlerH5 },
             [HandlerH11] = new[] { HandlerH10, HandlerH7 },
             [HandlerH12a] = new[] { HandlerH11 },

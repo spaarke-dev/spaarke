@@ -803,6 +803,9 @@ builder.Services.Configure<H11UserProvisioningOptions>(
 builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>();
 builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>();
 builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>();
+// Task 232 (D2, G10): the environment security group (Graph) and the guest's Dataverse user + role(s) (Web API).
+builder.Services.AddHttpClient<IEnvironmentSecurityGroupClient, GraphRestEnvironmentSecurityGroupClient>();
+builder.Services.AddHttpClient<IDataverseGuestUserWriter, DataverseWebApiGuestUserWriter>();
 builder.Services.AddScoped<H11UserProvisioningHandler>();
 
 // Task 072 (Batch 3F): H12c runtime references handler + ONE collaborator
