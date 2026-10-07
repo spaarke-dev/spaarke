@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="172" project="unified-access-control-r2">
+  <metadata>
+    <title>Membership resolver binds a team-owned Owner column: a polymorphic `ownerid` resolves through the caller's teams as well as the caller (GitHub #1011, reassigned 2026-10-06)</title>
+    <phase>Batch 5 (owner decision 2026-10-06: #1011 reopened and assigned to unified-access-control-r2)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes which records the membership resolver returns on its default and access-conferring surfaces (tags bff-api, auth, membership). Access-adjacent.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared resolver used by playbooks, the membership API, the access-record set and (via callers) Office routes. The fix must widen exactly one binding and leave the people-targeting surface (ADR-034 A3) byte-identical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches Services/Ai/Membership/** and its tests only. Task 171 (running) touches Infrastructure/Graph/**, the byte routes and SpeContainerMembershipService; no file overlap.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, membership, dataverse, testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <origin>GitHub #1011 (filed by spaarkeai-word-add-in-r1; auto-closed 2026-09-30 by #960's commit message; reopened 2026-10-06 by owner decision and assigned here). Shared with spaarkeai-word-add-in-r1 task 080 (D-11 team ownership for sprk_document / sprk_communication / sprk_todo).</origin>
+  </metadata>
+
+  <prompt>`MembershipFieldDiscoveryService` gives every `AttributeTypeCode.Owner` column the synthetic targets `{ "systemuser", "team" }` (`:94-95`, `:531-534`), and the classifier keeps only the FIRST target found in `identityTypeByTable` (`:288-300`). So `ownerid` always becomes ONE SystemUser descriptor, bound to the caller's own systemuserid. On a team-owned record `ownerid` holds the team's id, so the record resolves to nobody through its Owner column. Team ownership is the product convention (owner decision D-11, 2026-09-22: records are owned by the business unit's default owner team). Fix the resolver so a polymorphic lookup binds every identity type its targets admit, and the Owner column of a team-owned record resolves to that team's members.</prompt>
+
+  <owner-decision date="2026-10-06">Reopen #1011 and assign it to unified-access-control-r2. Fix it in the resolver, not the data model (team ownership stays the convention). Standing decisions that bound this fix: ADR-034 A3 / task 152 (the people-targeting surface "records FOR this person" never selects a team-owned row through ownership, because a BU default team contains every user in the unit); task 043 C-1 (`ownerid` / `owningteam` / `owningbusinessunit` confer structurally on the access-conferring surface without a registry entry).</owner-decision>
+
+  <goal>On the DEFAULT and ACCESS-CONFERRING surfaces, a record whose `ownerid` is a team the caller belongs to is returned under the owner role, and a record owned by the caller is still returned. The PEOPLE-TARGETING surface returns exactly what it returns today. A maker-authored single-target lookup classifies exactly as today.</goal>
+
+  <constraints>
+    <constraint source="ADR-034 A3 (task 152)">The people-targeting surface is unchanged: `ownerid` there binds only the caller's own id, `owningteam` stays excluded. Prove it with the existing A3 tests passing unmodified plus one new test (a team-owned row the caller's team owns is NOT returned on People).</constraint>
+    <constraint source="task 043 C-1 / FR-24">The access-conferring allowance stays keyed on the three platform column NAMES. A maker-authored `systemuser`- or `team`-typed lookup still confers nothing without a registry entry; `ResolveAsync_AccessConferringOnly_MakerAuthoredSystemUserLookup_ConfersNothing` keeps passing unmodified.</constraint>
+    <constraint source="ADR-003">Fail closed. The `teammembership` read in `IdentityNormalizationService` fails soft to an empty TeamIds list (known, ISS-019 shape); do not change that here, but state in the note that on team-owned rows a failed team read looks like "no access", which is the safe direction.</constraint>
+    <constraint source="FR-14 / caching">Emitted FetchXml stays deterministic (stable descriptor and condition order). If the discovery result's shape changes (more descriptors per field), bump or otherwise invalidate the discovery cache key so a stale cached single-descriptor result cannot survive a deploy for up to the 60-minute TTL.</constraint>
+    <constraint source="CLAUDE.md §11">Modify the existing classifier and descriptor model; no new service, interface or DI registration.</constraint>
+    <constraint source="CLAUDE.md §10">Tests for every Services/ change; publish-size delta against a fresh master build (short paths, Compress-Archive); CVE check.</constraint>
+    <constraint source="ADR-038">Unit tests in tests/unit/Sprk.Bff.Api.Tests on the resolver and discovery seams. No Mock&lt;HttpMessageHandler&gt;, DI-registration or ctor-null tests.</constraint>
+    <constraint source="project rule">No live or environment actions. Code, tests and the task note only.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Trace and record in `notes/task-172-team-owned-owner-column.md` (on the task branch): (a) every caller of `IMembershipResolverService` / `IMembershipFieldDiscoveryService` and which surface it uses (default, AccessConferringOnly, People, ResolveByContactAsync); (b) answer #1011's open question: does the A1.1 structural-ownership path pull a NON-registry entity's Owner column into the access-conferring surface (read `FilterToAccessConferringRoles`)? (c) for `sprk_document`, `sprk_todo`, `sprk_communication`, `sprk_matter`: is `owningteam` discovered today (a team-target lookup, not GlobalFieldExclusions-excluded per appsettings templates)? (d) every Office route (the Word/Outlook add-in endpoints) that reaches the resolver, directly or through AccessibleRecordSetService.</step>
+    <step order="1">Classifier: for a lookup with several targets in `identityTypeByTable` (the polymorphic Owner case; also Customer if both account and contact are configured), emit one descriptor per matched identity type, in the target array's order, instead of stopping at the first. Same field, same role. Check every consumer that keys descriptors by `Field` (role grouping, `projectAttributes`, `FilterToAccessConferringRoles`' `byField`, the registry type-mismatch check, PeopleTargeting's admission at `PersonOwnershipColumns`) and make each handle two descriptors for one field correctly.</step>
+    <step order="2">Resolver: the Team branch of `BuildFetchXml` already binds `identity.TeamIds`; confirm the ownerid-as-Team descriptor emits `ownerid eq {teamId}` for each team. On People, admit only the SystemUser descriptor of `ownerid` / `owninguser` (A3).</step>
+    <step order="3">Cache: invalidate stale discovery results (constraint FR-14 / caching).</step>
+    <step order="4">Tests: (a) regression: a team-owned record (ownerid = team T, caller ∈ T, caller ≠ owner) resolves under role owner on the default surface; (b) the same on AccessConferringOnly; (c) a user-owned record still resolves; (d) People returns neither the team-owned row nor any change for the user-owned one; (e) a caller in no owning team gets nothing from ownerid; (f) a single-target maker lookup classifies unchanged; (g) a Customer column with only `contact` configured classifies unchanged.</step>
+    <step order="5">Build, run `Sprk.Bff.Api.Tests` and `Spaarke.ArchTests`, measure publish size, run the CVE check, write the note's result table (which surfaces change, which Office routes change), open a DRAFT PR referencing #1011 WITHOUT a closing keyword (write "refs #1011"; #960 auto-closed it with "do not close").</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>AC1: test (a) passes: a team-owned row whose team contains the caller is returned under role owner on the default surface; it failed before the change (show the failing run or explain why the old code returns nothing).</criterion>
+    <criterion>AC2: tests (b)-(g) pass; all pre-existing Membership tests pass unmodified (list any test that had to change and why; an A3 or C-1 test changing is a stop-and-escalate).</criterion>
+    <criterion>AC3: the note answers step 0 (a)-(d) with file:line evidence, and states for each Office route whether its access result can change.</criterion>
+    <criterion>AC4: the discovery cache cannot serve a pre-change result after deploy.</criterion>
+    <criterion>AC5: build clean; Sprk.Bff.Api.Tests and Spaarke.ArchTests green; publish-size delta reported (both sizes, tool named); no new HIGH CVE.</criterion>
+    <criterion>AC6: DRAFT PR open, "refs #1011", no closing keyword anywhere in the PR body or commit messages.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>An ADR-034 A3 or task 043 C-1 test would have to change for the fix to pass.</trigger>
+    <trigger>Step 0 finds a caller for which widening `ownerid` to the caller's teams would return records the caller has no Dataverse access to (the resolver's output used as an access GRANT rather than a scope).</trigger>
+    <trigger>An Office route's access result changes (report it to the main session; it is relayed to spaarkeai-word-add-in-r1).</trigger>
+  </escalation>
+</task>

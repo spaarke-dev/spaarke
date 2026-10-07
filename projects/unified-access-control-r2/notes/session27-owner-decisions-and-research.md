@@ -1097,6 +1097,13 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 4. **Delete the 20 empty test SPE containers** (ids in `notes/batch4-live-gates-2026-10-06.md` and round 68). The BFF has no delete route and the admin Graph token is refused, so the owner runs it as a SharePoint admin step.
 5. **The owner is available for the screen session now** (2026-10-06).
 
+## Round 73 (2026-10-06): #1011 reassigned to this project
+
+- **From** spaarkeai-word-add-in-r1 (pasted by the owner): GitHub #1011 reopened and assigned to unified-access-control-r2 (owner decision 2026-10-06). GitHub had auto-closed it on 2026-09-30 when #960 merged, reading commit `34beafe78`'s "do not close #1011" as a closing keyword.
+- **Defect:** `MembershipFieldDiscoveryService` synthesizes Owner targets `{systemuser, team}` and keeps only the first match, so `ownerid` is always one SystemUser descriptor. A team-owned record (the D-11 convention) resolves to nobody through its Owner column. Task 043 routed this project's access checks around it via `owningteam`; the resolver itself was never repaired.
+- **Action:** task 172 created (`tasks/172-membership-resolver-team-owned-owner-column.poml`). Bind every matched identity type of a polymorphic lookup; the people-targeting surface (A3, task 152) stays byte-identical; the C-1 name-keyed allowance stays. Regression test: a team-owned record resolves to that team's members. PR text uses "refs #1011" only.
+- **Owed to spaarkeai-word-add-in-r1:** whether any Office-route access result changes (their saves create team-owned `sprk_document` / `sprk_todo`). Answered from task 172's step-0 trace.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
