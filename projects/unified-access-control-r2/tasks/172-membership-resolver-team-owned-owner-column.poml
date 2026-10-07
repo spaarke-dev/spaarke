@@ -4,7 +4,7 @@
     <title>Membership resolver binds a team-owned Owner column: a polymorphic `ownerid` resolves through the caller's teams as well as the caller (GitHub #1011, reassigned 2026-10-06)</title>
     <phase>Batch 5 (owner decision 2026-10-06: #1011 reopened and assigned to unified-access-control-r2)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which records the membership resolver returns on its default and access-conferring surfaces (tags bff-api, auth, membership). Access-adjacent.</rigor-reason>
     <model-tier>opus</model-tier>
