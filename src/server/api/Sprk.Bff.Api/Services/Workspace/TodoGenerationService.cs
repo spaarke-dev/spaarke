@@ -630,7 +630,10 @@ public sealed class TodoGenerationService : IScheduledJob
                     regardingEntityName: "sprk_event",
                     regardingId: evt.Id,
                     regardingDisplayName: evt.Name,
-                    dueDate: evt.DueDate,
+                    // Task 098: the event's due date is a calendar date (DateOnly). The to-do column is unchanged, so it is
+                    // written exactly as before — UTC midnight of that day (what the former DateTime.Parse of
+                    // "yyyy-MM-ddT00:00:00Z" produced on the UTC app server).
+                    dueDate: evt.DueDate.Value.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
                     ct: ct);
 
                 _logger.LogInformation(

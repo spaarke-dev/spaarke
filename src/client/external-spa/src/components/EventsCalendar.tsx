@@ -40,6 +40,7 @@ import {
   MessageBarBody,
 } from '@fluentui/react-components';
 import { AddRegular, CalendarEmptyRegular } from '@fluentui/react-icons';
+import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import { getEvents, createEvent, ODataEvent, CreateEventPayload } from '../api/web-api-client';
 import { AccessLevel, ApiError } from '../types';
 
@@ -230,10 +231,13 @@ interface ParsedDate {
   full: string;
 }
 
+/**
+ * sprk_duedate is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 098). `new Date("yyyy-MM-dd")` is UTC
+ * midnight, which every zone west of UTC shows as the PREVIOUS day; parseDueDate builds the local calendar date.
+ */
 function parseDateParts(iso: string | null | undefined): ParsedDate | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
+  const d = parseDueDate(iso);
+  if (!d) return null;
 
   return {
     month: d.toLocaleDateString('en-US', { month: 'short' }),
@@ -377,7 +381,9 @@ const CreateEventDialog: React.FC<CreateEventDialogProps> = ({ projectId, open, 
     try {
       const payload: CreateEventPayload = {
         sprk_name: title.trim(),
-        ...(dueDate ? { sprk_duedate: new Date(dueDate).toISOString() } : {}),
+        // Task 098: the date input's own "yyyy-MM-dd" — the column is Date Only and Dataverse refuses a timestamp
+        // (the former toISOString() also turned the picked day into a UTC instant).
+        ...(dueDate ? { sprk_duedate: dueDate } : {}),
         // sprk_status omitted: the BFF creates the event Open (statuscode 659490001) — task 097 review F9.
         // Note: the event-as-todo toggle was removed in R3 task 007 — events are not to-dos.
         'sprk_RegardingProject@odata.bind': `/sprk_projects(${projectId})`, // R5 002: PascalCase nav prop (metadata-verified)
@@ -579,8 +585,8 @@ export const EventsCalendar: React.FC<EventsCalendarProps> = ({ projectId, acces
       // Insert new event and re-sort by due date ascending
       const updated = [...prev, newEvent];
       updated.sort((a, b) => {
-        const da = a.sprk_duedate ? new Date(a.sprk_duedate).getTime() : Infinity;
-        const db = b.sprk_duedate ? new Date(b.sprk_duedate).getTime() : Infinity;
+        const da = parseDueDate(a.sprk_duedate)?.getTime() ?? Infinity;
+        const db = parseDueDate(b.sprk_duedate)?.getTime() ?? Infinity;
         return da - db;
       });
       return updated;

@@ -51,6 +51,34 @@ export function parseDueDate(isoString: string | undefined | null): Date | null 
 }
 
 /**
+ * The LOCAL calendar date of `date` as `YYYY-MM-DD` — the value a Dataverse
+ * Date Only column takes (spaarke-ontology-platform-r1 task 098: the Web API
+ * refuses a timestamp for one with HTTP 400). Never
+ * `toISOString().split('T')[0]`, which is the UTC date: after about 20:00 in
+ * any US zone that is tomorrow.
+ *
+ * §11: the same local-components formatting already existed privately as
+ * `DateRangeFilterChip.formatLocalDate` (DataGrid chip) and
+ * `CalendarWorkspaceWidget.toIsoDate` (now folded into this); this is the one
+ * exported copy writers use.
+ */
+export function formatDateOnly(date: Date): string {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * True when `value` is a bare `YYYY-MM-DD` — the shape Dataverse returns ONLY
+ * for a column whose behaviour is Date Only (UserLocal and
+ * TimeZoneIndependent columns always come back with a time and `Z`).
+ */
+export function isDateOnlyString(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+/**
  * Number of CALENDAR days between two dates, both normalized to local
  * midnight first. Positive when `b` is after `a`. Safe against DST's ±1h
  * skew (uses `Math.round`, not a raw ms division).

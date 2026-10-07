@@ -22,6 +22,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -738,6 +739,120 @@ public sealed class DailyBriefingCollectorTests
             return _inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
         }
     }
+    // ── Task 098: "today" is the CALLER's local day, not the UTC day ────────────────────────────────────────────────
+    // Pinned at 2026-10-06T01:00Z = 21:00 on Oct 5 in New York: the UTC day is already Oct 6. sprk_event's due dates
+    // are Dataverse Date Only ("yyyy-MM-dd"). The former code took "today" from DateTime.UtcNow, so at this instant a
+    // task due Oct 5 read as Overdue, the overdue cutoff moved a day, and a to-do due Oct 5 dropped out of the digest.
+
+    private static readonly DateTimeOffset EveningEastern = DateTimeOffset.Parse("2026-10-06T01:00:00Z", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The caller-context seam, answering the caller's own usersettings / time-zone reads as an Eastern user.</summary>
+    private sealed class EasternCallerQuery(IImpersonatedCommunicationQuery inner) : IImpersonatedCommunicationQuery
+    {
+        public List<string> ZoneReads { get; } = new();
+
+        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
+        {
+            IReadOnlyList<Dictionary<string, JsonElement>> one(string key, object value) =>
+                new List<Dictionary<string, JsonElement>> { Row(new Dictionary<string, object?> { [key] = value }) };
+            switch (entitySetName)
+            {
+                case "usersettingscollection":
+                    ZoneReads.Add($"{entitySetName}?{odataQuery} as {callerSystemUserId}");
+                    return Task.FromResult(one("timezonecode", 35));
+                case "timezonedefinitions":
+                    ZoneReads.Add($"{entitySetName}?{odataQuery} as {callerSystemUserId}");
+                    return Task.FromResult(one("standardname", "Eastern Standard Time"));
+                default:
+                    return inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+            }
+        }
+    }
+
+    private static DailyBriefingCollector SutAt(IImpersonatedCommunicationQuery query, Mock<IMembershipResolverService> resolver) =>
+        new(query, resolver.Object, NullLogger<DailyBriefingCollector>.Instance, new FakeTimeProvider(EveningEastern));
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ClassifiesAgainstTheCallersLocalToday()
+    {
+        var dueToday = Guid.NewGuid();
+        var dueYesterday = Guid.NewGuid();
+        var dueTomorrow = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "due today (Eastern)", ("sprk_finalduedate", "2026-10-05")), dueToday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "due yesterday", ("sprk_finalduedate", "2026-10-04")), dueYesterday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueTomorrow, "due tomorrow", ("sprk_finalduedate", "2026-10-06")), dueTomorrow);
+        var query = new EasternCallerQuery(inner);
+
+        var result = await SutAt(query, PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { dueToday, dueYesterday, dueTomorrow },
+        })).CollectHighPriorityAsync(SystemUserId, CancellationToken.None);
+
+        string ActionOf(Guid id) => result.Items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(dueToday).Should().Be("DueToday", "Oct 5 is TODAY for the caller at 21:00 Eastern; the UTC day (Oct 6) made it Overdue");
+        ActionOf(dueYesterday).Should().Be("Overdue");
+        ActionOf(dueTomorrow).Should().Be("DueSoon");
+        query.ZoneReads.Should().OnlyContain(r => r.EndsWith($"as {SystemUserId}"), "the time zone is read AS the caller (no app-only client)");
+    }
+
+    [Fact]
+    public async Task CollectAsync_OverdueCutoffAndToDoFloor_AreTheCallersLocalDay()
+    {
+        var inner = AllChannelsQuery();
+        var query = new EasternCallerQuery(inner);
+
+        await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("PropertyValue='2026-09-30'"),
+                "overdue = on or before (local today Oct 5 - 5 days); the UTC day gave 2026-10-01");
+        inner.Calls.Where(c => c.EntitySet == "sprk_todos")
+            .Should().NotBeEmpty().And.OnlyContain(c => c.Query.Contains("OnOrAfter(PropertyName='sprk_duedate',PropertyValue='2026-10-05')"),
+                "a to-do due today (Oct 5 for the caller) stays in the digest");
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheCallersZoneCannotBeRead_UsesTheUtcDay()
+    {
+        var query = AllChannelsQuery(); // no usersettings row for the caller → no-timezonecode → UTC fallback
+
+        await SutAt(query, PeopleResolver(AllSets)).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        query.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-01'"));
+    }
+
+    /// <summary>A caller-context seam whose time-zone read times out (HttpClient: a TaskCanceledException nobody requested).</summary>
+    private sealed class TimingOutZoneQuery(IImpersonatedCommunicationQuery inner) : IImpersonatedCommunicationQuery
+    {
+        public Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct) =>
+            entitySetName == "usersettingscollection"
+                ? throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout")
+                : inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+    }
+
+    [Fact]
+    public async Task CollectAsync_WhenTheZoneReadTimesOut_FallsBackToTheUtcDay_InsteadOfFailingTheBriefing()
+    {
+        var inner = AllChannelsQuery();
+
+        var act = () => SutAt(new TimingOutZoneQuery(inner), PeopleResolver(AllSets))
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        await act.Should().NotThrowAsync("only the caller's own cancellation may propagate; a timeout dates by UTC");
+        inner.Calls.Where(c => c.EntitySet == "sprk_events" && c.Query.Contains("OnOrBefore"))
+            .Should().OnlyContain(c => c.Query.Contains("PropertyValue='2026-10-01'"));
+    }
+
+    [Theory]
+    [InlineData("2026-10-05", "2026-10-05")]          // Date Only value: the day as written
+    [InlineData("2026-10-06T03:30:00Z", "2026-10-05")] // UserLocal instant: 23:30 Oct 5 in the caller's zone
+    public void DueDayOf_IsTheCalendarDayInTheCallersZone(string raw, string expected) =>
+        DailyBriefingCollector.DueDayOf(raw, TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"))
+            .Should().Be(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
 }
 
 /// <summary>

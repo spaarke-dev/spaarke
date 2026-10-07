@@ -141,6 +141,10 @@ internal sealed class TaskActionCore
         _logger = logger;
     }
 
+    /// <summary>The calendar date of <paramref name="value"/> as written (its own <see cref="DateTime.Kind"/>), at
+    /// midnight with <see cref="DateTimeKind.Unspecified"/> — what a Date Only column stores unchanged (task 098).</summary>
+    internal static DateTime AsCalendarDate(DateTime value) => DateTime.SpecifyKind(value.Date, DateTimeKind.Unspecified);
+
     /// <summary>
     /// Builds and creates the <c>sprk_event</c> (event type = Task) record. Returns the created id, or
     /// <see cref="Guid.Empty"/> when the Dataverse create is rejected (degraded success — the payload was
@@ -165,13 +169,16 @@ internal sealed class TaskActionCore
         if (input.Description is not null)
             entity["sprk_description"] = input.Description;
 
+        // Task 098: sprk_duedate / sprk_finalduedate are Date Only. The SDK stores the date part of a Utc/Unspecified
+        // DateTime as written but converts a Local one to UTC first (22:00 EDT on 10-20 was stored as 10-21 — probed
+        // live 2026-10-05), so the value is pinned to its calendar date at midnight, Unspecified.
         if (input.ScheduledEnd.HasValue)
-            entity["sprk_duedate"] = input.ScheduledEnd.Value;
+            entity["sprk_duedate"] = AsCalendarDate(input.ScheduledEnd.Value);
 
         // sprk_finalduedate is the OUTER bound. DailyBriefingCollector reads it FIRST and falls back to
         // sprk_duedate, and its task channels filter by date -- a task with neither set cannot surface.
         if (input.FinalDueDate.HasValue)
-            entity["sprk_finalduedate"] = input.FinalDueDate.Value;
+            entity["sprk_finalduedate"] = AsCalendarDate(input.FinalDueDate.Value);
 
         if (input.RegardingObjectId.HasValue && !string.IsNullOrWhiteSpace(input.RegardingObjectType))
         {

@@ -141,7 +141,7 @@ public class TodoGenerationServiceTests
             Id = id ?? Guid.NewGuid(),
             Name = name,
             StatusCode = statusCode,
-            DueDate = dueDate,
+            DueDate = dueDate is { } due ? DateOnly.FromDateTime(due) : null, // task 098: EventEntity dates are DateOnly
             CreatedOn = DateTime.UtcNow,
             ModifiedOn = DateTime.UtcNow
         };

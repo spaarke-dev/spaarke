@@ -65,6 +65,7 @@ import {
 
 import { useExternalContext } from '../hooks/useExternalContext';
 import { getProjects, getEvents, getDocuments } from '../api/web-api-client';
+import { daysBetweenLocalMidnight, parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { ODataProject, ODataDocument, ODataEvent } from '../api/web-api-client';
 import { PageContainer } from '../components/PageContainer';
 import { SectionCard } from '../components/SectionCard';
@@ -310,11 +311,15 @@ function formatRelativeDate(isoDate: string | null | undefined): string {
   return date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+/**
+ * An event due date is a calendar date ("yyyy-MM-dd" — Dataverse Date Only, task 098): parsed as the local day
+ * (`new Date("yyyy-MM-dd")` is UTC midnight — the previous day west of UTC), and overdue only once that day has passed.
+ */
 function formatDueDate(isoDate: string | null | undefined): { label: string; isOverdue: boolean } {
   if (!isoDate) return { label: 'No due date', isOverdue: false };
-  const date = new Date(isoDate);
-  if (isNaN(date.getTime())) return { label: 'Invalid date', isOverdue: false };
-  const isOverdue = date < new Date();
+  const date = parseDueDate(isoDate);
+  if (!date) return { label: 'Invalid date', isOverdue: false };
+  const isOverdue = daysBetweenLocalMidnight(new Date(), date) < 0;
   const formatted = date.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   return { label: isOverdue ? `Overdue — ${formatted}` : formatted, isOverdue };
 }
@@ -795,14 +800,16 @@ export const OutsideCounselDashboard: React.FC = () => {
   );
 
   const upcomingItems: UpcomingItem[] = React.useMemo(() => {
-    const now = Date.now();
+    // Task 098: sprk_duedate is a calendar date ("yyyy-MM-dd", Dataverse Date Only) — parsed as the LOCAL day
+    // (new Date("yyyy-MM-dd") is UTC midnight, the previous day west of UTC); the window is in calendar days.
+    const now = new Date();
     return projectEvents
       .flatMap(e => {
-        const due = e.sprk_duedate ? new Date(e.sprk_duedate).getTime() : NaN;
-        return isNaN(due) ? [] : [{ event: e, due }];
+        const day = parseDueDate(e.sprk_duedate);
+        return day ? [{ event: e, due: day.getTime(), day }] : [];
       })
       .sort((a, b) => a.due - b.due)
-      .filter(({ due }) => (due - now) / (1000 * 60 * 60 * 24) < 30)
+      .filter(({ day }) => daysBetweenLocalMidnight(now, day) < 30)
       .slice(0, 5)
       .map(({ event: e }) => ({
         id: e.sprk_eventid,

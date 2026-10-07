@@ -913,6 +913,12 @@ public static class ExternalProjectDataEndpoints
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
 
+        // Task 098: sprk_event.sprk_duedate is a calendar date (Dataverse Date Only); refuse what is not one rather than let
+        // Dataverse answer 400 behind a 500.
+        if (request.SprkDuedate is not null && !Spaarke.Dataverse.DataverseDateOnly.TryParse(request.SprkDuedate, out _))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "sprk_duedate must be a calendar date (yyyy-MM-dd).");
+
         // Task 146: owned by the project's team (the named Secure team for a secure project), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "event", ct);
         if (ownerRefusal is not null)

@@ -118,12 +118,15 @@ public sealed record CreateTaskRequest
     public required string Subject { get; init; }
     public string? Description { get; init; }
 
-    /// <summary>Due date (<c>sprk_duedate</c>); converted to UTC (matching the node's <c>ToUniversalTime()</c>).</summary>
+    /// <summary>Due date (<c>sprk_duedate</c>) — a calendar date (Date Only, task 098): its date part as written is
+    /// stored, with no time-zone conversion. Pass midnight of the intended day (callers use <c>DateTimeKind.Utc</c>
+    /// midnight of the user's local date).</summary>
     public DateTime? DueDate { get; init; }
 
     /// <summary>
     /// Final/outer due date (<c>sprk_event.sprk_finalduedate</c>) — the later "must be done by" bound where
-    /// <see cref="DueDate"/> is the target. Optional; null leaves the column unset.
+    /// <see cref="DueDate"/> is the target. Optional; null leaves the column unset. A calendar date, like
+    /// <see cref="DueDate"/>.
     /// </summary>
     /// <remarks>
     /// Added 2026-09-29 (<c>spaarke-ontology-platform-r1</c>). <c>DailyBriefingCollector</c>'s task channels

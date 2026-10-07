@@ -94,7 +94,7 @@ export interface ODataEvent {
   sprk_eventid: string;
   /** Event display name — the BFF reads it from Dataverse `sprk_eventname` (sprk_event has no `sprk_name`; task 097). */
   sprk_name: string;
-  /** ISO date string — due date */
+  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only, task 098) — parse with parseDueDate, never new Date(). */
   sprk_duedate?: string | null;
   /**
    * Event status — the BFF reads it from the event's status of record, Dataverse `statuscode` (sprk_event has no
@@ -558,7 +558,7 @@ export async function getOrganizations(
 export interface CreateEventPayload {
   /** Event display name — the BFF writes it to `sprk_eventname` (task 097). */
   sprk_name: string;
-  /** ISO date string for the due date */
+  /** Due date as a calendar date "yyyy-MM-dd" (Dataverse Date Only refuses a timestamp — task 098). */
   sprk_duedate?: string;
   /** Optional status — Draft (1) or Open (659490001) only, written to `statuscode`; omit it to create the event Open (task 097 review F9). */
   sprk_status?: number;

@@ -705,8 +705,11 @@ public class ExternalDataService
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
             body[EventNameColumn] = request.SprkName;
+        // Task 098: sprk_duedate is a Date Only column — the Web API accepts only "yyyy-MM-dd" and answers 400 for a
+        // timestamp. Earlier SPA builds sent toISOString() of the picked day's UTC midnight; its leading ten characters
+        // are that day. The endpoint refuses anything DataverseDateOnly cannot read before this point.
         if (request.SprkDuedate is not null)
-            body["sprk_duedate"] = request.SprkDuedate;
+            body["sprk_duedate"] = DataverseDateOnly.Format(DataverseDateOnly.Parse(request.SprkDuedate));
         body[EventStatusColumn] = status;
         body["statecode"] = EventStatusCode.GetStateCode(status);
 
@@ -1337,7 +1340,9 @@ public class ExternalDataService
     {
         SprkEventid = r.SprkEventid ?? "",
         SprkName = r.SprkName ?? "",
-        SprkDuedate = r.SprkDuedate,
+        // Task 098: always the calendar date "yyyy-MM-dd" — also from an environment whose column is not yet converted
+        // (a timestamp there reads as its UTC date, the day the conversion keeps).
+        SprkDuedate = DataverseDateOnly.TryParse(r.SprkDuedate, out var due) ? DataverseDateOnly.Format(due) : r.SprkDuedate,
         SprkStatus = r.SprkStatus,
         Createdon = r.Createdon,
         SprkRegardingprojectValue = r.SprkRegardingprojectValue,

@@ -18,7 +18,7 @@
  * **Origin**: lifted from legacy App.tsx `executeBulkStatusUpdate` + `executeBulkArchive`
  */
 
-import { registerCommandHandler, cleanGuid, getXrm } from '@spaarke/ui-components';
+import { registerCommandHandler, cleanGuid, getXrm, formatDateOnly } from '@spaarke/ui-components';
 import { EVENT_ENTITY_NAME } from './config';
 
 // Best-effort feedback: the nearest frame that has the member (task 081 round 5).
@@ -57,7 +57,7 @@ const StateCode = { ACTIVE: 0, INACTIVE: 1 } as const;
  * @param newStatus Target `sprk_eventstatus` option-set value.
  * @param statusLabel Human label for the success toast.
  * @param additionalFields Optional extra fields merged into the update payload
- *                         (e.g. `{ sprk_completeddate: new Date().toISOString() }`).
+ *                         (e.g. `{ sprk_completeddate: formatDateOnly(new Date()) }` — a Date Only column, task 098).
  * @returns `true` on success, `false` on any error (also shows an alert dialog).
  */
 async function executeBulkStatusUpdate(
@@ -171,14 +171,18 @@ export function registerEventHandlers(): void {
     // This generic registration completes the FR-MIG-02 contract; per-status
     // wrappers can be added when configjson surfaces them.
     await executeBulkStatusUpdate(ctx.selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
+      // Task 098: sprk_completeddate is Date Only — the Web API refuses a timestamp (HTTP 400). The user's LOCAL
+      // calendar day (toISOString() was also the UTC date: tomorrow after ~20:00 Eastern).
+      sprk_completeddate: formatDateOnly(new Date()),
     });
     ctx.refresh();
   });
 
   registerCommandHandler('CompleteEvents', async ctx => {
     await executeBulkStatusUpdate(ctx.selectedIds, EventStatus.COMPLETED, 'Completed', {
-      sprk_completeddate: new Date().toISOString(),
+      // Task 098: sprk_completeddate is Date Only — the Web API refuses a timestamp (HTTP 400). The user's LOCAL
+      // calendar day (toISOString() was also the UTC date: tomorrow after ~20:00 Eastern).
+      sprk_completeddate: formatDateOnly(new Date()),
     });
     ctx.refresh();
   });

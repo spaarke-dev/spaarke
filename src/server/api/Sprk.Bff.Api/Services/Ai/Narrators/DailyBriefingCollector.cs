@@ -56,6 +56,7 @@ using System.Text.Json;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Communication;
+using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Ai.Narrators;
 
@@ -200,6 +201,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     private readonly IImpersonatedCommunicationQuery _callerQuery;
     private readonly IMembershipResolverService _membershipResolver;
     private readonly ILogger<DailyBriefingCollector> _logger;
+    private readonly TimeProvider _clock;
 
     /// <param name="callerQuery">
     /// The existing caller-context read seam (MSCRMCallerID = the caller). Generic over entity set + OData query
@@ -211,11 +213,13 @@ public class DailyBriefingCollector : ICodedWorkflow
     public DailyBriefingCollector(
         IImpersonatedCommunicationQuery callerQuery,
         IMembershipResolverService membershipResolver,
-        ILogger<DailyBriefingCollector> logger)
+        ILogger<DailyBriefingCollector> logger,
+        TimeProvider? clock = null)
     {
         _callerQuery = callerQuery ?? throw new ArgumentNullException(nameof(callerQuery));
         _membershipResolver = membershipResolver ?? throw new ArgumentNullException(nameof(membershipResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions need not supply one
     }
 
     /// <summary>
@@ -230,6 +234,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         _callerQuery = null!;
         _membershipResolver = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = TimeProvider.System;
     }
 
     /// <inheritdoc />
@@ -309,14 +314,19 @@ public class DailyBriefingCollector : ICodedWorkflow
             "DailyBriefingCollector people-targeted ids: events={EventCount}, matters={MatterCount}, projects={ProjectCount}, documents={DocumentCount}, todos={TodoCount}",
             events.Ids.Count, matters.Ids.Count, projects.Ids.Count, documents.Ids.Count, todos.Ids.Count);
 
+        // Task 098: "today" is the caller's LOCAL day (their Dataverse time zone, read AS the caller), not the UTC day —
+        // at 21:00 Eastern the UTC day is already tomorrow, so a task due today read as overdue. Resolved lazily: only
+        // a channel that has something to read asks for it.
+        var userDay = new Lazy<Task<UserDay>>(() => ResolveUserDayAsync(systemUserId, ct));
+
         // ── Phase 2: read each channel AS THE CALLER, in parallel.
         var results = await Task.WhenAll(
             QueryUpcomingTasksAsync(systemUserId, events, matters, projects, w.DueWithinDays, ct),
-            QueryOverdueTasksAsync(systemUserId, events, matters, projects, ct),
+            QueryOverdueTasksAsync(systemUserId, events, matters, projects, userDay, ct),
             QueryDocumentsAsync(systemUserId, documents, matters, projects, w.RecencyHours, ct),
             QueryMattersAsync(systemUserId, matters, w.RecencyHours, ct),
             QueryProjectsAsync(systemUserId, projects, w.RecencyHours, ct),
-            QueryTodosAsync(systemUserId, todos, ct)).ConfigureAwait(false);
+            QueryTodosAsync(systemUserId, todos, userDay, ct)).ConfigureAwait(false);
 
         var channelCodes = new[]
         {
@@ -392,8 +402,10 @@ public class DailyBriefingCollector : ICodedWorkflow
         await Task.WhenAll(setTasks.Values).ConfigureAwait(false);
         var sets = setTasks.ToDictionary(kv => kv.Key, kv => kv.Value.Result, StringComparer.Ordinal);
 
+        // Task 098: Overdue / DueToday / DueSoon are judged against the caller's LOCAL today (lazy, as above).
+        var userDay = new Lazy<Task<UserDay>>(() => ResolveUserDayAsync(systemUserId, ct));
         var queries = await Task.WhenAll(
-            HighPriorityEntitySpecs.Select(spec => QueryHighPriorityAsync(spec, systemUserId, sets, ct))
+            HighPriorityEntitySpecs.Select(spec => QueryHighPriorityAsync(spec, systemUserId, sets, userDay, ct))
         ).ConfigureAwait(false);
 
         var failed = HighPriorityEntitySpecs
@@ -485,6 +497,7 @@ public class DailyBriefingCollector : ICodedWorkflow
         HighPriorityEntitySpec spec,
         Guid systemUserId,
         IReadOnlyDictionary<string, PeopleSet> sets,
+        Lazy<Task<UserDay>> userDay,
         CancellationToken ct)
     {
         var terms = new List<IdTerm> { new(spec.IdColumn, sets[spec.EntityType]) };
@@ -528,12 +541,15 @@ public class DailyBriefingCollector : ICodedWorkflow
             if (id is null) continue;
 
             DateTimeOffset? dueDate = null;
+            string? dueColumn = null;
             if (!string.IsNullOrEmpty(spec.DueDateColumn))
             {
                 dueDate = GetDate(row, spec.DueDateColumn);
+                dueColumn = spec.DueDateColumn;
                 if (dueDate is null && !string.IsNullOrEmpty(spec.FallbackDueDateColumn))
                 {
                     dueDate = GetDate(row, spec.FallbackDueDateColumn);
+                    dueColumn = spec.FallbackDueDateColumn;
                 }
             }
 
@@ -558,7 +574,8 @@ public class DailyBriefingCollector : ICodedWorkflow
                 Description = !string.IsNullOrEmpty(spec.DescriptionColumn)
                     ? (GetString(row, spec.DescriptionColumn) ?? string.Empty)
                     : string.Empty,
-                Action = ClassifyAction(dueDate, modifiedOn),
+                Action = await ClassifyActionAsync(dueColumn is null ? null : GetString(row, dueColumn), modifiedOn, userDay)
+                    .ConfigureAwait(false),
                 Reason = reason,
                 ModifiedOn = modifiedOn,
             });
@@ -577,27 +594,92 @@ public class DailyBriefingCollector : ICodedWorkflow
     ///   - "None"     — no dueDate + no recent modifiedon
     /// Widget renders as a badge with distinct intent color per action class.
     /// </summary>
-    private static string ClassifyAction(DateTimeOffset? dueDate, DateTimeOffset? modifiedOn)
+    /// <summary>
+    /// Overdue / DueToday / DueSoon from the due date's CALENDAR DAY against the caller's LOCAL today (task 098 — the
+    /// former UTC "today" called a task due today overdue from 20:00 Eastern), else Recent / None from modifiedon.
+    /// </summary>
+    private async Task<string> ClassifyActionAsync(string? rawDueDate, DateTimeOffset? modifiedOn, Lazy<Task<UserDay>> userDay)
     {
-        var nowUtc = DateTimeOffset.UtcNow;
-        var todayStart = new DateTimeOffset(nowUtc.UtcDateTime.Date, TimeSpan.Zero);
-        var tomorrowStart = todayStart.AddDays(1);
-        var sevenDaysFromNow = todayStart.AddDays(7);
-        var sevenDaysAgo = todayStart.AddDays(-7);
-
-        if (dueDate.HasValue)
+        if (!string.IsNullOrEmpty(rawDueDate))
         {
-            if (dueDate.Value < todayStart) return "Overdue";
-            if (dueDate.Value < tomorrowStart) return "DueToday";
-            if (dueDate.Value < sevenDaysFromNow) return "DueSoon";
+            var day = await userDay.Value.ConfigureAwait(false);
+            if (DueDayOf(rawDueDate, day.Zone) is { } dueDay)
+                return ClassifyAction(dueDay, modifiedOn, day.Today, _clock.GetUtcNow());
         }
 
+        return ClassifyAction(null, modifiedOn, DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime), _clock.GetUtcNow());
+    }
+
+    /// <summary>The classification rule itself — pure; <paramref name="today"/> is the caller's local today.</summary>
+    internal static string ClassifyAction(DateOnly? dueDay, DateTimeOffset? modifiedOn, DateOnly today, DateTimeOffset nowUtc)
+    {
+        if (dueDay is { } due)
+        {
+            if (due < today) return "Overdue";
+            if (due == today) return "DueToday";
+            if (due < today.AddDays(7)) return "DueSoon";
+        }
+
+        // Recency is elapsed time, not a calendar day: unchanged (7 days back from the UTC start of today).
+        var sevenDaysAgo = new DateTimeOffset(nowUtc.UtcDateTime.Date, TimeSpan.Zero).AddDays(-7);
         if (modifiedOn.HasValue && modifiedOn.Value >= sevenDaysAgo)
         {
             return "Recent";
         }
 
         return "None";
+    }
+
+    /// <summary>
+    /// A due value's calendar day: a bare <c>yyyy-MM-dd</c> (a Date Only column) is that day as written; a timestamp
+    /// (a UserLocal column) is the day of that instant in the caller's zone (UTC when unknown).
+    /// </summary>
+    internal static DateOnly? DueDayOf(string raw, TimeZoneInfo? zone)
+    {
+        // The Web API returns only ISO shapes: "yyyy-MM-dd" for a Date Only column, "yyyy-MM-ddTHH:mm:ssZ" otherwise.
+        // A non-ISO string would parse as UTC midnight and could land a day early — it does not occur on this path.
+        if (raw.Length == 10 && DataverseDateOnly.TryParse(raw, out var date))
+            return date;
+        return DateTimeOffset.TryParse(raw, CultureInfo.InvariantCulture,
+                DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var instant)
+            ? DataverseUserTimeZone.LocalDate(instant, zone)
+            : null;
+    }
+
+    /// <summary>
+    /// The caller's "today" in their own Dataverse time zone, read AS THE CALLER through the impersonated seam (this
+    /// collector holds no app-only client): <c>usersettings.timezonecode</c>, then that code's
+    /// <c>timezonedefinition.standardname</c>. Falls back to the UTC date with a warning.
+    /// </summary>
+    private async Task<UserDay> ResolveUserDayAsync(Guid systemUserId, CancellationToken ct)
+    {
+        var day = await DataverseUserTimeZone.UserDayAsync(
+            async c =>
+            {
+                var rows = await _callerQuery.QueryAsync(
+                    "usersettingscollection", $"$select=timezonecode&$filter=systemuserid eq {systemUserId:D}", systemUserId, c)
+                    .ConfigureAwait(false);
+                return rows.Count > 0 ? GetInt(rows[0], "timezonecode") : null;
+            },
+            async (code, c) =>
+            {
+                var rows = await _callerQuery.QueryAsync(
+                    "timezonedefinitions",
+                    $"$select=standardname&$filter=timezonecode eq {code.ToString(CultureInfo.InvariantCulture)}",
+                    systemUserId, c).ConfigureAwait(false);
+                return rows.Count > 0 ? GetString(rows[0], "standardname") : null;
+            },
+            _clock.GetUtcNow(),
+            ct).ConfigureAwait(false);
+
+        if (day.FallbackReason is not null)
+        {
+            _logger.LogWarning(
+                "DailyBriefingCollector: the caller's time zone could not be read; \"today\" is the UTC date ({Reason}).",
+                day.FallbackReason);
+        }
+
+        return day;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -790,16 +872,21 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// Overdue Tasks — sprk_event of type Task, due more than 5 days ago, status Open.
     /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
-    private Task<ChannelResult> QueryOverdueTasksAsync(
+    private async Task<ChannelResult> QueryOverdueTasksAsync(
         Guid systemUserId,
         PeopleSet events,
         PeopleSet matters,
         PeopleSet projects,
+        Lazy<Task<UserDay>> userDay,
         CancellationToken ct)
     {
-        // "Overdue" = on or before (today - TaskOverdueDaysPast), computed once per call.
-        var cutoff = DateTime.UtcNow.Date.AddDays(-TaskOverdueDaysPast).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
-        return QueryEventsAsync(
+        // "Overdue" = on or before (today - TaskOverdueDaysPast), today being the caller's LOCAL day (task 098).
+        // Nothing FOR the caller → nothing is read, so the time zone is not read either.
+        var today = events.Ids.Count + matters.Ids.Count + projects.Ids.Count > 0
+            ? (await userDay.Value.ConfigureAwait(false)).Today
+            : DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime);
+        var cutoff = DataverseDateOnly.Format(today.AddDays(-TaskOverdueDaysPast));
+        return await QueryEventsAsync(
             ChannelOverdueTasks,
             systemUserId,
             events,
@@ -807,7 +894,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             projects,
             $"(Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{cutoff}') or "
             + $"Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_finalduedate',PropertyValue='{cutoff}'))",
-            ct);
+            ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -979,9 +1066,13 @@ public class DailyBriefingCollector : ICodedWorkflow
     /// not clutter the digest.
     /// </para>
     /// </remarks>
-    private async Task<ChannelResult> QueryTodosAsync(Guid systemUserId, PeopleSet todos, CancellationToken ct)
+    private async Task<ChannelResult> QueryTodosAsync(
+        Guid systemUserId, PeopleSet todos, Lazy<Task<UserDay>> userDay, CancellationToken ct)
     {
-        var today = DateTime.UtcNow.Date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        // Task 098: "today" is the caller's LOCAL day (the UTC day dropped a to-do due today from 20:00 Eastern).
+        var today = DataverseDateOnly.Format(todos.Ids.Count > 0
+            ? (await userDay.Value.ConfigureAwait(false)).Today
+            : DateOnly.FromDateTime(_clock.GetUtcNow().UtcDateTime));
 
         var read = await ReadAsCallerAsync(
             systemUserId,

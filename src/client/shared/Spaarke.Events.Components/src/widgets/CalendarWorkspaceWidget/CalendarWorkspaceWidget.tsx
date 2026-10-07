@@ -128,6 +128,7 @@ import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Compo
 import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../../../Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
 import { getXrm } from '../../../../Spaarke.UI.Components/src/utils/xrmContext';
+import { formatDateOnly, parseDueDate } from '../../../../Spaarke.UI.Components/src/utils/dateLocal';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
@@ -433,14 +434,6 @@ function getHostXrmFor(capability: 'webApi' | 'navigation'): typeof Xrm | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Date helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-function toIsoDate(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Inner layout — consumes EventsPageContext (Q4 — provider kept so eventDates
 // flow continues to drive the calendar strip's dot indicators).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -509,9 +502,11 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
       for (const r of records) {
         const dateStr = (r.sprk_duedate as string | undefined) || (r.createdon as string | undefined);
         if (!dateStr) continue;
-        const d = new Date(dateStr);
-        if (Number.isNaN(d.getTime())) continue;
-        const key = toIsoDate(d);
+        // Task 098: sprk_duedate is a calendar date ("YYYY-MM-DD", Date Only) — its dot belongs on THAT day.
+        // new Date("YYYY-MM-DD") is UTC midnight, the previous day west of UTC. createdon stays an instant.
+        const d = parseDueDate(dateStr);
+        if (!d) continue;
+        const key = formatDateOnly(d);
         counts.set(key, (counts.get(key) ?? 0) + 1);
         eventDateObjects.push(d);
       }

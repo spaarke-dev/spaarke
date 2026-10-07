@@ -90,6 +90,7 @@ public sealed class CommunicationRiActionService
     private readonly NotificationService _notifications;
     private readonly IGenericEntityService _entityService;
     private readonly ILogger<CommunicationRiActionService> _logger;
+    private readonly TimeProvider _clock;
 
     public CommunicationRiActionService(
         IActionSeam seam,
@@ -97,7 +98,8 @@ public sealed class CommunicationRiActionService
         SignalRDeliveryService delivery,
         NotificationService notifications,
         IGenericEntityService entityService,
-        ILogger<CommunicationRiActionService> logger)
+        ILogger<CommunicationRiActionService> logger,
+        TimeProvider? clock = null)
     {
         _seam = seam ?? throw new ArgumentNullException(nameof(seam));
         _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
@@ -105,6 +107,7 @@ public sealed class CommunicationRiActionService
         _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions (seam tests) need not supply one; DI supplies the registered TimeProvider
     }
 
     /// <summary>
@@ -196,14 +199,26 @@ public sealed class CommunicationRiActionService
             // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
             // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so
             // an operator retunes the SLA by editing a row rather than shipping code.
-            var createdAtUtc = DateTime.UtcNow;
+            // Task 098: sprk_duedate / sprk_finalduedate are Date Only. The days count from the RECIPIENT's today,
+            // in their own Dataverse time zone — the former createdAtUtc.AddDays(n) took the UTC date, so a signal raised
+            // after ~20:00 Eastern dated the task a day late (the two ONTOLOGY DEV SEED 005 values hand-corrected in the
+            // conversion). UTC midnight of that calendar date is what the SDK stores as the date (probed live).
+            var (recipientToday, todayFallback) = await DataverseUserTimeZone.TodayForUserAsync(
+                _entityService, recipientSystemUserId, _clock.GetUtcNow(), ct).ConfigureAwait(false);
+            if (todayFallback is not null)
+            {
+                _logger.LogWarning(
+                    "[comms-ri] Task due dates count from the UTC date ({Reason}) for communication {CommunicationId}.",
+                    todayFallback, signal.CommunicationId);
+            }
+
             var taskResult = await _seam.CreateTaskAsync(
                 new CreateTaskRequest
                 {
                     Subject = subject,
                     Description = BuildActionDescription(signal, decision),
-                    DueDate = createdAtUtc.AddDays(decision.TaskDueDays),
-                    FinalDueDate = createdAtUtc.AddDays(decision.TaskFinalDueDays),
+                    DueDate = recipientToday.AddDays(decision.TaskDueDays).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                    FinalDueDate = recipientToday.AddDays(decision.TaskFinalDueDays).ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
                     RegardingObjectId = signal.CommunicationId,
                     RegardingObjectType = CommunicationEntity,
                     OwnerId = recipientSystemUserId,

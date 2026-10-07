@@ -295,6 +295,115 @@ public sealed class EventRoutesLiveTests
 
         leaks.Should().BeEmpty("every zz-097-test record this run created must be gone");
     }
+
+    /// <summary>
+    /// Task 098 — the six sprk_event date columns are Behavior DateOnly in the target environment (spaarkedev1 since
+    /// 2026-10-05; docs/data-model/sprk_event-date-columns.md). Proves, through the real routes and the production
+    /// services: dates are stored and returned as "yyyy-MM-dd"; a timestamp is refused before Dataverse; /complete
+    /// stores the operator's LOCAL date from their Dataverse time zone (run it between 20:00 and 24:00 Eastern and the
+    /// UTC date differs); the external create stores the date an earlier SPA build's toISOString() meant.
+    /// Same opt-in, same cleanup discipline as the 097 test; records are named "zz-098-test …".
+    /// </summary>
+    [Fact]
+    public async Task LiveMode_EventDates_AreCalendarDates_AndCompletionIsTheCallersLocalDate()
+    {
+        var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
+        if (string.IsNullOrWhiteSpace(dataverseUrl))
+            return; // not opted in
+
+        var projectId = Guid.Parse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_EVENTS_PROJECT_ID")!);
+        var credential = new AzureCliCredential();
+        using var dv = await DataverseClientAsync(dataverseUrl, credential);
+        var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
+
+        // The operator's own Dataverse time zone, read independently of the BFF.
+        var code = (await dv.GetFromJsonAsync<JsonElement>($"usersettingscollection({operatorId})?$select=timezonecode"))
+            .GetProperty("timezonecode").GetInt32();
+        var zoneName = (await dv.GetFromJsonAsync<JsonElement>($"timezonedefinitions?$select=standardname&$filter=timezonecode eq {code}"))
+            .GetProperty("value")[0].GetProperty("standardname").GetString()!;
+        var zone = TimeZoneInfo.FindSystemTimeZoneById(zoneName);
+        _out.WriteLine($"operator {operatorId}: Dataverse time zone {code} = {zoneName}");
+
+        await using var factory = new LiveEventsFactory(dataverseUrl, credential, _out);
+        using var bff = factory.CreateClient();
+        bff.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "live-test");
+
+        var createdEvents = new List<Guid>();
+        var leaks = new List<string>();
+        try
+        {
+            // a. POST: due and base date are stored as Edm.Date, exactly the day sent.
+            var post = await bff.PostAsJsonAsync("/api/v1/events", new
+            {
+                subject = "zz-098-test dates",
+                dueDate = "2026-10-20",
+                scheduledStart = "2026-10-01",
+            });
+            var id = await RegisterCreatedAsync(post, createdEvents);
+            Log("POST /api/v1/events (dueDate 2026-10-20, scheduledStart 2026-10-01)", post);
+            post.StatusCode.Should().Be(HttpStatusCode.Created);
+            var row = await ReadDatesAsync(dv, id);
+            Log("  Dataverse read-back", row);
+            row.GetProperty("sprk_duedate").GetString().Should().Be("2026-10-20");
+            row.GetProperty("sprk_basedate").GetString().Should().Be("2026-10-01");
+
+            // b. GET: all six as calendar dates (absent ones null).
+            var dto = await (await bff.GetAsync($"/api/v1/events/{id}")).Content.ReadFromJsonAsync<JsonElement>();
+            _out.WriteLine($"GET /api/v1/events/{id} -> {dto}");
+            dto.GetProperty("dueDate").GetString().Should().Be("2026-10-20");
+            dto.GetProperty("baseDate").GetString().Should().Be("2026-10-01");
+            foreach (var p in new[] { "finalDueDate", "completedDate", "approvedDate", "meetingDate" })
+                dto.GetProperty(p).ValueKind.Should().Be(JsonValueKind.Null);
+
+            // d. A timestamp is refused at the API — it never reaches Dataverse (which answers 400 for an Edm.Date).
+            var stamped = await bff.PostAsJsonAsync("/api/v1/events", new { subject = "zz-098-test timestamp", dueDate = "2026-10-20T00:00:00Z" });
+            await RegisterCreatedAsync(stamped, createdEvents);
+            Log("POST /api/v1/events (dueDate as a timestamp)", stamped);
+            stamped.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
+            // e. /complete: the operator's local date, from their Dataverse time zone — not the UTC date.
+            var before = DateTimeOffset.UtcNow;
+            var complete = await bff.PostAsync($"/api/v1/events/{id}/complete", null);
+            var after = DateTimeOffset.UtcNow;
+            Log("POST /complete", complete);
+            complete.StatusCode.Should().Be(HttpStatusCode.OK);
+            var stored = (await ReadDatesAsync(dv, id)).GetProperty("sprk_completeddate").GetString();
+            var expected = new[] { before, after }
+                .Select(t => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(t, zone).DateTime).ToString("yyyy-MM-dd")).Distinct().ToList();
+            _out.WriteLine($"  completed at {before:O} (UTC date {before.UtcDateTime:yyyy-MM-dd}); local date in {zoneName} = "
+                + $"{string.Join(" / ", expected)}; Dataverse stored sprk_completeddate = {stored}");
+            expected.Should().Contain(stored, "sprk_completeddate is the completing user's local calendar date");
+            (await (await bff.GetAsync($"/api/v1/events/{id}")).Content.ReadFromJsonAsync<JsonElement>())
+                .GetProperty("completedDate").GetString().Should().Be(stored);
+
+            // f. External create with the shape earlier SPA builds sent (toISOString of the picked day's UTC midnight).
+            var external = new ExternalDataService(new HttpClient(), factory.LiveConfiguration, credential,
+                factory.Services.GetRequiredService<ILogger<ExternalDataService>>());
+            var ext = await external.CreateEventAsync(projectId,
+                new CreateExternalEventRequest { SprkName = "zz-098-test external legacy date", SprkDuedate = "2026-10-21T00:00:00.000Z" },
+                await DefaultOwnerTeamOfRecordAsync(dv, "sprk_projects", projectId));
+            createdEvents.Add(Guid.Parse(ext.SprkEventid));
+            _out.WriteLine($"ExternalDataService.CreateEventAsync(sprk_duedate 2026-10-21T00:00:00.000Z) -> id={ext.SprkEventid} sprk_duedate={ext.SprkDuedate}");
+            ext.SprkDuedate.Should().Be("2026-10-21");
+            (await ReadDatesAsync(dv, Guid.Parse(ext.SprkEventid))).GetProperty("sprk_duedate").GetString().Should().Be("2026-10-21");
+            (await external.GetEventsAsync(projectId)).Single(e => e.SprkEventid == ext.SprkEventid)
+                .SprkDuedate.Should().Be("2026-10-21");
+        }
+        finally
+        {
+            foreach (var eventId in createdEvents.Where(e => e != Guid.Empty))
+                leaks.AddRange(await DeleteEventWithLogsAsync(dv, eventId));
+            _out.WriteLine($"cleanup: {createdEvents.Count(e => e != Guid.Empty)} zz-098-test events (+ their sprk_eventlog rows) "
+                + $"attempted; {leaks.Count} NOT deleted" + (leaks.Count > 0 ? ":" + Environment.NewLine + "  " + string.Join(Environment.NewLine + "  ", leaks) : "."));
+        }
+
+        leaks.Should().BeEmpty("every zz-098-test record this run created must be gone");
+    }
+
+    private static async Task<JsonElement> ReadDatesAsync(HttpClient dv, Guid id) =>
+        await dv.GetFromJsonAsync<JsonElement>(
+            $"sprk_events({id})?$select=sprk_duedate,sprk_finalduedate,sprk_basedate,sprk_completeddate,sprk_approveddate,sprk_meetingdate");
+
     // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────
 
     private void Log(string what, HttpResponseMessage r) =>
@@ -545,6 +654,18 @@ public sealed class EventRoutesLiveTests
 
         private async Task<Entity> LiveRetrieveAsync(string logicalName, Guid id, string[] columns, CancellationToken ct)
         {
+            if (logicalName == "usersettings")
+            {
+                // Task 098: plain (non-lookup) columns of the caller's settings row.
+                var settings = await _metadata.GetFromJsonAsync<JsonElement>(
+                    $"usersettingscollection({id})?$select={string.Join(',', columns)}", ct);
+                var result = new Entity(logicalName, id);
+                foreach (var column in columns)
+                    if (settings.TryGetProperty(column, out var value) && value.ValueKind == JsonValueKind.Number)
+                        result[column] = value.GetInt32();
+                return result;
+            }
+
             var meta = await MetaAsync(logicalName, ct);
             string Col(string attr) => meta.Types.TryGetValue(attr, out var t) && IsLookup(t) ? $"_{attr}_value" : attr;
             using var request = new HttpRequestMessage(HttpMethod.Get,
