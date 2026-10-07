@@ -7,6 +7,10 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
+
+`.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.
+
 ###### 2026-10-06 — Throughput fixes: `current-task.md` is state, not history; finding triage + round limits; seeding-proof and task-size scope (procedure-throughput-fixes-r1)
 
 Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4/day found three procedure causes. Build and test cost is real, but secondary.
