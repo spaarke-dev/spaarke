@@ -4,7 +4,7 @@
     <title>Schema: v4 data needs and the episode-scoped dedupe key</title>
     <phase>0 Foundations</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse column adds on five ontology tables; logical names are immutable, so a wrong name is delete-and-recreate after code is written against it.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,6 +110,11 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-03 (amended, D-13), FR-48..FR-51, FR-57; D-30 (severity, decided), D-36 (generic core-record reference + lineage-only typed lookups; supersedes the D-34 shape), D-35 (core-record columns optional for no-core-record items). Task 002's union check is repeated by task 008 after these adds (a column add touches the tables the append-only guarantee protects).</notes>
+
+  <completion>
+    <date>2026-10-07</date>
+    <summary>16 columns plus the Retired statuscode value created live in OntologyPlatformSolution on spaarkedev1 and verified by describe. sprk_dedupekey MaxLength 400 already fits the episode key (unchanged), alternate key Active; 0 Signal rows to re-key; sprk_matter RequiredLevel already None on both tables; recordtype_ref rows exist for all four core types. See notes/007-schema-verification.md. Open item for task 039/uac-r2: SecureChildLineage and secure-record-owner-role.json have no entries for sprk_signal / sprk_decisionrecord.</summary>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

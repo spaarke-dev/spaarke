@@ -53,6 +53,17 @@
 > `sprk_decisionrecord` append-only (no Update, no Delete) and `sprk_policyversion` no-update-after-create —
 > owner said permissions are managed as appropriate, and they are a security-role change, not metadata.
 
+> ## Task 007 additions (2026-10-07) - see [`007-schema-verification.md`](007-schema-verification.md)
+>
+> Created live in `spaarkedev1` (OntologyPlatformSolution) by the recipe above: `sprk_signal.sprk_duedate` (DateOnly);
+> `sprk_corerecordtype` (lookup to `sprk_recordtype_ref`) + `sprk_corerecordid` (text 100) on `sprk_signal` and `sprk_decisionrecord` (D-36);
+> `sprk_decisionrecord.sprk_project` + `sprk_workassignment` (typed lineage lookups), `sprk_steps` / `sprk_followons` (JSON), `sprk_gatetier`;
+> `sprk_policy.sprk_severity` (D-30), `sprk_shortname`, `sprk_worktype`, `sprk_retiredreason`, statuscode **Retired (100000000)** on Inactive;
+> `sprk_policyversion.sprk_decisionplan` (JSON).
+> **Dedupe key (D-13)**: `sprk_dedupekey` is `{policycode}|{subjecttype}|{subjectid}|{episode}`; MaxLength stays 400 (fits), alternate key still Active, no `sprk_episode` column.
+> **D-35**: `sprk_matter` is optional (RequiredLevel None) on `sprk_signal` and `sprk_decisionrecord`; the "required" marks for it in sections 1-2 are superseded.
+> **S-7**: `sprk_policyversion.sprk_inforceto` IS written at publish (D-14): null = currently in force; publishing a new version stamps the superseded one.
+
 > ## Original draft notes
 >
 > Requested so the tables can be **created manually in Dataverse before the project starts**. Five new tables:
