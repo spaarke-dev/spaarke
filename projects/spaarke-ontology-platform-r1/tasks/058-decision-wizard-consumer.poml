@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>The decision wizard: one WizardShell consumer for every decision, launched in-app</title>
+    <phase>5 The worklist surface</phase>
+    <gate>056, 057, 036, 026, 034 complete (043 for live wiring)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The primary user surface for recording decisions; carries most of v4's binding behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but fully specified by HANDOFF section 1.1 / 1.4 and the reconciliation; WizardShell's step API is stable.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>059 and 045 host this wizard; 102 reuses its host pattern.</parallel-reason>
+    <deps>056, 057, 036, 026, 034, 043</deps>
+    <tags>frontend,fluent-ui,react,wizard</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the decision wizard as a WizardShell consumer in a shared library, mounted in-app from the worklist widget: What was found, one step per plan action, Next steps, Confirm, Record decision through the commit route, dismissal, read-only replay and browse.</prompt>
+  <role>SPAARKE front-end developer. Steps come from data; the UI never switches on rule, lane or shape.</role>
+  <goal>Every Decide and Do decision is made and replayed in one wizard that writes nothing itself and calls the commit route once per review.</goal>
+
+  <context>
+    <background>D-26 adopts the canonical modal approach: the Console decision wizard is WizardShell, non-embedded, mounted in-app from the worklist widget (SpaarkeAi), never a navigateTo code page (notes/modal-wizard-canonical-approach.md section 7). D-17: nothing executes before Record decision; one review writes one record via the commit route (task 043). D-23: the rule sentence stays literal, the UI composes headlines, witness values are evidence lines. D-19: Approve variance says nothing else is written. D-18: Revise budget asks which budget when there are several. v4 HANDOFF section 1.1 and section 1.4 L127-144 @ ae1cc9f are the binding behaviour; reconciliation rows Z-1..Z-15 map each to work. Task 053 is superseded by this task plus 043.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/DecisionWizard.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/FollowOnGrid.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/ConfirmModal.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-26): WizardShell non-embedded, mounted in-app, the same pattern as CreateAnalysisWizardWidget's modal mode; never a new sprk_* web resource opened with navigateTo; never WizardModal; no wrapper Dialog. Use the props task 056 adds (nav + onBeforeNavigate, dismiss explicit, statusBar, stayOpenOnFinish, skipped, uiScale).</constraint>
+    <constraint source="owner">Scope (D-17): the wizard writes nothing. Record decision posts one review (with a client-generated review id) to the task 043 route and renders the result, including the "which writes landed" failure.</constraint>
+    <constraint source="project">Scope: steps are built from task 036's plan endpoint: What was found (sentence, evidence via EvidenceLine, How this was determined from task 026 collapsed in an Accordion, other open items on the matter in the same lane); one step per plan action in plan order, recommendation first; Next takes, Skip leaves out; excludes remove later steps and say so; FollowOnGrid Next steps add their own steps before Confirm; Confirm lists every action taken or skipped, the derived record class and why, Also resolve (Decide only), and Record decision.</constraint>
+    <constraint source="project">Scope: skip every action = dismissal: reason from the lane's closed list required, Other requires detail, the suppression effect shown from task 034's (policy, matter) count, finish label Dismiss and record.</constraint>
+    <constraint source="project">Scope: a decided item opens read-only on its last step under StatusBar (task 057) showing the record's fact snapshot, not today's data; Back walks the values actually sent; recording flips the item to read-only in place with focus on the status bar and a Next open item button.</constraint>
+    <constraint source="project">Scope: browse with nav walks the list the wizard was opened from, no wrap, typed values kept per item; Escape and backdrop never close; any close with unrecorded choices on any item opens a nested ConfirmModal (Keep deciding left, Discard and close).</constraint>
+    <constraint source="project">Scope: Approve variance's step says the Decision Record is the approval and nothing else is written (D-19); Revise budget offers a budget picker when the matter has several (D-18). Confirm says "a new Decision Record", never a predicted number (#6), and does not claim the record counts in a Report Card (#37).</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct; keyboard reachable; FollowOnGrid cards toggle with Space/Enter.</constraint>
+    <constraint source="project">Scope: the component lives in @spaarke/ui-components (FR-28); only its mount point is in SpaarkeAi.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Wizard host and decision UI</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="In-app WizardShell host" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateAnalysisWizardWidget.tsx">Modal-mode in-app mount; copy the host pattern, not its content.</pattern>
+      <pattern name="Next steps" location="src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/FollowOnGrid.tsx">Use as is; its steps collect values only, the commit route creates the records.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 1.1 all, section 1.4 L127-144, section 4.1 L218-226) in task notes.</step>
+    <step order="1">Build the step model from the plan endpoint response (fixtures first, against 036's contract).</step>
+    <step order="2">Implement What was found, action steps with excludes, Next steps, Confirm, dismissal.</step>
+    <step order="3">Implement browse, per-item drafts, the discard check, read-only replay and the post-record flip.</step>
+    <step order="4">Wire Record decision to the 043 route and render success and partial-failure results.</step>
+    <step order="5">Tests per binding behaviour; a mount in SpaarkeAi behind the worklist widget's open-item event.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Assistant-drafted field values inside the wizard are NOT decided (#32, O-14): there is no non-chat draft endpoint. Ship plain inputs (no "Assistant draft" badge) and ask the owner before adding any AI call.</trigger>
+    <trigger>If any v4 behaviour cannot be built on WizardShell plus task 056's props, STOP and escalate rather than adding a second wizard engine or a wrapper Dialog.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WizardShell (engine), FollowOnGrid (Next steps), ConfirmModal (discard) and the task 057 kit exist; no component builds wizard steps from a decision plan (grep DecisionWizard: none).</existing>
+    <extension>The engine and pieces are reused; only the consumer is new. WizardShell's own content cannot be generic over decision plans without making the engine domain-aware.</extension>
+    <cost-of-doing-nothing>There is no surface to record a decision; FR-26 req 5 and success criterion 10 cannot be exercised by a user, and task 053's single-action gate host cannot express multi-action plans.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Path B review records once">
+      <steps>
+        <step>Open a Path B item; take Send budget inquiry and Revise budget; add one To Do; Confirm; Record decision</step>
+        <step>Query sprk_decisionrecord for the matter</step>
+      </steps>
+      <expected>Exactly one record lists three offered actions (Approve variance skipped) and the To Do; the item flips to read-only with focus on the status bar.</expected>
+    </test>
+    <test name="Excludes and dismissal">
+      <steps>
+        <step>Take Approve variance</step>
+        <step>Start over and skip every action</step>
+      </steps>
+      <expected>Revise budget is removed with a note; skipping everything turns Confirm into a dismissal requiring a reason.</expected>
+    </test>
+    <test name="Explicit dismiss and discard check">
+      <steps>
+        <step>Type a value, press Escape, click the backdrop, then click the close button</step>
+      </steps>
+      <expected>Escape and backdrop do nothing; close opens the nested Discard confirmation with Keep deciding on the left.</expected>
+    </test>
+    <test name="Read-only replay">
+      <steps>
+        <step>Open a decided item from Closed today</step>
+      </steps>
+      <expected>It opens on its last step, read-only, under the status bar, showing the fact snapshot.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and walk every step</step>
+      </steps>
+      <expected>No white surfaces or hardcoded colours; no platform white header (in-app mount).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package and SpaarkeAi</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DecisionWizard/__tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a plan with N actions, when the wizard opens, then it shows What was found, N action steps in plan order (recommendation badged first), Next steps, and Confirm.</criterion>
+    <criterion testable="true">Given Approve variance taken, when the next step would be Revise budget, then that step is removed and the user is told why.</criterion>
+    <criterion testable="true">Given every action skipped, when Confirm shows, then it is a dismissal requiring a reason from the lane's list, and Other requires detail.</criterion>
+    <criterion testable="true">Given Record decision, when clicked, then exactly one request goes to the commit route with a review id; nothing is written before it; a partial-failure response lists the writes that landed and no record.</criterion>
+    <criterion testable="true">Given a decided item, when opened, then it is read-only under the status bar with the fact snapshot, and Back walks the values sent.</criterion>
+    <criterion testable="true">Negative: Escape and backdrop never close; closing with unrecorded choices on any browsed item asks Discard and close / Keep deciding; the wizard is never opened via navigateTo or WizardModal.</criterion>
+    <criterion testable="true">Negative: no edit or delete affordance for a record; no predicted record number; no Report Card claim; no Assistant-draft badge (O-14).</criterion>
+    <criterion testable="true">Tests cover the binding behaviours listed above; anything beyond needs a one-line justification in task notes. The package and SpaarkeAi build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26, FR-51, FR-55; D-17, D-18, D-19, D-23, D-26. Supersedes task 053 (UI half). Build against fixtures and 036's contract before 043 is live; 043 is a dep only for the live wiring step.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

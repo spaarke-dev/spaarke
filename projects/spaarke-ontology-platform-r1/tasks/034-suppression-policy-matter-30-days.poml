@@ -3,7 +3,7 @@
   <metadata>
     <title>Suppression: per (policy, matter), expiring after 30 days</title>
     <phase>3 Evaluator and Signal lifecycle</phase>
-    <gate>031 complete</gate>
+    <gate>031, 036 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Decides what the user stops seeing; an error either buries live work or produces notification fatigue.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>C</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>031</deps>
+    <deps>031, 036</deps>
     <tags>bff-api,signals,suppression</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
@@ -37,6 +37,9 @@
     <constraint source="project">Scope: an auto-closure is not a dismissal and must not count.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13): suppression is what task 031's re-raise rule reads. While sprk_suppresseduntil is in the future no new episode is raised for that (policy, matter); after it lapses the next pass MAY raise a new episode (the 30-day expiry is now reachable). The 14-day quiet window after a 1st or 2nd dismissal (FR-17a) is implemented in task 031's re-raise rule; this task must not implement a second one.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation R-8, R-10; FR-50): a dismissal whose reason code carries countsTowardSuppression = false in task 036's catalog (Wrong matter - misresolved) is recorded and queryable but never increments the counter. Read the code from the "code - detail" form of sprk_reason.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation B.2 row 034): expose a read of the (policy, matter) dismissal count and the current sprk_suppresseduntil for the decision wizard's dismissal step (task 058) and admin (task 100). Authorize it as the caller (caller can read the matter) and add it to the route census (NFR-10).</constraint>
   </constraints>
 
   <knowledge>
@@ -72,6 +75,12 @@
     <trigger>If dismissals cannot be counted per (policy, matter) because the Decision Record does not carry enough to group by, STOP and escalate rather than falling back to the dedupe-key grain. The grain was chosen deliberately in D-11 and the fallback silently fails the criterion-4 fatigue case.</trigger>
   </escalation>
 
+  <justification>
+    <existing>The suppression counter itself is this task's original scope; no route exposes a (policy, matter) dismissal count (grep for suppresseduntil in Api/: none).</existing>
+    <extension>The read is added beside the counter that computes it rather than as a separate service, so the wizard and admin show the same number the evaluator uses.</extension>
+    <cost-of-doing-nothing>The wizard's dismissal step cannot show the suppression effect v4 requires (reconciliation Z-7), and admin cannot show why a rule is quiet on a matter.</cost-of-doing-nothing>
+  </justification>
+
   <tools>
     <tool name="dotnet">Build and test .NET</tool>
   </tools>
@@ -88,10 +97,13 @@
     <criterion testable="true">Given a policy with countstowardsuppression No, when dismissed three times, then suppression does NOT apply, and the three dismissals remain queryable and clusterable.</criterion>
     <criterion testable="true">Given a suppression set 31 days ago, when evaluation runs, then the Signal surfaces again.</criterion>
     <criterion testable="true">Negative: an auto-closed Signal does not increment the counter.</criterion>
+    <criterion testable="true">Given three dismissals with reason Wrong matter - misresolved, when evaluation runs, then suppression does NOT apply and the dismissals remain queryable.</criterion>
+    <criterion testable="true">Given a suppression that has lapsed and a predicate that still holds, when evaluation runs, then a new episode is raised (not the old Signal reopened).</criterion>
+    <criterion testable="true">Given the count read, when called by a caller who can read the matter, then it returns the (policy, matter) dismissal count and the until-date; when called by one who cannot, then 404; an unresolved caller gets 403; the route is in the census.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-17 and success criterion 4. design.md section 8.0c (D-11).</notes>
+  <notes>spec.md FR-17, FR-17a, FR-03 (amended) and success criterion 4. design.md section 8.0c (D-11). Amended 2026-10-07 for D-13 and the reconciliation's R-8/R-10. Step 4 (exclude suppressed Signals from the worklist query) is now satisfied through task 050's FetchXML and task 038's read route.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

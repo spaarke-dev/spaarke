@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Schema: v4 data needs and the episode-scoped dedupe key</title>
+    <phase>0 Foundations</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse column adds on five ontology tables; logical names are immutable, so a wrong name is delete-and-recreate after code is written against it.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Repeats task 001's recorded Web API recipe; every column is named below.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>008, 009, 036 and 037 all read the columns this task creates.</parallel-reason>
+    <deps>001</deps>
+    <tags>dataverse,schema,signals,decision-record</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the columns the owner's 2026-10-07 decisions require on sprk_signal, sprk_policy, sprk_policyversion and sprk_decisionrecord, and make sprk_dedupekey able to carry the episode suffix, using the Web API recipe task 001 used.</prompt>
+  <role>SPAARKE platform developer. Schema first, verified by query, before any code is written against it.</role>
+  <goal>Every column listed under Steps exists in OntologyPlatformSolution under prefix sprk, verified by a live describe; sprk_dedupekey holds the longest episode-scoped key; the existing dev Signals carry an episode-1 key.</goal>
+
+  <context>
+    <background>Owner decisions 2026-10-07 (spec section 9): D-13 makes the dedupe key episode-scoped ({policycode}|{type}|{id}|{episode}) so a resolved Signal can re-raise, and the Do lane re-raises only when the subject's date changed since resolution, which needs the date the Signal last saw (sprk_signal.sprk_duedate). D-17 makes the one Decision Record list the actual outcome of every action (sprk_steps) and the Next steps created (sprk_followons). D-16/D-18/D-19 give a rule several actions, so the version needs a decision plan (sprk_decisionplan) instead of the single sprk_proposedaction text. D-22 slice (a) needs Retire with a reason. D-23 composes the row headline from the Signal's display columns, including the rule's short name. Reconciliation rows S-2, S-5, S-6, S-10 and v4-prototype-vs-solution entries #1, #2, #6, #7 carry the evidence.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/001-schema-verification.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file role="new">projects/spaarke-ontology-platform-r1/notes/007-schema-verification.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: every column in this task is created via the recorded Web API recipe (notes/schema-draft.md banner): explicit PascalCase SchemaName, the MSCRM.SolutionUniqueName header for OntologyPlatformSolution, DateTimeBehavior on every date column. NEVER MCP create_table or any tool without a publisher parameter (this environment's default publisher is new and logical names are immutable).</constraint>
+    <constraint source="project">Scope: create exactly these columns and no others. sprk_signal: sprk_duedate (Date Only, behaviour DateOnly; the subject's due or response date, refreshed while the Signal is open). sprk_policy: sprk_shortname (text, 100), sprk_worktype (choice; values = the v4 work types per lane listed in notes/v4-reconciliation.md W-8: Ask outside counsel, Approve or rebudget, Chase a reply, Finish or reschedule, Coming due, Chase a response), sprk_retiredreason (multiline text) plus a statuscode value Retired on the Inactive state. sprk_policyversion: sprk_decisionplan (multiline text, JSON). sprk_decisionrecord: sprk_steps (multiline text, JSON), sprk_followons (multiline text, JSON), sprk_gatetier (text, 100).</constraint>
+    <constraint source="project">Scope: sprk_dedupekey is NOT recreated. Read its current MaxLength; if the longest key ({policycode max 100}|{type}|{36-char guid}|{episode up to 6 digits}) does not fit, raise MaxLength on the existing column (an in-place metadata update; record before and after). The alternate key on sprk_dedupekey must stay Active.</constraint>
+    <constraint source="project">Scope: re-key every existing sprk_signal row (dev seed only) by appending |1 to its sprk_dedupekey (D-13: existing Signals are episode 1). Record the row count before and after; zero rows is a valid result and must be recorded as such.</constraint>
+    <constraint source="project">Scope: do NOT add sprk_policy.sprk_severity in this task unless the owner has answered reconciliation C-2 (where severity comes from). It is the only v4 column whose home is undecided (spec section 11.1 O-1).</constraint>
+    <constraint source="project">Scope: do NOT add a separate sprk_episode column. The episode lives in the key (D-13); the writer finds the latest episode by a begins-with query on sprk_dedupekey. A column would be new surface with no failure mode to cite (root CLAUDE.md section 11).</constraint>
+    <constraint source="project">Scope: no column is added to any table outside the five ontology tables (sprk_triagecategory recall columns are reconciliation C-16, undecided).</constraint>
+    <constraint source="ADR-038">Scope: any test written against these columns later must be paired with something touching the real schema; this task's live describe is that evidence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse schema creation</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/schema-draft.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/001-schema-verification.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Column add via Web API" location="projects/spaarke-ontology-platform-r1/notes/001-schema-verification.md">Task 001 added four columns with the recipe; copy its request shape, headers and the live-describe verification.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Describe the four tables live and record which of the columns in the constraints already exist (none is expected). Record sprk_dedupekey's MaxLength and the alternate key state.</step>
+    <step order="2">Create the sprk_signal, sprk_policy, sprk_policyversion and sprk_decisionrecord columns one at a time with the recipe; publish after each table.</step>
+    <step order="3">Add the Retired statuscode value on sprk_policy's Inactive state.</step>
+    <step order="4">Raise sprk_dedupekey MaxLength only if the longest episode-scoped key does not fit; confirm the alternate key is still Active.</step>
+    <step order="5">Re-key existing sprk_signal rows to episode 1 and re-read them.</step>
+    <step order="6">Describe all four tables again and record every new column's logical name, type, length or behaviour in notes/007-schema-verification.md; update notes/schema-draft.md (including the S-7 line: sprk_inforceto IS written at publish, per D-14).</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any column would land under a prefix other than sprk, or in a solution other than OntologyPlatformSolution, STOP before creating it: logical names are immutable.</trigger>
+    <trigger>If raising sprk_dedupekey's MaxLength would require dropping or recreating the alternate key, STOP and escalate rather than recreating it.</trigger>
+    <trigger>If the owner has not answered C-2 (severity source) when this task runs, create everything else and list sprk_policy.sprk_severity as outstanding in the notes; do not choose its home.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The five tables exist (task 001). sprk_policyversion.sprk_proposedaction is a single NVARCHAR(400) slug; sprk_decisionrecord has sprk_actioncode and sprk_action but no step list; sprk_signal has sprk_factsnapshot but no due date; sprk_policy has sprk_name and sprk_enabled but no short name, work type or retired reason (live describe, notes/v4-prototype-vs-solution.md #6, #7).</existing>
+    <extension>No for each column: a single-slug proposedaction cannot hold an ordered multi-action plan, and the append-only record cannot be amended later to add steps (#23). The dedupe key is extended in place rather than replaced.</extension>
+    <cost-of-doing-nothing>Without the episode suffix a dismissed or superseded Signal can never re-raise (D-13). Without sprk_duedate the Do-lane re-raise rule has nothing to compare and the row cannot show its due state. Without sprk_steps/sprk_followons the commit route cannot write the one record D-17 requires. Without sprk_decisionplan, Revise budget and Approve variance cannot both be offered by Path B.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">Web API calls per the recipe</tool>
+    <tool name="dataverse-mcp">Read-only describe and query for verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: the columns listed under constraints, in OntologyPlatformSolution</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/007-schema-verification.md</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/schema-draft.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a live describe, when read, then every column named in the constraints exists with prefix sprk, in OntologyPlatformSolution, with the stated type; sprk_signal.sprk_duedate has DateTimeBehavior DateOnly.</criterion>
+    <criterion testable="true">Given sprk_policy, when its status reason is described, then Retired is a value on the Inactive state.</criterion>
+    <criterion testable="true">Given the longest possible episode-scoped key, when compared with sprk_dedupekey's MaxLength, then it fits, and the sprk_dedupekey alternate key is Active.</criterion>
+    <criterion testable="true">Given every existing sprk_signal row, when read, then its sprk_dedupekey ends in |1 (or the recorded count is zero).</criterion>
+    <criterion testable="true">Negative: no sprk_episode column exists; no column was added to any table outside sprk_signal, sprk_policy, sprk_policyversion and sprk_decisionrecord.</criterion>
+    <criterion testable="true">Negative: sprk_policy.sprk_severity was created only if the owner answered C-2, and the notes say which.</criterion>
+    <criterion testable="true">notes/007-schema-verification.md carries the before and after describes.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-03 (amended, D-13), FR-48..FR-51, FR-57; section 11.1 O-1. Task 002's union check is repeated by task 008 after these adds (a column add touches the tables the append-only guarantee protects).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

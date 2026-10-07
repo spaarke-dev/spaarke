@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Migrate the remaining wizards off navigateTo: Summarize Files, Upload Documents, Find Similar, Workspace layout</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>112 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes how four more shipped wizards open from Spaarke React surfaces.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Repeats task 112's host pattern for four more launch paths.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the same launcher files as task 112 (wizardLaunchers.ts, WorkspaceGrid.tsx).</parallel-reason>
+    <deps>112</deps>
+    <tags>frontend,react,modal,migration</tags>
+    <estimated-effort>2-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Move the in-app launches of the Summarize Files, Upload Documents, Find Similar and Workspace layout wizards from navigateTo(webresource) to task 112's in-app host; ribbon and subgrid command scripts stay on navigateTo.</prompt>
+  <role>SPAARKE front-end developer.</role>
+  <goal>From SpaarkeAi and LegalWorkspace-in-SpaarkeAi, these four wizards open in-app with no platform header; hostless entry points are unchanged.</goal>
+
+  <context>
+    <background>D-26: migrate today's wizards off navigateTo. Modal note section 2.3 lists the launch sites: sprk_summarizefileswizard (WorkspaceGrid.tsx ~:364, wizardLaunchers.ts ~:245), sprk_documentuploadwizard (WorkspaceGrid.tsx ~:574; also SemanticSearchControl NavigationService.ts ~:408), sprk_findsimilar (WorkspaceGrid.tsx ~:381, wizardLaunchers.ts ~:268, FindSimilarWizardWidget.tsx ~:190), sprk_workspacelayoutwizard (WorkspaceGrid.tsx ~:850, :880, WorkspaceLoadingStates.tsx ~:242, SpaarkeAi ManageWorkspacesPane.tsx ~:481, :563). DocumentUploadWizard and WorkspaceLayoutWizard code pages reach into the parent document to click the platform close button (App.tsx ~:70-85; ~:780, :960); that hack stays only for their navigateTo path.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/InAppWizardHost.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-26): only the four wizards named, and only their launches from Spaarke React surfaces. Non-wizard navigateTo dialogs (playbook library, email page, semantic search, Smart To Do, Notepad, daily update, the Console itself) are NOT in scope. Ribbon, subgrid command scripts and the SemanticSearchControl PCF's own navigateTo stay as they are.</constraint>
+    <constraint source="project">Scope: reuse InAppWizardHost from task 112; extend it only with the adapters these wizards need.</constraint>
+    <constraint source="project">Scope: in the in-app path the wizards must not run their parent-document close hack (the close goes through onClose).</constraint>
+    <constraint source="project">Scope: record the SpaarkeAi bundle delta.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>In-app wizard hosting</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Switch each listed in-app launch site to the host.</step>
+    <step order="2">Guard the parent-document close hack so it runs only under navigateTo.</step>
+    <step order="3">Tests per launch site; record the bundle delta.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a wizard relies on being a separate document (for example a full-page upload flow that cannot live in a modal), STOP and ask the owner whether it stays on navigateTo.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Four wizards open in-app">
+      <steps>
+        <step>From the Console, open Summarize Files, Upload Documents, Find Similar and the Workspace layout wizard</step>
+      </steps>
+      <expected>Each opens in SprkModal with no platform header and closes through its own close button.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and open each</step>
+      </steps>
+      <expected>All surfaces themed.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each listed in-app launch site, when invoked, then the wizard mounts in-app and navigateTo is not called.</criterion>
+    <criterion testable="true">Negative: ribbon, subgrid command scripts and non-wizard navigateTo dialogs are unchanged in the diff.</criterion>
+    <criterion testable="true">Negative: in the in-app path no code queries the parent document for dialogCloseIconButton.</criterion>
+    <criterion testable="true">The bundle delta is recorded; tests cover the stated contract; the packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-60; D-26; modal note section 5.2 P5 (part 2 of 2). Deployed by task 114.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

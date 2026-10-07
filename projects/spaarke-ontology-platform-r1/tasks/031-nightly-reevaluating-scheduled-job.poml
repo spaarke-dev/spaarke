@@ -1,32 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="031" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>The single re-evaluating scheduled job</title>
-    <phase>3 Evaluator and Signal lifecycle</phase>
-    <gate>030 complete</gate>
+    <title>The single re-evaluating scheduled job, with episodes, secured-matter skip and per-item today</title>
+    <phase>3 Evaluator, Signal lifecycle and read</phase>
+    <gate>030, 003, 007, 008, 009, 024, 037, 098 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Background workload placement decision plus the mechanism that prevents the worklist rotting.</rigor-reason>
+    <rigor-reason>Background workload placement decision plus the mechanism that prevents the worklist rotting; writes the first real Signals.</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Follows ADR-036 with six live reference implementations.</model-tier-reason>
-    <effort>high</effort>
+    <model-tier-reason>Follows ADR-036 with six live reference implementations; the owner decisions (D-13, D-15, D-25) fix every judgement call.</model-tier-reason>
+    <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Tasks 032, 033 and 034 all attach to this job.</parallel-reason>
-    <deps>030,003</deps>
+    <parallel-reason>Tasks 025, 032, 033, 034, 038 and 101 all attach to this job or its evaluation core.</parallel-reason>
+    <deps>030, 003, 007, 008, 009, 024, 037, 098</deps>
     <tags>bff-api,scheduled-job,signals</tags>
-    <estimated-effort>4-5 hours</estimated-effort>
+    <estimated-effort>1-1.5 days</estimated-effort>
   </metadata>
 
-  <prompt>Build ONE re-evaluating scheduled job that upserts Signals whose predicate now holds and closes those whose predicate no longer holds, in one pass.</prompt>
+  <prompt>Build ONE re-evaluating scheduled job that upserts Signals whose predicate now holds and closes those whose predicate no longer holds, in one pass, around a side-effect-free Evaluate(version, scope) core; implement the episode-scoped key before the first Signal is written, skip Restricted and Limited matters, and judge Date Only comparisons per item in the assignee's time zone.</prompt>
   <role>SPAARKE backend developer. One component deciding both directions.</role>
-  <goal>A nightly ADR-036 IScheduledJob that re-evaluates every enabled policy and both creates and closes Signals, stamping sprk_lastevaluated on everything it touches.</goal>
+  <goal>A nightly ADR-036 IScheduledJob that re-evaluates every enabled policy (both lanes), creates, re-raises and closes Signals with episode-scoped keys, never writes a Signal on a secured matter, and stamps sprk_lastevaluated on everything it touches; its evaluation core is reusable read-only by the admin dry run.</goal>
 
   <context>
-    <background>Path B window is relative to now, so the predicate truth value changes even when nobody writes anything. Of four state transitions, TWO have no event to hook: death by time (the communication ages out) and birth by time (an old budget revision ages out, re-truthing the notExists half). So the nightly pass cannot be closure-only, and event-driven evaluation alone would never fire ConditionCleared.</background>
+    <background>Path B's window is relative to now, so the predicate truth value changes even when nobody writes anything. Of four state transitions, TWO have no event to hook: death by time (the communication ages out) and birth by time (an old budget revision ages out, re-truthing the notExists half). So the nightly pass cannot be closure-only, and event-driven evaluation alone would never fire ConditionCleared. Owner decisions 2026-10-07 (spec section 9) add four binding changes: D-13 episode-scoped key and re-raise rule (the built writer keeps a Resolved row Resolved and the key is unique, so without episodes a resolved Signal can never come back, #13); D-15 skip Restricted and Limited matters (Signals on secured matters would be readable by the whole BU tree, #17); D-25 "today" per item in the assignee's, else owner's, else UTC time zone, the same rule as To Do generation (task 098); D-23 witness values are evidence lines. Reconciliation B.2 row 031 (M-7, #39): the evaluation core must be side-effect free and reusable by the admin dry run (task 101).</background>
     <relevant-files>
       <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluator.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</file>
       <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/ExternalAccess/SecureRecordIsolationCensusJob.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</file>
     </relevant-files>
   </context>
@@ -35,12 +38,19 @@
     <constraint source="ADR-036">Scope: implement IScheduledJob. NO new hand-rolled timer BackgroundService.</constraint>
     <constraint source="ADR-052">Scope: this workload runs in the BFF. Tie-breaker is fewer moving parts; the workload is hundreds of rows, not a scale problem. State the placement decision in the PR.</constraint>
     <constraint source="project">Scope: ONE component that both creates and closes. Do NOT build an evaluator plus a separate sweep: two components can disagree about the same Signal, which miscounts suppression in both directions.</constraint>
+    <constraint source="project">Scope (reconciliation B.2, #39): split the work into a side-effect-free core, Evaluate(version, scope) returning per subject the hit, the grouping matter, the witness evidence and the facts, and the writing job that wraps it. Evaluate writes nothing, takes no lock, and can run against one matter (event triggers, task 032) or all (nightly, admin dry run, task 101).</constraint>
+    <constraint source="owner">Scope (D-13): BEFORE THE FIRST SIGNAL IS WRITTEN, change SignalWriter.BuildDedupeKey to {policycode}|{type}|{id}|{episode}. For a hit, find the subject's latest Signal for the policy by a begins-with query on sprk_dedupekey: none, start episode 1; latest Open or Acknowledged, reconcile it (same episode); latest Resolved, re-raise as episode n+1 only when the subject is not suppressed (sprk_suppresseduntil in the future blocks it) AND, Decide lane, the latest episode did not end in a dismissal less than quietWindowDays ago (the compiled predicate's knob, default 14 days), or, Do lane, the subject's current due date differs from the resolved Signal's sprk_duedate. A latest episode closed as Superseded re-raises under the new version whenever the new version holds. Task 007 already re-keyed existing rows as episode 1.</constraint>
+    <constraint source="owner">Scope (D-15): skip every subject whose grouping matter's Access Permission is Restricted or Limited (read the matter's access permission the way the access-control code does; ExternalCallerContext carries IsRestricted / IsLimited). A skipped subject writes nothing, is logged at Information with a stable EventId and counted in the run metric (dimension skipped_secured); an existing open Signal on such a matter is not refreshed.</constraint>
+    <constraint source="owner">Scope (D-25): for a compiled predicate whose filter compares a Date Only column (task 024 marks them), judge "today" per item: the item's assignee's time zone, else its owner's, else UTC, using the SAME shared helper as task 098's To Do generation (DataverseUserTimeZone). Do not write a second time-zone helper. Path B (a date-time column compared with now-Nd) keeps the single WindowAnchorUtc.</constraint>
+    <constraint source="owner">Scope (D-23, FR-48): write sprk_evidencerefs as evidence lines: one witness per exists clause (the matching communication, its sender and received date, the clause id from task 026 if present), plus context lines marked context, not tested. Witness values never enter sprk_sentence.</constraint>
+    <constraint source="project">Scope (FR-16 amended, #15): the pass never closes a Signal that is already Resolved (a decision-closed Signal stays Acted).</constraint>
     <constraint source="project">Scope: cadence derives from the EXISTING sprk_lane column. Decide-lane policies run here AND on the event triggers; Do-lane policies run here ONLY. Do not add a per-policy trigger column.</constraint>
     <constraint source="project">Scope: stamp sprk_lastevaluated on every Signal the pass touches, so a stale Signal is distinguishable from an unevaluated one.</constraint>
+    <constraint source="project">Scope: sprk_rankscore and severity are NOT computed here: the rank formula and the severity source are open (spec section 11 Q1, section 11.1 O-1, O-2). Ordering is task 038's.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
-    <constraint source="project">OWNER DECISION 2026-10-04: no silent failure. The writer fails closed by design, so a broken credential, a refused privilege or a dead job would otherwise look exactly like 'no conditions found'. The evaluator therefore (a) emits an App Insights custom metric per run (ontology.evaluator.runs, dimension outcome = succeeded|failed, plus signals written/updated/closed counts), following the existing custom-metric pattern the alerts in infrastructure/bicep/modules/alerts.bicep consume; (b) logs every writer refusal (credential, token, privilege, escalation) at Error with a stable EventId and increments ontology.writer.failures (dimension reason); (c) records the time of the last SUCCESSFUL run and exposes it on a DIAGNOSTIC health check tagged so it lands on /healthz/catalog-style diagnostics, NOT on the /healthz liveness probe (a stale evaluator must not recycle instances).</constraint>
+    <constraint source="project">OWNER DECISION 2026-10-04: no silent failure. The writer fails closed by design, so a broken credential, a refused privilege or a dead job would otherwise look exactly like 'no conditions found'. The evaluator therefore (a) emits an App Insights custom metric per run (ontology.evaluator.runs, dimension outcome = succeeded|failed, plus signals written/updated/closed/re-raised/skipped_secured counts), following the existing custom-metric pattern the alerts in infrastructure/bicep/modules/alerts.bicep consume; (b) logs every writer refusal (credential, token, privilege, escalation) at Error with a stable EventId and increments ontology.writer.failures (dimension reason); (c) records the time of the last SUCCESSFUL run and exposes it on a DIAGNOSTIC health check tagged so it lands on /healthz/catalog-style diagnostics, NOT on the /healthz liveness probe (a stale evaluator must not recycle instances).</constraint>
     <constraint source="project">FROM TASK 030 REVIEW R13 (2026-10-04): the Signal writer does NOT set sprk_regardingrecordnumber (ADR-024 resolver set) or sprk_privilegeflagged (schema draft: 'copied forward', ADR-015), and no spec line assigns either to task 030. Decide here, with a spec citation, whether the evaluator supplies them (e.g. privilegeflagged copied from the subject when the Signal is built) and pass them to the writer; if neither belongs to this task, record which task owns them. A privilege flag that silently stays empty is the kind of gap ADR-015 exists to prevent. Details: notes/030-signal-writer-progress.md.</constraint>
     <constraint source="project">OWNER-DERIVED GATE (2026-10-04, task 022 review F6): obtain every compiled predicate ONLY through PolicyVersionValidator.TryPrepareForEvaluation(snapshot, subjectId, out compiled). Never call PredicateCompiler.Compile directly and never skip the gate: it is what logs EventId 50301 + meters an invalid policy and continues with the others (owner rule: validate at evaluation, fail closed, no silent failure). Build FactValues for the sentence ONLY from values read for the firing subject from POSITIVE fields (the subject's when filter and exists clauses), never from notExists clause fields (task 022 F5, section 0.3).</constraint>
     <constraint source="project">FROM TASK 022 REVIEW ROUNDS 2-3 (2026-10-05): template tokens are limited to CompiledPredicate.TemplateEligibleFields. For a subject `when` field, put the firing subject's own value in FactValues. For an `exists`-clause field, the token is eligible only when that clause pins the field to one value, and FactValues carries that pinned literal. A `when` field filtered with `ne` (the `&lt;&gt;` operator) can match a subject whose value is NULL, which makes SignalWriter.RenderSentence refuse the write. Treat a null value for any token as a write refusal that is logged and metered (no silent skip), and test that case.</constraint>
@@ -54,9 +64,11 @@
       <file>.claude/adr/ADR-052-workload-placement.md</file>
       <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
       <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
-      <file>.claude/adr/ADR-052-workload-placement.md</file>
       <file>projects/spaarke-ontology-platform-r1/spec.md</file>
       <file>projects/spaarke-ontology-platform-r1/design.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/030-signal-writer-progress.md</file>
       <file>docs/adr/ADR-038-testing-strategy.md</file>
       <file>docs/standards/TEST-ARCHITECTURE.md</file>
     </files>
@@ -66,26 +78,29 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Confirm 007, 008, 009, 024, 037 and 098 have landed.</step>
     <step order="1">Read SecureRecordIsolationCensusJob and one other IScheduledJob to establish the registration, lease and logging conventions.</step>
-    <step order="2">Implement the job: for each enabled policy, compile its body (task 021), run it, and upsert a Signal per hit via the writer (task 030).</step>
-    <step order="3">In the SAME pass, for each still-open Signal of that policy, re-evaluate its predicate and close it if it no longer holds (task 033 supplies the closure semantics).</step>
-    <step order="4">Stamp sprk_lastevaluated on every Signal touched, created or not.</step>
-    <step order="5">Derive cadence from sprk_lane: process both lanes here.</step>
+    <step order="2">Change BuildDedupeKey to the episode-scoped format and implement the latest-episode lookup and the D-13 re-raise rule (with unit tests) BEFORE any code path can write a Signal.</step>
+    <step order="3">Implement Evaluate(version, scope): obtain the compiled predicate through TryPrepareForEvaluation, run it, skip secured matters (D-15), apply per-item today for Date Only comparisons (D-25), and build witness evidence (D-23); no writes.</step>
+    <step order="4">Implement the job: for each enabled policy, Evaluate then write via the writer (create, reconcile or re-raise); in the SAME pass close still-open Signals whose predicate no longer holds (task 033 supplies the closure semantics) and never re-close a Resolved one.</step>
+    <step order="5">Stamp sprk_lastevaluated on every Signal touched; process both lanes.</step>
     <step order="6">Register the job and confirm it appears in the admin jobs endpoint.</step>
-    <step order="7">Add tests: a policy that now holds creates a Signal; a Signal whose predicate stopped holding is closed; a Signal still holding is left open with a refreshed sprk_lastevaluated.</step>
+    <step order="7">Tests: creates; closes when the predicate stops holding; leaves open and refreshes; episode 2 re-raise after a dismissal once the quiet window passes and not before; Do-lane re-raise only after a date change; secured matter skipped; per-item today across two time zones; Evaluate writes nothing.</step>
     <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
     <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
   </steps>
 
   <escalation>
     <trigger>If a full nightly re-evaluation proves too expensive at realistic data volumes, STOP and escalate to agree a scoping strategy rather than silently narrowing the pass to recently-changed rows. Narrowing it reintroduces the birth-by-time blind spot that this design exists to close.</trigger>
+    <trigger>If the matter's Access Permission has another value that also restricts reading (for example Secure), STOP and ask the owner whether D-15's skip covers it (spec section 11.1 O-17); skip only Restricted and Limited until answered.</trigger>
+    <trigger>Whether a policy switched Off and then On again re-raises its PolicyRetired subjects as new episodes is NOT decided by D-13 (O-19). Until the owner answers, do not re-raise a subject whose latest episode closed as PolicyRetired; log the case.</trigger>
+    <trigger>If task 098's shared time-zone helper is not on master when this task starts, STOP; do not write a second helper (D-25).</trigger>
   </escalation>
 
   <justification>
-    <existing>Six IScheduledJob implementations exist, but none evaluates policies or manages Signal lifecycle.</existing>
-    <extension>No. The existing jobs are domain-specific reconciliations; this is a new workload. The ADR-036 seam itself IS being reused rather than a new scheduling mechanism built.</extension>
-    <cost-of-doing-nothing>Nothing closes a Signal when its condition clears on its own, so the worklist fills with stale items, users mute it, and suppression miscounts because an auto-cleared Signal is indistinguishable from a human dismissal.</cost-of-doing-nothing>
+    <existing>Six IScheduledJob implementations exist, but none evaluates policies or manages Signal lifecycle. The Signal writer (task 030) writes one Signal; it does not decide episodes, skips or closure.</existing>
+    <extension>No. The existing jobs are domain-specific reconciliations; this is a new workload. The ADR-036 seam itself IS being reused rather than a new scheduling mechanism built, and the writer is extended (BuildDedupeKey) rather than replaced.</extension>
+    <cost-of-doing-nothing>Nothing closes a Signal when its condition clears on its own, so the worklist fills with stale items, users mute it, and suppression miscounts because an auto-cleared Signal is indistinguishable from a human dismissal. Without episodes a resolved Signal never returns; without the skip, secured matters leak; without per-item today, the Do lane disagrees with the Briefing by a day.</cost-of-doing-nothing>
   </justification>
 
   <tools>
@@ -94,24 +109,34 @@
 
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalReevaluationJob.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalEvaluator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/SignalWriter.cs</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/RegistrationModule.cs</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Signals/SignalReevaluationJobTests.cs</output>
+    <output type="test">tests/unit/domain/Signals/SignalReevaluationJobTests.cs</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given an enabled policy whose predicate now holds for a matter, when the job runs, then a Signal exists for it.</criterion>
+    <criterion testable="true">Given an enabled policy whose predicate now holds for a matter, when the job runs, then a Signal exists for it with a key ending in |1.</criterion>
     <criterion testable="true">Given an open Signal whose predicate no longer holds, when the job runs, then it is closed with a resolution type and no Decision Record.</criterion>
     <criterion testable="true">Given an open Signal whose predicate still holds, when the job runs, then it stays open and sprk_lastevaluated is refreshed.</criterion>
+    <criterion testable="true">Given a Decide Signal dismissed 10 days ago whose predicate still holds and a quiet window of 14 days, when the job runs, then no new Signal is raised; at 15 days, then episode 2 is raised.</criterion>
+    <criterion testable="true">Given a resolved Do-lane Signal whose subject's due date is unchanged, when the job runs, then nothing is raised; after the due date changes and the predicate holds, then episode n+1 is raised.</criterion>
+    <criterion testable="true">Given a suppressed subject (sprk_suppresseduntil in the future), when the job runs, then nothing is raised.</criterion>
+    <criterion testable="true">Given a hit on a Restricted or a Limited matter, when the job runs, then no Signal is written and the run metric counts it as skipped_secured.</criterion>
+    <criterion testable="true">Given two overdue-task subjects whose assignees are in UTC-8 and UTC+10 with the same due date, when the job runs at a time when that date is yesterday in one zone and today in the other, then only the first is overdue.</criterion>
+    <criterion testable="true">Given Evaluate(version, scope), when called, then it returns hits with witness evidence and performs no Dataverse write.</criterion>
+    <criterion testable="true">Given a Path B hit, when written, then sprk_evidencerefs carries one witness line per exists clause and sprk_sentence contains no witness value.</criterion>
+    <criterion testable="true">Negative: a Resolved Signal is never closed again by the pass.</criterion>
     <criterion testable="true">Given a Do-lane policy, when the job runs, then it is evaluated (both lanes run nightly).</criterion>
     <criterion testable="true">Negative: a disabled policy is not evaluated at all.</criterion>
     <criterion testable="true">Negative: the job is an IScheduledJob and no new timer BackgroundService was added.</criterion>
     <criterion testable="true">The job is registered and visible via the admin jobs endpoint.</criterion>
-    <criterion testable="true">All tests pass; the BFF builds.</criterion>
     <criterion testable="true">Given the writer refuses (e.g. empty writer client id), when the job runs, then the run is recorded with outcome=failed, an Error log carries the stable EventId, and ontology.writer.failures increments; it is never recorded as a successful run with zero Signals.</criterion>
     <criterion testable="true">Given no successful run for longer than the threshold, when the diagnostic health check is read, then it reports Unhealthy with the last-success time, and /healthz (liveness) is unaffected.</criterion>
+    <criterion testable="true">Tests cover the stated contract and edge cases above; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-11, FR-12 and FR-15. design.md section 8.3 carries the reasoning, including the four-transition table. The ADR-040 amendment (task 003) must be merged before or alongside this task.</notes>
+  <notes>spec.md FR-03 (amended), FR-11, FR-12, FR-14a, FR-15, FR-16 (amended), FR-17a, FR-47, FR-48; D-13, D-15, D-23, D-25. design.md section 8.3 carries the reasoning, including the four-transition table. The ADR-040 amendment (task 003) is merged. Amended 2026-10-07 for D-13..D-29: deps now include 007 (schema), 008 (role grants), 009 (re-seed), 024 (grammar), 037 (Do-lane writer subjects) and 098 (time-zone helper); Threshold (025) follows this task.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

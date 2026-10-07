@@ -151,11 +151,22 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   queryable **per matter and per outside firm**.
   *Why*: **CM-5** and **success criterion 10** both depend on them. Verified absent across all 17 `sprk_`
   columns.
-- **FR-03**: Compose **`sprk_dedupekey`** as `{policycode}|{regardingrecordtype}|{regardingrecordid}`.
+- **FR-03** *(amended 2026-10-07, D-13)*: Compose **`sprk_dedupekey`** as
+  `{policycode}|{regardingrecordtype}|{regardingrecordid}|{episode}`.
   *Acceptance*: the writer reads `sprk_regardingrecordtype` + `sprk_regardingrecordid` (there is **no**
   `sprk_subjecttype` on `sprk_signal` — only on `sprk_policy`); ids stored **lowercase, braces stripped**
-  (audit §8.3 U1 found two divergent regexes in circulation); re-evaluation **upserts** rather than
-  duplicating.
+  (audit §8.3 U1 found two divergent regexes in circulation); **within one episode** re-evaluation **upserts**
+  rather than duplicating. The **episode** is a whole number starting at **1**, incremented when the subject
+  re-raises after its previous Signal for the same policy was resolved (Acted, Dismissed, ConditionCleared,
+  Superseded or PolicyRetired). A re-raise happens only when the subject is **not suppressed** (FR-17) **and**:
+  *Decide lane* — if the previous episode ended in a dismissal, the policy's **quiet window** (FR-17a) has passed
+  since it; *Do lane* — the subject's date has **changed since the Signal was resolved**. A Signal closed as
+  **Superseded** re-raises as a new episode under the new version whenever the new version still holds (FR-16).
+  The existing dev-seed Signals are re-keyed as episode 1. **The evaluator implements the episode before it writes
+  its first Signal** (task 031).
+  *Why*: the key is a unique alternate key and the built writer keeps a Resolved row Resolved, so without an
+  episode a dismissed, acted, superseded or cleared Signal can never come back — and Path B's subject is the
+  matter, so one dismissal would mute it on that matter for good (`notes/v4-prototype-vs-solution.md` #13, #40).
 - **FR-04**: Re-verify privileges after the FR-01/FR-02 column adds.
   *Acceptance*: `prvWritesprk_DecisionRecord` and `prvDeletesprk_DecisionRecord` remain **absent** from all
   three Spaarke Ontology roles, and the union check still shows only platform/admin roles holding them
@@ -170,6 +181,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   else; adding a fourth remains a code change with review (component model decision 7).
   *Why*: without it the differentiated capability is **literally unsavable** — validation refuses an invalid
   body, and the MVP allowed only `Threshold` and `Switch` (CM-7).
+  *Amended 2026-10-07, D-16*: R1 **compiles `Existence` and `Threshold`** (FR-46). `Switch` stays in the closed set
+  but is still refused at validation as `RuleTypeUnsupported` — deferred after R1, as is the inquiry-SLA rule (D-20).
 - **FR-06**: Implement the `Existence` body as **two independent ANDed clauses over a fixed window, with no
   cross-clause variable passing**:
   ```
@@ -240,6 +253,15 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   open, with the matter lookup rendering **blank** while the sentence tells them anyway. Live across **6
   business units**. `Spaarke Ontology Service` already holds **`Assign`**, so this needs no privilege change.
   One line now; a re-own of every row later, and invisible until then because nothing errors.
+- **FR-14a** *(added 2026-10-07, D-15)*: The evaluator **skips Restricted and Limited matters**.
+  *Acceptance*: no `sprk_signal` row is written for a subject whose grouping matter's Access Permission is
+  Restricted or Limited — the subject is skipped, logged and counted (never an error and never a silent drop);
+  a Signal that already exists on such a matter is not refreshed. Secured matters have **no** Signals in R1, so
+  extending the access-control project's **secure-record mirror** to `sprk_signal` + `sprk_decisionrecord` later
+  needs **no data migration** (follow-up issue, task 079).
+  *Why*: a Signal is owned by the writer with the matter's business unit and read at Parent: Child BU depth, and
+  `sprk_signal` is not in `SecureChildLineage` — so every Console User in the BU tree could read the sentence and
+  evidence of a Signal on a Restricted matter they cannot open (`notes/v4-prototype-vs-solution.md` #17).
 - **FR-15**: Cadence is derived from **`sprk_lane`** — no new column.
   *Acceptance*: `Decide` policies are evaluated on both the event triggers and the nightly pass; `Do`
   policies are evaluated **nightly only**.
@@ -252,6 +274,15 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Acceptance*: **a Signal whose communication has simply aged out of the window closes as
   `ConditionCleared`** — the condition genuinely no longer holds; `sprk_signal.sprk_decisionrecord` stays
   **null** for all three, because nobody decided anything.
+  *Amended 2026-10-07 (D-13, D-14; Retire per the owner's 2026-10-05 admin decision and reconciliation M-5)*:
+  **Superseded** — publishing a new version closes the open Signals citing the old version as `Superseded` and
+  stamps the old version's `sprk_inforceto` (D-14); where the **new** version still holds for that subject, the
+  evaluator raises a **new episode** citing the new version (FR-03). **Off** (`sprk_enabled = No`): open Signals
+  close as `PolicyRetired` at the next pass. **Retire** (admin, reason required; `statuscode` Retired +
+  `sprk_retiredreason`): open Signals close as `PolicyRetired` **immediately**. None of the three writes a Decision
+  Record; Retire and Off are audited admin changes. **The evaluator never re-closes a Signal that is already
+  Resolved** — a task completed or a budget revised *through a decision* is closed as `Acted` by the commit route
+  (FR-51), and the next pass must not close it again as `ConditionCleared` (`notes/v4-prototype-vs-solution.md` #15).
 - **FR-17**: Suppression counts dismissals per **(policy, matter)** and expires after **30 days** (D-11).
   *Acceptance*: three dismissals of any Signal for the same policy on the same matter set
   `sprk_suppresseduntil` to now + 30 days; a dismissal on a policy with
@@ -263,6 +294,14 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   fatigue case criterion 4 exists to prevent.
   *Why the expiry*: a permanent mute is indistinguishable from a broken rule, and the condition may still be
   true and by then more serious.
+- **FR-17a** *(added 2026-10-07, D-13)*: **Quiet window.** After a Decide-lane Signal is dismissed, the same
+  subject is **not re-raised** under that policy until the policy's quiet window has passed.
+  *Acceptance*: the window is a knob **in the rule body** (decision 14, knobs on the row; A-1), defaulting to
+  **14 days** when the body does not declare it; it applies after a 1st or 2nd dismissal (the 3rd triggers FR-17's
+  30-day suppression, which takes precedence while it lasts); changing the knob takes effect with no deployment.
+  The Do lane uses the date-change rule of FR-03 instead.
+  *Why*: without it a dismissed Decide item whose predicate still holds comes straight back on the next run — the
+  dismissal would be meaningless and the user would dismiss it again, feeding suppression with noise.
 
 #### Group D — The Decision Record
 
@@ -275,6 +314,12 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   bare "mark complete" — it also sends mail, creates follow-ons and closes records, and one of those is
   outward-facing. The earlier rule would have silently dropped the record of an email sent to outside counsel
   because it was triggered from the Do lane.
+  *Amended 2026-10-07, D-17*: every human resolution goes through **one BFF commit route** (FR-51), and **one
+  review writes exactly one record** that lists the **actual outcome** of every action the rule offered (taken or
+  skipped, with the values used) and every Next step created. Cancel, close and browsing away write nothing. Once
+  the BFF closes Signals, **Spaarke Console User loses `prvWritesprk_Signal`**, so no client path can close a
+  Signal without a record — the "no null `sprk_decisionrecord`" acceptance above becomes privilege-enforced rather
+  than a convention (`notes/v4-prototype-vs-solution.md` #16).
 - **FR-19**: Type each record with **`sprk_recordclass`** — `Judgement` · `Routine` · `Dismissal`.
   *Acceptance*: the Report Card and the action-rate metric **filter on read**; a bare completion or reschedule
   of one's own assigned work is `Routine`; any Do resolution that sends mail, creates a follow-on or closes a
@@ -293,6 +338,14 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   detection where prevention is impossible.
   *Why*: ADR-002 forbids plugins, and System Administrator always holds every privilege — so this is the
   honest limit, recorded rather than overclaimed.
+  *Amended 2026-10-07, D-14*: **Spaarke Ontology Administrator is granted Write on `sprk_policyversion`** so that
+  publishing a new version can stamp the old version's `sprk_inforceto`. The policy-version guarantee therefore
+  becomes **"the rule body is immutable after publish, enforced in the BFF publish service"** — code, not privilege.
+  The acceptance above now reads: an update to a `sprk_decisionrecord` row is refused for every Spaarke role
+  (unchanged); an update to a published version's `sprk_rulebody`, `sprk_ruletype`, `sprk_messagetemplate` or
+  `sprk_decisionplan` **through the BFF** is refused; and the union-of-roles check records exactly which roles hold
+  `prvWritesprk_PolicyVersion` (Spaarke Ontology Administrator plus platform/admin roles), with narrow auditing on
+  the table as detection for writes made outside the BFF.
 - **FR-22**: The relationship is **Decision Record 1 → N Signals**, with the FK on the Signal.
   *Acceptance*: there is **no** signal lookup on `sprk_decisionrecord`; "Signals closed by this decision"
   renders as a subgrid from the Signal side.
@@ -309,6 +362,11 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
 - **FR-24**: Membership, columns and actions come from a **`sprk_gridconfiguration`** row with no code change.
   *Acceptance*: changing which Signals appear, and in what order, is a configuration edit; membership is
   computed by **rule evaluation**, never by a user-authored filter.
+  *Amended 2026-10-07, D-15*: the worklist reads Signals **only through the BFF Signal read route** (FR-54). The
+  route executes the membership-and-order FetchXML from the `sprk_gridconfiguration` row, **removes every row whose
+  matter the caller cannot read**, and returns **only the caller's own work** in the Do lane. The widget renders a
+  card list from the route's response, not `<DataGrid>`. Actions come from the policy version's **decision plan**
+  (FR-49), never from the grid configuration.
 - **FR-25**: Build **one** row component rendering **every** signal shape, with data-driven variants.
   *Acceptance*: the three signal shapes (threshold, cross-source, SLA) and the Do-lane items all render
   through the same component; **a second row component is a design failure, not a feature.**
@@ -340,6 +398,16 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   shared libraries is domain-specific: `CitationBadge`, `PinnedMemoryProvenanceBadge`, `ChannelBadge`) —
   ships in `@spaarke/ui-components`; it is Fluent v9, **tokens only**, correct in both light and dark, with no
   hardcoded colors.
+  *Amended 2026-10-07, D-24 — the Console kit is named, and reuse comes first.* v4's kit (HANDOFF §1.3) maps as
+  follows. **Reuse, no new component**: *Disclosure* → Fluent `Accordion`; *ObjectLink* → Fluent `Link`;
+  *DiscardDialog* → `ConfirmModal` (custom labels, nested in the wizard); *BrowseNav* → `SprkModal`'s `nav`;
+  *StatusChip* → task 012's `StatusBadge` (plus a `success` tone, `notes/v4-prototype-vs-solution.md` #22);
+  *CountFilters* → **extend** `WorkspaceShell/MetricCard` + `MetricCardRow` with `selected`, `note` and `progress`
+  (and a non-square layout option). **New shared components, only these**: `EvidenceLine`, `StatusBar` (a thin
+  composition on Fluent `MessageBar`), `RecordRow`, `AggregateCard`, and the one row component `MatterCard` +
+  `IssueLine` (FR-25). Each new one lands in `@spaarke/ui-components` under the same token/dark-mode rule and
+  carries its own §11 justification (task 057); anything else the wizard or worklist needs is built from these or
+  escalated.
 - **FR-29**: The worklist carries **one aggregate Work Item** linking to the reconciliation tab —
   *"14 emails await a match confirmation →"*.
   *Acceptance*: one `SectionRegistration` mounts the existing reconciliation surface as a Console tab
@@ -359,6 +427,14 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Note*: `QueryTodosAsync` (`:999`) is hardcoded to `owninguser = systemUserId` with **no resolver call at
   all**, because `sprk_todo` carries no membership-bearing fields — so a To Do rule is **per-user by
   construction**. Do not spec around this as though it were configurable.
+  *Amended 2026-10-07 (D-16, D-25, D-27)*: the Do-lane rules are **subject-only rules in the extended grammar**
+  (FR-45) — a `when` filter on the subject's own columns, relative dates `now-Nd` **and `now+Nd`**, and the grouping
+  matter derived through the subject's `sprk_regardingmatter` — evaluated by **the one evaluator** (FR-11). The
+  collector's entities, columns and status values are the **reference for the rule bodies**; the collector itself
+  is **not** made to read policy rows (that would be a second evaluator). Event due date is **`sprk_duedate`**
+  (D-27, FR-61); "today" for a Date Only comparison is judged **per item** (D-25, FR-47). The Do lane shows each
+  reader only their own work (D-15, FR-54). What a task filed under a **project** (no matter) does — skip, or
+  group under the project's matter — is decided and flagged in the grammar/writer task (D-16).
 - **FR-31**: Know items become **narrative + Context pane**, not rows.
   *Acceptance*: new/updated matters, projects, documents and monitored-record activity do not appear as Work
   Items — they fail row-contract requirement 4 (nothing to do that changes anything).
@@ -383,6 +459,12 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Acceptance*: a confirmed Signal produces an Inquiry through `ConfirmationPolicyEngine` → `GateDecisionV2`
   → `sprk_servicerequest` outbound **with an SLA**; the Decision Record is written at the gate and the Signal
   closes with `Acted`.
+  *Amended 2026-10-07 (D-17, D-20)*: the Inquiry is **one executor called by the decision commit route** (FR-51),
+  not wired from a row; the Decision Record is written **last** by that route, listing the send's actual outcome.
+  **The inquiry SLA is deferred after R1** — no SLA rule, and no *Escalate* / *Extend SLA* / *Close inquiry*
+  actions. The budget-inquiry send and the reply disposition (FR-37) stay. How the confirmation tier is computed
+  outside a chat session (the gate is reachable only from chat today, `notes/v4-prototype-vs-solution.md` #25) is
+  **not decided** and is an escalation point in task 043.
 - **FR-37**: The reply resolves the Inquiry with a **`sprk_disposition`** queryable per matter and per outside
   firm.
   *Acceptance*: the association ladder links the reply to the Inquiry; `sprk_disposition` accrues for the
@@ -454,6 +536,150 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   computed from `topDeterministicConfidence` while the message interpolates `topConfidence`. AP-12 in
   runtime-generated prose.
 
+> **Groups K–P were added 2026-10-07** from the owner's decisions D-13..D-29 (§9) on the Console prototype v4
+> comparison (`notes/v4-prototype-vs-solution.md`, entries `#n`) and the reconciliation
+> (`notes/v4-reconciliation.md`, rows such as R-11, S-10). Where a requirement below needs a choice that D-13..D-29
+> did not make, it says so and the owning task carries an escalation trigger; §11 lists those points.
+
+#### Group K — Rule grammar and evaluation (D-16, D-23, D-25)
+
+- **FR-45** *(added 2026-10-07, D-16)*: **Extend the rule grammar for the Do lane.**
+  *Acceptance*: (a) an `Existence` body may be **subject-only** — a `when` filter on the subject's own columns
+  with **zero** `exists`/`notExists` clauses (today the schema requires `minItems: 1`); (b) relative dates accept
+  **`now+Nd`** as well as `now` and `now-Nd`; (c) `sprk_event`, `sprk_todo` and `sprk_workassignment` are valid
+  subjects, read org-wide by the evaluating principal, with the grouping matter derived through the subject's
+  `sprk_regardingmatter`; (d) the rule body accepts the **quiet-window knob** of FR-17a; (e) everything outside
+  this grammar is still **refused at save and at evaluation** (FR-08, fail closed) and still compiles to **one**
+  Dataverse filter (CM-3). A subject with no derivable matter (a task filed under a project; a To Do with no
+  regarding record) never produces a Signal with a null `sprk_matter` (FR-14, D-3).
+  *Why*: only Path B can be written or evaluated today; the Do lane, the overdue rules and the To Do subject are
+  hard refusals in the validator, the compiler and the writer (#12). D-16 chose the smallest extension that keeps
+  **one** evaluator.
+- **FR-46** *(added 2026-10-07, D-16)*: Author the **`Threshold` rule type** — JSON Schema plus compiler — for the
+  spend threshold.
+  *Acceptance*: a `Threshold` body compiles through `PolicyVersionValidator` to the same compiled-predicate
+  contract `Existence` produces, so the evaluator runs it **with no evaluator change**; an invalid body is refused
+  at save (FR-08); `Switch` is still refused.
+- **FR-47** *(added 2026-10-07, D-25)*: **"Today" is judged per item.** For a Date Only comparison (overdue, due
+  within N days), each item's "today" is the calendar date in its **assignee's time zone, else its owner's, else
+  UTC** — the same rule and the **same shared helper** as To Do generation (task 098).
+  *Acceptance*: an item due yesterday in its assignee's zone is overdue even when it is still "yesterday" in UTC,
+  and vice versa; no second time-zone helper exists; a nightly organisation-wide pass gives the same answer as
+  the user's own Briefing and SmartTodo colours.
+- **FR-48** *(added 2026-10-07, D-23)*: **Evidence lines carry the witnesses.** The rule's sentence stays the
+  rule's literal text (task 022's template rule is unchanged); the **witness values** — which communication matched
+  an `exists` clause, its sender and received date — are written as **evidence lines** in `sprk_evidencerefs`, one
+  witness per `exists` clause, each naming the clause it tested; context that no clause tested (for example the
+  spend snapshot) is labelled *context, not tested*.
+  *Acceptance*: no witness value appears in `sprk_sentence`; every evidence line names its clause or is marked
+  context; a `notExists` clause produces no witness (there is nothing to cite). The **UI composes the row
+  headline** from the Signal's display columns (subject name, due state, rule short name) — a display, not a
+  claim, so §0.3 is not engaged (D-23).
+
+#### Group L — Recording a decision (D-17, D-18, D-19, D-21)
+
+- **FR-49** *(added 2026-10-07; D-16, D-18, D-19)*: Each policy version carries a **decision plan**
+  (`sprk_policyversion.sprk_decisionplan`, JSON): the ordered action codes the rule offers (the first is the
+  recommendation) and its Next-steps set. A plan change is a new version, so an old decision stays explicable.
+  *Acceptance*: every enabled Decide-lane version has a plan with at least one action that changes something
+  (FR-26 req 4); every code in a plan exists in the action catalog (FR-50); the plan is immutable after publish
+  (FR-21 as amended).
+- **FR-50** *(added 2026-10-07; D-19)*: A **closed action catalog in the BFF** (C#), exposed read-only: per action
+  its label, work type, parameters, effect lines, `excludes`, and the record class it produces when taken;
+  per lane the closed **dismissal-reason** list with a *counts toward suppression* flag. Adding an action is a code
+  change with review (R1 has no Action Engine, §2.2).
+  *Acceptance*: the catalog contains *Send budget inquiry*, *Revise budget* (D-18), *Approve variance* (D-19,
+  record-only) and the Do-lane actions the Do policies' plans name; *Approve variance*'s effect lines say the
+  Decision Record is the approval and nothing else is written. The record class of *Reassign* and *Extend response
+  date* is **not decided** (reconciliation C-3) — escalation in task 036.
+- **FR-51** *(added 2026-10-07, D-17)*: **One BFF decision commit route, record last.** Order: validate → run the
+  internal (Dataverse) writes → send email **last** → write the **one** Decision Record listing actual outcomes and
+  the Next steps created → close the resolved Signals.
+  *Acceptance*: nothing executes before *Record decision*; on any failure **no record is written** and the
+  response tells the user **which writes landed**; the route is **idempotent per review** (a retry of the same
+  review neither duplicates a write nor writes a second record); a decision may close several **Decide** Signals on
+  the same matter, only those the user ticked (*Also resolve*), and a Do item never resolves another; the route is
+  classified in the #1312 route-authorization census and checks, **as the caller**, that they can write each
+  Signal's subject and append to the matter; a caller who cannot be resolved gets #1312's single **403** (D-29).
+- **FR-52** *(added 2026-10-07; D-18, D-19)*: **Executors** the commit route calls. *Revise budget*: the BFF
+  writer **creates** the `sprk_budgetrevision` (Spaarke Ontology Service is granted Create, D-18) **after checking
+  the caller can write the target `sprk_budget`**, and the revision **also updates that budget's amount**; when a
+  matter has several budgets the user picks one. *Approve variance*: **record-only** — the Decision Record (outcome
+  Authorized) is the approval and nothing else is written (D-19). *Send budget inquiry* (FR-36). The Do-lane
+  actions (complete, reschedule, reassign, send a reminder) reuse the existing event, To Do and communications
+  cores; reschedule writes **`sprk_duedate`** (D-27). The Next-step creators run **inside** the commit, before the
+  record, and their ids are listed in the record (`sprk_followons`).
+  *Acceptance*: a revision recorded through a decision closes the Path B Signal as `Acted`, and the
+  budget-revision trigger (FR-13b) does not re-close it as `ConditionCleared`. Which identity writes the new
+  budget **amount** onto `sprk_budget` is **not decided** — escalation in task 044.
+- **FR-53** *(added 2026-10-07, D-21)*: **Server-side work-assignment create.** `sprk_workassignment` is created
+  through the BFF (WP-3; a work assignment is a secure-record root), so *Assign Work* can be a Next step inside the
+  decision.
+  *Acceptance*: the server create preserves the existing client wizard's business-unit cascade semantics; the
+  existing wizard can call it; the work-assignment area owner has reviewed it.
+
+#### Group M — Reading Signals and the decision wizard (D-15, D-26)
+
+- **FR-54** *(added 2026-10-07, D-15)*: **The BFF Signal read route.** The worklist (and anything else in the
+  Console) reads `sprk_signal` only through this route.
+  *Acceptance*: the route runs the worklist configuration's FetchXML (FR-24), then removes every row whose grouping
+  matter the **caller** cannot read; in the Do lane it returns **only the caller's own work**; it passes the #1312
+  census; a caller who reads nothing gets an empty list, not an error. Which subject field makes a work assignment
+  "mine" (assignee or assigner) is **not decided** — escalation in task 038.
+- **FR-55** *(added 2026-10-07, D-26 and the v4 baseline)*: **Every decision happens in one decision wizard**,
+  `WizardShell` launched **in-app** from the worklist widget (never a `navigateTo` code page): *What was found* →
+  one step per plan action (skip allowed; `excludes` honoured) → Next steps → Confirm (record class shown) →
+  *Record decision*; skip everything → a dismissal with a required reason; a decided item reopens in the **same
+  wizard, read-only**, showing its fact snapshot under a status bar.
+  *Acceptance*: HANDOFF §1.1 and §1.4 "The wizard" (L127-136) @ `ae1cc9f` hold, checked per the reconciliation
+  §B.6 pre-start rule; the wizard writes nothing itself — it calls the commit route (FR-51).
+
+#### Group N — Ontology admin (D-22, D-14)
+
+- **FR-56** *(added 2026-10-07, D-22)*: An **"Ontology admin" workspace tab**, shown only when a **BFF
+  capability probe** says the caller can create `sprk_policyversion` (checked **as the caller**). Every admin write
+  goes through the BFF **as the caller**, so Dataverse enforces the Spaarke Ontology Administrator role and the
+  audit names the human. The five ontology tables are added to *Spaarke Platform* **read-only**; Spaarke Ontology
+  Administrator gains Create/Write/Read on `sprk_triagecategory`; the role is assigned to the owner's spaarkedev1
+  account.
+  *Acceptance*: a user without the role never sees the tab and gets 403 from every admin write route; the probe is
+  not the security boundary — Dataverse privileges are.
+- **FR-57** *(added 2026-10-07; D-22 slice a)*: **Rules, read-only**, plus **On/Off** and **Retire** (reason
+  required; closes open Signals immediately, FR-16).
+- **FR-58** *(added 2026-10-07; D-22 slice b, D-14)*: **Rule authoring wizard.** Save calls
+  `PolicyVersionValidator.ValidateForSave`; the condition editor's catalog is **generated from the compiler's
+  verified joins and readable tables**, so it can only offer what compiles (#46); *Test* is a **dry run** over
+  current data using the evaluator's side-effect-free core, run **as the evaluator principal**, with the displayed
+  rows filtered by the caller's access (#39); a new rule saves **Off**; publishing supersedes open items, re-raises
+  those that still hold (FR-16) and stamps the old version's `sprk_inforceto` (D-14).
+- **FR-59** *(added 2026-10-07; D-22 slice c)*: **Classification admin** — triage categories with guidance,
+  On/Off, which rules read each, 30-day volume; edit in a form; a rename is blocked while a rule reads the
+  category; a new category saves Off. Where measured recall is stored (reconciliation C-16) is **not decided** —
+  escalation in task 103.
+
+#### Group O — Modal system (D-26)
+
+- **FR-60** *(added 2026-10-07, D-26)*: **One canonical modal approach** per `notes/modal-wizard-canonical-approach.md`:
+  `SprkModal` is the only envelope; `WizardShell` is the only wizard engine and becomes `SprkModal`'s wizard preset
+  (`WizardModal` is deleted); a Spaarke React caller opens wizards **in-app**; `navigateTo` web-resource dialogs
+  remain only for hostless ribbon/command scripts. ADR-050 is amended (path B). **Today's wizards launched from
+  Spaarke React surfaces are migrated off `navigateTo`** in this project.
+  *Acceptance*: no in-app launcher in SpaarkeAi or LegalWorkspace opens a wizard through
+  `navigateTo(webresource)`; wizards ignore Escape/backdrop (`dismiss="explicit"`) and scale with `uiScale`; every
+  non-embedded `WizardShell` consumer passes its regression row (modal note §5.2); no CSS or DOM is injected into
+  platform chrome.
+
+#### Group P — Events and To Dos (D-27, D-28, D-29)
+
+- **FR-61** *(added 2026-10-07, D-27)*: The Do lane, Reschedule **and the Daily Briefing** use **`sprk_duedate`**
+  as the event due date, always; `sprk_finalduedate` becomes informational.
+- **FR-62** *(added 2026-10-07, D-28)*: **`statuscode` is the authoritative event status**; `sprk_eventstatus` is
+  deprecated. Its remaining readers are inventoried before removal; *Completed* stays an Active-state status.
+- **FR-63** *(added 2026-10-07, D-29)*: The **To Do composite score** counts **calendar days** (as the due label
+  already does), computed by **one shared function**; the boards re-rank once.
+  *Acceptance*: the urgency component and the due label agree for every due date; no second copy of the scorer
+  exists.
+
 ### 3.2 Non-functional requirements
 
 - **NFR-01**: **Publish-size** measured per CLAUDE.md §10 on every BFF-touching task — against a **fresh
@@ -495,6 +721,14 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   resolution is **best-effort**, and a Dataverse read failure degrades to the pre-2026-09-04 behaviour
   (category null on 100% of captures) **invisibly** — tracked as
   [ISS-002](https://github.com/spaarke-dev/spaarke/issues/1049).
+- **NFR-10** *(added 2026-10-07; D-17, D-22, D-29)*: **Every new BFF route is authorized as the caller and
+  classified in the #1312 route-authorization census** (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs`),
+  with a record-level check. A caller who cannot be resolved gets **#1312's single 403** — no new 401/503 split.
+- **NFR-11** *(added 2026-10-07; D-14, D-17, D-18, D-22, D-29)*: **Every role edit is re-verified as a union.** The
+  owner-approved role edits (writer AppendTo on four tables and Create on `sprk_budgetrevision`; administrator Write
+  on `sprk_policyversion` and Create/Write/Read on `sprk_triagecategory`; Console User losing Write on `sprk_signal`)
+  are each followed by the task-002 union check, and `prvWritesprk_DecisionRecord` / `prvDeletesprk_DecisionRecord`
+  stay absent from every Spaarke role.
 
 ---
 
@@ -652,7 +886,7 @@ proposed from a single case; (C) comply — keep the guard advisory in legacy SD
 | 7 | **Membership and column/action configuration** come from a `sprk_gridconfiguration` row with no code change; **one** row component renders every shape | Config edit + component count = 1 |
 | 8 | A new taxonomy category — with guidance — changes classifier behaviour with no deployment | Add a row, re-run enrichment |
 | 9 | **The §0 differentiation test passes** for every shipped capability — and **the predicate reads the data the message names** (§0.3) | Per-capability table, naming the data and the `where` clause |
-| 10 | **Something happens in the world**: a confirmed Signal produces an Inquiry through the gate, carrying an SLA, and the reply resolves it with a `sprk_disposition` queryable per matter and per outside firm | End-to-end on seeded data |
+| 10 | **Something happens in the world**: a confirmed Signal produces an Inquiry through the gate, ~~carrying an SLA~~ *(SLA deferred after R1 — amended 2026-10-07, D-20)*, and the reply resolves it with a `sprk_disposition` queryable per matter and per outside firm | End-to-end on seeded data |
 | 11 | **Classifier recall meets its floor** — **≥ 80% on ≥ 50 labelled items** (D-10) | Labelled-set measurement, number recorded |
 
 **Standing metric, not a criterion**: *action rate per policy* = acted ÷ surfaced, a zero-code Dataverse
@@ -760,6 +994,34 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 - [ ] **PR #1032 semantics review** — `TaskActionCore` now sets `statuscode = Open` for **every** consumer.
   Settled code rather than in flight, but a domain owner has not reviewed it. *Blocks*: nothing in R1; it is a
   correctness risk in a neighbouring domain that this project introduced.
+
+### 11.1 Still open after D-13..D-29 (recorded 2026-10-07 while updating the task plan)
+
+Each item is carried as an `<escalation><trigger>` in the task named; none blocks the critical path to 031 except
+where noted.
+
+| # | Open point | Source | Task |
+|---|---|---|---|
+| O-1 | **Severity source** — `sprk_policy.sprk_severity` column or derived in code | reconciliation C-2, #1 | 007 (blocks only the severity column) |
+| O-2 | **Rank formula** — §11 Q1 above; whether `sprk_highpriority` is the 2nd key | C-9, W-13, W-14 | 038, 062 |
+| O-3 | **Record class** of *Reassign* and *Extend response date* | C-3 | 036 |
+| O-4 | **Initial overdue threshold** — v4's 1 day or the collector's 5 | C-6 | 061 |
+| O-5 | **Overdue To Do policy in R1**, and a To Do with no regarding matter | C-7, W-15, S-4 | 037, 061 |
+| O-6 | **Work assignment "mine"** — assignee or assigner (`sprk_createdbyperson`) | C-8, #3 | 038 |
+| O-7 | Drop the row ⋮ menu (`DocumentRowMenu`) and the `OutcomeCard` extension | C-10, W-4, Z-15 | 052 |
+| O-8 | **Console Decision Record tab** in R1 | C-14 | 045 |
+| O-9 | **Association-confirmed trigger** (filing wakes the evaluator) | C-15, X-4 | 032 |
+| O-10 | Where measured **recall** is stored for Classification admin | C-16, S-11 | 103 |
+| O-11 | Source freshness / *Missing* beyond rendering a null fact as Missing | C-17, H-5 | 057 |
+| O-12 | Which action the **Know-promotion rule** offers | C-19, X-5 | 063 |
+| O-13 | **Gate tier outside a chat session** (the gate is chat-only) | #25 | 043, 070 |
+| O-14 | **Assistant drafts** inside the wizard (facade call vs templated drafts) | #32 | 058 |
+| O-15 | *Record the response* on a work assignment (no column; #3 recommends deactivate + record) | #3, #30 | 044 |
+| O-16 | Which identity writes the **new budget amount** onto `sprk_budget` (D-18) | D-18, #26 | 044 |
+| O-17 | Does D-15's skip also cover a matter whose Access Permission is **Secure**? | D-15 | 031 |
+| O-18 | Does the Inquiry still stamp `sprk_responseduedate` now the SLA is deferred? | D-20 | 070 |
+| O-19 | Off → On again: does a policy's re-enable re-raise its `PolicyRetired` subjects as new episodes? | D-13 | 031 |
+| O-20 | Decision Records the communications gate writes on **Restricted/Limited** matters (D-15 covers only the evaluator) | D-15 | 042 |
 
 ---
 

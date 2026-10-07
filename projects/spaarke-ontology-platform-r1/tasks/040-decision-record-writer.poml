@@ -3,7 +3,7 @@
   <metadata>
     <title>The Decision Record writer with record class and mandatory fact snapshot</title>
     <phase>4 The Decision Record</phase>
-    <gate>001,030 complete</gate>
+    <gate>001, 030, 007, 036 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes the append-only artifact the whole defensibility story rests on; it cannot be edited after the fact.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Tasks 041 and 042 both build on the writer.</parallel-reason>
-    <deps>001,030</deps>
+    <deps>001, 030, 007, 036</deps>
     <tags>bff-api,dataverse,decision-record</tags>
     <estimated-effort>4-5 hours</estimated-effort>
   </metadata>
@@ -41,6 +41,9 @@
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17; reconciliation R-6, S-10; #6, #16): the writer writes ONE record per REVIEW, not per action. Its input is the review outcome from the commit route (task 043): every action the plan offered, each taken or skipped with the values used and its actual outcome, the Next steps created with their ids, the strictest gate tier among taken actions, and the resolved Signal ids. It writes sprk_steps (JSON), sprk_followons (JSON) and sprk_gatetier (task 007); sprk_actioncode = the first action taken (the catalog code; sprk_action stays the nullable lookup and is left null for catalog actions, #6); sprk_proposedaction = the offered action labels joined. It is called LAST by the commit route, after every other write succeeded; it never runs on a failed review.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17, FR-50): sprk_recordclass comes from task 036's catalog (Dismissal when nothing was taken; Judgement when any taken action or any Next step is Judgement; Routine otherwise), never from the client and never from scattered conditionals. The decider's role and the "because" text go into sprk_factsnapshot (#16, S-10).</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (FR-22, R-7): setting sprk_signal.sprk_decisionrecord covers every Signal the review resolves (the primary and any ticked Also-resolve Decide Signals on the same matter).</constraint>
   </constraints>
 
   <knowledge>
@@ -64,12 +67,12 @@
 
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
-    <step order="1">Implement the writer taking the resolved Signal, the action taken, the confirming user and the fact values at decision time.</step>
-    <step order="2">Derive sprk_recordclass from the action per the mapping above, and document the mapping in code as a single table rather than scattered conditionals.</step>
+    <step order="1">Implement the writer taking ONE review outcome (offered actions taken or skipped with values and outcomes, Next steps with ids, gate tier, resolved Signal ids), the confirming user and the fact values at decision time (amended 2026-10-07, D-17).</step>
+    <step order="2">Derive sprk_recordclass from task 036's catalog for the actions taken and Next steps created (one table, the catalog), never from the client.</step>
     <step order="3">Populate sprk_matter, sprk_policyversion, sprk_factsnapshot, sprk_proposedaction, sprk_decisionoutcome, sprk_confirmedby, sprk_decidedon.</step>
-    <step order="4">Populate sprk_action when there is one; leave it null on deny.</step>
+    <step order="4">Populate sprk_actioncode with the first action taken, sprk_steps, sprk_followons and sprk_gatetier; leave sprk_action null on deny and for catalog actions.</step>
     <step order="5">Copy sprk_privilegeflagged forward from the Signal.</step>
-    <step order="6">Set sprk_signal.sprk_decisionrecord on the resolved Signal, and set its resolution type to Acted or Dismissed.</step>
+    <step order="6">Return the record id to the commit route, which sets sprk_signal.sprk_decisionrecord on every resolved Signal and their resolution type to Acted or Dismissed (or do it here if the commit route delegates it, but in one place only).</step>
     <step order="7">Add tests for each record class, the deny path with a null action, and the mandatory snapshot refusal.</step>
     <step order="8">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
     <step order="9">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
@@ -102,10 +105,13 @@
     <criterion testable="true">Negative: given a deny, when resolved, then the record saves with sprk_action null.</criterion>
     <criterion testable="true">Negative: attempting to write a record without sprk_factsnapshot is refused.</criterion>
     <criterion testable="true">Negative: nothing in the writer branches on sprk_privilegeflagged.</criterion>
+    <criterion testable="true">Given a review offering three actions of which two were taken and one Next step created, when written, then exactly one record exists whose sprk_steps lists all three (one skipped) with values and outcomes, sprk_followons lists the Next step id, sprk_actioncode is the first taken action and the class is Judgement.</criterion>
+    <criterion testable="true">Given a review resolving a primary Signal and one Also-resolve Signal, when completed, then both Signals reference the one record.</criterion>
+    <criterion testable="true">Negative: the writer is never invoked for a review that failed before the record step (task 043 contract), and it refuses a review whose record class cannot be derived from the catalog.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-18, FR-19, FR-20. design.md BR-1 as reversed, and notes/schema-draft.md section 6 for the full rationale.</notes>
+  <notes>spec.md FR-18 (amended, D-17), FR-19, FR-20, FR-22, FR-50, FR-51. design.md BR-1 as reversed, and notes/schema-draft.md section 6 for the full rationale. Amended 2026-10-07: one record per review (reconciliation B.2 row 040); the record class of reassign and extend-response-date is open (C-3, O-3) and handled by task 036.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

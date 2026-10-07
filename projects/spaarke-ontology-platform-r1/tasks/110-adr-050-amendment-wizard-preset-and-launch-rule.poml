@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>ADR-050 path B amendment: WizardShell is the wizard preset, in-app launch rule (MAIN SESSION ONLY)</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>ADR amendment with repo-wide blast radius; edits .claude/ files.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR amendment (architectural rule change) per CLAUDE.md section 6.5 path B.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ - main-session-only (permission boundary)</parallel-reason>
+    <deps>none</deps>
+    <tags>adr,documentation,modal</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Apply the ADR-050 path B amendment the owner adopted in D-26, plus the companion doc fixes, in the main session (sub-agents cannot write .claude/).</prompt>
+  <role>SPAARKE architect. Amend narrowly; record what changed and why.</role>
+  <goal>ADR-050 names WizardShell as the engine-bearing wizard preset, retires WizardModal, adds the in-app launch rule and the no-chrome-injection rule; the stale companion docs are corrected; a CHANGELOG entry exists.</goal>
+
+  <context>
+    <background>D-26 (spec section 9): adopt the canonical approach (SprkModal envelope + WizardShell engine, launched in-app; ADR-050 amendment = path B) and migrate today's wizards off navigateTo in this project. notes/modal-wizard-canonical-approach.md section 6 is the full conflict statement and draft. Root cause of the white header: navigateTo(webresource, target 2) draws Dataverse dialog chrome in the parent document, which Microsoft does not let us theme or hide; only an in-app mount avoids it. WizardModal has zero consumers; WizardShell has eight and owns its own envelope, violating ADR-050's MUST NOT on bespoke envelopes.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file role="modify">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file role="modify">docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file role="modify">.claude/patterns/ui/record-modal-selection.md</file>
+      <file role="modify">.claude/patterns/ui/modal-shell.md</file>
+      <file role="modify">docs/architecture/ui-dialog-shell-architecture.md</file>
+      <file role="modify">.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file role="modify">.claude/CHANGELOG.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md 6.5">Scope: path B (amendment), owner-approved in D-26. The amendment text is the block in notes below; apply it to the concise ADR (.claude/adr). No full ADR-050 exists under docs/adr (checked 2026-10-07); if one exists when this runs, amend it too, otherwise record its absence in the CHANGELOG entry, adding an "Amended 2026-10-07 (D-26, spaarke-ontology-platform-r1)" marker.</constraint>
+    <constraint source="project">Scope: this task runs in the MAIN SESSION. A sub-agent dispatched on it must stop at once (it cannot write .claude/).</constraint>
+    <constraint source="project">Scope: change only what notes lists. Layout 1 OOB entityrecord dialogs (85% x 85%), the fullCover escalation and the per-entity-size MUST NOT stay as they are. RecordNavigationModalShell: record that it has zero live consumers and is kept as the dirty-check protocol library behind onBeforeNavigate (no deletion in this task).</constraint>
+    <constraint source="project">Scope: ADR-026 gets a cross-reference on its "Wizard / dialog (standalone)" matrix row only: standalone HTML is the deployment wrapper for hostless (ribbon) entry points; in-app hosting is preferred when a Spaarke React host exists.</constraint>
+    <constraint source="project">Scope: every PR touching .claude/ or root CLAUDE.md adds a .claude/CHANGELOG.md entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Modal system governance</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-026-full-page-custom-page-standard.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8; confirm this is the main session.</step>
+    <step order="1">Apply amendment points 1-8 (notes) to the concise ADR-050 (and the full one if it exists).</step>
+    <step order="2">Apply the companion fixes (point 9) to MODAL-DECISION-CRITERIA.md, MODAL-DESIGN-SYSTEM.md section 7, record-modal-selection.md:26, modal-shell.md:16, ui-dialog-shell-architecture.md (Three-Layer Model step 4 becomes the ribbon path only) and ADR-026's matrix row.</step>
+    <step order="3">Add the .claude/CHANGELOG.md entry.</step>
+    <step order="4">Run the markdown link check on the touched files.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the full ADR in docs/adr disagrees with the concise one in a way the amendment text does not cover, STOP and bring both texts to the owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="edit">Main-session file edits</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-050-canonical-modal-shell.md</output>
+    <output type="docs">docs/standards/MODAL-DECISION-CRITERIA.md</output>
+    <output type="docs">docs/standards/MODAL-DESIGN-SYSTEM.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ADR-050 (concise, and the full version if one exists), when read, then the preset list is ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardShell; WizardModal is recorded as retired; an "Amended 2026-10-07 (D-26)" marker is present.</criterion>
+    <criterion testable="true">Given ADR-050, when read, then it contains the MUSTs on WizardShell as the only wizard engine, the in-app launch rule, embedded hideTitle under platform chrome, dismiss explicit + uiScale for wizards, and the MUST NOT on injecting CSS/DOM into platform chrome.</criterion>
+    <criterion testable="true">Given MODAL-DECISION-CRITERIA.md, record-modal-selection.md and modal-shell.md, when read, then none says WizardShell comes from @spaarke/legal-workspace, none tells yes/no confirms to use a raw Fluent Dialog, and none says to compose RecordNavigationModalShell.</criterion>
+    <criterion testable="true">Negative: the Layout 1 OOB dialog rules, fullCover escalation and per-entity-size MUST NOT are unchanged.</criterion>
+    <criterion testable="true">A .claude/CHANGELOG.md entry names D-26 and this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+AMENDMENT TEXT FOR THE MAIN SESSION (from notes/modal-wizard-canonical-approach.md section 6; owner-adopted D-26, 2026-10-07). Apply to ADR-050:
+
+1. Decision: the preset list becomes ConfirmModal, ChoiceModal, FormModal, PreviewModal, BrowseModal, WizardShell. WizardShell is the engine-bearing wizard preset: it renders inside SprkModal, and its embedded mode (no envelope) is the sanctioned variant for workspace tabs, full pages and pages hosted under platform chrome. WizardModal is retired (it had zero consumers).
+2. MUST: every multi-step flow uses WizardShell. No other wizard engine or reducer may be introduced.
+3. MUST (launch rule): when the caller is a Spaarke React surface (Console/SpaarkeAi widgets, LegalWorkspace sections running in SpaarkeAi, code pages, PCFs with the component in their bundle), open modals and wizards in-app via the SprkModal family. Xrm.Navigation.navigateTo(webresource|custom, {target:2}) is reserved for hostless contexts (model-driven ribbon/command scripts) or a deliberately separate deployable. Its title bar, expand and close button are platform chrome, light-only and not themeable (cite https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/clientapi/reference/xrm-navigation/navigateto and https://learn.microsoft.com/en-us/power-apps/user/modern-fluent-design: dark mode not supported).
+4. MUST: a page shown under platform chrome renders WizardShell embedded hideTitle (no double header). This codifies today's practice.
+5. MUST NOT: inject CSS into or DOM-manipulate platform dialog chrome (cite https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/supported-customizations); a request to do so needs its own section 6.5 sign-off.
+6. MUST: wizards default to dismiss="explicit" and pass uiScale like every other preset.
+7. Unchanged: Layout 1 OOB entityrecord dialogs (85% x 85%), the fullCover escalation, and the MUST NOT on per-entity sizes.
+8. RecordNavigationModalShell: record that it has zero live consumers; it is kept as the dirty-check protocol library behind onBeforeNavigate.
+9. Companion doc fixes (not ADR text): MODAL-DECISION-CRITERIA.md :33 (WizardShell is in @spaarke/ui-components; wizards point to MODAL-DESIGN-SYSTEM.md), :34 (yes/no confirms use ConfirmModal), :30 and :95-113 (Family 3 is BrowseModal + onBeforeNavigate), plus a new line "Launching from Spaarke React: in-app; from ribbon: navigateTo (white platform chrome)"; .claude/patterns/ui/record-modal-selection.md:26 and .claude/patterns/ui/modal-shell.md:16 (no longer "compose RecordNavigationModalShell"); docs/architecture/ui-dialog-shell-architecture.md (Three-Layer Model step 4 "embedded inside a Dataverse dialog" is the ribbon path only); ADR-026 matrix row cross-reference; MODAL-DESIGN-SYSTEM.md section 7 (WizardShell preset, WizardModal removed); .claude/CHANGELOG.md row.
+
+Alternatives (for the ADR record): A (project exception) rejected because the conflict is general; C (comply) rejected because it means building on WizardModal, a second wizard engine. spec.md FR-60; D-26.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

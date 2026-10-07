@@ -3,7 +3,7 @@
   <metadata>
     <title>Know becomes narrative, Critical Today is retired, the LLM Top action is removed</title>
     <phase>6 Do lane and Briefing fold-in</phase>
-    <gate>061 complete</gate>
+    <gate>061, 038, 059 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Removes an LLM-chosen priority that violates the row contract, and changes what users see.</rigor-reason>
@@ -12,7 +12,7 @@
     <effort>high</effort>
     <parallel-group>F</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>061</deps>
+    <deps>061, 038, 059</deps>
     <tags>frontend,bff-api,configuration</tags>
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
@@ -37,6 +37,8 @@
     <constraint source="project">Section 0.3 is binding: a capability must TEST what its message CLAIMS. Scope: any sentence, message template or prose this task produces may assert only what the predicate actually read.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation W-10; #38): the narrative is hidden while any worklist filter is on, is tagged as written by the Assistant and not choosing or ordering the list, and may not name an item that is not on the list.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (D-15, D-23): ordering lives in the Signal read route (task 038); nothing writes sprk_rankscore. The rank keys are open (spec section 11 Q1, section 11.1 O-2): see escalation before making sprk_highpriority a rank input.</constraint>
   </constraints>
 
   <knowledge>
@@ -61,7 +63,7 @@
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
     <step order="1">Remove the LLM Top action selection and any prompt or playbook section that produced it.</step>
     <step order="2">Route Know categories to the narrative and the Context pane rather than to rows.</step>
-    <step order="3">Make sprk_highpriority a rank input feeding sprk_rankscore, and sprk_monitor a Know subscription.</step>
+    <step order="3">Make sprk_monitor a Know subscription. Make sprk_highpriority a rank input in task 038's order ONLY after the owner answers C-9 (escalation).</step>
     <step order="4">Delete the Critical Today list surface.</step>
     <step order="5">Make the narrative summarise Do volume rather than enumerate it.</step>
     <step order="6">Add tests: no model output influences ordering; Know categories produce no Work Items.</step>
@@ -71,6 +73,7 @@
 
   <escalation>
     <trigger>If removing the LLM Top action breaks a downstream consumer that depends on it, STOP and escalate rather than leaving it in. A model choosing priority is a decision-15 violation, not a feature to preserve for compatibility.</trigger>
+    <trigger>FR-32 makes sprk_highpriority a rank input, but v4's rank (severity, oldest, matter number) omits it (reconciliation W-14) and the owner has not answered C-9. Ask before adding it to the order.</trigger>
   </escalation>
 
   <ui-tests>
@@ -117,12 +120,13 @@
     <criterion testable="true">Given the worklist, when ordered, then no model output influences the order; rank is computed deterministically.</criterion>
     <criterion testable="true">Given a new matter or document, when the worklist loads, then it is NOT a Work Item.</criterion>
     <criterion testable="true">Given the Console, when inspected, then Critical Today no longer exists as a list.</criterion>
-    <criterion testable="true">Given sprk_highpriority on a subject, when a Signal is ranked, then it contributes to sprk_rankscore.</criterion>
+    <criterion testable="true">CONDITIONAL on the owner keeping it (C-9): given sprk_highpriority on a subject, when the read route orders a lane, then it is the second key after severity; otherwise the notes record the owner's answer and highpriority is not a rank key.</criterion>
+    <criterion testable="true">Given a worklist filter on, when the widget renders, then the narrative is hidden; given the narrative, when generated, then it names no item absent from the list.</criterion>
     <criterion testable="true">Negative: no prompt or playbook still asks the model to choose a top action.</criterion>
     <criterion testable="true">All tests pass; both sides build.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-31, FR-32, FR-34. design.md BR-3, BR-5.</notes>
+  <notes>spec.md FR-31, FR-32, FR-34. design.md BR-3, BR-5. Amended 2026-10-07 per reconciliation B.2 row 062 (W-10, W-13, W-14) and #38; C-9 open (O-2).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

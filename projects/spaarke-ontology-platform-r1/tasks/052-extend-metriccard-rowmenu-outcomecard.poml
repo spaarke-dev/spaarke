@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="052" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Extend MetricCard, DocumentRowMenu and OutcomeCard rather than rebuilding</title>
+    <title>Extend MetricCard into the lane count filters (selected, note, progress); DocumentRowMenu and OutcomeCard parts await owner C-10</title>
     <phase>5 The worklist surface</phase>
     <gate>051 complete</gate>
     <status>not-started</status>
@@ -17,7 +17,7 @@
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
 
-  <prompt>Extend the three named shipped components for count filters, the row menu and the post-action outcome surface. Do not build parallel ones.</prompt>
+  <prompt>Extend WorkspaceShell/MetricCard and MetricCardRow into the per-lane count filters D-24 names (selected state, note line, progress, non-square layout). The DocumentRowMenu and OutcomeCard extensions are on hold until the owner answers C-10. Do not build parallel components.</prompt>
   <role>SPAARKE front-end developer. Default to reuse; new surface needs a justification it cannot give here.</role>
   <goal>Count filters, the row menu and the outcome surface all come from extended shipped components.</goal>
 
@@ -38,6 +38,8 @@
     <constraint source="project">Scope: count filters are LENSES ON MEMBERSHIP, not separate queues. Clicking one filters the existing list; it does not open another list.</constraint>
     <constraint source="ADR-021">Scope: Fluent v9 tokens only across all three extensions.</constraint>
     <constraint source="project">Scope: C-9 (assigned here 2026-10-03). Extract a shared RowActionMenu from DocumentRowMenu, build the worklist row against it, and migrate the four other hand-rolled row menus onto it.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-24; #21; reconciliation W-7..W-9): extend MetricCard with selected (aria-pressed), note (one line, e.g. "oldest 4 days", "3 past due") and progress ("n of m done today") props and a non-square layout option; disabled when its count is 0. Cards split each lane by work type so counts add up (W-8): Decide = Ask outside counsel, Approve or rebudget, Chase a reply; Do = Finish or reschedule, Coming due, Chase a response; the work type comes from sprk_policy.sprk_worktype (task 007). Existing MetricCard consumers keep their behaviour with the new props absent.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (v4 baseline, reconciliation W-4, Z-15; spec section 11.1 O-7): the worklist row has no menu (task 051) and post-decision state is the wizard's status bar (task 057), so the DocumentRowMenu worklist descriptors and the OutcomeCard Signal statuses below are NOT built until the owner answers C-10. C-9 (RowActionMenu extraction for the four existing menus) is cleanup independent of the worklist; it proceeds only if the owner confirms C-10's recommendation that C-9 continues as its own cleanup item.</constraint>
   </constraints>
 
   <knowledge>
@@ -57,8 +59,8 @@
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
     <step order="1">Read each of the three components and record what it already does, so the extension is additive.</step>
     <step order="2">Extend MetricCard or MetricCardRow for the lane count filters, preserving the existing clickable behavior.</step>
-    <step order="3">Extend DocumentRowMenu with the Work Item action descriptors, reusing its disabledActions filtering.</step>
-    <step order="4">Extend OutcomeCard with the Signal statuses (complete, reschedule, reassign, dismiss).</step>
+    <step order="3">ONLY after the owner answers C-10: extend DocumentRowMenu with the Work Item action descriptors (or record the drop).</step>
+    <step order="4">ONLY after the owner answers C-10: extend OutcomeCard with the Signal statuses (or record the drop; the status bar replaces it in v4).</step>
     <step order="5">Add tests for each extension and confirm no existing consumer regressed.</step>
     <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
     <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
@@ -66,6 +68,7 @@
 
   <escalation>
     <trigger>If any of the three genuinely cannot be extended, STOP and escalate with the specific blocking reason. The reuse rule is binding, and a new parallel component needs owner sign-off rather than an implementer decision.</trigger>
+    <trigger>Reconciliation C-10 (drop the worklist ⋮ menu and the OutcomeCard extension, which design section 1.3 called binding) is NOT answered by D-13..D-29. Build the MetricCard part, then STOP and ask the owner before any DocumentRowMenu, OutcomeCard or C-9 work.</trigger>
   </escalation>
 
   <ui-tests>
@@ -76,13 +79,13 @@
       </steps>
       <expected>The existing list filters in place; no second list or queue opens.</expected>
     </test>
-    <test name="Row menu reuses the descriptor table">
+    <test name="Row menu reuses the descriptor table (only if the owner keeps it, C-10)">
       <steps>
         <step>Open the row menu on a Work Item with one unavailable action</step>
       </steps>
       <expected>The unavailable action is filtered out by disabledActions, not hidden by bespoke logic.</expected>
     </test>
-    <test name="Outcome card shows Signal statuses">
+    <test name="Outcome card shows Signal statuses (only if the owner keeps it, C-10)">
       <steps>
         <step>Complete a Work Item</step>
         <step>Observe the outcome surface</step>
@@ -110,15 +113,17 @@
 
   <acceptance-criteria>
     <criterion testable="true">Given the worklist count filters, when inspected, then they are MetricCard or MetricCardRow instances, not new components and not StatTiles.</criterion>
-    <criterion testable="true">Given the row menu, when inspected, then it is DocumentRowMenu with added action descriptors, and the repo still contains no fourth bespoke menu.</criterion>
-    <criterion testable="true">Given the post-action surface, when inspected, then it is OutcomeCard extended with Signal statuses.</criterion>
+    <criterion testable="true">CONDITIONAL on the owner keeping it (C-10): Given the row menu, when inspected, then it is DocumentRowMenu with added action descriptors, and the repo still contains no fourth bespoke menu.</criterion>
+    <criterion testable="true">CONDITIONAL on the owner keeping it (C-10): Given the post-action surface, when inspected, then it is OutcomeCard extended with Signal statuses.</criterion>
     <criterion testable="true">Negative: clicking a count filter filters the existing list and does not open a second queue.</criterion>
     <criterion testable="true">Negative: no existing consumer of any of the three components regressed; their existing tests pass unmodified.</criterion>
     <criterion testable="true">The package builds.</criterion>
-    <criterion testable="true">One shared RowActionMenu exists, extracted from DocumentRowMenu; the worklist row and the four former row menus all use it.</criterion>
+    <criterion testable="true">CONDITIONAL on the owner's C-10 answer: one shared RowActionMenu exists, extracted from DocumentRowMenu, and the four former row menus use it; if the owner drops C-9 from this task, the notes record the answer and its issue URL instead.</criterion>
+    <criterion testable="true">Given the extended MetricCard with selected, note and progress, when rendered, then it exposes aria-pressed, shows the note and progress lines, is disabled at count 0, and existing consumers render unchanged without the new props.</criterion>
+    <criterion testable="true">Given each lane, when its cards are summed, then the counts add up to the lane total (one work type per item).</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-27. design.md section 1.3 is BINDING, not advisory.</notes>
+  <notes>spec.md FR-27, FR-28 (amended, D-24), FR-34. design.md section 1.3 is BINDING, not advisory, which is why the DocumentRowMenu/OutcomeCard drop needs the owner (C-10, O-7). Amended 2026-10-07 per reconciliation B.2 row 052. The criteria about DocumentRowMenu and OutcomeCard above apply only if the owner keeps them.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

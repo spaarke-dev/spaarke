@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="112" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Migrate the Create wizards off navigateTo: in-app wizard host for SpaarkeAi and LegalWorkspace launchers</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>056 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes how every Create wizard opens from the Console and the Legal Workspace.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration of five wizard launch paths onto a shared in-app host (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>056</deps>
+    <tags>frontend,react,modal,migration</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add one in-app wizard host and move the Create Matter, Project, Event, To Do and Work Assignment launchers in wizardLaunchers.ts and WorkspaceGrid.tsx from navigateTo(webresource) to it, so these wizards open in SprkModal with no platform white header; leave the ribbon scripts on navigateTo.</prompt>
+  <role>SPAARKE front-end developer. One host, mounted the way CreateMatterWizardWidget already mounts in-app.</role>
+  <goal>From SpaarkeAi and LegalWorkspace-in-SpaarkeAi, the five Create wizards open in-app, themed, with explicit dismiss; the ribbon still opens them via navigateTo; the SpaarkeAi bundle delta is measured.</goal>
+
+  <context>
+    <background>D-26 (spec section 9): migrate today's wizards off navigateTo in this project. The white header is Dataverse dialog chrome drawn by navigateTo(webresource, target 2) in the parent document; the only supported fix is not to open a platform dialog when a Spaarke React host exists (modal note sections 2-3, 5.1 item 4, 5.2 P5). CreateMatterWizardWidget and CreateAnalysisWizardWidget already mount wizards in-app with Xrm adapters. Launch sites: WorkspaceShell/wizardLaunchers.ts (~:159 fireNavigateTo, :197, :219, :232, :289) and LegalWorkspace Shell/WorkspaceGrid.tsx (~:312, :343, :397, :413, :429). Ribbon sprk_wizard_commands.js stays on navigateTo (launch rule (b)).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Wizard/InAppWizardHost.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-26): migrate exactly the launches of sprk_creatematterwizard, sprk_createprojectwizard, sprk_createeventwizard, sprk_createtodowizard and sprk_createworkassignmentwizard from wizardLaunchers.ts and WorkspaceGrid.tsx. Ribbon/command scripts (webresources/js/sprk_wizard_commands.js) are NOT changed.</constraint>
+    <constraint source="project">Scope: ONE in-app host component mounts the wizard component non-embedded (WizardShell in SprkModal, dismiss explicit, uiScale) with the Xrm adapters the code pages use; no per-wizard host, no wrapper Dialog, no WizardModal.</constraint>
+    <constraint source="project">Scope: the wizard code pages themselves stay deployable for the ribbon path (embedded hideTitle); do not delete them.</constraint>
+    <constraint source="project">Scope: no CSS or DOM injection into platform chrome (ADR-050 as amended).</constraint>
+    <constraint source="project">Scope: measure the SpaarkeAi code-page bundle before and after with code-page-deploy's build and record the delta.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark correct.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>In-app wizard hosting</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+    </files>
+    <patterns>
+      <pattern name="In-app Create wizard" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CreateMatterWizardWidget.tsx">Already mounts the Create Matter wizard in-app with Xrm adapters.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Record the SpaarkeAi bundle size baseline.</step>
+    <step order="2">Build InAppWizardHost from CreateMatterWizardWidget's pattern.</step>
+    <step order="3">Switch the five launches in wizardLaunchers.ts and WorkspaceGrid.tsx to the host.</step>
+    <step order="4">Tests: each launcher mounts in-app and calls no navigateTo; the ribbon path is untouched.</step>
+    <step order="5">Record the bundle delta.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="7">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the SpaarkeAi bundle grows by more than 1 MB, or a wizard needs Xrm capabilities the in-app frame lacks, STOP and escalate before continuing.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>CreateMatterWizardWidget and CreateAnalysisWizardWidget each mount one wizard in-app; wizardLaunchers.ts and WorkspaceGrid.tsx open the others through navigateTo.</existing>
+    <extension>The widgets' pattern is reused; a single host generalizes it so five launchers do not each grow their own mount code.</extension>
+    <cost-of-doing-nothing>Every Create wizard opened from the Console keeps the white, unthemeable platform header the owner asked to remove (D-26).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Create wizards open in-app">
+      <steps>
+        <step>From the Console, open each of Create Matter, Project, Event, To Do and Work Assignment</step>
+      </steps>
+      <expected>Each opens in SprkModal with no platform title bar; Escape does not close it.</expected>
+    </test>
+    <test name="Ribbon unchanged">
+      <steps>
+        <step>Open Create Matter from the model-driven ribbon</step>
+      </steps>
+      <expected>It opens via navigateTo as before.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and open each in-app wizard</step>
+      </steps>
+      <expected>No white header; all surfaces themed.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the packages and code pages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Wizard/InAppWizardHost.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/components/Shell/WorkspaceGrid.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the five Create launches in wizardLaunchers.ts and WorkspaceGrid.tsx, when invoked, then the wizard mounts in-app and Xrm.Navigation.navigateTo is not called.</criterion>
+    <criterion testable="true">Given the ribbon scripts, when diffed, then they are unchanged.</criterion>
+    <criterion testable="true">Negative: no per-wizard host, wrapper Dialog or WizardModal was added; no CSS/DOM is injected into platform chrome.</criterion>
+    <criterion testable="true">The SpaarkeAi bundle before/after sizes are recorded.</criterion>
+    <criterion testable="true">Tests cover the stated contract; anything beyond needs a one-line justification in task notes. The packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-60; D-26; modal note section 5.2 P5 (part 1 of 2; task 113 is part 2). Deployed by task 114.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

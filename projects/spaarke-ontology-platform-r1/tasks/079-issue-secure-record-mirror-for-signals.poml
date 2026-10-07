@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="079" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>File the follow-up issue: extend the secure-record mirror to sprk_signal and sprk_decisionrecord</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Files one GitHub issue and records its URL; no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Issue authoring from a settled decision.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>documentation,issue,security</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>File one GitHub issue, addressed to the unified-access-control project, asking it to extend its secure-record mirror (SecureChildLineage) to sprk_signal and sprk_decisionrecord, and record the URL in notes/defer-issues.md.</prompt>
+  <role>SPAARKE engineer.</role>
+  <goal>An issue exists with the decision, the evidence and the R1 interim, and its URL is in notes/defer-issues.md.</goal>
+
+  <context>
+    <background>D-15 (spec section 9; v4-prototype-vs-solution #17): R1 skips Restricted and Limited matters in the evaluator and reads Signals only through a caller-checked BFF route; later, the access-control project's secure-record mirror is extended to sprk_signal and sprk_decisionrecord. No data migration is needed because secured matters have no Signals until then. sprk_signal is not in SecureChildLineage on master and does not appear in master's server code at all (#17).</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Access/SecureChildLineage.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-15): the issue states the owner decision, the evidence (#17), the R1 interim (FR-14a skip, FR-54 read route), and that no data migration is needed. It is addressed to the unified-access-control project (check projects/INDEX.md for its current name and owner).</constraint>
+    <constraint source="project">Scope: file the issue only; change no code and no Dataverse metadata. Use gh with the repository's issue conventions (project-defer-issue-tracking skill).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deferred work tracking</topic>
+    <files>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Draft the issue body; file it with gh.</step>
+    <step order="2">Record the URL in notes/defer-issues.md.</step>
+    <step order="3">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given GitHub, when the issue is opened, then it names sprk_signal and sprk_decisionrecord, cites D-15 and #17, states the R1 interim and that no migration is needed.</criterion>
+    <criterion testable="true">notes/defer-issues.md lists the issue URL.</criterion>
+    <criterion testable="true">Negative: no code or Dataverse change was made.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-14a, FR-54; D-15.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

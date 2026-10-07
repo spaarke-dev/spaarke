@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Rule-body describer: generate the plain-language condition, read-side</title>
+    <phase>2b Rule grammar (D-16)</phase>
+    <gate>024 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF code whose output is shown to users as the statement of what a rule tested; a wrong description is a section 0.3 failure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic mapping over a closed grammar.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>024</deps>
+    <tags>bff-api,signals,rule-grammar</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build a read-side describer that turns a compiled rule body into plain-language clauses (GUIDs resolved to category names), used by the wizard's "How this was determined" and the admin rule page; generate it, never store it.</prompt>
+  <role>SPAARKE backend developer. The words describe exactly what the filter tests, nothing more.</role>
+  <goal>For every body the compiler accepts, the describer returns one plain-language line per clause plus the formal form, deterministically, with GUIDs shown as names.</goal>
+
+  <context>
+    <background>v4 shows "How this was determined" with each clause in words and in formal form (v4-prototype-vs-solution #11); sprk_sentence is plain text and no column holds a plain-language clause; rule bodies hold GUIDs. #11 recommends a small read-side describer in the BFF: generate, do not store. The v4 baseline (owner, 2026-10-05) requires the disclosure in the wizard's What was found step (reconciliation Z-2, W-6) and the admin rule page shows the condition in words (M-3).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodyDescriber.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Signals/PredicateCompiler.cs</file>
+      <file role="new">tests/unit/domain/Signals/RuleBodyDescriberTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the describer reads the SAME parsed body the compiler compiles (one parse), so the words cannot drift from the filter. It never reads data rows: lookup GUIDs are resolved to names by one batched read of the referenced reference table (e.g. sprk_triagecategory), as the evaluator principal.</constraint>
+    <constraint source="project">Scope: covers exactly the shapes the compiler accepts at the time it runs (Existence incl. task 024's subject-only shapes; Threshold if task 025 has landed). An unknown shape returns a refusal, never a guess.</constraint>
+    <constraint source="project">Scope: a classifier-based clause is described as a classification ("was classified as Fee / rate change"), per v4 HANDOFF section 1.4 L116 (binding).</constraint>
+    <constraint source="project">Scope: no endpoint in this task; consumers (058 via the 036 plan/read endpoint, 100) call the service. No new Dataverse column.</constraint>
+    <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="ADR-038">Scope: tests asserting category names must be paired with a seam read of the real sprk_triagecategory rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Rule grammar</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-prototype-vs-solution.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/pathb-fetchxml-reference.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Expose the compiler's parsed body (or a shared parse) so the describer and compiler read one representation.</step>
+    <step order="2">Implement RuleBodyDescriber: per clause a plain-language line, the formal form and the clause id that evidence lines (FR-48) cite.</step>
+    <step order="3">Tests: Path B v2 body, the three Do fixtures from task 024, a refused shape.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a clause cannot be described without implying something the filter does not test (for example a comparison the body does not make), STOP and escalate with the clause rather than softening the wording.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None found: grep for "Describe" in Services/Signals returns no describer; sprk_sentence is the rule's literal template, not a per-clause description.</existing>
+    <extension>No: the compiler's job is FetchXML; mixing prose generation into it would give it a second reason to change. The describer reuses the compiler's parse.</extension>
+    <cost-of-doing-nothing>The wizard's "How this was determined" and the admin rule page have no data behind them (#11), so they would either be omitted or written by hand per rule and drift from the filter.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Signals/RuleBodyDescriber.cs</output>
+    <output type="test">tests/unit/domain/Signals/RuleBodyDescriberTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Path B v2 body, when described, then it returns two clause lines, the first phrased as a classification naming the categories by name, the second stating no budget revision in the window, each with its formal form and clause id.</criterion>
+    <criterion testable="true">Given each of task 024's three Do fixtures, when described, then each returns one line naming the subject, the date column and the relative date.</criterion>
+    <criterion testable="true">Negative: given a body the compiler refuses, when described, then the describer refuses too.</criterion>
+    <criterion testable="true">Negative: no Dataverse column was added and no description is persisted.</criterion>
+    <criterion testable="true">Tests cover the shapes above; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-48, FR-55, FR-57; #11. Off the critical path to 031.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

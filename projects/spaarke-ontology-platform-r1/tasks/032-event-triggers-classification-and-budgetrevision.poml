@@ -40,6 +40,8 @@
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
     <constraint source="project">Scope: before opening a BFF PR, run /conflict-check. 56 of 62 active projects declare a hot path.</constraint>
     <constraint source="project">OWNER-DERIVED GATE (2026-10-04, task 022 review F6): obtain every compiled predicate ONLY through PolicyVersionValidator.TryPrepareForEvaluation(snapshot, subjectId, out compiled). Never call PredicateCompiler.Compile directly and never skip the gate: it is what logs EventId 50301 + meters an invalid policy and continues with the others (owner rule: validate at evaluation, fail closed, no silent failure). Build FactValues for the sentence ONLY from values read for the firing subject from POSITIVE fields (the subject's when filter and exists clauses), never from notExists clause fields (task 022 F5, section 0.3).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13, D-15): the triggers call task 031's Evaluate(version, scope) for the one matter and its writing path, so the episode-scoped key, the re-raise rule and the Restricted/Limited skip apply here exactly as nightly. A trigger on a Restricted or Limited matter writes nothing.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-17, D-18; reconciliation X-6, #15): a budget revision recorded THROUGH a decision has already closed its Signal as Acted via the commit route (task 043). The budget-revision trigger must not close that Signal again as ConditionCleared: it only touches Signals that are still Open or Acknowledged.</constraint>
   </constraints>
 
   <knowledge>
@@ -73,6 +75,7 @@
 
   <escalation>
     <trigger>If sprk_budgetrevision create cannot be hooked (for example rows are written by a path with no event), STOP and escalate. Without that hook the Work Item asserts something untrue for up to 24 hours, and that is a section 0.3 failure in the product primary surface, not a latency nicety.</trigger>
+    <trigger>A third trigger, association confirmed (a classified email filed to a matter later wakes the evaluator; reconciliation X-4 / C-15, prototype finding F-39), is NOT decided by D-13..D-29 (spec section 11.1 O-9). Do not add it; ask the owner.</trigger>
   </escalation>
 
   <justification>
@@ -97,10 +100,12 @@
     <criterion testable="true">Given a Do-lane policy, when either trigger fires, then it is NOT evaluated by the trigger (nightly only).</criterion>
     <criterion testable="true">Negative: a trigger handler failure is observable in App Insights rather than silently swallowed.</criterion>
     <criterion testable="true">Negative: evaluation logic is not duplicated; both the job and the triggers call the same evaluator.</criterion>
+    <criterion testable="true">Given a Signal already closed as Acted by a decision that recorded a budget revision, when the budget-revision trigger runs, then the Signal stays Acted.</criterion>
+    <criterion testable="true">Negative: a classification on a Restricted or Limited matter produces no Signal.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-13. design.md section 8.3 explains why the budget-revision hook is correctness rather than polish.</notes>
+  <notes>spec.md FR-13, FR-14a, FR-16 (amended). design.md section 8.3 explains why the budget-revision hook is correctness rather than polish. Amended 2026-10-07 for D-13, D-15, D-17, D-18.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

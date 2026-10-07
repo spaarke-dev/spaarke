@@ -3,7 +3,7 @@
   <metadata>
     <title>Replace the Daily Briefing tab with the worklist</title>
     <phase>6 Do lane and Briefing fold-in</phase>
-    <gate>062,063,055 complete</gate>
+    <gate>062, 063, 055, 059, 065 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Replaces a shipped user surface; premature replacement leaves users worse off.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Changes the Console default surface; must not race another widget change.</parallel-reason>
-    <deps>062,063,055</deps>
+    <deps>062, 063, 055, 059, 065</deps>
     <tags>frontend,configuration</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
@@ -36,6 +36,9 @@
     <constraint source="project">Scope: each lane carries its own count filters; the narrative summarises Do volume rather than listing it.</constraint>
     <constraint source="project">Scope: keep the old widget available behind a flag for one release rather than deleting it outright, so a regression is recoverable without a deploy.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-15, D-26): the Workspace tab points at task 059's worklist widget, which reads Signals only through the BFF read route (each reader sees only their own Do-lane work and only matters they can read) and opens decisions in the in-app wizard. Verify both on dev as a non-admin reader before the swap.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-27): the old Briefing kept behind the flag is the task 065 version (due date = sprk_duedate), so reverting does not reintroduce the finalduedate disagreement.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation B.6): use HANDOFF v4 section 1.4 (the full list) as the cutover check, recorded in notes/briefing-cutover.md, against real Dataverse.</constraint>
   </constraints>
 
   <knowledge>
@@ -111,9 +114,11 @@
     <criterion testable="true">Given many Do items and few Decide items, when rendered, then the Decide items remain visible.</criterion>
     <criterion testable="true">Negative: the old widget is still reachable behind a flag, so a regression is recoverable without a deploy.</criterion>
     <criterion testable="true">The client builds and the cutover is documented.</criterion>
+    <criterion testable="true">Given a non-admin reader on dev, when the worklist opens, then the Do lane shows only that reader's own work and no Signal on a matter they cannot read.</criterion>
+    <criterion testable="true">Given the cutover notes, when read, then every HANDOFF section 1.4 rule has a pass or a recorded refinement.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-35. design.md BR-4, BR-5.</notes>
+  <notes>spec.md FR-35, FR-54, FR-55, FR-61. design.md BR-4, BR-5. Amended 2026-10-07 for D-15, D-26, D-27 and reconciliation B.6.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

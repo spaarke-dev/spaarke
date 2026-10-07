@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="050" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>Author the worklist grid configuration row</title>
+    <title>Author the worklist grid configuration row: membership and order per lane, plus three secondary sets</title>
     <phase>5 The worklist surface</phase>
-    <gate>034 complete</gate>
+    <gate>034, 007 complete</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Configuration data against a shipped framework; no new code surface.</rigor-reason>
@@ -12,12 +12,12 @@
     <effort>medium</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
-    <deps>034</deps>
+    <deps>034, 007</deps>
     <tags>dataverse,configuration,frontend</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
 
-  <prompt>Author the sprk_gridconfiguration row that defines worklist membership, columns and actions, so changing them later needs no code change.</prompt>
+  <prompt>Author the sprk_gridconfiguration row that defines worklist membership and order per lane, plus the closed-today, suppressed and closed-earlier sets, so changing them needs no code change. The row is executed server-side by the Signal read route (task 038), not by DataGrid in the browser (amended 2026-10-07, D-15).</prompt>
   <role>SPAARKE platform developer. Membership is configuration; the row component is code.</role>
   <goal>Worklist membership and presentation come from a configuration row, with membership computed by rule evaluation rather than a user filter.</goal>
 
@@ -34,6 +34,10 @@
     <constraint source="project">Scope: read the DENORMALIZED sprk_suppresseduntil so the query is cheap rather than counting Decision Records per load.</constraint>
     <constraint source="project">Scope: group by sprk_matter. Worklist rows ARE matters grouping Work Items (D-3, decision 28).</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-15, FR-24 amended): the row supplies membership and ORDER only (FetchXML), one query per lane (Decide, Do), executed server-side by task 038's route, which then removes rows the caller cannot read and applies the Do-lane reader scope. It carries no actions (actions come from the policy version's decision plan, FR-49) and no per-user filter.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (reconciliation W-12): add three secondary queries in the same row: closed today (Resolved with sprk_resolvedon today), suppressed (sprk_suppresseduntil in the future, with the until-date), closed earlier (Resolved before today, bounded to a window stated in the row).</constraint>
+    <constraint source="project">AMENDED 2026-10-07: the order clause uses only columns that exist and are decided: sprk_firstdetected (oldest first) then matter number. Severity and sprk_highpriority are NOT added (spec section 11.1 O-1, O-2); sprk_rankscore is not written by anything yet.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (D-23): select the display columns the row needs, including sprk_signal.sprk_duedate (task 007) and the policy short name via a link to sprk_policy.</constraint>
   </constraints>
 
   <knowledge>
@@ -56,8 +60,8 @@
   <steps mode="directional">
     <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
     <step order="1">Read the four existing reconciliation grid configuration rows and the configuration guide.</step>
-    <step order="2">Author the worklist row: FetchXML selecting Open and Acknowledged Signals, excluding suppressed ones, ordered by sprk_rankscore then matter.</step>
-    <step order="3">Define the columns the row component needs, and the actions available per row.</step>
+    <step order="2">Author the worklist row: per-lane FetchXML selecting Open and Acknowledged Signals, excluding suppressed ones, ordered by sprk_firstdetected then matter number; plus the three secondary queries.</step>
+    <step order="3">Define the display columns the row component needs (no actions; actions come from the decision plan).</step>
     <step order="4">Verify the configuration loads and the membership query returns the seeded positive matter.</step>
     <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
     <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
@@ -107,9 +111,11 @@
     <criterion testable="true">Given a closed Signal, when the grid loads, then it does NOT appear.</criterion>
     <criterion testable="true">Negative: changing which Signals appear requires only a configuration edit, demonstrated by changing the row and reloading with no code change.</criterion>
     <criterion testable="true">Rows are grouped by matter.</criterion>
+    <criterion testable="true">Given the row, when read, then it holds one membership query per lane and the three secondary queries, and no action definitions.</criterion>
+    <criterion testable="true">Negative: the order clause references neither sprk_rankscore nor a severity or high-priority column.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-24 and success criterion 7 (the membership half).</notes>
+  <notes>spec.md FR-24 (amended, D-15) and success criterion 7 (the membership half). Amended 2026-10-07 per reconciliation B.2 row 050: membership + order only; the ui-tests below run through the worklist widget (task 059) once 038 exists, or as a direct server-side query before then.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

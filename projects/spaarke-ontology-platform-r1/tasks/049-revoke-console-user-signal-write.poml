@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="049" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Remove Spaarke Console User Write on sprk_signal once the BFF closes Signals</title>
+    <phase>4b Commit and actions</phase>
+    <gate>043, 055 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>One owner-approved privilege removal plus the union re-verify; no code.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Query, remove, re-verify against a recorded method.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes the privileges every deployed Console user holds; must follow the deploy that moves Signal writes to the BFF.</parallel-reason>
+    <deps>043, 055</deps>
+    <tags>dataverse,security,roles,verification</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>After the deployed Console resolves Signals only through the BFF commit route, remove prvWritesprk_Signal from every business-unit copy of Spaarke Console User and re-run the union check.</prompt>
+  <role>SPAARKE platform developer. Prove no client path still writes a Signal before taking the privilege away.</role>
+  <goal>No human role writes sprk_signal; the deployed Console still records decisions; the union check is recorded.</goal>
+
+  <context>
+    <background>D-17 (spec section 9; #16): Console User holds Write on sprk_signal (Parent: Child BU), so a user could close a Signal from the browser with no Decision Record, and FR-18's "no human-resolved Signal has a null record" is not enforced by privilege. Once the BFF closes Signals (task 043, deployed in 055), Console User loses that Write. Task 008 deliberately left it in place.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/tasks/002-privilege-reverify-after-column-adds.poml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-17): remove prvWritesprk_Signal from every BU copy of Spaarke Console User. Nothing else changes on any role.</constraint>
+    <constraint source="project">Scope: before removing, grep src/ on the branch and on master for any client write to sprk_signal (Xrm.WebApi updateRecord / createRecord, child-records with sprk_signal, PATCH sprk_signals) and record the result; any hit blocks the removal (escalation).</constraint>
+    <constraint source="project">Scope: after removing, repeat task 002's union check including who holds Write on sprk_signal (expected: Spaarke Ontology Service via its own role or the root BU team, plus platform/admin roles), and run the live negative: as a non-admin user with only the Spaarke roles, an update to a sprk_signal row is refused.</constraint>
+    <constraint source="project">Scope: then record one decision in the deployed dev Console end to end and confirm it still works (the commit route writes as the writer and the caller, never needing the caller's Write on sprk_signal).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse security roles</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Grep for client writes to sprk_signal and record the result.</step>
+    <step order="2">Record the before state of every BU copy of Spaarke Console User.</step>
+    <step order="3">Remove prvWritesprk_Signal; re-read and diff.</step>
+    <step order="4">Run the union check and the live negative.</step>
+    <step order="5">Record one decision in the deployed dev Console and confirm the record and the closed Signal.</step>
+    <step order="6">Append the dated result to notes/security-roles.md.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any client code still writes sprk_signal, or the deployed Console fails to record a decision after the removal, STOP, restore the privilege, and escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Web API role edit</tool>
+    <tool name="dataverse-mcp">Verification queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: Spaarke Console User privileges</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given every BU copy of Spaarke Console User, when listed, then prvWritesprk_Signal is absent and no other privilege changed.</criterion>
+    <criterion testable="true">Negative: as a non-admin user with only the Spaarke roles, an update to a sprk_signal row is refused.</criterion>
+    <criterion testable="true">Given the deployed dev Console, when a decision is recorded, then a Decision Record exists and the Signal is closed with it.</criterion>
+    <criterion testable="true">The grep result, the before/after and the union check are recorded with the date.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-18 (amended), NFR-11; D-17.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

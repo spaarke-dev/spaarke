@@ -1,16 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="053" project="spaarke-ontology-platform-r1">
   <metadata>
-    <title>The gate host and the action that changes something</title>
+    <title>SUPERSEDED: the gate host and the action that changes something (now tasks 058 + 043)</title>
     <phase>5 The worklist surface</phase>
-    <gate>051 complete</gate>
-    <status>not-started</status>
+    <gate>superseded 2026-10-07; do not execute</gate>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Wires the human-confirmation boundary; this is where a Work Item becomes an effect in the world.</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Hosting a shipped gate in a new surface.</model-tier-reason>
     <effort>high</effort>
-    <parallel-group>E</parallel-group>
+    <parallel-group>none</parallel-group>
     <parallel-safe>true</parallel-safe>
     <deps>051</deps>
     <tags>frontend,bff-api,gate</tags>
@@ -120,7 +120,7 @@
     <criterion testable="true">All tests pass; both sides build.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-26 requirement 5 and FR-18.</notes>
+  <notes>SUPERSEDED 2026-10-07 by task 058 (decision wizard UI) and task 043 (decision commit route): D-17 (one BFF commit route, record last) and D-26 (WizardShell in-app) replace a per-action gate host in the row; v4 has no action area in a row (reconciliation W-5, Z-1, Z-6, Z-8 and B.2 row 053). Its reason-required dismissal and "no client-side carve-out" criteria are carried into 058 and 043. Do not run task-execute on this file. spec.md FR-26 requirement 5 and FR-18.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

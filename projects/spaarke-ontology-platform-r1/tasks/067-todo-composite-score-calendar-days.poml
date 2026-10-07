@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>To Do composite score on calendar days, one shared function</title>
+    <phase>6 Do lane and Briefing fold-in</phase>
+    <gate>081, 098 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the ranking of every To Do board (a user-visible re-rank).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One function in a known file, plus collapsing any copies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>081, 098</deps>
+    <tags>frontend,todo,scoring</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the To Do composite score's urgency component count calendar days (as the due label already does) and make every board use that one function.</prompt>
+  <role>SPAARKE front-end developer. One scorer, no copies.</role>
+  <goal>computeTodoScore's urgency and computeDueLabel agree for every due date; no other copy of the urgency or score computation exists; boards re-rank once.</goal>
+
+  <context>
+    <background>D-29 (spec section 9): To Do composite score to calendar days, one shared function (boards re-rank once). In Spaarke.SmartTodo.Components/src/utils/todoScoring.ts, computeDueDateUrgencyRaw uses Math.ceil over a millisecond difference (time-of-day dependent), while computeDueLabel compares local-midnight calendar days. C-10 (task 084, merged) already removed one drifted copy in useKanbanColumns; task 081 (#1309) touches SmartTodo code and must merge first to avoid conflicts.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/__tests__/todoScoring.kanbanParity.tz.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-29): the urgency raw score uses the same calendar-day difference as computeDueLabel (local midnight to local midnight, Math.round for DST); tier thresholds and weights are unchanged.</constraint>
+    <constraint source="owner">Scope (D-29): exactly one implementation: grep src/ for any other copy of the urgency or composite computation (including src/solutions/LegalWorkspace/src/hooks/useKanbanColumns.ts) and make it call the shared function.</constraint>
+    <constraint source="project">Scope: no change to colour tiers or labels.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>To Do scoring</topic>
+    <files>
+      <file>projects/spaarke-ontology-platform-r1/tasks/084-todo-scorer-own-pr.poml</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code.</step>
+    <step order="1">Extract one calendar-day difference helper used by both computeDueLabel and the urgency score.</step>
+    <step order="2">Find and remove any other copy.</step>
+    <step order="3">Tests: a due date today at 23:00 and tomorrow at 01:00 score by calendar day; label and urgency agree across a DST change.</step>
+    <step order="4">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="5">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Board re-rank">
+      <steps>
+        <step>Open Smart To Do with To Dos due today, tomorrow and overdue</step>
+      </steps>
+      <expected>Order and column placement match the due labels.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode</step>
+      </steps>
+      <expected>Unchanged colours via tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the SmartTodo package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given due dates at different times of day on the same calendar day, when scored, then their urgency components are equal.</criterion>
+    <criterion testable="true">Given any due date, when computeDueLabel and the urgency score are computed, then they place it in the same tier.</criterion>
+    <criterion testable="true">Negative: grep finds no second implementation of the urgency or composite computation in src/.</criterion>
+    <criterion testable="true">Tests cover the stated contract and the DST case; the package builds.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-63; D-29.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

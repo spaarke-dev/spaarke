@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Worklist widget assembly: two lanes, count filters, narrative slot, aggregate row, disclosures</title>
+    <phase>5 The worklist surface</phase>
+    <gate>038, 051, 052, 054, 058 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Composes the Console's primary surface from the read route, the row, the filters and the wizard.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Assembly of already-built pieces into one registered widget, behaviour fixed by HANDOFF section 1.2 and 1.4.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>055 deploys it and 064 swaps the Briefing tab to it.</parallel-reason>
+    <deps>038, 051, 052, 054, 058</deps>
+    <tags>frontend,fluent-ui,react,widget</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Assemble the worklist widget: read both lanes from the Signal read route, render one MatterCard per matter with IssueLines, per-lane count filters on the extended MetricCard, the narrative slot, the email aggregate row and the closed/suppressed disclosures, and open the decision wizard on the browse set the user is looking at.</prompt>
+  <role>SPAARKE front-end developer. Membership and order come from the server; the widget never sorts or filters by its own rule.</role>
+  <goal>A registered workspace widget renders Decide above Do from real data, its filters are honest, and every line opens the wizard on the visible list.</goal>
+
+  <context>
+    <background>Reconciliation W-1..W-12 and HANDOFF section 1.2 / 1.4 L115-124 (binding): two lanes, Decide always above Do; each lane has a heading with its count and a start button that walks the visible (filtered) list; count cards per lane; "Showing n of m - Show all"; "+1 other open item on this matter, not in this filter"; filters not remembered between sessions; the narrative summarises Do volume and is hidden while a filter is on; one aggregate email row at the top of the Do lane, not in either lane's counts; Closed today, Suppressed (with until-date) and Closed earlier behind disclosures. D-15: rows come only from the BFF read route (task 038). D-26: the wizard opens in-app.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Worklist/WorklistWidget.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-15): the widget reads Signals ONLY through the task 038 route; no Xrm.WebApi or child-records read of sprk_signal anywhere in the widget.</constraint>
+    <constraint source="project">Scope: order is the route's order; the widget never re-sorts. Filters are lenses on the lane's list (task 052), never another query, and are not persisted (no localStorage or user setting).</constraint>
+    <constraint source="project">Scope: the aggregate email row is task 054's AggregateCard at the top of the Do lane, its count taken from the same feed the Email Review tab uses (#36), excluded from both lanes' counts and hidden under a Do filter.</constraint>
+    <constraint source="project">Scope: the narrative slot shows the existing Briefing narrative (task 062 makes it summarise Do volume) and is hidden while any filter is on; it may not name an item that is not on the list (#38).</constraint>
+    <constraint source="project">Scope: the widget lands in a shared library and is registered through WorkspaceWidgetRegistry; nothing but registration in src/solutions/SpaarkeAi (FR-28).</constraint>
+    <constraint source="ADR-021">Scope: Fluent v9 tokens only; light and dark correct; keyboard reachable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Workspace widgets</topic>
+    <files>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/v4-reconciliation.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Widget registration" location="src/solutions/LegalWorkspace/src/sections/dailyBriefing/dailyBriefing.registration.ts">The registration template.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Record the reconciliation section B.6 pre-start check (HANDOFF section 1.2 all, section 1.4 L115 and L121-124, section 1.1 L51-53) in task notes.</step>
+    <step order="1">Build the widget against the 038 route contract with fixtures.</step>
+    <step order="2">Wire lanes, filters, honesty lines, narrative slot, aggregate row and disclosures.</step>
+    <step order="3">Open the wizard (058) on the visible list for a line, a lane's start button, and the disclosures.</step>
+    <step order="4">Register the widget; tests per behaviour above.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="6">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a behaviour in HANDOFF section 1.2 needs data the 038 route does not return, STOP and extend the route through its own task rather than reading Dataverse from the widget.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The Daily Briefing widget (LegalWorkspace dailyBriefing section) is the current surface; it reads the collector, not Signals, and has no lanes, filters or wizard.</existing>
+    <extension>No: the Briefing is replaced by this widget in task 064 (BR-4), and its sections are kept behind a flag for one release rather than mutated in place.</extension>
+    <cost-of-doing-nothing>The row, filters and wizard exist with no surface composing them, so Signals stay invisible (the sprk_spendsignal outcome).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Decide above Do with honest filters">
+      <steps>
+        <step>Seed several Do items and two Decide items; open the worklist; click one Do count card</step>
+      </steps>
+      <expected>Decide renders above Do; the Do list filters in place with "Showing n of m - Show all"; the narrative hides; the aggregate row hides.</expected>
+    </test>
+    <test name="Wizard opens on the visible list">
+      <steps>
+        <step>With a filter on, click a line, then use the wizard's next arrow to the end</step>
+      </steps>
+      <expected>The wizard browses only the filtered list and does not wrap.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and open every disclosure</step>
+      </steps>
+      <expected>All surfaces adapt via semantic tokens.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the client packages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Worklist</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given both lanes populated, when rendered, then Decide is above Do and each lane shows its count and start button.</criterion>
+    <criterion testable="true">Given a filter, when on, then the lane shows "Showing n of m - Show all", a matter with an open item outside the filter shows the "+1 other open item" line, and the narrative and aggregate row are hidden.</criterion>
+    <criterion testable="true">Given a reload, when the widget renders, then no filter is restored.</criterion>
+    <criterion testable="true">Given the aggregate row, when counted, then it is excluded from both lanes' counts and its number equals the Email Review feed's count.</criterion>
+    <criterion testable="true">Given the Closed today, Suppressed and Closed earlier disclosures, when opened, then each lists its set (Suppressed with the until-date) and opens the wizard read-only.</criterion>
+    <criterion testable="true">Negative: the widget performs no direct sprk_signal read and never re-sorts the route's order.</criterion>
+    <criterion testable="true">Tests cover the behaviours above; anything beyond needs a one-line justification in task notes. The packages build.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-24 (amended), FR-29, FR-34, FR-54; D-15, D-26. Reconciliation W-2, W-9..W-12.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

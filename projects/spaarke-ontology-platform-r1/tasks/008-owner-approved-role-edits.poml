@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Owner-approved role edits and assignment, with the union re-verify</title>
+    <phase>0 Foundations</phase>
+    <gate>007 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security role changes on the tables whose append-only and visibility guarantees the project rests on.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive privilege edits; the union across every role must be judged, not just the edited role.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>L</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>007</deps>
+    <tags>dataverse,security,roles,verification</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Apply exactly the role edits the owner approved on 2026-10-07, assign the administrator role to the owner's account, add the five ontology tables read-only to Spaarke Platform, and re-run task 002's union check.</prompt>
+  <role>SPAARKE platform developer. Security fails closed; add only what was approved and prove nothing else moved.</role>
+  <goal>Each approved privilege is present on every business-unit copy of the named role, nothing else changed, the union check is recorded, and the owner's spaarkedev1 user holds Spaarke Ontology Administrator.</goal>
+
+  <context>
+    <background>Owner decisions 2026-10-07 (spec section 9). D-29: the writer gets AppendTo on sprk_communication, sprk_event, sprk_todo and sprk_workassignment (closes task 030's F26: creating a Signal whose subject is a communication fails with AppendToAccess, and the Do-lane subjects would fail the same way). D-18: the writer gets Create on sprk_budgetrevision so the commit route can record Revise budget. D-14: Spaarke Ontology Administrator gets Write on sprk_policyversion so publishing stamps the old version's sprk_inforceto. D-22: Spaarke Ontology Administrator gets Create, Write and Read on sprk_triagecategory (it holds no privilege on that table today), the role is assigned to the owner's account, and the five tables go into Spaarke Platform read-only. D-17's removal of Console User Write on sprk_signal is NOT in this task: it waits until the BFF closes Signals (task 049).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-ontology-platform-r1/tasks/002-privilege-reverify-after-column-adds.poml</file>
+      <file role="modify">projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-29): add prvAppendTosprk_Communication, prvAppendTosprk_Event, prvAppendTosprk_Todo and prvAppendTosprk_WorkAssignment to Spaarke Ontology Service. Use the depth that matches its existing AppendTo on sprk_policy and sprk_policyversion, and record it.</constraint>
+    <constraint source="owner">Scope (D-18): add prvCreatesprk_BudgetRevision to Spaarke Ontology Service. Do NOT add Write or Delete on sprk_budgetrevision, and do NOT add any privilege on sprk_budget (which identity updates the budget amount is undecided, spec section 11.1 O-16).</constraint>
+    <constraint source="owner">Scope (D-14): add prvWritesprk_PolicyVersion to Spaarke Ontology Administrator only. No other role gains it.</constraint>
+    <constraint source="owner">Scope (D-22): add Create, Write and Read on sprk_triagecategory to Spaarke Ontology Administrator only. sprk_triagecategory is organisation-owned; use organisation depth and record it. Assign Spaarke Ontology Administrator to the owner's spaarkedev1 user (ask the owner for the exact user if it is not unambiguous from systemuser).</constraint>
+    <constraint source="owner">Scope (D-22): add sprk_signal, sprk_decisionrecord, sprk_policy, sprk_policyversion and sprk_budgetrevision to the Spaarke Platform model-driven app for inspection, with forms that are read-only (a form or field setting, no plugin, ADR-002). Check spec section 8.1 first: the owner may already have done part of this.</constraint>
+    <constraint source="project">Scope: edit ALL business-unit copies of each role (task 002 constraint: a top-1 read returns an arbitrary copy). Do not touch Service Writer or Service Deleter.</constraint>
+    <constraint source="project">Scope: do NOT remove prvWritesprk_Signal from Spaarke Console User here (task 049 does it after the BFF closes Signals). Do NOT add any privilege not listed above.</constraint>
+    <constraint source="project">Scope: after the edits, repeat task 002's union check: every role holding Write or Delete on sprk_decisionrecord, or Write on sprk_policyversion, classified as platform, admin, human or Spaarke identity. prvWritesprk_DecisionRecord and prvDeletesprk_DecisionRecord must remain absent from all three Spaarke Ontology roles and from Spaarke Console User.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse security roles and privileges</topic>
+    <files>
+      <file>.claude/adr/ADR-002-thin-plugins.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/security-roles.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/030-signal-writer-progress.md</file>
+      <file>projects/spaarke-ontology-platform-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Union privilege check" location="projects/spaarke-ontology-platform-r1/notes/security-roles.md">Sections 6, 7 and 9 record the method, the per-BU-copy artifact and its Core User control.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above.</step>
+    <step order="1">Record the before state: every BU copy of Spaarke Ontology Service, Spaarke Ontology Administrator and Spaarke Console User, with their privileges on sprk_communication, sprk_event, sprk_todo, sprk_workassignment, sprk_budgetrevision, sprk_policyversion, sprk_triagecategory and sprk_signal.</step>
+    <step order="2">Apply the D-29 and D-18 edits to Spaarke Ontology Service.</step>
+    <step order="3">Apply the D-14 and D-22 edits to Spaarke Ontology Administrator and assign it to the owner's user.</step>
+    <step order="4">Add the five tables to Spaarke Platform with read-only forms; publish the app.</step>
+    <step order="5">Re-read every BU copy and diff against the before state: only the listed privileges changed.</step>
+    <step order="6">Run the union check and the live negative: as a non-admin user holding only the Spaarke roles, an update to a sprk_decisionrecord row is refused.</step>
+    <step order="7">Prove the F26 fix live: re-run tests/integration/seam/Signals/SignalWriterSeamTests.cs's communication-subject test as the writer and confirm it passes.</step>
+    <step order="8">Append the dated before/after and union result to notes/security-roles.md.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="10">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any human user or any Spaarke application identity ends up holding Write or Delete on sprk_decisionrecord, STOP and escalate: that breaks the append-only guarantee.</trigger>
+    <trigger>If a needed edit is not in the list above (for example Write on sprk_budget for the amount update), STOP and ask the owner; do not add it.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Web API role edits</tool>
+    <tool name="dataverse-mcp">Read-only verification queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">Dataverse: role privileges, role assignment, Spaarke Platform app module</output>
+    <output type="doc">projects/spaarke-ontology-platform-r1/notes/security-roles.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given every BU copy of Spaarke Ontology Service, when listed, then AppendTo on sprk_communication, sprk_event, sprk_todo and sprk_workassignment and Create on sprk_budgetrevision are present.</criterion>
+    <criterion testable="true">Given every BU copy of Spaarke Ontology Administrator, when listed, then Write on sprk_policyversion and Create, Write and Read on sprk_triagecategory are present, and the owner's spaarkedev1 user holds the role.</criterion>
+    <criterion testable="true">Given the before/after diff, when compared, then no privilege other than those listed changed on any role, and Spaarke Console User still holds prvWritesprk_Signal (removed later by task 049).</criterion>
+    <criterion testable="true">Given the union check, when run, then prvWritesprk_DecisionRecord and prvDeletesprk_DecisionRecord are absent from every Spaarke role, and every holder of Write on sprk_policyversion is Spaarke Ontology Administrator or a platform/admin role, classified in the notes.</criterion>
+    <criterion testable="true">Negative: as a non-admin user holding only the Spaarke roles, an update to a sprk_decisionrecord row is refused.</criterion>
+    <criterion testable="true">Negative: Spaarke Ontology Service holds no privilege on sprk_budget and no Write or Delete on sprk_budgetrevision.</criterion>
+    <criterion testable="true">Given the writer identity, when the seam test writes a Signal whose subject is a communication, then it succeeds (F26 closed).</criterion>
+    <criterion testable="true">Given the Spaarke Platform app, when a user opens a sprk_signal or sprk_policyversion form, then it is read-only.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-21 (amended, D-14), FR-52, FR-56, NFR-11. Task 049 removes Console User Write on sprk_signal and re-runs the same union check.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

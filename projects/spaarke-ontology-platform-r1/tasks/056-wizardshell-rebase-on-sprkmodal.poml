@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="056" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>WizardShell: characterization tests, re-base onto SprkModal, the v4 props, delete WizardModal</title>
+    <phase>5b Modal system (D-26)</phase>
+    <gate>110 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the shared wizard engine used by eight shipped consumers.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting refactor of a shared component with eight consumers, one across the PCF React 16 boundary (high blast radius).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>058, 102, 111, 112 and 113 all build on the re-based shell.</parallel-reason>
+    <deps>110</deps>
+    <tags>frontend,fluent-ui,react,modal,refactoring</tags>
+    <estimated-effort>4-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>Lock WizardShell's current behaviour with characterization tests, then render its non-embedded branch inside SprkModal, add the additive props the decision wizard needs, and delete the unused WizardModal preset, leaving the embedded branch byte-for-byte unchanged.</prompt>
+  <role>SPAARKE front-end developer. Tests first; the embedded markup must not move.</role>
+  <goal>One modal envelope (SprkModal) and one wizard engine (WizardShell) in the library; existing consumers behave as before except the intended UAT changes; the new props exist and are tested.</goal>
+
+  <context>
+    <background>D-26 adopts notes/modal-wizard-canonical-approach.md section 5 (phases P1-P3). WizardShell (Wizard/WizardShell.tsx, 593 LOC) owns its own Fluent Dialog (~:576-589), closes on Escape and backdrop (~:578-580), has no uiScale, no nav, no statusBar, no 'skipped' status (wizardShellTypes.ts:18) and NO direct tests. WizardModal has zero consumers. All eight navigateTo wizard code pages mount WizardShell embedded, so re-basing the non-embedded branch does not reach them if the embedded markup stays identical (lock it with a snapshot first). The decision wizard (058) needs nav + onBeforeNavigate, dismiss explicit, statusBar, footer override + stayOpenOnFinish, 'skipped' and uiScale (modal note section 7).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardShell.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellTypes.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Wizard/wizardShellReducer.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/SprkModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/index.ts</file>
+      <file role="delete">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/WizardModal.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/Wizard/__tests__</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-26, ADR-050 as amended by task 110): the non-embedded branch renders inside SprkModal with size (default wizard), dismiss (default explicit), uiScale, nav, footerStart (Cancel + footerLeftExtra) and footer (Skip, Back, Next/Finish); WizardShell's own Dialog, title bar and window controls are removed. The embedded branch is unchanged.</constraint>
+    <constraint source="project">Scope: characterization tests FIRST, committed before the re-base: wizardShellReducer (next, prev, go-to, add/remove dynamic with canonicalOrder, clamp on remove, initialStepId) and WizardShell (canAdvance gating, Skip, early finish, finish to success / error / close, and an embedded snapshot).</constraint>
+    <constraint source="project">Scope: additive props exactly: dismiss, size, uiScale, nav + onBeforeNavigate (lift onBeforeNavigate from BrowseModal into SprkModal's nav), statusBar slot, footer override + stayOpenOnFinish, and a 'skipped' WizardStepStatus that does not tick the step. Existing props keep their meaning; maxWidth/height strings are deprecated (kept working, mapped to named sizes in task 111).</constraint>
+    <constraint source="project">Scope: delete WizardModal, its test and its barrel export; update MODAL-DESIGN-SYSTEM.md section 7 only if task 110 has not already.</constraint>
+    <constraint source="project">Scope: intended behaviour changes, recorded for UAT: wizards no longer close on Escape or backdrop; resize: both goes; the header title becomes SprkModal's aria-labelledby span. Nothing else changes for existing consumers.</constraint>
+    <constraint source="ADR-021">Scope: tokens only; light and dark; compiles under React 16/17 types (PCF) and React 18/19 (code pages) per ADR-050.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Modal shell and wizard engine</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/spaarke-ontology-platform-r1/notes/modal-wizard-canonical-approach.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Browse guard" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx">onBeforeNavigate (~:48, :65) is the seam to lift into SprkModal's nav.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8, then load the knowledge files above before touching code. Confirm task 110 has landed.</step>
+    <step order="1">Write and commit the characterization tests against the current code; all pass.</step>
+    <step order="2">Lift onBeforeNavigate into SprkModal's nav.</step>
+    <step order="3">Re-base the non-embedded branch onto SprkModal; the embedded snapshot still matches.</step>
+    <step order="4">Add the additive props with tests; add 'skipped' to the reducer.</step>
+    <step order="5">Delete WizardModal, its test and export; build the package.</step>
+    <step order="6">Run every existing consumer's tests (CreateRecordWizard.*, CreateAnalysisWizardWidget, CreateTodoWizard, DocumentEmailWizard, WorkAssignmentWizardDialog, SummarizeFilesDialog, DocumentUploadWizardDialog, WorkspaceLayoutWizard, external-spa DocumentUploadPage) unmodified.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set this task to the completed marker, AND set this POML status element to completed. Both, or scripts/check-task-status-drift.ps1 fails the next push.</step>
+    <step order="8">Record any deviation from this POML in projects/spaarke-ontology-platform-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the embedded snapshot changes, or an existing consumer's test needs editing to pass, STOP and escalate: the re-base is reaching code it must not.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>WizardShell has no direct tests (no Wizard/__tests__; covered only indirectly by CreateRecordWizard.*.test.tsx and CreateAnalysisWizardWidget.test.tsx, modal note section 4). No new component is added; WizardModal is removed.</existing>
+    <extension>Yes: SprkModal and WizardShell are extended in place; the only new files are tests.</extension>
+    <cost-of-doing-nothing>Without characterization tests the envelope swap can silently change eight shipped wizards; without the props the decision wizard (058) cannot browse, stay open after recording or show a status bar.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Canary: create an analysis">
+      <steps>
+        <step>From the SpaarkeAi hub, create an analysis (CreateAnalysisWizardWidget, non-embedded) in light and dark at 100% and large display size</step>
+        <step>Press Escape, click the backdrop, then click the close button</step>
+      </steps>
+      <expected>Escape and backdrop do nothing; close closes; the wizard scales and themes correctly.</expected>
+    </test>
+    <test name="Dark mode compliance per ADR-021">
+      <steps>
+        <step>Toggle dark mode and open a non-embedded wizard</step>
+      </steps>
+      <expected>Header, footer and body all follow the theme.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build and test the shared UI package and its consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Wizard</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkModal</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/Wizard/__tests__</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the characterization tests, when run on the pre-change code, then they pass, and they are committed before the re-base.</criterion>
+    <criterion testable="true">Given a non-embedded WizardShell, when rendered, then the only Dialog/DialogSurface in the tree is SprkModal's.</criterion>
+    <criterion testable="true">Given an embedded WizardShell, when rendered, then the snapshot is identical to the pre-change snapshot.</criterion>
+    <criterion testable="true">Given nav, statusBar, stayOpenOnFinish, dismiss explicit, uiScale and a skipped step, when exercised, then each behaves as specified and is covered by a test.</criterion>
+    <criterion testable="true">Negative: WizardModal, its test and its export no longer exist; no grep hit for WizardModal in src/.</criterion>
+    <criterion testable="true">Negative: every existing consumer's tests pass without modification.</criterion>
+    <criterion testable="true">The package builds under both React type sets.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-60; D-26; modal note sections 4, 5.1, 5.2 (P1-P3), 7. Regression across live consumers and deploy is task 111.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

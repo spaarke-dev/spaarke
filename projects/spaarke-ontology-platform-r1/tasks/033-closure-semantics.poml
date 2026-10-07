@@ -35,6 +35,9 @@
     <constraint source="project">Scope: an auto-closure must NEVER count as a human dismissal. The three-dismissal suppression rule is wrong in both directions if it does.</constraint>
     <constraint source="project">Scope: if this task changes src/server/api/Sprk.Bff.Api, state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and measure publish size against a FRESH build of master from a short path with file counts compared on both sides. Ceiling 60 MB.</constraint>
     <constraint source="ADR-038">Scope: any test this task adds that asserts a Dataverse column list, entity name or option-set value must be paired with something touching the real schema. A consistently throwing path is a defect to diagnose, never noise to tolerate.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-13, D-14): a version is superseded when its sprk_inforceto is set (publishing stamps it, task 101) or when sprk_policy.sprk_currentversion points elsewhere; read sprk_inforceto. Closing as Superseded is followed, in the same pass, by task 031's re-raise of each subject the NEW version still holds, as a new episode citing the new version. Expose the supersede closure as a callable method so task 101's publish can run it.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-22 slice a; FR-16 amended; reconciliation M-5): split Off from Retire. Off (sprk_enabled = No): open Signals close as PolicyRetired at the next pass. Retire (statuscode Retired + sprk_retiredreason, task 007): expose ClosePolicyRetiredNow(policyId) so task 100 closes them immediately. Neither writes a Decision Record.</constraint>
+    <constraint source="project">AMENDED 2026-10-07 (#15): no closure path touches a Signal that is already Resolved.</constraint>
   </constraints>
 
   <knowledge>
@@ -85,10 +88,13 @@
     <criterion testable="true">Given a disabled policy, when the pass runs, then its open Signals close as PolicyRetired.</criterion>
     <criterion testable="true">Negative: for all three system closures, sprk_decisionrecord is null and sprk_resolvedby is null.</criterion>
     <criterion testable="true">Negative: an auto-closure does NOT increment the dismissal counter used by suppression.</criterion>
+    <criterion testable="true">Given a published v2 (v1's sprk_inforceto stamped) and an open v1 Signal whose subject v2 still holds, when the pass (or the callable supersede) runs, then the v1 Signal is Superseded and a new episode citing v2 is open.</criterion>
+    <criterion testable="true">Given a retired policy, when ClosePolicyRetiredNow runs, then its open Signals are PolicyRetired immediately; given a policy switched Off, then they close at the next pass.</criterion>
+    <criterion testable="true">Negative: a Signal already Resolved (e.g. Acted) is not changed by any closure path.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-16. design.md section 8.3 closing note covers the aged-out mapping.</notes>
+  <notes>spec.md FR-16 (amended 2026-10-07: D-13, D-14, Retire), FR-03 (episodes). design.md section 8.3 closing note covers the aged-out mapping. Reconciliation B.2 row 033; #15, #40.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
