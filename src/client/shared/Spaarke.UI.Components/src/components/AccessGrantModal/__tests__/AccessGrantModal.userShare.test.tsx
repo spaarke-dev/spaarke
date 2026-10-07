@@ -235,6 +235,43 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
     });
 
+    // Task 114 (owner round 67 amendment 4(c)): on a Restricted record, an external-flagged user's share is labelled
+    // "External user — no access" until the server removes it; every other share keeps its "Internal user share" label.
+    it('labels a share the server marks externalNoAccess as "External user — no access", and only that one', async () => {
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/user-shares')
+          ? jsonResponse({
+              shares: [
+                {
+                  systemUserId: 'systemuser-ext',
+                  fullName: 'Ext Erin',
+                  accessRightsMask: 1,
+                  accessLevel: 100000000,
+                  modifiedOn: '2026-10-06T00:00:00Z',
+                  externalNoAccess: true,
+                },
+                {
+                  systemUserId: 'systemuser-int',
+                  fullName: 'Int Ivan',
+                  accessRightsMask: 1,
+                  accessLevel: 100000000,
+                  modifiedOn: '2026-10-06T00:00:00Z',
+                  externalNoAccess: false,
+                },
+              ],
+            })
+          : null
+      );
+      const props = makeProps({
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      expect(await screen.findByText('Ext Erin')).toBeInTheDocument();
+      expect(screen.getAllByText('External user — no access')).toHaveLength(1);
+      expect(screen.getAllByText(/^Internal user share — last updated/)).toHaveLength(1);
+    });
+
     it('revoking a user-share row issues POST /unshare-user with {recordType, recordId, systemUserId} and removes the row on success', async () => {
       const authenticatedFetch = baseAuthenticatedFetch(url =>
         url.includes('/user-shares')

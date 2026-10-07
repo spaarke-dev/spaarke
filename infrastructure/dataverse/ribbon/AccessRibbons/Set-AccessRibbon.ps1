@@ -24,8 +24,16 @@
 
       -Verify (read-only): reads each main form's EFFECTIVE ribbon (RetrieveEntityRibbon, Form) and checks that every
         command of the before-list is still present, that Update Access and Remove Secure are present with their
-        access_ribbon.js functions, and that Make Secure is present exactly when -SecureTransitionDeployed is given.
-        Exit 0 = PASS.
+        access_ribbon.js functions, that Make Secure is present exactly when -SecureTransitionDeployed is given, and
+        (task 114) that the platform's form Share command carries sprk.Access.<entity>.ShareAllowed.EnableRule, which
+        calls access_ribbon.js isShareAllowed. Exit 0 = PASS.
+
+    THE SHARE COMMAND ON RESTRICTED RECORDS (task 114, owner round 67 amendment 4(a)). The platform's own form Share
+    command is hidden on a Restricted record (sprk_accesspermission = Restricted), so sharing goes through Manage Access
+    "+ User", which refuses a user flagged external there. The command is the PLATFORM's: -Apply reads it from the live
+    effective ribbon (the Command of the Mscrm.Form.<entity>.Share button - never assumed) and Merge-AccessRibbon.ps1
+    appends the rule to that copy, keeping every platform rule. The dry run uses fixtures/share-command.dry-run-sample.xml,
+    a stand-in that only exercises the transformation. Needs access_ribbon.js 1.6.0 (isShareAllowed) published first.
 
     MAKE SECURE IS RELEASE-GATED (acceptance (b); owner R3b / F7). The confirmation the user accepts says the record's
     related records AND its files follow it, so it ships only where all of this is deployed, in the same release: task
@@ -132,10 +140,26 @@ function Get-MergedShape([string] $path, [string] $logical) {
     return @{ Commands = $commands; Menu = $menu }
 }
 
-function Invoke-Merge([string] $source, [string] $logical, [string] $out) {
-    $mergeArgs = @{ ExportedRibbonDiff = $source; Entity = $logical; Out = $out }
+function Invoke-Merge([string] $source, [string] $logical, [string] $out, [string] $shareCommandXml, [string] $gridShareCommandXml) {
+    $mergeArgs = @{
+        ExportedRibbonDiff = $source; Entity = $logical; Out = $out
+        ShareCommandXml = $shareCommandXml; GridShareCommandXml = $gridShareCommandXml
+    }
     if ($SecureTransitionDeployed) { $mergeArgs.SecureTransitionDeployed = $true }
     & $merge @mergeArgs   # throws when a pre-existing command would be lost (142's check)
+
+    # Task 114: the platform's Share command must come out of the merge carrying the ShareAllowed rule.
+    [xml] $merged = Get-Content -Raw -LiteralPath $out
+    $shareRule = $merged.SelectSingleNode(
+        "//*[local-name()='CommandDefinition' and not(starts-with(@Id, 'sprk.'))]/*[local-name()='EnableRules']/*[local-name()='EnableRule' and @Id='sprk.Access.$logical.ShareAllowed.EnableRule']")
+    if (-not $shareRule) {
+        throw "${logical}: the platform's Share command does not carry sprk.Access.$logical.ShareAllowed.EnableRule after the merge."
+    }
+    $gridRule = $merged.SelectSingleNode(
+        "//*[local-name()='CommandDefinition' and not(starts-with(@Id, 'sprk.'))]/*[local-name()='EnableRules']/*[local-name()='EnableRule' and @Id='sprk.Access.$logical.ShareAllowedSelection.EnableRule']")
+    if (-not $gridRule) {
+        throw "${logical}: the platform's grid Share command does not carry sprk.Access.$logical.ShareAllowedSelection.EnableRule after the merge."
+    }
 
     $shape = Get-MergedShape $out $logical
     $expected = Get-ExpectedMenu $SecureTransitionDeployed.IsPresent
@@ -170,14 +194,53 @@ function Expand-RibbonXml([string] $base64) {
     }
 }
 
-function Get-LiveFormRibbon([string] $logical, [string] $token) {
+function Get-LiveFormRibbon([string] $logical, [string] $token, [string] $location = 'Form') {
     $uri = "$EnvironmentUrl/api/data/v9.2/RetrieveEntityRibbon(EntityName='$logical'," +
-        "RibbonLocationFilter=Microsoft.Dynamics.CRM.RibbonLocationFilters'Form')"
+        "RibbonLocationFilter=Microsoft.Dynamics.CRM.RibbonLocationFilters'$location')"
     $response = Invoke-RestMethod -Uri $uri -Method Get -Headers @{
         Authorization = "Bearer $token"; Accept = 'application/json'; 'OData-Version' = '4.0'; 'OData-MaxVersion' = '4.0'
     }
     [xml] $ribbon = Expand-RibbonXml $response.CompressedEntityXml
     return $ribbon
+}
+
+# Task 114: the platform's form Share command as the live ribbon has it - the Command of the Mscrm.Form.<entity>.Share
+# button, never an assumed id - written to $outPath for Merge-AccessRibbon.ps1 -ShareCommandXml.
+function Save-LiveShareCommand([xml] $ribbon, [string] $logical, [string] $outPath) {
+    $button = $ribbon.SelectSingleNode("//*[local-name()='Button' and @Id='Mscrm.Form.$logical.Share']")
+    if (-not $button) { throw "${logical}: the live form ribbon has no Mscrm.Form.$logical.Share button; nothing was written." }
+    $commandId = $button.GetAttribute('Command')
+    $command = $ribbon.SelectSingleNode("//*[local-name()='CommandDefinition' and @Id='$commandId']")
+    if (-not $command) { throw "${logical}: the Share button's command '$commandId' has no definition in the live ribbon; nothing was written." }
+    Set-Content -LiteralPath $outPath -Value $command.OuterXml -Encoding utf8
+    Write-Host "${logical}: the platform's Share command is '$commandId' (copied from the live ribbon to $outPath)"
+}
+
+# Task 114 follow-up: the platform's GRID and SUBGRID Share command(s) - the Command of the Mscrm.HomepageGrid.<entity>.Share
+# and Mscrm.SubGrid.<entity>.Share buttons in the live ribbon (location 'All'), never an assumed id - written to $outPath
+# (one definition per distinct command) for Merge-AccessRibbon.ps1 -GridShareCommandXml. The home grid's button is
+# required; a form without a subgrid Share button is reported, not an error.
+function Save-LiveGridShareCommands([xml] $ribbon, [string] $logical, [string] $outPath) {
+    $commandIds = @()
+    foreach ($location in @('HomepageGrid', 'SubGrid')) {
+        $button = $ribbon.SelectSingleNode("//*[local-name()='Button' and @Id='Mscrm.$location.$logical.Share']")
+        if (-not $button) {
+            if ($location -eq 'HomepageGrid') {
+                throw "${logical}: the live ribbon has no Mscrm.HomepageGrid.$logical.Share button; nothing was written."
+            }
+            Write-Warning "${logical}: no Mscrm.SubGrid.$logical.Share button in the live ribbon; only the home grid's Share is ruled."
+            continue
+        }
+        $commandIds += $button.GetAttribute('Command')
+    }
+
+    $definitions = foreach ($commandId in ($commandIds | Select-Object -Unique)) {
+        $command = $ribbon.SelectSingleNode("//*[local-name()='CommandDefinition' and @Id='$commandId']")
+        if (-not $command) { throw "${logical}: the grid Share command '$commandId' has no definition in the live ribbon; nothing was written." }
+        $command.OuterXml
+    }
+    Set-Content -LiteralPath $outPath -Value ("<GridShareCommands>" + ($definitions -join '') + "</GridShareCommands>") -Encoding utf8
+    Write-Host "${logical}: the platform's grid Share command(s): $(($commandIds | Select-Object -Unique) -join ', ') (copied to $outPath)"
 }
 
 function Get-LiveCommandIds([xml] $ribbon) {
@@ -217,6 +280,56 @@ function Test-LiveAccessGroup([string] $logical, [xml] $ribbon, [string[]] $befo
         }
     }
 
+    # Task 114: the platform's Share command carries the ShareAllowed rule, and the rule calls isShareAllowed.
+    $shareButton = $ribbon.SelectSingleNode("//*[local-name()='Button' and @Id='Mscrm.Form.$logical.Share']")
+    $shareRuleId = "sprk.Access.$logical.ShareAllowed.EnableRule"
+    if (-not $shareButton) {
+        $failures.Add("no Mscrm.Form.$logical.Share button on the effective form ribbon")
+    }
+    else {
+        $shareCommandId = $shareButton.GetAttribute('Command')
+        $reference = $ribbon.SelectSingleNode(
+            "//*[local-name()='CommandDefinition' and @Id='$shareCommandId']/*[local-name()='EnableRules']/*[local-name()='EnableRule' and @Id='$shareRuleId']")
+        if (-not $reference) { $failures.Add("the Share command $shareCommandId does not carry $shareRuleId") }
+        $ruleFunction = $ribbon.SelectSingleNode(
+            "//*[local-name()='EnableRule' and @Id='$shareRuleId']/*[local-name()='CustomRule' and @FunctionName='Spaarke.Access.Ribbon.isShareAllowed']")
+        if (-not $ruleFunction -or $ruleFunction.GetAttribute('Library') -ne '$webresource:sprk_/scripts/access_ribbon.js') {
+            $failures.Add("$shareRuleId does not call Spaarke.Access.Ribbon.isShareAllowed in sprk_/scripts/access_ribbon.js")
+        }
+    }
+
+    return , $failures
+}
+
+# Task 114 follow-up: every grid Share button the live ribbon has carries ShareAllowedSelection, which calls
+# isShareAllowedForSelection with the selected ids and the entity name.
+function Test-LiveGridShareRule([string] $logical, [xml] $ribbon) {
+    $failures = New-Object System.Collections.Generic.List[string]
+    $ruleId = "sprk.Access.$logical.ShareAllowedSelection.EnableRule"
+    $found = 0
+    foreach ($location in @('HomepageGrid', 'SubGrid')) {
+        $button = $ribbon.SelectSingleNode("//*[local-name()='Button' and @Id='Mscrm.$location.$logical.Share']")
+        if (-not $button) {
+            if ($location -eq 'HomepageGrid') { $failures.Add("no Mscrm.HomepageGrid.$logical.Share button on the effective ribbon") }
+            continue
+        }
+        $found++
+        $commandId = $button.GetAttribute('Command')
+        $reference = $ribbon.SelectSingleNode(
+            "//*[local-name()='CommandDefinition' and @Id='$commandId']/*[local-name()='EnableRules']/*[local-name()='EnableRule' and @Id='$ruleId']")
+        if (-not $reference) { $failures.Add("the $location Share command $commandId does not carry $ruleId") }
+    }
+    if ($found -gt 0) {
+        $function = $ribbon.SelectSingleNode(
+            "//*[local-name()='EnableRule' and @Id='$ruleId']/*[local-name()='CustomRule' and @FunctionName='Spaarke.Access.Ribbon.isShareAllowedForSelection']")
+        if (-not $function -or $function.GetAttribute('Library') -ne '$webresource:sprk_/scripts/access_ribbon.js') {
+            $failures.Add("$ruleId does not call Spaarke.Access.Ribbon.isShareAllowedForSelection in sprk_/scripts/access_ribbon.js")
+        }
+        elseif (@($function.SelectNodes("*[local-name()='CrmParameter']") | ForEach-Object { $_.GetAttribute('Value') }) -join ',' -ne
+            'SelectedControlSelectedItemIds,SelectedEntityTypeName') {
+            $failures.Add("$ruleId does not pass SelectedControlSelectedItemIds and SelectedEntityTypeName")
+        }
+    }
     return , $failures
 }
 
@@ -229,6 +342,7 @@ function Invoke-Verify([System.Collections.IDictionary] $beforeByEntity) {
         $ribbon = Get-LiveFormRibbon $e.Logical $token
         $before = if ($beforeByEntity -and $beforeByEntity.Contains($e.Logical)) { $beforeByEntity[$e.Logical] } else { @() }
         $failures = Test-LiveAccessGroup $e.Logical $ribbon $before
+        foreach ($f in (Test-LiveGridShareRule $e.Logical (Get-LiveFormRibbon $e.Logical $token 'All'))) { $failures.Add($f) }
         if ($failures.Count -eq 0) {
             Write-Host "[PASS] $($e.Logical): Access group as expected$(if (@($before).Count) { "; all $(@($before).Count) before-commands present" })"
         }
@@ -255,6 +369,9 @@ if ($Verify) {
 
 if (-not $Apply) {
     Write-Host "DRY RUN - 142's checked-in exports; no Dataverse call. Output: $WorkDir"
+    # Task 114: a stand-in for the platform's Share command (the transformation only; -Apply merges the LIVE command).
+    $dryRunShareCommand = Join-Path $PSScriptRoot 'fixtures/share-command.dry-run-sample.xml'
+    $dryRunGridShareCommand = Join-Path $PSScriptRoot 'fixtures/grid-share-command.dry-run-sample.xml'
     $missing = @()
     foreach ($e in $entities) {
         if (-not (Test-Path -LiteralPath $e.CheckedIn)) {
@@ -262,7 +379,7 @@ if (-not $Apply) {
             Write-Host "[SKIP] $($e.Logical): no checked-in export at $($e.CheckedIn) - -Apply exports it fresh and checks it in (task 142 UX (f))." -ForegroundColor Yellow
             continue
         }
-        Invoke-Merge $e.CheckedIn $e.Logical (Join-Path $WorkDir "$($e.Logical).RibbonDiff.xml")
+        Invoke-Merge $e.CheckedIn $e.Logical (Join-Path $WorkDir "$($e.Logical).RibbonDiff.xml") $dryRunShareCommand $dryRunGridShareCommand
     }
     Write-Host ("DRY RUN PASSED{0}." -f $(if ($missing.Count) { " (not checked in yet: $($missing -join ', '))" } else { '' })) -ForegroundColor Green
     exit 0
@@ -285,9 +402,18 @@ if ($SecureTransitionDeployed) {
 Write-Host "APPLY to $EnvironmentUrl through solution '$SolutionName'. Make Secure: $(if ($SecureTransitionDeployed) { 'INCLUDED' } else { 'withheld' })."
 $token = Get-DvToken
 $beforeByEntity = [ordered] @{}
+$shareCommandFiles = @{}
+$gridShareCommandFiles = @{}
 foreach ($e in $entities) {
-    $beforeByEntity[$e.Logical] = @(Get-LiveCommandIds (Get-LiveFormRibbon $e.Logical $token))
+    $liveRibbon = Get-LiveFormRibbon $e.Logical $token
+    $beforeByEntity[$e.Logical] = @(Get-LiveCommandIds $liveRibbon)
     Write-Host "Before ($($e.Logical)): $($beforeByEntity[$e.Logical] -join ', ')"
+    # Task 114: the platform's own Share command, from the LIVE ribbon (throws, writing nothing, when it is not there).
+    $shareCommandFiles[$e.Logical] = Join-Path $WorkDir "$($e.Logical).share-command.xml"
+    Save-LiveShareCommand $liveRibbon $e.Logical $shareCommandFiles[$e.Logical]
+    # Task 114 follow-up: the platform's grid / subgrid Share command(s), from the LIVE ribbon (location 'All').
+    $gridShareCommandFiles[$e.Logical] = Join-Path $WorkDir "$($e.Logical).grid-share-commands.xml"
+    Save-LiveGridShareCommands (Get-LiveFormRibbon $e.Logical $token 'All') $e.Logical $gridShareCommandFiles[$e.Logical]
 }
 $beforePath = Join-Path $WorkDir 'before.json'
 $beforeByEntity | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $beforePath -Encoding utf8
@@ -314,7 +440,7 @@ foreach ($e in $entities) {
         Write-Host "Checked in the exported work-assignment ribbon: $($e.CheckedIn) (commit it)."
     }
 
-    Invoke-Merge $ribbonDiff $e.Logical $ribbonDiff
+    Invoke-Merge $ribbonDiff $e.Logical $ribbonDiff $shareCommandFiles[$e.Logical] $gridShareCommandFiles[$e.Logical]
 }
 
 $packed = Join-Path $WorkDir "$SolutionName.merged.zip"

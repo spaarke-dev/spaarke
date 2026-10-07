@@ -1080,6 +1080,26 @@ public sealed class SecureRootInheritance
         // in-memory state a failed ledger write would leave stale.
         var declinedRows = new HashSet<Guid>();
 
+        // Task 114 (owner round 67): on a RESTRICTED record a user flagged external is never passed on, and the Restricted
+        // remover takes away a share such a user already held — a KNOWN cause. Asked once, for the users the ledger names.
+        // A read that fails leaves their removals undecided (below) — never an operator's.
+        RestrictedPrincipalsAnswer? restricted;
+        try
+        {
+            restricted = await _synchronizer.RestrictedExternalPrincipalsOrThrowAsync(
+                logical, recordId,
+                ledger.Where(r => r.State != AssignedAccessState.Revoked)
+                    .Select(AssignedAccessStore.InheritedPrincipalOf).OfType<DataversePrincipalRef>(),
+                ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[SECURE-INHERIT] Whether {Table} {RecordId} is Restricted, or who its sharees flagged external are, could not " +
+                "be read; a removed inherited share of a user is decided on the next pass.", logical, recordId);
+            restricted = null;
+        }
+
         // (a) The record's own shares against what the ledger says was passed on.
         foreach (var row in ledger.Where(r => r.State != AssignedAccessState.Revoked))
         {
@@ -1101,6 +1121,41 @@ public sealed class SecureRootInheritance
 
             if (IsPending(row) && held == PriorMaskOf(row.Reason))
                 continue; // recorded, but the share never landed: the mirror below writes it again — never a removal
+
+            if (principal.Kind == DataversePrincipalKind.SystemUser && restricted is null)
+            {
+                // Task 114: the Restricted remover, or an operator? Undecided: nothing re-added this pass, nothing recorded.
+                declinedRows.Add(row.Id);
+                notDone.Add($"why {principal}'s inherited share was removed could not be decided (whether the record is " +
+                            "Restricted could not be read)");
+                continue;
+            }
+
+            if (restricted?.Barred.Contains(principal) == true)
+            {
+                // Task 114: the record is Restricted and the user is flagged external — the Restricted remover's removal, a
+                // known cause. Skipped(restricted), never Declined, so the share is passed on again once the record is not.
+                try
+                {
+                    await UpdateDecidedRowAsync(row,
+                        new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.Restricted), ct).ConfigureAwait(false);
+                    _logger.LogInformation(
+                        "[SECURE-INHERIT] {Principal}'s inherited share on Restricted {Table} {RecordId} was removed (the user is " +
+                        "flagged external): it is passed on again once the record is not Restricted.", principal, logical, recordId);
+                }
+                catch (LedgerRowChangedException)
+                {
+                    notDone.Add($"{principal}'s inherited share record changed while it was being decided; it is decided on the next pass");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+                {
+                    _logger.LogWarning(ex, "[SECURE-INHERIT] Recording why {Principal}'s inherited share on {Table} {RecordId} went failed.",
+                        principal, logical, recordId);
+                    notDone.Add($"{principal} could not be recorded as removed because the record is Restricted");
+                }
+
+                continue;
+            }
 
             // Removed or narrowed since it was passed on (or, unconfirmed, changed by someone else). By whom? Task 158 final
             // round (main-session round 58 item 1): task 143's enforcer also removes a share here when the person is on a

@@ -97,7 +97,8 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", matter, user, ExternalAccessLevel.Collaborate),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, _fixture.NoAccessReads,
+            new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),
@@ -117,7 +118,7 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(Ledger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     [Fact(DisplayName = "158×140: an operator's Declined marker landing before the write-ahead update refuses that update (412), and NO share is written")]

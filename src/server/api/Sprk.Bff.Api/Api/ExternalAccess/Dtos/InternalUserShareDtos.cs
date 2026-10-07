@@ -91,9 +91,15 @@ public record RecordUserSharesResponse(
 /// rights — for example a provisioning creator's Share right. Setting a level replaces those rights.
 /// </param>
 /// <param name="ModifiedOn">When the share last changed.</param>
+/// <param name="ExternalNoAccess">
+/// Task 114 (owner round 67 amendment 4(c)): <c>true</c> when the record is Restricted and this user is flagged external
+/// (<c>sprk_isexternal = true</c>) — Manage Access shows "External user — no access" until the share is removed (the
+/// record's next save or the 5-minute job). Additive: <c>false</c> on every other share.
+/// </param>
 public record RecordUserShare(
     Guid SystemUserId,
     string? FullName,
     int AccessRightsMask,
     ExternalAccessLevel? AccessLevel,
-    DateTimeOffset ModifiedOn);
+    DateTimeOffset ModifiedOn,
+    bool ExternalNoAccess = false);
