@@ -2,16 +2,16 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure 2026-10-06): F1–F4 fix now / K1–K4 known limit; ≤ 2 fix rounds re-verifying only the fix diff + direct callers/callees; 1 verifier pass per task (2 for auth/security); escalate an F1 still open instead of a round 3.
 
-> **Last Updated**: 2026-10-06 SESSION 41 — T254 closed; next T232.
+> **Last Updated**: 2026-10-07 SESSION 41 — T254 closed (f06296312); T232 POML created; owner chose PAYG licensing.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T232** — H11 B2B guests + Spaarke-paid licensing (D2, G10): verify/implement license assignment + guest → Dataverse user sync in the Spaarke-tenant environment. **No POML yet** — create it first from plan §7 row T232 (copy `tasks/228-…poml`), add the TASK-INDEX row. |
+| **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
 | **Step** | 0 — not started. T254 ✅ (SESSION 41) — see its POML notes. |
 | **Status** | pending. |
-| **Next Action** | Create `tasks/232-…poml` (task-create conventions), then `task-execute` 232. No live action without owner approval. |
+| **Next Action** | `task-execute` 232 — Step 1 research (researcher subagent): PAYG + B2B guest systemuser creation, force-sync need, billing-policy check recipe. No live action without owner approval. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 
