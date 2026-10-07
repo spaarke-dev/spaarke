@@ -1,81 +1,95 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format (2026-10-06):** this file holds CURRENT state only and is REWRITTEN at each checkpoint — never prepend a new block on top of old ones. Standing directives + environment gotchas live in the project `CLAUDE.md` ("Standing directives & gotchas"). Session history lives in git (checkpoint commit messages) and the verbatim archive `notes/handoff-history/current-task-archive-2026-10-06.md` (do NOT load it on recovery; grep it only if you need a specific past detail). Why: see `.claude/skills/context-handoff/SKILL.md` "State, not history" and `notes/handoff-history/2026-10-06-conversion-review.md`.
+> **Format:** CURRENT state only. Rewrite this file at each checkpoint, never prepend; keep it ≤10 KB. Standing rules live in the project `CLAUDE.md` ("Standing directives & gotchas"). Decisions live in `notes/session27-owner-decisions-and-research.md` (numbered rounds). Narrative goes in checkpoint commit messages. The old journal is `notes/handoff-history/current-task-archive-2026-10-06.md`: grep it, never load it.
 
-> **Last Updated**: 2026-10-06 ~20:15 UTC (checkpoint #18, commit `657dbc9de`). Converted to state-only format from the #18 block.
+> **Last Updated**: 2026-10-06 ~23:30 UTC (checkpoint #19, after the conversion self-review).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch-4 dev live gates + hotfixes; batch 5 started with task 171 (broker-only SPE bytes). 116/168 tasks complete |
-| **Step** | Hotfixes deployed to dev: #1319 (No Access lookup filters + event create 500), #1320 (No Access enforce privilege), #1322 (owner's own share revoked as owner); BFF at master b977fc7a6. Gate groups G1-G7 done (results: notes/batch4-live-gates-2026-10-06.md). Completed today: 003, 132, 133, 148, 149, 156, 158, 159, 160, 167. RUNNING (Agent tool, background): gates-g6 (163-166/168/169 API gates), exec171 (task 171 executor, worktree C:\wt171, branch task/uac-r2-171), fmpush (field-mapping push lookup fix D-G6-3, worktree C:\wtM, branch fix/uac-r2-field-mapping-push-lookups) |
-| **Status** | in-progress |
-| **Next Action** | (1) When fmpush reports: review diff, open PR, merge on Router green, deploy (C:\wtR fresh master; Deploy-BffApi.ps1 dev), re-run 166 (e)+ and 12. (2) When gates-g6 reports: record results into the gate note, mark tasks whose gates all passed. (3) When exec171 reports: review, PR, merge, deploy, run its post-deploy live checklist. (4) Owner pending: is SPE 'Modified by = BFF app' acceptable for app-only writes (171); G146-3 alert setting (admin user id); 137 WritesEnabled; 18 empty test SPE containers to delete (round 68 list + G7's 3; operator step, no BFF delete route). (5) Owner screen session (~2.5-3h): CIAM (136/037/039, 137 obs, 140, 157), workforce sign-in (141 G-8), wizards/forms (047, 142 G-7, 147 G147-4/6, 150 G-10+UI, 168 (h), 169, 163/164/166 UI), BU1 SPE admin for 165 leaf gates, a second non-admin login. (6) Then batch 5 rest: 154, 113/114 (round 67 rescope)/105/101, 064, 153/067, 099, 036 (ADR-034 path B pending owner). Owner decisions today: rounds 67 (114 Restricted/isexternal), 68 (gate findings), 69-70 (broker-only + standing BU membership + JIT secure edit; Office/Word desktop system-user only). |
+| **Task** | Batch 5 started. **Task 171** (broker-only SPE document bytes + JIT Office edit) is built and verified, and is DRAFT PR **#1333**. It waits on 2 owner decisions (F4, F10 below). 116/168 tasks complete. |
+| **Status** | Waiting on the owner. Nothing is running: no workflows, no background agents. |
+| **Next Action** | (1) On the owner's F4/F10 answers: implement them on `task/uac-r2-171` (worktree `C:\wt171`), re-verify ONLY that fix diff (review limits: at most 2 fix rounds; 171 has used 1), mark the PR ready, merge on Router green, deploy the BFF and the DocumentUploadWizard, then run 171's live checklist (`notes/task-171-broker-only-document-bytes.md` on that branch: A–J, D0, C2). (2) Then batch 5: 154 → 113, 114 (round 67), 105, 101 → 064 → 153, 067 → 099 → 036 → 090. (3) The owner screen session when the owner is available (list below). |
 
-## Running now
-No workflows are running. Three **Agent-tool** agents run in the background. They are not workflow agents, so SendMessage by name is allowed (a workflow agent is never SendMessage'd; see memory `workflow-agent-messaging`).
+## Owner decisions pending
+- **171 F4** (the pointer can be re-targeted now that every upload is BFF-created): (A) a field-security-locked `sprk_graphitemidbound` copy, checked by the pointer rule (recommended), or (B) a known limit.
+- **171 F10** (share-link mints organization-wide view links): refuse it for secure and Restricted records (recommended), or keep it.
+- **171:** SPE "Modified by" shows the BFF app for BFF-written files; Spaarke records the person (recommend accept).
+- **G146-3:** which admin systemuser gets `Communication__OwnershipHoldAlertUserIds__0`. It's an app setting, so setting it restarts the BFF.
+- **137:** `ExternalAccess:Reconciliation:WritesEnabled`. The report shows 0 changes. It now also gates R4 (round 71).
+- **036:** accept the ADR-034 amendment (path B) before 036 merges.
+- **Smaller:**
+  - delete 20 empty test SPE containers (ids in `notes/batch4-live-gates-2026-10-06.md` and round 68; an operator step, because the BFF has no delete route);
+  - accept 133(e)'s `sharesRestored` as proven by tests;
+  - close 166's reporting gates as "not configured" and Redis-down as proven by tests;
+  - is the Copilot agent deployed in dev (164 j/d)?
 
-| Agent | Work | Worktree / branch |
-|---|---|---|
-| `gates-g6` | 163-166/168/169 API gates | (results → `notes/batch4-live-gates-2026-10-06.md`, written by the main session) |
-| `exec171` | task 171 executor | `C:\wt171` / `task/uac-r2-171` |
-| `fmpush` | field-mapping push lookup fix D-G6-3 | `C:\wtM` / `fix/uac-r2-field-mapping-push-lookups` |
+## Owner screen session (~2.5–3 h)
+- **CIAM:** 136/037/039/135, 137's observations, 140's invite flows (needs 3–4 CIAM identities), 157's grid walk.
+- **Workforce sign-in:** 141 G-8 (test.user@demo.spaarke.com; a guest token).
+- **Wizards and forms:** 047 (one secure Create Project), 142 G-7 + UX, 147 G147-4/6, 150 G-10 + UI tests, 168 (h), 169 probes (the invoice form has a To Do subgrid), 163 d/e, 164 b/g/f/l/m, 166 27 (wizard).
+- **Setup:** a BU1 SPE admin user (165 leaf gates); a second non-admin login (reset `uac.child.user` or another user); a second non-admin WITHOUT the Create privilege (166 f).
+- **Before the CIAM session (status unknown):** `POST /api/v1/external-access/invite-and-grant` returned 500 on 2026-09-25, with two 500 paths (onboard vs grant). Reproduce with an ALREADY-invited email (a fresh one sends a real invitation). Nothing records a fix.
+- **API smoke checks still owed (dev writes on test records):**
+  - 098: `set-record-share-expiry`, then read back `sprk_expiresdate` for the exact date.
+  - R15: create and read through `POST /api/v1/external/projects/{id}/documents`. The field names and the case-sensitive `sprk_Project@odata.bind` have never run live, and gate 23 now locks `sprk_graphdriveid`, which that route writes.
 
 ## Branches and environment
-- **Work branch:** `work/unified-access-control-r2` @ `657dbc9de`. Clean, 0 unpushed (measured at conversion).
-- **Master and dev BFF:** `b977fc7a6` (#1322). Deploy worktree `C:\wtR` (fresh master).
-- **Integration branch:** none in flight. `integ/uac-r2-batch4` was consumed by PR #1312 (`d254d7166`, squash). Follow-up PR #1314 merged (`891cfd9a3`) and the BFF was redeployed.
-- **Live gates run as `testuser1@spaarke.com`** (the non-admin child-BU user; `uac.child.user` has no known password). Token: `AZURE_CONFIG_DIR=C:/tmp/az-uac-child az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`. Helpers `gate161.py` / `recheck1314.py` (`call()`/`tok()`) are in `C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/`. 150's UI tests are run by hand with the owner.
-
-## Dev state (deployed 2026-10-06 from `C:\wtD` @ d254d7166; backups/manifests in `C:\wtD\scripts\logs\{,deploy-phase2\,deploy-phase3\}`)
-- **Phase 1:**
-  - Schema: 142/158 ledger, 143, 140, 133.
-  - 165 marker and binding backfill (5/5 stamped).
-  - 144 migration (0 rows).
-  - BFF (36.13 MB) plus the external SPA.
-  - 150 FLS lock.
-- **Phase 2:**
-  - Clients that wrote `sprk_issecure` rebuilt.
-  - 166 gate 23a/26; 148 backfill (0 changes); 168 in full.
-  - PCFs RegardingResolver 1.6.1, CommunicationConnections 1.7.0, TrackingFieldTrio 1.0.35.
-  - 4 web resources; 142 G-4 form libraries.
-  - Ribbons 147 G147-6 and 142 G-5 (Update Access + Remove Secure).
-  - 144 -Verify PASS.
-- **Phase 3:**
-  - Removed (owner-approved, backed up first): UniversalDatasetGrid, `sprk_externalworkspace`, UniversalDocumentUpload (UQC solution and its "File Upload" custom page).
-  - "New Document" appaction repointed to `Spaarke_UploadDocumentsStandalone`.
-  - Gate 21: 0 of 5,327 web resources write the pointer.
-  - Gate 22 census.
-  - Gate 23 (option a): `sprk_graphdriveid` and the relocation columns locked; `sprk_graphitemid` NOT secured (alternate key `sprk_graphitemid_uk`, 0x80060896).
-  - Gate 24: 367 moved, 0 failed.
-  - Gate 25: `DocumentPointer__StrictDerivedContainer=true`.
-  - 150 G-11: Make Secure live.
-- **Held:**
-  - Power BI workspace id: owner says leave unset; reporting answers 503.
-  - `PowerBi__ClientSecret` is a plain app setting: owner says leave it.
+- **Work branch** `work/unified-access-control-r2` holds notes and tasks only, and is **314 commits BEHIND master** (2026-10-06). Never build here (CLAUDE.md).
+- **Master and dev BFF:** `cc96ea6d7` (#1332). Deployed today, in order: #1312 → #1314 → #1319 → #1320 → #1322 → #1327 + #1328 → #1332. Deploy from a fresh short-path master worktree.
+- **171:** `task/uac-r2-171`, worktree `C:\wt171`, master merged in; builds clean; 1,950 overlap-area tests + 809 arch tests pass after the merge.
+- **Live gates:** run as `testuser1@spaarke.com` (non-admin, BU1, `sprk_isexternal` = false). Token via `AZURE_CONFIG_DIR=C:/tmp/az-uac-child`. Gate helpers and the per-group results G1–G9 are in the session scratchpad `gates\` (COMMON.md, INVENTORY*.md). The durable record is `notes/batch4-live-gates-2026-10-06.md`.
+- **Held by the owner:** the Power BI workspace id stays unset (reporting answers 503); `PowerBi__ClientSecret` stays a plain setting.
+- **Kept on purpose:** `C:\wtD\scripts\logs\` holds the batch-4 deploy backups and manifests. Don't remove `C:\wtD`.
 
 ## Task status
-- **116/168 complete.** Completed 2026-10-06: 003, 132, 133, 148, 149, 156, 158, 159, 160, 161, 167.
-- **Still 🔄 [wip] "INTEGRATED, completes at live gates"** (measured from TASK-INDEX at conversion): 137, 140, 142, 143, 146, 147, 150, 157, 162, 163, 164, 165, 166, 168, 169. Each becomes ✅ only when its live gates pass on dev.
-- **171** 🔲: R69, batch 5 FIRST (critical), executing via `exec171`. **170** 🚫 cancelled.
-- Batch 5 dispositions follow round 59. The drift check was clean at 167/167.
-
-## Batch 5 (per `notes/batch5-scope-review-2026-10-05.md` + Next Action 6)
-- **Order:** 171 → 154 (reuse the existing picker) → 113, 114 (round 67 rescope), 105, 101 → 064 → 153 and 067 → 099 → 036 (read set plus per-record write checks; ADR-034 path B pending owner) → 090.
+- **🔄 wip, completes at live gates (15):** 137, 140, 142, 143, 146, 147, 150, 157, 162, 163, 164, 165, 166, 168, 169. Each list above names what is left. 143's gate 14 needs task 154 first.
+- **🔲 open:**
+  - 171 (PR #1333);
+  - batch-5 KEEPs 154, 113, 114, 105, 101, 064, 153, 067, 099, 036;
+  - merged-into-gate items 013 (141 G-8), 037/039/136 (CIAM session), 047 (wizard), 058 (090), 066 (067);
+  - 090 wrap-up.
+- **Completed 2026-10-06:** 003, 132, 133, 148, 149, 156, 158, 159, 160, 161, 167.
 
 ## Open follow-ups and issues
-- **Recorded in the #1314 body:**
-  - `/disable` does not survive a restart.
-  - The `pac` bash shim.
-  - `deploy-spaarke-ai.yml` fails ("Could not resolve react").
-  - Orphans: `sprk_OpenDocumentQuickCreate` and the empty "Upload Documents" form.
-  - `Create_Task_From_Email` schema error (missing `dueDate`).
-  - Thread `sprk_regardingreportcard` fault on send (161 note §4.9).
-- **#1313:** the 165 backfill cannot list a config with no secret name (Model 1). Container `b!MVasATu…` is unexamined (fails closed).
-- **#1317:** insert-template returns raw XSLT for Dynamics-editor templates. Origin is email-r5, not UAC scope.
-- **#1293** (fix for #1290) is a DRAFT. Rebase it once #1123 merges and keep only its unique parts; the owner chose "grid fills the row".
-- **Other issues:** #1290, #1303–1307, #1310.
+- **cpo-r1 hand-offs** INCOMING-141 and INCOMING-145, plus the batch-4 schema check: delivered on #1094 2026-10-06 (issuecomment-6028915048). Track until acknowledged.
+- **#1313:** the Model 1 SPE config has no secret. Do NOT mint one (CLAUDE.md; cpo-r1 D16).
+- **Other issues:**
+  - #1317: insert-template returns raw XSLT (email-r5).
+  - #1318: provisioning seeder lookup filter.
+  - #1324: notification Condition node.
+  - #1325: AI catalog drift.
+  - #1326: matter-health-single schema/index.
+  - #1293: DRAFT, open; rebase after #1123.
+  - #969: CI lane.
+  - #974: open.
+  - #1290 and #1303–1307, #1310.
+- **Minor (f) fix candidates found 2026-10-06:**
+  - playbook sharing info shows a revoked team as Read (mask 0 → Read);
+  - shared teams show "Unknown Team" (`/api/data/teams(id)` is missing `v9.2/`);
+  - a failed push child shows a raw 403 message.
+- **Known limits (2026-10-06):**
+  - inherited-share ledger rows (158) of a deleted filed work assignment aren't retired;
+  - R4 doesn't scan `sprk_invoice`/`sprk_recordtype` grant lookups;
+  - 171's limits are listed in its note.
+- **#1314 follow-ups:**
+  - `/disable` doesn't survive a restart;
+  - the `pac` bash shim;
+  - `deploy-spaarke-ai.yml` fails ("Could not resolve react");
+  - orphan `sprk_OpenDocumentQuickCreate` and the empty "Upload Documents" form;
+  - the `Create_Task_From_Email` schema (missing `dueDate`);
+  - the thread `sprk_regardingreportcard` fault on send.
+- **Unticked items in `notes/batch4-integration-steps.md`:** one F3 check, 6 external-SPA `tsc` errors, the 160 A5 note, and CHANGELOG entries. Reconcile them at 090.
+- **Deferred tests and notes for 090:** ISS-032 (search-filter oid regression test), ISS-033 (bare 401 ProblemDetails), in `notes/defer-issues.md`.
+- **Housekeeping:**
+  - consumed worktrees `C:\wt4i`, `C:\wv*`/`C:\wvs*`;
+  - ~169 agent worktrees under `C:/code_files/spaarke/.claude/worktrees`;
+  - undeletable `wf_*` folders.
 
 ## Key notes
-`notes/session27-owner-decisions-and-research.md` (owner/main-session rounds 1–70; rounds 66–70 are from 2026-10-05/06) · `notes/batch4-live-gates-2026-10-06.md` · `notes/batch5-scope-review-2026-10-05.md` · per-task notes for each task's live gates · `notes/handoff-history/2026-10-06-conversion-review.md` (items to verify from the conversion).
+- `notes/session27-owner-decisions-and-research.md` (rounds 1–71)
+- `notes/batch4-live-gates-2026-10-06.md`
+- `notes/batch5-scope-review-2026-10-05.md`
+- `notes/handoffs/INCOMING-141*.md`, `INCOMING-145*.md`
+- `notes/handoff-history/2026-10-06-conversion-review.md` (with this session's resolutions)

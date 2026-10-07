@@ -76,3 +76,50 @@ Also: `notes/batch4-integration-steps.md` has unticked items that nothing points
 
 ## Cross-project item raised by the cpo-r1 audit (relevant here)
 `notes/task-165-admin-surfaces.md` §13.9(b) plans `Repair-SpeConfigSecretName.ps1 -MintClientSecret` on `bfac7f6e` (Spaarke SPE Model 1 Owner). cpo-r1's owner decisions D16 and T250 say there must be NO secret-based Model 1 config, and the app uses MI-FIC. Reconcile with cpo-r1 before running it.
+
+---
+
+# Resolution (main session, 2026-10-06, from live knowledge of the project)
+
+## Stale content inside the #18 block
+- **"25 wip":** CORRECTED. 15 are wip (listed in `current-task.md`).
+- **Integration / "Dev live steps — Remaining":** NOT APPLICABLE (consumed and done).
+- **Test user:** CORRECTED. Gates run as testuser1. The CIAM session still needs the owner (CIAM sign-in), and a second non-admin login is still needed. Both are listed in `current-task.md`.
+- **The word-add-in-r1 note on 161:** NOT APPLICABLE. The relay text was given to the owner on 2026-10-06 (peer messages go through the owner).
+- **#1314 "open":** CORRECTED. Merged as `891cfd9a3`, and its branch was deleted on origin.
+- **114's licence proxy:** RESOLVED by round 67 (the external flag on Restricted records; no licence check).
+- **#1293:** VERIFIED. Still an open DRAFT; listed in `current-task.md`.
+
+## Older blocks
+- **Continuation-script vs `resumeFromRunId`:** RECONCILED. Both hold: use `resumeFromRunId` for the same script, and a continuation script when a pooled/DAG call order varies. The CLAUDE.md bullet is rewritten and the *(verify)* removed.
+- **"Schema work is CODE + DOCS ONLY":** SUPERSEDED for dev. Since 2026-10-02 the main session applies live dev schema with per-round owner approval; production schema is provisioning's job (cpo-r1). Not restored.
+- **"Dataverse MCP is DOWN":** NOT APPLICABLE (the tools work now).
+- **"Python is a Store stub":** NOT APPLICABLE (python runs).
+- **`gh` token lacks `read:project`:** NOT APPLICABLE. Project fields were updated on 2026-10-06.
+- **Word-add-in coordination (synthetic job, AssociationType ordinal 3):** NOT APPLICABLE. On master the ordinal is pinned in code with an explicit "do not reclaim 3" comment, and the synthetic GUID is absent from `OfficeService`.
+- **`Spaarke Demo` team holds System Administrator; the root default team stays role-free:** COVERED by round 66's peer note (a dev artifact under round 5; the census flags it). G1 re-observed it on 2026-10-06.
+- **D-12-era items (Power BI F-SKU pool, M365 Copilot agent, Redis Standard, Trivy):** NOT THIS PROJECT'S. D-12/D-13 remediation is cpo-r1's (CLAUDE.md, 2026-09-28).
+- **B3 `section-break-flattened` acceptance (compose-r8):** NOT THIS PROJECT'S. It is a compose-r8 owner accept/decline (root CLAUDE.md, ADR-049 row).
+- **#974:** VERIFIED. Still open; listed in `current-task.md`.
+- **Merge style:** CORRECTED. PRs squash-merge (new CLAUDE.md bullet).
+- **Housekeeping:** listed in `current-task.md`. `C:\wtD` is kept on purpose (deploy backups).
+
+## Independent audit
+1. **HIGH, 141/145 hand-offs:** DELIVERED as a comment on #1094 (issuecomment-6028915048). Both notes are on master. The comment also adds the batch-4 schema check (audit item 5). Tracked in CLAUDE.md and `current-task.md` until cpo-r1 acknowledges.
+2. **invite-and-grant 500:** RESTORED to `current-task.md` (check before the CIAM session; reproduce with an already-invited email). No live action taken.
+3. **098 / R15 smoke checks:** RESTORED to `current-task.md` (owed API checks).
+4. **Search-filter oid regression test:** RESTORED to `defer-issues.md` as ISS-032 (090).
+5. **No `sprk_noaccessentry` table means every read is denied:** DELIVERED in the #1094 comment (the H6 solution-import check).
+6. **#969 residuals:** MARKED not ours (the CI lane, #969 open); recorded as ISS-034.
+7. **Client build traps:** RESTORED to CLAUDE.md "Build, test and measurement".
+8. **Bare 401:** RESTORED as ISS-033 (090).
+- **`batch4-integration-steps.md` unticked items:** linked from `current-task.md` (reconcile at 090).
+
+**Wrongly carried:**
+- **The `[open]`/`[done]` rule:** CORRECTED. The 11 rows from 2026-10-06 were re-tokened, and 19 older rows using `[completed]` were normalized to `[done]` (116 ✅ = 116 `[done]`; drift check clean). The CLAUDE.md rule now says every ✅ row carries `[done]`.
+- **161 omitted from "Completed today":** CORRECTED.
+- **The work branch is 314 behind master:** NOTED prominently in CLAUDE.md and `current-task.md`.
+- **The `Secure Projects` BU name:** CORRECTED to `Secure Record`.
+- **The "~44.96 MB" baseline:** CORRECTED to "measure against a fresh master build" (36.13 MB on 2026-10-06).
+
+**Cross-project, 165 §13.9(b) `-MintClientSecret` on `bfac7f6e`:** RECONCILED. It must NOT be run: cpo-r1 D16 (the SPE owning app uses MI-FIC, with no certificate and no secret) and ADR-028 A4 (no new secrets). A CLAUDE.md 🔴 bullet was added, and a comment posted on #1313, which owns the secret-less config. The 165 note itself is on master only and gets annotated at the next master merge.

@@ -64,7 +64,7 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 | Gate | Rule |
 |---|---|
 | **NFR-04** negative canary | Impersonated low-privilege read MUST return a strict subset AND **strictly fewer** rows than app-only. **Equality means impersonation is inert → fail the build.** Task 034 is a blocking merge gate for 036 |
-| **NFR-05** role-depth assertion | No security role may reach the `Secure Projects` BU. A role edit that re-opens secure projects fails the build |
+| **NFR-05** role-depth assertion | No security role may reach the `Secure Record` BU (renamed from `Secure Projects` by task 121). A role edit that re-opens secure projects fails the build |
 | **NFR-07** | Characterization suite exists BEFORE Phase 1 changes behaviour — the current baseline is near-zero |
 | **FR-07 → FR-29** | Delegation ("you may grant if you have Write on the record") ships BEFORE the PCF "+ User" button. Otherwise that button is a one-click privilege escalation on a confidential matter |
 | **Integration suites, run in full, before the PR** | `dotnet test` on `tests/integration/Sprk.Bff.Api.IntegrationTests` AND `tests/integration/Spe.Integration.Tests`, not just a build. `Router` does not run them; the legacy Build & Test does, about an hour after the push. Batch 3 (PR #1096) ran the unit and arch suites only, and three integration tests whose fixtures had not followed tasks 138 and 152 surfaced only in CI (fixed in `8531711d6`) |
@@ -77,7 +77,7 @@ max( dataverse-answer, explicit-grant, derived-member, org-expansion, inherited 
 
 ## Every BFF-touching task
 
-State the **Placement Justification** in the PR citing [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md), and verify publish size **≤60 MB** (baseline ~44.96 MB incl. PDBs). Run `/conflict-check` before **every** BFF PR — this surface is shared with shipped `SPA-external-access-platform-r1/r2` + `teams-app-r1`, and draft `SPA-r3`.
+State the **Placement Justification** in the PR citing [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md), and verify publish size **≤60 MB**, measured against a FRESH master build per root CLAUDE.md §10 (never a recorded baseline; master measured 36.13 MB with Compress-Archive on 2026-10-06). Run `/conflict-check` before **every** BFF PR — this surface is shared with shipped `SPA-external-access-platform-r1/r2` + `teams-app-r1`, and draft `SPA-r3`.
 
 ## ADR tensions — all CLAUDE.md §6.5 **path B**
 
@@ -136,19 +136,25 @@ AI-search trimming for contacts (finding A-21 → AI/indexing owner) · field-le
 - Do NOT mass-rename `tenantId`. D-12/D-13 code remediation belongs to cpo-r1, not this project (2026-09-28).
 
 **Agents and coordination**
+- cpo-r1 hand-offs INCOMING-141 (workforce tenant list) and INCOMING-145 (H7b Secure Record setup), plus a batch-4 schema check, were DELIVERED as a #1094 comment on 2026-10-06 (issuecomment-6028915048). Track until cpo-r1 acknowledges on #1094. Until then, every new customer environment denies workforce first sign-in and refuses secure records.
+- 🔴 Do NOT run `Repair-SpeConfigSecretName.ps1 -MintClientSecret` on `bfac7f6e` (Spaarke SPE Model 1 Owner, 165 note §13.9(b)/§14.9(b), master only). cpo-r1 D16 says the SPE owning app signs in with MI-FIC, with no certificate and no secret, and ADR-028 A4 forbids new secrets. The secret-less config is #1313's to support (2026-10-06).
 - Answer a running workflow agent by appending to `NOTE-FROM-MAIN.md` in its worktree, and never commit that file. Agent-tool (non-workflow) agents MAY be resumed with SendMessage (2026-10-03/04).
-- Workflow resume caching is prefix-ordered. For a pooled/DAG script, write a CONTINUATION script that embeds the done results instead of using `resumeFromRunId` (2026-10-03). *(verify: memory `workflow-agent-messaging` says otherwise; see conversion review)*
+- Workflow resume: re-invoke the SAME script with `resumeFromRunId` to recover failed or killed calls (memory `workflow-agent-messaging`). Resume caching is prefix-ordered, so when a pooled/DAG script's call order varies between runs, write a CONTINUATION script that embeds the done results instead (2026-10-03; reconciled 2026-10-06).
 - Peer sessions (e.g. word-add-in-r1) hold incoming messages until their user approves them. The owner relays; durable hand-offs go through GitHub issues/comments (2026-10-02, reaffirmed 2026-10-06).
 - If agents' `current-task.md` copies conflict on merge, keep the orchestrator's: `git checkout --ours` on that path (2026-08-28).
 - Agents sharing ONE worktree must not edit TASK-INDEX/current-task, run git, or run solution-wide `dotnet`. The main session does the build, the suite and ONE commit (2026-09-04).
 - Re-read a task's `parallel-safe` against its CURRENT scope. Source-disjoint packages can still share a build (`dist/`, barrel) (2026-09-21).
 
 **CI, merge and deploy**
+- PRs to master SQUASH-merge (`gh pr merge N --squash`) once Router is green. Delete the branch only after no check is pending (2026-10-06; supersedes the older "merge commit, keep the branch" for integration branches).
+- 🔴 `work/unified-access-control-r2` holds notes and tasks only and runs ~300+ commits BEHIND master (314 on 2026-10-06), so it lacks the batch-4 code. Never build or run code here. Do task and fix work in a fresh short-path worktree from `origin/master` (2026-10-06).
+- A pre-push failure "Remote origin does not support the Git LFS locking API … Unable to verify locks" was a transient GitHub-side failure: retry after a minute. Never disable `locksverify` and never `--no-verify` (2026-10-06).
 - `Router` is the only required check. `gh pr checks` never lists it: probe by name via the check-runs API and gate on the full rollup with pending = 0. Tier 2 full-unit cancelled at 30 min is advisory (2026-09-17/10-02).
 - Don't push while a CI run is in flight (cancel-in-progress kills the verdict). Merge BEFORE `/context-handoff`, whose commit re-triggers the gate (2026-08/09-02).
 - Deploy the BFF from a FRESH short-path worktree of master (`Deploy-BffApi.ps1`), with `pac.cmd`/pwsh from a short path (2026-10-02/06).
 
 **Build, test and measurement**
+- Client build traps (batch-5 UI tasks): build `@spaarke/sdap-client` (`dist`) before typechecking anything that depends on it. Run ui-components jest from INSIDE the package (`--rootDir` from the root gives 232 false failures). `ApiError` has `statusCode` (not `status`) and no `detail`. An injected `authenticatedFetch` has two production behaviours: one throws, the other returns the raw response (restored 2026-10-06 from the archive).
 - Never launch a background suite with `&`; use `run_in_background`. Two suites run concurrently give flaky timing failures (2026-10-02).
 - Never pipe a command whose exit code you need. Write the EXPECTED test count into the command, and never `--no-build` after an unguarded build (2026-09-19).
 - Prove a test filter is non-empty with `--list-tests`: `tests/integration/{auth,seam}/**` are globbed into the UNIT csproj (2026-09-17).
@@ -159,6 +165,8 @@ AI-search trimming for contacts (finding A-21 → AI/indexing owner) · field-le
 - Verify a POML's or doc comment's premises against code and live metadata before obeying them. Never trust `<dependency status>` attributes; re-derive them from the dependency's own POML (recurring; 2026-09-07).
 
 **Environment**
+- Dataverse Web API: a LOOKUP is `_x_value` in `$filter` AND `$select`; the bare logical name is a 400 for the whole request (FAILURE-MODES G-13). Test doubles that match on query text copy the code's mistake (live defects #1319, #1328, #1318, 2026-10-06).
+- `RetrievePrincipalAccess` is refused on ORGANIZATION-owned tables (400 0x80040800); ask the table privilege instead. Revoking the share of a record's CURRENT owning user needs `MSCRMCallerID` = that user (0x80040223) (2026-10-06, #1320/#1322).
 - The connected system is DEV and its records are test records (2026-09-17).
 - Web API PATCH by id must send `If-Match: *`, or it upserts and a bad id CREATES a row. Grant "today" is the UTC date, which rolls over in the local evening (2026-09-11).
 - `mcp__dataverse__create_table` has no publisher/solution parameter. Create schema via the Web API + `MSCRM.SolutionUniqueName`, then read back and assert the prefix (prefixes are immutable) (2026-09-04, AP-13).
@@ -170,4 +178,4 @@ AI-search trimming for contacts (finding A-21 → AI/indexing owner) · field-le
 - Never `git stash` and never `git add -A`; stage explicit paths (2026-09-04).
 - Remove a `node_modules` junction with `cmd /c rmdir` BEFORE `git worktree remove` (2026-09-21).
 - Python needs `PYTHONIOENCODING=utf-8`. Scratchpad PowerShell stays 7-bit ASCII and runs under `pwsh` (2026-09-17/21).
-- Never put characters above U+FFFF in a grep pattern (it silently matches 0). Count TASK-INDEX by the ASCII `[open]`/`[done]` tokens (2026-09-07, G-16).
+- Never put characters above U+FFFF in a grep pattern (it silently matches 0). Count TASK-INDEX by the ASCII `[open]`/`[done]` tokens (2026-09-07, G-16), so EVERY ✅ row must carry `[done]` (`| ✅ [done] NNN |`), including rows completed by hand. The 11 rows completed 2026-10-06 were re-tokened.

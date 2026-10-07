@@ -1178,6 +1178,18 @@ flight on the same routes.
 
 ---
 
+### ISS-032 — Regression test owed: search authorization filters with a real-shape principal (090)
+
+`SemanticSearchAuthorizationFilter` / `RecordSearchAuthorizationFilter` and their handlers need a test whose principal carries the long-form `oid` claim AND a `NameIdentifier` that differs from it. A perturbation of the oid fix left 45 tests green (archive L3821–3835). Owner: task 090 wrap-up.
+
+### ISS-033 — Bare 401 from `TypedResults.Unauthorized()` has no ProblemDetails (ADR-019) (090)
+
+Wrap-up candidate: make the 401 answer a ProblemDetails like every other refusal (archive L4761). Owner: task 090 note.
+
+### ISS-034 — #969 residuals: not this project's (CI lane)
+
+`sdap-ci.yml:799` calls `listComments` unpaginated; the `createComment` branch may be broken; two redundant `continue-on-error` full-suite runs remain (archive L1712). Tracked on #969 (open, the CI lane). UAC-r2 does not take CI-workflow work (owner 2026-09-07).
+
 ## Closed
 
 *(none yet)*
