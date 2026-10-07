@@ -581,7 +581,7 @@ FOR each wave in the Parallel Execution Plan:
       (3) git status shows only the waves' expected file changes.
       OR: a BLOCKED.md exists under projects/{name}/ documenting a root-CLAUDE.md §6 escalation, shown in transcript.
       Stop after {N_tasks × 6} turns if neither state is reached. (A default the operator may raise in
-      the goal condition for FULL-rigor waves; hitting it means re-launch, not a defect.)
+      the goal condition for FULL-rigor waves; hitting it means re-launch after reading the transcript for the cause — project-pipeline Step 5 retry rule.)
 
   RECORD in TASK-INDEX.md Parallel Execution Plan:
     Wave 2 (parallel, 3 agents): 020, 021, 022 — prereq: Wave 1 — goal-eligible: YES

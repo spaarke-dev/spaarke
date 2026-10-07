@@ -69,8 +69,9 @@ Before starting this skill, Claude MUST:
   2. If NOT in Plan Mode → STOP and ask user to press Shift+Tab twice to enter Plan Mode
   3. Do NOT proceed past Step 0 until Plan Mode is confirmed
   4. NON-INTERACTIVE session (headless / `-p`, nobody to press Shift+Tab): say that Plan Mode cannot be
-     confirmed, then run Steps 0-3 read-only — no file writes until the planning artifacts are reviewed.
-     That is the guarantee Plan Mode exists to give.
+     confirmed, run Steps 0-1.7 (validation, ADR tensions, overlap) read-only, and stop with a report.
+     Steps 2-3 create files: run them in an interactive session, or when the invoking prompt explicitly
+     authorizes writes.
 
 WHY: Steps 0-3 analyze spec.md, discover resources, and generate planning artifacts.
      Plan Mode ensures Claude reads and plans before making any file changes.
@@ -120,7 +121,8 @@ IF not confirmed:
   → STOP — request user to press Shift+Tab twice
   → Do not proceed until confirmed
 IF the session is non-interactive:
-  → State that Plan Mode cannot be confirmed; run Steps 0-3 read-only (see Permission Mode above)
+  → State that Plan Mode cannot be confirmed; run Steps 0-1.7 read-only and stop with a report
+    (Steps 2-3 need an interactive session or explicit authorization — see Permission Mode above)
 ```
 
 ---

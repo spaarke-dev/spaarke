@@ -145,7 +145,7 @@ OUTPUT FORMAT (include in review report):
   |--------|------------------|-------|
   | Total Lines | > 300 | Cohesion (root CLAUDE.md §11.5) |
   | Public Methods | > 10 | More than one reason to change? |
-  | Constructor Parameters | > 7 | ADR-010; a second responsibility? |
+  | Constructor Parameters | > 7 | A second responsibility? (COMPONENT-COMPLEXITY.md) |
   | Cyclomatic Complexity | > 15 | Branches that could be data or separate cases? |
   | Interfaces per file | > 1 | Single-implementation interfaces (Smell 1) |
 
@@ -154,6 +154,9 @@ OUTPUT FORMAT (include in review report):
   docs/standards/COMPONENT-COMPLEXITY.md decide. A large, cohesive, single-responsibility file is
   fine — say so in the review. A finding comes from the cohesion judgment (e.g. a second
   responsibility added), and its severity follows the finding, not the number.
+
+  REQUIRED for every file over a look-closer value: one line in the review —
+  "cohesive: <reason>" or "not cohesive: <responsibilities that diverge>". The second is a finding.
 ```
 
 ### Step 2.6: Quality Direction Analysis (Before/After Comparison)
@@ -702,8 +705,9 @@ APPLY Section D (New Background Work) — only if IHostedService/IJobHandler/ISc
 FLAG SEVERITIES:
   - Missing Placement Justification → Critical (binding §10 imperative)
   - New direct CRUD→AI dep → Critical (per refined ADR-013)
-  - New HIGH-severity CVE → Critical. If no fixed version exists upstream, it is resolved — not
-    waived — by the escalation path in .claude/rules/bff-hygiene.md item 5 (owner sign-off in the PR)
+  - New HIGH-severity CVE → Critical. If no fixed version exists upstream it stays Critical until the
+    owner's sign-off appears in the PR; the implementer's part is the record in .claude/rules/bff-hygiene.md
+    item 5 plus a root §6 escalation
   - Endpoint added directly in Program.cs → Warning (ADR-001/008)
   - Feature-module pattern not followed → Warning (ADR-010)
   - Publish-size delta not reported → Warning (binding rule; ask for the measurement)

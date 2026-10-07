@@ -248,7 +248,7 @@ Replace `IMemoryCache` with `IDistributedCache`. Remove hybrid caching libraries
 
 ## ADR-010: DI Minimalism
 
-**Constraint**: ≤15 non-framework registrations. Concrete types unless seam required.
+**Constraint**: feature-module composition in `Program.cs` (~15 lines is a readability target, not a count — ADR-010 concise). Concrete types unless seam required.
 
 ### Check For (Warnings)
 
