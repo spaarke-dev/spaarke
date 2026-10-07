@@ -38,7 +38,7 @@ import { useToolbarFit } from '../hooks/useToolbarFit';
  *
  * Consolidates what used to be two stacked rows (logo/actions header + tab row) into
  * ONE toolbar (email-communication-intelligence-r2 UI feedback, owner 2026-09-02):
- *   [ Save ] [ To Do ] [ Find ] [ Send ] ……… [ ⋮  → Theme · Settings · Account ]
+ *   [ Save ] [ To Do ] [ Find ] [ Send ] ……… [ ⋮  → Theme · Settings · Account ] [ Expand ]
  *
  * "Send" is Word's Email TAB (task 096) or, in Outlook, the Send Email ACTION button (task 106, owner UAT
  * round 8: "should be in the tool bar next to Find") — it opens Outlook's native compose, so it is not a tab.
@@ -46,9 +46,10 @@ import { useToolbarFit } from '../hooks/useToolbarFit';
  * Tabs are left-aligned; the per-user tools (theme/settings/account) collapse into a
  * three-dots overflow on the right. Fluent UI v9 only (ADR-021).
  *
- * Task 107 (owner UAT round 9): when the row is too narrow, Expand moves into "⋮" and then the tabs go icon-only
- * (`useToolbarFit`) — nothing overlaps. Expand/Collapse use the pane icons (a pane growing left), not the
- * maximize arrows. The Office title-bar row above belongs to the host; an add-in cannot place buttons there.
+ * Task 108 (owner UAT round 10): one rule for both hosts — tabs are icon-only at a normal pane width and show labels
+ * once the pane is wide/expanded (`useToolbarFit`); icon-only tabs keep their names as tooltip + accessible name.
+ * Expand/Collapse (pane icons) is always the right-most item, directly below the host's close button: the title row
+ * above belongs to Word/Outlook and an add-in cannot place buttons in it (Outlook's own icon there is Outlook's).
  */
 
 const useStyles = makeStyles({
@@ -165,22 +166,19 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   const styles = useStyles();
   const tabs = getAvailableTabs(hostType, capabilities);
 
-  // Task 107: step the row down until it fits (see useToolbarFit).
+  // Task 108: labels only when the pane is wide (see useToolbarFit).
   const headerRef = useRef<HTMLElement>(null);
   const tabsRef = useRef<HTMLDivElement>(null);
-  const fitLevel = useToolbarFit(
+  const { showLabels } = useToolbarFit(
     headerRef,
     tabsRef,
-    `${tabs.map(t => t.value).join(',')}|${Boolean(onSendEmail)}|${Boolean(onToggleExpand)}`
+    `${tabs.map(t => t.value).join(',')}|${Boolean(onSendEmail)}`
   );
-  const expandInMenu = Boolean(onToggleExpand) && fitLevel >= 1;
-  const iconOnly = fitLevel >= 2;
+  const iconOnly = !showLabels;
   const expandLabel = isExpanded ? 'Collapse pane' : 'Expand pane';
   const expandIcon = isExpanded ? <PanelRightContractRegular /> : <PanelRightExpandRegular />;
 
-  const hasOverflow = Boolean(
-    onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)) || expandInMenu
-  );
+  const hasOverflow = Boolean(onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)));
 
   // NFR-11: announce tab changes to screen readers via the React-owned live region
   // (task 018 pattern) — `liveRegion` must be rendered here, not created out-of-tree.
@@ -234,21 +232,6 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
       {/* push the overflow to the right even when tabs are hidden */}
       {(!showTabs || !isAuthenticated || tabs.length === 0) && <div className={styles.tabs} />}
 
-      {onToggleExpand && !expandInMenu && (
-        <div className={styles.overflow}>
-          <Tooltip content={expandLabel} relationship="label">
-            <Button
-              appearance="subtle"
-              icon={expandIcon}
-              aria-label={expandLabel}
-              aria-pressed={isExpanded}
-              disabled={isResizing}
-              onClick={onToggleExpand}
-            />
-          </Tooltip>
-        </div>
-      )}
-
       {hasOverflow && (
         <div className={styles.overflow}>
           <Menu>
@@ -259,12 +242,6 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
             </MenuTrigger>
             <MenuPopover>
               <MenuList>
-                {expandInMenu && onToggleExpand && (
-                  <MenuItem icon={expandIcon} disabled={isResizing} onClick={onToggleExpand}>
-                    {expandLabel}
-                  </MenuItem>
-                )}
-
                 {onThemeChange && (
                   <Menu>
                     <MenuTrigger disableButtonEnhancement>
@@ -318,6 +295,22 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
               </MenuList>
             </MenuPopover>
           </Menu>
+        </div>
+      )}
+
+      {/* Task 108: Expand/Collapse is the right-most item, directly below the host's close button. */}
+      {onToggleExpand && (
+        <div className={styles.overflow}>
+          <Tooltip content={expandLabel} relationship="label">
+            <Button
+              appearance="subtle"
+              icon={expandIcon}
+              aria-label={expandLabel}
+              aria-pressed={isExpanded}
+              disabled={isResizing}
+              onClick={onToggleExpand}
+            />
+          </Tooltip>
         </div>
       )}
     </header>

@@ -1,43 +1,42 @@
 /**
- * Task 107 (owner UAT round 9): in Word the Expand button sat on top of the last tab when the row was too narrow.
- * The toolbar now steps down until it fits — Expand into "⋮", then icon-only tabs — and steps back up when wide.
+ * Task 108 (owner UAT round 10): one toolbar rule for Word and Outlook — icon-only tabs at a normal pane width,
+ * labels once the pane is wide (expanded); Expand/Collapse is always the right-most item. Safety net (task 107):
+ * labels that would overflow stay hidden, and come back only once the toolbar is wider than they needed.
  */
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { TaskPaneToolbar } from '../TaskPaneToolbar';
-import { nextToolbarFitLevel } from '../../hooks/useToolbarFit';
+import { nextShowLabels, TOOLBAR_LABELS_MIN_WIDTH } from '../../hooks/useToolbarFit';
 
-describe('nextToolbarFitLevel (task 107)', () => {
-  it('steps down one level when the tabs overflow, recording the width that level needed', () => {
-    const needed: number[] = [];
-    expect(nextToolbarFitLevel(0, 40, 380, needed)).toBe(1);
-    expect(needed[0]).toBe(420);
-    expect(nextToolbarFitLevel(1, 10, 380, needed)).toBe(2);
-    expect(needed[1]).toBe(390);
+describe('nextShowLabels (task 108)', () => {
+  it('icons only below the minimum width, whatever the overflow', () => {
+    expect(nextShowLabels(true, 0, TOOLBAR_LABELS_MIN_WIDTH - 1, { width: 0 })).toBe(false);
+    expect(nextShowLabels(false, 0, 395, { width: 0 })).toBe(false);
   });
 
-  it('never goes past icon-only', () => {
-    expect(nextToolbarFitLevel(2, 50, 200, [400, 300])).toBe(2);
+  it('labels once the toolbar is at least the minimum width and they fit', () => {
+    expect(nextShowLabels(false, 0, TOOLBAR_LABELS_MIN_WIDTH, { width: 0 })).toBe(true);
+    expect(nextShowLabels(true, 0, 640, { width: 0 })).toBe(true);
   });
 
-  it('steps back up only once the header is wider than the previous level needed (no flicker)', () => {
-    const needed = [420, 390];
-    expect(nextToolbarFitLevel(2, 0, 389, needed)).toBe(2);
-    expect(nextToolbarFitLevel(2, 0, 391, needed)).toBe(1);
-    expect(nextToolbarFitLevel(1, 0, 420, needed)).toBe(1);
-    expect(nextToolbarFitLevel(1, 0, 421, needed)).toBe(0);
+  it('labels that overflow are hidden, recording the width they needed', () => {
+    const needed = { width: 0 };
+    expect(nextShowLabels(true, 40, 500, needed)).toBe(false);
+    expect(needed.width).toBe(540);
   });
 
-  it('stays put when it fits at the top level', () => {
-    expect(nextToolbarFitLevel(0, 0, 300, [])).toBe(0);
+  it('labels return only once the toolbar is wider than they needed (no flicker)', () => {
+    const needed = { width: 540 };
+    expect(nextShowLabels(false, 0, 540, needed)).toBe(false);
+    expect(nextShowLabels(false, 0, 541, needed)).toBe(true);
   });
 });
 
-describe('TaskPaneToolbar fitting (task 107)', () => {
-  // jsdom does no layout: drive the measured widths. The tab container overflows by `overflow`; the header is
-  // `headerWidth` wide.
+describe('TaskPaneToolbar (task 108)', () => {
+  // jsdom does no layout: drive the measured widths. The header is `headerWidth` wide; the tab row overflows by
+  // `overflow`.
   let overflow = 0;
-  let headerWidth = 1000;
+  let headerWidth = 395;
   const originals = {
     scroll: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth'),
     client: Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth'),
@@ -88,55 +87,76 @@ describe('TaskPaneToolbar fitting (task 107)', () => {
     if (originals.client) Object.defineProperty(HTMLElement.prototype, 'clientWidth', originals.client);
   });
 
-  const toolbar = (onToggleExpand = jest.fn()) => (
+  const toolbar = (host: 'word' | 'outlook', extra: Record<string, unknown> = {}) => (
     <FluentProvider theme={webLightTheme}>
       <TaskPaneToolbar
-        hostType="word"
-        capabilities={{ canEmailFromPane: true }}
+        hostType={host}
+        capabilities={{ canEmailFromPane: host === 'word' }}
         isAuthenticated
         selectedTab="save"
         onThemeChange={() => undefined}
-        onToggleExpand={onToggleExpand}
+        {...extra}
       />
     </FluentProvider>
   );
 
-  it('fits: labelled tabs and an inline Expand button (pane icon)', () => {
+  it('Word at a normal width: icon-only tabs that keep their names; Expand is the right-most item', () => {
     overflow = 0;
-    headerWidth = 1000;
-    render(toolbar());
-    expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent('Send');
-    expect(screen.getByRole('button', { name: 'Expand pane' })).toBeInTheDocument();
-  });
+    headerWidth = 395;
+    render(toolbar('word', { onToggleExpand: jest.fn() }));
 
-  it('too narrow: Expand moves into "⋮" and the tabs go icon-only, keeping their names', async () => {
-    overflow = 60;
-    headerWidth = 380;
-    const onToggleExpand = jest.fn();
-    render(toolbar(onToggleExpand));
-
-    await waitFor(() => expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent(''));
     for (const name of ['Save', 'To Do', 'Find', 'Send']) {
-      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name })).toHaveTextContent('');
     }
-    expect(screen.queryByRole('button', { name: 'Expand pane' })).toBeNull();
-
-    fireEvent.click(screen.getByRole('button', { name: 'More options' }));
-    fireEvent.click(await screen.findByRole('menuitem', { name: 'Expand pane' }));
-    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+    const buttons = screen.getAllByRole('button');
+    expect(buttons[buttons.length - 1]).toHaveAccessibleName('Expand pane');
   });
 
-  it('widened again: steps back up to labelled tabs and the inline button', async () => {
-    overflow = 60;
-    headerWidth = 380;
-    const { rerender } = render(toolbar());
-    await waitFor(() => expect(screen.queryByRole('button', { name: 'Expand pane' })).toBeNull());
-
+  it('Outlook at a normal width: the same icon-only tabs, and Send is icon-only too', () => {
     overflow = 0;
-    headerWidth = 1000;
-    rerender(toolbar());
+    headerWidth = 395;
+    render(toolbar('outlook', { onSendEmail: jest.fn() }));
+
+    for (const name of ['Save', 'To Do', 'Find']) {
+      expect(screen.getByRole('tab', { name })).toHaveTextContent('');
+    }
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveTextContent('');
+  });
+
+  it('expanded (wide): labels show', async () => {
+    overflow = 0;
+    headerWidth = 640;
+    render(toolbar('outlook', { onSendEmail: jest.fn() }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Find' })).toHaveTextContent('Find'));
+    expect(screen.getByRole('button', { name: 'Send' })).toHaveTextContent('Send');
+  });
+
+  it('resizing the pane switches between icons and labels', async () => {
+    overflow = 0;
+    headerWidth = 395;
+    const onToggleExpand = jest.fn();
+    const { rerender } = render(toolbar('word', { onToggleExpand }));
+    expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent('');
+
+    headerWidth = 640;
+    rerender(toolbar('word', { onToggleExpand, isExpanded: true }));
     resizePane();
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Expand pane' })).toBeInTheDocument());
-    expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent('Send');
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent('Send'));
+    expect(screen.getByRole('button', { name: 'Collapse pane' })).toBeInTheDocument();
+
+    headerWidth = 395;
+    rerender(toolbar('word', { onToggleExpand, isExpanded: false }));
+    resizePane();
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent(''));
+  });
+
+  it('wide but the labels would overflow: they stay hidden, and Expand still works inline', async () => {
+    overflow = 60;
+    headerWidth = 500;
+    const onToggleExpand = jest.fn();
+    render(toolbar('word', { onToggleExpand }));
+    await waitFor(() => expect(screen.getByRole('tab', { name: 'Send' })).toHaveTextContent(''));
+    fireEvent.click(screen.getByRole('button', { name: 'Expand pane' }));
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 });
