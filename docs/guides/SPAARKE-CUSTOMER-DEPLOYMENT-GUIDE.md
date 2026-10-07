@@ -275,8 +275,8 @@ whoever signs in. Application Insights `ai.metering.tokens` remains the authorit
 
 **Known limits** — the estimate is list-price based, not the invoice: set the limit with headroom. Chat messages and text
 refinement get the 429 before they start; other AI endpoints that turn every error into their own message show that
-message instead. **Background AI jobs (document indexing, profiling) refuse while the month is over the limit** and,
-after their retries, are dead-lettered — nothing replays them when the month resets or the limit is raised, so re-run
+message instead. **Background AI jobs (document indexing, profiling) refuse while the month is over the limit** and
+fail after their retries — nothing replays them when the month resets or the limit is raised, so re-run
 indexing / profiling for documents uploaded in that window. A call already running when the limit is crossed completes.
 If Redis cannot be read within 250 ms, calls are allowed (logged); if the setting is not a number, it is ignored (logged
 once as an error). The stamp's Redis evicts least-recently-used keys under memory pressure, which would restart the

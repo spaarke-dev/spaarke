@@ -235,9 +235,6 @@ function extractTenantId(token: string): string | null {
 // readSseStream — the canonical non-hook SSE streaming primitive
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Options for {@link readSseStream}.
- */
 /** ProblemDetails code of the BFF's monthly AI usage limit (task 254 — `AiSpendLimitExceededException.ErrorCode`). */
 export const AI_SPEND_LIMIT_ERROR_CODE = 'ai_spend_limit_exceeded';
 
@@ -262,6 +259,17 @@ export function describeTooManyRequests(responseBody: string): string {
   return 'You are sending messages too quickly. Please wait a moment and try again.';
 }
 
+/**
+ * The error message for a failed streaming request: {@link describeTooManyRequests} for a 429, otherwise
+ * `"{what} failed ({status}): {body}"` — for callers that pass their own `mapHttpError`.
+ */
+export function requestFailedMessage(what: string, status: number, responseBody: string): string {
+  return status === 429 ? describeTooManyRequests(responseBody) : `${what} failed (${status}): ${responseBody}`;
+}
+
+/**
+ * Options for {@link readSseStream}.
+ */
 export interface ReadSseStreamOptions {
   /** Fully-constructed streaming endpoint URL (never a raw template literal). */
   url: string;

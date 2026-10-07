@@ -123,6 +123,31 @@ public sealed class AiSpendLimitTests
     }
 
     [Fact]
+    public async Task ASlowStore_LetsTheCallThroughAfterTheReadTimeout()
+    {
+        _options.CurrentValue = new AiSpendLimitOptions { MonthlyLimitUsd = 1m };
+        var pending = new TaskCompletionSource<decimal>();
+        var check = Limit(new PendingLedger(pending.Task)).EnsureUnderLimitAsync(CancellationToken.None).AsTask();
+
+        check.IsCompleted.Should().BeFalse("the read is still pending");
+        _time.Advance(AiSpendLimit.LedgerReadTimeout);
+
+        await check.Invoking(t => t).Should().NotThrowAsync("a degraded store must not hold every model call (fail-open)");
+    }
+
+    [Fact]
+    public async Task ACancelledCaller_IsNotFailedOpen()
+    {
+        _options.CurrentValue = new AiSpendLimitOptions { MonthlyLimitUsd = 1m };
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        await Limit(new PendingLedger(new TaskCompletionSource<decimal>().Task))
+            .Invoking(l => l.EnsureUnderLimitAsync(cancelled.Token).AsTask())
+            .Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
     public async Task UnbindableSettings_AreReadAsNoLimit()
     {
         var limit = new AiSpendLimit(new UnbindableOptionsMonitor(), _ledger, _time, NullLogger<AiSpendLimit>.Instance);
@@ -144,6 +169,16 @@ public sealed class AiSpendLimitTests
         var lastSecondOfYear = new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero);
 
         AiSpendLimit.UntilNextUtcMonth(lastSecondOfYear).Should().Be(TimeSpan.FromSeconds(1));
+    }
+
+    private sealed class PendingLedger(Task<decimal> read) : IAiSpendLedger
+    {
+        public ValueTask<decimal> GetMonthToDateUsdAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
+            => new(read);
+
+        public void Add(decimal usd, DateTimeOffset nowUtc)
+        {
+        }
     }
 
     private sealed class ThrowingLedger : IAiSpendLedger

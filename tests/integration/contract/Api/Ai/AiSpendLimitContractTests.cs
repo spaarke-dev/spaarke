@@ -63,6 +63,7 @@ public sealed class AiSpendLimitContractTests : IClassFixture<ChatAgentRouteProo
 
         response.StatusCode.Should().Be(HttpStatusCode.OK, "no limit is configured — the default (G37)");
         response.Content.Headers.ContentType!.MediaType.Should().Be("text/event-stream");
+        (await response.Content.ReadAsStringAsync()).Should().Contain(ChatAgentRouteProofFixture.AgentAnswer, "the turn ran");
     }
 
     [Fact]
@@ -71,7 +72,7 @@ public sealed class AiSpendLimitContractTests : IClassFixture<ChatAgentRouteProo
         using var host = OverLimitHost();
         var chatClient = host.Services.GetRequiredService<IChatClient>();
 
-        // The configured endpoint is not reachable: anything but the refusal means the call got past the limit.
+        // AiSpendLimitExceededException is sealed and thrown only by the limit: nothing else satisfies the assertion.
         await chatClient.Invoking(c => c.GetResponseAsync("hi")).Should().ThrowAsync<AiSpendLimitExceededException>();
     }
 

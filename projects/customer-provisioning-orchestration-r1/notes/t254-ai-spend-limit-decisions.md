@@ -62,9 +62,9 @@ Owner G37 (2026-10-06): "no cap but allow for a per customer spend limit if desi
   deliberately — a capped stamp must still prove its identity) and Foundry Agent Service runs
   (`Services/Ai/Foundry/AgentServiceClient`, disabled by default — `AgentService:Enabled` is false on every stamp; add a
   check in its `GuardEnabled()` before enabling it on a capped stamp).
-- K6 — background AI jobs (indexing, profiling) refuse while over the limit; Service Bus redelivers until the max
-  delivery count, then dead-letters. Nothing replays them when the month resets or the limit is raised — re-run them
-  (guide §3.2b).
+- K6 — background AI jobs (indexing, profiling) refuse while over the limit and fail after their job's retry policy
+  (the exact end state — dead-letter or failed status — depends on the job handler; not verified per handler). Nothing
+  replays them when the month resets or the limit is raised — re-run them (guide §3.2b).
 - K7 — a provisioning re-run that carries `openAiMonthlyLimitUsd` re-applies the intake value, overriding a later
   `Set-AiSpendLimit.ps1` change (or re-adding a removed limit). Run upgrades without the value, or with the current one.
 - Side effect (correct, not a double count): `ai.metering.tokens` `source=executor` now also records streaming and

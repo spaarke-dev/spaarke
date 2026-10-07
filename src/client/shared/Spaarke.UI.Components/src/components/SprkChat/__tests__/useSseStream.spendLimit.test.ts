@@ -6,7 +6,7 @@
  * which would have the user retry for the rest of the month.
  */
 
-import { describeTooManyRequests, AI_SPEND_LIMIT_ERROR_CODE } from '../../../hooks/useSseStream';
+import { describeTooManyRequests, requestFailedMessage, AI_SPEND_LIMIT_ERROR_CODE } from '../../../hooks/useSseStream';
 
 describe('describeTooManyRequests', () => {
   it('shows the server message for the monthly AI usage limit', () => {
@@ -18,6 +18,16 @@ describe('describeTooManyRequests', () => {
     });
 
     expect(describeTooManyRequests(body)).toBe('This environment has reached its monthly AI usage limit.');
+  });
+
+  it('requestFailedMessage: a refine 429 for the usage limit shows its message, not the raw body', () => {
+    const body = JSON.stringify({
+      detail: 'Monthly AI usage limit reached.',
+      extensions: { code: AI_SPEND_LIMIT_ERROR_CODE },
+    });
+
+    expect(requestFailedMessage('Refine request', 429, body)).toBe('Monthly AI usage limit reached.');
+    expect(requestFailedMessage('Refine request', 500, 'boom')).toBe('Refine request failed (500): boom');
   });
 
   it('keeps the rate-limit message for any other 429', () => {

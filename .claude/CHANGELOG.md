@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Optional per-customer OpenAI spend limit at intake (T254)
+
+`customer-provisioning-orchestration-r1` T254 (owner G37: no cap by default, a per-customer limit if desired).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-quater — OPTIONAL `openAiMonthlyLimitUsd` (empty = no
+  limit; plain number in (0, 1,000,000]); Step 4.0 sends it only when set; on an upgrade run leave it out or send the
+  current value (a re-run re-applies it). Later changes: `scripts/Set-AiSpendLimit.ps1` (guide §3.2b).
+
+---
 ###### 2026-10-06 — Keyless proof: H13 proves every stamp service with the BFF's managed identity (T230b)
 
 `customer-provisioning-orchestration-r1` T230b (owner D13).

@@ -57,17 +57,21 @@ public sealed class AiSpendLimit
 
         var now = _timeProvider.GetUtcNow();
         decimal spent;
+        Task<decimal>? read = null;
         try
         {
-            spent = await _ledger.GetMonthToDateUsdAsync(now, cancellationToken).AsTask()
-                .WaitAsync(LedgerReadTimeout, _timeProvider, cancellationToken).ConfigureAwait(false);
+            read = _ledger.GetMonthToDateUsdAsync(now, cancellationToken).AsTask();
+            spent = await read.WaitAsync(LedgerReadTimeout, _timeProvider, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
-        catch (TimeoutException)
+        catch (TimeoutException) when (read is { IsCompleted: false })
         {
+            // Our deadline, not the store's own timeout (RedisTimeoutException is a TimeoutException too — that one
+            // falls to the general catch below with its detail). The abandoned read's later fault is observed there.
+            _ = read.ContinueWith(t => _ = t.Exception, TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously);
             _logger.LogWarning(
                 "AI spend limit: the month-to-date figure was not read within {TimeoutMs} ms; the call proceeds (fail-open).",
                 LedgerReadTimeout.TotalMilliseconds);
