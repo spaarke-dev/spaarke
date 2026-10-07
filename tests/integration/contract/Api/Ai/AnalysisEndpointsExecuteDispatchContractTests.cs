@@ -237,6 +237,8 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton(Mock.Of<ITextExtractor>());
         builder.Services.AddSingleton<ITenantCache>(
             new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
+        // Task 171: the loader reads document bytes app-only after the document-pointer check.
+        builder.Services.AddSingleton(TestRecordContainerResolver.ForBusinessUnitContainers(c => true));
         builder.Services.AddSingleton<AnalysisDocumentLoader>();
 
         // FR-P3-05 (task 044): the endpoint composes the executor primitives directly

@@ -7,6 +7,12 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — SPE byte identity: broker-only replaces writer-identity matching (unified-access-control-r2 task 171)
+
+Three files change: `.claude/patterns/auth/spe-writer-identity-matching.md` (marked SUPERSEDED, decision-matrix row marked historical), `.claude/constraints/auth.md` (the SPE File Access section is rewritten: app-only behind a Dataverse decision plus the pointer check; no new `*AsUserAsync` callers; container roles only through `GrantMarkedWriterAsync`) and `.claude/constraints/bff-extensions.md` §D (background SPE reads are app-only after the pointer check). This follows owner rounds 69/70.
+
+---
+
 ###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
 
 `.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.

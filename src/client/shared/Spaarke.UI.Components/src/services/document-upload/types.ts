@@ -158,7 +158,7 @@ export interface ServiceResult<T = void> {
    *
    * Distinct from `error` because it is recoverable and the recovery needs a user decision:
    * nothing was written, the existing file is intact, and retrying the same upload with
-   * `conflictBehavior: 'rename' | 'replace'` will succeed. A caller that only reads `error` still
+   * `conflictBehavior: 'rename'` will succeed (`'replace'` is refused by the BFF since task 171). A caller that only reads `error` still
    * behaves correctly (it shows the message) — this field is additive so existing consumers are
    * unaffected.
    */

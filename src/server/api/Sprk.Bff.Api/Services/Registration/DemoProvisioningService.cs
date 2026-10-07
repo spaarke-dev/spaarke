@@ -1,7 +1,6 @@
 using Microsoft.Extensions.Options;
-using Microsoft.Graph;
-using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Registration;
 
@@ -20,7 +19,7 @@ public sealed class DemoProvisioningService
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
     private readonly PasswordGenerator _passwordGenerator;
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly SpeContainerMembershipService _membership;
     private readonly DemoProvisioningOptions _options;
     private readonly ILogger<DemoProvisioningService> _logger;
 
@@ -31,13 +30,18 @@ public sealed class DemoProvisioningService
         PasswordGenerator passwordGenerator,
         IGraphClientFactory graphClientFactory,
         IOptions<DemoProvisioningOptions> options,
-        ILogger<DemoProvisioningService> logger)
+        ILogger<DemoProvisioningService> logger,
+        ILoggerFactory loggerFactory)
     {
         _graphUserService = graphUserService ?? throw new ArgumentNullException(nameof(graphUserService));
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _passwordGenerator = passwordGenerator ?? throw new ArgumentNullException(nameof(passwordGenerator));
-        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        // Task 171 (finding 6): Step 8 grants through the ONE marked-grant primitive. The service is stateless over the
+        // Graph factory, so this singleton holds its own instance rather than reaching into a request scope.
+        _membership = new SpeContainerMembershipService(
+            graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory)),
+            (loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory))).CreateLogger<SpeContainerMembershipService>());
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -168,7 +172,7 @@ public sealed class DemoProvisioningService
             {
                 _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
                     environment.SpeContainerId, entraUserId);
-                await GrantSpeContainerAccessAsync(environment.SpeContainerId, entraUserId, upn, ct);
+                await GrantSpeContainerAccessAsync(environment.SpeContainerId, dataverseSystemUserId.Value, upn, ct);
                 completedSteps.Add("GrantSpeContainerAccess");
                 _logger.LogInformation("[Step 8/9] Granted SPE container Writer access");
             }
@@ -241,42 +245,29 @@ public sealed class DemoProvisioningService
     }
 
     /// <summary>
-    /// Grants Writer access on an SPE container to the specified user via Graph API.
-    /// Uses the same Graph SDK pattern as SpeAdminGraphService.GrantContainerPermissionAsync.
-    /// POST /storage/fileStorage/containers/{containerId}/permissions
+    /// Grants the new user a STANDING writer role on the environment's SPE container — the same marked grant
+    /// <c>SpeContainerMembershipSyncJob</c> keeps (unified-access-control-r2 task 171, adversarial finding 6). Before
+    /// task 171 this POSTed an UNMARKED permission, which nothing could ever tell apart from a hand-granted role, so the
+    /// sync never removed it (disabled, moved, flagged external — the role stayed). Marked, it is reconciled like every
+    /// other standing writer; granting here (rather than waiting up to five minutes for the job) lets the new user edit
+    /// in Office immediately. A user who already holds a role is left as they are (Graph 409 → nothing recorded).
     /// </summary>
     private async Task GrantSpeContainerAccessAsync(
-        string containerId, string userId, string upn, CancellationToken ct)
+        string containerId, Guid systemUserId, string upn, CancellationToken ct)
     {
-        var graphClient = _graphClientFactory.ForApp();
+        var outcome = await _membership
+            .GrantMarkedWriterAsync(containerId, SpeContainerMembershipService.StandingWriterMarkerPrefix, systemUserId, upn, ct)
+            .ConfigureAwait(false);
 
-        var permissionRequest = new Permission
-        {
-            Roles = new List<string> { "writer" },
-            GrantedToV2 = new SharePointIdentitySet
-            {
-                User = new SharePointIdentity
-                {
-                    AdditionalData = new Dictionary<string, object>
-                    {
-                        ["userPrincipalName"] = upn
-                    }
-                }
-            }
-        };
-
-        var created = await graphClient.Storage.FileStorage.Containers[containerId].Permissions
-            .PostAsync(permissionRequest, cancellationToken: ct);
-
-        if (created is null)
+        if (outcome == SpeContainerMembershipService.MarkedGrantOutcome.Failed)
         {
             throw new InvalidOperationException(
-                $"Graph returned null when granting Writer permission on SPE container '{containerId}' for user '{userId}'.");
+                $"The standing writer grant on SPE container '{containerId}' for user {systemUserId} could not be made.");
         }
 
         _logger.LogInformation(
-            "Granted Writer permission on SPE container {ContainerId} for user {UserId}, permissionId={PermissionId}",
-            containerId, userId, created.Id);
+            "Standing writer on SPE container {ContainerId} for user {SystemUserId}: {Outcome}",
+            containerId, systemUserId, outcome);
     }
 }
 

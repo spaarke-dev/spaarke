@@ -518,6 +518,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
                     ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = itemId,
+                    [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = itemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
                     ["sprk_graphdriveid"] = driveId,
                 };
                 ApplyContentOwner(attachmentDoc, docOwner); // task 146
@@ -2307,6 +2308,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
             ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileHandle?.Id, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             ["sprk_graphdriveid"] = driveId,
             ["sprk_isemailarchive"] = true,
             ["sprk_emailsubject"] = request.Subject,
@@ -2634,6 +2636,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 }
 
                 attachmentDoc["sprk_graphitemid"] = fileHandle.Id;
+                attachmentDoc[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = fileHandle.Id; // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
                 attachmentDoc["sprk_graphdriveid"] = driveId;
                 ApplyContentOwner(attachmentDoc, copyOwner);
 

@@ -13,6 +13,7 @@ public class AnalysisDocumentLoader
     private readonly IAnalysisDataverseService _analysisService;
     private readonly IDocumentDataverseService _documentService;
     private readonly ISpeFileOperations _speFileStore;
+    private readonly Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver _containerResolver;
     private readonly ITextExtractor _textExtractor;
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor _httpContextAccessor;
@@ -32,6 +33,7 @@ public class AnalysisDocumentLoader
         IAnalysisDataverseService analysisService,
         IDocumentDataverseService documentService,
         ISpeFileOperations speFileStore,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ITextExtractor textExtractor,
         ITenantCache cache,
         IHttpContextAccessor httpContextAccessor,
@@ -40,6 +42,7 @@ public class AnalysisDocumentLoader
         _analysisService = analysisService;
         _documentService = documentService;
         _speFileStore = speFileStore;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
         _textExtractor = textExtractor;
         _cache = cache;
         _httpContextAccessor = httpContextAccessor;
@@ -93,11 +96,17 @@ public class AnalysisDocumentLoader
 
     /// <summary>
     /// Extract text from a document stored in SharePoint Embedded.
-    /// Downloads the file using OBO authentication and uses TextExtractor to extract readable text.
+    /// Downloads the file APP-ONLY and uses TextExtractor to extract readable text.
     /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 171 (owner round 69 — broker-only). Every caller authorized the caller on this
+    /// document first (the analysis filters, the chat filter, the Compose profile's write gate), so the bytes are read
+    /// as the BFF identity — after the document-pointer check, because the row's pointer is followed as the
+    /// application. It used to read OBO, which SPE answers only for a caller holding a role on the container: an
+    /// analysis of any document on a secure record (no members by design) extracted nothing.
+    /// </remarks>
     public async Task<string> ExtractDocumentTextAsync(
         DocumentEntity document,
-        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         // Check if document has SPE file reference
@@ -126,6 +135,13 @@ public class AnalysisDocumentLoader
 
         try
         {
+            // Task 171: followed AS THE APPLICATION, so the pointer must name a container this document may use.
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
+            {
+                return $"[Document: {document.Name}]\n\nThe document's file in storage could not be verified.";
+            }
+
             _logger.LogInformation(
                 "Downloading document {DocumentId} from SPE (Drive={DriveId}, Item={ItemId}, FileName={FileName})",
                 document.Id, document.GraphDriveId, document.GraphItemId, fileName);
@@ -134,8 +150,7 @@ public class AnalysisDocumentLoader
             string? etag = null;
             try
             {
-                var metadata = await _speFileStore.GetFileMetadataAsUserAsync(
-                    httpContext,
+                var metadata = await _speFileStore.GetFileMetadataAsync(
                     document.GraphDriveId!,
                     document.GraphItemId!,
                     cancellationToken);
@@ -148,9 +163,8 @@ public class AnalysisDocumentLoader
                     document.Id);
             }
 
-            // Download file from SharePoint Embedded using OBO authentication
-            using var fileStream = await _speFileStore.DownloadFileAsUserAsync(
-                httpContext,
+            // Download file from SharePoint Embedded app-only (task 171)
+            using var fileStream = await _speFileStore.DownloadFileAsync(
                 document.GraphDriveId!,
                 document.GraphItemId!,
                 cancellationToken);

@@ -76,7 +76,7 @@ export interface OrchestratorFileProgress {
     /**
      * Present when this file stopped on a NAME COLLISION rather than a real failure.
      *
-     * Nothing was written to SPE, so the row can offer "Keep both" / "Save as new version" and the
+     * Nothing was written to SPE, so the row can offer "Keep both" (task 171: no replace) and the
      * caller re-invokes {@link orchestrateUpload} for just this file with the chosen
      * `conflictBehavior`.
      */
@@ -178,8 +178,8 @@ export function resolveUploadTarget(parentContext: ParentContext): UploadTarget 
  * @param config - Orchestrator configuration
  * @param onProgress - Per-file progress callback
  * @param conflictBehavior - OMIT on the first attempt: the BFF then defaults to `fail`, so a
- *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'` or
- *   `'replace'` only when the caller is RETRYING the files in `files` after the user chose. A
+ *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'`
+ *   (never `'replace'` — refused since task 171) only when the caller is RETRYING the files in `files` after the user chose. A
  *   retry is normally a single-file call, since one decision covers one file.
  * @returns Overall orchestration result
  */

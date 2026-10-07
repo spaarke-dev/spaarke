@@ -381,7 +381,7 @@ public static class AnalysisEndpoints
                 var document = await documentLoader.GetDocumentAsync(documentId, cancellationToken);
                 if (document != null)
                 {
-                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, context, cancellationToken);
+                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
                     documentContext = new DocumentContext
                     {
                         DocumentId = Guid.TryParse(document.Id, out var docGuid) ? docGuid : request.DocumentIds[0],

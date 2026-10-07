@@ -130,7 +130,10 @@ public static class GraphErrorTranslator
         var code = ex.ErrorCode ?? status.ToString();
         var detail = (status == 403 && code.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase))
             ? "missing graph app role (filestoragecontainer.selected) for the api identity."
-            : status == 403 ? "api identity lacks required container-type permission for this operation."
+            // uac-r2 task 171 (step 6): a plain SPE 403 is a CONTAINER/ITEM denial ("Access denied" — e.g. a delegated
+            // caller with no container role), not a container-type registration gap. Pass through what SPE said instead of
+            // naming the app's registration, which sent the 2026-10-06 upload403 diagnosis the wrong way.
+            : status == 403 ? ProblemDetailsHelper.SpeAccessDeniedDetail(ex.Message)
             : ProblemDetailsHelper.Redact(ex.Message);
 
         return Results.Problem(

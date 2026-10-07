@@ -7,6 +7,18 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 /// Interface for SPE file operations needed by AI services.
 /// Extracted from SpeFileStore to enable unit testing without complex mock setup.
 /// </summary>
+/// <remarks>
+/// <para><b>Identity (unified-access-control-r2 task 171, owner round 69 — broker-only).</b> Every byte path runs
+/// APP-ONLY after the caller has been authorized against Dataverse and, when it follows a <c>sprk_document</c> row's
+/// pointer, after the document-pointer check (<c>RecordContainerResolver.EnsureDocumentPointerContainerAsync</c>).
+/// Under OBO, SharePoint Embedded only answers a caller who holds a container ROLE — and per-record secure containers
+/// have none by design — so an OBO byte path works only where someone happened to hand-add the user.</para>
+/// <para>The remaining <c>*AsUserAsync</c> members exist ONLY for paths with no Dataverse record behind them, where
+/// SPE's own answer for the caller IS the decision (task 171 escalation trigger 2): Compose "Path B" (a document
+/// opened by drive+item that has no <c>sprk_document</c> row), the chat-session check that authorizes those sessions,
+/// and RAG indexing of an item named without a document. Do not add a new caller with a record behind it — authorize
+/// the record and use the app-only member. <c>SpeBrokerOnlyByteIdentityGuardTests</c> pins the caller set.</para>
+/// </remarks>
 public interface ISpeFileOperations
 {
     /// <summary>
@@ -18,8 +30,17 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// Get file metadata using user OBO authentication.
-    /// Use this when accessing files uploaded by a user in their context.
+    /// Get file metadata APP-ONLY, never from the metadata cache (task 171). Use where the ETag is sent back in
+    /// <c>If-Match</c> or compared to detect an external edit. Performs NO authorization.
+    /// </summary>
+    Task<FileHandleDto?> GetFileMetadataUncachedAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Get file metadata as the CALLER (OBO). Only for a path with no Dataverse record behind it (see the interface
+    /// remarks); a row-backed path uses <see cref="GetFileMetadataUncachedAsync"/>.
     /// </summary>
     Task<FileHandleDto?> GetFileMetadataAsUserAsync(
         HttpContext ctx,
@@ -46,8 +67,8 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// Download file content using user OBO authentication.
-    /// Use this when accessing files uploaded by a user in their context.
+    /// Download file content as the CALLER (OBO). Only for a path with no Dataverse record behind it (see the
+    /// interface remarks); a row-backed path uses <see cref="DownloadFileAsync"/>.
     /// </summary>
     Task<Stream?> DownloadFileAsUserAsync(
         HttpContext ctx,
@@ -77,6 +98,16 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Download a SPECIFIC prior version APP-ONLY — the twin of <see cref="DownloadFileVersionAsUserAsync"/> for the
+    /// document version route and a row-backed Compose save (task 171). Performs NO authorization.
+    /// </summary>
+    Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Resolve the CURRENT (most-recent) version id of a drive-item using the caller's OBO identity.
     /// Graph route <c>drives/{driveId}/items/{itemId}/versions</c> → the newest version's id. Returns
     /// <c>null</c> when the item has no version history or is not found (facade-translated — no
@@ -96,27 +127,10 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// List ALL versions of a drive-item using the caller's OBO identity (user-context,
-    /// per-item delegated permission — NEVER app-only). Graph route
-    /// <c>drives/{driveId}/items/{itemId}/versions</c>, mapped to the
-    /// <see cref="VersionInfoDto"/> projection (id/label + lastModified timestamp + size),
-    /// newest first. Returns <c>null</c> when the item is not found (facade-translated —
-    /// no <c>Microsoft.Graph</c> type or exception crosses this boundary, ADR-007).
-    /// Throws <see cref="UnauthorizedAccessException"/> when the calling user is not
-    /// authorized to read the item (Graph 403 under the user's own token).
+    /// The CURRENT version id APP-ONLY — the twin of <see cref="GetCurrentVersionIdAsUserAsync"/> for a row-backed
+    /// Compose load (task 171). Performs NO authorization.
     /// </summary>
-    /// <remarks>
-    /// spaarkeai-compose-r6 task 050 (spec FR-07 / Success Criterion 4): the user-context
-    /// version-history list backing <c>GET /api/documents/{documentId}/versions</c> (re-keyed from
-    /// the drive-keyed route by unified-access-control-r2 task 079 — the caller names a document row
-    /// and the drive/item below come off that row AFTER the per-document gate, so a caller can no
-    /// longer address an arbitrary SPE item).
-    /// Same Graph call shape as <see cref="GetCurrentVersionIdAsUserAsync"/>, but returns the
-    /// FULL mapped list instead of just the newest id (per task 002's inventory,
-    /// <c>notes/spe-versioning-verify.md</c> §3). Read-only — no restore/branch surface.
-    /// </remarks>
-    Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
-        HttpContext ctx,
+    Task<string?> GetCurrentVersionIdAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default);
@@ -125,85 +139,29 @@ public interface ISpeFileOperations
     /// Lists a file's versions using APP-ONLY (broker) authentication.
     /// </summary>
     /// <remarks>
-    /// App-only sibling of <see cref="ListFileVersionsAsUserAsync"/> — same Graph route, same
-    /// newest-first <see cref="VersionInfoDto"/> projection, read-only (no restore/branch surface).
+    /// Newest-first <see cref="VersionInfoDto"/> projection, read-only (no restore/branch surface).
     ///
     /// ⚠️ Performs NO authorization. The broker identity can read any item in a container it owns,
-    /// so the CALLER must authorize the principal against the owning record first. Exists for the
-    /// external-access surface, whose CIAM contacts are not Dataverse principals and therefore have
-    /// no delegated permission to exchange for the AsUser variant. Prefer the AsUser overload
-    /// wherever an acting Entra user is available. unified-access-control-r2.
+    /// so the CALLER must authorize the principal against the owning record first. Serves the
+    /// external-access surface and, since task 171, the workforce version route (the OBO list was
+    /// deleted: it worked only for a caller holding a container role).
     /// </remarks>
     Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default);
 
-    /// <summary>
-    /// Create a NEW drive-item in a container/drive under the user's OBO
-    /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
-    /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +
-    /// resolved drive id). Used by the Compose create-on-save backbone (FR-05) when a transient
-    /// draft has no <c>DocumentSpeId</c> yet — the drive-item must be created before the
-    /// <c>sprk_document</c> row + indexing. Distinct from
-    /// <see cref="ReplaceFileContentAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>,
-    /// which overwrites an EXISTING item.
-    /// </summary>
-    /// <remarks>
-    /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
-    /// <see cref="FileHandleDto"/> shape only. Throws <see cref="UnauthorizedAccessException"/> on
-    /// 403 ACL denial. The concrete <c>SpeFileStore</c> already implements this; it is surfaced here
-    /// so OBO callers can create drive-items through the same injected facade.
-    ///
-    /// ⚠️ <b>"Small" is a legacy name, NOT a 4 MB limit.</b> Corrected 2026-09-02: this text used to
-    /// say "&lt;4 MB" and "throws ArgumentException on 413 (content &gt; 4 MB — use chunked upload)".
-    /// Both were wrong. Graph's simple-upload boundary for SPE containers has been <b>250 MB</b>
-    /// since October 2023; the 4 MB figure came from the retired OneDrive REST docs.
-    /// <c>spaarkeai-compose-r8</c> task 015 (FR-S08) DELETED the 4 MB guard from the implementation
-    /// precisely because it failed a Compose create-on-save of any document over 4 MB outright — but
-    /// the guard's advice survived here in prose, where it kept reading as a live constraint and
-    /// caused a later reviewer to propose capping an upload UI at 4 MB. Do not reintroduce either.
-    /// The app-only twin below has no size guard at all.
-    /// </remarks>
-    Task<FileHandleDto?> UploadSmallAsUserAsync(
-        HttpContext ctx,
-        string containerId,
-        string path,
-        Stream content,
-        CancellationToken ct = default);
-
-    /// <summary>
-    /// Create a NEW drive-item under the user's OBO identity with an EXPLICIT name-collision behaviour.
-    /// </summary>
-    /// <remarks>
-    /// The 5-argument overload above is equivalent to passing
-    /// <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Replace"/> — which silently overwrites a
-    /// same-named file. Any caller that has NOT already asked the user what to do on a collision
-    /// should pass <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Fail"/> instead: Graph then returns
-    /// 409 and the existing item is untouched, which is recoverable. Overwriting first and reporting
-    /// afterwards is not.
-    ///
-    /// Added by unified-access-control-r2 as an OVERLOAD rather than a parameter on the existing
-    /// method so that the many Moq expectations pinning the 4-argument arity keep compiling.
-    /// </remarks>
-    Task<FileHandleDto?> UploadSmallAsUserAsync(
-        HttpContext ctx,
-        string containerId,
-        string path,
-        Stream content,
-        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
-        CancellationToken ct = default);
+    // UploadSmallAsUserAsync (both overloads) DELETED 2026-10-06 by unified-access-control-r2 task 171: every caller
+    // derives its container server-side behind a Dataverse decision and now writes app-only (owner round 69).
 
     /// <summary>
     /// Create a NEW drive-item in a container/drive under APP-ONLY (managed identity,
-    /// ADR-028) auth — the background/server-side counterpart to
-    /// <see cref="UploadSmallAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>.
-    /// PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c> and returns the created
+    /// ADR-028) auth. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c> and returns the created
     /// item's <see cref="FileHandleDto"/> (id + name + size + etag + resolved drive id).
     ///
-    /// ⚠️ <b>"Small" is a legacy name.</b> This implementation has NO size guard whatsoever — see the
-    /// OBO twin above for why the "&lt;4 MB" claim that used to sit here was wrong (250 MB is the real
-    /// simple-upload boundary for SPE containers).
+    /// ⚠️ <b>"Small" is a legacy name, NOT a 4 MB limit.</b> This implementation has NO size guard: Graph's
+    /// simple-upload boundary for SPE containers has been 250 MB since October 2023 (spaarkeai-compose-r8 task 015
+    /// deleted a 4 MB guard that failed every larger Compose create-on-save). Do not reintroduce one.
     ///
     /// ⚠️ <b>The path MUST be a bare file name.</b> Uploading to a path makes Graph implicitly create
     /// every folder segment in it, so any prefix mints folders nobody asked for. Enforced by
@@ -269,9 +227,22 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// Replace the content of an existing drive-item by itemId (OBO flow). PUTs the
-    /// stream to the drive-item's /content endpoint, committing a new SPE version.
-    /// Returns null when the drive-item doesn't exist. Throws
+    /// Replace the content of an existing drive-item APP-ONLY, with optional <c>If-Match</c> (task 171): commits a new
+    /// SPE version; null when the item does not exist; <see cref="EtagPreconditionFailedException"/> on 412,
+    /// <see cref="DocumentLockedByWordException"/> on 423 / locked, <see cref="GraphThrottledException"/> on 429.
+    /// ⚠️ Performs NO authorization: the caller must hold WRITE on the <c>sprk_document</c> whose (verified) pointer
+    /// names this item.
+    /// </summary>
+    Task<FileHandleDto?> ReplaceFileContentAsync(
+        string driveId,
+        string itemId,
+        Stream content,
+        string? ifMatch,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Replace the content of an existing drive-item as the CALLER (OBO). Only for Compose "Path B" (no
+    /// <c>sprk_document</c> row — see the interface remarks). Returns null when the drive-item doesn't exist. Throws
     /// <see cref="UnauthorizedAccessException"/> on ACL denial.
     /// </summary>
     Task<FileHandleDto?> ReplaceFileContentAsUserAsync(

@@ -319,6 +319,7 @@ public class ExternalDataService
             ["sprk_documentname"] = pointers.FileName,
             ["sprk_filename"] = pointers.FileName,
             ["sprk_graphitemid"] = pointers.ItemId,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = pointers.ItemId, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             ["sprk_graphdriveid"] = pointers.DriveId,
             ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
             [OwnerBindKey] = $"/teams({owningTeamId})",

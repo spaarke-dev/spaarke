@@ -32,6 +32,9 @@ internal static class ComposeAnnotationEndpoints
         // the SpeFileStore/ISpeFileOperations facade (ADR-007). This is the READ direction;
         // push-annotations (above) is the WRITE direction.
         group.MapPost("/document/{documentSpeId}/pull-annotations", PullAnnotations)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "read" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("read")
             .WithName("ComposePullAnnotations")
             .WithSummary("Parse the current SPE document for w:comment/w:ins/w:del and return the structured annotation payload for re-anchoring")
             .RequireRateLimiting("ai-context")
@@ -53,6 +56,9 @@ internal static class ComposeAnnotationEndpoints
         // because re-anchoring needs the CLIENT's prior anchors in the request body — pull's
         // contract carries none.
         group.MapPost("/document/{documentSpeId}/reanchor-annotations", ReanchorAnnotations)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "read" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("read")
             .WithName("ComposeReanchorAnnotations")
             .WithSummary("Re-anchor prior Compose annotations against the reloaded Word document; return banded summary (FR-27)")
             .RequireRateLimiting("ai-context")
@@ -140,7 +146,7 @@ internal static class ComposeAnnotationEndpoints
 
         try
         {
-            var stream = await spe.DownloadFileAsUserAsync(httpContext, body.DriveId, documentSpeId, ct)
+            var stream = await spe.DownloadForComposeAsync(httpContext, body.DriveId, documentSpeId, ct)
                 .ConfigureAwait(false);
 
             if (stream is null)
@@ -239,7 +245,7 @@ internal static class ComposeAnnotationEndpoints
 
         try
         {
-            var stream = await spe.DownloadFileAsUserAsync(httpContext, body.DriveId, documentSpeId, ct)
+            var stream = await spe.DownloadForComposeAsync(httpContext, body.DriveId, documentSpeId, ct)
                 .ConfigureAwait(false);
 
             if (stream is null)

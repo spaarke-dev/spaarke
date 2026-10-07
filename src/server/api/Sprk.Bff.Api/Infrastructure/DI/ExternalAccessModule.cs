@@ -638,6 +638,17 @@ public static class ExternalAccessModule
         // are unconditional, and the store/materializer it resolves per run are registered unconditionally above.
         services.AddScheduledJob<AssignedAccessReconciliationJob>(AssignedAccessReconciliationJob.DefaultCronSchedule);
 
+        // unified-access-control-r2 task 171 (owner rounds 69 + 70) — SPE container ROLES kept in line with Dataverse:
+        // standing writers (enabled internal person users) on every business-unit container, and removal of just-in-time
+        // Office-edit grants on secure containers once Write is gone. ENABLED with writes: round 70 makes it the mechanism
+        // that replaces hand-adding users. Every removal is limited to roles this code recorded (marked grants). ADR-052
+        // places it in the BFF on the in-process scheduler (ADR-036 A1 rule 6). UNCONDITIONAL (ADR-032): the engine's
+        // dependencies (IGenericEntityService, SpeContainerMembershipService, ISecurableEntityRegistry,
+        // IDataverseRecordShareService) are registered unconditionally.
+        services.AddScoped<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync>();
+        services.AddScheduledJob<Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob>(
+            Sprk.Bff.Api.Services.Access.SpeContainerMembershipSyncJob.DefaultCronSchedule);
+
         return services;
     }
 

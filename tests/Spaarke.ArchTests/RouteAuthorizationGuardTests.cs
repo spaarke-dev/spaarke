@@ -1854,6 +1854,11 @@ public partial class RouteAuthorizationGuardTests
                 // so the pin follows the new spelling (batch-4 integration, 2026-10-05).
                 return Regex.IsMatch(code, @"if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*return\s+await\s+next\s*\(");
 
+            case "AddComposeDocumentAuthorizationFilter":
+                // Task 171: decides (DocumentAuthorizationFilter on the row) when the item has a sprk_document, and passes
+                // through for a row-less item (Compose Path B — the caller's OBO identity, SPE decides).
+                return Regex.IsMatch(code, @"if\s*\(\s*row\s+is\s+null\s*\)\s*\{\s*return\s+await\s+next\s*\(");
+
             case "AddReportingAuthorizationFilter":
                 return Regex.IsMatch(code, @"\.IsInRole\s*\(") && !ConsultsAny(code, decisions);
 
@@ -2148,7 +2153,7 @@ public partial class RouteAuthorizationGuardTests
                                      + "file:line):\n  " + string.Join("\n  ", thin));
 
         var ownerless = NonDecidingAttachments
-            .Where(n => n.OwningTask is not ("-" or "160" or "161" or "162" or "163" or "164" or "165"))
+            .Where(n => n.OwningTask is not ("-" or "160" or "161" or "162" or "163" or "164" or "165" or "171"))
             .Select(n => n.Form).ToList();
         Assert.True(ownerless.Count == 0, "Every NonDecidingAttachments entry names the fix task whose POML modifies the "
                                           + "filter, or '-' for an identity/role precondition:\n  " + string.Join("\n  ", ownerless));
@@ -6705,6 +6710,9 @@ public partial class RouteAuthorizationGuardTests
         "AddTenantAuthorizationFilter" => Regex.Replace(raw,
             @"(if\s*\(\s*requestedTenantIds\.Count\s*==\s*0\s*\)\s*\{[^{}]*?)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.Problem(statusCode: 403);"),
+        "AddComposeDocumentAuthorizationFilter" => Regex.Replace(raw,
+            @"(if\s*\(\s*row\s+is\s+null\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
+            "$1return Results.NotFound();"),
         "AddSpeAdminTenantScopeFilter" => Regex.Replace(raw,
             @"(if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.NotFound();"),

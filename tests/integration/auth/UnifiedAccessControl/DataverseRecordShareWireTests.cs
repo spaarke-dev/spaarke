@@ -370,6 +370,61 @@ public class DataverseRecordShareWireTests
             throw new InvalidOperationException($"Unexpected request: {request.Method} {url}");
         });
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 171 (adversarial finding 3): the effective-rights read a REVOKING caller uses
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static HttpResponseMessage Status(HttpStatusCode status, string? errorCode) =>
+        new(status)
+        {
+            Content = errorCode is null
+                ? new StringContent(string.Empty)
+                : new StringContent("{\"error\":{\"code\":\"" + errorCode + "\",\"message\":\"scripted\"}}", Encoding.UTF8, "application/json"),
+        };
+
+    [Theory(DisplayName = "Task 171 (finding 3): the strict rights read answers only what is an ACCESS answer — a request-level 403 is UNKNOWN")]
+    [InlineData(HttpStatusCode.Forbidden, "0x80040220", "None")]      // access-check denial — an answer about the user
+    [InlineData(HttpStatusCode.NotFound, null, "None")]               // Dataverse's "cannot read this record"
+    [InlineData(HttpStatusCode.Forbidden, "0x8004A110", "unknown")]   // CannotActOnBehalfOfAnotherUser — the app's fault
+    [InlineData(HttpStatusCode.Forbidden, "0x80040216", "unknown")]   // any other 403 code
+    [InlineData(HttpStatusCode.Forbidden, null, "unknown")]           // an unreadable 403
+    public async Task RetrievePrincipalRightsOrUnknownAsync_MapsOnlyAccessAnswers(
+        HttpStatusCode status, string? errorCode, string expected)
+    {
+        var handler = new ScriptedHandler(_ => Status(status, errorCode));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        if (expected == "unknown")
+            rights.Should().BeNull("revoking on a fault of the REQUEST would remove every grant on every pass");
+        else
+            rights.Should().Be(AccessRights.None);
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Url.Should().Contain($"systemusers({UserId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess");
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 3): a 200 answer is the rights Dataverse states")]
+    public async Task RetrievePrincipalRightsOrUnknownAsync_Success_ReturnsTheStatedRights()
+    {
+        var handler = new ScriptedHandler(_ => Json("""{"AccessRights":"ReadAccess, WriteAccess"}"""));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsOrUnknownAsync(UserId, "sprk_matters", MatterId);
+
+        rights.Should().NotBeNull();
+        rights!.Value.HasFlag(AccessRights.Write).Should().BeTrue();
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 3): the LENIENT read still maps the impersonation fault to None — which is why a revoking caller must not use it")]
+    public async Task RetrievePrincipalRightsAsync_ImpersonationFault_IsNone()
+    {
+        var handler = new ScriptedHandler(_ => Status(HttpStatusCode.Forbidden, "0x8004A110"));
+
+        var rights = await new OfflineService(handler).RetrievePrincipalRightsAsync(UserId, "sprk_matters", MatterId);
+
+        rights.Should().Be(AccessRights.None, "deny-side callers read every 403 as 'no rights' — safe for them, by design");
+    }
+
     private static HttpResponseMessage Json(string body) =>
         new(HttpStatusCode.OK) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 

@@ -8,6 +8,8 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose;
 using static Sprk.Bff.Api.Api.ComposeEndpoints;
 
+using Sprk.Bff.Api.Api.Filters;
+
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
@@ -33,6 +35,9 @@ internal static class ComposeTemplateEndpoints
         //      030 part-merge engine and persists a new SPE version through the existing replace
         //      path. Deterministic OOXML packaging — NOT an AI dispatch (ADR-039).
         group.MapPost("/documents/{documentSpeId}/apply-template", ApplyTemplate)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "write" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("write")
             .WithName("ComposeApplyTemplate")
             .WithSummary("Apply a firm/matter template's chrome to a persisted Compose document via the OOXML part-merge engine (FR-05)")
             // SPE persistence (writes a new version) → ai-persist, same bucket as sibling Save (3).

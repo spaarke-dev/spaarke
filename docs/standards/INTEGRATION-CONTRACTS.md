@@ -113,7 +113,7 @@ Graph SDK throws `ODataError` which is converted to ProblemDetails via `ProblemD
 |-------------|----------------------|--------|
 | 401 | 401 | "unauthorized" |
 | 403 (Authorization_RequestDenied) | 403 | "missing graph app role (filestoragecontainer.selected) for the api identity." |
-| 403 (other) | 403 | "api identity lacks required container-type permission for this operation." |
+| 403 (other) | 403 | "SharePoint Embedded denied access to this container or item: {Graph message}" (task 171 — a membership/item denial, not the app's container-type registration) |
 | 429 | 429 | Mapped from `activityLimitReached` |
 | 5xx | 5xx | Graph error message passed through |
 
