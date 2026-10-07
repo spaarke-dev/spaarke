@@ -19,7 +19,11 @@ describe('CalendarVisual.mapRecordToEvent — Date Only dates (task 098)', () =>
   });
 
   it('buckets a Date Only final due date on its own day', () => {
-    const e = mapRecordToEvent({ sprk_eventid: 'e1', sprk_eventname: 'Filing', sprk_finalduedate: '2026-10-02' }, 'sprk_event', undefined);
+    const e = mapRecordToEvent(
+      { sprk_eventid: 'e1', sprk_eventname: 'Filing', sprk_finalduedate: '2026-10-02' },
+      'sprk_event',
+      undefined
+    );
     expect(e).not.toBeNull();
     expect([e!.date.getFullYear(), e!.date.getMonth(), e!.date.getDate()]).toEqual([2026, 9, 2]);
   });

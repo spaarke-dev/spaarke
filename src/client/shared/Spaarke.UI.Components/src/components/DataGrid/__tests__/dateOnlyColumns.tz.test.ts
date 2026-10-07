@@ -103,7 +103,12 @@ describe('XrmDataverseClient — projects a DateTime column behaviour from every
           PrimaryIdAttribute: 'sprk_eventid',
           PrimaryNameAttribute: 'sprk_eventname',
           Attributes: [
-            { LogicalName: 'sprk_duedate', AttributeType: 2, Format: 'DateOnly', DateTimeBehavior: { Value: 'DateOnly' } },
+            {
+              LogicalName: 'sprk_duedate',
+              AttributeType: 2,
+              Format: 'DateOnly',
+              DateTimeBehavior: { Value: 'DateOnly' },
+            },
             { LogicalName: 'sprk_basedate', AttributeType: 2, DateTimeBehavior: 'DateOnly' },
             { LogicalName: 'sprk_meetingdate', AttributeType: 2, Behavior: 2 },
             { LogicalName: 'createdon', AttributeType: 2, Behavior: 1 },
@@ -135,8 +140,16 @@ describe('ColumnRendererService — Date Only column renders the stored day', ()
       return out.props.children;
     };
 
-    const oct2 = new Date(2026, 9, 2).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
-    const oct1 = new Date(2026, 9, 1).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    const oct2 = new Date(2026, 9, 2).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+    const oct1 = new Date(2026, 9, 1).toLocaleDateString(undefined, {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
     expect(text('2026-10-02')).toBe(oct2);
     expect(text('2026-10-02T03:00:00Z')).toBe(oct1);
   });
