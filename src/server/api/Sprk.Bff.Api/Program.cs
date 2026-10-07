@@ -75,12 +75,16 @@ builder.Services.AddScoped<Sprk.Bff.Api.Services.ScorecardCalculatorService>();
 builder.Services.AddDocumentsModule();
 
 // Dataverse passthrough — Spaarke DataGrid Framework R1, Phase B
-// (5 endpoints: savedquery x2, metadata, fetch, record; shared authorization filter
-//  with cross-entity FetchXML privilege-bypass mitigation per task 010 design)
+// (savedquery x2, metadata and gridconfigurations on the internal /api/dataverse group, sharing the
+//  entity-level authorization filter).
+// The internal POST /api/dataverse/fetch and GET /api/dataverse/record/{entity}/{id} were DELETED
+// (unified-access-control-r2 task 160, owner round 10 item 1: no caller, not published). FetchService,
+// RecordService and FetchXmlEntityExtractor stay registered: the external module seam
+// (Api/ExternalAccess/ExternalModuleDataEndpoints.cs, /api/v1/external/api/dataverse/*) is their only consumer.
 builder.Services.AddDataverseSavedQueryServices();   // task 011: shared infra (filter + privilege checker) + savedquery pair
 builder.Services.AddDataverseMetadataServices();     // task 012: metadata endpoint (6h cache)
-builder.Services.AddDataverseFetchServices();        // task 013: fetch endpoint + FetchXmlEntityExtractor (security-critical)
-builder.Services.AddDataverseRecordServices();       // task 014: record endpoint ($select projection)
+builder.Services.AddDataverseFetchServices();        // task 013: FetchService + FetchXmlEntityExtractor (external module seam)
+builder.Services.AddDataverseRecordServices();       // task 014: RecordService ($select projection; external module seam)
 builder.Services.AddDataverseGridConfigurationServices(); // spaarke-dataset-grid-framework-r2 DEF-002: sprk_gridconfiguration picker list
 
 // Workers module (Service Bus + BackgroundService)
@@ -266,8 +270,6 @@ app.MapSpaarkeEndpoints();
 // Dataverse passthrough endpoints (Spaarke DataGrid Framework R1, Phase B)
 app.MapSavedQueryEndpoints();   // task 011: GET /api/dataverse/savedquery/{id} + GET /api/dataverse/savedqueries/{entity}
 app.MapMetadataEndpoints();     // task 012: GET /api/dataverse/metadata/{entity}
-app.MapFetchEndpoints();        // task 013: POST /api/dataverse/fetch (cross-entity privilege check)
-app.MapRecordEndpoints();       // task 014: GET /api/dataverse/record/{entity}/{id}
 app.MapGridConfigurationEndpoints(); // spaarke-dataset-grid-framework-r2 DEF-002: GET /api/dataverse/gridconfigurations/{entity}
 
 app.Run();

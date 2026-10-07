@@ -32,8 +32,15 @@ public static class WorkspaceAiEndpoints
             .WithTags("Workspace AI");
 
         // POST /api/workspace/ai/summary
+        //
+        // Authorization (unified-access-control-r2 task 163, sweep finding #46): WorkspaceAuthorizationFilter
+        // only establishes WHO the caller is. The record decision is the declaration filter after it: Read on
+        // the named sprk_event / sprk_matter / sprk_project / sprk_document, AS THE CALLER, before
+        // WorkspaceAiService reads that row app-only. An unreadable and an absent record get the identical
+        // uniform 404 — and so does a record that disappears between the check and the fetch (handler).
         group.MapPost("/summary", HandleAiSummary)
             .AddEndpointFilter<WorkspaceAuthorizationFilter>()
+            .AddFinanceAuthorizationFilter(ResolveSummaryTargets, FinanceDenial.UniformNotFound)
             .RequireRateLimiting("ai-stream")
             .WithName("GenerateWorkspaceAiSummary")
             .WithSummary("Generate AI summary for a feed item or to-do item")
@@ -50,6 +57,84 @@ public static class WorkspaceAiEndpoints
             .ProducesProblem(StatusCodes.Status504GatewayTimeout);
 
         return app;
+    }
+
+    /// <summary>
+    /// Authorization declaration for <c>POST /api/workspace/ai/summary</c> (task 163): Read ("read") on the
+    /// named record, for exactly the four types <see cref="WorkspaceAiService"/> supports (compared
+    /// case-insensitively). The entity set comes from the shared <c>EntityAccessFilter</c> map, including
+    /// <c>sprk_documents</c> for a document (Record path, the same rights question the document path asks, so
+    /// the evaluated entity set is explicit). An empty type, an empty id and an unsupported type are the
+    /// handler's own 400s (same bodies), returned with NO rights query.
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveSummaryTargets(EndpointFilterInvocationContext context)
+    {
+        var httpContext = context.HttpContext;
+        var request = context.Arguments.OfType<AiSummaryRequest>().FirstOrDefault();
+
+        if (request is null || string.IsNullOrWhiteSpace(request.EntityType))
+        {
+            return FinanceAuthorizationTargets.Reject(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "EntityType is required and cannot be empty.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["field"] = "entityType",
+                    ["correlationId"] = httpContext.TraceIdentifier
+                }));
+        }
+
+        if (request.EntityId == Guid.Empty)
+        {
+            return FinanceAuthorizationTargets.Reject(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: "EntityId must be a valid non-empty GUID.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["field"] = "entityId",
+                    ["correlationId"] = httpContext.TraceIdentifier
+                }));
+        }
+
+        if (!WorkspaceAiService.IsSupportedEntityType(request.EntityType))
+        {
+            // The same 400 body the handler's InvalidOperationException branch returns.
+            return FinanceAuthorizationTargets.Reject(Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                detail: WorkspaceAiService.UnsupportedEntityTypeMessage(request.EntityType),
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["correlationId"] = httpContext.TraceIdentifier
+                }));
+        }
+
+        // sprk_document: the existing document entity-set constant (the shared EntityAccessFilter map holds
+        // the record types a document can be FILED under, not the document itself). The other three: that map.
+        string entitySet;
+        if (string.Equals(request.EntityType, "sprk_document", StringComparison.OrdinalIgnoreCase))
+        {
+            entitySet = FinanceAuthorizationFilter.DocumentEntitySet;
+        }
+        else if (!EntityAccessFilter.TryResolveEntitySet(request.EntityType, out entitySet))
+        {
+            // A supported type the shared map cannot resolve declares no check — denied, never passed.
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = entitySet,
+            RecordId = request.EntityId,
+            Operation = "read",
+            Source = "body.entityId",
+        });
     }
 
     /// <summary>
@@ -161,17 +246,10 @@ public static class WorkspaceAiEndpoints
                 request.EntityId,
                 httpContext.TraceIdentifier);
 
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: $"Entity '{request.EntityType}' with ID '{request.EntityId}' was not found.",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["entityType"] = request.EntityType,
-                    ["entityId"] = request.EntityId,
-                    ["correlationId"] = httpContext.TraceIdentifier
-                });
+            // Task 163: the SAME uniform 404 the route's declaration filter gives an unreadable or absent
+            // record — no entityType / entityId echoed — so "deleted between the check and the fetch" is
+            // indistinguishable from the other two.
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
         catch (InvalidOperationException ex)
         {

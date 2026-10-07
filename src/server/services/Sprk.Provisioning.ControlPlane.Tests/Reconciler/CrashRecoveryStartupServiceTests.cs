@@ -56,7 +56,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 /// </summary>
 public sealed class CrashRecoveryStartupServiceTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000060";
     private static readonly DateTimeOffset Now = DateTimeOffset.Parse("2026-08-18T12:00:00Z");
 
@@ -339,13 +339,13 @@ public sealed class CrashRecoveryStartupServiceTests
     {
         var run1 = MakeRun(RunStatus.Running,
             runId: "00000000-0000-0000-0000-000000000101",
-            customerId: "customer-a",
+            customerId: "custa",
             currentPhase: "H2a",
             createdAgo: TimeSpan.FromMinutes(30),
             completedPhases: Array.Empty<(string, TimeSpan)>());
         var run2 = MakeRun(RunStatus.Running,
             runId: "00000000-0000-0000-0000-000000000102",
-            customerId: "customer-b",
+            customerId: "custb",
             currentPhase: "H5",
             createdAgo: TimeSpan.FromMinutes(30),
             completedPhases: Array.Empty<(string, TimeSpan)>());
@@ -535,7 +535,7 @@ public sealed class CrashRecoveryStartupServiceTests
             RunId = runId ?? TestRunId,
             CustomerId = customerId ?? TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
             CurrentPhase = currentPhase,
@@ -568,9 +568,17 @@ public sealed class CrashRecoveryStartupServiceTests
     private sealed class StubActiveRunScanner : IActiveRunScanner
     {
         private readonly IReadOnlyList<ProvisioningRun> _runs;
-        public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
+        private readonly IReadOnlyList<ProvisioningRun> _terminalRuns;
+        public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs, IEnumerable<ProvisioningRun>? terminalRuns = null)
+        {
+            _runs = runs.ToList();
+            _terminalRuns = terminalRuns?.ToList() ?? (IReadOnlyList<ProvisioningRun>)Array.Empty<ProvisioningRun>();
+        }
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: orphan-guard sweep.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult(_terminalRuns);
     }
 
     private sealed class ThrowingActiveRunScanner : IActiveRunScanner
@@ -578,6 +586,9 @@ public sealed class CrashRecoveryStartupServiceTests
         private readonly Exception _exception;
         public ThrowingActiveRunScanner(Exception exception) => _exception = exception;
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
+            => throw _exception;
+        // Bucket B MED#12 SESSION 18: throwing scanner throws on this path too.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
             => throw _exception;
     }
 

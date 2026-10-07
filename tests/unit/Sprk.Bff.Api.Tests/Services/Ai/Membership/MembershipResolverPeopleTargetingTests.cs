@@ -181,6 +181,70 @@ public class MembershipResolverPeopleTargetingTests
         forOther.CapturedFetch.Single().Should().NotContain(BuDefaultTeamId.ToString("D"));
     }
 
+    // ── Task 147 r1 (owner round 28 item 1): "createdbyperson, else createdby" ───────────────────────────────────────
+
+    private static readonly Guid BffApplicationUser = Guid.Parse("cccccccc-0000-0000-0000-0000000000a1");
+
+    /// <summary>The to-do shapes once the child schema step has put the creator-person column on the table.</summary>
+    private static readonly MembershipDescriptor[] TodoShapesWithCreatorPerson =
+        TodoShapes.Append(D("sprk_createdbyperson", "createdByPerson", "SystemUser")).ToArray();
+
+    [Fact]
+    public async Task People_Todo_AnAppCreatedToDo_IsForThePersonWhoAskedForIt_NotForAnotherTeamMember()
+    {
+        // A to-do the browser created through the BFF (G5): createdby is the APPLICATION, sprk_createdbyperson the caller,
+        // owned by the team. It must stay in its creator's briefing — and only theirs.
+        var appCreated = Guid.Parse("bbbbbbbb-0000-0000-0000-0000000000a1");
+        var team = new EntityReference("team", BuDefaultTeamId);
+
+        Harness Build(Guid caller, PersonIdentity identity)
+        {
+            var h = new Harness(TodoShapesWithCreatorPerson, identity, human: true, cache: null, logger: null, entity: Todo, callerId: caller);
+            h.AnswerWhenQueryContains(CallerId, TodoRow(appCreated,
+                ("createdby", new EntityReference("systemuser", BffApplicationUser)),
+                ("sprk_createdbyperson", new EntityReference("systemuser", CallerId)),
+                ("ownerid", team)));
+            return h;
+        }
+
+        var forCaller = Build(CallerId, FullIdentity());
+        var callerResult = await forCaller.Sut.ResolveAsync(CallerId, Todo, MembershipResolveOptions.People, CancellationToken.None);
+
+        forCaller.CapturedFetch.Should().ContainSingle().Which.Should().Contain(Condition("sprk_createdbyperson", CallerId));
+        callerResult.Ids.Should().Equal(appCreated);
+        callerResult.ByRole["createdBy"].Should().BeEquivalentTo(new[] { appCreated }, "the person who asked is its creator on this surface");
+
+        var otherIdentity = new PersonIdentity(
+            SystemUserId: OtherMemberId, ContactId: OtherMemberContactId, TeamIds: new[] { BuDefaultTeamId },
+            BusinessUnitId: BusinessUnitId);
+        var forOther = Build(OtherMemberId, otherIdentity);
+        (await forOther.Sut.ResolveAsync(OtherMemberId, Todo, MembershipResolveOptions.People, CancellationToken.None))
+            .Ids.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task People_ACreatorPersonTerm_IsNeverEmitted_WhereTheTableHasNoSuchColumn()
+    {
+        // Before the schema step (or on a table without the column) discovery does not find it, so the query never names a
+        // column the table lacks — that would fail the whole briefing query.
+        var harness = new Harness(TodoShapes, FullIdentity(), human: true, cache: null, logger: null, entity: Todo, callerId: CallerId);
+
+        await harness.Sut.ResolveAsync(CallerId, Todo, MembershipResolveOptions.People, CancellationToken.None);
+
+        harness.CapturedFetch.Should().ContainSingle().Which.Should().NotContain("sprk_createdbyperson");
+    }
+
+    [Fact]
+    public async Task People_ForAnApplicationUser_NeitherCreatorTermBinds()
+    {
+        var harness = new Harness(TodoShapesWithCreatorPerson, FullIdentity(), human: false, cache: null, logger: null, entity: Todo, callerId: CallerId);
+
+        await harness.Sut.ResolveAsync(CallerId, Todo, MembershipResolveOptions.People, CancellationToken.None);
+
+        var fetch = harness.CapturedFetch.Should().ContainSingle().Subject;
+        fetch.Should().NotContain("'sprk_createdbyperson'").And.NotContain("'createdby'");
+    }
+
     private static Entity TodoRow(Guid id, params (string Attr, object Value)[] attributes)
     {
         var entity = new Entity(Todo) { Id = id };

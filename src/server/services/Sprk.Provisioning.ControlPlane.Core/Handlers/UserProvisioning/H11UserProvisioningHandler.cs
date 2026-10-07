@@ -64,7 +64,9 @@
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)                  │ Resumable                 │
 //   │ Missing/invalid identityPreset              │ Resumable                 │
-//   │ Missing/malformed/empty usersJson           │ Resumable                 │
+//   │ Missing/malformed/empty usersJson, or an    │ Resumable                 │
+//   │ unusable entry (UserProvisioningIntake)     │ (POST /api/runs rejects   │
+//   │                                             │ these at intake, T245c)   │
 //   │ Run not found in Cosmos partition          │ Resumable                 │
 //   │ NativeAccount: user creation failed        │ Resumable (POST /users is │
 //   │                                             │ idempotent via UPN check) │
@@ -122,16 +124,10 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
     public const string UsersJsonParameterKey = "usersJson";
 
     /// <summary>D6 identity preset value — cross-tenant B2B guest access.</summary>
-    public const string IdentityPresetB2BGuest = "B2BGuest";
+    public const string IdentityPresetB2BGuest = UserProvisioningIntake.B2BGuest;
 
     /// <summary>D6 identity preset value — low-IT-friction native tenant account.</summary>
-    public const string IdentityPresetNativeAccount = "NativeAccount";
-
-    private static readonly JsonSerializerOptions UsersJsonDeserializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-    };
+    public const string IdentityPresetNativeAccount = UserProvisioningIntake.NativeAccount;
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IGraphUserProvisioner _userProvisioner;
@@ -231,59 +227,22 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (4) identityPreset guard (design.md D6).
-        if (!TryGetNonEmpty(parameters, IdentityPresetParameterKey, out var identityPreset))
+        // (4) identityPreset + usersJson (design.md D6) — the rules POST /api/runs already applied at intake
+        //     (task 245c), checked again here for the WHOLE list before the first Graph call.
+        parameters.TryGetValue(IdentityPresetParameterKey, out var identityPreset);
+        parameters.TryGetValue(UsersJsonParameterKey, out var usersJson);
+        var intake = UserProvisioningIntake.Validate(identityPreset, usersJson);
+        if (intake is UserProvisioningIntakeOutcome.Invalid invalid)
         {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingIdentityPreset,
-                "Run parameter 'identityPreset' is required by H11 (design.md D6) — MUST be " +
-                $"'{IdentityPresetB2BGuest}' or '{IdentityPresetNativeAccount}'. Operator/upstream must " +
-                "populate before H11 dispatches.",
-                cancellationToken).ConfigureAwait(false);
+            return await FailAsync(run, etag, FailureClass.Resumable, invalid.RejectionCode,
+                $"Run parameter {invalid.Diagnostic}", cancellationToken).ConfigureAwait(false);
         }
+        var valid = (UserProvisioningIntakeOutcome.Valid)intake;
 
-        var isNativeAccount = string.Equals(identityPreset, IdentityPresetNativeAccount, StringComparison.Ordinal);
-        var isB2BGuest = string.Equals(identityPreset, IdentityPresetB2BGuest, StringComparison.Ordinal);
-        if (!isNativeAccount && !isB2BGuest)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.InvalidIdentityPreset,
-                $"Run parameter 'identityPreset' value '{identityPreset}' is not one of the two D6 presets " +
-                $"('{IdentityPresetB2BGuest}', '{IdentityPresetNativeAccount}').",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        // (5) usersJson guard.
-        if (!TryGetNonEmpty(parameters, UsersJsonParameterKey, out var usersJson))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingUsers,
-                "Run parameter 'usersJson' is required by H11 — a JSON array of {firstName,lastName,email," +
-                "companyName} entries. Operator/upstream must populate before H11 dispatches.",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        IReadOnlyList<UserProvisioningEntry> users;
-        try
-        {
-            users = JsonSerializer.Deserialize<IReadOnlyList<UserProvisioningEntry>>(
-                usersJson, UsersJsonDeserializerOptions) ?? Array.Empty<UserProvisioningEntry>();
-        }
-        catch (JsonException ex)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MalformedUsersPayload,
-                $"Run parameter 'usersJson' could not be deserialized as a user array: {ex.Message}",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        if (users.Count == 0)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.MissingUsers,
-                "Run parameter 'usersJson' deserialized to an empty array — H11 requires at least one user entry.",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        return isNativeAccount
-            ? await HandleNativeAccountAsync(run, etag, envelope, idempotencyKey, tenantId, users, stopwatch, cancellationToken)
+        return valid.IsNativeAccount
+            ? await HandleNativeAccountAsync(run, etag, envelope, idempotencyKey, tenantId, valid.Users, stopwatch, cancellationToken)
                 .ConfigureAwait(false)
-            : await HandleB2BGuestAsync(run, etag, envelope, idempotencyKey, tenantId, users, stopwatch, cancellationToken)
+            : await HandleB2BGuestAsync(run, etag, envelope, idempotencyKey, tenantId, valid.Users, stopwatch, cancellationToken)
                 .ConfigureAwait(false);
     }
 
@@ -303,8 +262,11 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
         CancellationToken cancellationToken)
     {
         var provisioned = new List<ProvisionedUserRecord>();
-        foreach (var entry in users)
+        // D15 (task 245c): diagnostics name a user by position in usersJson / Entra object id, never by name or UPN.
+        for (var i = 0; i < users.Count; i++)
         {
+            var entry = users[i];
+            var position = i + 1;
             UserCreationOutcome creationOutcome;
             try
             {
@@ -314,7 +276,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.UserCreationFailed,
-                    $"User creation infrastructure error for '{entry.FirstName} {entry.LastName}': " +
+                    $"User creation infrastructure error for usersJson entry {position}: " +
                     $"{ex.GetType().Name}: {ex.Message}",
                     cancellationToken).ConfigureAwait(false);
             }
@@ -322,7 +284,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             if (creationOutcome is UserCreationOutcome.Failure creationFailure)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.UserCreationFailed,
-                    $"User creation failed for '{entry.FirstName} {entry.LastName}': {creationFailure.Diagnostic}",
+                    $"User creation failed for usersJson entry {position}: {creationFailure.Diagnostic}",
                     cancellationToken).ConfigureAwait(false);
             }
 
@@ -337,8 +299,8 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return await FailAsync(run, etag, FailureClass.RetryableWithCleanup, H11Rejections.LicenseAssignmentFailed,
-                    $"License assignment infrastructure error for user '{created.Upn}' " +
-                    $"({entry.FirstName} {entry.LastName}): {ex.GetType().Name}: {ex.Message}. User account already " +
+                    $"License assignment infrastructure error for usersJson entry {position} (Entra user " +
+                    $"{created.UserId}): {ex.GetType().Name}: {ex.Message}. User account already " +
                     "exists — retry re-attempts only the license assignment.",
                     cancellationToken).ConfigureAwait(false);
             }
@@ -346,7 +308,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             if (licenseOutcome is LicenseAssignmentOutcome.Failure licenseFailure)
             {
                 return await FailAsync(run, etag, FailureClass.RetryableWithCleanup, H11Rejections.LicenseAssignmentFailed,
-                    $"License assignment failed for user '{created.Upn}' ({entry.FirstName} {entry.LastName}): " +
+                    $"License assignment failed for usersJson entry {position} (Entra user {created.UserId}): " +
                     $"{licenseFailure.Diagnostic}. User account already exists — retry re-attempts only the " +
                     "license assignment.",
                     cancellationToken).ConfigureAwait(false);
@@ -383,16 +345,12 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
     {
         var invited = new List<ProvisionedUserRecord>();
         var invitedUserIds = new List<string>();
-        foreach (var entry in users)
+        // Every entry carries an email: UserProvisioningIntake checked the whole list before this branch (T245c).
+        // D15: diagnostics name a user by position in usersJson, never by email.
+        for (var i = 0; i < users.Count; i++)
         {
-            if (string.IsNullOrWhiteSpace(entry.Email))
-            {
-                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
-                    $"B2BGuest entry for '{entry.FirstName} {entry.LastName}' is missing 'email' — B2B invitations " +
-                    "require invitedUserEmailAddress.",
-                    cancellationToken).ConfigureAwait(false);
-            }
-
+            var entry = users[i];
+            var position = i + 1;
             B2BInvitationOutcome invitationOutcome;
             try
             {
@@ -402,14 +360,14 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
-                    $"B2B invitation infrastructure error for '{entry.Email}': {ex.GetType().Name}: {ex.Message}",
+                    $"B2B invitation infrastructure error for usersJson entry {position}: {ex.GetType().Name}: {ex.Message}",
                     cancellationToken).ConfigureAwait(false);
             }
 
             if (invitationOutcome is B2BInvitationOutcome.Failure invitationFailure)
             {
                 return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.B2BInvitationFailed,
-                    $"B2B invitation failed for '{entry.Email}': {invitationFailure.Diagnostic}",
+                    $"B2B invitation failed for usersJson entry {position}: {invitationFailure.Diagnostic}",
                     cancellationToken).ConfigureAwait(false);
             }
 

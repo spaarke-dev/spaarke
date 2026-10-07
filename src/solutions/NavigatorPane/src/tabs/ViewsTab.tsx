@@ -263,7 +263,7 @@ export const ViewsTab: React.FC = () => {
   }, []);
 
   const handleViewClick = React.useCallback(async (view: IViewDefinition) => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'navigation']);
     if (!xrm) return;
     await navigateToView(xrm, view);
   }, []);

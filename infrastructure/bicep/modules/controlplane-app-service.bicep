@@ -81,6 +81,13 @@ param serviceBusQueueName string = 'sprk-provisioning-jobs'
 // were DELETED -- task 112's Path X migration made the runtime MI-native and
 // FR-38's acceptance criterion requires the Bicep residue's absence.
 
+@description('Admin Dataverse environment URL hosting the sprk_dataverseenvironment registry. Emitted as DataverseEnvironmentRegistry__AdminEnvironmentUrl: since REG-07 the Api host registers DataverseEnvironmentRegistryClient (CreateRun sanity-checks environmentId), whose options require it, and the CustomerRunGuard falls back to it as its TargetDataverseUrl (REG-05). Same value the Worker module receives. (Added task 242b, 2026-10-05: the Api module never emitted it.)')
+@minLength(1)
+param adminDataverseEnvironmentUrl string
+
+@description('CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module\'s value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)')
+param customerRunGuardEnabled bool = false
+
 @description('App Insights connection string (from monitoring.bicep outputs).')
 param appInsightsConnectionString string
 
@@ -161,6 +168,11 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'AZURE_CLIENT_ID', value: uamiClientId }
         { name: 'ManagedIdentity__ClientId', value: uamiClientId }
+
+        // REG-07 registry client + I5 CustomerRunGuard (task 242b). The guard's TargetDataverseUrl and
+        // ManagedIdentityClientId fall back to the two settings above/below (CustomerRunGuardModule).
+        { name: 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', value: adminDataverseEnvironmentUrl }
+        { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
 
         // ---------------------------------------------------------------
         // App Insights (connection string is not a secret per Azure guidance)

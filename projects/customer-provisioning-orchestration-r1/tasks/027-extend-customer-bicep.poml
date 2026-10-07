@@ -4,7 +4,7 @@
     <title>Extend customer.bicep — add Cosmos DB + optional SignalR; remove Redis; UAMI param</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deployment-touching Bicep change to the customer stamp — blast radius: every customer environment consumes this. task-create Step 3.5.5 FULL (azure-deployment scope; changes irreversible for deployed environments unless rolled forward).</rigor-reason>
     <model-tier>sonnet</model-tier>

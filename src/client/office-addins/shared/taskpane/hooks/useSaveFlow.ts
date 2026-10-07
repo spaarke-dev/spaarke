@@ -10,7 +10,7 @@ import {
   type ErrorMessage,
 } from '../utils/errorMessages';
 import { createSseConnection, type SseConnection, type SseEvent } from '../services/SseClient';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { toDocxFileName } from '../utils/documentFileName';
 
 /** A canonical (bare-lowercase, ADR-044) Dataverse GUID. */

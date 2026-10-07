@@ -15,6 +15,15 @@ import { renderHook, act } from '@testing-library/react';
 import { useInlineTodoCreate } from '../src/hooks/useInlineTodoCreate';
 import type { IWebApi, NotificationItem } from '../src/types/notifications';
 
+/**
+ * UAC-r2 task 147 r1: the hook now creates the To Do through the BFF (its default). These tests inject a creator that
+ * delegates to the webApi stub, so the payload assertions below still read what the hook built.
+ */
+function viaWebApi(webApi: IWebApi) {
+  return async (table: string, payload: Record<string, unknown>): Promise<string> =>
+    ((await webApi.createRecord(table, payload)) as { id: string }).id;
+}
+
 function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
     id: 'n-1',
@@ -67,7 +76,7 @@ describe('useInlineTodoCreate — primary-contact promise cache (R5 task 037 / F
     const retrieveRecord = jest.fn().mockReturnValue(lookupPromise);
     const webApi = makeWebApi({ retrieveRecord });
 
-    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1'));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1', viaWebApi(webApi)));
 
     await act(async () => {
       // Kick off two creates concurrently — neither awaited before the other starts.
@@ -93,7 +102,7 @@ describe('useInlineTodoCreate — primary-contact promise cache (R5 task 037 / F
   it('caches the resolved contact across sequential creates — second create issues no new lookup', async () => {
     const retrieveRecord = jest.fn().mockResolvedValue({ _sprk_primarycontact_value: 'contact-abc' });
     const webApi = makeWebApi({ retrieveRecord });
-    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1'));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1', viaWebApi(webApi)));
 
     await act(async () => {
       await result.current.createTodo(makeItem({ id: 'n-1' }));

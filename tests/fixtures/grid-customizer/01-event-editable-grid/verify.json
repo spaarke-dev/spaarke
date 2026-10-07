@@ -1,0 +1,357 @@
+{
+  "UniqueId": "00000000-0000-0000-0000-000000000000",
+  "CustomControls": [
+    {
+      "CustomControlId": "d550243b-6154-44e0-b46e-ef1f7a4a5e59",
+      "FormFactor": 0,
+      "Name": "Microsoft.PowerApps.PowerAppsOneGrid",
+      "DisplayNameKey": "PowerAppsOneGrid_Name",
+      "Parameters": [
+        { "Name": "AccessibleLabel", "Value": { "Usage": "Input" } },
+        { "Name": "EnableEditing", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "DisableChildItemsEditing",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "HeadlessRendering", "Value": { "Usage": "Input" } },
+        { "Name": "EnableFiltering", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableSorting", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableGrouping", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableAggregation", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnableColumnMoving", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "EnableMultipleSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableRangeSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableJumpBar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnablePagination", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "EnableDropdownColor",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableStatusIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableTypeIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "NavigationTypesAllowed",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "all" }
+        },
+        { "Name": "ReflowBehavior", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "Reflow" } },
+        { "Name": "ShowAvatar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ShowColumnNamesForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableBandedRowsForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "NumberOfListColumns",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Whole.None", "Value": 3 }
+        },
+        { "Name": "ShowFooter", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "ShowColumnHeaders", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ContextualLookupColumnFilters",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "LookupFilterBeginsWith",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        {
+          "Name": "UseFirstColumnForLookupEdits",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "GridActions", "Value": { "Usage": "Output" } },
+        { "Name": "BasePaletteColor", "Value": { "Usage": "Input" } },
+        { "Name": "Font", "Value": { "Usage": "Input" } },
+        { "Name": "FontColor", "Value": { "Usage": "Input" } },
+        { "Name": "FontSize", "Value": { "Usage": "Input" } },
+        { "Name": "FontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFont", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontColor", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontSize", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "NoDataText", "Value": { "Usage": "Input" } },
+        { "Name": "TabIndex", "Value": { "Usage": "Input" } },
+        { "Name": "DateTimeFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "DateOnlyFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "EnableStatusColumn", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "DisableStatusColumn", "Value": { "Usage": "Input" } },
+        { "Name": "DisableStatusColumnSavingIcons", "Value": { "Usage": "Input" } },
+        {
+          "Name": "Items",
+          "Value": {
+            "Name": "Items",
+            "Columns": [],
+            "ViewId": "7690f9d7-9cb1-4837-ac76-d0705e9e1b75",
+            "EnableViewPicker": true,
+            "RelationshipName": null,
+            "RelationshipRoleOrdinal": null,
+            "TargetEntityType": null,
+            "ContextFilter": null,
+            "ExtraCondition": null,
+            "RelationshipType": -1,
+            "ReferencingName": null,
+            "IsHierarchyEnabled": false,
+            "EntityName": "sprk_event",
+            "Lookups": {},
+            "Type": "Grid"
+          }
+        },
+        { "Name": "ChildItems", "Value": { "Name": "ChildItems", "Columns": [], "Type": "Grid" } },
+        {
+          "Name": "GridCustomizerControlFullName",
+          "Value": {
+            "Usage": "Input",
+            "Static": true,
+            "Type": "SingleLine.Text",
+            "Value": "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
+          }
+        }
+      ],
+      "ShouldOverrideControlVisible": false
+    },
+    {
+      "CustomControlId": "d550243b-6154-44e0-b46e-ef1f7a4a5e59",
+      "FormFactor": 1,
+      "Name": "Microsoft.PowerApps.PowerAppsOneGrid",
+      "DisplayNameKey": "PowerAppsOneGrid_Name",
+      "Parameters": [
+        { "Name": "AccessibleLabel", "Value": { "Usage": "Input" } },
+        { "Name": "EnableEditing", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "DisableChildItemsEditing",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "HeadlessRendering", "Value": { "Usage": "Input" } },
+        { "Name": "EnableFiltering", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableSorting", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableGrouping", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableAggregation", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnableColumnMoving", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "EnableMultipleSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableRangeSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableJumpBar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnablePagination", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "EnableDropdownColor",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableStatusIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableTypeIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "NavigationTypesAllowed",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "all" }
+        },
+        { "Name": "ReflowBehavior", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "Reflow" } },
+        { "Name": "ShowAvatar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ShowColumnNamesForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableBandedRowsForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "NumberOfListColumns",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Whole.None", "Value": 3 }
+        },
+        { "Name": "ShowFooter", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "ShowColumnHeaders", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ContextualLookupColumnFilters",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "LookupFilterBeginsWith",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        {
+          "Name": "UseFirstColumnForLookupEdits",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "GridActions", "Value": { "Usage": "Output" } },
+        { "Name": "BasePaletteColor", "Value": { "Usage": "Input" } },
+        { "Name": "Font", "Value": { "Usage": "Input" } },
+        { "Name": "FontColor", "Value": { "Usage": "Input" } },
+        { "Name": "FontSize", "Value": { "Usage": "Input" } },
+        { "Name": "FontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFont", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontColor", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontSize", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "NoDataText", "Value": { "Usage": "Input" } },
+        { "Name": "TabIndex", "Value": { "Usage": "Input" } },
+        { "Name": "DateTimeFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "DateOnlyFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "EnableStatusColumn", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "DisableStatusColumn", "Value": { "Usage": "Input" } },
+        { "Name": "DisableStatusColumnSavingIcons", "Value": { "Usage": "Input" } },
+        {
+          "Name": "Items",
+          "Value": {
+            "Name": "Items",
+            "Columns": [],
+            "ViewId": "7690f9d7-9cb1-4837-ac76-d0705e9e1b75",
+            "EnableViewPicker": true,
+            "RelationshipName": null,
+            "RelationshipRoleOrdinal": null,
+            "TargetEntityType": null,
+            "ContextFilter": null,
+            "ExtraCondition": null,
+            "RelationshipType": -1,
+            "ReferencingName": null,
+            "IsHierarchyEnabled": false,
+            "EntityName": "sprk_event",
+            "Lookups": {},
+            "Type": "Grid"
+          }
+        },
+        { "Name": "ChildItems", "Value": { "Name": "ChildItems", "Columns": [], "Type": "Grid" } },
+        {
+          "Name": "GridCustomizerControlFullName",
+          "Value": {
+            "Usage": "Input",
+            "Static": true,
+            "Type": "SingleLine.Text",
+            "Value": "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
+          }
+        }
+      ],
+      "ShouldOverrideControlVisible": false
+    },
+    {
+      "CustomControlId": "d550243b-6154-44e0-b46e-ef1f7a4a5e59",
+      "FormFactor": 2,
+      "Name": "Microsoft.PowerApps.PowerAppsOneGrid",
+      "DisplayNameKey": "PowerAppsOneGrid_Name",
+      "Parameters": [
+        { "Name": "AccessibleLabel", "Value": { "Usage": "Input" } },
+        { "Name": "EnableEditing", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "DisableChildItemsEditing",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "HeadlessRendering", "Value": { "Usage": "Input" } },
+        { "Name": "EnableFiltering", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableSorting", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableGrouping", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableAggregation", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnableColumnMoving", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "EnableMultipleSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableRangeSelection",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableJumpBar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "EnablePagination", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "EnableDropdownColor",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        { "Name": "EnableStatusIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "EnableTypeIcons", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        {
+          "Name": "NavigationTypesAllowed",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "all" }
+        },
+        { "Name": "ReflowBehavior", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "Reflow" } },
+        { "Name": "ShowAvatar", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ShowColumnNamesForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "EnableBandedRowsForListView",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "NumberOfListColumns",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Whole.None", "Value": 3 }
+        },
+        { "Name": "ShowFooter", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        { "Name": "ShowColumnHeaders", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" } },
+        {
+          "Name": "ContextualLookupColumnFilters",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "yes" }
+        },
+        {
+          "Name": "LookupFilterBeginsWith",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        {
+          "Name": "UseFirstColumnForLookupEdits",
+          "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" }
+        },
+        { "Name": "GridActions", "Value": { "Usage": "Output" } },
+        { "Name": "BasePaletteColor", "Value": { "Usage": "Input" } },
+        { "Name": "Font", "Value": { "Usage": "Input" } },
+        { "Name": "FontColor", "Value": { "Usage": "Input" } },
+        { "Name": "FontSize", "Value": { "Usage": "Input" } },
+        { "Name": "FontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFont", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontColor", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontSize", "Value": { "Usage": "Input" } },
+        { "Name": "HeaderFontWeight", "Value": { "Usage": "Input" } },
+        { "Name": "NoDataText", "Value": { "Usage": "Input" } },
+        { "Name": "TabIndex", "Value": { "Usage": "Input" } },
+        { "Name": "DateTimeFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "DateOnlyFormat", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "none" } },
+        { "Name": "EnableStatusColumn", "Value": { "Usage": "Input", "Static": true, "Type": "Enum", "Value": "no" } },
+        { "Name": "DisableStatusColumn", "Value": { "Usage": "Input" } },
+        { "Name": "DisableStatusColumnSavingIcons", "Value": { "Usage": "Input" } },
+        {
+          "Name": "Items",
+          "Value": {
+            "Name": "Items",
+            "Columns": [],
+            "ViewId": "7690f9d7-9cb1-4837-ac76-d0705e9e1b75",
+            "EnableViewPicker": true,
+            "RelationshipName": null,
+            "RelationshipRoleOrdinal": null,
+            "TargetEntityType": null,
+            "ContextFilter": null,
+            "ExtraCondition": null,
+            "RelationshipType": -1,
+            "ReferencingName": null,
+            "IsHierarchyEnabled": false,
+            "EntityName": "sprk_event",
+            "Lookups": {},
+            "Type": "Grid"
+          }
+        },
+        { "Name": "ChildItems", "Value": { "Name": "ChildItems", "Columns": [], "Type": "Grid" } },
+        {
+          "Name": "GridCustomizerControlFullName",
+          "Value": {
+            "Usage": "Input",
+            "Static": true,
+            "Type": "SingleLine.Text",
+            "Value": "sprk_Spaarke.Controls.SpaarkeGridCustomizer"
+          }
+        }
+      ],
+      "ShouldOverrideControlVisible": false
+    }
+  ],
+  "FormLibraries": [],
+  "EventHandlers": [],
+  "VersionNumber": 0,
+  "OverallVersionNumber": 0
+}

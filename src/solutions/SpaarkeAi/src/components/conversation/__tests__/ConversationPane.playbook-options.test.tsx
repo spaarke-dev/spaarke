@@ -344,6 +344,8 @@ describe('ConversationPane → onOpenLibraryModal (FR-51)', () => {
     originalXrm = (window as any).Xrm;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (window as any).Xrm = {
+      // The shared getXrm() walker (task 081 / C-8) accepts a frame only when Xrm.WebApi is present.
+      WebApi: {},
       Navigation: { navigateTo: navigateToSpy },
     };
     navigateToSpy.mockClear();

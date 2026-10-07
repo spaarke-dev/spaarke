@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Sprk.Bff.Api.Infrastructure.HealthChecks;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -78,11 +79,14 @@ public static class ComposeModule
         // deliberately differs from its Unhealthy-on-drift sibling.
         services.AddSingleton<ComposeIdentityKeyHealthCheck>();
         services.AddHostedService(sp => sp.GetRequiredService<ComposeIdentityKeyHealthCheck>());
+        // AddCatalogCheck adds the "catalog" tag and memoizes the result for 30 s, one evaluation shared by every
+        // caller of the anonymous route (unified-access-control-r2 task 167, round 34 item 7); it resolves the
+        // singleton above, exactly as AddCheck<T> did.
         services.AddHealthChecks()
-            .AddCheck<ComposeIdentityKeyHealthCheck>(
+            .AddCatalogCheck<ComposeIdentityKeyHealthCheck>(
                 "compose-identity-key",
                 failureStatus: HealthStatus.Degraded,
-                tags: new[] { "compose", "identity-key", "catalog" });
+                tags: new[] { "compose", "identity-key" });
 
         return services;
     }

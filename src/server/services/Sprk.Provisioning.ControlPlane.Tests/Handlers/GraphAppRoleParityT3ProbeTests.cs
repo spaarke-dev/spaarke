@@ -101,9 +101,9 @@ public sealed class GraphAppRoleParityT3ProbeTests
     [Fact]
     public async Task ProbeAsync_AllRolesGranted_ReturnsPassed()
     {
+        // Task 251: "all" = every Entra-granted role; the mailbox roles are granted through Exchange.
         var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
-        var verifier = new FakeParityVerifier(
-            result: new GraphAppRoleParityResult.Verified(registry.GetAll().Count));
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value));
         var httpHandler = FakeGraphSpHandler.ReturnsSp(UamiSpObjectId);
         var probe = BuildProbe(registry, verifier, httpHandler);
 
@@ -111,7 +111,21 @@ public sealed class GraphAppRoleParityT3ProbeTests
 
         outcome.Should().BeOfType<TrapVerificationOutcome.Passed>()
             .Which.Kind.Should().Be(TrapKind.T3GraphAppRoleParity);
-        verifier.CallCount.Should().Be(1);
+        verifier.CallCount.Should().Be(2, "one read for the Entra roles, one proving the mailbox roles are absent");
+    }
+
+    [Fact]
+    public async Task ProbeAsync_MailboxRoleGrantedInEntra_ReturnsFailed()
+    {
+        // Task 251: an Entra Mail.* grant reaches every mailbox in the tenant and voids H14a's Exchange scope.
+        var registry = FakeGraphAppRolesRegistry.WithFullCatalog();
+        var verifier = FakeParityVerifier.Granting(((IGraphAppRolesRegistry)registry).GetEntraGranted().Select(r => r.Value).Append("Mail.Send"));
+        var probe = BuildProbe(registry, verifier, FakeGraphSpHandler.ReturnsSp(UamiSpObjectId));
+
+        var outcome = await probe.ProbeAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<TrapVerificationOutcome.Failed>().Which.Diagnostic
+            .Should().Contain("mailbox role(s) granted through Entra: Mail.Send");
     }
 
     // ---------- T3 parity mismatch (silent-fail catch) ----------
@@ -548,6 +562,12 @@ public sealed class GraphAppRoleParityT3ProbeTests
             _throwOnCall = throwOnCall;
         }
 
+        private IReadOnlySet<string>? _granted;
+
+        /// <summary>Reports exactly <paramref name="grantedValues"/> as granted, for any expected list.</summary>
+        public static FakeParityVerifier Granting(IEnumerable<string> grantedValues)
+            => new(new GraphAppRoleParityResult.Verified(0)) { _granted = new HashSet<string>(grantedValues, StringComparer.Ordinal) };
+
         public Task<GraphAppRoleParityResult> VerifyAsync(
             string uamiServicePrincipalObjectId,
             string tenantId,
@@ -562,6 +582,13 @@ public sealed class GraphAppRoleParityT3ProbeTests
             if (_throwOnCall is not null)
             {
                 throw _throwOnCall;
+            }
+            if (_granted is not null)
+            {
+                var missing = expectedRoles.Select(r => r.Value).Where(v => !_granted.Contains(v)).ToArray();
+                return Task.FromResult<GraphAppRoleParityResult>(missing.Length == 0
+                    ? new GraphAppRoleParityResult.Verified(expectedRoles.Count)
+                    : new GraphAppRoleParityResult.Partial(missing, expectedRoles.Count - missing.Length, expectedRoles.Count));
             }
             return Task.FromResult(_result!);
         }

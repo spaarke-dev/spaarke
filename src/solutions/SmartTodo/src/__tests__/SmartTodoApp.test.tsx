@@ -74,6 +74,8 @@ jest.mock('@spaarke/ui-components', () => ({
   // try/catch, so a stub missing this key makes the call throw and silently
   // return `undefined`, which a shallower mock would miss entirely.
   cleanGuid: (id: string | null | undefined) => (id ?? '').replace(/[{}]/g, '').trim().toLowerCase(),
+  // The REAL shared cross-frame walker (task 081 / C-8) — newTaskLauncher resolves Xrm with it.
+  getXrm: jest.requireActual('@spaarke/ui-components/utils/xrmContext').getXrm,
 }));
 
 import {

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "description": "The regarding FILING columns of the child tables sprk_todo, sprk_event, sprk_communication and sprk_analysis (unified-access-control-r2 task 168). This file is the ONE list (owner/main-session round 38). scripts/Lock-CoreAncestorStampColumnsOnForms.ps1 disables the root columns on the forms; scripts/Add-RegardingFilingPickerToForms.ps1 hides the raw filing columns on the forms; src/client/pcf/SpaarkeGridCustomizer (customizers/RootColumnLock.ts) makes both sets not editable in the sprk_event and sprk_analysis grids. All three read this file. Do not copy it anywhere else.",
+  "rule": "A FILING column is a root column, or a raw filing column. A raw filing column is the record-type column or a pair text column, or a column whose logical name starts with lookupPrefix, whose type is one of lookupTypes, and that is not a root column. Names compare as whole values, case-insensitively: sprk_RegardingMatter matches, sprk_regardingmatterstatus does not match a root. The forms read a column's type from the table's live metadata (AttributeType); the grid reads it from the column definition (dataType). Both use the same type names.",
+  "howToExtend": [
+    "rootColumns is CoreAncestorResolver.CoreAncestorLookups (task 156, src/server). Change it only together with that server list, then re-run both form scripts (dry run, -Apply, -Verify) and rebuild and redeploy SpaarkeGridCustomizer with a version bump.",
+    "A new pair column of the ADR-024 regarding pair goes in pairTextColumns (or recordTypeColumn) here, nowhere else.",
+    "optionalPairTextColumns names the pairTextColumns the RegardingResolver writes only where the table has them (it binds sprk_regardingrecordnumber only when present). Every OTHER pair column, and recordTypeColumn, is required: Add-RegardingFilingPickerToForms.ps1 refuses a table that lacks one (PAIR_INCOMPLETE, naming it). Each entry must also be in pairTextColumns.",
+    "A new sprk_regarding* lookup on a child table needs no edit: the rule covers it by prefix and type."
+  ],
+  "rootColumns": [
+    "sprk_regardingproject",
+    "sprk_regardingmatter",
+    "sprk_regardingworkassignment",
+    "sprk_regardingservicerequest"
+  ],
+  "recordTypeColumn": "sprk_regardingrecordtype",
+  "pairTextColumns": [
+    "sprk_regardingrecordid",
+    "sprk_regardingrecordname",
+    "sprk_regardingrecordurl",
+    "sprk_regardingrecordnumber"
+  ],
+  "optionalPairTextColumns": ["sprk_regardingrecordnumber"],
+  "lookupPrefix": "sprk_regarding",
+  "lookupTypes": ["Lookup"]
+}

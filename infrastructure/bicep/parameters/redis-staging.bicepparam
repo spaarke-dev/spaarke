@@ -1,52 +1,29 @@
 // infrastructure/bicep/parameters/redis-staging.bicepparam
-// Dedicated BFF Redis cache — staging environment parameters
-//
-// Project: spaarke-redis-cache-remediation-r1 (task 023, FR-20)
-// FR-20 (ADR-009 amendment SKU table): staging SKU = Standard C0 — HA required
-// for staging fidelity to prod (single-node Basic insufficient).
-// NFR-03: canonical name `spaarke-bff-redis-{env}` (top-level env-suffix).
+// Staging per-environment Redis — Azure Managed Redis, Microsoft Entra only (task 242, owner D12/D13).
+// No staging environment exists today (2026-10-04); this file is the template for when one is stood up.
+// High availability on for staging fidelity to customer stamps. The cache has no access keys: list every
+// identity that must read or write it (the staging BFF's user-assigned identity) before deploying.
 //
 // Usage:
 //   az deployment group create \
 //     --resource-group <rg> \
 //     --template-file infrastructure/bicep/modules/redis.bicep \
 //     --parameters infrastructure/bicep/parameters/redis-staging.bicepparam
-//
-// OR via deploy script (task 030+):
-//   ./scripts/Deploy-RedisCache.ps1 -Environment staging
-//
-// Constraints:
-//   - FR-09: targets the audited redis.bicep module (SKU shape = string+int per audit decision)
-//   - FR-20: staging gets Standard (replication) per ADR-009 SKU table addition
-//   - NFR-05: staging environment only — Deploy-RedisCache.ps1 rejects prod/demo without -Force
-//   - Module defaults: redisVersion='' (Azure default), subnetId='' (public), staticIP=''
 
 using '../modules/redis.bicep'
 
-// ============================================================================
-// IDENTITY
-// ============================================================================
-
-// Canonical resource name (NFR-03)
 param redisName = 'spaarke-bff-redis-staging'
 
-// ============================================================================
-// SKU (Standard C0 — HA for staging fidelity, FR-20)
-// ============================================================================
-
-param sku = 'Standard'
-param capacity = 0
-
-// ============================================================================
-// SECURITY
-// ============================================================================
-
+param skuName = 'Balanced_B0'
+param highAvailability = 'Enabled'
 param minimumTlsVersion = '1.2'
-param enableNonSslPort = false
+param publicNetworkAccess = 'Enabled'
 
-// ============================================================================
-// TAGS
-// ============================================================================
+// PLACEHOLDER — replace with the staging BFF user-assigned identity's OBJECT id before deploying. Not a GUID on purpose:
+// Azure rejects it, so this template cannot deploy a cache that no identity can reach (the module requires >= 1).
+param accessPolicyPrincipalIds = [
+  'REPLACE-WITH-staging-BFF-UAMI-object-id'
+]
 
 param tags = {
   environment: 'staging'

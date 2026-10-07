@@ -1,4 +1,7 @@
+using System.Text.Json.Serialization;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -30,6 +33,17 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// about ONE record for the CALLER, and deliberately does not return the rights mask. Handing a client the
 /// raw rights would invite it to re-derive authorization rules client-side, which is the pattern this
 /// project exists to remove (CLAUDE.md §11 — one component that answers one question well).</para>
+///
+/// <para><b>The record's OWNER, on request only</b> (task 150, round 46 item 4; round 53 item 2). With
+/// <c>includeOwner=true</c> the answer also names the record's owning team, whether it is the Secure Record Owners team,
+/// and whether that team owns it inside the Secure Record business unit (<see cref="ReadOwnerAsync"/>). These are facts
+/// about the RECORD, not the caller's rights — the rights mask is still never returned — and they decide nothing here.
+/// The Access ribbon needs them to tell a provisioned secure record from one whose secure transition did not finish (a
+/// secure record reassigned outside Spaarke to a team in another business unit, or a legacy one still user-owned), and
+/// both from one owned by ANOTHER team inside the Secure Record business unit (the retired default team before task 144's
+/// migration — already isolated, so nothing to finish), because which team and business unit those are is the server's
+/// configuration. Opt-in, so the Manage Access gates (<c>TrackingFieldTrio</c>, the flyout's own visibility) still make
+/// one rights probe and no read.</para>
 ///
 /// <para><b>It adds no second <c>RetrievePrincipalAccess</c> caller.</b> The rights come from
 /// <see cref="Infrastructure.ExternalAccess.CallerRecordAccessProbe"/>, invoked once by the filter on the
@@ -81,7 +95,9 @@ public static class RecordAccessGateEndpoint
                 "canManageAccess = true when the caller holds Write on it, 403 with a " +
                 "sdap.access.deny.delegation_* reason code when they do not, or when it could not be " +
                 "established. Clients gate the Manage Access affordance on this and MUST treat anything other " +
-                "than 200 + canManageAccess = true as a denial.")
+                "than 200 + canManageAccess = true as a denial. With includeOwner=true the 200 also names the " +
+                "record's owning team, whether it is the Secure Record Owners team, and whether that team owns it inside " +
+                "the Secure Record business unit (null = could not be told).")
             .Produces<RecordAccessGateResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -92,12 +108,16 @@ public static class RecordAccessGateEndpoint
 
     /// <summary>Handles <c>GET /api/v1/external-access/can-manage-access</c>.</summary>
     /// <returns>
-    /// 200 with <c>canManageAccess = true</c>. 400 only for a record the root resolver rejects. Every denial
-    /// is the group filter's 403 and never reaches here.
+    /// 200 with <c>canManageAccess = true</c> (and, with <c>includeOwner=true</c>, the record's owner facts). 400 only for
+    /// a record the root resolver rejects. Every denial is the group filter's 403 and never reaches here.
     /// </returns>
-    internal static IResult Handle(
+    internal static async Task<IResult> Handle(
         [AsParameters] RecordAccessGateQuery query,
-        HttpContext httpContext)
+        DataverseWebApiClient dataverseClient,
+        IConfiguration configuration,
+        ILogger<Program> logger,
+        HttpContext httpContext,
+        CancellationToken ct)
     {
         var root = GrantExternalAccessEndpoint.ResolveExplicitRoot(query.RecordType, query.RecordId);
         if (!root.Ok)
@@ -115,6 +135,132 @@ public static class RecordAccessGateEndpoint
 
         // Reaching this line IS the answer: DelegationRuleFilter established Write on this record, as the
         // caller, over OBO. Nothing here re-decides it.
-        return TypedResults.Ok(new RecordAccessGateResponse(root.Id, CanManageAccess: true));
+        if (query.IncludeOwner != true)
+            return TypedResults.Ok(new RecordAccessGateResponse(root.Id, CanManageAccess: true));
+
+        // Round 46 item 4: who OWNS the record — asked only by the Access ribbon's secure-state rule, for a record flagged
+        // secure. Facts about the record, never about the caller's rights; the delegation answer above is unchanged.
+        var owner = await ReadOwnerAsync(
+            dataverseClient, configuration, SecureRecordRoot.For(root.Type), root.Id, logger, httpContext.TraceIdentifier, ct);
+        return TypedResults.Ok(new RecordAccessGateResponse(
+            root.Id, CanManageAccess: true, owner.OwningTeamId, owner.OwnedBySecureOwnerTeam,
+            owner.OwningTeamInSecureBusinessUnit));
+    }
+
+    /// <summary>
+    /// Task 150 (round 46 item 4; round 53 item 2): the record's owning team, whether it is the Secure Record Owners team,
+    /// and whether that team owns it inside the Secure Record business unit — the facts the Access ribbon needs to tell a
+    /// PROVISIONED secure record (owned by that team, its own container recorded) from one whose transition did not finish
+    /// (reassigned outside Spaarke to a team in another business unit, or a legacy one provisioned before task 133's owner
+    /// move, still user-owned), and both from one owned by ANOTHER team inside the Secure Record business unit (the retired
+    /// default team before task 144's migration: already isolated — provisioning refuses it 409
+    /// <c>owned_by_other_secure_team</c>, and the ribbon hides Make Secure). App-only reads; the caller already passed the
+    /// delegation filter (Write on THIS record).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Unknown is never an answer</b> (ADR-003). The record's owner could not be read, it was read with neither
+    /// owner column, or which team is the Secure Record Owners team could not be told
+    /// (<see cref="SecureRecordOwnerTeam.IdentifyAsync"/> refused: absent, ambiguous or unreadable) — each answers
+    /// <c>OwnedBySecureOwnerTeam = null</c>, logged. A team owner read without its owning business unit answers
+    /// <c>OwningTeamInSecureBusinessUnit = null</c>. The ribbon offers Make Secure on neither basis.</para>
+    /// <para><b>Placement</b> (CLAUDE.md §10/§11): an extension of this route, opt-in, so the Manage Access gates' form-load
+    /// path makes no extra read. Which team and business unit are the Secure Record ones is decided by the ONE rule
+    /// provisioning uses (<see cref="SecureRecordOwnerTeam"/>, its first two steps), and "inside" by the one predicate its
+    /// <c>owned_by_other_secure_team</c> refusal uses (<see cref="SecureRecordOwnerTeam.IsInSecureBusinessUnit"/>) — never
+    /// re-implemented here.</para>
+    /// </remarks>
+    internal static async Task<RecordOwnerFacts> ReadOwnerAsync(
+        DataverseWebApiClient dataverseClient,
+        IConfiguration configuration,
+        SecureRecordRoot root,
+        Guid recordId,
+        ILogger logger,
+        string traceId,
+        CancellationToken ct)
+    {
+        OwnerRow? row;
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<OwnerRow>(
+                root.EntitySet,
+                filter: $"{root.IdColumn} eq {recordId}",
+                select: OwnerSelect(root),
+                top: 1,
+                cancellationToken: ct);
+            row = rows.FirstOrDefault();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[ACCESS-GATE] The owner of {RecordType} {RecordId} could not be read; reporting it as unknown. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+            return RecordOwnerFacts.Unknown;
+        }
+
+        if (row?._owninguser_value is { } user && user != Guid.Empty)
+            return new RecordOwnerFacts(OwningTeamId: null, OwnedBySecureOwnerTeam: false, OwningTeamInSecureBusinessUnit: null);
+
+        if (row?._owningteam_value is not { } team || team == Guid.Empty)
+        {
+            logger.LogWarning(
+                "[ACCESS-GATE] {RecordType} {RecordId} was read with neither an owning user nor an owning team " +
+                "(found: {Found}); reporting its owner as unknown. TraceId={TraceId}",
+                root.WireToken, recordId, row is not null, traceId);
+            return RecordOwnerFacts.Unknown;
+        }
+
+        var secureTeam = await SecureRecordOwnerTeam.IdentifyAsync(dataverseClient, configuration, ct);
+        if (!secureTeam.IsIdentified)
+        {
+            logger.LogWarning(secureTeam.Fault,
+                "[ACCESS-GATE] {RecordType} {RecordId} is owned by team {TeamId}, but which team is the Secure Record " +
+                "Owners team could not be told ({Refusal}); reporting whether it is as unknown. TraceId={TraceId}",
+                root.WireToken, recordId, team, secureTeam.Refusal, traceId);
+            return new RecordOwnerFacts(OwningTeamId: team, OwnedBySecureOwnerTeam: null, OwningTeamInSecureBusinessUnit: null);
+        }
+
+        // Round 53 item 2: inside the Secure Record business unit — the ONE predicate provisioning's 409
+        // owned_by_other_secure_team uses — tells another team there (already isolated) from a team outside it.
+        var inSecureBusinessUnit =
+            SecureRecordOwnerTeam.IsInSecureBusinessUnit(row._owningbusinessunit_value, secureTeam.BusinessUnitId!.Value);
+        if (inSecureBusinessUnit is null)
+        {
+            logger.LogWarning(
+                "[ACCESS-GATE] {RecordType} {RecordId} is owned by team {TeamId} but was read without its owning business " +
+                "unit; reporting whether that is the Secure Record business unit as unknown. TraceId={TraceId}",
+                root.WireToken, recordId, team, traceId);
+        }
+
+        return new RecordOwnerFacts(
+            OwningTeamId: team,
+            OwnedBySecureOwnerTeam: team == secureTeam.OwnerTeamId,
+            OwningTeamInSecureBusinessUnit: inSecureBusinessUnit);
+    }
+
+    /// <summary>
+    /// The one read <see cref="ReadOwnerAsync"/> makes of the record: its id, both owner columns and its owning business unit.
+    /// </summary>
+    internal static string OwnerSelect(SecureRecordRoot root) =>
+        $"{root.IdColumn},_owningteam_value,_owninguser_value,_owningbusinessunit_value";
+
+    /// <summary>The record's owner, as <see cref="RecordAccessGateResponse"/> reports it.</summary>
+    internal sealed record RecordOwnerFacts(Guid? OwningTeamId, bool? OwnedBySecureOwnerTeam, bool? OwningTeamInSecureBusinessUnit)
+    {
+        /// <summary>The owner could not be told.</summary>
+        public static readonly RecordOwnerFacts Unknown = new(null, null, null);
+    }
+
+    /// <summary>The owner columns of a secure root (the same JSON names provisioning's root read uses).</summary>
+    internal sealed class OwnerRow
+    {
+        [JsonPropertyName("_owningteam_value")]
+        public Guid? _owningteam_value { get; set; }
+
+        [JsonPropertyName("_owninguser_value")]
+        public Guid? _owninguser_value { get; set; }
+
+        /// <summary>The business unit the record's owner places it in (round 53 item 2).</summary>
+        [JsonPropertyName("_owningbusinessunit_value")]
+        public Guid? _owningbusinessunit_value { get; set; }
     }
 }

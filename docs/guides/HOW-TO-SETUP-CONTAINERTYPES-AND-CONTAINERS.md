@@ -250,7 +250,10 @@ az webapp restart --name <app-service-name> --resource-group <resource-group>
 
 ### When Adding New Business Units
 
-Run the standalone script when a new BU is created:
+Run the standalone script when a new BU is created. It creates the container, **binds it to the business unit** (custom
+property `spaarkeBusinessUnitId`, read back; the container is removed if the stamp did not land — unified-access-control-r2
+task 165, owner round 35 item 1) and only then sets `sprk_containerid`. An unbound container is reached by no SPE admin
+route, so a container created any other way must be bound with `Backfill-SpeContainerBusinessUnitStamp.ps1`.
 
 ```powershell
 .\scripts\New-BusinessUnitContainer.ps1 `
@@ -295,6 +298,23 @@ CONTAINER_ID=$(curl -sS -X POST \
   -H "Content-Type: application/json" \
   -d "{\"displayName\":\"$DISPLAY_NAME\",\"description\":\"$DESCRIPTION\",\"containerTypeId\":\"$CONTAINER_TYPE_ID\"}" | jq -r .id)
 
+# Step 3b: BIND the container to the business unit that owns it (task 165, owner round 35 item 1 — MANDATORY).
+# The SPE admin plane reaches NO unbound container. Stamp, read it back, and remove the container if it did not land.
+BUSINESS_UNIT_ID="<owning-business-unit-guid>"
+curl -sS -X PATCH \
+  "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID/customProperties" \
+  -H "Authorization: Bearer $APP_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"spaarkeBusinessUnitId\":{\"value\":\"$BUSINESS_UNIT_ID\",\"isSearchable\":false}}"
+STAMP=$(curl -sS "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID?\$select=id,customProperties" \
+  -H "Authorization: Bearer $APP_TOKEN" | jq -r '.customProperties.spaarkeBusinessUnitId.value')
+if [ "$STAMP" != "$BUSINESS_UNIT_ID" ]; then
+  curl -sS -X DELETE "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID" \
+    -H "Authorization: Bearer $APP_TOKEN"
+  echo "The stamp did not read back — the container was removed." >&2
+fi
+# (Prefer scripts/New-BusinessUnitContainer.ps1, which does all of this through scripts/common/SpeContainerBinding.ps1.)
+
 # Step 4: Activate the container (required — new containers start inactive; returns 204)
 curl -sS -X POST \
   "https://graph.microsoft.com/v1.0/storage/fileStorage/containers/$CONTAINER_ID/activate" \
@@ -325,6 +345,10 @@ ADR-002 prohibits Dataverse plugins, so automatic container creation on BU creat
 | **Power Automate flow** | BU record created in Dataverse | Medium — calls Graph API + updates BU |
 | **BFF API endpoint** | Ribbon button / command bar action | Medium — new endpoint + UI button |
 | **Manual script** | Operator runs `New-BusinessUnitContainer.ps1` | Low — current approach |
+
+> Whatever the trigger, the container MUST be bound to its business unit at creation (stamp, read back, remove on
+> failure — task 165, owner round 35 item 1). A flow or endpoint that creates containers without it creates containers
+> no SPE admin route reaches.
 
 ---
 

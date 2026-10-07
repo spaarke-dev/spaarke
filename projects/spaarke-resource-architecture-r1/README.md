@@ -1,5 +1,7 @@
 # Spaarke Resource Architecture (R1)
 
+> **Portfolio**: [Project #1231](https://github.com/spaarke-dev/spaarke/issues/1231) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Project**: `spaarke-resource-architecture-r1`
 > **Status**: 🟡 **DEFERRED** — design only; execution sequenced after [`sdap-bff-api-remediation-fix`](../sdap-bff-api-remediation-fix/) completes
 > **Created**: 2026-05-23

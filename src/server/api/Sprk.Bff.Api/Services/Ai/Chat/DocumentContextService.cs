@@ -1,5 +1,6 @@
 using System.Numerics.Tensors;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -62,6 +63,12 @@ public sealed class DocumentContextService
     private readonly ILogger _logger;
 
     /// <summary>
+    /// Verifies a row's pointer before the APP-ONLY download (unified-access-control-r2 task 166 r1, owner round 21
+    /// item 1b). The OBO branch is bounded by the user's own SharePoint Embedded permissions and does not need it.
+    /// </summary>
+    private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>
     /// Initializes a new instance of <see cref="DocumentContextService"/>.
     /// </summary>
     /// <param name="documentService">Dataverse document lookup (for SPE IDs and metadata).</param>
@@ -69,18 +76,21 @@ public sealed class DocumentContextService
     /// <param name="textExtractor">Text extraction from file streams.</param>
     /// <param name="openAiClient">OpenAI client for embedding generation (conversation-aware re-selection).</param>
     /// <param name="logger">Logger for diagnostic metadata output (no content per ADR-015).</param>
+    /// <param name="containerResolver">Verifies a row's pointer before the app-only download (task 166 r1).</param>
     public DocumentContextService(
         IDocumentDataverseService documentService,
         ISpeFileOperations speFileStore,
         ITextExtractor textExtractor,
         IOpenAiClient openAiClient,
-        ILogger logger)
+        ILogger logger,
+        RecordContainerResolver containerResolver)
     {
         _documentService = documentService;
         _speFileStore = speFileStore;
         _textExtractor = textExtractor;
         _openAiClient = openAiClient;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     /// <summary>
@@ -678,6 +688,13 @@ public sealed class DocumentContextService
     /// Downloads and extracts text from a document using SpeFileStore (ADR-007)
     /// and TextExtractor.
     /// </summary>
+    /// <remarks>
+    /// APP-ONLY in every case (unified-access-control-r2 task 171, owner round 69 — broker-only). The document was
+    /// authorized for the caller before this runs (<c>AiAuthorizationFilter</c> on the chat routes); the row's pointer is
+    /// verified here (task 166 r1) because it is followed as the application. The request path used to download OBO,
+    /// which SPE answers only for a caller holding a container role, so a chat over a secure record's document read
+    /// nothing. <paramref name="httpContext"/> no longer chooses the identity.
+    /// </remarks>
     private async Task<string?> ExtractDocumentTextAsync(
         DocumentEntity document,
         HttpContext? httpContext,
@@ -685,24 +702,20 @@ public sealed class DocumentContextService
     {
         var fileName = document.FileName ?? "document";
 
-        Stream? fileStream;
-        if (httpContext != null)
+        // A pointer into a container this document may not use refuses — never downloads.
+        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
         {
-            // OBO authentication (preferred — user-delegated permissions)
-            fileStream = await _speFileStore.DownloadFileAsUserAsync(
-                httpContext,
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                cancellationToken);
+            _logger.LogWarning(
+                "Download of document {DocumentId} refused: its storage pointer could not be verified",
+                document.Id);
+            return null;
         }
-        else
-        {
-            // App-only fallback (background processing scenarios)
-            fileStream = await _speFileStore.DownloadFileAsync(
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                cancellationToken);
-        }
+
+        var fileStream = await _speFileStore.DownloadFileAsync(
+            document.GraphDriveId!,
+            document.GraphItemId!,
+            cancellationToken);
 
         if (fileStream == null)
         {

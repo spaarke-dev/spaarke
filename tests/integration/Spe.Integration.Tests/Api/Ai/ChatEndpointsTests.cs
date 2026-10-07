@@ -48,7 +48,9 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
 
     private const string TestTenantId = "chat-test-tenant-abc";
     private const string TestSessionId = "test-session-123";
-    private const string TestDocumentId = "doc-test-001";
+    // A sprk_document id (GUID): unified-access-control-r2 task 164 r1 — the chat routes refuse a non-GUID document id
+    // (400) and authorize a GUID one as the caller, so the fixture uses the shape real clients send.
+    private const string TestDocumentId = "a1b2c3d4-0000-4000-8000-000000000164";
 
     // FR-D3 (spaarkeai-assistant-enhancements-r2 task 031): a session that genuinely exists
     // (fixture's mock resolves it) but carries zero messages — distinct from a session id the
@@ -318,7 +320,7 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
     {
         // Arrange
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
-        var request = new { DocumentId = "doc-new-001", PlaybookId = TestPlaybookId };
+        var request = new { DocumentId = "a1b2c3d4-0000-4000-8000-000000000165", PlaybookId = TestPlaybookId };
 
         // Act
         var response = await client.PatchAsJsonAsync(
@@ -334,7 +336,7 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
     {
         // Arrange
         var client = _fixture.CreateClient();
-        var request = new { DocumentId = "doc-new-001" };
+        var request = new { DocumentId = "a1b2c3d4-0000-4000-8000-000000000165" };
 
         // Act
         var response = await client.PatchAsJsonAsync(
@@ -642,7 +644,9 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
 {
     public const string CreatedSessionId = "created-session-001";
     private const string TestSessionId = "test-session-123";
-    private const string TestDocumentId = "doc-test-001";
+    // A sprk_document id (GUID): unified-access-control-r2 task 164 r1 — the chat routes refuse a non-GUID document id
+    // (400) and authorize a GUID one as the caller, so the fixture uses the shape real clients send.
+    private const string TestDocumentId = "a1b2c3d4-0000-4000-8000-000000000164";
 
     // FR-D3 (task 031): a session the Dataverse mock resolves to a real (non-null) session with
     // zero messages — must stay distinguishable from TestMissingSessionId's null resolution.
@@ -800,10 +804,8 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi>(Moq.MockBehavior.Loose).Object);
 
-            // ReferenceIndexingService (sealed concrete) — used by AdminKnowledgeEndpoints.
-            // Register its missing dependency stubs so DI can construct it.
+            // ITextChunkingService stub (formerly registered for ReferenceIndexingService, deleted by task 163).
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.ITextChunkingService>(Moq.MockBehavior.Loose).Object);
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.ReferenceIndexingService>();
 
             // IRecordMatchService — used by RecordMatchEndpoints (always mapped).
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.RecordMatching.IRecordMatchService>(Moq.MockBehavior.Loose).Object);
@@ -838,7 +840,21 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             // IAccessDataSource (used by IAiAuthorizationService and ResourceAccessHandler) also makes
             // real Dataverse calls. Replace with a Loose mock.
             services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
-            services.AddScoped(_ => new Moq.Mock<Spaarke.Dataverse.IAccessDataSource>(Moq.MockBehavior.Loose).Object);
+            // Task 164 r1: the chat-context evaluation (AiAuthorizationFilter) asks the CALLER's rights on a record — the
+            // session's playbook here — through AuthorizationService → IAccessDataSource.GetRecordAccessAsync. This
+            // fixture tests chat behaviour, not authorization (that is ChatContextAuthorizationContractTests), so the
+            // record path is as permissive as the document path's IAiAuthorizationService mock below.
+            var permissiveAccess = new Moq.Mock<Spaarke.Dataverse.IAccessDataSource>(Moq.MockBehavior.Loose);
+            permissiveAccess
+                .Setup(a => a.GetRecordAccessAsync(
+                    Moq.It.IsAny<string>(), Moq.It.IsAny<string>(), Moq.It.IsAny<Guid>(), Moq.It.IsAny<string?>(), Moq.It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string userId, string _, Guid recordId, string? _, CancellationToken _) => new Spaarke.Dataverse.AccessSnapshot
+                {
+                    UserId = userId,
+                    ResourceId = recordId.ToString(),
+                    AccessRights = Spaarke.Dataverse.AccessRights.Read,
+                });
+            services.AddScoped(_ => permissiveAccess.Object);
 
             // IAiAuthorizationService (registered by SpaarkeCore) makes real Dataverse calls via
             // IAccessDataSource. Replace with a mock that approves all authenticated requests so the

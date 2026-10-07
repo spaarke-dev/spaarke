@@ -20,15 +20,19 @@ namespace Sprk.Bff.Api.Tests.Seam.SpeAdmin;
 /// <remarks>
 /// <para>
 /// <b>Why app-only, not delegated, for container lifecycle.</b> Container CRUD (create / list /
-/// soft-delete / restore / permanent-delete) works under the owning app's APP-ONLY credential —
-/// confirmed live 2026-08-24 (<c>notes/live-verification-credential.md</c> §3: the app-only token
-/// carries <c>FileStorageContainer.Selected</c>, enough for containers, the recycle bin, search,
-/// security, and audit). That is non-interactive: the client secret comes from Key Vault via
-/// <see cref="Azure.Identity.DefaultAzureCredential"/> reaching the vault (picks up the operator's
-/// own `az login` locally; a managed identity in Azure), exactly the same production path
-/// <c>SpeAdminGraphService.GetClientForConfigAsync</c> uses — this fixture calls that method
-/// directly rather than re-implementing it, so the suite exercises production code, not a
-/// reimplementation of it.
+/// soft-delete / restore / permanent-delete) works under an APP-ONLY credential holding
+/// <c>FileStorageContainer.Selected</c> plus a grant on the container type's registration —
+/// confirmed live 2026-08-24 (<c>notes/live-verification-credential.md</c> §3).
+/// </para>
+/// <para>
+/// <b>Which app-only identity, and why it is not production's (changed 2026-10-04).</b> Production
+/// (<c>SpeAdminGraphService.GetClientForConfigAsync</c>) now runs as the BFF's own identity — on Azure, its
+/// user-assigned managed identity — which does not exist on an operator's workstation. This fixture
+/// therefore authenticates as the dev container type's OWNING app (<see cref="OwningAppClientId"/>), with
+/// its secret read from Key Vault under the operator's own <c>az login</c>. That is a TEST credential, built
+/// here in <c>tests/</c>; the production path holds no secret. What the suite exercises is the production
+/// GRAPH code (every <c>SpeAdminGraphService</c> method it calls), against a real tenant; the identity
+/// difference is stated rather than hidden.
 /// </para>
 /// <para>
 /// <b>Why NOT delegated OBO for the fixture's own provisioning.</b> The BFF's actual delegated path
@@ -91,9 +95,9 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
     /// the parent type for the throwaway container this fixture creates for destructive tests.</summary>
     public string ContainerTypeId { get; }
 
-    /// <summary>The real production service — constructed with a live <see cref="SecretClient"/> and
-    /// an unreachable Dataverse credential (this suite never resolves config from Dataverse; it
-    /// supplies <see cref="SpeAdminGraphService.ContainerTypeConfig"/> directly). Null until
+    /// <summary>The real production service — constructed with an unreachable Dataverse credential
+    /// (this suite never resolves config from Dataverse; it hands its Graph clients straight to the
+    /// service's methods). Null until
     /// <see cref="InitializeAsync"/> runs under <see cref="IsLive"/>.</summary>
     public SpeAdminGraphService GraphService { get; private set; } = null!;
 
@@ -136,7 +140,17 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
             ?? "https://sprk-prod-kv.vault.azure.net/";
         _secretName = Environment.GetEnvironmentVariable("SPE_LIVE_KEYVAULT_SECRET_NAME")
             ?? "spe-owning-app-secret";
+
+        // Every container the BFF creates is stamped with its owning business unit (unified-access-control-r2
+        // task 165, owner round 20). The throwaway container gets a marker unit no real business unit carries, so no
+        // SPE administrator reaches it through the admin plane; the fixture tears it down directly.
+        ThrowawayBusinessUnitId = Guid.TryParse(Environment.GetEnvironmentVariable("SPE_LIVE_BUSINESS_UNIT_ID"), out var unit)
+            ? unit
+            : Guid.Parse("5ea0be7e-0000-0000-0000-00000000165f");
     }
+
+    /// <summary>The business unit stamped on the throwaway container.</summary>
+    public Guid ThrowawayBusinessUnitId { get; }
 
     public async Task InitializeAsync()
     {
@@ -156,32 +170,24 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
         // this is test-only code exercising the operator's own signed-in identity, not a new
         // production credential path.
         var secretClient = new SecretClient(new Uri(_keyVaultUri), new AzureCliCredential());
+        var secret = await secretClient.GetSecretAsync(_secretName).ConfigureAwait(false);
 
-        GraphService = BuildGraphService(secretClient);
+        GraphService = BuildGraphService();
 
-        var config = new SpeAdminGraphService.ContainerTypeConfig(
-            ConfigId: Guid.NewGuid(),
-            ContainerTypeId: ContainerTypeId,
-            ClientId: OwningAppClientId,
-            TenantId: TenantId,
-            SecretKeyVaultName: _secretName);
-
-        // Exercises the real production Key-Vault-fetch → ClientSecretCredential → GraphServiceClient
-        // path (GetClientForConfigAsync) rather than reimplementing it — ADR-038: this is the live
-        // tier, it mocks nothing, and that includes not re-deriving the auth plumbing under test.
-        GraphClient = await GraphService.GetClientForConfigAsync(config).ConfigureAwait(false);
-
-        GraphClientV1 = await BuildV1GraphClientAsync(secretClient).ConfigureAwait(false);
+        // Test-only owning-app credential — see the remarks on the type for why production's managed
+        // identity cannot be used from a workstation. Beta for container CRUD (task 020); v1.0 for
+        // containerTypeRegistrations.
+        GraphClient = BuildAppOnlyGraphClient(secret.Value.Value, "https://graph.microsoft.com/beta");
+        GraphClientV1 = BuildAppOnlyGraphClient(secret.Value.Value, "https://graph.microsoft.com/v1.0");
 
         await ProvisionThrowawayContainerAsync().ConfigureAwait(false);
     }
 
-    /// <summary>Constructs the real production service with a live Key Vault client and an
-    /// intentionally-unreachable Dataverse credential (this suite supplies
-    /// <see cref="SpeAdminGraphService.ContainerTypeConfig"/> directly rather than resolving it from
+    /// <summary>Constructs the real production service with an intentionally-unreachable Dataverse
+    /// credential (this suite supplies its Graph clients directly and never resolves config from
     /// Dataverse, so that dependency exists only to satisfy the constructor — see
     /// <see cref="UnreachableCredential"/>).</summary>
-    private SpeAdminGraphService BuildGraphService(SecretClient secretClient)
+    private static SpeAdminGraphService BuildGraphService()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -194,29 +200,23 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
             .Build();
 
         return new SpeAdminGraphService(
-            httpClientFactory: new LiveHttpClientFactory(_httpClient),
-            secretClient: secretClient,
             dataverseClient: new DataverseWebApiClient(
                 configuration, NullLogger<DataverseWebApiClient>.Instance, new UnreachableCredential()),
             configuration: configuration,
             logger: NullLogger<SpeAdminGraphService>.Instance,
-            tokenProvider: null,
             graphClientFactory: null);
     }
 
-    /// <summary>v1.0-based sibling of <see cref="GraphClient"/>, same app-only credential.
-    /// <c>GetClientForConfigAsync</c> always returns a BETA-based client (container CRUD needs beta —
-    /// task 020), but <c>containerTypeRegistrations</c> (the resource the consuming-app registration
-    /// flow reads/writes) is a v1.0 resource — the mirror image of task 027's finding that container-
-    /// type OWNERS live only on beta. Proven live in this task: see
-    /// notes/task-041-teardown-proof.md.</summary>
-    private async Task<GraphServiceClient> BuildV1GraphClientAsync(SecretClient secretClient)
+    /// <summary>App-only client as the dev owning app, at <paramref name="baseUrl"/>. Container CRUD
+    /// needs beta (task 020); <c>containerTypeRegistrations</c> is a v1.0 resource — the mirror image of
+    /// task 027's finding that container-type OWNERS live only on beta (notes/task-041-teardown-proof.md).
+    /// Both clients share the fixture's one <see cref="HttpClient"/>.</summary>
+    private GraphServiceClient BuildAppOnlyGraphClient(string secret, string baseUrl)
     {
-        var secretValue = await secretClient.GetSecretAsync(_secretName).ConfigureAwait(false);
-        var v1Credential = new Azure.Identity.ClientSecretCredential(TenantId, OwningAppClientId, secretValue.Value.Value);
-        var v1AuthProvider = new Microsoft.Kiota.Authentication.Azure.AzureIdentityAuthenticationProvider(
-            v1Credential, scopes: new[] { "https://graph.microsoft.com/.default" });
-        return new GraphServiceClient(_httpClient, v1AuthProvider, "https://graph.microsoft.com/v1.0");
+        var credential = new Azure.Identity.ClientSecretCredential(TenantId, OwningAppClientId, secret);
+        var authProvider = new Microsoft.Kiota.Authentication.Azure.AzureIdentityAuthenticationProvider(
+            credential, scopes: new[] { "https://graph.microsoft.com/.default" });
+        return new GraphServiceClient(_httpClient, authProvider, baseUrl);
     }
 
     private async Task ProvisionThrowawayContainerAsync()
@@ -230,7 +230,8 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
             displayName: $"sdap-r2-live-test-{Guid.NewGuid():N}",
             description: "Throwaway container for the sdap-SPE-admin-app-r2 task 041 LiveIntegration " +
                 "suite. Created and torn down automatically by LiveIntegrationFixture. Safe to delete " +
-                "manually if this is ever found orphaned (indicates a teardown failure).")
+                "manually if this is ever found orphaned (indicates a teardown failure).",
+            owningBusinessUnitId: ThrowawayBusinessUnitId)
             .ConfigureAwait(false);
 
         ContainerId = created.Id;
@@ -302,20 +303,6 @@ public sealed class LiveIntegrationFixture : IAsyncLifetime
         Console.Error.WriteLine(
             $"[LiveIntegrationFixture] teardown step '{step}' threw — the other step still ran " +
             $"independently. {ex.GetType().Name}: {ex.Message}");
-
-    /// <summary>Returns the fixture's single shared <see cref="HttpClient"/> for any requested name.
-    /// Unlike production's named "GraphApiClient" (a distinct DI-registered client carrying resilience
-    /// handlers), a live test run does not need retry/circuit-breaker middleware —
-    /// <c>SpeAdminGraphService</c>'s own <c>ExecuteWithRetryAsync</c> already covers 429 throttling —
-    /// so one connection-reusing instance for the whole fixture is enough.</summary>
-    private sealed class LiveHttpClientFactory : IHttpClientFactory
-    {
-        private readonly HttpClient _client;
-
-        public LiveHttpClientFactory(HttpClient client) => _client = client;
-
-        public HttpClient CreateClient(string name) => _client;
-    }
 
     /// <summary>Throws if ever asked for a token — proves, by construction, that this suite never
     /// reaches Dataverse. Mirrors the identical <c>UnusableCredential</c> pattern already established

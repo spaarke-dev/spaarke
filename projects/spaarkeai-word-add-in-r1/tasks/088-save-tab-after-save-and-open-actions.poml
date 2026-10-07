@@ -191,7 +191,7 @@
     - ESCALATION 1 FIRED: ms-word: cannot be launched by a supported call (openBrowserWindow is http/https only, office-js #2820
       by design; window.open of Office URIs undocumented) -> webUrl everywhere, mechanism chosen by canOpenBrowserWindow.
       Trigger 2 not fired (only gated "Save Another" pin was a Word capture test, rewritten, invariant kept). Trigger 3 judged
-      not fired: same existing access check, now also on filed-elsewhere collisions (<=1 OBO access query per refused save).
+      not fired: same existing access check, now also on filed-elsewhere collisions (at most 1 OBO access query per refused save).
     - Gates: gated jest 63 suites / 886 tests green (baseline 62/836); lint 0; typecheck 0 production (68 accepted test-file);
       BFF Office scope 467 passed / 8 skipped (pre-existing) / 0 failed; ArchTests 346/346; CVE check clean.
       Publish size OWED (worktree iterated; commit-less branch copy disallowed by the wave rules). Live AC (Word host) OPEN.

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../services/documentProfileChoices';
 
 /**
@@ -82,7 +82,7 @@ export interface UseDocumentProfileResult {
    * button in that state, so this is defense-in-depth, not the only guard.
    *
    * Resolves `true` when the server ACCEPTED the request (202 — the profile job is queued), `false` when it
-   * was refused or never sent (task 088: the Save tab's saved state re-enables "Save version" only on `true`).
+   * was refused or never sent (task 088: the Save tab's saved state re-enables "Save" only on `true`).
    */
   generateProfile: () => Promise<boolean>;
   /** True while the POST is in flight (button busy state). */

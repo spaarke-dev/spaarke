@@ -36,6 +36,7 @@ import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import {
   ReconciliationWorkspace,
+  bffRefile,
   derivePrimaryReview,
   type EmailConnectionsReviewProps,
   type ReconcileRegarding,
@@ -230,7 +231,13 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
         regardingRecordName: str(record, 'sprk_regardingrecordname'),
         regardingRecordNumber: str(record, 'sprk_regardingrecordnumber'),
         regardingRecordType: str(record, 'sprk_regardingrecordtypename'),
-        writeContext: { webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id },
+        writeContext: {
+          webApi,
+          hostEntity: COMMUNICATION_ENTITY,
+          hostRecordId: id,
+          // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
+          refileThroughBff: bffRefile(authenticatedFetch, bffBaseUrl ?? ''),
+        },
         pickerWebApi: webApi,
         onAssociationsChanged: handleAssociationsChanged,
       };

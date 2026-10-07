@@ -25,11 +25,11 @@ namespace Spe.Integration.Tests;
 /// - Event listing (GET /events)
 /// - Event by ID (GET /events/{id})
 /// - Event creation (POST /events)
-/// - Event update (PUT /events/{id})
-/// - Event deletion (DELETE /events/{id})
 /// - Event completion (POST /events/{id}/complete)
-/// - Event cancellation (POST /events/{id}/cancel)
-/// - Event logs (GET /events/{id}/logs)
+///
+/// unified-access-control-r2 task 159 DELETED PUT /events/{id}, DELETE /events/{id}, POST /events/{id}/cancel and
+/// GET /events/{id}/logs (owner round 10 item 1: no caller, not in the published Copilot description); their tests
+/// went with them.
 /// </remarks>
 public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
 {
@@ -98,7 +98,8 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         // Arrange & Act
         var response = await _httpClient!.GetAsync("/api/v1/events");
 
-        // Assert - Should return Unauthorized (401) but NOT NotFound (404)
+        // Assert - the client is SIGNED IN, so anything but 404 means the route is registered (an anonymous 401
+        // would not: the authorization FallbackPolicy answers 401 for a missing route too, UAC-r2 task 167)
         // This verifies the endpoint is registered
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
             "GET /api/v1/events endpoint should be registered");
@@ -111,8 +112,10 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
     {
         SkipIfNotConfigured();
 
-        // Arrange - include filter query parameters
-        var url = "/api/v1/events?statusCode=3&priority=1&pageNumber=1&pageSize=20";
+        // Arrange - include filter query parameters. Task 097: the values are the LIVE sprk_event option-set values
+        // (statuscode Open 659490001, sprk_priority High 100000002). The former statusCode=3 / priority=1 do not exist in
+        // Dataverse; priority is validated against the live set, so priority=1 is (correctly) a 400.
+        var url = $"/api/v1/events?statusCode={Spaarke.Dataverse.EventStatusCode.Open}&priority={Spaarke.Dataverse.EventPriority.High}&pageNumber=1&pageSize=20";
 
         // Act
         var response = await _httpClient!.GetAsync(url);
@@ -283,13 +286,13 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var request = new CreateEventRequest(
             Subject: "Test Event",
             Description: "Test Description",
-            Priority: 1
+            Priority: Spaarke.Dataverse.EventPriority.Normal
         );
 
         // Act
         var response = await _httpClient!.PostAsJsonAsync("/api/v1/events", request);
 
-        // Assert - Returns 401 not 404
+        // Assert - signed in: anything but 404 means the route is registered (not an anonymous 401, UAC-r2 task 167)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
             "POST /api/v1/events endpoint should be registered");
     }
@@ -302,7 +305,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         SkipIfNotConfigured();
 
         // Arrange - send raw JSON with proper content type
-        var json = """{"subject":"Test Event","description":"Test Description","priority":1}""";
+        var json = """{"subject":"Test Event","description":"Test Description","priority":100000001}""";
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         // Act
@@ -333,7 +336,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
             ScheduledStart: DateTime.UtcNow,
             ScheduledEnd: DateTime.UtcNow.AddHours(1),
             DueDate: DateTime.UtcNow.AddDays(7),
-            Priority: 2
+            Priority: Spaarke.Dataverse.EventPriority.High
         );
 
         // Act
@@ -344,138 +347,6 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
             "Endpoint should be registered");
         response.StatusCode.Should().NotBe(HttpStatusCode.BadRequest,
             "Endpoint should accept all optional fields");
-    }
-
-    #endregion
-
-    #region PUT /api/v1/events/{id}
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "PUT /events/{id}")]
-    public async Task UpdateEvent_ReturnsUnauthorized_WhenNoAuthToken()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-        var request = new UpdateEventRequest(
-            Subject: "Updated Subject"
-        );
-
-        // Act
-        var response = await _unauthenticatedHttpClient!.PutAsJsonAsync($"/api/v1/events/{eventId}", request);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "All event endpoints require authentication");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "PUT /events/{id}")]
-    public async Task UpdateEvent_EndpointExists_NotReturning404ForValidRoute()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-        var request = new UpdateEventRequest(
-            Subject: "Updated Subject",
-            Priority: 2
-        );
-
-        // Act
-        var response = await _httpClient!.PutAsJsonAsync($"/api/v1/events/{eventId}", request);
-
-        // Assert - Route should match. Handler may return 404/500 from mock Dataverse.
-        var content = await response.Content.ReadAsStringAsync();
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            content.Should().NotBeNullOrEmpty(
-                "A 404 from a matched route should include a ProblemDetails body");
-        }
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "PUT /events/{id}")]
-    public async Task UpdateEvent_Returns404_ForInvalidGuidFormat()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var request = new UpdateEventRequest(
-            Subject: "Updated Subject"
-        );
-        var json = JsonSerializer.Serialize(request, JsonOptions);
-        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-        // Act
-        var response = await _httpClient!.PutAsync("/api/v1/events/not-a-valid-guid", content);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "Invalid GUID format should not match the route constraint");
-    }
-
-    #endregion
-
-    #region DELETE /api/v1/events/{id}
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "DELETE /events/{id}")]
-    public async Task DeleteEvent_ReturnsUnauthorized_WhenNoAuthToken()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _unauthenticatedHttpClient!.DeleteAsync($"/api/v1/events/{eventId}");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "All event endpoints require authentication");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "DELETE /events/{id}")]
-    public async Task DeleteEvent_EndpointExists_NotReturning404ForValidRoute()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _httpClient!.DeleteAsync($"/api/v1/events/{eventId}");
-
-        // Assert - Route should match. Handler may return 404/500 from mock Dataverse.
-        var content = await response.Content.ReadAsStringAsync();
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            content.Should().NotBeNullOrEmpty(
-                "A 404 from a matched route should include a ProblemDetails body");
-        }
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "DELETE /events/{id}")]
-    public async Task DeleteEvent_Returns404_ForInvalidGuidFormat()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange & Act
-        var response = await _httpClient!.DeleteAsync("/api/v1/events/not-a-valid-guid");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "Invalid GUID format should not match the route constraint");
     }
 
     #endregion
@@ -558,143 +429,6 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
 
     #endregion
 
-    #region POST /api/v1/events/{id}/cancel
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "POST /events/{id}/cancel")]
-    public async Task CancelEvent_ReturnsUnauthorized_WhenNoAuthToken()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _unauthenticatedHttpClient!.PostAsync($"/api/v1/events/{eventId}/cancel", null);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "All event endpoints require authentication");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "POST /events/{id}/cancel")]
-    public async Task CancelEvent_EndpointExists_NotReturning404ForValidRoute()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _httpClient!.PostAsync($"/api/v1/events/{eventId}/cancel", null);
-
-        // Assert - Route should match. Handler may return 404/500 from mock Dataverse.
-        var content = await response.Content.ReadAsStringAsync();
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            content.Should().NotBeNullOrEmpty(
-                "A 404 from a matched route should include a ProblemDetails body");
-        }
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "POST /events/{id}/cancel")]
-    public async Task CancelEvent_Returns404_ForInvalidGuidFormat()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange & Act
-        var response = await _httpClient!.PostAsync("/api/v1/events/not-a-valid-guid/cancel", null);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "Invalid GUID format should not match the route constraint");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "POST /events/{id}/cancel")]
-    public async Task CancelEvent_RequiresPostMethod()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act - Try GET on POST-only endpoint
-        var response = await _httpClient!.GetAsync($"/api/v1/events/{eventId}/cancel");
-
-        // Assert - Minimal API may return 405 (Method Not Allowed) or 404 (no route match for GET)
-        var validStatuses = new[] { HttpStatusCode.MethodNotAllowed, HttpStatusCode.NotFound };
-        validStatuses.Should().Contain(response.StatusCode,
-            "GET to /cancel should return 405 (POST only) or 404 (no GET route match)");
-    }
-
-    #endregion
-
-    #region GET /api/v1/events/{id}/logs
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "GET /events/{id}/logs")]
-    public async Task GetEventLogs_ReturnsUnauthorized_WhenNoAuthToken()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _unauthenticatedHttpClient!.GetAsync($"/api/v1/events/{eventId}/logs");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
-            "All event endpoints require authentication");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "GET /events/{id}/logs")]
-    public async Task GetEventLogs_EndpointExists_NotReturning404ForValidRoute()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange
-        var eventId = Guid.NewGuid();
-
-        // Act
-        var response = await _httpClient!.GetAsync($"/api/v1/events/{eventId}/logs");
-
-        // Assert - Route should match. Handler may return 404/500 from mock Dataverse.
-        var content = await response.Content.ReadAsStringAsync();
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            content.Should().NotBeNullOrEmpty(
-                "A 404 from a matched route should include a ProblemDetails body");
-        }
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Endpoint", "GET /events/{id}/logs")]
-    public async Task GetEventLogs_Returns404_ForInvalidGuidFormat()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange & Act
-        var response = await _httpClient!.GetAsync("/api/v1/events/not-a-valid-guid/logs");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "Invalid GUID format should not match the route constraint");
-    }
-
-    #endregion
-
     #region Error Response Format (RFC 7807)
 
     [SkippableFact]
@@ -708,8 +442,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var endpoints = new[]
         {
             "/api/v1/events",
-            $"/api/v1/events/{Guid.NewGuid()}",
-            $"/api/v1/events/{Guid.NewGuid()}/logs"
+            $"/api/v1/events/{Guid.NewGuid()}"
         };
 
         foreach (var endpoint in endpoints)
@@ -742,8 +475,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var postEndpoints = new[]
         {
             ("/api/v1/events", """{"subject":"Test Event"}"""),
-            ($"/api/v1/events/{eventId}/complete", ""),
-            ($"/api/v1/events/{eventId}/cancel", "")
+            ($"/api/v1/events/{eventId}/complete", "")
         };
 
         foreach (var (endpoint, body) in postEndpoints)
@@ -778,8 +510,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var baseUrls = new[]
         {
             "/api/v1/events",
-            $"/api/v1/events/{eventId}",
-            $"/api/v1/events/{eventId}/logs"
+            $"/api/v1/events/{eventId}"
         };
 
         foreach (var url in baseUrls)
@@ -809,8 +540,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         // Verify POST-only endpoints reject GET requests with 405
         var postOnlyEndpoints = new[]
         {
-            $"/api/v1/events/{eventId}/complete",
-            $"/api/v1/events/{eventId}/cancel"
+            $"/api/v1/events/{eventId}/complete"
         };
 
         foreach (var endpoint in postOnlyEndpoints)
@@ -835,10 +565,11 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var eventId = Guid.NewGuid();
 
         // Verify GET-only endpoints reject POST requests
-        // Note: /api/v1/events has both GET and POST, so only test truly GET-only endpoints
+        // Note: /api/v1/events has both GET and POST, so only test truly GET-only endpoints. Task 159 deleted
+        // GET /{id}/logs (this list's only entry until then); GET /{id} is GET-only now that PUT/DELETE are gone.
         var getOnlyEndpoints = new[]
         {
-            $"/api/v1/events/{eventId}/logs"
+            $"/api/v1/events/{eventId}"
         };
 
         foreach (var endpoint in getOnlyEndpoints)
@@ -947,32 +678,12 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
     {
         SkipIfNotConfigured();
 
-        // Arrange - Priority is out of range (0-3)
+        // Arrange - Priority is not a live sprk_priority value (100000000..100000003)
         var json = """{"subject":"Test","priority":10}""";
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         // Act
         var response = await _httpClient!.PostAsync("/api/v1/events", content);
-
-        // Assert - Should not return 404 (endpoint exists)
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-            "Endpoint should be registered");
-    }
-
-    [SkippableFact]
-    [Trait("Category", "Events")]
-    [Trait("Category", "Validation")]
-    public async Task UpdateEvent_HandlesInvalidStatusCode_WhenAuthenticated()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange - StatusCode is out of range (1-7)
-        var eventId = Guid.NewGuid();
-        var json = """{"statusCode":99}""";
-        var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-
-        // Act
-        var response = await _httpClient!.PutAsync($"/api/v1/events/{eventId}", content);
 
         // Assert - Should not return 404 (endpoint exists)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,

@@ -114,9 +114,12 @@ interface ReconcileXrm {
     navigateTo?: (pageInput: Record<string, unknown>, navOptions?: Record<string, unknown>) => Promise<unknown>;
   };
 }
-/** Cast the shared picker bridge to the broader (metadata + navigation) surface. Undefined on non-MDA. */
-function getReconcileXrm(): ReconcileXrm | undefined {
-  return getXrmForPicker() as ReconcileXrm | undefined;
+/**
+ * The shared picker bridge, asking for the capability the caller uses (task 081
+ * round 5, R4-3): 'lookupObjects' / 'metadata' / 'navigation'. Undefined on non-MDA.
+ */
+function getReconcileXrm(capability: 'lookupObjects' | 'metadata' | 'navigation'): ReconcileXrm | undefined {
+  return getXrmForPicker(capability) as ReconcileXrm | undefined;
 }
 
 /** Resolved attribute metadata for a proposal's target field (best-effort; all fields optional). */
@@ -400,7 +403,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   // still honored from the fieldType hint).
   React.useEffect(() => {
     let cancelled = false;
-    const xrmUtil = getReconcileXrm()?.Utility;
+    const xrmUtil = getReconcileXrm('metadata')?.Utility;
     if (!xrmUtil?.getEntityMetadata || proposals.length === 0) {
       setFieldMeta({});
       return;
@@ -428,7 +431,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
     async (p: FieldUpdateProposal): Promise<void> => {
       const targets = fieldMeta[p.reviewLogId]?.targets;
       try {
-        const xrm = getReconcileXrm();
+        const xrm = getReconcileXrm('lookupObjects');
         if (!xrm?.Utility?.lookupObjects || !targets?.length) return; // non-MDA or unknown target — no-op
         const results = await xrm.Utility.lookupObjects({
           entityTypes: targets,
@@ -453,7 +456,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   // may have changed). Guarded no-op on non-MDA/dev.
   const openRecordForm = React.useCallback(async (): Promise<void> => {
     if (!regarding?.entityType || !regarding?.recordId) return;
-    const nav = getReconcileXrm()?.Navigation;
+    const nav = getReconcileXrm('navigation')?.Navigation;
     if (!nav?.navigateTo) return; // non-MDA/dev — no-op
     try {
       await nav.navigateTo(

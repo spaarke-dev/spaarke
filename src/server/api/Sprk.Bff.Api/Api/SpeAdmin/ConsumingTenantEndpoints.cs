@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -20,6 +21,14 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 ///
 /// Authorization: Inherited from SpeAdminEndpoints route group (RequireAuthorization + SpeAdminAuthorizationFilter).
 /// All four verbs require admin role — no per-endpoint auth filter needed (ADR-008).
+///
+/// <para><b>Graph identity: the signed-in administrator, delegated (2026-10-04).</b> Grants live on the
+/// container type's registration, and app-only Graph lets an app change only registrations it OWNS — the
+/// BFF owns none. Delegated, Graph additionally requires the caller to hold the <b>SharePoint Embedded
+/// Administrator</b> (or Global Administrator) Entra role; without it Graph answers 403. These endpoints
+/// are how an administrator grants the BFF's own identity access to a container type — e.g. a
+/// <c>full</c> app-only grant for the BFF managed identity's appId. <c>configId</c> is still required and
+/// resolved, so a request always names a known configuration, but no credential is taken from it.</para>
 /// </summary>
 /// <remarks>
 /// ADR-001: Minimal API — no controllers; MapGroup for route organization.
@@ -40,6 +49,9 @@ public static class ConsumingTenantEndpoints
     {
         // GET /api/spe/containertypes/{typeId}/consumers?configId={id}
         group.MapGet("/containertypes/{typeId}/consumers", ListConsumersAsync)
+            // App-only as the config's owning app: the type must be the config's own, and the list names every customer's
+            // consuming app, so the caller must reach every config of the type (task 165, round 20 item 3; round 35 item 5).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeListConsumingTenants")
             .WithSummary("List consuming application registrations for an SPE container type")
             .WithDescription(
@@ -56,6 +68,8 @@ public static class ConsumingTenantEndpoints
 
         // POST /api/spe/containertypes/{typeId}/consumers?configId={id}
         group.MapPost("/containertypes/{typeId}/consumers", RegisterConsumerAsync)
+            // A consuming-app registration grants an app EVERY container of the type: a type shared with an unreachable config is not changed (task 165).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRegisterConsumingTenant")
             .WithSummary("Register a new consuming application for an SPE container type")
             .WithDescription(
@@ -72,6 +86,8 @@ public static class ConsumingTenantEndpoints
 
         // PUT /api/spe/containertypes/{typeId}/consumers/{appId}?configId={id}
         group.MapPut("/containertypes/{typeId}/consumers/{appId}", UpdateConsumerAsync)
+            // Shared-type write rule (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeUpdateConsumingTenant")
             .WithSummary("Update permissions for an existing consuming application registration")
             .WithDescription(
@@ -87,6 +103,8 @@ public static class ConsumingTenantEndpoints
 
         // DELETE /api/spe/containertypes/{typeId}/consumers/{appId}?configId={id}
         group.MapDelete("/containertypes/{typeId}/consumers/{appId}", RemoveConsumerAsync)
+            // Shared-type write rule (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRemoveConsumingTenant")
             .WithSummary("Remove a consuming application registration from an SPE container type")
             .WithDescription(
@@ -118,7 +136,7 @@ public static class ConsumingTenantEndpoints
     ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
     ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
     ///   404 Not Found   — Container type with the given typeId was not found in Graph API.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> ListConsumersAsync(
         string typeId,
@@ -141,8 +159,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var consumers = await graphService.ListConsumingTenantsForConfigAsync(
-                config, typeId, ct);
+            var consumers = await graphService.ListConsumingTenantsForUserAsync(
+                context, typeId, ct);
 
             if (consumers is null)
             {
@@ -181,7 +199,7 @@ public static class ConsumingTenantEndpoints
     ///   400 Bad Request — configId/typeId invalid, or request body validation failed.
     ///   404 Not Found   — Container type with the given typeId was not found in Graph API.
     ///   409 Conflict    — The consuming app is already registered for this container type.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> RegisterConsumerAsync(
         string typeId,
@@ -219,8 +237,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var registered = await graphService.RegisterConsumingTenantForConfigAsync(
-                config, typeId, request.AppId, request.TenantId,
+            var registered = await graphService.RegisterConsumingTenantForUserAsync(
+                context, typeId, request.AppId, request.TenantId,
                 request.DelegatedPermissions, request.ApplicationPermissions, ct);
 
             if (registered is null)
@@ -273,7 +291,7 @@ public static class ConsumingTenantEndpoints
     ///   200 OK          — Permissions updated; returns the updated registration.
     ///   400 Bad Request — configId/typeId/appId invalid.
     ///   404 Not Found   — Container type or consuming app not found in Graph API.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> UpdateConsumerAsync(
         string typeId,
@@ -311,8 +329,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var updated = await graphService.UpdateConsumingTenantForConfigAsync(
-                config, typeId, appId,
+            var updated = await graphService.UpdateConsumingTenantForUserAsync(
+                context, typeId, appId,
                 request.DelegatedPermissions, request.ApplicationPermissions, ct);
 
             if (updated is null)
@@ -358,7 +376,7 @@ public static class ConsumingTenantEndpoints
     ///   204 No Content  — Consumer removed successfully.
     ///   400 Bad Request — configId/typeId/appId invalid.
     ///   404 Not Found   — Container type or consuming app not found in Graph API.
-    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    ///   500 Internal    — Unexpected error from Graph API.
     /// </summary>
     private static async Task<IResult> RemoveConsumerAsync(
         string typeId,
@@ -395,8 +413,8 @@ public static class ConsumingTenantEndpoints
 
         try
         {
-            var removed = await graphService.RemoveConsumingTenantForConfigAsync(
-                config, typeId, appId, ct);
+            var removed = await graphService.RemoveConsumingTenantForUserAsync(
+                context, typeId, appId, ct);
 
             if (!removed)
             {

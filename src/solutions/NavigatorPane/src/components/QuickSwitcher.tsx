@@ -321,7 +321,7 @@ export const QuickSwitcher: React.FC = () => {
   }, []);
 
   const handleSelect = React.useCallback((entry: SearchIndexEntry) => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'navigation']);
     if (!xrm) return;
     void navigateToTarget(xrm, entry.target);
     setQuery('');

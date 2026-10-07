@@ -5,14 +5,14 @@ techStack: [github-actions, dotnet, azure, dataverse]
 appliesTo: [".github/workflows/", "ci-cd", "build status", "pipeline"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-09-25
+last-reviewed: 2026-09-30
 ---
 
 # CI/CD Pipeline Skill
 
 > **Category**: Operations
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
+> **Last Reviewed**: 2026-09-30
+> **Reviewed By**: customer-provisioning-orchestration-r1 (plan G24 — workflow sections corrected against `.github/workflows`; full per-workflow reference: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md))
 > **Exemplar rationale**: Workflows evolve quarterly; no single canonical pipeline holds steady. Inventory + status checks live in `notes/inventory/workflows.md` (Phase 0 task 003).
 > **Inventory anomaly #1 RESOLVED**: This skill had zero frontmatter before 2026-05-16. Frontmatter block now in place.
 
@@ -30,7 +30,7 @@ Understanding the distinction between CI, deployment, and sync:
 
 | Term | What It Means | Workflow |
 |------|---------------|----------|
-| **CI (Continuous Integration)** | Build, test, code quality checks | `ci-router.yml` → `ci-tier1-blocking.yml` (required check **`Router`**) + `ci-tier2-advisory.yml`; legacy `sdap-ci.yml` runs in shadow until cutover (ci-cd-unit-test-remediation-r1) |
+| **CI (Continuous Integration)** | Build, test, code quality checks | `ci-router.yml` → `ci-tier1-blocking.yml` (blocking) + `ci-tier2-advisory.yml` (advisory). **`Router` is the only required status check** on master (verified 2026-09-30). Legacy `sdap-ci.yml` still runs but is not required (pending deletion) |
 | **Deployment** | Deploy a component to an environment | Per-component `deploy-*.yml` (see [Deployment Workflows](#deployment-workflows)) — mostly `workflow_dispatch` / operator-driven |
 | **Merge to Master** | Push changes to origin/master | Git operation (not a workflow) |
 | **Sync Main Repo** | Pull origin/master to local main repo | Git operation (needed for worktrees) |
@@ -43,7 +43,7 @@ Understanding the distinction between CI, deployment, and sync:
    - Deploy the BFF — BFF deploys are **operator-driven** (`/bff-deploy`, or `deploy-bff-api.yml` via `workflow_dispatch`); CI never auto-deploys the BFF on merge
    - Sync the main repo's local master (must be done explicitly when using worktrees)
 
-3. **A few deploy workflows are path-triggered on push to master** (`deploy-spaarke-ai.yml`, `deploy-office-addins.yml`, `deploy-infrastructure.yml`) — they can fail independently of CI.
+3. **Two deploy workflows are path-triggered on push to master** (`deploy-spaarke-ai.yml` → dev, `deploy-office-addins.yml`) — they can fail independently of CI. `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") is path-triggered too, but it only lints and compiles Bicep — it has no deploy job since task 249 (customer stamps are deployed by the L2 control plane).
 
 ---
 
@@ -93,25 +93,18 @@ gh run watch
 
 ## GitHub Workflows Overview
 
-### Primary CI Pipeline: `sdap-ci.yml`
+### Primary CI: `ci-router.yml` (workflow `CI`, required check `Router`)
 
-**Triggers**: Push to `main`/`master`, Pull requests
+**Triggers**: every pull request, push to `master`, `merge_group` — **no `paths:` filter** (a path-filtered required check gets stuck pending). The `classify` job decides which tiers run; both tiers are skipped on a docs-only diff, and a skipped job reports success.
 
 | Job | Purpose | Blocking? |
 |-----|---------|-----------|
-| `security-scan` | Trivy vulnerability scanner | Yes |
-| `build-test` | Build + test (Debug & Release) | Yes |
-| `code-quality` | Format check, ADR tests, dependencies | Yes |
-| `integration-readiness` | Package artifacts for deployment | Yes |
-| `adr-pr-comment` | Post ADR violations to PR (non-blocking) | No |
-| `summary` | Pipeline summary report | No |
+| `classify` (Classify Diff) | Path-aware diff classification | — |
+| Tier 1 → `ci-tier1-blocking.yml` | Compile (Debug) · Arch Tests (full suite) · Changed-Surface Integration Smoke · Auth Smoke · Eval Gate (Golden Utterances) · Tenant Isolation (I1–I5) · Compose Fidelity Gate · Xrm Capability Guard (getXrm AST scan; on client/solution/workflow changes) · DataGrid External-Host Gate (advisory until its flip) | **Yes** (DataGrid gate: no, until flipped) |
+| Tier 2 → `ci-tier2-advisory.yml` | Format (`dotnet format`) · Lint (ESLint + Prettier) · Full Unit Tests · ADR Compliance (NetArchTest) · Markdown Link Validator · Last Reviewed Stamp · Plugin Size (ADR-002) · one deduplicated advisory PR comment | No — excluded from the gate by construction |
+| `router-result` (**Router**) | `if: always()` + `re-actors/alls-green` over the tiers — its result IS the required check | **Yes** |
 
-**Key Checks**:
-- Trivy security scan uploads to GitHub Security tab
-- `dotnet format --verify-no-changes` for code style
-- NetArchTest ADR validation (`Spaarke.ArchTests`)
-- ADR-002 zero-plugin guard (`ADR002_PluginTests` — no plugin code/projects anywhere in `src/`)
-- Vulnerable package detection
+The legacy monolithic `sdap-ci.yml` (and its `sdap-ci-docs-only.yml` fallback) still runs on PRs/pushes but is **not** required.
 
 ### Deployment Workflows
 
@@ -120,7 +113,7 @@ Verified against `.github/workflows/` on 2026-09-25. There is no staging environ
 | Workflow | Deploys | Trigger |
 |----------|---------|---------|
 | `deploy-bff-api.yml` | BFF API (App Service) | `workflow_dispatch` only — BFF deploys are operator-driven; prefer the `/bff-deploy` skill |
-| `deploy-infrastructure.yml` | Bicep infrastructure | PR (what-if) + push to master on `infrastructure/bicep/**` |
+| `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | Bicep infrastructure | PR + push to master on `infrastructure/bicep/**`, or `workflow_dispatch` → lint every Bicep file + compile `customer.bicep` and the remaining stacks; **deploys nothing** (task 249, D19) |
 | `deploy-spaarke-ai.yml` | SpaarkeAi code page | Push to master on `src/solutions/SpaarkeAi/**` / shared UI lib |
 | `deploy-office-addins.yml` | Office add-ins (Static Web App) | Push to master on `src/client/office-addins/**` |
 | `deploy-external-spa.yml` | External SPA (Static Web App) | `workflow_dispatch` |
@@ -146,12 +139,20 @@ Read each workflow's `on:` block before relying on a trigger — they change.
 
 ### Supporting Workflows
 
+None of these is a required check. Full per-workflow detail: [`docs/procedures/ci-cd-workflow.md`](../../../docs/procedures/ci-cd-workflow.md).
+
 | Workflow | Purpose | Triggers |
 |----------|---------|----------|
-| `build-only.yml` | Simple build + artifact upload | Push to main, manual |
-| `dotnet.yml` | .NET build validation | (Legacy) |
-| `test.yml` | Test runner | (Legacy) |
-| `auto-add-to-project.yml` | Auto-add issues/PRs to GitHub Project | Issue/PR events |
+| `workflows-validate.yml` (actionlint) | Lints every workflow YAML file | Every PR |
+| `provisioning-prereqs-validate.yml` | `prereqs.yaml` + `intake.schema.json` shape and parser parity | PR, push to master, merge_group |
+| `css-reset-gate.yml` | Code Page `index.html` box-sizing reset | PR/push on Code Page `index.html` paths |
+| `office-addins-tests.yml` | Office add-in jest ratchet, typecheck, server suites, ESLint | PR/push on office-addins + related paths |
+| `build-provisioning-sidecar.yml` | Build + Trivy-scan the provisioning sidecar image (push leg publishes it) | PR/push on sidecar paths, manual |
+| `publish-provisioning-arm-artifacts.yml` | Compile the customer Bicep to ARM JSON for H2a | Push to master on Bicep paths, manual |
+| `publish-dataverse-solutions-manifest.yml` | Publish the managed-solution manifest H6 reads | Manual (release-time) |
+| `nightly-health.yml` | Flake hunt, bundle-size drift, vuln + Trivy scans, integration suite, coverage observation | Daily 06:00 UTC, manual |
+| `client-tests.yml` | Nightly jest baseline across client packages | Nightly 07:00 UTC, manual |
+| `report-workflow-health.yml` | Weekly per-workflow success-rate report | Weekly, manual |
 
 ---
 
@@ -160,19 +161,22 @@ Read each workflow's `on:` block before relying on a trigger — they change.
 ### Before Merging a PR
 
 ```
-1. Push changes (triggers sdap-ci.yml)
-2. Wait for all checks to pass:
+1. Push changes (triggers CI / Router, plus any path-scoped reporting workflows)
+2. Wait for the required check:
    gh pr checks --watch
-3. Review any ADR violation comments
-4. Merge when all checks green
+3. Review the Tier 2 advisory PR comment (format, lint, unit tests, ADR compliance)
+4. Merge when Router is green (and look at any red reporting check before merging,
+   even though it does not block)
 ```
 
 ### After Merge to Master
 
 ```
 1. CI (Router) runs on master
-2. Path-triggered deploy workflows run if their paths changed
-   (deploy-spaarke-ai / deploy-office-addins / deploy-infrastructure):
+2. Path-triggered workflows run if their paths changed — deploys:
+   deploy-spaarke-ai (dev) / deploy-office-addins; publish-only:
+   publish-provisioning-arm-artifacts / build-provisioning-sidecar;
+   validate only: deploy-infrastructure:
    gh run list --limit 10
 3. Nothing else deploys automatically — the BFF is deployed by an operator
 ```
@@ -205,36 +209,24 @@ Verify:  curl https://{app}.azurewebsites.net/ping
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  sdap-ci.yml (Automatic on PR/Push)                             │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │ security-scan│  │ build-test   │  │ code-quality │          │
-│  │ (Trivy)      │  │ (Debug/Rel)  │  │ (ADR, format)│          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-│         │                  │                  │                  │
-│         └──────────────────┼──────────────────┘                  │
-│                            ▼                                     │
-│                ┌──────────────────────┐                         │
-│                │ integration-readiness │                         │
-│                │ (Package artifacts)   │                         │
-│                └──────────────────────┘                         │
-│                            │                                     │
-│         ┌──────────────────┼──────────────────┐                 │
-│         ▼                  ▼                  ▼                  │
-│  ┌────────────┐    ┌────────────┐    ┌────────────┐            │
-│  │adr-pr-comm │    │  summary   │    │ artifacts  │            │
-│  │(PR comment)│    │  (report)  │    │ (30 days)  │            │
-│  └────────────┘    └────────────┘    └────────────┘            │
+│  ci-router.yml — CI / Router (automatic on PR / push / queue)   │
+│                                                                  │
+│   classify (path-aware) ──▶ Tier 1 (blocking)                    │
+│                         └─▶ Tier 2 (advisory, PR comment)        │
+│                                    │                             │
+│                                    ▼                             │
+│              router-result = "Router" (THE required check)       │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               │ (on master merge)
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Path-triggered deploy-*.yml only (SpaarkeAi, Office add-ins,   │
-│  Bicep). BFF + everything else: operator-driven /              │
-│  workflow_dispatch — see "Deployment Workflows".                │
+│  Path-triggered: deploy-spaarke-ai (dev) + deploy-office-addins │
+│  deploy; Bicep paths → validate/what-if + ARM artifact publish. │
+│  BFF + everything else: operator-driven / workflow_dispatch —   │
+│  see "Deployment Workflows".                                    │
 └─────────────────────────────────────────────────────────────────┘
 ```
-(The diagram's CI box shows the legacy `sdap-ci.yml` job layout; the required check is now `Router` → Tier 1/Tier 2 — see Key Terminology.)
 
 ---
 
@@ -244,17 +236,18 @@ Verify:  curl https://{app}.azurewebsites.net/ping
 
 | Failure | Cause | Fix |
 |---------|-------|-----|
-| `security-scan` | Vulnerable dependency | Update package or add to allowlist |
-| `build-test` | Compilation error | Fix code errors locally |
-| `code-quality` format | Code style violation | Run `dotnet format` locally |
-| `code-quality` ADR | Architecture violation | Run `/adr-check` locally, fix violations |
-| `code-quality` vulnerable | Package vulnerability | Update or replace vulnerable package |
+| Tier 1 `Compile (Debug)` | Compilation error | Fix code errors locally (`dotnet build`) |
+| Tier 1 `Arch Tests (full suite, blocking)` | Architecture rule violation | Run `dotnet test tests/Spaarke.ArchTests/` + `/adr-check` locally |
+| Tier 1 `Tenant Isolation (I1–I5 invariants)` | A tenant-isolation ArchTest failed | Read the failing invariant test; never weaken it |
+| Tier 1 `Xrm Capability Guard (getXrm AST scan)` | A `getXrm(...)` value is used for a member its requested capability does not cover, or the analyzer reported a blind spot | Read file:line in the log; request the capability the code calls (or rewrite the shape); run `npx jest src/utils/__tests__/xrmCapabilityUsage.guard.test.ts` in `Spaarke.UI.Components` |
+| Tier 1 smoke / eval / Compose gates | Changed surface broke an integration path | Read the job log; reproduce with the named test project |
+| Tier 2 (any) | Format, lint, unit test, ADR compliance, links, stamps | Advisory — does not block, but fix what the PR comment lists |
 
 ### View Detailed Logs
 
 ```powershell
 # Get run ID from list
-gh run list --workflow=sdap-ci.yml
+gh run list --workflow=ci-router.yml
 
 # View full logs
 gh run view {run-id} --log
@@ -280,8 +273,8 @@ gh run rerun {run-id}
 
 ## Required Secrets
 
-### CI Pipeline (sdap-ci.yml)
-No secrets required - runs in read-only mode.
+### CI (`ci-router.yml` + both tiers)
+No secrets referenced (verified 2026-09-30).
 
 ### Deployment Workflows
 Each `deploy-*.yml` declares its own secrets / OIDC federation — read the workflow's `env:` and `secrets.*` references rather than relying on a list here.
@@ -293,11 +286,11 @@ Each `deploy-*.yml` declares its own secrets / OIDC federation — read the work
 | Skill | CI/CD Integration |
 |-------|-------------------|
 | `push-to-github` | After push, check `gh pr checks` before merge |
-| `adr-check` | Local validation mirrors `code-quality` ADR tests |
-| `azure-deploy` | Bicep / Key Vault deployment (automated counterpart: `deploy-infrastructure.yml`) |
+| `adr-check` | Local validation mirrors Tier 1 Arch Tests + Tier 2 ADR Compliance |
+| `azure-deploy` | Bicep / Key Vault deployment (manual; `deploy-infrastructure.yml` only validates Bicep — customer stamps deploy via the L2 control plane) |
 | `bff-deploy` | BFF deployment (automated counterpart: `deploy-bff-api.yml`, `workflow_dispatch` only) |
 | `dataverse-deploy` | Solution / PCF / web resource deployment (no plugins — ADR-002) |
-| `code-review` | Quality gates run same checks as `code-quality` job |
+| `code-review` | Local quality gate; CI's closest counterparts are Tier 2 format/lint/unit tests |
 
 ---
 
@@ -345,7 +338,7 @@ Each `deploy-*.yml` declares its own secrets / OIDC federation — read the work
 
 | Failure | Cause | Prevention / Recovery |
 |---|---|---|
-| Workflow fails in 0-2 seconds with "failed" status | Workflow startup failure — action version doesn't exist in registry (e.g., `actions/checkout@v6` when current major is v4). See [`FAILURE-MODES.md#G-3`](../../FAILURE-MODES.md#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures) | Look at action version pins FIRST before debugging test logic. `actionlint` (Phase 4b) catches this pre-merge. |
+| Workflow fails in 0-2 seconds with "failed" status | Workflow startup failure — action version doesn't exist in registry (e.g. a major tag one ahead of the action's latest release). See [`FAILURE-MODES.md#G-3`](../../FAILURE-MODES.md#g-3-zero-second-github-actions-workflow-failures-are-startup-failures-not-test-failures) | Look at action version pins FIRST before debugging test logic. `actionlint` (Phase 4b) catches this pre-merge. |
 | Merge landed but an expected deploy didn't run | Deploy workflows are path-filtered or `workflow_dispatch`-only; the change didn't touch the filtered paths, or a `workflow_run` chain references a renamed workflow | Inspect the deploy workflow's `on:` block (paths / `workflow_run: workflows: [<name>]`). After renaming any workflow, update every workflow that depends on it. |
 | Required-status check failing but not gating the PR | Branch protection allows merge despite failing status (admin-bypass enabled OR check not marked required) | Re-audit required status checks in repo settings. Branch protection bypass during ai-procedure-quality-r1 is acceptable; re-audit at project wrap. |
 | Action version is pinned to a major tag (`@v4`) instead of SHA | SHA pinning not enforced in any current workflow (0 of 115 actions are SHA-pinned per Phase 0 inventory) | Phase 4b task 070 introduces SHA pinning; until then, treat major-tag pins as a known security/reproducibility gap. |

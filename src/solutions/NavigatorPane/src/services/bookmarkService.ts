@@ -162,7 +162,9 @@ async function resolveRecordDisplayName(
   const fallback = formatEntityFallbackLabel(entityLogicalName);
   if (!xrm?.WebApi) return fallback;
 
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+  // getEntityMetadata is optional here (callers fall back to a label): ask for the
+  // nearest frame that has it, separately from the WebApi frame (task 081 round 5).
+  const utility = getXrm('metadata')?.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
   if (!utility?.getEntityMetadata) return fallback;
 
   try {
@@ -297,7 +299,7 @@ function deriveCurrentPageWeblinkName(input: PageContextInput | undefined, url: 
  * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
  */
 export async function pinCurrentPage(ownerId: string): Promise<PinResult> {
-  const xrm = getXrm();
+  const xrm = getXrm(['webApi', 'pageContext']);
   const target = deriveCapturedTarget(xrm);
   if (target) {
     // When the host didn't preload `entityRecordName`, `deriveCapturedTarget`

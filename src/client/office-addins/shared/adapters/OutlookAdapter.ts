@@ -118,6 +118,19 @@ export class OutlookAdapter implements IHostAdapter {
   }
 
   /**
+   * Read `Office.context.platform` defensively (task 094) — a host that somehow lacks it (or throws
+   * reading it) is simply "not a known desktop platform", never a crash. Mirrors `WordAdapter`'s
+   * identically-named helper.
+   */
+  private getPlatform(): Office.PlatformType | undefined {
+    try {
+      return Office.context.platform;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Whether `Office.context.mailbox.displayNewMessageForm` can be called right now (task 036 / FR-15).
    * Requires Mailbox requirement set 1.6, AND the pane running in **read** mode — the API's documented
    * applicable Outlook mode is Message Read (Microsoft Learn: `Office.context.mailbox.displayNewMessageForm`,
@@ -585,6 +598,20 @@ export class OutlookAdapter implements IHostAdapter {
 
   /**
    * @inheritdoc
+   *
+   * Outlook has no open document to watch for content changes — task 094's change detection is
+   * Word-only, same reasoning as {@link readDocumentStamp}. Rejects with a typed
+   * `CAPABILITY_NOT_SUPPORTED` `HostAdapterError`.
+   */
+  async registerDocumentChangeHandler(_onChange: () => void): Promise<() => void> {
+    throw createHostAdapterError(
+      'CAPABILITY_NOT_SUPPORTED',
+      'Outlook has no open document. registerDocumentChangeHandler() is only supported in Word.'
+    );
+  }
+
+  /**
+   * @inheritdoc
    */
   getCapabilities(): HostCapabilities {
     const hasMailbox18 = this.isMailboxSupported('1.8');
@@ -618,6 +645,9 @@ export class OutlookAdapter implements IHostAdapter {
       canOpenBrowserWindow: this.isOpenBrowserWindowSupported(),
       // task 036 / FR-15: Mailbox 1.6 + read mode — see isComposeNewMessageSupported().
       canComposeEmail: this.isComposeNewMessageSupported(),
+      // task 096 (owner 2026-10-04: "Outlook unchanged"): no in-pane Email tab — Send Email keeps opening
+      // Outlook's native compose window (canComposeEmail above).
+      canEmailFromPane: false,
       // task 040 / FR-19: linked-todos (spec.md Assumptions Outlook-only list) — unconditionally
       // true here, matching the pre-existing `hostType === 'outlook'` gate this formalizes
       // (`App.tsx`'s LinkedTodosBanner visibility). The banner itself stays inert without a
@@ -636,6 +666,13 @@ export class OutlookAdapter implements IHostAdapter {
       // field register as user-typed and silently drop the collision-avoiding suffix. See the
       // `HostCapabilities.canProvideDocumentName` doc comment (types.ts) for the full reasoning.
       canProvideDocumentName: false,
+      // task 094: no open document in Outlook — content-change detection is Word-only.
+      canDetectDocumentChanges: false,
+      // task 094: PLATFORM, never hostType (NFR-10) — the collision prompt's "Open in Word" opens the
+      // COLLIDING FILE (always a Word document), which can be reachable from an Outlook-hosted pane
+      // too. Same PC/Mac check as WordAdapter.
+      canOpenDesktopWord:
+        this.getPlatform() === Office.PlatformType.PC || this.getPlatform() === Office.PlatformType.Mac,
       // Minimum API version for basic functionality
       minApiVersion: '1.5',
       // Actual supported version

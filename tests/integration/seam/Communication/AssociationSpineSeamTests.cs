@@ -2,8 +2,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Communication;
@@ -50,7 +50,7 @@ public sealed class AssociationSpineSeamTests
             new ThreadContinuityRung(dv.Object),
             new ParticipantCorrelationRung(dv.Object),
         };
-        return new IncomingAssociationResolver(rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), NullLogger<IncomingAssociationResolver>.Instance);
+        return new IncomingAssociationResolver(rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<IncomingAssociationResolver>.Instance);
     }
 
     private static NormalizedMessage ThreadEnvelope(string parentMsgId)

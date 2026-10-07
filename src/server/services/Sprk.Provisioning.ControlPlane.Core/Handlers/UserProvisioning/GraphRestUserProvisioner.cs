@@ -87,13 +87,13 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
             if (existingId is not null)
             {
                 _logger.LogInformation(
-                    "H11 user already exists for UPN {Upn} — idempotent no-op (userId={UserId})", upn, existingId);
+                    "H11 user already exists — idempotent no-op (userId={UserId})", existingId);   // D15: no UPN in logs
                 return new UserCreationOutcome.Success(existingId, upn);
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return new UserCreationOutcome.Failure($"UPN availability check failed for '{upn}': {ex.Message}");
+            return new UserCreationOutcome.Failure($"UPN availability check failed: {ex.Message}");
         }
 
         var payload = new Dictionary<string, object?>
@@ -125,7 +125,7 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
             if (!response.IsSuccessStatusCode)
             {
                 return new UserCreationOutcome.Failure(
-                    $"POST /users failed for '{upn}': {(int)response.StatusCode} {response.StatusCode}. " +
+                    $"POST /users failed: {(int)response.StatusCode} {response.StatusCode}. " +
                     $"Body: {Truncate(body, 300)}");
             }
 
@@ -133,16 +133,16 @@ public sealed class GraphRestUserProvisioner : IGraphUserProvisioner
             var userId = doc.RootElement.TryGetProperty("id", out var idProp) ? idProp.GetString() : null;
             if (string.IsNullOrWhiteSpace(userId))
             {
-                return new UserCreationOutcome.Failure($"Graph returned no 'id' after creating user '{upn}'.");
+                return new UserCreationOutcome.Failure("Graph returned no 'id' for the created user.");
             }
 
-            _logger.LogInformation("H11 created Entra user {UserId} with UPN {Upn}", userId, upn);
+            _logger.LogInformation("H11 created Entra user {UserId}", userId);   // D15: no UPN in logs
             return new UserCreationOutcome.Success(userId, upn);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new UserCreationOutcome.Failure(
-                $"POST /users infrastructure error for '{upn}': {ex.GetType().Name}: {ex.Message}");
+                $"POST /users infrastructure error: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

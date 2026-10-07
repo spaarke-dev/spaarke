@@ -19,9 +19,6 @@
  * because `sprk_event.sprk_todoflag` no longer exists. Todos are first-class
  * `sprk_todo` records and are created via the shared CreateTodoWizard.
  *
- * The PlaceholderFeedItem below is retained as a fallback/dev aid but is no
- * longer used in the main render path.
- *
  * The component is forward-ref compatible; consumers can hold a ref to the
  * scroll container for programmatic scroll-to-top on filter changes.
  */
@@ -31,11 +28,9 @@ import {
   makeStyles,
   tokens,
   Text,
-  Badge,
   Spinner,
 } from "@fluentui/react-components";
 import { IEvent } from "../../types/entities";
-import { formatRelativeTime } from "../NotificationPanel/notificationTypes";
 import { FeedItemCard } from "./FeedItemCard";
 
 // ---------------------------------------------------------------------------
@@ -79,55 +74,6 @@ const useStyles = makeStyles({
     gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: tokens.spacingHorizontalM,
   },
-  item: {
-    display: "flex",
-    flexDirection: "column",
-    gap: tokens.spacingVerticalXXS,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalM,
-    paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
-    borderBottomColor: tokens.colorNeutralStroke3,
-    cursor: "default",
-    backgroundColor: tokens.colorNeutralBackground1,
-    ":hover": {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-    ":focus-visible": {
-      outlineStyle: "solid",
-      outlineWidth: "2px",
-      outlineColor: tokens.colorBrandStroke1,
-      outlineOffset: "-2px",
-    },
-  },
-  itemRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: tokens.spacingHorizontalS,
-  },
-  itemSubject: {
-    flex: "1 1 0",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    color: tokens.colorNeutralForeground1,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  itemMeta: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: tokens.spacingHorizontalS,
-    flexShrink: 0,
-  },
-  itemTime: {
-    color: tokens.colorNeutralForeground3,
-    whiteSpace: "nowrap",
-  },
   sentinelContainer: {
     display: "flex",
     justifyContent: "center",
@@ -145,66 +91,6 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
   },
 });
-
-// ---------------------------------------------------------------------------
-// Placeholder feed item (task 011 will replace with FeedItemCard)
-// ---------------------------------------------------------------------------
-
-interface IPlaceholderFeedItemProps {
-  event: IEvent;
-}
-
-function getTypeBadgeColor(
-  eventType: string | undefined
-): "important" | "warning" | "informative" | "success" | "severe" {
-  const type = (eventType ?? "").toLowerCase();
-  if (type === "notification" || type === "status change") return "important";
-  if (type === "approval") return "warning";
-  if (type === "deadline" || type === "reminder") return "severe";
-  if (type === "task" || type === "to do" || type === "action") return "success";
-  if (type === "communication") return "informative";
-  return "informative";
-}
-
-function formatEventTypeLabel(eventType: string | undefined): string {
-  // sprk_eventtype_ref display names are already human-readable.
-  // Return the display value directly, or "Event" as fallback.
-  return eventType || "Event";
-}
-
-const PlaceholderFeedItem: React.FC<IPlaceholderFeedItemProps> = React.memo(
-  ({ event }) => {
-    const styles = useStyles();
-    const relativeTime = formatRelativeTime(event.modifiedon);
-
-    return (
-      <div
-        className={styles.item}
-        role="listitem"
-        tabIndex={0}
-        aria-label={`${event.sprk_eventname}, ${formatEventTypeLabel(event.eventTypeName)}, ${relativeTime}`}
-      >
-        <div className={styles.itemRow}>
-          <Text className={styles.itemSubject} size={300}>
-            {event.sprk_eventname}
-          </Text>
-          <div className={styles.itemMeta}>
-            <Badge
-              size="small"
-              appearance="tint"
-              color={getTypeBadgeColor(event.eventTypeName)}
-            >
-              {formatEventTypeLabel(event.eventTypeName)}
-            </Badge>
-            <Text className={styles.itemTime} size={200}>
-              {relativeTime}
-            </Text>
-          </div>
-        </div>
-      </div>
-    );
-  }
-);
 
 // ---------------------------------------------------------------------------
 // Props

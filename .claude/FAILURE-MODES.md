@@ -52,6 +52,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-13: A Dataverse `$select` is all-or-nothing — one bad column name blanks the entire control](#g-13-a-dataverse-select-is-all-or-nothing)
 - [G-14: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-14-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 - [G-15: A detached `Xrm` method loses `this` and dies inside the platform](#g-15-a-detached-xrm-method-loses-this-and-dies-inside-the-platform)
+- [G-17: A test that pins a cache-version constant to an exact value fails every later legitimate bump](#g-17-a-test-that-pins-a-cache-version-constant-to-an-exact-value)
 
 ---
 
@@ -747,7 +748,7 @@ That matters disproportionately because perturbation testing is the primary anti
 
 ### G-13: A Dataverse `$select` is all-or-nothing
 
-> **Date**: 2026-08-26 · **Class**: Gotcha · **Occurrences**: 3 (`RS-1`, RecordHeader UAT, and the generic guard that closed it)
+> **Date**: 2026-08-26 (extended 2026-10-06) · **Class**: Gotcha · **Occurrences**: 5 (`RS-1`, RecordHeader UAT, the generic guard that closed it, and two `$filter` cases in 2026-10)
 
 **What happened**: Three separate times, one invalid column name in a `useRecordFieldValues` `$select` produced HTTP 400 for the **whole request**, so every field came back null and the entire control rendered em-dashes. It presents as "the control is broken", not as "one field is wrong", which sends diagnosis in the wrong direction.
 
@@ -761,6 +762,8 @@ That matters disproportionately because perturbation testing is the primary anti
 **Prevention**: Never let a `$select` be assembled from names that a *derivation step* produced without a fallback. When adding or renaming a Dataverse column that any control selects, grep for the old name across `src/client/**` — a deleted column is a live outage, not a stale reference.
 
 **Evidence**: `projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md`; `notes/decisions/033-def1-metadata-never-reached-resolver.md`.
+
+**Same rule in `$filter` (2026-10-06, `unified-access-control-r2`)**: a lookup in a `$filter` must also be `_<name>_value eq {id}`; `<name> eq {id}` is a 400 (`0x80060888` "Could not find a property named …"). `NoAccessListReader` filtered all four No Access lookups that way (`sprk_subjectcontact` / `sprk_subjectorganization` / `sprk_subjectsystemuser` / `sprk_objectorganization`). Every deny-list read failed closed on dev, so secure provisioning returned 500 and No Access checks refused. The provisioning field-mapping seeder had the same bug (#1318). **It survived every suite because the test doubles answered on the filter TEXT and had copied the wrong form.** A double that matches on a query string proves only that the code and the double agree. When a test double keys on a Dataverse query, take its key from a query proven against the live Web API, not from the code under test. The sweep that found the second case (lookup names from metadata, grepped against `eq`/`ne` in `src/**`) is a cheap check to repeat.
 
 ---
 
@@ -1094,6 +1097,29 @@ writing to `task` succeeds. Nothing in the build, the tests, or the runtime obje
 `sprk_event` constant, the write) · `Services/Ai/PublicContracts/IActionSeam.cs:44` (the misleading
 signature) · `projects/spaarke-ontology-platform-r1/notes/mvp-technical-spec.md` §15.
 
+### AP-15: A Dataverse DateOnly-FORMAT column with TimeZoneIndependent BEHAVIOUR comes back from the Web API as a timestamp
+
+> **Found** 2026-10-05 by `unified-access-control-r2` task 140 (round v1c-v1), after it had broken every dated grant-row read since task 023.
+
+**The shape**: `"sprk_expiresdate":"2026-12-10T00:00:00Z"`, not `"2026-12-10"` — only DateOnly *behaviour* returns a bare
+date. System.Text.Json's `DateOnly` converter throws on the timestamp, so a `DateOnly?` property bound to such a column fails
+every read that carries a value — and in-memory doubles that serialize the shape the test chose never show it.
+
+**The rule**:
+- Before typing a Web API row property as `DateOnly`, read the column's `DateTimeBehavior`.
+- For TimeZoneIndependent, use a converter that takes the leading `yyyy-MM-dd` as written (`DataverseDateOnlyJsonConverter`, task 140).
+- Pin it with a wire test that serves the live response shape, not one the test invented.
+
 ---
 
 *Established 2026-05-14 by project `ai-procedure-quality-r1` (task 013). Cross-reference: [.claude/CHANGELOG.md](CHANGELOG.md) for the entry stream.*
+
+### G-17: A test that pins a cache-version constant to an exact value
+
+> **Added 2026-10-06** by `unified-access-control-r2` task 172 (#1011).
+
+**What happens.** A cache key carries a version constant so a deploy can retire entries whose meaning changed. A test that asserts `CacheVersion.Should().Be(N)` passes on the day it is written, then fails on the next change that legitimately bumps the version. That makes a correct bump look like a regression. In task 172, `AccessCacheFaultCachingTests` pinned the membership resolver cache version at exactly 5, and the needed bump to 6 failed it.
+
+**Rule.** Pin the floor, not the value: `Should().BeGreaterThanOrEqualTo(N)`. Prove the purpose by seeding an entry under the pre-bump version and asserting that it is not served. That is what the version exists to guarantee.
+
+---

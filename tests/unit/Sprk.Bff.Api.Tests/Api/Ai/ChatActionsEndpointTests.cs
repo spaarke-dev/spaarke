@@ -38,8 +38,11 @@ public class ChatActionsEndpointTests : IClassFixture<CustomWebAppFactory>
 
     private readonly HttpClient _client;
 
+    private readonly CustomWebAppFactory _factory;
+
     public ChatActionsEndpointTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -53,6 +56,7 @@ public class ChatActionsEndpointTests : IClassFixture<CustomWebAppFactory>
 
         // Assert - endpoint exists (not 404)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", "/api/ai/chat/actions");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     #endregion

@@ -48,6 +48,7 @@
 import * as React from 'react';
 import { SparkleRegular } from '@fluentui/react-icons';
 import type { SectionRegistration, SectionFactoryContext, ContentSectionConfig } from '@spaarke/ui-components';
+import { openPlaybookLibrary } from '../utils/openPlaybookLibrary';
 import { DailyBriefingApp } from '../components/DailyBriefingApp';
 
 // ---------------------------------------------------------------------------
@@ -195,32 +196,9 @@ export function createDailyBriefingRegistration(
        * 094. Browse mode launches the existing `sprk_playbooklibrary` Code
        * Page (preserves Path A.5 routing per ADR-013 — no new BFF surface).
        */
-      const handleBrowsePlaybooks = (): void => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        const xrm = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-        const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
-          xrm?.Navigation?.navigateTo;
-        if (typeof navigateTo !== 'function') {
-          console.warn('[DailyBriefing/embedded] Xrm.Navigation unavailable — cannot open Playbook Library.');
-          return;
-        }
-        navigateTo(
-          {
-            pageType: 'webresource',
-            webresourceName: 'sprk_playbooklibrary',
-            data: '',
-          },
-          {
-            target: 2,
-            width: { value: 85, unit: '%' },
-            height: { value: 85, unit: '%' },
-            title: 'Playbook Library',
-          }
-        ).catch((err: unknown) => {
-          console.warn('[DailyBriefing/embedded] Playbook Library navigation rejected:', err);
-        });
-      };
+      // Shared opener (task 081 round 4): calls Xrm.Navigation.navigateTo as a
+      // method on the nearest frame that can navigate.
+      const handleBrowsePlaybooks = (): void => openPlaybookLibrary('[DailyBriefing/embedded]');
 
       return {
         id: 'daily-briefing',

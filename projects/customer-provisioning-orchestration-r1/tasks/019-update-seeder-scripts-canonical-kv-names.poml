@@ -4,7 +4,7 @@
     <title>Update seeder scripts to write KV secrets under canonical names per §7.9 R1,R2,R4</title>
     <phase>G Canonical Naming Compliance</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing PowerShell seeder scripts (not BFF code); azure-deployment scope with explicit naming constraints. Per root CLAUDE.md §8 = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

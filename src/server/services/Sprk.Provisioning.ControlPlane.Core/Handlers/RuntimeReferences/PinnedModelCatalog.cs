@@ -7,7 +7,7 @@
 // DESIGN REF:
 //   - ADR-020 (versioning) — model deployments MUST be pinned to specific
 //     versions, never "latest": gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18,
-//     text-embedding-3-large 1. H2a's IBicepTemplateInspector already asserts
+//     text-embedding-3-large 1. H2a's ArmTemplateInspector already asserts
 //     the deployed Bicep template pins these same 3 versions
 //     (BicepDeployRejectionCodes.ModelVersionNotPinned) — this catalog is the
 //     C#-side mirror consumed at H12c runtime-reference-write time, parity

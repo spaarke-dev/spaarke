@@ -82,7 +82,7 @@ WHEN invoking a script:
   4. HANDLE output and errors
 
 COMMON PATTERNS:
-  - PCF deployment: .\Deploy-PCFWebResources.ps1 -ControlName "X"
+  - PCF build: .\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/X   (then deploy via the pcf-deploy skill)
   - API testing: .\Test-SdapBffApi.ps1 -Environment "dev"
   - Health check: node test-sdap-api-health.js <url>
 ```
@@ -95,7 +95,7 @@ COMMON PATTERNS:
 
 | Script | Purpose | When to Use |
 |--------|---------|-------------|
-| `Deploy-PCFWebResources.ps1` | Deploy PCF to Dataverse | After `npm run build` |
+| `Invoke-PcfBuildProd.ps1` | Production PCF build that FAILS on a failed build (pcf-scripts itself exits 0) | Before packing any PCF; deploy via the pcf-deploy skill |
 | `Deploy-CustomPage.ps1` | Deploy custom pages | After custom page changes |
 | `Deploy-ThemeIcons.ps1` | Deploy theme icons | After icon updates |
 | `Deploy-SubgridCommands.ps1` | Deploy subgrid commands | After ribbon changes |
@@ -260,7 +260,7 @@ The `project-pipeline` skill should:
 
 The `dataverse-deploy` skill should:
 1. Reference deployment scripts rather than inline commands
-2. Use `Deploy-PCFWebResources.ps1` for PCF deployment
+2. Use `Invoke-PcfBuildProd.ps1` for PCF builds and the `pcf-deploy` skill for PCF deployment
 3. Use `Test-SdapBffApi.ps1` for post-deployment validation
 
 ---
@@ -277,9 +277,9 @@ Claude writes new deployment commands inline...
 **With script-aware**:
 ```
 1. CHECK scripts/README.md for deployment scripts
-2. FIND: Deploy-PCFWebResources.ps1 matches "PCF deployment"
+2. FIND: Invoke-PcfBuildProd.ps1 matches "PCF build"; the pcf-deploy skill covers pack + import
 3. READ script to understand parameters
-4. INVOKE: .\scripts\Deploy-PCFWebResources.ps1 -ControlName "AISummaryPanel"
+4. INVOKE: .\scripts\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/SemanticSearchControl (stop on a non-zero exit)
 5. VERIFY deployment with Test-SdapBffApi.ps1
 ```
 

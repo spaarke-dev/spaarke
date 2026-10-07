@@ -53,15 +53,18 @@ public sealed class CommunicationParticipantIndexer
 
     private readonly ICommunicationDataverseService _resolver;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<CommunicationParticipantIndexer> _logger;
 
     public CommunicationParticipantIndexer(
         ICommunicationDataverseService resolver,
         IGenericEntityService genericEntityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<CommunicationParticipantIndexer> logger)
     {
         _resolver = resolver;
         _genericEntityService = genericEntityService;
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
     }
 
@@ -83,11 +86,28 @@ public sealed class CommunicationParticipantIndexer
             //    write self-heals — already-written rows are skipped, missing ones are added.
             var seen = await LoadExistingKeysAsync(communicationId, ct);
 
+            // Task 146: a participant row names a person on its message — owned like the message (the named Secure
+            // team's for a secure message; the creator while the message is unfiled, E1). Resolved once, before the
+            // first new row; a REFUSAL writes no rows (this index's contract: logged, never thrown — the next pass
+            // self-heals once the owner resolves).
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? owner = null;
+
             var written = 0;
             foreach (var (role, address, preResolved) in desired)
             {
                 if (!seen.Add(NormalizeKey(role, address)))
                     continue; // already present (an existing row, or a duplicate within this call)
+
+                owner ??= await _ownership.ResolveOwnerAsync(
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ContentOf("sprk_communication", communicationId), ct);
+                if (owner.IsRefused)
+                {
+                    _logger.LogWarning(
+                        "Participant-index rows not written: no owner resolved for the rows of communication "
+                        + "{CommunicationId} ({RefusalCode}: {Reason})",
+                        communicationId, owner.RefusalCode, owner.Reason);
+                    return;
+                }
 
                 // 3. Resolve identity. Prefer a caller-supplied typed reference (e.g. the ACS message sender
                 //    already resolved to a systemuser); otherwise REUSE the email→contact resolver. An address
@@ -101,7 +121,9 @@ public sealed class CommunicationParticipantIndexer
                         resolved = ParticipantReference.Contact(contact.Id);
                 }
 
-                await _genericEntityService.CreateAsync(BuildRow(communicationId, role, address, resolved), ct);
+                var row = BuildRow(communicationId, role, address, resolved);
+                owner.ApplyTo(row);
+                await _genericEntityService.CreateAsync(row, ct);
                 written++;
             }
 

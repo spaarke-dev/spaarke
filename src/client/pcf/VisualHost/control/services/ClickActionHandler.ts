@@ -6,6 +6,11 @@
 
 import { IChartDefinition, OnClickAction } from '../types';
 import { logger } from '../utils/logger';
+// React-free module from source (same precedent as VisualHostRoot / oobModalSizes).
+import {
+  getXrm as getSharedXrm,
+  type XrmCapability,
+} from '../../../../shared/Spaarke.UI.Components/src/utils/xrmContext';
 
 export interface IClickActionContext {
   chartDefinition: IChartDefinition;
@@ -15,13 +20,14 @@ export interface IClickActionContext {
 }
 
 /**
- * Get Xrm from global scope
+ * Xrm comes from the one shared lookup (task 081 round 4, review F2): the
+ * nearest frame whose Xrm has the capability each action needs. This file used
+ * to read `window.Xrm` only, so a VisualHost rendered inside an iframe whose
+ * own window has no Xrm (a custom page / dashboard host) silently did nothing
+ * on click. Each call below asks for exactly what it uses.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (window as any).Xrm;
-}
+const getXrm = (capability: XrmCapability): any => getSharedXrm(capability);
 
 /**
  * Resolve the record ID to use for the click action.
@@ -48,7 +54,7 @@ function resolveRecordId(ctx: IClickActionContext): string {
  * Open a record's modal form
  */
 async function openRecordForm(ctx: IClickActionContext): Promise<void> {
-  const xrm = getXrm();
+  const xrm = getXrm('openForm');
   if (!xrm?.Navigation?.openForm) {
     logger.warn('ClickActionHandler', 'Xrm.Navigation.openForm not available');
     return;
@@ -72,7 +78,7 @@ async function openRecordForm(ctx: IClickActionContext): Promise<void> {
  * Open a Custom Page in a side pane
  */
 async function openSidePane(ctx: IClickActionContext): Promise<void> {
-  const xrm = getXrm();
+  const xrm = getXrm('sidePanes');
   if (!xrm?.App?.sidePanes?.createPane) {
     logger.warn('ClickActionHandler', 'Xrm.App.sidePanes not available');
     return;
@@ -108,7 +114,7 @@ async function openSidePane(ctx: IClickActionContext): Promise<void> {
  * Navigate to a Custom Page or URL
  */
 async function navigateToPage(ctx: IClickActionContext): Promise<void> {
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   if (!xrm?.Navigation?.navigateTo) {
     logger.warn('ClickActionHandler', 'Xrm.Navigation.navigateTo not available');
     return;

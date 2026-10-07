@@ -408,6 +408,20 @@ describe('OutlookAdapter', () => {
       });
     });
 
+    describe('registerDocumentChangeHandler (task 094) — Word-only capability', () => {
+      it('rejects with a typed CAPABILITY_NOT_SUPPORTED HostAdapterError', async () => {
+        await expect(adapter.registerDocumentChangeHandler(jest.fn())).rejects.toMatchObject({
+          code: 'CAPABILITY_NOT_SUPPORTED',
+        });
+      });
+
+      it('never invokes the callback', async () => {
+        const onChange = jest.fn();
+        await expect(adapter.registerDocumentChangeHandler(onChange)).rejects.toBeDefined();
+        expect(onChange).not.toHaveBeenCalled();
+      });
+    });
+
     describe('getInternetMessageId', () => {
       it('should return the internet message ID', () => {
         const messageId = adapter.getInternetMessageId();

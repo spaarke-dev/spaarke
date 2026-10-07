@@ -36,10 +36,9 @@
  * `OpenBrowserWindowApi` lifecycle Spike-2 selected. They share no state.
  *
  * **Task 086 (FR-10 amended 2026-10-02)**: the opened record is a FOCUSED page (`navbar=off`, command
- * bar kept) — see {@link buildOpenRecordUrl}'s doc comment. This file also exposes
- * {@link openUrlInBrowserWindow}, a generic version of the same opener, reused by
- * `sendEmailService.ts`'s Word Send Email choice so the two compose URLs open through the SAME
- * mechanism as an opened record, not a second one.
+ * bar kept) — see {@link buildOpenRecordUrl}'s doc comment. (Task 086 also added a generic
+ * `openUrlInBrowserWindow` for its Word Send Email choice; task 096 replaced that choice with the Email tab and
+ * removed the then-unused helper.)
  *
  * **Task 088 (UAT-1, `notes/042-uat-round3-2026-10-03.md` §3a)**: a link that names no app opens in the
  * user's DEFAULT model-driven app, which may not be Spaarke's. Every record link therefore names the Spaarke
@@ -55,7 +54,7 @@
  * @see projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md
  */
 
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 /**
  * The Spaarke model-driven app's unique name, from the `SPAARKE_APP_NAME` build setting (task 088). An unset
@@ -167,17 +166,6 @@ function defaultOpener(url: string): void {
 }
 
 /**
- * Opens an arbitrary URL in a new browser tab/window via `Office.context.ui.openBrowserWindow` — the
- * SAME mechanism {@link openRecord} uses, exposed generically for other pane-driven browser-tab opens
- * (spaarkeai-word-add-in-r1 task 086 / FR-15: the Word Send Email choice's two compose URLs). Never
- * `window.open` / the Office Dialog API. Callers MUST gate on `HostCapabilities.canOpenBrowserWindow`
- * themselves (NFR-10) — this function does not re-check the capability.
- */
-export function openUrlInBrowserWindow(url: string, opener: (url: string) => void = defaultOpener): void {
-  opener(url);
-}
-
-/**
  * Task 088 (UAT-5): opens an https file URL — the colliding document's `webUrl` from
  * `GET /api/documents/{id}/open-links` — by whichever of the two supported mechanisms the host has
  * (NFR-10: decided by capability, never `hostType`):
@@ -212,6 +200,35 @@ export function openFileUrl(
   }
   // The opened page must not be able to script this pane (the noopener feature would hide the null check above).
   opened.opener = null;
+  return { opened: true };
+}
+
+/**
+ * Task 094 (UAT round 4 trial): launches `ms-word:` by a synthetic anchor click — the one mechanism
+ * community evidence (OfficeDev/office-js#6926, Win Word 2608) showed launching desktop Word from a
+ * task pane. **No SUPPORTED Office.js call can do this**: `openBrowserWindow` only accepts http/https
+ * (Microsoft Learn, Office.UI; OfficeDev/office-js#2820 closed "by design" for Office URI schemes),
+ * and a bare `window.open('ms-word:...')` from a task pane is undocumented. This is the owner-accepted
+ * trial of that unsupported mechanism (2026-10-04: *"if this is just something to test, then fine"*).
+ *
+ * Nothing can detect a failed launch (no event, no promise rejection for a scheme the OS declines to
+ * open) — this always reports `{ opened: true }`. "Open in browser" ({@link openFileUrl}) is the real
+ * fallback button, never a retry of this one. Callers MUST gate the "Open in Word" affordance on
+ * {@link HostCapabilities.canOpenDesktopWord} themselves (NFR-10) — this function does not re-check it.
+ */
+export function openDesktopUrl(
+  url: string,
+  click: (anchor: HTMLAnchorElement) => void = anchor => anchor.click()
+): OpenRecordResult {
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  try {
+    click(anchor);
+  } finally {
+    document.body.removeChild(anchor);
+  }
   return { opened: true };
 }
 

@@ -59,11 +59,12 @@ Load when:
 - ✅ **MUST** fail closed on every error path — and **MUST NOT** cache a fault-derived result as if it were an answer (session 26 C12 / task 132)
 - ✅ **MUST** include machine-readable deny codes (e.g., `sdap.access.deny.team_mismatch`)
 
-### SPE File Access — Writer-Identity Matching (binding — Pattern 4, 2026-06-08)
+### SPE File Access — broker-only byte identity (binding — task 171, 2026-10-06; supersedes Pattern 4's writer-identity rule)
 
-- ✅ **MUST** match the identity that reads an SPE file with the identity that wrote it. The Spaarke MI is intentionally NOT registered as a guest app on the SPE container type — it is on its own writes' ACLs only.
-- ✅ **MUST** dispatch post-upload RAG indexing synchronously in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` for **any user-OBO-uploaded file** (Create* wizard uploads, SprkChat persist, PCF/Code Page uploads). A Service Bus job that runs under MI later will 403 on the SPE download.
-- ✅ **MUST** use `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus enqueue) ONLY when the file was written by MI itself (Office Add-in finalize, Email-to-Document, post-analysis re-index).
+- ✅ **MUST** read and write SPE bytes app-only, behind a Dataverse decision and the document-pointer check, whenever a `sprk_document` (or record) stands behind them (task 171, owner rounds 69/70).
+- ✅ **MUST NOT** add a new caller of a user-identity byte member (`*AsUserAsync`). `SpeBrokerOnlyByteIdentityGuardTests` pins the allowed list (only record-less paths, such as staging and Compose items with no row).
+- ✅ **MUST** grant users SPE container roles only through `SpeContainerMembershipService.GrantMarkedWriterAsync` (guarded by `OnlyThreeTypesCreateContainerPermissions`).
+- ✅ **MUST** use `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus enqueue) ONLY when the file was written by MI itself (Office Add-in finalize, Email-to-Document, post-analysis re-index). An app-only job can read user-uploaded files since task 171.
 - ❌ **MUST NOT** enqueue a Service Bus job that reads an SPE file written by a different identity than the job handler runs under. Background-job handlers run under MI (`_factory.ForApp()`); they cannot read user-OBO-uploaded files.
 - ❌ **MUST NOT** wire new post-upload pipelines through `JobSubmissionService.SubmitJobAsync(RagIndexingJobPayload)` from request-scoped endpoints. Use the helper's OBO method.
 

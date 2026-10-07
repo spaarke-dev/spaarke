@@ -108,6 +108,27 @@ public class EmailProcessingOptions
     public int MinImageSizeKB { get; set; } = 5;
 
     /// <summary>
+    /// Per-pattern timeout for the <see cref="SignatureImagePatterns"/> regex match
+    /// (ReDoS defense, matching the <c>TimeSpan.FromSeconds(1)</c> convention used throughout
+    /// the Communication engine's detectors/rungs, e.g. <c>CourtEFilingDetector</c>,
+    /// <c>ExplicitReferenceRung</c>). <c>EmailAttachmentProcessor</c> catches
+    /// <see cref="System.Text.RegularExpressions.RegexMatchTimeoutException"/> and treats a
+    /// timed-out pattern as a non-match (fails open: logs a warning, does not filter).
+    /// </summary>
+    /// <remarks>
+    /// Exposed here — rather than a hardcoded literal inside <c>EmailAttachmentProcessor</c> —
+    /// so tests can substitute a timeout appropriate to their own execution environment without
+    /// changing the production default. A unit-test
+    /// process under heavy parallel CPU contention (e.g. the full BFF suite running many xunit
+    /// collections concurrently on a shared/loaded machine) can suffer thread-scheduling delays
+    /// that have nothing to do with the regex engine's actual work, and a 1-second budget sized
+    /// for a single production request thread is not generous enough to absorb that. The
+    /// PRODUCTION default stays at 1 second (unchanged behavior); see task 095
+    /// (spaarke-ontology-platform-r1) for the investigation that added this seam.
+    /// </remarks>
+    public TimeSpan SignatureImageRegexTimeout { get; set; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>
     /// Whether to filter out calendar attachments (.ics, .vcs).
     /// Default: true (exclude calendar files from document creation).
     /// </summary>

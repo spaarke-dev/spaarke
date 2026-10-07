@@ -1,6 +1,6 @@
 # Version Compatibility Matrix (BFF × Solution)
 
-> **Status**: v1 (initial publication — 2026-08-17)
+> **Status**: v2 (2026-10-02 — registry vocabulary = deployed build ids, owner D17) · v1 2026-08-17
 > **Owner**: Spaarke Platform Operations (Release Manager)
 > **Update cadence**: per release-tag milestone (living document; append rows/columns each release; do not rewrite history)
 > **Consumed by**: **H0 preflight (upgrade mode)** per [design.md §14A.3](../../projects/customer-provisioning-orchestration-r1/design.md) + [spec.md FR-34](../../projects/customer-provisioning-orchestration-r1/spec.md)
@@ -15,7 +15,7 @@
 
 This matrix maps each supported **BFF version** × **Solution-set version** pair to a compatibility verdict. It is the authoritative query surface that **H0 preflight (upgrade mode)** consults before an upgrade run proceeds against a live customer environment.
 
-Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_provisionedon != null` has no way to verify that the pending BFF binary + Dataverse solution set is a supported pair — and design.md §4B silent-fail traps T1..T6 cascade (customer environment becomes unreachable, DE seed fails, MI-Dataverse-App-User missing, container-type replication stalls, etc.). Publishing the matrix is the mechanism that lets H0 fail **loudly + early** on an incompatible pair.
+Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_provisionedon != null` has no way to verify that the pending BFF binary + Dataverse solution set is a supported pair — and design.md §4B silent-fail traps T1..T7 cascade (customer environment becomes unreachable, DE seed fails, MI-Dataverse-App-User missing, container-type replication stalls, etc.). Publishing the matrix is the mechanism that lets H0 fail **loudly + early** on an incompatible pair.
 
 ## 2. How H0 uses this matrix (query semantics)
 
@@ -23,9 +23,17 @@ Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_p
 
 | Column | Purpose |
 |---|---|
-| `sprk_bffversion` | Semver-ish string identifying the BFF binary the customer's environment is currently bound to (e.g. `1.0.0-net10` for the current baseline). Populated at H9 slot-swap. |
-| `sprk_solutionversion` | Aggregated Solution-set version tag (e.g. `S2026.08`) representing the shipped combination of the 8 solutions per [design.md §11.1a](../../projects/customer-provisioning-orchestration-r1/design.md). Populated at H6 completion. |
-| `sprk_clientcachebusttoken` | Env-var value picked up by SPA clients on next refresh; force-bump on solution upgrades that require immediate cache invalidation. |
+| `sprk_bffversion` | The **CI build id** of the BFF artifact H9 deployed (`<YYYY>.<MM>.<DD>-<run>`, e.g. `2026.09.30-123` — the `buildId` in the BFF artifact manifest). Written by H13 from H9's output. H9 also reads it to pin a re-run to the same build. |
+| `sprk_solutionversion` | A **32-hex fingerprint** of the imported solution set — the sorted (solution unique name, version) pairs H6 imported (`ImportedSolutionSet`). Identical sets give identical values in every environment. Written by H13. |
+| `sprk_clientcachebusttoken` | The **run id** of the last provisioning or upgrade run (every run deploys). Intended for SPA clients to detect a deploy on next refresh; no client reads it yet. |
+
+> **v2 (2026-10-02, owner decision D17).** The columns record **what was deployed**, as above. v1 described a
+> semver and an `S<YYYY>.<MM>` set tag; neither ever had a producer (the columns were blank until task 245b) and
+> nothing read them, so the definition was fixed before the first real write (ADR-020 complied with, no exception —
+> `spec.md` ADR Tensions). The semver / set-tag scheme in §3 is the **future release layer**: when it lands, a release
+> record maps each release to its BFF build id + solution-set fingerprint and H0 resolves through it. Until then,
+> matrix cells must be keyed by the deployed values, and any pair not listed is Red — so an **upgrade** run stops at H0
+> (`upgrade-compat-red`) until the release manager appends its cell. First installs never read the matrix.
 
 **Algorithm**:
 
@@ -49,6 +57,10 @@ Without this matrix, an upgrade against `sprk_dataverseenvironment` with `sprk_p
 - Not a zero-downtime guarantee (H9 blue-green gives minutes-of-drain per §14A.7)
 
 ## 3. Version scheme
+
+> **§3 is the future release layer (v2 note).** The registry columns hold deployed build ids (§2). The schemes below
+> name *releases*; they become matrix keys once a release → build-id mapping exists (follow-on before the first
+> customer upgrade).
 
 ### 3.1 BFF version (`sprk_bffversion`)
 
@@ -144,4 +156,5 @@ Per [design.md §14A.3](../../projects/customer-provisioning-orchestration-r1/de
 
 | Version | Date | Change | Author |
 |---|---|---|---|
+| v2 | 2026-10-02 | Registry columns redefined to what provisioning writes: `sprk_bffversion` = BFF CI build id, `sprk_solutionversion` = solution-set fingerprint, `sprk_clientcachebusttoken` = run id (owner decision D17; ADR-020 path C). §3 schemes re-scoped to the future release layer. The v1 cell keeps release names no environment carries — historical, not deleted. | main session (customer-provisioning-orchestration-r1, owner item O3) |
 | v1 | 2026-08-17 | Initial publication per FR-34 + design.md §14A.3. Baseline row (BFF 1.0.0-net10) × baseline column (S2026.08) = ✅ Green. Framework + remediation guidance in place; matrix expands per §6 at each release-tag milestone. | task-execute (task 006, project customer-provisioning-orchestration-r1) |

@@ -1,5 +1,7 @@
 # dotnet-10-upgrade-r1
 
+> **Portfolio**: [Project #1156](https://github.com/spaarke-dev/spaarke/issues/1156) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Created**: 2026-08-10 · **Status**: ✅ **COMPLETE 2026-08-14** — master + dev on .NET 10 (`DOTNETCORE-10.0.9`), suite green, zero-CVE, publish 44.96 MB. Prod/demo cutover deferred (#773). Handoff to r3: [`notes/r3-handoff.md`](notes/r3-handoff.md). · **Driver**: .NET 8 EOL **2026-11-10**
 
 Upgrade the Spaarke server backend from **.NET 8 → .NET 10 (LTS)** before .NET 8 loses support.

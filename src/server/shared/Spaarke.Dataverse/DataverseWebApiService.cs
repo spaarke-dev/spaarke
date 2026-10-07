@@ -26,6 +26,11 @@ namespace Spaarke.Dataverse;
 /// communication-query / health capability all resolve to <see cref="DataverseServiceClientImpl"/>
 /// (SDK) — the former implementations of those surfaces here were runtime-dead and were removed.
 /// See <c>docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md</c>.</para>
+///
+/// <para><b>Every POA share write notifies</b> (unified-access-control-r2 task 132, main-session round 55): GrantAccessAsync,
+/// ModifyAccessAsync and RevokeAccessAsync send through one private method that, on every path, tells the
+/// <see cref="IRecordShareWriteObserver"/> passed to the constructor which record it wrote — in the BFF, the access-cache
+/// invalidator. It is a property of the write, so it holds for every caller and every way of invoking it.</para>
 /// </remarks>
 public class DataverseWebApiService : IEventDataverseService, IFieldMappingDataverseService
 {
@@ -33,9 +38,15 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<DataverseWebApiService> _logger;
+    private readonly IRecordShareWriteObserver _shareWriteObserver;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
 
+    /// <param name="shareWriteObserver">
+    /// Told after every POA share write this client makes (unified-access-control-r2 task 132, round 55) — in the BFF,
+    /// its access-cache invalidator. Required, with no default, so no host gets a client whose share writes silently
+    /// tell nobody; a host with no access cache passes one that does nothing. See <see cref="IRecordShareWriteObserver"/>.
+    /// </param>
     /// <param name="confidentialClients">
     /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY in the
     /// managed-identity-disabled branch, where it replaces an inline <c>ClientSecretCredential</c>.
@@ -46,8 +57,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
+        IRecordShareWriteObserver shareWriteObserver,
         IConfidentialClientProvider? confidentialClients = null)
-        : this(httpClient, configuration, logger, confidentialClients, credential: null)
+        : this(httpClient, configuration, logger, shareWriteObserver, confidentialClients, credential: null)
     {
     }
 
@@ -64,11 +76,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         HttpClient httpClient,
         IConfiguration configuration,
         ILogger<DataverseWebApiService> logger,
+        IRecordShareWriteObserver shareWriteObserver,
         IConfidentialClientProvider? confidentialClients,
         TokenCredential? credential)
     {
         _httpClient = httpClient;
         _logger = logger;
+        _shareWriteObserver = shareWriteObserver ?? throw new ArgumentNullException(nameof(shareWriteObserver));
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
         if (string.IsNullOrEmpty(dataverseUrl))
@@ -304,9 +318,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return entitySetName;
     }
 
-    public async Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -315,44 +329,194 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         int skip = 0,
         int top = 50,
         Guid? ownerUserId = null,
+        IReadOnlyCollection<int>? excludeStatusCodes = null,
         CancellationToken ct = default)
     {
-        // Build OData query
+        // APP-ONLY: background callers only (TodoGenerationService). See the interface remarks.
+        var url = BuildEventQueryUrl(
+            regardingRecordType, regardingRecordId, regardingRecordTypeRefId: null,
+            eventTypeId, statusCode, priority, dueDateFrom, dueDateTo, skip, top,
+            new EventOwnershipScope(ownerUserId, null, null), excludeStatusCodes);
+
+        return QueryEventsCoreAsync(url, skip, top, impersonateSystemUserId: null, ct);
+    }
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        EventOwnershipScope? mine = null,
+        CancellationToken ct = default)
+    {
+        // Refused BEFORE the URL is built or anything is sent: an empty caller would otherwise be one bug away from
+        // the app-only query this method exists to replace (task 104's fail-closed rule, restated at the entry).
+        if (callerSystemUserId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "A caller-scoped event query requires a non-empty caller systemuserid; refusing to issue an app-only "
+                + "query on the access-scoped read path (fail closed).",
+                nameof(callerSystemUserId));
+        }
+
+        var url = BuildEventQueryUrl(
+            regardingRecordType, regardingRecordId, regardingRecordTypeRefId,
+            eventTypeId, statusCode, priority, dueDateFrom, dueDateTo, skip, top, mine, excludeStatusCodes: null);
+
+        return QueryEventsCoreAsync(url, skip, top, callerSystemUserId, ct);
+    }
+
+    /// <summary>
+    /// The Dataverse Web API rejects <c>$top</c> above this (and rejects <c>$skip</c> outright), so a page window
+    /// <c>skip + top</c> may not exceed it. The endpoint validates the same bound as a 400.
+    /// </summary>
+    internal const int MaxEventQueryWindow = 5000;
+
+    /// <summary>
+    /// The <c>$select</c> of the event list. Lookups are selected as <c>_x_value</c> (a lookup's logical name is not a
+    /// queryable property — live 400 on 2026-10-03); the regarding type is <c>_sprk_regardingrecordtype_value</c>, and
+    /// the eight typed lookups the API's 0-7 types use are selected so the mapper can derive the type by value.
+    /// </summary>
+    internal const string EventListSelect =
+        "sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,"
+        + "sprk_regardingrecordid,sprk_regardingrecordname,_sprk_regardingrecordtype_value,"
+        + "_sprk_regardingproject_value,_sprk_regardingmatter_value,_sprk_regardinginvoice_value,"
+        + "_sprk_regardinganalysis_value,_sprk_regardingaccount_value,_sprk_regardingcontact_value,"
+        + "_sprk_regardingworkassignment_value,_sprk_regardingbudget_value,"
+        + "sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,"
+        + "createdon,modifiedon";
+
+    /// <summary>
+    /// The <c>$select</c> of a single event: the list's columns plus the reminder/related-event columns. There is no
+    /// <c>sprk_relatedevent</c> lookup on <c>sprk_event</c> (live 2026-10-03), so <c>_sprk_relatedevent_value</c> is
+    /// not selected — selecting it 400'd every GET /{id}.
+    /// </summary>
+    internal const string EventGetSelect =
+        EventListSelect + ",sprk_remindat,sprk_relatedeventtype,sprk_relatedeventoffsettype";
+
+    /// <summary>
+    /// The event-type <c>$expand</c>, by NAVIGATION property (<c>sprk_EventType_Ref</c>). The logical name
+    /// <c>sprk_eventtype_ref</c> is not a property of the entity type (live 400 on 2026-10-03).
+    /// </summary>
+    internal const string EventTypeExpand = "sprk_EventType_Ref($select=sprk_name)";
+
+    /// <summary>
+    /// The ONE URL builder for both event queries (app-only and caller-scoped), so the trimmed list and the
+    /// background scan cannot drift apart (unified-access-control-r2 task 159, #1098).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>No caller text reaches <c>$filter</c>.</b> Every clause is built from a typed value — a
+    /// <see cref="Guid"/> formatted "D", an <see cref="int"/>, or a <see cref="DateTime"/> formatted yyyy-MM-dd with
+    /// the invariant culture. The previous builder concatenated a caller string into
+    /// <c>sprk_regardingrecordid eq '…'</c>, so <c>x' or sprk_regardingrecordid ne 'zz</c> escaped the owner clause.</para>
+    /// <para><b>The regarding filters read the lookup as a lookup.</b> An id (with or without a type) filters on
+    /// <c>sprk_regardingrecordid</c>, plus the type's typed lookup when the type is given; a type alone filters on
+    /// <c>_sprk_regardingrecordtype_value</c> = its <c>sprk_recordtype_ref</c> row.</para>
+    /// <para><b>Paging without <c>$skip</c></b>, which the Dataverse Web API rejects ("Skip Clause is not supported in
+    /// CRM"): the request asks for the first <c>skip + top</c> rows, and the caller drops the first <c>skip</c>.
+    /// <c>$count=true</c> still counts the whole (for the caller-scoped query: the whole TRIMMED) result.</para>
+    /// </remarks>
+    internal static string BuildEventQueryUrl(
+        int? regardingRecordType,
+        Guid? regardingRecordId,
+        Guid? regardingRecordTypeRefId,
+        Guid? eventTypeId,
+        int? statusCode,
+        int? priority,
+        DateTime? dueDateFrom,
+        DateTime? dueDateTo,
+        int skip,
+        int top,
+        EventOwnershipScope? mine,
+        IReadOnlyCollection<int>? excludeStatusCodes = null)
+    {
+        if (skip < 0)
+            throw new ArgumentOutOfRangeException(nameof(skip), skip, "skip must not be negative.");
+        if (top < 1)
+            throw new ArgumentOutOfRangeException(nameof(top), top, "top must be at least 1.");
+        if ((long)skip + top > MaxEventQueryWindow)
+            throw new ArgumentOutOfRangeException(
+                nameof(skip), skip, $"skip + top must not exceed {MaxEventQueryWindow} (the Dataverse $top limit).");
+
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
         var filters = new List<string>();
 
-        // Owner filter — scopes results to a specific user (used by Copilot integration)
-        if (ownerUserId.HasValue)
-            filters.Add($"_ownerid_value eq {ownerUserId.Value}");
+        // "Mine" (task 097 round 8, owner decision B): owned by the caller, OR assigned to the caller's linked contact
+        // (task 152 S1), OR created by the caller as sprk_createdbyperson (task 146 c1-r1 — a SYSTEMUSER lookup). An
+        // app-only create is owned by a TEAM (I-6), so ownership alone would hide every event the BFF made for the caller.
+        if (mine?.ToFilter(inv) is { } mineFilter)
+            filters.Add(mineFilter);
 
-        if (regardingRecordType.HasValue)
-            filters.Add($"sprk_regardingrecordtype eq {regardingRecordType.Value}");
+        if (regardingRecordId is { } regardingId)
+        {
+            filters.Add(string.Create(inv, $"sprk_regardingrecordid eq '{regardingId:D}'"));
 
-        if (!string.IsNullOrEmpty(regardingRecordId))
-            filters.Add($"sprk_regardingrecordid eq '{regardingRecordId}'");
+            if (regardingRecordType is { } typeWithId)
+            {
+                var lookup = RegardingRecordType.GetLookupFieldName(typeWithId)
+                    ?? throw new ArgumentOutOfRangeException(
+                        nameof(regardingRecordType), typeWithId, "Unknown regarding record type.");
+                filters.Add(string.Create(inv, $"_{lookup}_value eq {regardingId:D}"));
+            }
+        }
+        else if (regardingRecordType is { } typeOnly)
+        {
+            if (RegardingRecordType.GetLookupFieldName(typeOnly) is null)
+                throw new ArgumentOutOfRangeException(nameof(regardingRecordType), typeOnly, "Unknown regarding record type.");
 
-        if (eventTypeId.HasValue)
-            filters.Add($"_sprk_eventtype_ref_value eq {eventTypeId.Value}");
+            // sprk_regardingrecordtype is a LOOKUP to sprk_recordtype_ref, never an option set. Filtering on it needs
+            // the environment's row id, which only the BFF resolves; without one there is nothing true to filter on.
+            if (regardingRecordTypeRefId is not { } refId || refId == Guid.Empty)
+                throw new ArgumentException(
+                    "A regarding-type filter without a regarding id needs that type's sprk_recordtype_ref row.",
+                    nameof(regardingRecordTypeRefId));
 
-        if (statusCode.HasValue)
-            filters.Add($"statuscode eq {statusCode.Value}");
+            filters.Add(string.Create(inv, $"_sprk_regardingrecordtype_value eq {refId:D}"));
+        }
 
-        if (priority.HasValue)
-            filters.Add($"sprk_priority eq {priority.Value}");
+        if (eventTypeId is { } eventType)
+            filters.Add(string.Create(inv, $"_sprk_eventtype_ref_value eq {eventType:D}"));
 
-        if (dueDateFrom.HasValue)
-            filters.Add($"sprk_duedate ge {dueDateFrom.Value:yyyy-MM-dd}");
+        if (statusCode is { } status)
+            filters.Add(string.Create(inv, $"statuscode eq {status}"));
 
-        if (dueDateTo.HasValue)
-            filters.Add($"sprk_duedate le {dueDateTo.Value:yyyy-MM-dd}");
+        if (priority is { } prio)
+            filters.Add(string.Create(inv, $"sprk_priority eq {prio}"));
+
+        if (dueDateFrom is { } from)
+            filters.Add(string.Create(inv, $"sprk_duedate ge {from:yyyy-MM-dd}"));
+
+        if (dueDateTo is { } to)
+            filters.Add(string.Create(inv, $"sprk_duedate le {to:yyyy-MM-dd}"));
+
+        // Task 097 review F5: an exclusion is applied IN the query, so a page is cut from the rows that qualify (an
+        // in-memory filter after $top would silently drop qualifying rows past the window).
+        foreach (var excluded in excludeStatusCodes ?? Array.Empty<int>())
+            filters.Add(string.Create(inv, $"statuscode ne {excluded}"));
 
         var filterQuery = filters.Count > 0 ? $"$filter={string.Join(" and ", filters)}&" : "";
-        var url = $"sprk_events?{filterQuery}$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)&$orderby=sprk_duedate asc,createdon desc&$skip={skip}&$top={top}&$count=true";
+        // Task 097 review F4: sprk_eventid is the final tiebreaker, so the skip+top window is deterministic across pages.
+        return string.Create(inv,
+            $"sprk_events?{filterQuery}$select={EventListSelect}&$expand={EventTypeExpand}"
+            + $"&$orderby=sprk_duedate asc,createdon desc,sprk_eventid asc&$top={skip + top}&$count=true");
+    }
 
-        _logger.LogDebug("Querying events: {Url}", url);
+    private async Task<(EventEntity[] Items, int TotalCount)> QueryEventsCoreAsync(
+        string url, int skip, int top, Guid? impersonateSystemUserId, CancellationToken ct)
+    {
+        _logger.LogDebug(
+            "Querying events (impersonated: {Impersonated}): {Url}", impersonateSystemUserId.HasValue, url);
 
         try
         {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct, impersonateSystemUserId);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -362,7 +526,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             if (data == null)
                 return (Array.Empty<EventEntity>(), 0);
 
-            var events = data.Value.Select(MapToEventEntity).ToArray();
+            var events = data.Value.Skip(skip).Take(top).Select(MapToEventEntity).ToArray();
             return (events, data.Count);
         }
         catch (Exception ex)
@@ -375,7 +539,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     public async Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
     {
 
-        var url = $"sprk_events({id})?$select=sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid,sprk_regardingrecordname,sprk_regardingrecordtype,_sprk_regardingaccount_value,_sprk_regardinganalysis_value,_sprk_regardingcontact_value,_sprk_regardinginvoice_value,_sprk_regardingmatter_value,_sprk_regardingproject_value,_sprk_regardingbudget_value,_sprk_regardingworkassignment_value,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode,sprk_priority,sprk_source,sprk_remindat,_sprk_relatedevent_value,sprk_relatedeventtype,sprk_relatedeventoffsettype,createdon,modifiedon&$expand=sprk_eventtype_ref($select=sprk_name)";
+        var url = $"sprk_events({id:D})?$select={EventGetSelect}&$expand={EventTypeExpand}";
 
         _logger.LogDebug("Getting event: {Id}", id);
 
@@ -408,6 +572,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Refuses (throws) before anything is sent when the request carries no owner (task 146, in the builder).
         var payload = BuildCreateEventPayload(request);
 
         _logger.LogInformation("Creating event: {Name}", request.Name);
@@ -434,16 +601,35 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// BFF unit tests) so the payload — including the unified-access-control-r2 task 152 <c>sprk_AssignedTo</c> bind —
     /// is asserted without intercepting the HTTP transport (ADR-038 bans <c>Mock&lt;HttpMessageHandler&gt;</c>).
     /// </summary>
+    /// <exception cref="InvalidOperationException">The request carries no <see cref="CreateEventRequest.OwningTeamId"/>
+    /// (unified-access-control-r2 task 146): no payload without an owner is ever built.</exception>
     internal static Dictionary<string, object?> BuildCreateEventPayload(CreateEventRequest request)
     {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // unified-access-control-r2 task 146: the owner is resolved upstream (the regarding record's team; the named
+        // Secure team for a secure one) and its absence REFUSES — never an app-owned event in the root business unit.
+        if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateEventAsync requires CreateEventRequest.OwningTeamId (resolved by IRecordOwnershipResolver); "
+                + "refusing to create an app-owned sprk_event (task 146).");
+        }
+
         var payload = new Dictionary<string, object?>
         {
             ["sprk_eventname"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["statuscode"] = 3, // Open
-            ["statecode"] = 0,  // Active
-            ["sprk_source"] = 0 // User
+            // Live sprk_event option set (task 159, notes §0.2 (e)): Open = 659490001, statecode 0 (Active). The old
+            // value 3 is not a statuscode of this table.
+            ["statuscode"] = EventStatusCode.Open,
+            ["statecode"] = EventStatusCode.GetStateCode(EventStatusCode.Open),
+            ["sprk_source"] = 0, // User
+            ["ownerid@odata.bind"] = $"/teams({owningTeamId})", // task 146 — resolved upstream; the builder refuses without it
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.BindIfKnown(payload, request.CreatedByPersonId);
 
         if (request.EventTypeId.HasValue)
             payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
@@ -463,69 +649,76 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
 
         if (request.RegardingRecordType.HasValue)
-        {
-            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
-            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
-            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
-
-            // Set entity-specific lookup based on record type
-            var lookupField = RegardingRecordType.GetLookupFieldName(request.RegardingRecordType.Value);
-            var entityName = RegardingRecordType.GetEntityLogicalName(request.RegardingRecordType.Value);
-            if (lookupField != null && entityName != null && !string.IsNullOrEmpty(request.RegardingRecordId))
-            {
-                payload[$"{lookupField}@odata.bind"] = $"/{entityName}s({request.RegardingRecordId})";
-            }
-        }
+            AddRegardingWriteSet(payload, request);
 
         return payload;
     }
 
-    public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
+    /// <summary><c>sprk_event.sprk_regardingrecordname</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNameMaxLength = 1000;
+
+    /// <summary><c>sprk_event.sprk_regardingrecordnumber</c> length (live metadata, 2026-10-03).</summary>
+    internal const int EventRegardingRecordNumberMaxLength = 100;
+
+    /// <summary>
+    /// Shapes the ADR-024 regarding write set into the create body, in this order: (i) the target's own typed lookup
+    /// by its live NAVIGATION property and its live entity SET; (ii) the record-type lookup to its
+    /// <c>sprk_recordtype_ref</c> row, left out when the environment has none; (iii) the denormalized id, name, url
+    /// and number; (iv) the FR-26 core-ancestor stamps.
+    /// </summary>
+    /// <remarks>
+    /// <b>Only shapes.</b> Every value is resolved by the BFF (task 159 LAYERING note). A missing entity set is a
+    /// programming error and throws — this method never derives a set name (no "logical name + s") and never
+    /// writes <c>sprk_regardingrecordtype</c> as a number or any <c>_x_value</c> key.
+    /// </remarks>
+    private static void AddRegardingWriteSet(Dictionary<string, object?> payload, CreateEventRequest request)
     {
+        var regardingType = request.RegardingRecordType!.Value;
+        var lookup = RegardingRecordType.GetLookupFieldName(regardingType)
+            ?? throw new ArgumentOutOfRangeException(nameof(request), regardingType, "Unknown regarding record type.");
+        var navigation = RegardingRecordType.GetEventNavigationProperty(lookup)
+            ?? throw new InvalidOperationException($"No sprk_event navigation property is known for '{lookup}'.");
 
-        var payload = new Dictionary<string, object?>();
+        if (request.RegardingRecordId is not { } targetId || targetId == Guid.Empty)
+            throw new ArgumentException("A regarding write needs the regarding record id.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.RegardingEntitySetName))
+            throw new ArgumentException(
+                "A regarding write needs the target's entity set, resolved from live metadata by the caller.",
+                nameof(request));
 
-        if (request.Name != null)
-            payload["sprk_eventname"] = request.Name;
+        // (i) the target's own typed lookup
+        payload[$"{navigation}@odata.bind"] = $"/{request.RegardingEntitySetName}({targetId:D})";
 
-        if (request.Description != null)
-            payload["sprk_description"] = request.Description;
+        // (ii) the record type, as a lookup to the environment's sprk_recordtype_ref row
+        if (request.RegardingRecordTypeRefId is { } refId && refId != Guid.Empty)
+            payload[$"{RegardingRecordType.EventRecordTypeNavigationProperty}@odata.bind"] =
+                $"/{RegardingRecordType.RecordTypeRefEntitySet}({refId:D})";
 
-        if (request.EventTypeId.HasValue)
-            payload["sprk_EventType_Ref@odata.bind"] = $"/sprk_eventtype_refs({request.EventTypeId.Value})"; // R5 002: nav prop sprk_EventType_Ref + correct collection sprk_eventtype_refs (metadata-verified; sprk_eventtypes does not exist)
+        // (iii) the denormalized resolver fields
+        payload["sprk_regardingrecordid"] = targetId.ToString("D");
+        payload["sprk_regardingrecordname"] = Truncate(request.RegardingRecordName, EventRegardingRecordNameMaxLength);
+        payload["sprk_regardingrecordurl"] = request.RegardingRecordUrl;
+        if (!string.IsNullOrEmpty(request.RegardingRecordNumber))
+            payload["sprk_regardingrecordnumber"] = Truncate(request.RegardingRecordNumber, EventRegardingRecordNumberMaxLength);
 
-        if (request.BaseDate.HasValue)
-            payload["sprk_basedate"] = request.BaseDate.Value.ToString("yyyy-MM-dd");
-
-        if (request.DueDate.HasValue)
-            payload["sprk_duedate"] = request.DueDate.Value.ToString("yyyy-MM-dd");
-
-        if (request.Priority.HasValue)
-            payload["sprk_priority"] = request.Priority.Value;
-
-        if (request.StatusCode.HasValue)
-            payload["statuscode"] = request.StatusCode.Value;
-
-        if (request.RegardingRecordType.HasValue)
+        // (iv) the core-ancestor stamps (the target's own lookup is never among them — DeriveForHostAsync skips it)
+        foreach (var stamp in request.RegardingCoreStamps ?? [])
         {
-            payload["sprk_regardingrecordtype"] = request.RegardingRecordType.Value;
-            payload["sprk_regardingrecordid"] = request.RegardingRecordId;
-            payload["sprk_regardingrecordname"] = request.RegardingRecordName;
+            var stampNavigation = RegardingRecordType.GetEventNavigationProperty(stamp.LookupAttribute)
+                ?? throw new InvalidOperationException(
+                    $"No sprk_event navigation property is known for core stamp '{stamp.LookupAttribute}'.");
+            if (string.IsNullOrWhiteSpace(stamp.EntitySetName) || stamp.RecordId == Guid.Empty)
+                throw new ArgumentException($"Core stamp '{stamp.LookupAttribute}' has no entity set or id.", nameof(request));
+
+            payload[$"{stampNavigation}@odata.bind"] = $"/{stamp.EntitySetName}({stamp.RecordId:D})";
         }
-
-        if (payload.Count == 0)
-        {
-            _logger.LogDebug("No fields to update for event {Id}", id);
-            return;
-        }
-
-        _logger.LogInformation("Updating event: {Id}", id);
-
-        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        _logger.LogDebug("Event updated: {Id}", id);
     }
+
+    private static string? Truncate(string? value, int maxLength) =>
+        value is { Length: > 0 } && value.Length > maxLength ? value[..maxLength] : value;
+
+    // ── sprk_event status: the live option set and its statecode pairing have ONE home, EventStatusCode (Models.cs) ──
+    // (task 097 and unified-access-control-r2 task 159 fixed the same values independently; merged into one.)
 
     public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
@@ -535,10 +728,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ["statuscode"] = statusCode
         };
 
-        // Set statecode based on statuscode
-        // Draft(1), Planned(2), Open(3), OnHold(4) = Active(0)
-        // Completed(5), Cancelled(6), Deleted(7) = Inactive(1)
-        payload["statecode"] = statusCode >= 5 ? 1 : 0;
+        // The statecode the live statuscode belongs to (task 159); an unknown value throws (task 097).
+        payload["statecode"] = EventStatusCode.GetStateCode(statusCode);
 
         if (completedDate.HasValue)
             payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
@@ -551,46 +742,39 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         _logger.LogDebug("Event status updated: {Id}", id);
     }
 
-    public async Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
+    /// <summary><c>sprk_eventlog.sprk_eventlogname</c> length (live metadata).</summary>
+    internal const int EventLogNameMaxLength = 850;
+
+    /// <summary>
+    /// The <c>sprk_eventlog</c> create body. Task 097 review F1: the table has NO <c>sprk_description</c> column (live
+    /// spaarkedev1 — only sprk_eventlogname, sprk_action, sprk_event, sprk_createdbyperson and system columns), so the
+    /// former body was a 400 on every write and every event log silently failed. The description is folded into the
+    /// name (cut to 850) and read back from it.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreateEventLogPayload(Guid eventId, int action, string? description, DateTime utcNow)
     {
-
-        var url = $"sprk_eventlogs?$filter=_sprk_event_value eq {eventId}&$select=sprk_eventlogid,sprk_eventlogname,_sprk_event_value,sprk_action,sprk_description,createdon,_createdby_value&$orderby=createdon desc";
-
-        _logger.LogDebug("Querying event logs for event: {EventId}", eventId);
-
-        try
+        var name = $"{EventLogAction.GetDisplayName(action)} - {utcNow:yyyy-MM-dd HH:mm:ss} UTC";
+        if (!string.IsNullOrWhiteSpace(description))
+            name = $"{name} - {description}";
+        return new Dictionary<string, object?>
         {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
-            request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
-
-            var response = await _httpClient.SendAsync(request, ct);
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-            if (data == null)
-                return Array.Empty<EventLogEntity>();
-
-            return data.Value.Select(MapToEventLogEntity).ToArray();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error querying event logs for event {EventId}", eventId);
-            throw;
-        }
-    }
-
-    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
-    {
-
-        var logName = $"Event Log - {EventLogAction.GetDisplayName(action)} - {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}";
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["sprk_eventlogname"] = logName,
+            ["sprk_eventlogname"] = name.Length > EventLogNameMaxLength ? name[..EventLogNameMaxLength] : name,
             ["sprk_Event@odata.bind"] = $"/sprk_events({eventId})", // R5 002: PascalCase nav prop (metadata-verified)
             ["sprk_action"] = action,
-            ["sprk_description"] = description
         };
+    }
+    public async Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
+    {
+
+        var payload = BuildCreateEventLogPayload(eventId, action, description, DateTime.UtcNow);
+        if (owningTeamId is { } teamId && teamId != Guid.Empty)
+        {
+            // Task 146: owned like its event (the caller resolved it). Unset only for an event that is not team-owned.
+            payload["ownerid@odata.bind"] = $"/teams({teamId})";
+        }
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person whose change the log records.
+        RecordCreatorPersonColumn.BindIfKnown(payload, createdByPersonId);
 
         _logger.LogInformation("Creating event log for event {EventId}: {Action}", eventId, EventLogAction.GetDisplayName(action));
 
@@ -608,63 +792,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         }
 
         throw new InvalidOperationException("Failed to extract entity ID from create response");
-    }
-
-    public async Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
-    {
-
-        var filterQuery = activeOnly ? "$filter=statecode eq 0&" : "";
-        var url = $"sprk_eventtypes?{filterQuery}$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate&$orderby=sprk_name asc";
-
-        _logger.LogDebug("Getting event types (activeOnly={ActiveOnly})", activeOnly);
-
-        try
-        {
-            var response = await SendGetAsync(url, ct);
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-            if (data == null)
-                return Array.Empty<EventTypeEntity>();
-
-            return data.Value.Select(MapToEventTypeEntity).ToArray();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting event types");
-            throw;
-        }
-    }
-
-    public async Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
-    {
-
-        var url = $"sprk_eventtypes({id})?$select=sprk_eventtypeid,sprk_name,sprk_eventcode,sprk_description,statecode,sprk_requiresduedate,sprk_requiresbasedate";
-
-        _logger.LogDebug("Getting event type: {Id}", id);
-
-        try
-        {
-            var response = await SendGetAsync(url, ct);
-
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                _logger.LogDebug("Event type not found: {Id}", id);
-                return null;
-            }
-
-            response.EnsureSuccessStatusCode();
-
-            var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
-            if (data == null) return null;
-
-            return MapToEventTypeEntity(data);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting event type {Id}", id);
-            throw;
-        }
     }
 
     // ========================================
@@ -1132,11 +1259,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-    {
-        var response = await SendPostAsJsonAsync(
-            "GrantAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
-        response.EnsureSuccessStatusCode();
-    }
+        => await SendShareWriteAsync(
+            "GrantAccess", RecordShareWrite.Grant, entitySetName, recordId,
+            PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
 
     /// <summary>
     /// Replaces the rights of a principal's EXISTING POA share on a record — the OOB <c>ModifyAccess</c> action,
@@ -1155,11 +1280,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         DataversePrincipalRef principal,
         string accessRightsCsv,
         CancellationToken ct = default)
-    {
-        var response = await SendPostAsJsonAsync(
-            "ModifyAccess", PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
-        response.EnsureSuccessStatusCode();
-    }
+        => await SendShareWriteAsync(
+            "ModifyAccess", RecordShareWrite.Modify, entitySetName, recordId,
+            PrincipalAccessPayload(entitySetName, recordId, principal, accessRightsCsv), ct);
 
     /// <summary>
     /// The <c>Target</c> + <c>PrincipalAccess</c> body that GrantAccess and ModifyAccess both take — built once, so
@@ -1196,14 +1319,65 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// share that does not exist is a Dataverse no-op; Microsoft Learn does not document that case. A caller that must
     /// be idempotent reads the shares first (<see cref="GetPrincipalAccessOrThrowAsync"/>) and skips the call when
     /// there is nothing to revoke.</para>
+    ///
+    /// <para><b>Not for the owner's own share.</b> Dataverse refuses an app-only revoke of the share held by the record's
+    /// CURRENT owning user (0x80040223). A caller that may be revoking that share uses
+    /// <see cref="RevokeAccessAsync(string, Guid, DataversePrincipalRef, DataversePrincipalRef, CancellationToken)"/>.</para>
     /// </remarks>
     public async Task RevokeAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
         CancellationToken ct = default)
-    {
-        var payload = new Dictionary<string, object>
+        => await SendShareWriteAsync(
+            "RevokeAccess", RecordShareWrite.Revoke, entitySetName, recordId,
+            RevokePayload(entitySetName, recordId, principal), ct);
+
+    /// <summary>
+    /// Revokes a principal's POA share on a record whose CURRENT owner the caller knows — app-only, except for the one
+    /// share Dataverse lets nobody but its holder revoke: the share of the record's owning USER, which is revoked AS that
+    /// user.
+    /// </summary>
+    /// <remarks>
+    /// <para>unified-access-control-r2 (live on dev 2026-10-06). Dataverse refuses an app-only RevokeAccess of a share held
+    /// by the record's current owning user — HTTP 400 <c>0x80040223</c> "Only owner can revoke access to the owner" — and
+    /// accepts the same request sent as that user (<c>MSCRMCallerID</c>, 204; the BFF's application user holds
+    /// <c>prvActOnBehalfOfAnotherUser</c>). So when <paramref name="recordOwner"/> is a systemuser AND is
+    /// <paramref name="principal"/>, the request runs as the principal, through the shared request builder
+    /// (<see cref="DataverseImpersonation.ApplyAsSystemUser"/>). The impersonated identity is therefore always the revokee
+    /// itself and only when it owns the record: no other principal is ever impersonated, and a team (owner or principal)
+    /// never is — every other combination is byte-for-byte the app-only revoke above.</para>
+    /// <para>Same name as the app-only revoke on purpose: the POA guards recognise a client share write by the three names
+    /// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync, and this one sends through the same notifying sender.</para>
+    /// </remarks>
+    /// <param name="recordOwner">
+    /// The record's CURRENT owner, as the caller last read it back. Used only to decide whether this is the owner's own
+    /// share.
+    /// </param>
+    public async Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        DataversePrincipalRef recordOwner,
+        CancellationToken ct = default)
+        => await SendShareWriteAsync(
+            "RevokeAccess", RecordShareWrite.Revoke, entitySetName, recordId,
+            RevokePayload(entitySetName, recordId, principal), ct,
+            impersonateSystemUserId: IsOwnersOwnShare(principal, recordOwner) ? principal.Id : null);
+
+    /// <summary>
+    /// Whether <paramref name="principal"/>'s share is the one held by the record's current owning USER — the share
+    /// Dataverse lets only that user revoke. A team (as principal or as owner) never is.
+    /// </summary>
+    private static bool IsOwnersOwnShare(DataversePrincipalRef principal, DataversePrincipalRef recordOwner)
+        => recordOwner.Kind == DataversePrincipalKind.SystemUser
+           && principal.Kind == DataversePrincipalKind.SystemUser
+           && recordOwner.Id == principal.Id
+           && principal.Id != Guid.Empty;
+
+    /// <summary>The <c>Target</c> + <c>Revokee</c> body RevokeAccess takes — the same key shape as a grant's.</summary>
+    private static Dictionary<string, object> RevokePayload(string entitySetName, Guid recordId, DataversePrincipalRef principal)
+        => new()
         {
             ["Target"] = new Dictionary<string, object>
             {
@@ -1215,8 +1389,62 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             },
         };
 
-        var response = await SendPostAsJsonAsync("RevokeAccess", payload, ct);
-        response.EnsureSuccessStatusCode();
+    /// <summary>
+    /// Sends one POA share write and then, on EVERY path (returned, refused, thrown, cancelled), tells the
+    /// <see cref="IRecordShareWriteObserver"/> which record it addressed. GrantAccessAsync, ModifyAccessAsync and
+    /// RevokeAccessAsync all send through it.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 132, main-session round 55. The access-cache eviction a share write needs used to be
+    /// made by a caller-side seam, so it held only for callers that went through the seam. Here it is a property of the
+    /// write: any call of the three share writes notifies — whoever made it and however (directly, through a delegate,
+    /// reflection, a late binder, an expression tree). What lies outside it is a request that does not go through those
+    /// methods: a raw HTTP call, including one assembled from this class's private members by reflection (its generic POST
+    /// helper, request builder or <see cref="HttpClient"/>) — task 132's notes record that as a known limit.
+    /// <para><paramref name="impersonateSystemUserId"/>: null (every grant and modify, and every revoke but the owner's
+    /// own) sends app-only; set only by <see cref="RevokeAccessAsync(string, Guid, DataversePrincipalRef, DataversePrincipalRef, CancellationToken)"/> for
+    /// the record owner's own share.</para>
+    /// </remarks>
+    private async Task SendShareWriteAsync(
+        string action,
+        RecordShareWrite write,
+        string entitySetName,
+        Guid recordId,
+        Dictionary<string, object> payload,
+        CancellationToken ct,
+        Guid? impersonateSystemUserId = null)
+    {
+        try
+        {
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, action, ct, impersonateSystemUserId);
+            request.Content = JsonContent.Create(payload);
+            using var response = await _httpClient.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+        }
+        finally
+        {
+            // A write that reports failure, or whose caller went away, can still have committed: notify on every path.
+            await NotifyShareWrittenAsync(entitySetName, recordId, write);
+        }
+    }
+
+    /// <summary>
+    /// Tells the observer about one share write. Never throws — the write's own outcome (its return or its exception) is
+    /// what the caller sees — and is not bound to the caller's token: the write may already have committed, and a caller
+    /// that went away must not leave the clean-up undone.
+    /// </summary>
+    private async Task NotifyShareWrittenAsync(string entitySetName, Guid recordId, RecordShareWrite write)
+    {
+        try
+        {
+            await _shareWriteObserver.OnRecordShareWrittenAsync(entitySetName, recordId, write, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[ACCESS-EVICT] The share-write observer threw after the {Write} on {EntitySet} {RecordId}; the share " +
+                "write's own outcome stands and the cached entries lapse on their TTLs.", write, entitySetName, recordId);
+        }
     }
 
     /// <summary>
@@ -1299,6 +1527,220 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         return ReadPrincipalAccessRows(data.Value, entityLogicalName, recordId, strict: true);
     }
+
+    /// <summary>
+    /// <paramref name="principalSystemUserId"/>'s EFFECTIVE rights on one record, as Dataverse answers them:
+    /// <c>RetrievePrincipalAccess</c> bound to that user and asked AS that user (<c>MSCRMCallerID</c> impersonation) —
+    /// the same question <c>CallerRecordAccessProbe</c> asks under a caller's own token, for a writer that acts for a user
+    /// by impersonation and holds no token of theirs (unified-access-control-r2 task 146 c1-r1, owner round 13 item 8: a
+    /// playbook that impersonates a user is checked under F3 as that user).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>An answer versus a fault.</b> <c>403</c> and <c>404</c> are Dataverse's answer that the user cannot see the
+    /// record (404 is how it reports a record a principal cannot read), so they are <see cref="AccessRights.None"/>. Any
+    /// other failure — throttling, a 5xx, an unreadable body — THROWS: a fault is never read as "no rights", so a caller
+    /// can tell a refusal from a check that could not run.</para>
+    /// </remarks>
+    /// <param name="entitySetName">The record's Web API entity set (e.g. <c>sprk_matters</c>), from an explicit table.</param>
+    /// <exception cref="ArgumentException"><paramref name="principalSystemUserId"/> is <see cref="Guid.Empty"/>.</exception>
+    /// <exception cref="HttpRequestException">Dataverse did not answer.</exception>
+    public async Task<AccessRights> RetrievePrincipalRightsAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+        if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogInformation(
+                "RetrievePrincipalAccess as {Principal} on {EntitySet}({RecordId}): {StatusCode} — no rights.",
+                principalSystemUserId, entitySetName, recordId, (int)response.StatusCode);
+            return AccessRights.None;
+        }
+
+        return await ReadPrincipalAccessAnswerAsync(response, principalSystemUserId, entitySetName, recordId, ct);
+    }
+
+    /// <summary>
+    /// <c>RetrievePrincipalAccess</c> bound to <paramref name="principalSystemUserId"/> and asked AS that user — the one
+    /// request both readings (<see cref="RetrievePrincipalRightsAsync"/>, <see cref="RetrievePrincipalRightsOrUnknownAsync"/>)
+    /// send. The caller owns the response.
+    /// </summary>
+    private Task<HttpResponseMessage> SendRetrievePrincipalAccessAsync(
+        Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct)
+    {
+        if (principalSystemUserId == Guid.Empty)
+            throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
+
+        var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySetName}({recordId:D})\"}}");
+        return SendGetAsync(
+            $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}",
+            ct,
+            impersonateSystemUserId: principalSystemUserId);
+    }
+
+    /// <summary>
+    /// The rights in a <c>RetrievePrincipalAccess</c> response that was not a 403/404: a non-success THROWS (a fault is
+    /// never "no rights"); an absent or empty rights string is an authoritative "no rights".
+    /// </summary>
+    private static async Task<AccessRights> ReadPrincipalAccessAnswerAsync(
+        HttpResponseMessage response, Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct)
+    {
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new HttpRequestException(
+                $"RetrievePrincipalAccess as {principalSystemUserId:D} on {entitySetName}({recordId:D}) answered "
+                + $"{(int)response.StatusCode} {response.StatusCode}.",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        using var document = JsonDocument.Parse(body);
+        var rights = document.RootElement.TryGetProperty("AccessRights", out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+
+        return DataverseAccessRightsMapper.FromAccessRightsString(rights);
+    }
+
+    /// <summary>
+    /// Dataverse's error code for an ACCESS-CHECK denial (<c>PrincipalPrivilegeDenied</c> / "SecLib::AccessCheckEx
+    /// failed") — the one 403 that is an answer about the principal's rights rather than a fault of the request.
+    /// </summary>
+    public const string AccessCheckDeniedErrorCode = "0x80040220";
+
+    /// <summary>
+    /// <see cref="RetrievePrincipalRightsAsync"/> for a caller that ACTS DESTRUCTIVELY on "no rights" (removing an
+    /// access grant) — unified-access-control-r2 task 171, adversarial finding 3. Returns <see langword="null"/>
+    /// (UNKNOWN) for every answer that is not about the principal's access.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a second reading of the same call.</b> <see cref="RetrievePrincipalRightsAsync"/> maps every 403 and
+    /// 404 to <see cref="AccessRights.None"/>, which is the safe reading for its callers — they DENY on it. A caller that
+    /// REVOKES on it would read a request-level fault as "lost access": a missing <c>prvActOnBehalfOfAnotherUser</c> on the
+    /// BFF application user makes EVERY impersonated call 403 (<c>CannotActOnBehalfOfAnotherUser</c>, 0x8004A110), and
+    /// that would revoke every grant on every pass.</para>
+    /// <para><b>The mapping.</b> 2xx → the rights Dataverse answered (an empty string is an authoritative "none").
+    /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
+    /// <see cref="AccessRights.None"/> ONLY when the error code is <see cref="AccessCheckDeniedErrorCode"/>; any other
+    /// 403 code, or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure throws, as in
+    /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
+    /// </remarks>
+    public async Task<AccessRights?> RetrievePrincipalRightsOrUnknownAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return AccessRights.None;
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
+            if (string.Equals(code, AccessCheckDeniedErrorCode, StringComparison.OrdinalIgnoreCase))
+                return AccessRights.None;
+
+            _logger.LogWarning(
+                "RetrievePrincipalAccess as {Principal} on {EntitySet}({RecordId}): 403 with error code {Code} — not an "
+                + "access answer (e.g. the application user lacks prvActOnBehalfOfAnotherUser); treated as UNKNOWN.",
+                principalSystemUserId, entitySetName, recordId, code ?? "(unreadable)");
+            return null;
+        }
+
+        return await ReadPrincipalAccessAnswerAsync(response, principalSystemUserId, entitySetName, recordId, ct);
+    }
+
+    /// <summary>The OData <c>error.code</c> of a failed response, or <see langword="null"/> when the body has none.</summary>
+    private static async Task<string?> TryReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(body))
+                return null;
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>How many records one batched share read names — keeps the OData filter far below the URL limit.</summary>
+    public const int PrincipalAccessBatchSize = 25;
+
+    /// <summary>
+    /// The strict share read (<see cref="GetPrincipalAccessOrThrowAsync"/>) for MANY records of one table: every record
+    /// asked about is in the answer (an empty list when it has no share), or the call throws.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a batched read</b> (unified-access-control-r2 task 149). The secure-child share synchronizer compares
+    /// every child of a secure record with its root's shares; one GET per child would spend the application user's
+    /// Dataverse request budget on a schedule. The records are read <see cref="PrincipalAccessBatchSize"/> at a time,
+    /// with the same query shape the single read uses (logical-name <c>objecttypecode</c>, <c>changedon</c>; see
+    /// <see cref="PrincipalAccessQuery"/>) plus <c>objectid</c>, verified live on spaarkedev1 on 2026-10-02.</para>
+    /// <para><b>Same strictness, per batch.</b> A refused read, a missing <c>value</c>, a second page, a row with no
+    /// readable record, principal, mask or <c>changedon</c>, or a row for a record that was not asked about: the whole
+    /// call throws, so a caller deciding writes from it never mistakes "could not read" for "no share".</para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">The shares could not be read completely.</exception>
+    public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(entityLogicalName);
+        ArgumentNullException.ThrowIfNull(recordIds);
+
+        var answer = new Dictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>();
+        foreach (var batch in recordIds.Where(id => id != Guid.Empty).Distinct().Chunk(PrincipalAccessBatchSize))
+        {
+            var asked = batch.ToHashSet();
+            using var response = await SendGetAsync(PrincipalAccessBatchQuery(batch, entityLogicalName), ct);
+            if (!response.IsSuccessStatusCode)
+                throw ShareReadFailed(entityLogicalName, batch[0],
+                    $"Dataverse answered {(int)response.StatusCode} {response.StatusCode} for a batch of {batch.Length}");
+
+            var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (data?.Value is null)
+                throw ShareReadFailed(entityLogicalName, batch[0], "the batched response carried no rows");
+
+            if (data.NextLink is not null)
+                throw ShareReadFailed(entityLogicalName, batch[0], "the batched shares continue on another page");
+
+            var byRecord = asked.ToDictionary(id => id, _ => new List<Dictionary<string, JsonElement>>());
+            foreach (var row in data.Value)
+            {
+                if (!TryReadGuid(row, "objectid", out var objectId) || !byRecord.TryGetValue(objectId, out var rows))
+                    throw ShareReadFailed(entityLogicalName, batch[0], "a share row names no record that was asked about");
+
+                rows.Add(row);
+            }
+
+            foreach (var (id, rows) in byRecord)
+                answer[id] = ReadPrincipalAccessRows(rows, entityLogicalName, id, strict: true);
+        }
+
+        return answer;
+    }
+
+    /// <summary>The batched read's query: every POA row of the named records of one table.</summary>
+    private static string PrincipalAccessBatchQuery(IReadOnlyCollection<Guid> recordIds, string entityLogicalName)
+        => $"principalobjectaccessset?$filter=objecttypecode eq '{entityLogicalName}' and ("
+            + string.Join(" or ", recordIds.Select(id => $"objectid eq {id}"))
+            + ")&$select=objectid,principalid,principaltypecode,accessrightsmask,changedon";
 
     /// <summary>The query both share reads issue: every POA row of one record.</summary>
     /// <remarks>
@@ -1682,7 +2124,43 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     // Entity Mapping Helpers
     // ========================================
 
-    private EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
+    /// <summary>
+    /// The API's 0-7 regarding type of an event row, derived from its LOOKUPS (task 159, #1098): the one of the eight
+    /// typed lookups the API's types use whose value equals <c>sprk_regardingrecordid</c>. Null when none does.
+    /// </summary>
+    /// <remarks>
+    /// By value, not by "which lookup is set": a correctly written event regarding an invoice or analysis ALSO
+    /// carries its core ancestor's stamp in sprk_regardingmatter/project/workassignment, so "the set lookup" would be
+    /// ambiguous. <c>sprk_regardingrecordtype</c> is a lookup to <c>sprk_recordtype_ref</c> and is never read as a
+    /// number.
+    /// </remarks>
+    internal static int? DeriveRegardingRecordType(Dictionary<string, JsonElement> data)
+    {
+        if (!data.TryGetValue("sprk_regardingrecordid", out var idElement)
+            || idElement.ValueKind != JsonValueKind.String
+            || !Guid.TryParse(idElement.GetString(), out var regardingId)
+            || regardingId == Guid.Empty)
+        {
+            return null;
+        }
+
+        for (var type = RegardingRecordType.Project; type <= RegardingRecordType.Budget; type++)
+        {
+            var lookup = RegardingRecordType.GetLookupFieldName(type);
+            if (lookup is not null
+                && data.TryGetValue($"_{lookup}_value", out var value)
+                && value.ValueKind == JsonValueKind.String
+                && Guid.TryParse(value.GetString(), out var lookupId)
+                && lookupId == regardingId)
+            {
+                return type;
+            }
+        }
+
+        return null;
+    }
+
+    internal static EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
     {
         return new EventEntity
         {
@@ -1694,8 +2172,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? desc.GetString() : null,
             EventTypeId = data.TryGetValue("_sprk_eventtype_ref_value", out var etId) && etId.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(etId.GetString()!) : null,
-            EventTypeName = data.TryGetValue("sprk_eventtype_ref", out var et) && et.ValueKind == JsonValueKind.Object
-                ? et.GetProperty("sprk_name").GetString() : null,
+            // The expanded event type comes back under its NAVIGATION property (sprk_EventType_Ref); the logical name
+            // is accepted too so a reader of either shape keeps the display name.
+            EventTypeName = (data.TryGetValue("sprk_EventType_Ref", out var et) || data.TryGetValue("sprk_eventtype_ref", out et))
+                && et.ValueKind == JsonValueKind.Object && et.TryGetProperty("sprk_name", out var etName)
+                ? etName.GetString() : null,
             StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
             StatusCode = data.TryGetValue("statuscode", out var status) ? status.GetInt32() : 1,
             BaseDate = data.TryGetValue("sprk_basedate", out var bd) && bd.ValueKind != JsonValueKind.Null
@@ -1720,8 +2201,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? rrid.GetString() : null,
             RegardingRecordName = data.TryGetValue("sprk_regardingrecordname", out var rrn) && rrn.ValueKind != JsonValueKind.Null
                 ? rrn.GetString() : null,
-            RegardingRecordType = data.TryGetValue("sprk_regardingrecordtype", out var rrt) && rrt.ValueKind != JsonValueKind.Null
-                ? rrt.GetInt32() : null,
+            RegardingRecordType = DeriveRegardingRecordType(data),
             RegardingAccountId = data.TryGetValue("_sprk_regardingaccount_value", out var racc) && racc.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(racc.GetString()!) : null,
             RegardingAnalysisId = data.TryGetValue("_sprk_regardinganalysis_value", out var rana) && rana.ValueKind != JsonValueKind.Null
@@ -1742,48 +2222,6 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? created.GetDateTime() : DateTime.MinValue,
             ModifiedOn = data.TryGetValue("modifiedon", out var modified) && modified.ValueKind != JsonValueKind.Null
                 ? modified.GetDateTime() : DateTime.MinValue
-        };
-    }
-
-    private EventLogEntity MapToEventLogEntity(Dictionary<string, JsonElement> data)
-    {
-        return new EventLogEntity
-        {
-            Id = data.TryGetValue("sprk_eventlogid", out var id) && id.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(id.GetString()!) : Guid.Empty,
-            Name = data.TryGetValue("sprk_eventlogname", out var name) && name.ValueKind != JsonValueKind.Null
-                ? name.GetString() : null,
-            EventId = data.TryGetValue("_sprk_event_value", out var evId) && evId.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(evId.GetString()!) : Guid.Empty,
-            Action = data.TryGetValue("sprk_action", out var action) ? action.GetInt32() : 0,
-            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
-                ? desc.GetString() : null,
-            CreatedOn = data.TryGetValue("createdon", out var created) && created.ValueKind != JsonValueKind.Null
-                ? created.GetDateTime() : DateTime.MinValue,
-            CreatedById = data.TryGetValue("_createdby_value", out var cbId) && cbId.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(cbId.GetString()!) : null,
-            CreatedByName = data.TryGetValue("_createdby_value@OData.Community.Display.V1.FormattedValue", out var cbName) && cbName.ValueKind != JsonValueKind.Null
-                ? cbName.GetString() : null
-        };
-    }
-
-    private EventTypeEntity MapToEventTypeEntity(Dictionary<string, JsonElement> data)
-    {
-        return new EventTypeEntity
-        {
-            Id = data.TryGetValue("sprk_eventtypeid", out var id) && id.ValueKind != JsonValueKind.Null
-                ? Guid.Parse(id.GetString()!) : Guid.Empty,
-            Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
-                ? name.GetString()! : string.Empty,
-            EventCode = data.TryGetValue("sprk_eventcode", out var code) && code.ValueKind != JsonValueKind.Null
-                ? code.GetString() : null,
-            Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
-                ? desc.GetString() : null,
-            StateCode = data.TryGetValue("statecode", out var state) ? state.GetInt32() : 0,
-            RequiresDueDate = data.TryGetValue("sprk_requiresduedate", out var rdd) && rdd.ValueKind != JsonValueKind.Null
-                ? rdd.GetInt32() : null,
-            RequiresBaseDate = data.TryGetValue("sprk_requiresbasedate", out var rbd) && rbd.ValueKind != JsonValueKind.Null
-                ? rbd.GetInt32() : null
         };
     }
 

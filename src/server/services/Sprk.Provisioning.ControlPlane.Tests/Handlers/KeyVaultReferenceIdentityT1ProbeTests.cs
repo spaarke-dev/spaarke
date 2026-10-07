@@ -78,6 +78,7 @@ public sealed class KeyVaultReferenceIdentityT1ProbeTests
     private static KeyVaultReferenceIdentityT1Probe BuildProbe(FakeArmHttpMessageHandler handler)
         => new(
             ArmSdkTestFakes.NewArmClient(handler),
+            Microsoft.Extensions.Options.Options.Create(new H13AcceptanceOptions()),
             NullLogger<KeyVaultReferenceIdentityT1Probe>.Instance);
 
     // ---------- T1 happy path ----------

@@ -93,7 +93,7 @@ beforeEach(() => {
   global.fetch = mockFetch as unknown as typeof fetch;
 });
 
-function renderPane(props: { canOpenRecord?: boolean } = {}) {
+function renderPane(props: { canOpenRecord?: boolean; canOpenDesktopWord?: boolean } = {}) {
   return render(
     <FluentProvider theme={webLightTheme}>
       <SaveFlow
@@ -112,7 +112,7 @@ function renderPane(props: { canOpenRecord?: boolean } = {}) {
 /** Drives the pane to the collision state: renders, clicks Save, waits for the collision choices. */
 async function triggerCollision(
   problem: Record<string, unknown> = COLLISION_PROBLEM,
-  props: { canOpenRecord?: boolean } = {}
+  props: { canOpenRecord?: boolean; canOpenDesktopWord?: boolean } = {}
 ) {
   mockFetch.mockImplementation(async (url: string) => {
     if (String(url).includes('/api/office/save')) {
@@ -147,7 +147,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
 
       expect(screen.getByRole('button', { name: 'Keep both' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Save as new version' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open in browser' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
       // Non-destructive framing: "Nothing was saved", never presented as a hard failure with no way
       // forward — the server's own detail text surfaces verbatim. Appears TWICE by design (the visible
@@ -257,7 +257,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       expect(screen.getByRole('button', { name: 'Keep both' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Save as new version' })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: 'Open' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open in browser' })).not.toBeInTheDocument();
     },
     TEST_TIMEOUT_MS
   );
@@ -270,7 +270,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       await triggerCollision(UNFILED_COLLISION_PROBLEM);
 
       expect(screen.getByRole('button', { name: 'Keep both' })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open in browser' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: 'Save as new version' })).not.toBeInTheDocument();
       // The prompt names which document holds the name (task 055), so Open is not a blind click.
@@ -286,7 +286,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       await triggerCollision(idOnly);
 
       expect(screen.queryByRole('button', { name: 'Save as new version' })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Open in browser' })).toBeInTheDocument();
     },
     TEST_TIMEOUT_MS
   );
@@ -300,7 +300,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       mockFetch.mockClear();
       mockFetch.mockImplementation(async () => textResponse(true, 200, OPEN_LINKS));
 
-      await userEvent.click(screen.getByRole('button', { name: 'Open' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Open in browser' }));
 
       await waitFor(() => expect(openBrowserWindow).toHaveBeenCalledTimes(1), WAIT);
       expect(openLinksCalls()).toEqual([
@@ -311,6 +311,69 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
       expect(openBrowserWindow).not.toHaveBeenCalledWith(OPEN_LINKS.desktopUrl);
       // Opening the other file is not a save: nothing else was sent.
       expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/api/office/save'))).toBe(false);
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  // ── Task 094: "Open in Word" (PC/Mac trial) alongside "Open in browser" ──────────────────────────────
+
+  it(
+    'canOpenDesktopWord false (the default — Office on the web, or no desktop evidence) renders "Open in browser" only',
+    async () => {
+      await triggerCollision(UNFILED_COLLISION_PROBLEM, { canOpenRecord: true });
+
+      expect(screen.getByRole('button', { name: 'Open in browser' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Open in Word' })).not.toBeInTheDocument();
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    'canOpenDesktopWord true (PC/Mac) also renders "Open in Word", which anchor-clicks the desktopUrl — never openBrowserWindow/window.open',
+    async () => {
+      const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      const openBrowserWindow = Office.context.ui.openBrowserWindow as jest.Mock;
+      openBrowserWindow.mockClear();
+      const windowOpen = jest.spyOn(window, 'open').mockImplementation(() => null);
+      try {
+        await triggerCollision(UNFILED_COLLISION_PROBLEM, { canOpenRecord: true, canOpenDesktopWord: true });
+        mockFetch.mockClear();
+        mockFetch.mockImplementation(async () => textResponse(true, 200, OPEN_LINKS));
+
+        await userEvent.click(screen.getByRole('button', { name: 'Open in Word' }));
+
+        await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1), WAIT);
+        const anchor = clickSpy.mock.instances[0] as unknown as HTMLAnchorElement;
+        expect(anchor.getAttribute('href')).toBe(OPEN_LINKS.desktopUrl);
+        expect(openBrowserWindow).not.toHaveBeenCalled();
+        expect(windowOpen).not.toHaveBeenCalled();
+        // Opening the other file is not a save: nothing else was sent.
+        expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/api/office/save'))).toBe(false);
+      } finally {
+        clickSpy.mockRestore();
+        windowOpen.mockRestore();
+      }
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
+    '"Open in Word" without a desktopUrl in the response shows a reason and opens nothing',
+    async () => {
+      const clickSpy = jest.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      try {
+        await triggerCollision(UNFILED_COLLISION_PROBLEM, { canOpenRecord: true, canOpenDesktopWord: true });
+        mockFetch.mockClear();
+        mockFetch.mockImplementation(async () => textResponse(true, 200, { ...OPEN_LINKS, desktopUrl: null }));
+
+        await userEvent.click(screen.getByRole('button', { name: 'Open in Word' }));
+
+        const reasons = await screen.findAllByText(/did not return a desktop link/i);
+        expect(reasons.some(element => element.closest('[aria-live]') === null)).toBe(true);
+        expect(clickSpy).not.toHaveBeenCalled();
+      } finally {
+        clickSpy.mockRestore();
+      }
     },
     TEST_TIMEOUT_MS
   );
@@ -326,7 +389,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
         mockFetch.mockClear();
         mockFetch.mockImplementation(async () => textResponse(true, 200, OPEN_LINKS));
 
-        await userEvent.click(screen.getByRole('button', { name: 'Open' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Open in browser' }));
 
         await waitFor(() => expect(windowOpen).toHaveBeenCalledWith(OPEN_LINKS.webUrl, '_blank'), WAIT);
         expect(openBrowserWindow).not.toHaveBeenCalled();
@@ -355,7 +418,7 @@ describe('SaveFlow — collision two-option choice (task 025)', () => {
           })
         );
 
-        await userEvent.click(screen.getByRole('button', { name: 'Open' }));
+        await userEvent.click(screen.getByRole('button', { name: 'Open in browser' }));
 
         // Visible in the prompt itself — not only in the sr-only live region the announcement also uses.
         const reasons = await screen.findAllByText('Document 11aed095 has no file in storage.');

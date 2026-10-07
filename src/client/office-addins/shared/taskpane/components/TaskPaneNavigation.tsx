@@ -1,14 +1,16 @@
 import React from 'react';
-import { makeStyles, tokens, TabList, Tab } from '@fluentui/react-components';
+import { makeStyles, mergeClasses, tokens, TabList, Tab } from '@fluentui/react-components';
 import {
   SaveRegular,
   SearchRegular,
+  MailRegular,
   // V1: Disabled icons - uncomment for future releases
   // ShareRegular,
   // ClockRegular,
   // DocumentSearchRegular,
 } from '@fluentui/react-icons';
 import type { HostType } from './TaskPaneHeader';
+import type { HostCapabilities } from '@shared/adapters';
 import { MicrosoftToDoIcon } from './icons/MicrosoftToDoIcon';
 
 /**
@@ -58,7 +60,13 @@ const useStyles = makeStyles({
  * gating, similarity results) is tasks 033-034. `search` is a distinct, still-hidden
  * legacy member wired to a job-status placeholder in App.tsx — do not conflate the two.
  */
-export type NavigationTab = 'save' | 'createTodo' | 'find' | 'share' | 'recent' | 'search';
+export type NavigationTab = 'save' | 'createTodo' | 'find' | 'email' | 'share' | 'recent' | 'search';
+
+/**
+ * The host capabilities the tab table can be gated on (task 096). A subset of `HostCapabilities`, so callers
+ * pass `hostAdapter.getCapabilities()` straight through.
+ */
+export type TabCapabilities = Pick<HostCapabilities, 'canEmailFromPane'>;
 
 /**
  * Tab configuration.
@@ -69,6 +77,11 @@ export interface TabConfig {
   icon: React.ReactElement;
   /** Whether this tab is available for the host type */
   availableFor: HostType[];
+  /**
+   * Task 096: a capability the host must ALSO report for the tab to show (NFR-10 — a capability, never a
+   * `hostType` branch). Absent → the tab depends on `availableFor` alone, as every tab did before.
+   */
+  requiresCapability?: keyof TabCapabilities;
 }
 
 /**
@@ -116,6 +129,19 @@ const TAB_CONFIGS: TabConfig[] = [
     icon: <SearchRegular />,
     availableFor: ['outlook', 'word'],
   },
+  {
+    // Email tab (task 096, owner UAT round 4 item 6: "Add the send email to the main add-in bar next to
+    // 'Find'"): an in-pane form, built from the shared Spaarke compose engine, that emails the open document as
+    // an attachment from the user's own mailbox. Word only by the owner's decision ("Outlook unchanged") —
+    // expressed as the `canEmailFromPane` CAPABILITY (Word true, Outlook false), never a `hostType` list.
+    // Task 106 (owner UAT round 8): labelled "Send" - the mail icon already says it is email - matching
+    // Outlook's Send action in the same toolbar position.
+    value: 'email',
+    label: 'Send',
+    icon: <MailRegular />,
+    availableFor: ['outlook', 'word'],
+    requiresCapability: 'canEmailFromPane',
+  },
   // V1: Disabled - uncomment for future releases
   // {
   //   value: 'share',
@@ -145,8 +171,14 @@ const TAB_CONFIGS: TabConfig[] = [
  * routing — classified as legitimate, NOT converted to `hostAdapter.getCapabilities()` (which would
  * mean inventing a same-purpose boolean per tab). See notes/parity-checklist.md.
  */
-export function getAvailableTabs(hostType: HostType): TabConfig[] {
-  return TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
+export function getAvailableTabs(hostType: HostType, capabilities?: Partial<TabCapabilities>): TabConfig[] {
+  return TAB_CONFIGS.filter(
+    tab =>
+      tab.availableFor.includes(hostType) &&
+      // A capability-gated tab shows only when the host reports the capability; without capabilities, it
+      // never shows (fail closed — a tab that cannot work is not offered).
+      (!tab.requiresCapability || capabilities?.[tab.requiresCapability] === true)
+  );
 }
 
 export interface TaskPaneNavigationProps {
@@ -160,6 +192,8 @@ export interface TaskPaneNavigationProps {
   compact?: boolean;
   /** Whether navigation is disabled */
   disabled?: boolean;
+  /** Task 096: host capabilities for capability-gated tabs (see `getAvailableTabs`). */
+  capabilities?: Partial<TabCapabilities>;
 }
 
 export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
@@ -168,13 +202,14 @@ export const TaskPaneNavigation: React.FC<TaskPaneNavigationProps> = ({
   hostType = 'outlook',
   compact = false,
   disabled = false,
+  capabilities,
 }) => {
   const styles = useStyles();
 
-  // Filter tabs based on host type
-  const availableTabs = TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
+  // Filter tabs based on host type and (task 096) host capabilities — the same rule the live toolbar uses.
+  const availableTabs = getAvailableTabs(hostType, capabilities);
 
-  const tabListClassName = compact ? `${styles.tabList} ${styles.tabListCompact}` : styles.tabList;
+  const tabListClassName = compact ? mergeClasses(styles.tabList, styles.tabListCompact) : styles.tabList;
 
   return (
     <nav className={styles.navigation} aria-label="Task pane navigation">

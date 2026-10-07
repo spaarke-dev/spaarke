@@ -12,8 +12,8 @@
 //     acceptance — each failure branch has a distinct code)
 //   - projects/customer-provisioning-orchestration-r1/spec.md §4D I1
 //     (tenant hardcoding forbidden — MissingTenantId / MissingCustomerId
-//     enforce; MissingDataverseUrl too since target-env URL is a per-run
-//     parameter)
+//     enforce; MissingDataverseUrl too since the target-env URL is per-run
+//     state — H5's output, run.InterStepState.DataverseEnvUrl)
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H12b row +
 //     §4C rollback (H12b failures are Resumable — every wrapped script is
 //     upsert-safe so post-remediation resume re-drives cleanly)
@@ -49,9 +49,11 @@ public static class AppConfigSeedRejectionCodes
     public const string MissingTenantId = "appconfig-missing-tenant-id";
 
     /// <summary>
-    /// <c>run.Parameters.NonSecret["dataverseUrl"]</c> was null / whitespace.
-    /// H12b needs an explicit target-env URL to hand the wrapped PS scripts
-    /// (they in turn call <c>az account get-access-token --resource {url}</c>).
+    /// <c>run.InterStepState.DataverseEnvUrl</c> (H5's output — task 245a,
+    /// G25; previously read from <c>run.Parameters.NonSecret["dataverseUrl"]</c>,
+    /// which nothing writes) was null / whitespace. H12b needs an explicit
+    /// target-env URL to hand every registered seeder; a missing value cannot
+    /// be silently defaulted (§4D I1).
     /// </summary>
     public const string MissingDataverseUrl = "appconfig-missing-dataverse-url";
 

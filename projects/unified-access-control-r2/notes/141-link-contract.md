@@ -42,8 +42,10 @@ security applied" — *Work with alternate keys*), so the two properties live on
   only the BFF application user(s), associated explicitly. A client write fails.
 - **Exactly one contact per oid** — the alternate key `sprk_ExternalObjectIdUniqueKey` on the unsecured mirror
   `contact.sprk_externalobjectidkey`. The BFF writes binding and mirror together, in one request, on every bind and
-  every create (the create is a create-only `PATCH contacts(sprk_externalobjectidkey='<oid>')` with
-  `If-None-Match: *`). The platform's unique index — which counts rows of every state — therefore admits one contact
+  every create (the create is a `POST contacts` carrying the binding AND the mirror; a second contact for the same
+  oid is refused with 412 `0x80060892`). **Not** a keyed `PATCH contacts(sprk_externalobjectidkey='<oid>')` with
+  `If-None-Match: *`: Dataverse answers that with 404 `0x80060891` and creates nothing (found by G-6 live, fixed in
+  PR #1097, 2026-10-02). The platform's unique index — which counts rows of every state — therefore admits one contact
   per oid, **including when two first sign-ins race** (the loser's create is refused and it resolves the winner's
   contact by the binding). The schema step copies the existing bindings into the mirror before creating the key.
 - **What the unsecured mirror allows** — a user with contact Write can put someone's oid into a mirror. That can

@@ -58,9 +58,15 @@ if (-not $SkipBuild) {
 
         # Repo convention: build:prod (NOT build) - per AP-1. `npm run build` is
         # dev mode: no tree-shaking, 5-10x bundle bloat, breaks NFR-02.
-        npm run build:prod 2>&1 | Out-Host
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "npm run build:prod failed with exit code $LASTEXITCODE"
+        # pcf-scripts EXITS 0 WHEN THE WEBPACK BUILD FAILS, so judge the result from the output
+        # (shared rule: scripts/PcfBuildResult.psm1, also used by Invoke-PcfBuildProd.ps1 and the nightly CI).
+        Import-Module (Join-Path $pcfRoot '..\..\..\..\scripts\PcfBuildResult.psm1') -Force
+        $buildOutput = & { $ErrorActionPreference = 'Continue'; npm run build:prod 2>&1 }
+        $buildExit = $LASTEXITCODE
+        $buildOutput | Out-Host
+        $buildResult = Get-PcfBuildResult -Output $buildOutput -ExitCode $buildExit
+        if (-not $buildResult.Succeeded) {
+            Write-Host "npm run build:prod $($buildResult.Status.ToLower()): $($buildResult.Reason)" -ForegroundColor Red
             exit 1
         }
     } finally {

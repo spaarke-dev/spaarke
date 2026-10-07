@@ -1,4 +1,5 @@
 ## SharePoint Embedded + Graph
+- [SPE owner app via MI-as-FIC (2026-10-02)](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; FIC token appidacr=2; registration now Graph v1.0 PUT
 - [SPE version comment (2026-09-12)](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}; no read-back in Graph (CSDL); repo checkin drops comment
 - [SPE WOPI co-auth lock / 423 (2026-07-30)](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases co-auth lock; checkout/checkin = formal checkout only; ~30-min timeout
 - [SPE dedup / content identity (2026-07-14)](spe-dedup-content-identity-2026-07.md) — quickXorHash only; versions API no per-version hash; custom columns queryable
@@ -9,6 +10,8 @@
 - [Power Pages vs Entra External ID portal (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice; licensing + SPE-external story
 
 ## Word add-in / Office
+- [Outlook desktop unified button inert (2026-10-06)](outlook-desktop-unified-button-inert-2026-10-06.md) — classic ≥2307/16626.20132; 24-72h; XML-vs-unified button fingerprint; Wef+HubAppFileCache; #6768; script 404
+- [Task pane width (2026-10-04)](office-addin-taskpane-width-2026-10-04.md) — YES runtime setWidth (TaskPaneApi 1.1, Win 2507+); manifest preferredWidth preview-only; RequestedWidth content-only
 - [Launch ms-word: from task pane (2026-10-03)](office-addin-launch-ms-word-uri-2026-10-03.md) — openBrowserWindow http(s)-only (#2820 by design), N/A on web; anchor-click works Win (#6926); Office.context.platform
 - [Word unified manifest GA status (2026-09-30)](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac 16.103+/web; schema 1.30; "Teams app" zip upload; hide bug #6938
 - [Word add-in save collision path (2026-09-08)](word-addin-save-collision-path-2026-09-08.md) — /api/office/save uses Replace (silent overwrite) vs OBO Fail/409
@@ -72,12 +75,17 @@
 - [Kiota CVE-2026-44503 + TFM (2026-08-11)](kiota-cve-2026-44503-tfm-2026-08-11.md) — fix Kiota.Abstractions 1.22.0; r1 chose Graph 6.5.0/Kiota 2.0
 - [.NET 10 on App Service Linux (2026-08-10)](dotnet10-appservice-linux-2026-08-10.md) — DOTNETCORE:10.0 vs DOTNETCORE|10.0; port 8080
 - [Functions Flex + .NET 10 (2026-08-13)](functions-flex-consumption-net10-2026-08-13.md) — supported; runtime version '10.0'; Core Tools 4.7.0 regression
-- [Azure Managed Redis (2026-06-26)](azure-managed-redis-2026-06-26.md) — RediSearch needs Enterprise policy; pays off only for semantic dedup
+- [Per-customer Redis decision (2026-09-30)](redis-per-customer-stamp-amr-decision-2026-09-30.md) — ACR retires 2028-09-30; AMR B1 HA ~$47 vs C1 ~$101/mo; UAMI + RESP3
+- [Azure Managed Redis (2026-06-26)](azure-managed-redis-2026-06-26.md) — RediSearch needs Enterprise policy; pays off only for semantic dedup (pricing superseded 09-30)
 - [Assistant push channel (2026-07-15)](assistant-push-channel-2026-07-15.md) — REC Azure SignalR + durable outbox
 - [SignalR vs SSE notification fabric (2026-07-16)](signalr-vs-sse-notification-fabric-2026-07-16.md) — defer SignalR to r2 for MDA-only r1
 - [ACS Chat integration (2026-07-16)](acs-chat-integration-2026-07-16.md) — transport vs system-of-record; BYOI tokens; UI Library React-19 gap
 - [BFF Dataverse HTTP unification (2026-06-23)](bff-dataverse-http-unification-2026-06.md) — orphan named clients; REC IDataverseHttpClient
 - [Customer-stamp pricing (2026-08-12)](spaarke-customer-stamp-pricing-2026-08-12.md) — ~$3.5-4.5K/mo per customer; AI Search S1 biggest floor
+
+- [EXO sidecar identity (2026-10-03)](exo-sidecar-identity-2026-10-03.md) — EXO -ManagedIdentity internals (verified), MI-FIC -AccessToken recommendation, AAP→RBAC-for-Apps status, perms
+- [EXO RBAC-for-Apps design (2026-10-04)](exo-rbac-for-apps-design-2026-10-04.md) — T251 cmdlet sequence, caller perms + Role Management escalation, subscriptions gap, cache, limits
+- [EXO app-only DC-write error (2026-10-04)](exo-apponly-dc-write-error-2026-10-04.md) — -Organization must be primary .onmicrosoft.com, not tenant GUID; Q&A accepted fixes; App-RBAC: apps not in role groups
 
 ## AI platform / models / competitors
 - [Foundry IQ + Work IQ state (2026-09-21)](foundry-iq-work-iq-state-2026-09-21.md) — Foundry IQ GA extractive-only; SPE source not ISV-viable; supersedes 07-14 Work IQ memo

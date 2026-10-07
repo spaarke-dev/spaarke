@@ -98,7 +98,7 @@ public class OfficeMatterTypeLookupContractTests : IClassFixture<OfficeTestWebAp
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        var result = await response.Content.ReadFromJsonAsync<MatterTypeListResponse>();
+        var result = await response.Content.ReadFromJsonAsync<ReferenceListResponse>();
         result.Should().NotBeNull();
         result!.Results.Should().HaveCount(2, "the unnamed row must be dropped");
         result.Results.Select(r => r.Name).Should().ContainInOrder("Litigation", "Trademark");
@@ -115,6 +115,83 @@ public class OfficeMatterTypeLookupContractTests : IClassFixture<OfficeTestWebAp
             Times.Once,
             "only active (statecode eq 0) rows are requested");
     }
+
+    // ── Task 100: the same route, generalized to /search/{list} ─────────────────────────────────────────
+
+    [Theory]
+    [InlineData("practice-areas", "sprk_practicearea_refs", "sprk_practicearea_refid,sprk_practiceareaname,sprk_practiceareacode",
+        """{ "sprk_practicearea_refid": "b41377db-690e-f111-8342-7c1e520aa4df", "sprk_practiceareaname": "Appellate", "sprk_practiceareacode": "APPL" }""",
+        "Appellate")]
+    [InlineData("project-types", "sprk_projecttype_refs", "sprk_projecttype_refid,sprk_name",
+        """{ "sprk_projecttype_refid": "0ed9d8ac-b018-f111-8343-7ced8d1dc988", "sprk_name": "Litigation" }""",
+        "Litigation")]
+    public async Task Get_ReferenceList_ReadsItsOwnTable_ActiveRowsOnly(
+        string list, string entitySet, string select, string rowJson, string expectedName)
+    {
+        var dataverseClientMock = NewDataverseClientMock();
+        dataverseClientMock
+            .Setup(c => c.QueryAsync<Dictionary<string, JsonElement>>(
+                entitySet, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<Dictionary<string, JsonElement>> { Row(rowJson) });
+
+        using var scopedFactory = WithDataverseClient(dataverseClientMock.Object);
+
+        var response = await scopedFactory.CreateClient().GetAsync($"/api/office/search/{list}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<ReferenceListResponse>();
+        result!.Results.Should().ContainSingle().Which.Name.Should().Be(expectedName);
+        dataverseClientMock.Verify(
+            c => c.QueryAsync<Dictionary<string, JsonElement>>(
+                entitySet, "statecode eq 0", select, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            Times.Once, "each list reads its own table, active rows only, with its live columns");
+    }
+
+    [Theory]
+    [InlineData("contacts")]
+    [InlineData("sprk_matters")]
+    [InlineData("systemusers")]
+    public async Task Get_AnUnofferedList_Returns404_AndReadsNothing(string list)
+    {
+        var dataverseClientMock = NewDataverseClientMock();
+        using var scopedFactory = WithDataverseClient(dataverseClientMock.Object);
+
+        var response = await scopedFactory.CreateClient().GetAsync($"/api/office/search/{list}");
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        dataverseClientMock.Verify(
+            c => c.QueryAsync<Dictionary<string, JsonElement>>(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the route reads only the closed table — never a table the caller names");
+    }
+
+    [Fact]
+    public async Task Get_Entities_IsStillTheSearchRoute_NotAReferenceList()
+    {
+        // Route precedence: the literal /search/entities wins over /search/{list}. Without a query it is the
+        // search's own 400, not the reference route's 404.
+        // Signed in (the host's TestAuthHandler authenticates every request; the bearer states it for the reader and for
+        // the route guard): since task 167's FallbackPolicy an ANONYMOUS request is 401 whether or not a route exists.
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
+        var response = await client.GetAsync("/api/office/search/entities");
+
+        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+    }
+
+    private static Mock<DataverseWebApiClient> NewDataverseClientMock() => new(
+        MockBehavior.Loose,
+        Mock.Of<IConfiguration>(c => c["Dataverse:ServiceUrl"] == "https://test.crm.dynamics.com"),
+        Mock.Of<ILogger<DataverseWebApiClient>>(),
+        new NoOpTokenCredential(),
+        (IConfidentialClientProvider)null!);
+
+    private Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactory<Program> WithDataverseClient(DataverseWebApiClient client)
+        => _factory.WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+        {
+            services.RemoveAll<DataverseWebApiClient>();
+            services.AddSingleton(client);
+        }));
 
     private static Dictionary<string, JsonElement> Row(string json) =>
         JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;

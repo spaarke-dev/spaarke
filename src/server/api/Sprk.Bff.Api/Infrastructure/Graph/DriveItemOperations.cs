@@ -138,58 +138,16 @@ public class DriveItemOperations
         }
     }
 
-    public async Task<Stream?> DownloadFileAsync(
+    /// <summary>
+    /// File content APP-ONLY (broker). Performs NO authorization: every caller authorizes the principal against
+    /// Dataverse first and, when it follows a <c>sprk_document</c> row's pointer, runs the document-pointer check
+    /// (<c>RecordContainerResolver.EnsureDocumentPointerContainerAsync</c>).
+    /// </summary>
+    public Task<Stream?> DownloadFileAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
-    {
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "DownloadFile");
-        activity?.SetTag("driveId", driveId);
-        activity?.SetTag("itemId", itemId);
-
-        _logger.LogInformation("Downloading file {ItemId} from drive {DriveId}", itemId, driveId);
-
-        try
-        {
-            var graphClient = _factory.ForApp();
-
-            var stream = await graphClient.Drives[driveId].Items[itemId].Content
-                .GetAsync(cancellationToken: ct);
-
-            if (stream == null)
-            {
-                _logger.LogWarning("Failed to download file {ItemId} - stream is null", itemId);
-                return null;
-            }
-
-            _logger.LogInformation("Successfully downloaded file {ItemId}", itemId);
-            return stream;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
-            return null;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
-        {
-            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (ODataError ex)
-        {
-            _logger.LogError(ex, "Graph API error downloading file: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to download file: {ex.Message}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error downloading file: {Error}", ex.Message);
-            throw;
-        }
-    }
+        => DownloadFileCoreAsync(_factory.ForApp(), "app-only", driveId, itemId, ct);
 
     public async Task<bool> DeleteFileAsync(
         string driveId,
@@ -332,446 +290,100 @@ public class DriveItemOperations
         }
     }
 
-    // =============================================================================
-    // USER CONTEXT METHODS (OBO Flow)
-    // =============================================================================
-
     /// <summary>
-    /// Lists drive children as the user (OBO flow) with paging and ordering.
+    /// Who CREATED a drive item (app-only Graph read of <c>id,name,createdBy</c>) — the evidence the document-pointer
+    /// check verifies before the BFF follows a <c>sprk_document</c> row's pointer as the application
+    /// (unified-access-control-r2 task 166 r2, owner round 23 item 1). Returns <see langword="null"/> when the item is
+    /// not in that drive (Graph 404). Deliberately NOT cached: it sits on an authorization path, so a stale or poisoned
+    /// cache entry would be a security defect rather than a slow page; every other fault throws (the caller refuses).
     /// </summary>
-    public async Task<ListingResponse> ListChildrenAsUserAsync(
-        HttpContext ctx,
-        string containerId,
-        ListingParameters parameters,
-        CancellationToken ct = default)
+    public async Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
     {
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "ListChildrenAsUser");
-        activity?.SetTag("containerId", containerId);
-
-        _logger.LogInformation("Listing children for container {ContainerId} (user context)", containerId);
-
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
+            // task 166 f1: size, file (hashes) and webUrl ride on the same read — the server-side pointer attach and the
+            // relocation copy verify against them; still one uncached call. lastModifiedDateTime (round 54 item 3) is the
+            // time a relocation's witness records when Graph lists no version.
+            var item = await _factory.ForApp().Drives[driveId].Items[itemId]
+                .GetAsync(
+                    req => req.QueryParameters.Select = new[] { "id", "name", "createdBy", "size", "file", "webUrl", "lastModifiedDateTime" },
+                    cancellationToken: ct);
 
-            // Get the drive for the container
-            var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
-                .GetAsync(cancellationToken: ct);
-
-            if (drive?.Id is null)
+            if (item is null)
             {
-                _logger.LogWarning("Drive not found for container {ContainerId}", containerId);
-                return new ListingResponse(new List<DriveItemDto>(), null);
-            }
-
-            // Call Graph API to list root items with OData query parameters
-            var children = await graphClient.Drives[drive.Id].Items
-                .GetAsync(requestConfiguration =>
-                {
-                    requestConfiguration.QueryParameters.Filter = "parentReference/path eq '/drive/root:'";
-                    requestConfiguration.QueryParameters.Top = parameters.ValidatedTop;
-                    requestConfiguration.QueryParameters.Skip = parameters.ValidatedSkip;
-
-                    // Apply ordering (OData $orderby)
-                    var orderField = parameters.ValidatedOrderBy.ToLowerInvariant() switch
-                    {
-                        "name" => "name",
-                        "lastmodifieddatetime" => "lastModifiedDateTime",
-                        "size" => "size",
-                        _ => "name"
-                    };
-                    var orderDirection = parameters.ValidatedOrderDir == "desc" ? " desc" : " asc";
-                    requestConfiguration.QueryParameters.Orderby = new[] { orderField + orderDirection };
-                }, cancellationToken: ct);
-
-            if (children?.Value == null)
-            {
-                return new ListingResponse(new List<DriveItemDto>(), null);
-            }
-
-            // Map Graph DriveItem to DriveItemDto
-            var items = children.Value.Select(item => new DriveItemDto(
-                Id: item.Id!,
-                Name: item.Name!,
-                Size: item.Size,
-                ETag: item.ETag,
-                LastModifiedDateTime: item.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
-                ContentType: item.File?.MimeType,
-                Folder: item.Folder != null ? new FolderDto(item.Folder.ChildCount) : null
-            )).ToList();
-
-            // Handle pagination (@odata.nextLink)
-            string? nextLink = null;
-            if (!string.IsNullOrEmpty(children.OdataNextLink))
-            {
-                // Extract skip token from nextLink
-                var nextSkip = parameters.ValidatedSkip + parameters.ValidatedTop;
-                nextLink = $"/api/obo/containers/{containerId}/children?top={parameters.ValidatedTop}&skip={nextSkip}&orderBy={parameters.ValidatedOrderBy}&orderDir={parameters.ValidatedOrderDir}";
-            }
-
-            _logger.LogInformation("Listed {Count} items for container {ContainerId}", items.Count, containerId);
-
-            return new ListingResponse(items, nextLink);
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
-        {
-            _logger.LogWarning("Container or drive not found: {ContainerId}", containerId);
-            return new ListingResponse(new List<DriveItemDto>(), null);
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
-        {
-            _logger.LogWarning("Access denied to container {ContainerId}: {Error}", containerId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 429)
-        {
-            _logger.LogWarning("Graph API throttling for container {ContainerId}, retry after {RetryAfter}s",
-                containerId, GetRetryAfterSeconds(ex));
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to list children for container {ContainerId}", containerId);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Downloads file with range support as the user (OBO flow).
-    /// Supports partial content (206) and conditional requests (304).
-    /// </summary>
-    public async Task<FileContentResponse?> DownloadFileWithRangeAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        RangeHeader? range,
-        string? ifNoneMatch,
-        CancellationToken ct = default)
-    {
-        if (!FileOperationExtensions.IsValidItemId(itemId))
-        {
-            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
-            return null;
-        }
-
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "DownloadFileWithRangeAsUser");
-        activity?.SetTag("driveId", driveId);
-        activity?.SetTag("itemId", itemId);
-
-        _logger.LogInformation("Downloading file {DriveId}/{ItemId} (user context)", driveId, itemId);
-
-        try
-        {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
-            // First, get item metadata to check ETag and size
-            var item = await graphClient.Drives[driveId].Items[itemId]
-                .GetAsync(cancellationToken: ct);
-
-            if (item == null)
-            {
-                _logger.LogWarning("Item not found: {ItemId}", itemId);
                 return null;
             }
 
-            // Handle If-None-Match (ETag-based caching)
-            if (!string.IsNullOrEmpty(ifNoneMatch) &&
-                !string.IsNullOrEmpty(item.ETag) &&
-                ifNoneMatch.Trim('"') == item.ETag.Trim('"'))
-            {
-                _logger.LogInformation("ETag match for item {ItemId}, returning 304 Not Modified", itemId);
-                return new FileContentResponse(
-                    Content: Stream.Null,
-                    ContentLength: 0,
-                    ContentType: item.File?.MimeType ?? "application/octet-stream",
-                    ETag: item.ETag
-                );
-            }
-
-            var totalSize = item.Size ?? 0;
-            var contentType = item.File?.MimeType ?? "application/octet-stream";
-
-            // Download content with optional range
-            Stream? contentStream;
-            long contentLength;
-            long? rangeStart = null;
-            long? rangeEnd = null;
-
-            if (range != null && range.IsValid && totalSize > 0)
-            {
-                // Handle partial content (HTTP 206)
-                var actualEnd = Math.Min(range.End, totalSize - 1);
-                var actualStart = Math.Min(range.Start, actualEnd);
-
-                if (actualStart >= totalSize)
-                {
-                    // Range not satisfiable (HTTP 416)
-                    _logger.LogWarning("Range not satisfiable for item {ItemId}: {Start}-{End}/{TotalSize}",
-                        itemId, actualStart, actualEnd, totalSize);
-                    return null;
-                }
-
-                // Use Graph API to download specific range
-                contentStream = await graphClient.Drives[driveId].Items[itemId].Content
-                    .GetAsync(requestConfiguration =>
-                    {
-                        requestConfiguration.Headers.Add("Range", $"bytes={actualStart}-{actualEnd}");
-                    }, cancellationToken: ct);
-
-                if (contentStream == null)
-                {
-                    _logger.LogError("Failed to download range content for item {ItemId}", itemId);
-                    return null;
-                }
-
-                contentLength = actualEnd - actualStart + 1;
-                rangeStart = actualStart;
-                rangeEnd = actualEnd;
-
-                _logger.LogInformation("Serving range {Start}-{End} of item {ItemId} (total: {TotalSize})",
-                    actualStart, actualEnd, itemId, totalSize);
-            }
-            else
-            {
-                // Download full content
-                contentStream = await graphClient.Drives[driveId].Items[itemId].Content
-                    .GetAsync(cancellationToken: ct);
-
-                if (contentStream == null)
-                {
-                    _logger.LogError("Failed to download content for item {ItemId}", itemId);
-                    return null;
-                }
-
-                contentLength = totalSize;
-                _logger.LogInformation("Serving full content of item {ItemId} (size: {Size})", itemId, totalSize);
-            }
-
-            return new FileContentResponse(
-                Content: contentStream!,  // Guaranteed non-null by null checks above
-                ContentLength: contentLength,
-                ContentType: contentType,
-                ETag: item.ETag,
-                RangeStart: rangeStart,
-                RangeEnd: rangeEnd,
-                TotalSize: totalSize
-            );
+            return new SpeItemCreator(
+                item.Name,
+                item.CreatedBy?.User?.Id,
+                item.CreatedBy?.Application?.Id,
+                item.Size,
+                item.File?.Hashes?.QuickXorHash,
+                item.WebUrl,
+                item.LastModifiedDateTime);
         }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning("Item not found: {ItemId}", itemId);
+            _logger.LogWarning("Item {ItemId} not found in drive {DriveId} (creator read)", itemId, driveId);
             return null;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
-        {
-            _logger.LogWarning("Access denied to item {ItemId}: {Error}", itemId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 416)
-        {
-            _logger.LogWarning("Range not satisfiable for item {ItemId}", itemId);
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to download content for item {ItemId}", itemId);
-            throw;
         }
     }
 
-    /// <summary>
-    /// Updates drive item (rename/move) as the user (OBO flow).
-    /// </summary>
-    public async Task<DriveItemDto?> UpdateItemAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        UpdateFileRequest request,
-        CancellationToken ct = default)
-    {
-        if (!FileOperationExtensions.IsValidItemId(itemId))
-        {
-            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
-            return null;
-        }
-
-        if (!string.IsNullOrEmpty(request.Name) && !FileOperationExtensions.IsValidFileName(request.Name))
-        {
-            _logger.LogWarning("Invalid file name: {Name}", request.Name);
-            return null;
-        }
-
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "UpdateItemAsUser");
-        activity?.SetTag("driveId", driveId);
-        activity?.SetTag("itemId", itemId);
-
-        _logger.LogInformation("Updating item {DriveId}/{ItemId} (user context)", driveId, itemId);
-
-        try
-        {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
-            // Build update request
-            var driveItemUpdate = new DriveItem();
-
-            if (!string.IsNullOrEmpty(request.Name))
-            {
-                driveItemUpdate.Name = request.Name;
-            }
-
-            if (!string.IsNullOrEmpty(request.ParentReferenceId))
-            {
-                driveItemUpdate.ParentReference = new ItemReference
-                {
-                    Id = request.ParentReferenceId
-                };
-            }
-
-            // Execute update via Graph API
-            var updatedItem = await graphClient.Drives[driveId].Items[itemId]
-                .PatchAsync(driveItemUpdate, cancellationToken: ct);
-
-            if (updatedItem == null)
-            {
-                _logger.LogWarning("Item not found or update failed: {ItemId}", itemId);
-                return null;
-            }
-
-            _logger.LogInformation("Updated item {ItemId}: name={Name}, parentRef={ParentRef}",
-                itemId, updatedItem.Name, request.ParentReferenceId);
-
-            // Invalidate caches after update (metadata and listing may be stale)
-            if (_metadataCache != null)
-            {
-                await _metadataCache.InvalidateFileMetadataAsync(driveId, itemId);
-                await _metadataCache.InvalidateFolderListingAsync(driveId, null);
-            }
-
-            return new DriveItemDto(
-                Id: updatedItem.Id!,
-                Name: updatedItem.Name!,
-                Size: updatedItem.Size,
-                ETag: updatedItem.ETag,
-                LastModifiedDateTime: updatedItem.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
-                ContentType: updatedItem.File?.MimeType,
-                Folder: updatedItem.Folder != null ? new FolderDto(updatedItem.Folder.ChildCount) : null
-            );
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
-        {
-            _logger.LogWarning("Item not found: {ItemId}", itemId);
-            return null;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
-        {
-            _logger.LogWarning("Access denied updating item {ItemId}: {Error}", itemId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to update item {ItemId}", itemId);
-            throw;
-        }
-    }
+    // =============================================================================
+    // ListChildrenAsUserAsync, DownloadFileWithRangeAsUserAsync, UpdateItemAsUserAsync and DeleteItemAsUserAsync were
+    // DELETED 2026-10-06 by unified-access-control-r2 task 171: OBO byte methods with no caller since task 071 retired
+    // their routes. Under the broker-only decision (owner round 69) a byte path runs app-only behind a Dataverse check;
+    // an uncalled OBO byte method is only an invitation to reintroduce the "SPE decides" shape.
+    // =============================================================================
 
     /// <summary>
-    /// Deletes drive item as the user (OBO flow).
-    /// </summary>
-    public async Task<bool> DeleteItemAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        CancellationToken ct = default)
-    {
-        if (!FileOperationExtensions.IsValidItemId(itemId))
-        {
-            _logger.LogWarning("Invalid item ID: {ItemId}", itemId);
-            return false;
-        }
-
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "DeleteItemAsUser");
-        activity?.SetTag("driveId", driveId);
-        activity?.SetTag("itemId", itemId);
-
-        _logger.LogInformation("Deleting item {DriveId}/{ItemId} (user context)", driveId, itemId);
-
-        try
-        {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
-            // Delete item via Graph API
-            await graphClient.Drives[driveId].Items[itemId]
-                .DeleteAsync(cancellationToken: ct);
-
-            _logger.LogInformation("Deleted item {ItemId} from drive {DriveId}", itemId, driveId);
-
-            // Invalidate caches after deletion
-            if (_metadataCache != null)
-            {
-                await _metadataCache.InvalidateFileMetadataAsync(driveId, itemId);
-                await _metadataCache.InvalidateFolderListingAsync(driveId, null);
-            }
-
-            return true;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
-        {
-            _logger.LogWarning("Item not found (may already be deleted): {ItemId}", itemId);
-            return false;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
-        {
-            _logger.LogWarning("Access denied deleting item {ItemId}: {Error}", itemId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to delete item {ItemId}", itemId);
-            throw;
-        }
-    }
-
-    /// <summary>
-    /// Get file metadata using user OBO authentication.
-    /// Used by AI services that need to access user-uploaded files.
+    /// File metadata as the CALLER (OBO), uncached. Kept ONLY for Compose "Path B" — a document opened by drive+item
+    /// that has no <c>sprk_document</c> row, so no Dataverse record exists to authorize and SPE's own answer for the
+    /// caller is the decision (task 171, escalation trigger 2; see the task note). Every row-backed path uses
+    /// <see cref="GetFileMetadataUncachedAsync"/> after its Dataverse check.
     /// </summary>
     public async Task<FileHandleDto?> GetFileMetadataAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
+        => await GetFileMetadataCoreAsync(await _factory.ForUserAsync(ctx, ct), "OBO", driveId, itemId, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// File metadata APP-ONLY (broker) and UNCACHED — the app-only twin of <see cref="GetFileMetadataAsUserAsync"/>
+    /// (unified-access-control-r2 task 171). Unlike <see cref="GetFileMetadataAsync"/> it never reads the Redis
+    /// metadata cache: a caller that sends the ETag back in <c>If-Match</c>, or compares it to detect an external edit,
+    /// must see the item's CURRENT ETag. Performs NO authorization.
+    /// </summary>
+    public Task<FileHandleDto?> GetFileMetadataUncachedAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => GetFileMetadataCoreAsync(_factory.ForApp(), "app-only", driveId, itemId, ct);
+
+    private async Task<FileHandleDto?> GetFileMetadataCoreAsync(
+        GraphServiceClient graphClient,
+        string identity,
+        string driveId,
+        string itemId,
+        CancellationToken ct)
     {
         // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
         // start the Activity, and disposing it here ended the request's own trace span early (see
         // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
         var activity = Activity.Current;
-        activity?.SetTag("operation", "GetFileMetadataAsUser");
+        activity?.SetTag("operation", "GetFileMetadataUncached");
+        activity?.SetTag("identity", identity);
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
 
-        _logger.LogInformation("Getting metadata for file {ItemId} from drive {DriveId} (OBO)",
-            itemId, driveId);
+        _logger.LogInformation("Getting metadata for file {ItemId} from drive {DriveId} ({Identity})",
+            itemId, driveId, identity);
 
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
             var item = await graphClient.Drives[driveId].Items[itemId]
                 .GetAsync(cancellationToken: ct);
 
@@ -780,8 +392,6 @@ public class DriveItemOperations
                 _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
                 return null;
             }
-
-            _logger.LogInformation("Successfully retrieved metadata for file {ItemId} (OBO)", itemId);
 
             return new FileHandleDto(
                 item.Id!,
@@ -802,7 +412,7 @@ public class DriveItemOperations
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
-            _logger.LogWarning("Access denied getting metadata for file {ItemId}: {Error}", itemId, ex.Message);
+            _logger.LogWarning("Access denied getting metadata for file {ItemId} ({Identity}): {Error}", itemId, identity, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
         catch (ODataError ex)
@@ -810,37 +420,45 @@ public class DriveItemOperations
             _logger.LogError(ex, "Graph API error getting file metadata: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to get file metadata: {ex.Message}", ex);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error getting file metadata: {Error}", ex.Message);
-            throw;
-        }
     }
 
     /// <summary>
-    /// Download file content using user OBO authentication.
-    /// Used by AI services that need to access user-uploaded files.
+    /// File content as the CALLER (OBO). Kept ONLY for Compose "Path B" (no <c>sprk_document</c> row — SPE's answer
+    /// for the caller is the decision; task 171 escalation trigger 2). Every row-backed path uses
+    /// <see cref="DownloadFileAsync"/> after its Dataverse check and the document-pointer check.
     /// </summary>
     public async Task<Stream?> DownloadFileAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
+        => await DownloadFileCoreAsync(await _factory.ForUserAsync(ctx, ct), "OBO", driveId, itemId, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// The one download body (task 171): 404 is null; 403 is <see cref="UnauthorizedAccessException"/>; 429 is a
+    /// rate-limited <see cref="InvalidOperationException"/>; any other Graph error is <see cref="InvalidOperationException"/>.
+    /// </summary>
+    private async Task<Stream?> DownloadFileCoreAsync(
+        GraphServiceClient graphClient,
+        string identity,
+        string driveId,
+        string itemId,
+        CancellationToken ct)
     {
         // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
         // start the Activity, and disposing it here ended the request's own trace span early (see
         // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
         var activity = Activity.Current;
-        activity?.SetTag("operation", "DownloadFileAsUser");
+        activity?.SetTag("operation", "DownloadFile");
+        activity?.SetTag("identity", identity);
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
 
-        _logger.LogInformation("Downloading file {ItemId} from drive {DriveId} (OBO)", itemId, driveId);
+        _logger.LogInformation("Downloading file {ItemId} from drive {DriveId} ({Identity})", itemId, driveId, identity);
 
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
             var stream = await graphClient.Drives[driveId].Items[itemId].Content
                 .GetAsync(cancellationToken: ct);
 
@@ -850,7 +468,6 @@ public class DriveItemOperations
                 return null;
             }
 
-            _logger.LogInformation("Successfully downloaded file {ItemId} (OBO)", itemId);
             return stream;
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
@@ -860,26 +477,24 @@ public class DriveItemOperations
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
-            _logger.LogWarning("Access denied downloading file {ItemId}: {Error}", itemId, ex.Message);
+            _logger.LogWarning("Access denied downloading file {ItemId} ({Identity}): {Error}", itemId, identity, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
         catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error downloading file: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to download file: {ex.Message}", ex);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error downloading file: {Error}", ex.Message);
-            throw;
-        }
     }
 
     /// <summary>
-    /// Download a SPECIFIC version's content (OBO). Mirrors <see cref="DownloadFileAsUserAsync"/>
-    /// but targets the Graph <c>/versions/{versionId}/content</c> route. Returns <c>null</c> when the
-    /// item or the requested version is not found (ADR-007 — no Graph type leaks; 404 → null).
-    /// FR-06 / Spike S4: retrieves the load-time SPE baseline for the Compose E1 delta save.
+    /// A SPECIFIC version's content as the CALLER (OBO). Kept ONLY for Compose "Path B" (no <c>sprk_document</c> row;
+    /// task 171 escalation trigger 2). FR-06 / Spike S4: the load-time SPE baseline for the Compose E1 delta save.
     /// </summary>
     public async Task<Stream?> DownloadFileVersionAsUserAsync(
         HttpContext ctx,
@@ -887,85 +502,133 @@ public class DriveItemOperations
         string itemId,
         string versionId,
         CancellationToken ct = default)
+        => await DownloadFileVersionCoreAsync(await _factory.ForUserAsync(ctx, ct), "OBO", driveId, itemId, versionId, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// A SPECIFIC prior version's content APP-ONLY (broker). Returns <see langword="null"/> when the item or that version
+    /// is not found. Performs NO authorization: callers are the relocation's version replay (task 166, owner round 45
+    /// item 1 — a server-derived move of a row's own file), the document version route and Compose's row-backed save,
+    /// each of which authorized the caller against the document and verified its pointer first (task 171).
+    /// </summary>
+    public Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+        => DownloadFileVersionCoreAsync(_factory.ForApp(), "app-only", driveId, itemId, versionId, ct);
+
+    private async Task<Stream?> DownloadFileVersionCoreAsync(
+        GraphServiceClient graphClient,
+        string identity,
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct)
     {
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
+        // Not `using`: Activity.Current is the CALLER's span (ActivityCurrentDisposalGuardTests, #1084 follow-on).
         var activity = Activity.Current;
-        activity?.SetTag("operation", "DownloadFileVersionAsUser");
+        activity?.SetTag("operation", "DownloadFileVersion");
+        activity?.SetTag("identity", identity);
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
         activity?.SetTag("versionId", versionId);
 
         _logger.LogInformation(
-            "Downloading version {VersionId} of file {ItemId} from drive {DriveId} (OBO)",
-            versionId, itemId, driveId);
+            "Downloading version {VersionId} of file {ItemId} from drive {DriveId} ({Identity})", versionId, itemId, driveId, identity);
 
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
             var stream = await graphClient.Drives[driveId].Items[itemId]
                 .Versions[versionId].Content
                 .GetAsync(cancellationToken: ct);
 
             if (stream == null)
             {
-                _logger.LogWarning(
-                    "Failed to download version {VersionId} of file {ItemId} - stream is null",
-                    versionId, itemId);
+                _logger.LogWarning("Failed to download version {VersionId} of file {ItemId} - stream is null", versionId, itemId);
                 return null;
             }
 
-            _logger.LogInformation(
-                "Successfully downloaded version {VersionId} of file {ItemId} (OBO)",
-                versionId, itemId);
             return stream;
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
-            _logger.LogWarning(
-                "Version {VersionId} of file {ItemId} not found in drive {DriveId}",
-                versionId, itemId, driveId);
+            _logger.LogWarning("Version {VersionId} of file {ItemId} not found in drive {DriveId}", versionId, itemId, driveId);
             return null;
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning(
-                "Access denied downloading version {VersionId} of file {ItemId}: {Error}",
-                versionId, itemId, ex.Message);
+                "Access denied downloading version {VersionId} of file {ItemId} ({Identity}): {Error}", versionId, itemId, identity, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
         catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error downloading file version: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to download file version: {ex.Message}", ex);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error downloading file version: {Error}", ex.Message);
-            throw;
-        }
     }
 
+    /// <summary>
+    /// The <see cref="VersionInfoDto"/> projection of one Graph version: id (= label), date, size and who wrote it
+    /// (display name; the person's or application's id server-side only).
+    /// </summary>
+    private static VersionInfoDto ToVersionInfo(DriveItemVersion v)
+        => new(
+            Id: v.Id!,
+            ETag: null,
+            LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+            Size: v.Size ?? 0,
+            LastModifiedBy: v.LastModifiedBy?.User?.DisplayName ?? v.LastModifiedBy?.Application?.DisplayName)
+        {
+            LastModifiedByUserId = v.LastModifiedBy?.User?.Id,
+            LastModifiedByApplicationId = v.LastModifiedBy?.Application?.Id,
+        };
+
+    /// <summary>
+    /// The CURRENT version id as the CALLER (OBO). Kept ONLY for Compose "Path B" (task 171 escalation trigger 2).
+    /// </summary>
     public async Task<string?> GetCurrentVersionIdAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,
         CancellationToken ct = default)
+        => await GetCurrentVersionIdCoreAsync(await _factory.ForUserAsync(ctx, ct), "OBO", driveId, itemId, ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// The CURRENT version id APP-ONLY (broker) — the twin of <see cref="GetCurrentVersionIdAsUserAsync"/> for a
+    /// row-backed Compose load (task 171). Performs NO authorization.
+    /// </summary>
+    public Task<string?> GetCurrentVersionIdAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => GetCurrentVersionIdCoreAsync(_factory.ForApp(), "app-only", driveId, itemId, ct);
+
+    private async Task<string?> GetCurrentVersionIdCoreAsync(
+        GraphServiceClient graphClient,
+        string identity,
+        string driveId,
+        string itemId,
+        CancellationToken ct)
     {
         // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
         // start the Activity, and disposing it here ended the request's own trace span early (see
         // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
         var activity = Activity.Current;
-        activity?.SetTag("operation", "GetCurrentVersionIdAsUser");
+        activity?.SetTag("operation", "GetCurrentVersionId");
+        activity?.SetTag("identity", identity);
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
 
         try
         {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
             var versions = await graphClient.Drives[driveId].Items[itemId]
                 .Versions.GetAsync(cancellationToken: ct);
 
@@ -995,8 +658,8 @@ public class DriveItemOperations
         catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning(
-                "Access denied resolving current version id for file {ItemId}: {Error}",
-                itemId, ex.Message);
+                "Access denied resolving current version id for file {ItemId} ({Identity}): {Error}",
+                itemId, identity, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
         catch (ODataError ex)
@@ -1006,98 +669,28 @@ public class DriveItemOperations
         }
     }
 
+    // ListFileVersionsAsUserAsync (OBO) DELETED 2026-10-06 by unified-access-control-r2 task 171: its one caller, the
+    // document version-history route, now reads app-only (ListFileVersionsAsync) after its Dataverse check and the
+    // document-pointer check — the same projection, so the list does not change shape.
+
     /// <summary>
-    /// List ALL versions of a drive-item under the caller's OBO identity (user-context —
-    /// the calling user's own delegated permission on the item, never app-only). Targets the
-    /// Graph <c>drives/{driveId}/items/{itemId}/versions</c> route (the same call shape as
-    /// <see cref="GetCurrentVersionIdAsUserAsync"/>) and maps each version to the
-    /// <see cref="VersionInfoDto"/> projection, newest first. Returns <c>null</c> when the
-    /// item is not found (ADR-007 — 404 → null, no Graph type leaks); throws
-    /// <see cref="UnauthorizedAccessException"/> on Graph 403 (caller not authorized).
-    /// spaarkeai-compose-r6 task 050 (FR-07 version-history list).
+    /// The most pages <see cref="ListFileVersionsAsync"/> follows. A history longer than this is reported as not fully
+    /// enumerated (it throws), never returned cut: a relocation replays what it lists (task 166, owner round 54 item 4).
     /// </summary>
-    public async Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        CancellationToken ct = default)
-    {
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "ListFileVersionsAsUser");
-        activity?.SetTag("driveId", driveId);
-        activity?.SetTag("itemId", itemId);
-
-        _logger.LogInformation(
-            "Listing versions of file {ItemId} in drive {DriveId} (OBO)", itemId, driveId);
-
-        try
-        {
-            var graphClient = await _factory.ForUserAsync(ctx, ct);
-
-            var versions = await graphClient.Drives[driveId].Items[itemId]
-                .Versions.GetAsync(cancellationToken: ct);
-
-            if (versions?.Value == null)
-            {
-                _logger.LogWarning(
-                    "No versions returned for file {ItemId} in drive {DriveId}", itemId, driveId);
-                return Array.Empty<VersionInfoDto>();
-            }
-
-            // Newest first — the natural order for a version-history UX (mirrors the
-            // "current version = most-recently-modified" convention GetCurrentVersionIdAsUserAsync uses).
-            var mapped = versions.Value
-                .Where(v => v.Id != null)
-                .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
-                .ToList();
-
-            _logger.LogInformation(
-                "Listed {Count} versions of file {ItemId} (OBO)", mapped.Count, itemId);
-            return mapped;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogWarning(
-                "File {ItemId} not found in drive {DriveId} when listing versions", itemId, driveId);
-            return null;
-        }
-        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
-        {
-            _logger.LogWarning(
-                "Access denied listing versions of file {ItemId}: {Error}", itemId, ex.Message);
-            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
-        }
-        catch (ODataError ex)
-        {
-            _logger.LogError(ex, "Graph API error listing file versions: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
-        }
-    }
+    internal const int MaxVersionPages = 500;
 
     /// <summary>
     /// Lists the versions of a file using APP-ONLY (broker) authentication.
     /// </summary>
     /// <remarks>
-    /// The app-only sibling of <see cref="ListFileVersionsAsUserAsync"/>, added by
-    /// unified-access-control-r2 for the external-access surface.
+    /// Added by unified-access-control-r2 for the external-access surface; since task 171 also the document
+    /// version-history route's read (the OBO sibling is deleted).
     ///
     /// ⚠️ This method performs NO authorization of its own — app-only means the broker identity can
     /// read any item in any container it owns. Every caller MUST authorize the principal against the
     /// owning record BEFORE calling it. The external document endpoints do exactly that (project
-    /// participation + document→project scoping, uniform 403), which is why they cannot use the
-    /// AsUser variant: an external CIAM contact is not a Dataverse principal and holds no delegated
-    /// permission on the drive item to exchange.
-    ///
-    /// Same Graph route and the same newest-first <see cref="VersionInfoDto"/> projection as the OBO
-    /// variant, so a version list does not change shape depending on which surface asked for it.
+    /// participation + document→project scoping, uniform 403); the workforce version route authorizes Read on the
+    /// document and verifies its pointer.
     /// </remarks>
     public async Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
         string driveId,
@@ -1119,8 +712,8 @@ public class DriveItemOperations
         {
             var graphClient = _factory.ForApp();
 
-            var versions = await graphClient.Drives[driveId].Items[itemId]
-                .Versions.GetAsync(cancellationToken: ct);
+            var versionsBuilder = graphClient.Drives[driveId].Items[itemId].Versions;
+            var versions = await versionsBuilder.GetAsync(cancellationToken: ct);
 
             if (versions?.Value == null)
             {
@@ -1129,14 +722,29 @@ public class DriveItemOperations
                 return Array.Empty<VersionInfoDto>();
             }
 
-            var mapped = versions.Value
+            // Every page (task 166 f1-v2, owner round 45 item 1): a relocation replays the WHOLE history, so a long one
+            // must never be cut silently at the first page. Each follow-up request is the URL the server handed back. A
+            // listing that does not end within MaxVersionPages is never returned as if it were the whole history: it
+            // throws, and the relocation that asked fails (owner round 54 item 4, Sd).
+            var all = new List<DriveItemVersion>(versions.Value);
+            var pages = 1;
+            while (!string.IsNullOrEmpty(versions?.OdataNextLink))
+            {
+                if (pages >= MaxVersionPages)
+                {
+                    throw new InvalidOperationException(
+                        $"The versions of {itemId} could not be fully enumerated ({pages} pages read, more remain).");
+                }
+
+                versions = await versionsBuilder.WithUrl(versions.OdataNextLink).GetAsync(cancellationToken: ct);
+                all.AddRange(versions?.Value ?? []);
+                pages++;
+            }
+
+            var mapped = all
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
+                .Select(ToVersionInfo)
                 .ToList();
 
             _logger.LogInformation(
@@ -1239,36 +847,36 @@ public class DriveItemOperations
     }
 
     // =========================================================================
-    // OBO-context methods for FileAccessEndpoints (CICD-088b — ADR-007 §1)
-    //
-    // Each returns the URL/stream/summary FileAccessEndpoints needs WITHOUT
-    // exposing the Graph SDK request-builder fluent API or DriveItem DTO to
-    // callers. The Microsoft.Graph types stay inside this file.
-    //
-    // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b.
+    // App-only (broker) helpers for FileAccessEndpoints (CICD-088b — ADR-007 §1). Each returns the URL or summary
+    // the route needs WITHOUT exposing the Graph SDK request builders or DriveItem DTO. The Microsoft.Graph types stay
+    // inside this file. unified-access-control-r2 task 171 (owner round 69) converted them from OBO: under OBO SPE
+    // only answered a caller who holds a container ROLE, and per-record secure containers have none by design. Every
+    // route that calls them authorizes the caller on the sprk_document first (DocumentAuthorizationFilter) and runs
+    // the document-pointer check before following the row's pointer.
     // =========================================================================
 
     /// <summary>
-    /// Posts an OBO-authenticated preview request to Graph and returns the resulting
-    /// preview URL. The caller-supplied <paramref name="additionalData"/> is forwarded
-    /// to <c>PreviewPostRequestBody.AdditionalData</c> (e.g., <c>chromeless: true</c>,
-    /// <c>viewer: "onedrive"</c>).
+    /// Posts an APP-ONLY preview request and returns the preview URL. <paramref name="additionalData"/> is forwarded to
+    /// <c>PreviewPostRequestBody.AdditionalData</c> (e.g. <c>chromeless: true</c>, <c>viewer: "onedrive"</c>).
     /// </summary>
-    public async Task<string?> GetPreviewUrlAsUserAsync(
-        HttpContext ctx,
+    /// <remarks>
+    /// ⚠️ Graph: "anyone who accesses the URL acts as the caller with the caller's permissions" — a preview URL minted
+    /// app-only carries the BFF identity's rights for whoever holds it, for its short lifetime. Return it only to the
+    /// authorized caller; never log it, store it, or put it in a message. (Task 171 known limit: Microsoft recommends
+    /// minting preview URLs with a read-only application identity.)
+    /// </remarks>
+    public async Task<string?> GetEmbedPreviewUrlAsync(
         string driveId,
         string itemId,
         IDictionary<string, object>? additionalData = null,
         CancellationToken ct = default)
     {
-        var graphClient = await _factory.ForUserAsync(ctx, ct);
-
         var previewRequest = new Microsoft.Graph.Drives.Item.Items.Item.Preview.PreviewPostRequestBody
         {
             AdditionalData = additionalData ?? new Dictionary<string, object>()
         };
 
-        var previewResponse = await graphClient.Drives[driveId]
+        var previewResponse = await _factory.ForApp().Drives[driveId]
             .Items[itemId]
             .Preview
             .PostAsync(previewRequest, cancellationToken: ct);
@@ -1277,16 +885,19 @@ public class DriveItemOperations
     }
 
     /// <summary>
-    /// Creates a recipient-openable SPE sharing link for a DriveItem via OBO (the caller's own SPE
-    /// access authorizes the operation — email-communication-solution-r5 R2 item 12). Mirrors the
-    /// Graph <c>createLink</c> body used by <see cref="SpeAdminGraphService.CreateSharingLinkAsync"/>,
-    /// but OBO with the driveId already resolved (no container→drive re-resolution). Returns the
-    /// sharing URL, or <c>null</c> when Graph returns no link. No Graph SDK types are returned.
+    /// Creates a recipient-openable SPE sharing link for a DriveItem APP-ONLY (email-communication-solution-r5 R2 item
+    /// 12 — the composer's "Link" attachments). Mirrors the Graph <c>createLink</c> body used by
+    /// <see cref="SpeAdminGraphService.CreateSharingLinkAsync"/>, with the drive already resolved. Returns the sharing
+    /// URL, or <see langword="null"/> when Graph returns no link. No Graph SDK types are returned.
     /// </summary>
+    /// <remarks>
+    /// The route's per-document <c>share</c> gate (task 072) is the authorization; it is unchanged. Task 171 only
+    /// changes WHO mints the link: the BFF identity instead of the caller, so a caller with Share on the document no
+    /// longer also needs a container role.
+    /// </remarks>
     /// <param name="linkType">"view", "edit", or "embed".</param>
     /// <param name="scope">"anonymous", "organization", or "users".</param>
-    public async Task<string?> CreateSharingLinkAsUserAsync(
-        HttpContext ctx,
+    public async Task<string?> CreateSharingLinkAsync(
         string driveId,
         string itemId,
         string linkType,
@@ -1294,8 +905,6 @@ public class DriveItemOperations
         DateTimeOffset? expiration = null,
         CancellationToken ct = default)
     {
-        var graphClient = await _factory.ForUserAsync(ctx, ct);
-
         var requestBody = new Microsoft.Graph.Drives.Item.Items.Item.CreateLink.CreateLinkPostRequestBody
         {
             Type = linkType,
@@ -1303,7 +912,7 @@ public class DriveItemOperations
             ExpirationDateTime = expiration
         };
 
-        var permission = await graphClient.Drives[driveId]
+        var permission = await _factory.ForApp().Drives[driveId]
             .Items[itemId]
             .CreateLink
             .PostAsync(requestBody, cancellationToken: ct);
@@ -1312,28 +921,33 @@ public class DriveItemOperations
     }
 
     /// <summary>
-    /// Retrieves drive-item metadata via OBO context, projecting the Graph DTO into
-    /// a Spaarke-domain <see cref="SpeDriveItemSummary"/> record (no Graph SDK types
-    /// returned to the caller).
+    /// Retrieves drive-item metadata APP-ONLY, projected into a Spaarke-domain <see cref="SpeDriveItemSummary"/> (no
+    /// Graph SDK types returned). The <c>webUrl</c> / <c>webDavUrl</c> it returns are POINTERS: opening one in Office
+    /// still needs the user's own role on the container (standing BU writer, or the JIT grant on a secure container).
     /// </summary>
-    public async Task<SpeDriveItemSummary?> GetDriveItemAsUserAsync(
-        HttpContext ctx,
+    public async Task<SpeDriveItemSummary?> GetDriveItemAsync(
         string driveId,
         string itemId,
         IEnumerable<string>? selectFields = null,
         CancellationToken ct = default)
     {
-        var graphClient = await _factory.ForUserAsync(ctx, ct);
-
         // Default select covers everything FileAccessEndpoints currently consumes.
         var fields = (selectFields ?? new[] { "id", "name", "size", "webUrl", "webDavUrl", "file", "parentReference", "lastModifiedDateTime", "createdDateTime" }).ToArray();
 
-        var item = await graphClient.Drives[driveId]
-            .Items[itemId]
-            .GetAsync(req =>
-            {
-                req.QueryParameters.Select = fields;
-            }, cancellationToken: ct);
+        Microsoft.Graph.Models.DriveItem? item;
+        try
+        {
+            item = await _factory.ForApp().Drives[driveId]
+                .Items[itemId]
+                .GetAsync(req =>
+                {
+                    req.QueryParameters.Select = fields;
+                }, cancellationToken: ct);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
 
         if (item is null) return null;
 
@@ -1483,19 +1097,6 @@ public class DriveItemOperations
     };
 
     /// <summary>
-    /// Downloads file content via OBO context. Equivalent to
-    /// <see cref="DownloadFileAsUserAsync"/> but kept as a distinct member for
-    /// symmetry with the other CICD-088b OBO helpers consumed by
-    /// <c>FileAccessEndpoints.GetContent</c>.
-    /// </summary>
-    public Task<Stream?> GetContentStreamAsUserAsync(
-        HttpContext ctx,
-        string driveId,
-        string itemId,
-        CancellationToken ct = default)
-        => DownloadFileAsUserAsync(ctx, driveId, itemId, ct);
-
-    /// <summary>
     /// Reads the SharePoint Embedded <c>quickXorHash</c> content identity for a persisted drive item
     /// (app-only), via <c>GET /drives/{driveId}/items/{itemId}?$select=file</c> → <c>file.hashes.quickXorHash</c>.
     /// This keeps the <c>Microsoft.Graph</c> hash facet inside the ADR-007 Infrastructure boundary — callers
@@ -1533,25 +1134,5 @@ public class DriveItemOperations
                 itemId, driveId);
             return null;
         }
-    }
-
-    /// <summary>
-    /// Reads the Retry-After seconds from an <see cref="ODataError"/>, defaulting to 60.
-    /// dotnet-10-upgrade-r1 task 033 behavior observation: unlike the legacy
-    /// <c>Microsoft.Graph.ServiceException.ResponseHeaders</c> (a strongly-typed
-    /// <c>HttpResponseHeaders</c> exposing <c>.RetryAfter.Delta</c>), <see cref="ODataError"/>.<c>ResponseHeaders</c>
-    /// under Kiota 2.0 is a plain <c>IDictionary&lt;string, IEnumerable&lt;string&gt;&gt;</c> — there is no
-    /// <c>.RetryAfter</c> member, so the header must be read by key.
-    /// </summary>
-    private static double GetRetryAfterSeconds(ODataError ex)
-    {
-        if (ex.ResponseHeaders is not null
-            && ex.ResponseHeaders.TryGetValue("Retry-After", out var values)
-            && double.TryParse(values.FirstOrDefault(), out var seconds))
-        {
-            return seconds;
-        }
-
-        return 60;
     }
 }

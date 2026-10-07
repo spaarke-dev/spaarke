@@ -99,7 +99,7 @@ public sealed class ArmComputeVCpuProbeTests
         });
         var probe = new ArmComputeVCpuProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmComputeVCpuProbe>.Instance);
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1",
+            "acme", "tenant-1",
             new Dictionary<string, string> { ["region"] = Region, ["subscriptionId"] = SubscriptionId });
 
         var result = await probe.CheckAsync(input, CancellationToken.None);
@@ -115,7 +115,7 @@ public sealed class ArmComputeVCpuProbeTests
         var handler = ArmSdkTestFakes.NewHandler(_ => throw new InvalidOperationException("must not call ARM"));
         var probe = new ArmComputeVCpuProbe(ArmSdkTestFakes.NewArmClient(handler), NullLogger<ArmComputeVCpuProbe>.Instance);
         var input = new PreflightProbeInput(
-            "acme-corp", "tenant-1",
+            "acme", "tenant-1",
             new Dictionary<string, string> { ["region"] = Region }); // no subscriptionId
 
         var result = await probe.CheckAsync(input, CancellationToken.None);

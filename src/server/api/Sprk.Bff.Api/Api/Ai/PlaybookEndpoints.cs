@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Caching;
@@ -55,19 +54,19 @@ public static class PlaybookEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
-        // GET /api/ai/playbooks/by-name/{name} - Get playbook by name
-        group.MapGet("/by-name/{name}", GetPlaybookByName)
-            .WithName("GetPlaybookByName")
-            .WithSummary("Get a playbook by name")
-            .WithDescription("Retrieves playbook details by name. Used by PCF for resolving system playbooks like 'Document Profile'.")
-            .Produces<PlaybookResponse>()
-            .ProducesProblem(401)
-            .ProducesProblem(404);
+        // GET /api/ai/playbooks/by-name/{name} was REMOVED by unified-access-control-r2 task 164 (owner round 10
+        // item 1): no caller in the repo (useAiSummary and DocumentEmailWizard moved to /by-id in FR-03 task 021),
+        // not in any published API description, and sweep finding #55 (any signed-in user could read any private
+        // playbook's definition by name, app-only, and its 500 echoed exception text).
 
         // GET /api/ai/playbooks/by-id/{id} - Get playbook by stable-ID alternate key (FR-01)
         // Cached 5 min per ADR-014, tenant-scoped per ADR-008.
         // Per Q&A 2026-06-22 Q1: uses sprk_playbookid (GUID-format stable-ID alt-key).
+        // unified-access-control-r2 task 164 (sweep #55): the playbook-use decision (public, or the caller's own
+        // Dataverse Read on the row) runs in the filter BEFORE the response cache is read, and an unknown id, a
+        // denied id and a decision fault answer one uniform 404 that carries no id.
         group.MapGet("/by-id/{id}", GetPlaybookById)
+            .AddPlaybookByIdAuthorizationFilter()
             .WithName("GetPlaybookById")
             .WithSummary("Get a playbook by stable-ID alternate key (sprk_playbookid)")
             .WithDescription(
@@ -208,9 +207,20 @@ public static class PlaybookEndpoints
                 });
         }
 
+        // Gate D-G6-2: the row is OWNED by the caller's Dataverse systemuserid (WhoAmI over OBO — the same resolution
+        // OwnerOnly compares with), never left owned by the BFF application user the create runs as, which would lock
+        // its creator out of PUT / share / unshare. Unresolvable → refuse; nothing is created (ADR-003).
+        var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+            httpContext, httpContext.RequestAborted);
+        if (ownerSystemUserId is null)
+        {
+            logger.LogWarning("Creating a playbook for user {UserId}: the caller's systemuserid is unresolvable; refusing", userId);
+            return OwnerUnresolved();
+        }
+
         try
         {
-            var playbook = await playbookService.CreatePlaybookAsync(request, userId);
+            var playbook = await playbookService.CreatePlaybookAsync(request, ownerSystemUserId.Value);
             logger.LogInformation("Created playbook {Id}: {Name}", playbook.Id, playbook.Name);
 
             return Results.Created($"/api/ai/playbooks/{playbook.Id}", playbook);
@@ -306,76 +316,6 @@ public static class PlaybookEndpoints
     }
 
     /// <summary>
-    /// Get a playbook by name. DEPRECATED — migrate callers to <see cref="GetPlaybookById"/>
-    /// (FR-03 / spec §1.7). The endpoint stays mapped during the deprecation stabilization
-    /// window so legacy clients keep working while the call-rate-to-zero gate is measured.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// Per task 024 (FR-03 acceptance): every call emits a warning-level log entry +
-    /// <see cref="Activity"/> tag <c>deprecated.endpoint = "playbooks-by-name"</c> so the
-    /// stabilization-window owner can dashboard the call-rate decay. See
-    /// <c>projects/spaarke-ai-platform-chat-routing-redesign-r1/notes/handoffs/024-deprecation-dashboard.md</c>
-    /// for the App Insights KQL queries.
-    /// </para>
-    /// <para>
-    /// ADR-015 tier-1 audit: payload contains ONLY (a) the endpoint identifier, (b) the
-    /// playbook-name parameter (a stable identifier, NOT user content), (c) the tenant id
-    /// from the JWT <c>tid</c> claim, and (d) the caller User-Agent. No user message text,
-    /// no document content, no memory facts, no recall results.
-    /// </para>
-    /// </remarks>
-    private static async Task<IResult> GetPlaybookByName(
-        string name,
-        IPlaybookService playbookService,
-        HttpContext httpContext,
-        ILoggerFactory loggerFactory)
-    {
-        var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
-
-        // ── Deprecation telemetry (FR-03 / task 024 / ADR-015 tier-1 safe). ────────────
-        // Tenant id from JWT 'tid' claim (mirrors GetPlaybookById's tenant resolution).
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? "unknown-tenant";
-        var userAgent = httpContext.Request.Headers.UserAgent.ToString();
-        if (string.IsNullOrEmpty(userAgent))
-        {
-            userAgent = "unknown-ua";
-        }
-
-        logger.LogWarning(
-            "Deprecated endpoint /api/ai/playbooks/by-name/ called for {PlaybookName} by tenant {TenantId} ua={UserAgent}",
-            name, tenantId, userAgent);
-        Activity.Current?.SetTag("deprecated.endpoint", "playbooks-by-name");
-        Activity.Current?.SetTag("deprecated.name", name);
-        // ───────────────────────────────────────────────────────────────────────────────
-
-        try
-        {
-            var playbook = await playbookService.GetByNameAsync(name);
-            return Results.Ok(playbook);
-        }
-        catch (PlaybookNotFoundException ex)
-        {
-            logger.LogWarning("Playbook not found: {Name}", name);
-            return Results.Problem(
-                statusCode: 404,
-                title: "Playbook Not Found",
-                detail: ex.Message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Failed to get playbook by name: {Name}. Exception: {ExceptionType}, Message: {Message}, StackTrace: {StackTrace}",
-                name, ex.GetType().Name, ex.Message, ex.StackTrace);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: $"Failed to get playbook: {ex.Message}");
-        }
-    }
-
-    /// <summary>
     /// Get a playbook by stable-ID alternate key (FR-01).
     /// </summary>
     /// <remarks>
@@ -390,10 +330,11 @@ public static class PlaybookEndpoints
     /// (GUID strings are case-insensitive; the upper-invariant call is defensive).
     /// </para>
     /// <para>
-    /// 404 returns a full RFC 7807 ProblemDetails payload (ADR-019) with all 5 fields:
-    /// <c>type</c> (Spaarke convention URI), <c>title</c>, <c>status</c>, <c>detail</c> (includes the
-    /// requested id per ADR-015 — id is user-supplied input, not memory content), and <c>instance</c>
-    /// (the request URI). Refined by task 011.
+    /// unified-access-control-r2 task 164 (sweep #55): the 404 is the ONE uniform playbook-unavailable body
+    /// (<see cref="PlaybookAuthorizationFilter.UniformPlaybookNotFound"/>) that the filter also returns for a
+    /// denied id and a decision fault, so the status, title, detail and reasonCode do not reveal whether a
+    /// playbook the caller may not read exists. It no longer echoes the requested id. The filter runs BEFORE
+    /// this handler, so the response cache below is only ever read for a caller the decision has allowed.
     /// </para>
     /// </remarks>
     private static async Task<IResult> GetPlaybookById(
@@ -405,11 +346,6 @@ public static class PlaybookEndpoints
         CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
-
-        // RFC 7807 ProblemDetails fields for 404 (ADR-019). Spaarke convention for the `type` URI is
-        // `https://spaarke.com/problems/<slug>` — see OwnershipValidator.cs for prior art.
-        const string PlaybookNotFoundType = "https://spaarke.com/problems/playbook-not-found";
-        const string PlaybookNotFoundTitle = "Playbook Not Found";
 
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -427,7 +363,6 @@ public static class PlaybookEndpoints
 
         // Cache key: tenant + id (case-insensitive — GUID strings are case-insensitive by convention) per ADR-014.
         var cacheKey = $"playbook-by-id:{tenantId}:{id.ToUpperInvariant()}";
-        var instance = $"/api/ai/playbooks/by-id/{id}";
 
         try
         {
@@ -443,12 +378,7 @@ public static class PlaybookEndpoints
             {
                 // Defensive — GetByIdAsync should throw on miss, but guard against null cache entry.
                 logger.LogWarning("Playbook by-id lookup returned null for id '{Id}' (tenant {TenantId})", id, tenantId);
-                return Results.Problem(
-                    type: PlaybookNotFoundType,
-                    title: PlaybookNotFoundTitle,
-                    statusCode: 404,
-                    detail: $"Playbook with id '{id}' not found.",
-                    instance: instance);
+                return PlaybookAuthorizationFilter.UniformPlaybookNotFound(httpContext);
             }
 
             return Results.Ok(playbook);
@@ -456,14 +386,8 @@ public static class PlaybookEndpoints
         catch (PlaybookNotFoundException)
         {
             logger.LogWarning("Playbook not found by id '{Id}' for tenant {TenantId}", id, tenantId);
-            // ADR-019: full RFC 7807 ProblemDetails. ADR-015: `detail` may include the requested
-            // id (user-supplied input), MUST NOT include user message content or memory facts.
-            return Results.Problem(
-                type: PlaybookNotFoundType,
-                title: PlaybookNotFoundTitle,
-                statusCode: 404,
-                detail: $"Playbook with id '{id}' not found.",
-                instance: instance);
+            // Task 164: the SAME body the filter returns for a denied id (no id echo, ADR-019 reasonCode).
+            return PlaybookAuthorizationFilter.UniformPlaybookNotFound(httpContext);
         }
         catch (Exception ex)
         {
@@ -513,7 +437,24 @@ public static class PlaybookEndpoints
 
         try
         {
-            var result = await playbookService.ListUserPlaybooksAsync(userId, query);
+            // Owner round 12 item 6 (task 164): _ownerid_value holds a Dataverse systemuserid, never the Entra
+            // oid, so the filter is the CALLER's systemuserid (WhoAmI over OBO). Unresolvable → an empty page
+            // (fail closed: no other owner's rows can be listed in its place).
+            var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+                httpContext, httpContext.RequestAborted);
+            if (ownerSystemUserId is null)
+            {
+                logger.LogWarning("Listing owned playbooks for user {UserId}: the caller's systemuserid is unresolvable; returning an empty page", userId);
+                return Results.Ok(new PlaybookListResponse
+                {
+                    Items = [],
+                    TotalCount = 0,
+                    Page = query.Page,
+                    PageSize = query.GetNormalizedPageSize()
+                });
+            }
+
+            var result = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query);
             logger.LogDebug("Listed {Count} playbooks for user {UserId}", result.Items.Length, userId);
             return Results.Ok(result);
         }
@@ -593,7 +534,19 @@ public static class PlaybookEndpoints
 
         try
         {
-            var result = await sharingService.SharePlaybookAsync(id, request, userId);
+            // Owner round 12 item 6 (task 164): the sharing service compares this with the row's _ownerid_value,
+            // a Dataverse systemuserid — pass the caller's systemuserid, never the Entra oid (which matched no one).
+            var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+                httpContext, httpContext.RequestAborted);
+            if (ownerSystemUserId is null)
+            {
+                return Results.Problem(
+                    statusCode: 403,
+                    title: "Forbidden",
+                    detail: "You do not have permission to modify this playbook");
+            }
+
+            var result = await sharingService.SharePlaybookAsync(id, request, ownerSystemUserId.Value);
             if (!result.Success)
             {
                 return Results.Problem(
@@ -639,7 +592,19 @@ public static class PlaybookEndpoints
 
         try
         {
-            var result = await sharingService.RevokeShareAsync(id, request, userId);
+            // Owner round 12 item 6 (task 164): the sharing service compares this with the row's _ownerid_value,
+            // a Dataverse systemuserid — pass the caller's systemuserid, never the Entra oid (which matched no one).
+            var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+                httpContext, httpContext.RequestAborted);
+            if (ownerSystemUserId is null)
+            {
+                return Results.Problem(
+                    statusCode: 403,
+                    title: "Forbidden",
+                    detail: "You do not have permission to modify this playbook");
+            }
+
+            var result = await sharingService.RevokeShareAsync(id, request, ownerSystemUserId.Value);
             if (!result.Success)
             {
                 return Results.Problem(
@@ -824,9 +789,18 @@ public static class PlaybookEndpoints
                 detail: "User identity not found");
         }
 
+        // The clone is the caller's own, by the same owner rule as a create (gate D-G6-2).
+        var ownerSystemUserId = await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(
+            httpContext, httpContext.RequestAborted);
+        if (ownerSystemUserId is null)
+        {
+            logger.LogWarning("Cloning playbook {Id} for user {UserId}: the caller's systemuserid is unresolvable; refusing", id, userId);
+            return OwnerUnresolved();
+        }
+
         try
         {
-            var clonedPlaybook = await playbookService.ClonePlaybookAsync(id, userId, request?.NewName);
+            var clonedPlaybook = await playbookService.ClonePlaybookAsync(id, ownerSystemUserId.Value, request?.NewName);
             logger.LogInformation("Cloned playbook {SourceId} to {CloneId} for user {UserId}",
                 id, clonedPlaybook.Id, userId);
 
@@ -849,4 +823,14 @@ public static class PlaybookEndpoints
                 detail: "Failed to clone playbook");
         }
     }
+
+    /// <summary>
+    /// The refusal for a create or clone whose caller has no resolvable Dataverse user: the playbook would have no person
+    /// to own it. The same 403 shape OwnerOnly answers.
+    /// </summary>
+    private static IResult OwnerUnresolved() =>
+        Results.Problem(
+            statusCode: 403,
+            title: "Forbidden",
+            detail: "Your Dataverse user could not be resolved, so the playbook cannot be created for you");
 }

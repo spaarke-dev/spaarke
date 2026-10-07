@@ -396,7 +396,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(SingleGrant(ProjectEntity, deniedRecord, ExternalAccessLevel.FullAccess));
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), deniedRecord));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), deniedRecord));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -425,7 +425,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ReferencedOrgs[record] = new[] { opposingCounselOrg };
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", OrgObjectRow(Guid.NewGuid(), opposingCounselOrg));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", OrgObjectRow(Guid.NewGuid(), opposingCounselOrg));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -447,7 +447,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA);
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), record));
+        denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), record));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -472,7 +472,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA);
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", OrgObjectRow(Guid.NewGuid(), deniedOrg));
+        denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", OrgObjectRow(Guid.NewGuid(), deniedOrg));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -779,10 +779,10 @@ public sealed class UnifiedEvaluatorSeamTests
         var denyReader = new SeamNoAccessListReader();
         var (subject, row) = shape switch
         {
-            "contact x record" => ($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), denied)),
-            "contact x organization" => ($"sprk_subjectcontact eq {ContactId}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
-            "organization x record" => ($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), denied)),
-            "organization x organization" => ($"sprk_subjectorganization eq {OrgA}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            "contact x record" => ($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "contact x organization" => ($"_sprk_subjectcontact_value eq {ContactId}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            "organization x record" => ($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "organization x organization" => ($"_sprk_subjectorganization_value eq {OrgA}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, "Unknown key shape."),
         };
         denyReader.AddEntry(subject, row);
@@ -807,7 +807,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA); // both contacts belong to OrgA
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
         var evaluator = GrantOnlySut(participations, denyReader);
 
         var named = await ResolveCiamAsync(evaluator);
@@ -972,7 +972,7 @@ public sealed class UnifiedEvaluatorSeamTests
                 case "no access entry":
                     rows.Add((entityType, Direct(first, ExternalAccessLevel.FullAccess)));
                     rows.Add((entityType, Direct(second, ExternalAccessLevel.Collaborate)));
-                    denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), first));
+                    denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), first));
                     answer[second] = Rights(ExternalAccessLevel.Collaborate);
                     break;
                 default:
@@ -1359,6 +1359,164 @@ public sealed class UnifiedEvaluatorSeamTests
             "systemuser plane: the direct FullAccess contact grant is vetoed (Delete absent), the membership survives");
     }
 
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+    // Task 137 (#1060, defect C5) — inactive contacts and inactive roots confer nothing contact-sourced
+    // (the transport-level twins — the live reads over a real HTTP server, warm caches — are in
+    // OrganizationMembershipReadTests' task 137 section)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// C5: an INACTIVE root confers nothing to a contact on any plane — CIAM, the workforce contact plane, and the
+    /// systemuser plane's contact-grants term — while the systemuser's OWN membership on that root survives (the
+    /// Restricted slot's survivor rule). One case per root type. The positive twin is the active control below.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task InactiveRoot_ConfersNothingContactSourced_OnEveryPlane_TheSystemusersMembershipSurvives(string entityType)
+    {
+        var inactive = RootId(entityType, 91);
+        var active = RootId(entityType, 92);
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, entityType, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(entityType, inactive));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(
+            entityType, Direct(inactive, ExternalAccessLevel.FullAccess), Direct(active, ExternalAccessLevel.Collaborate)));
+        participations.Flags[inactive] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsInactive: true);
+
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+
+        var ciam = await ResolveCiamAsync(evaluator);
+        var workforceContact = await evaluator.ComposeAsync(ContactPrincipal(), entityType, CancellationToken.None);
+        var systemUser = await evaluator.ComposeAsync(SystemUserPrincipal(), entityType, CancellationToken.None);
+
+        ScopeOf(ciam, entityType).Should().NotContainKey(inactive, "CIAM: an inactive root confers nothing");
+        workforceContact.Rights.Should().NotContainKey(inactive, "workforce contact: the same");
+        systemUser.RightsFor(inactive).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "systemuser: the FullAccess contact grant is removed (no Delete), the systemuser's own membership survives");
+
+        RightsIn(ScopeOf(ciam, entityType), active).Should().Be(Rights(ExternalAccessLevel.Collaborate),
+            "control: an ACTIVE root's grant is untouched");
+        workforceContact.RightsFor(active).Should().Be(Rights(ExternalAccessLevel.Collaborate));
+    }
+
+    /// <summary>C5: reactivating the root restores the contact's access with no other change (read-time, not a write).</summary>
+    [Theory]
+    [MemberData(nameof(RootEntityTypes))]
+    public async Task InactiveRoot_Reactivated_RestoresTheContactsAccess(string entityType)
+    {
+        var root = RootId(entityType, 93);
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(entityType, Direct(root, ExternalAccessLevel.Collaborate)));
+        participations.Flags[root] = new RootRecordFlags(IsSecure: false, IsRestricted: false, IsInactive: true);
+
+        ScopeOf(await ResolveCiamAsync(GrantOnlySut(participations)), entityType).Should().NotContainKey(root);
+
+        participations.Flags[root] = RootRecordFlags.None; // reactivated — the grant row never changed
+
+        ScopeOf(await ResolveCiamAsync(GrantOnlySut(participations)), entityType).Should().ContainKey(root,
+            "the same grant confers again once the root is active");
+    }
+
+    /// <summary>C5: an UNREADABLE root (the existing fail-closed value) is inactive too, and still keeps the survivor.</summary>
+    [Fact]
+    public void UnreadableRoot_IsInactive_AndRemovesContactSourcedAccess()
+    {
+        RootRecordFlags.Unreadable.IsInactive.Should().BeTrue();
+        RootRecordFlags.Unreadable.RemovesContactSourcedAccess.Should().BeTrue();
+        RootRecordFlags.None.RemovesContactSourcedAccess.Should().BeFalse("control: a readable Standard active root");
+    }
+
+    public static TheoryData<string> InactiveContactStates => new() { "inactive", "unreadable", "read-throws" };
+
+    /// <summary>
+    /// C5: an inactive (or unreadable) contact confers nothing on either contact plane — every term there is
+    /// contact-sourced — and nothing else is even read for it. The control is the same world with an active contact.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(InactiveContactStates))]
+    public async Task InactiveOrUnreadableContact_ComposesToNothing_OnBothContactPlanes(string state)
+    {
+        var root = RootId(ProjectEntity, 94);
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(root, ExternalAccessLevel.FullAccess)));
+        var evaluator = GrantOnlySut(participations);
+
+        (await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None))
+            .Rights.Should().ContainKey(root, "control: the active contact holds its grant");
+
+        participations.ContactState = state == "inactive" ? ContactRecordState.Inactive : ContactRecordState.Unreadable;
+        participations.ThrowOnContactStateRead = state == "read-throws";
+
+        var workforce = await evaluator.ComposeAsync(ContactPrincipal(), ProjectEntity, CancellationToken.None);
+        var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
+
+        workforce.Rights.Should().BeEmpty($"workforce contact: a contact whose state is {state} confers nothing");
+        ciam.Rights.Should().BeEmpty($"CIAM: the same ({state})");
+    }
+
+    /// <summary>
+    /// C5: a systemuser's INACTIVE linked contact contributes no grant, while the systemuser's own membership is
+    /// unchanged — internal access is Dataverse's answer, never the contact's. Positive twin: the active contact's
+    /// grant on a record the membership does not reach.
+    /// </summary>
+    [Fact]
+    public async Task InactiveLinkedContact_OfASystemUser_ContributesNoGrant_TheMembershipIsUnchanged()
+    {
+        var memberRecord = RootId(ProjectEntity, 95);
+        var grantOnlyRecord = RootId(ProjectEntity, 96);
+
+        var membership = new Mock<IMembershipResolverService>();
+        membership.Setup(m => m.ResolveAsync(
+                SystemUserId, ProjectEntity, It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, memberRecord));
+
+        var participations = new ParticipationWorld();
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(grantOnlyRecord, ExternalAccessLevel.FullAccess)));
+        var evaluator = BuildSut(BuildDataverse(contactHeld: false), membership.Object, participations);
+
+        var active = await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+        active.Rights.Should().ContainKey(grantOnlyRecord, "control: the active linked contact's grant applies");
+
+        participations.ContactState = ContactRecordState.Inactive;
+        var inactive = await evaluator.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        inactive.Rights.Should().NotContainKey(grantOnlyRecord, "the inactive linked contact's grant confers nothing");
+        inactive.RightsFor(memberRecord).Should().Be(AccessibleRecordSetService.MembershipTermRights,
+            "the systemuser's own membership is unchanged");
+        inactive.Sources.ContactGrants.Should().BeFalse("no contact grant term was applied");
+    }
+
+    /// <summary>
+    /// C5 constraint: the contact-state check must not depend on the standing-grant reader (task 142 escalation (d)
+    /// may retire that term, and CIAM never calls it). With the standing reader Strict and unset — any call throws —
+    /// the CIAM composition still denies an inactive contact, and reads the contact state itself.
+    /// </summary>
+    [Fact]
+    public async Task InactiveContactCheck_DoesNotRideTheStandingGrantReader()
+    {
+        var root = RootId(ProjectEntity, 97);
+        var participations = new ParticipationWorld { ContactState = ContactRecordState.Inactive };
+        participations.SetGrants(GrantsOn(ProjectEntity, Direct(root, ExternalAccessLevel.FullAccess)));
+        var evaluator = new AccessibleRecordSetService(
+            new Mock<IMembershipResolverService>(MockBehavior.Strict).Object,
+            participations,
+            new Mock<ISubjectStandingGrantReader>(MockBehavior.Strict).Object,
+            new SeamNoAccessListReader(),
+            // Merge of 137-b2 with 143-r2 (task 142 base): 143 r1 added the identity store to the evaluator; the inert
+            // unlinked default every other construction site uses.
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            NullLogger<AccessibleRecordSetService>.Instance);
+
+        var ciam = await evaluator.ComposeForCiamContactAsync(ContactId, ProjectEntity, CancellationToken.None);
+
+        ciam.Rights.Should().BeEmpty();
+        participations.ContactStateReads.Should().Be(1, "the evaluator reads the contact's state itself");
+    }
+
     // ── CIAM harness (task 135) ──────────────────────────────────────────────────────────────────
 
     private const string CiamOid = "c1a00000-0000-0000-0000-0000000000c1";
@@ -1482,7 +1640,8 @@ public sealed class UnifiedEvaluatorSeamTests
         Mock<IDataverseService> dataverse,
         IMembershipResolverService membership,
         ParticipationWorld participations,
-        NoAccessListReader? denyReader = null)
+        NoAccessListReader? denyReader = null,
+        IContactIdentityStore? identityStore = null)
     {
         var standing = new SubjectStandingGrantReader(dataverse.Object, NullLogger<SubjectStandingGrantReader>.Instance);
         return new AccessibleRecordSetService(
@@ -1490,6 +1649,7 @@ public sealed class UnifiedEvaluatorSeamTests
             participations,
             standing,
             denyReader ?? new SeamNoAccessListReader(),
+            identityStore ?? Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
             NullLogger<AccessibleRecordSetService>.Instance);
     }
 
@@ -1675,6 +1835,23 @@ public sealed class UnifiedEvaluatorSeamTests
             return Task.FromResult(result);
         }
 
+        /// <summary>Task 137: the contact's live state (Active unless a test says otherwise).</summary>
+        public ContactRecordState ContactState { get; set; } = ContactRecordState.Active;
+
+        /// <summary>Task 137: the live state read THROWS (the production wrapper turns that into Unreadable).</summary>
+        public bool ThrowOnContactStateRead { get; set; }
+
+        /// <summary>Task 137: how many times the live contact-state read ran.</summary>
+        public int ContactStateReads { get; private set; }
+
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+        {
+            ContactStateReads++;
+            return ThrowOnContactStateRead
+                ? Task.FromException<ContactRecordState>(new HttpRequestException("simulated contact-state read fault"))
+                : Task.FromResult(ContactState);
+        }
+
         // ActiveOrgIds are current memberships of active organizations — in BOTH named sets (task 109).
         // ThrowOnActiveOrgIds models the entry's token/API-url fault, the one that arrives as an exception.
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
@@ -1724,8 +1901,32 @@ public sealed class UnifiedEvaluatorSeamTests
         {
         }
 
+        /// <summary>
+        /// Adds an active entry. Its SUBJECT column is set from <paramref name="requiredSubjectSubstring"/>
+        /// (<c>"_sprk_subjectcontact_value eq {id}"</c> / <c>"_sprk_subjectorganization_value eq {id}"</c>) — a real row carries the
+        /// subject the query matched it on, and since task 143 the reader treats a row with no subject as malformed.
+        /// </summary>
         public void AddEntry(string requiredSubjectSubstring, NoAccessEntryRow row)
-            => _entries.Add(new ActiveEntry(requiredSubjectSubstring, row));
+        {
+            var parts = requiredSubjectSubstring.Split(" eq ", 2);
+            if (parts.Length == 2 && Guid.TryParse(parts[1], out var subjectId))
+            {
+                switch (parts[0])
+                {
+                    case "_sprk_subjectcontact_value":
+                        row._sprk_subjectcontact_value ??= subjectId;
+                        break;
+                    case "_sprk_subjectorganization_value":
+                        row._sprk_subjectorganization_value ??= subjectId;
+                        break;
+                    case "_sprk_subjectsystemuser_value":
+                        row._sprk_subjectsystemuser_value ??= subjectId;
+                        break;
+                }
+            }
+
+            _entries.Add(new ActiveEntry(requiredSubjectSubstring, row));
+        }
 
         internal override Task<List<NoAccessEntryRow>?> QueryChunkAsync(
             string subjectFilter, string objectFilter, CancellationToken ct)
@@ -1735,7 +1936,7 @@ public sealed class UnifiedEvaluatorSeamTests
                 throw new InvalidOperationException("simulated sprk_noaccessentry query outage");
             }
 
-            var isOrgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var isOrgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             var matching = _entries
                 .Where(e => subjectFilter.Contains(e.RequiredSubjectSubstring, StringComparison.Ordinal))
                 .Select(e => e.Row)

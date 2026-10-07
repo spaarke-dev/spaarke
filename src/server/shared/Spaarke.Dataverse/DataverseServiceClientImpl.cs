@@ -297,14 +297,21 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
-        // Null keeps the pre-existing behaviour (the calling identity owns the row). The OFFICE writers always pass a
-        // team — OfficeDocumentPersistence refuses to call without one — and refuse the save when none resolves.
-        // Several OTHER BFF writers still pass null and so still create app-owned rows in root (Communication
-        // archive/inbound, the external portal); adopting the resolver there is GitHub #1034, not a guarantee here.
-        if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
+        // unified-access-control-r2 task 146 (#1034): every caller now resolves the team through the BFF's
+        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents, EmailAttachmentProcessor), so a
+        // missing owner is a programming error and REFUSES here, before any write — never the old "null keeps the
+        // calling identity", which made the BFF application user own the document in the root business unit.
+        if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
         {
-            document["ownerid"] = new EntityReference("team", owningTeamId);
+            throw new InvalidOperationException(
+                "CreateDocumentAsync requires CreateDocumentRequest.OwningTeamId (resolved by IRecordOwnershipResolver); "
+                + "refusing to create an app-owned sprk_document (task 146).");
         }
+
+        document["ownerid"] = new EntityReference("team", owningTeamId);
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(document, request.CreatedByPersonId);
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -428,7 +435,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, Guid? owningTeamId = null, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // FR-D9: at least one anchor is required — a source document OR a regarding (matter/project)
         // target. A document-less analysis is valid ONLY when a regarding target makes it discoverable.
@@ -438,11 +445,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 "CreateAnalysisAsync requires either a documentId or a regarding target (FR-D9).", nameof(documentId));
         }
 
+        // unified-access-control-r2 task 146: the owner is resolved upstream and its absence REFUSES — before any
+        // write — rather than leaving the BFF application user owning an analysis of a secure document in root.
+        if (owningTeamId is not { } teamId || teamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateAnalysisAsync requires the owning team resolved by IRecordOwnershipResolver; refusing to create "
+                + "an app-owned sprk_analysis (task 146).");
+        }
+
         var analysis = new Entity("sprk_analysis")
         {
             ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-            ["statuscode"] = new OptionSetValue(1) // Active
+            ["statuscode"] = new OptionSetValue(1), // Active
+            ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(analysis, createdByPersonId);
 
         // Document anchor is now optional (FR-D9). Only bind when supplied.
         if (documentId is { } docId && docId != Guid.Empty)
@@ -481,7 +501,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// come from the target record. Resolver-lookup failures are non-fatal (they are for display); the
     /// entity-specific lookup that drives the Analyses subgrid is always staged.
     /// </summary>
-    private async Task PopulateAnalysisRegardingAsync(Entity analysis, AnalysisRegardingTarget target, CancellationToken ct)
+    private Task PopulateAnalysisRegardingAsync(Entity analysis, AnalysisRegardingTarget target, CancellationToken ct) =>
+        PopulateAnalysisRegardingAsync(
+            analysis,
+            target,
+            QueryRecordTypeRefAsync,
+            (entity, id, columns, token) => _serviceClient.RetrieveAsync(entity, id, new ColumnSet(columns), token),
+            _logger,
+            ct);
+
+    /// <summary>
+    /// The body of <see cref="PopulateAnalysisRegardingAsync(Entity, AnalysisRegardingTarget, CancellationToken)"/> with
+    /// its two Dataverse reads passed in (task 097 round 10), so the I/O path is testable without a live
+    /// <see cref="ServiceClient"/>.
+    /// </summary>
+    internal static async Task PopulateAnalysisRegardingAsync(
+        Entity analysis,
+        AnalysisRegardingTarget target,
+        Func<string, CancellationToken, Task<Entity?>> readRecordTypeRef,
+        Func<string, Guid, string[], CancellationToken, Task<Entity>> retrieve,
+        ILogger logger,
+        CancellationToken ct)
     {
         var entityLogicalName = target.EntityLogicalName;
 
@@ -493,53 +533,81 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 nameof(target));
         }
 
-        string? resolvedName = null;
-        string? resolvedNumber = null;
-        Guid? recordTypeRefId = null;
-        string? recordTypeRefName = null;
-
-        try
-        {
-            var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
-            var numberField = RegardingRecordType.GetReferenceNumberField(entityLogicalName);
-            if (nameField is not null || numberField is not null)
-            {
-                try
-                {
-                    var columns = new List<string>(2);
-                    if (nameField is not null) columns.Add(nameField);
-                    if (numberField is not null) columns.Add(numberField);
-                    var record = await _serviceClient.RetrieveAsync(
-                        entityLogicalName, target.RecordId, new ColumnSet(columns.ToArray()), ct);
-                    if (nameField is not null) resolvedName = record.GetAttributeValue<string>(nameField);
-                    if (numberField is not null) resolvedNumber = record.GetAttributeValue<string>(numberField);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Regarding name/number retrieve failed for {Entity} {Id}", entityLogicalName, target.RecordId);
-                }
-            }
-
-            var recordTypeRef = await QueryRecordTypeRefAsync(entityLogicalName, ct);
-            if (recordTypeRef is not null)
-            {
-                recordTypeRefId = recordTypeRef.Id;
-                recordTypeRefName = recordTypeRef.GetAttributeValue<string>("sprk_recorddisplayname");
-            }
-            else
-            {
-                _logger.LogWarning("No sprk_recordtype_ref found for {Entity}; sprk_regardingrecordtype left unset.", entityLogicalName);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Denormalized-value resolution is for display; a failure here must not fail the whole
-            // promotion. The stager below still writes the load-bearing entity-specific lookup.
-            _logger.LogWarning(ex, "Failed to resolve denormalized regarding values for analysis→{Entity} {Id}",
-                entityLogicalName, target.RecordId);
-        }
+        var (resolvedName, resolvedNumber, recordTypeRefId, recordTypeRefName) = await ResolveAnalysisRegardingValuesAsync(
+            entityLogicalName, target.RecordId, readRecordTypeRef, retrieve, logger, ct);
 
         StageAnalysisRegardingFields(analysis, target, resolvedName, resolvedNumber, recordTypeRefId, recordTypeRefName);
+    }
+
+    /// <summary>
+    /// The denormalized regarding values for an analysis target: the record's true name + reference number and the
+    /// <c>sprk_recordtype_ref</c> row. Every read is display-only and non-fatal, and each is guarded on its OWN
+    /// (task 097 round 10): a catalog fault costs the number and the record-type lookup, never the name; a catalog
+    /// that names a column the record lacks faults the combined read, so the name is read again on its own. The two
+    /// reads are passed in by the caller.
+    /// </summary>
+    private static async Task<(string? Name, string? Number, Guid? RecordTypeRefId, string? RecordTypeRefName)>
+        ResolveAnalysisRegardingValuesAsync(
+            string entityLogicalName,
+            Guid recordId,
+            Func<string, CancellationToken, Task<Entity?>> readRecordTypeRef,
+            Func<string, Guid, string[], CancellationToken, Task<Entity>> retrieve,
+            ILogger logger,
+            CancellationToken ct)
+    {
+        // The catalog row names the reference-number column (task 097 round 9 — never a hard-coded map).
+        Entity? recordTypeRef = null;
+        try
+        {
+            recordTypeRef = await readRecordTypeRef(entityLogicalName, ct);
+            if (recordTypeRef is null)
+                logger.LogWarning("No sprk_recordtype_ref found for {Entity}; sprk_regardingrecordtype left unset.", entityLogicalName);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "sprk_recordtype_ref read failed for {Entity}; the regarding number and record type are left unset.",
+                entityLogicalName);
+        }
+
+        var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
+        var numberField = RegardingRecordType.RecordNumberFieldOf(recordTypeRef);
+        string? name = null;
+        string? number = null;
+        if (nameField is not null || numberField is not null)
+        {
+            try
+            {
+                var record = await retrieve(
+                    entityLogicalName, recordId, new[] { nameField, numberField }.OfType<string>().ToArray(), ct);
+                if (nameField is not null) name = record.GetAttributeValue<string>(nameField);
+                if (numberField is not null) number = record.GetAttributeValue<string>(numberField);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                if (nameField is not null && numberField is not null)
+                {
+                    logger.LogWarning(ex,
+                        "Name+number read failed for {Entity} {Id} (number column '{NumberField}'); retrying the name alone.",
+                        entityLogicalName, recordId, numberField);
+                    try
+                    {
+                        name = (await retrieve(entityLogicalName, recordId, new[] { nameField }, ct))
+                            .GetAttributeValue<string>(nameField);
+                    }
+                    catch (Exception retry) when (retry is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        logger.LogDebug(retry, "Regarding name retrieve failed for {Entity} {Id}", entityLogicalName, recordId);
+                    }
+                }
+                else
+                {
+                    logger.LogDebug(ex, "Regarding name/number retrieve failed for {Entity} {Id}", entityLogicalName, recordId);
+                }
+            }
+        }
+
+        return (name, number, recordTypeRef?.Id, recordTypeRef?.GetAttributeValue<string>("sprk_recorddisplayname"));
     }
 
     /// <summary>
@@ -598,12 +666,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(output);
+
+        // unified-access-control-r2 task 146: an output carries its analysis's content, so it is owned like the
+        // analysis; the owner is resolved upstream and its absence refuses before any write.
+        if (output.OwningTeamId is not { } teamId || teamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateAnalysisOutputAsync requires AnalysisOutputEntity.OwningTeamId resolved by IRecordOwnershipResolver; "
+                + "refusing to create an app-owned sprk_analysisoutput (task 146).");
+        }
+
         var entity = new Entity("sprk_analysisoutput")
         {
             ["sprk_name"] = output.Name ?? "Output",
             ["sprk_value"] = output.Value,
-            ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId)
+            ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId),
+            ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked.
+        RecordCreatorPersonColumn.StampIfKnown(entity, output.CreatedByPersonId);
 
         if (output.OutputTypeId.HasValue)
         {
@@ -820,7 +903,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_mimetype"] = request.MimeType;
 
         if (request.GraphItemId != null)
+        {
             document["sprk_graphitemid"] = request.GraphItemId;
+            // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+            document[DocumentPointerBinding.BoundItemIdColumn] = request.GraphItemId;
+        }
 
         if (request.GraphDriveId != null)
             document["sprk_graphdriveid"] = request.GraphDriveId;
@@ -1946,6 +2033,19 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return entity == null ? null : ToProcessingJobRecord(entity);
     }
 
+    /// <summary>
+    /// The request property an artifact create maps to <c>ownerid</c> (a team) — task 146. A create without it is
+    /// REFUSED: an app-only create would be owned by the application user in the root business unit, readable only
+    /// through root depth, and outside its document's team.
+    /// </summary>
+    public const string ArtifactOwningTeamProperty = "OwningTeamId";
+
+    /// <summary>
+    /// The request property an artifact create maps to <c>sprk_createdbyperson</c> (a <c>systemuser</c>) — task 146 c1-r1,
+    /// owner round 13 item 9: the person who asked, since the create is app-only. Optional (a writer acting for nobody).
+    /// </summary>
+    public const string ArtifactCreatedByPersonProperty = "CreatedByPersonId";
+
     public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
     {
         var entity = new Entity("sprk_emailartifact");
@@ -1962,6 +2062,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             if (prop.Name == "DocumentId")
             {
                 // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
+            // unified-access-control-r2 task 146: the artifact is owned like its document — an owner TEAM the caller
+            // resolved (never a generic "sprk_owningteamid" column, which does not exist).
+            if (prop.Name == ArtifactOwningTeamProperty)
+            {
+                if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
+                    entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
                 continue;
             }
 
@@ -2002,10 +2118,21 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
 
         entity["statecode"] = new OptionSetValue(0); // Active
+        RequireArtifactOwner(entity);
 
         var artifactId = await _serviceClient.CreateAsync(entity, ct);
         _logger.LogInformation("EmailArtifact created with ID: {ArtifactId}", artifactId);
         return artifactId;
+    }
+
+    private static void RequireArtifactOwner(Entity entity)
+    {
+        if (!entity.Contains("ownerid"))
+        {
+            throw new InvalidOperationException(
+                $"A {entity.LogicalName} create must carry an owner team ({ArtifactOwningTeamProperty}) resolved from its "
+                + "document; refusing to create it app-owned (task 146).");
+        }
     }
 
     public async Task<object?> GetEmailArtifactAsync(Guid id, CancellationToken ct = default)
@@ -2047,6 +2174,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 continue;
             }
 
+            // unified-access-control-r2 task 146: the artifact is owned like its document — an owner TEAM the caller
+            // resolved (never a generic "sprk_owningteamid" column, which does not exist).
+            if (prop.Name == ArtifactOwningTeamProperty)
+            {
+                if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
+                    entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
             if (value is Guid gv)
@@ -2080,6 +2223,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
 
         entity["statecode"] = new OptionSetValue(0); // Active
+        RequireArtifactOwner(entity);
 
         var artifactId = await _serviceClient.CreateAsync(entity, ct);
         _logger.LogInformation("AttachmentArtifact created with ID: {ArtifactId}", artifactId);
@@ -2120,7 +2264,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -2129,10 +2273,31 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         int skip = 0,
         int top = 50,
         Guid? ownerUserId = null,
+        IReadOnlyCollection<int>? excludeStatusCodes = null,
         CancellationToken ct = default)
     {
         // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
         throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
+    }
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        EventOwnershipScope? mine = null,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        // unified-access-control-r2 task 159: a silent-empty stub here would read as "the caller may see nothing".
+        throw new NotImplementedException("QueryEventsAsCallerAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
@@ -2147,40 +2312,16 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
-    {
-        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
-        throw new NotImplementedException("UpdateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
     public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
-    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
+    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("CreateEventLogAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
-    public Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("GetEventTypesAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
-    public Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("GetEventTypeAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     // ========================================
@@ -2551,8 +2692,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
-    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
-    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
+    /// the fields supplied are written; <see cref="DBNull.Value"/> CLEARS the column (the attribute is set to null),
+    /// exactly as <c>UpdateAsync</c> treats it (task 140, 2026-10-04 — it used to be rejected).
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2585,18 +2726,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             foreach (var field in fields)
             {
-                if (field.Value is DBNull)
-                {
-                    throw new ArgumentException(
-                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
-                        "column; use UpdateAsync with DBNull.Value instead.",
-                        nameof(updates));
-                }
+                // UpdateAsync's convention exactly: C# null → SKIP; DBNull.Value → explicit CLEAR (the attribute is
+                // set to null, which the SDK serializes as "clear the column / sever the lookup"). The DBNull itself
+                // is never put into the entity — that was the unserializable shape this builder used to reject.
+                if (field.Value is null)
+                    continue;
 
-                if (field.Value != null)
-                {
-                    entity[field.Key] = field.Value;
-                }
+                entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
             transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
@@ -3223,7 +3359,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         var query = new QueryExpression("sprk_recordtype_ref")
         {
-            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+            // The number column too (task 097 round 9): every writer that resolves the row takes its reference-number
+            // attribute from it (RegardingRecordType.RecordNumberFieldOf) instead of a hard-coded map.
+            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname", RegardingRecordType.RecordNumberFieldColumn),
             TopCount = 1
         };
         query.Criteria.Conditions.Add(

@@ -8,8 +8,11 @@ Spaarke supports two deployment models:
 
 | Model | Description | Use Case |
 |-------|-------------|----------|
-| **Model 1** | Spaarke-hosted multi-tenant | SaaS customers, shared infrastructure |
-| **Model 2** | Customer-hosted dedicated | Enterprise customers, dedicated resources |
+| **Model 1** | Dedicated stamp in **Spaarke's** Azure tenant (D-12) | Customers Spaarke hosts — every resource dedicated, own subscription |
+| **Model 2** | Dedicated stamp in the **customer's** Azure tenant | Enterprise customers hosting in their own tenant |
+
+Both models deploy the same per-customer stamp (`bicep/customer.bicep`, via the L2 control plane); there is no shared
+Model 1 infrastructure.
 
 ## Directory Structure
 
@@ -28,26 +31,24 @@ infrastructure/
 │   │   ├── doc-intelligence.bicep
 │   │   └── monitoring.bicep
 │   │
-│   ├── stacks/            # Composed deployments
-│   │   ├── model1-shared.bicep    # Model 1: Shared services
-│   │   ├── model1-customer.bicep  # Model 1: Per-customer resources
-│   │   └── model2-full.bicep      # Model 2: Complete deployment
+│   ├── customer.bicep     # The ONLY customer-stamp template — Model 1 AND Model 2 (D-12, D19);
+│   │                      # deployed only by L2 handler H2a, into the customer's own subscription
+│   ├── stacks/            # Standalone stacks (not used by customer.bicep)
+│   │   └── ai-foundry-stack.bicep
+│   │                      # (model1-shared / model1-customer retired by task 225a, 2026-10-01;
+│   │                      #  model2-full + stacks/{dev,staging,prod}.bicepparam retired by task 249, 2026-10-02)
 │   │
-│   └── parameters/        # Environment-specific parameters
-│       ├── dev.bicepparam
-│       ├── prod.bicepparam
-│       └── customer-template.bicepparam
+│   └── parameters/        # Per-customer + platform parameters
+│       ├── customer-template.bicepparam   # using '../customer.bicep'
+│       └── demo-customer.bicepparam       # using '../customer.bicep'
 │
-├── scripts/               # Deployment automation (TODO)
-│   ├── Deploy-Model1-Shared.ps1
-│   ├── Deploy-Model1-Customer.ps1
-│   └── Deploy-Model2-Full.ps1
-│
-└── docs/                  # Deployment documentation (TODO)
-    ├── MODEL1-DEPLOYMENT-GUIDE.md
-    ├── MODEL2-DEPLOYMENT-GUIDE.md
-    └── PREREQUISITES.md
+└── scripts/               # Misc. helpers — there is no customer deployment script; L2 H2a deploys
 ```
+
+Customer deployment documentation lives in
+[`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md).
+CI only **validates** the Bicep (`.github/workflows/deploy-infrastructure.yml`, "Validate Bicep
+Infrastructure": lint + compile, no deploy).
 
 ## Quick Start
 
@@ -60,45 +61,23 @@ infrastructure/
    - Contributor on subscription (for resource group creation)
    - User Access Administrator (for RBAC assignments)
 
-### Deploy Model 1 (Shared Infrastructure)
+### Model 1 (no shared infrastructure)
 
-```powershell
-# Login to Azure
-az login
-az account set --subscription "Your Subscription Name"
-
-# Deploy shared infrastructure (dev)
-az deployment sub create \
-  --location eastus \
-  --template-file bicep/stacks/model1-shared.bicep \
-  --parameters bicep/parameters/dev.bicepparam
-
-# Deploy shared infrastructure (prod)
-az deployment sub create \
-  --location eastus \
-  --template-file bicep/stacks/model1-shared.bicep \
-  --parameters bicep/parameters/prod.bicepparam
-```
+There is no shared Model 1 tier any more (D-12, 2026-09-28): a Model 1 customer is a **dedicated stamp** in
+Spaarke's Azure tenant, built from `bicep/customer.bicep` by the L2 control plane (handler H2a) — run
+`/provision-environment`, see `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`. (Until task 228 lands,
+H2a refuses Model 1 runs — fails closed — rather than deploy into a non-dedicated subscription.) The former
+`stacks/model1-shared.bicep` / `model1-customer.bicep` and their `parameters/{dev,staging,prod}.bicepparam` were
+retired by `customer-provisioning-orchestration-r1` task 225a (2026-10-01).
 
 ### Deploy Model 2 (Customer Deployment)
 
-```powershell
-# 1. Copy and customize the parameter file
-cp bicep/parameters/customer-template.bicepparam bicep/parameters/contoso.bicepparam
-# Edit contoso.bicepparam with customer-specific values
-
-# 2. Deploy
-az deployment sub create \
-  --location eastus \
-  --template-file bicep/stacks/model2-full.bicep \
-  --parameters bicep/parameters/contoso.bicepparam
-
-# 3. Store secrets in Key Vault (from deployment outputs)
-$outputs = az deployment sub show --name <deployment-name> --query properties.outputs -o json | ConvertFrom-Json
-az keyvault secret set --vault-name <kv-name> --name redis-connection-string --value $outputs.redisConnectionString.value
-az keyvault secret set --vault-name <kv-name> --name servicebus-connection-string --value $outputs.serviceBusConnectionString.value
-# ... repeat for other secrets
-```
+Customer stamps are deployed **only** by the L2 control plane (owner decision D19, 2026-10-02): run
+`/provision-environment`; handler H2a deploys `bicep/customer.bicep` into the customer's own subscription and
+H4 populates the stamp's Key Vault. See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`.
+*(Retired by task 249, 2026-10-02: the hand-run `az deployment sub create --template-file bicep/customer.bicep`
++ manual `az keyvault secret set` recipe that stood here — a stamp deployed outside L2 has no run record and
+no H4/H13 verification.)*
 
 ## Post-Deployment Steps
 
@@ -150,15 +129,20 @@ The AI Search index must be created via API:
 
 ## Resource Naming Convention
 
+As composed by `bicep/customer.bicep` (authoritative table:
+[`AZURE-RESOURCE-NAMING-CONVENTION.md` § Per-Customer Resources](../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)):
+
 | Resource Type | Pattern | Example |
 |---------------|---------|---------|
 | Resource Group | `rg-spaarke-{customer}-{env}` | `rg-spaarke-contoso-prod` |
-| App Service | `sprk{customer}{env}-api` | `sprkcontosoprod-api` |
-| Key Vault | `sprk{customer}{env}-kv` | `sprkcontosoprod-kv` |
-| Redis | `sprk{customer}{env}-redis` | `sprkcontosoprod-redis` |
-| Service Bus | `sprk{customer}{env}-sb` | `sprkcontosoprod-sb` |
-| OpenAI | `sprk{customer}{env}-openai` | `sprkcontosoprod-openai` |
-| AI Search | `sprk{customer}{env}-search` | `sprkcontosoprod-search` |
+| Managed Identity (UAMI) | `mi-spaarke-{customer}-{env}` | `mi-spaarke-contoso-prod` |
+| Key Vault | `take('sprk-{customer}-{env}-kv', 24)` | `sprk-contoso-prod-kv` |
+| Storage Account | `sprk{customer}{env}sa` | `sprkcontosoprodsa` |
+| Service Bus | `spaarke-{customer}-{env}-sbus` | `spaarke-contoso-prod-sbus` |
+| Cosmos DB | `spaarke-{customer}-{env}-cosmos` | `spaarke-contoso-prod-cosmos` |
+| App Service Plan / App Service | `sprk-{customer}-{env}-{plan\|api}` | `sprk-contoso-prod-api` |
+| Redis / OpenAI / AI Search / Doc Intelligence | `sprk-{customer}-{env}-{redis\|openai\|search\|docintel}` | `sprk-contoso-prod-openai` |
+| App Insights / Log Analytics | `sprk-{customer}-{env}-{insights\|logs}` | `sprk-contoso-prod-insights` |
 
 ## Environment Variables
 

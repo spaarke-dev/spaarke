@@ -173,7 +173,7 @@ For each knowledge record:
 ## Related
 
 - `scripts/seed-data/Deploy-Knowledge.ps1` — Seeds inline knowledge records
-- `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` — BFF API indexing service
+- (ReferenceIndexingService and /api/admin/knowledge/* were removed by unified-access-control-r2 task 163 — the scripts above are the only indexing path)
 - `infrastructure/ai-search/spaarke-rag-references.json` — Index schema definition
 
 ## Failure Modes & Recovery

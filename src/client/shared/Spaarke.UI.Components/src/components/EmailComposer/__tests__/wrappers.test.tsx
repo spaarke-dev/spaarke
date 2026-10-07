@@ -7,6 +7,7 @@
  *   - SendEmailStep  → mount='inline', forwards the composer handle, default mode 'compose'
  *   - SendEmailDialog → mount='dialog', open-gated Dialog chrome, Cancel → onClose
  *   - SendEmailPage  → mount='page', requires mode, Cancel → onCancel(onClose)
+ *   - SendEmailPane  → mount='inline' with its own Send, no chrome, forwards sendMode/onSent/onError (task 096)
  */
 import * as React from 'react';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
@@ -14,6 +15,7 @@ import { renderWithProviders } from '../../../__mocks__/pcfMocks';
 import { SendEmailStep } from '../wrappers/SendEmailStep';
 import { SendEmailDialog } from '../wrappers/SendEmailDialog';
 import { SendEmailPage } from '../wrappers/SendEmailPage';
+import { SendEmailPane } from '../wrappers/SendEmailPane';
 import type { IEmailComposerHandle } from '../EmailComposer.types';
 import type { AuthenticatedFetchFn } from '../../../services/EntityCreationService';
 
@@ -143,5 +145,86 @@ describe('SendEmailPage', () => {
 
     const toGroup = screen.getByRole('group', { name: 'To' });
     expect(within(toGroup).getByText('greg@example.com')).toBeInTheDocument();
+  });
+});
+
+describe('SendEmailPane (spaarkeai-word-add-in-r1 task 096 — a chromeless side pane that owns its send)', () => {
+  function jsonResponse(status: number, body: unknown): Response {
+    return {
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => 'application/json' },
+      json: async () => body,
+      text: async () => JSON.stringify(body),
+    } as unknown as Response;
+  }
+
+  it('locks mount to inline, defaults mode to compose, and draws no chrome or action bar', () => {
+    const ref = React.createRef<IEmailComposerHandle>();
+    renderWithProviders(<SendEmailPane ref={ref} authenticatedFetch={authenticatedFetch} bffBaseUrl={BFF} />);
+
+    expect(ref.current!.getState().mount).toBe('inline');
+    expect(ref.current!.getState().mode).toBe('compose');
+    expect(screen.queryByRole('heading', { name: 'New Email' })).toBeNull();
+    expect(screen.queryByRole('region', COMPOSER_ACTIONS)).toBeNull();
+  });
+
+  it('keeps the engine Send button and forwards a host-locked sendMode (no From switcher)', () => {
+    const ref = React.createRef<IEmailComposerHandle>();
+    renderWithProviders(
+      <SendEmailPane
+        ref={ref}
+        authenticatedFetch={authenticatedFetch}
+        bffBaseUrl={BFF}
+        sendMode="user"
+        fromMailbox="me@example.com"
+      />
+    );
+
+    const from = screen.getByRole('group', { name: 'From' });
+    expect(within(from).getByRole('button', { name: /send/i })).toBeInTheDocument();
+    expect(within(from).getByText('me@example.com')).toBeInTheDocument();
+    expect(within(from).queryByRole('button', { name: 'From mailbox' })).toBeNull();
+    expect(ref.current!.getState().sendMode).toBe('user');
+  });
+
+  it('forwards onSent with the communication id after a send', async () => {
+    const fetchFn = jest.fn().mockResolvedValue(jsonResponse(200, { communicationId: 'c-1' }));
+    const onSent = jest.fn();
+    renderWithProviders(
+      <SendEmailPane
+        authenticatedFetch={fetchFn as unknown as AuthenticatedFetchFn}
+        bffBaseUrl={BFF}
+        initialTo={['a@example.com']}
+        initialSubject="Hi"
+        initialBody="<p>Body</p>"
+        onSent={onSent}
+      />
+    );
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'From' })).getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onSent).toHaveBeenCalledWith({ communicationId: 'c-1' }));
+    expect(fetchFn).toHaveBeenCalledWith(`${BFF}/api/communications/send`, expect.objectContaining({ method: 'POST' }));
+  });
+
+  it('forwards onError with the server reason on a refused send', async () => {
+    const fetchFn = jest.fn().mockResolvedValue(jsonResponse(403, { detail: 'Not allowed' }));
+    const onError = jest.fn();
+    renderWithProviders(
+      <SendEmailPane
+        authenticatedFetch={fetchFn as unknown as AuthenticatedFetchFn}
+        bffBaseUrl={BFF}
+        initialTo={['a@example.com']}
+        initialSubject="Hi"
+        initialBody="<p>Body</p>"
+        onError={onError}
+      />
+    );
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'From' })).getByRole('button', { name: /send/i }));
+
+    await waitFor(() => expect(onError).toHaveBeenCalledTimes(1));
+    expect(onError.mock.calls[0][0]).toMatchObject({ status: 403, detail: 'Not allowed' });
   });
 });

@@ -18,13 +18,19 @@
 //          registry Ready transition + all 6 H13 gates Verified.
 //   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
 //   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
-//   AC-2c  Missing buildId → Resumable + MissingBuildId.
-//   AC-2d  Missing bffApiUrl → Resumable + MissingBffApiUrl.
+//   AC-2c  Missing InterStepState.BffBuildId (H9 output, task 245b) → Resumable + MissingBuildId.
+//   AC-2d  Missing InterStepState.BffApiUrl (H9 output, task 245b) → Resumable + MissingBffApiUrl.
 //   AC-2e  Missing InterStepState.dataverseEnvUrl → Resumable + MissingDataverseEnvUrl.
+//   AC-2f/g/h Missing InterStepState.resourceGroupName / appServiceName /
+//          keyVaultName (H2a outputs, task 245a) → Resumable + MissingResourceGroupName /
+//          MissingAppServiceName / MissingKeyVaultName; no probe invoked; a
+//          same-named run parameter does NOT satisfy the guard.
+//   AC-2i  Stamp names flow from InterStepState to the trap/cost requests +
+//          registry columns; containerTypeId comes from the intake parameter.
 //   AC-3   Extended validate script Failure (SC #5) → QuarantineRequired +
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
-//   AC-5a..f Each of 6 T1–T6 trap fail branches → QuarantineRequired + distinct code.
+//   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
 //   AC-6a..e Each of 5 I1–I5 invariant fail branches → QuarantineRequired + distinct code.
 //   AC-7   Trap verifier InfraFault (no failed traps) → Resumable + TrapVerifierInfraFault.
 //   AC-8   Invariant verifier InfraFault (no failed invariants) → Resumable + InvariantVerifierInfraFault.
@@ -42,7 +48,7 @@
 //   AC-16  Idempotency-key format determinism — validate-{customerId}-{buildId}.
 //   AC-17  Run not found → Resumable + RunNotFound.
 //   AC-18  HandlerId mismatch → throws InvalidOperationException.
-//   AC-19a..f Trap rejection code mapping table — each TrapKind maps to distinct code.
+//   AC-19a..g Trap rejection code mapping table — each TrapKind maps to distinct code.
 //   AC-20a..e Invariant rejection code mapping table — each InvariantKind maps to distinct code.
 //   AC-21  All infra faults present at once — first-in-priority (extended-validate
 //          infra fault) wins the diagnostic; still Resumable.
@@ -75,7 +81,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "sprk-bff-acme";
     private const string KeyVaultName = "sprk-acme-prod-kv";
-    private const string RegistryDataverseUrl = "https://spaarke-registry.crm.dynamics.com";
     private const string EnvironmentId = "b0000000-0000-0000-0000-000000000001";
 
     // ---------- AC-1 happy path ----------
@@ -149,8 +154,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [Fact]
     public async Task AC2c_MissingBuildId_FailsResumable()
     {
+        // Task 245b: the deployed build is H9's output, not a run parameter.
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H13E2EAcceptanceGateHandler.BuildIdParameterKey);
+        run.InterStepState.BffBuildId = null;
         var repo = new FakeRepository(run, etag: "etag-2c");
         var handler = BuildHandler(repo, out _);
 
@@ -163,8 +169,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [Fact]
     public async Task AC2d_MissingBffApiUrl_FailsResumable()
     {
+        // Task 245b: the deployed BFF URL is H9's output, not a run parameter.
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H13E2EAcceptanceGateHandler.BffApiUrlParameterKey);
+        run.InterStepState.BffApiUrl = null;
         var repo = new FakeRepository(run, etag: "etag-2d");
         var handler = BuildHandler(repo, out _);
 
@@ -186,6 +193,94 @@ public sealed class H13E2EAcceptanceGateHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(H13Rejections.MissingDataverseEnvUrl);
+    }
+
+    // ---------- AC-2f/g/h H2a outputs required from InterStepState (task 245a, G25) ----------
+
+    [Theory]
+    [InlineData(nameof(InterStepState.ResourceGroupName), H13Rejections.MissingResourceGroupName, "resourceGroupName")]
+    [InlineData(nameof(InterStepState.AppServiceName), H13Rejections.MissingAppServiceName, "appServiceName")]
+    [InlineData(nameof(InterStepState.KeyVaultName), H13Rejections.MissingKeyVaultName, "keyVaultName")]
+    public async Task AC2fgh_MissingH2aOutputInInterStepState_FailsResumable_NoProbeInvoked(
+        string property, string expectedCode, string jsonName)
+    {
+        var run = BuildRun();
+        ClearInterStepStateValue(run, property);
+        var repo = new FakeRepository(run, etag: $"etag-2-{property}");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedCode);
+        failure.Diagnostic.Should().Contain($"InterStepState.{jsonName}").And.Contain("H2a",
+            "the diagnostic must name the producing handler so the operator knows which upstream step is missing");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().StartWith($"[{expectedCode}]");
+        seams.Validator.CallCount.Should().Be(0);
+        seams.Traps.CallCount.Should().Be(0);
+        seams.Invariants.CallCount.Should().Be(0);
+        seams.Naming.CallCount.Should().Be(0);
+        seams.Cost.CallCount.Should().Be(0);
+        seams.Registry.CallCount.Should().Be(0);
+        seams.RegistryClient.UpdateColumnsCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2h_CustomerVaultMissing_ARunParameterDoesNotStandIn_FailsResumable()
+    {
+        // The customer vault is H2a's InterStepState.KeyVaultName; a stray run parameter of the same
+        // name (no longer an accepted intake key since task 245b) must never stand in for it.
+        var run = BuildRun();
+        ClearInterStepStateValue(run, nameof(InterStepState.KeyVaultName));
+        run.Parameters.NonSecret["keyVaultName"] = "vault-from-a-run-parameter";
+        var repo = new FakeRepository(run, etag: "etag-2h-platform-vault");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.MissingKeyVaultName);
+        seams.Traps.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC2i_StampNames_FlowFromInterStepState_ToProbesCostAndRegistryColumns()
+    {
+        var run = BuildRun();
+        // Intake carries the container type id; InterStepState carries the CUSTOMER stamp names from H2a.
+        run.Parameters.NonSecret["containerTypeId"] = "ct-from-intake";
+        var repo = new FakeRepository(run, etag: "etag-2i");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        var trapRequest = seams.Traps.LastRequest!;
+        trapRequest.ResourceGroupName.Should().Be(ResourceGroupName);
+        trapRequest.AppServiceName.Should().Be(AppServiceName);
+        trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
+        trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
+        seams.Cost.LastRequest!.ResourceGroupName.Should().Be(ResourceGroupName);
+
+        var columns = seams.RegistryClient.LastColumns!;
+        columns["sprk_resourcegroupname"].Should().Be(ResourceGroupName);
+        columns["sprk_appservicename"].Should().Be(AppServiceName);
+        columns["sprk_keyvaultname"].Should().Be(KeyVaultName);
+        columns["sprk_containertypeid"].Should().Be("ct-from-intake");
+    }
+
+    private static void ClearInterStepStateValue(ProvisioningRun run, string property)
+    {
+        switch (property)
+        {
+            case nameof(InterStepState.ResourceGroupName): run.InterStepState.ResourceGroupName = null; break;
+            case nameof(InterStepState.AppServiceName): run.InterStepState.AppServiceName = null; break;
+            case nameof(InterStepState.KeyVaultName): run.InterStepState.KeyVaultName = null; break;
+            default: throw new ArgumentOutOfRangeException(nameof(property), property, "Unknown InterStepState property.");
+        }
     }
 
     // ---------- AC-3 extended validate script Failure ----------
@@ -223,7 +318,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         failure.RejectionCode.Should().Be(H13Rejections.ExtendedValidationInfraFault);
     }
 
-    // ---------- AC-5 trap fail branches (6 tests) ----------
+    // ---------- AC-5 trap fail branches (7 tests) ----------
 
     [Theory]
     [InlineData(TrapKind.T1KeyVaultReferenceIdentity, H13Rejections.TrapT1Failed)]
@@ -232,6 +327,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [InlineData(TrapKind.T4ExchangePolicyCount, H13Rejections.TrapT4Failed)]
     [InlineData(TrapKind.T5SlotMiKvRbac, H13Rejections.TrapT5Failed)]
     [InlineData(TrapKind.T6SpeConfidentialClient, H13Rejections.TrapT6Failed)]
+    [InlineData(TrapKind.T7CustomerIdentityExplicit, H13Rejections.TrapT7Failed)]
     public async Task AC5_TrapFailBranch_FailsQuarantineWithDistinctCode(TrapKind failingTrap, string expectedCode)
     {
         var repo = new FakeRepository(BuildRun(), etag: $"etag-5-{failingTrap}");
@@ -392,35 +488,121 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     }
 
     // ---------- AC-13 registry updater Failure ----------
+    // MED#10 SESSION-19 INVERTED (customer-provisioning-orchestration-r1
+    // adversarial e2e verify workflow wepdcb8we): under Cosmos-first ordering,
+    // setupstatus PATCH failure fires AFTER Cosmos-Completed lands, so the run
+    // IS complete — the failure surfaces as a REGISTRY-STALE warning log +
+    // HandlerResult.Success. Operator SKILL Step 6a picks up the residual PATCH.
+    // Prior behavior (return Resumable + H13Rejections.RegistryUpdateFailed) is
+    // no longer correct because it would re-flip Cosmos to Failed on the next
+    // retry, violating single-writer / Cosmos-authoritative semantics.
 
     [Fact]
-    public async Task AC13_RegistryUpdaterFailure_FailsResumable()
+    public async Task AC13_RegistryUpdaterFailure_SucceedsWithRegistryStaleWarning_BucketB_MED10()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-13");
-        var handler = BuildHandler(repo, out _,
+        var handler = BuildHandler(repo, out var seams,
             configureSeams: s => s.Registry = FakeRegistryUpdater.Failure("PATCH 412 ETag conflict"));
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H13Rejections.RegistryUpdateFailed);
+        result.Should().BeOfType<HandlerResult.Success>(
+            "MED#10 SESSION-19 Cosmos-first: Cosmos-Completed landed FIRST; registry-updater failure is now log-and-tolerate (operator SKILL Step 6a picks up).");
+        repo.LastWrittenRun.Should().NotBeNull("Cosmos write happened BEFORE the registry PATCH attempt");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Completed);
+        seams.Registry.CallCount.Should().Be(1, "setupstatus PATCH was attempted even though it failed");
     }
 
     // ---------- AC-14 registry updater throws ----------
+    // MED#10 SESSION-19 INVERTED — same rationale as AC-13.
 
     [Fact]
-    public async Task AC14_RegistryUpdaterThrows_FailsResumable()
+    public async Task AC14_RegistryUpdaterThrows_SucceedsWithRegistryStaleWarning_BucketB_MED10()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-14");
-        var handler = BuildHandler(repo, out _,
+        var handler = BuildHandler(repo, out var seams,
             configureSeams: s => s.Registry = FakeRegistryUpdater.Throws(new InvalidOperationException("token acquisition failed")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "MED#10 SESSION-19 Cosmos-first: setupstatus PATCH throw is log-and-tolerate (operator SKILL Step 6a picks up).");
+        repo.LastWrittenRun.Should().NotBeNull("Cosmos-Completed persisted BEFORE the throw");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Completed);
+    }
+
+    // ---------- MED#10 SESSION-19 Cosmos-first ordering (new tests) ----------
+
+    /// <summary>
+    /// MED#10 SESSION-19 (customer-provisioning-orchestration-r1 adversarial e2e
+    /// verify workflow wepdcb8we). Given the Cosmos-first ordering: when the
+    /// Cosmos ReplaceRunAsync returns Conflict, NO registry PATCH (neither
+    /// promoted-columns via UpdateColumnsAsync nor setupstatus via
+    /// TransitionToReadyAsync) must be attempted. This is the whole point of
+    /// Cosmos-first — the caller's OWN write fails safely, and no external
+    /// state is touched.
+    /// </summary>
+    [Fact]
+    public async Task H13_CosmosConflict_DoesNotMutateRegistry_BucketB_MED10()
+    {
+        var run = BuildRun();
+        var winner = BuildRun();
+        winner.Status = RunStatus.Completed;
+        var repo = new FakeRepository(run, etag: "etag-med10-conflict")
+        {
+            ForceConflictOnNextReplace = true,
+            ConflictWinningRun = winner,
+            ConflictWinningEtag = "etag-med10-winner",
+        };
+        var handler = BuildHandler(repo, out var seams);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H13Rejections.RegistryUpdateFailed);
+        failure.RejectionCode.Should().Be(H13Rejections.ConcurrentWriteConflict);
+        failure.Diagnostic.Should().Contain("MED#10 SESSION-19",
+            "the diagnostic must cite the Cosmos-first ordering so operators know registry is untouched");
+
+        seams.Registry.CallCount.Should().Be(0,
+            "MED#10 Cosmos-first: setupstatus PATCH MUST NOT run on Cosmos Conflict — registry is untouched");
+        seams.RegistryClient.UpdateColumnsCallCount.Should().Be(0,
+            "MED#10 Cosmos-first: promoted-columns PATCH MUST NOT run on Cosmos Conflict — registry is untouched");
+        repo.ReplaceCallCount.Should().Be(1, "single Cosmos write attempt; Conflict returned; no retry from H13");
+    }
+
+    /// <summary>
+    /// MED#10 SESSION-19 (customer-provisioning-orchestration-r1 adversarial e2e
+    /// verify workflow wepdcb8we). Given the Cosmos-first ordering: when the
+    /// Cosmos ReplaceRunAsync succeeds (run IS Completed) but the subsequent
+    /// promoted-columns registry PATCH fails, the handler returns
+    /// HandlerResult.Success — the run is authoritatively complete and the
+    /// operator SKILL Step 6a picks up the residual PATCH. This is the
+    /// documented trade-off: Cosmos-authoritative with brief registry lag is
+    /// strictly better than the SESSION 18 alternative of registry-Ready +
+    /// Cosmos-Running for the same window. The subsequent TransitionToReadyAsync
+    /// MUST also be skipped when the columns PATCH failed (registry is already
+    /// declared stale — piling on with another PATCH just risks additional
+    /// error noise without changing operator-side recovery cost).
+    /// </summary>
+    [Fact]
+    public async Task H13_CosmosSuccess_ThenColumnsFailure_ReturnsSuccessWithLog_BucketB_MED10()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-med10-cols-fail");
+        var handler = BuildHandler(repo, out var seams,
+            configureRegistryClient: c => c.UpdateColumnsBehavior = ()
+                => new RegistryUpdateOutcome.Failure("PATCH 412 ETag conflict on promoted columns"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "MED#10 SESSION-19: Cosmos-Completed lands FIRST; promoted-columns failure is log-and-tolerate.");
+        repo.LastWrittenRun.Should().NotBeNull("Cosmos-Completed persisted BEFORE the registry PATCH attempt");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Completed);
+        seams.RegistryClient.UpdateColumnsCallCount.Should().Be(1,
+            "the promoted-columns PATCH WAS attempted (it just failed)");
+        seams.Registry.CallCount.Should().Be(0,
+            "when the columns PATCH failed, we short-circuit the subsequent setupstatus PATCH (registry is already declared stale)");
     }
 
     // ---------- AC-15 idempotency (level-3 durable no-op) ----------
@@ -512,6 +694,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     [InlineData(TrapKind.T4ExchangePolicyCount, H13Rejections.TrapT4Failed)]
     [InlineData(TrapKind.T5SlotMiKvRbac, H13Rejections.TrapT5Failed)]
     [InlineData(TrapKind.T6SpeConfidentialClient, H13Rejections.TrapT6Failed)]
+    [InlineData(TrapKind.T7CustomerIdentityExplicit, H13Rejections.TrapT7Failed)]
     public void AC19_MapTrapKindToRejectionCode_IsDistinctPerTrap(TrapKind kind, string expectedCode)
     {
         H13E2EAcceptanceGateHandler.MapTrapKindToRejectionCode(kind).Should().Be(expectedCode);
@@ -578,13 +761,18 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public required FakeNamingChecker Naming { get; init; }
         public required FakeCostChecker Cost { get; init; }
         public required FakeRegistryUpdater Registry { get; init; }
+        // MED#10 SESSION-19: expose the wire-registry-client so tests can
+        // assert Cosmos-first ordering (columns PATCH NOT called on Conflict)
+        // and configure UpdateColumns failure modes.
+        public required FakeRegistryClient RegistryClient { get; init; }
     }
 
     private H13E2EAcceptanceGateHandler BuildHandler(
         FakeRepository repo,
         out ResolvedSeams resolved,
         Action<Seams>? configureSeams = null,
-        Action<H13AcceptanceOptions>? configureOptions = null)
+        Action<H13AcceptanceOptions>? configureOptions = null,
+        Action<FakeRegistryClient>? configureRegistryClient = null)
     {
         var seams = new Seams();
         configureSeams?.Invoke(seams);
@@ -593,6 +781,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         configureOptions?.Invoke(options);
 
         var registryClient = new FakeRegistryClient();
+        configureRegistryClient?.Invoke(registryClient);
 
         resolved = new ResolvedSeams
         {
@@ -602,6 +791,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             Naming = seams.NamingFake,
             Cost = seams.CostFake,
             Registry = seams.RegistryFake,
+            RegistryClient = registryClient,
         };
 
         return new H13E2EAcceptanceGateHandler(
@@ -627,21 +817,22 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = EnvironmentId,
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BuildIdParameterKey] = BuildId;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.BffApiUrlParameterKey] = BffApiUrl;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.AppServiceNameParameterKey] = AppServiceName;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.KeyVaultNameParameterKey] = KeyVaultName;
-        run.Parameters.NonSecret[H13E2EAcceptanceGateHandler.RegistryDataverseUrlParameterKey] = RegistryDataverseUrl;
+        // H9 outputs (task 245b) — the deployed build and the BFF URL it health-probed.
+        run.InterStepState.BffBuildId = BuildId;
+        run.InterStepState.BffApiUrl = BffApiUrl;
         run.InterStepState.DataverseEnvUrl = DataverseUrl;
         run.InterStepState.BffAppRegId = "bff-appreg-id";
         run.InterStepState.MiClientId = "uami-client-id";
+        // H2a outputs (task 245a, G25) — H13 reads these from InterStepState, not run parameters.
+        run.InterStepState.ResourceGroupName = ResourceGroupName;
+        run.InterStepState.AppServiceName = AppServiceName;
+        run.InterStepState.KeyVaultName = KeyVaultName;
         return run;
     }
 
@@ -651,6 +842,16 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     {
         private ProvisioningRun? _run;
         private string? _etag;
+        // MED#10 SESSION-19: opt-in Conflict / NotFound modes so tests can
+        // exercise the Cosmos-first Failure branch without a live repository.
+        // Semantic: the FIRST ReplaceRunAsync returns the configured outcome;
+        // subsequent calls (if any) revert to Success. This mirrors real
+        // eventual convergence (the concurrent winner's own write lands).
+        public bool ForceConflictOnNextReplace { get; set; }
+        public bool ForceNotFoundOnNextReplace { get; set; }
+        public ProvisioningRun? ConflictWinningRun { get; set; }
+        public string? ConflictWinningEtag { get; set; }
+
         public ProvisioningRun? LastWrittenRun { get; private set; }
         public int ReplaceCallCount { get; private set; }
 
@@ -665,6 +866,21 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
         {
             ReplaceCallCount++;
+
+            if (ForceConflictOnNextReplace)
+            {
+                ForceConflictOnNextReplace = false;
+                var winner = ConflictWinningRun ?? run;
+                var winnerEtag = ConflictWinningEtag ?? (ifMatchEtag + "-winner");
+                return Task.FromResult<ReplaceRunResult>(
+                    new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(winner, winnerEtag)));
+            }
+            if (ForceNotFoundOnNextReplace)
+            {
+                ForceNotFoundOnNextReplace = false;
+                return Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.NotFound());
+            }
+
             LastWrittenRun = run;
             _run = run;
             _etag = ifMatchEtag + "-next";
@@ -674,6 +890,16 @@ public sealed class H13E2EAcceptanceGateHandlerTests
 
     private sealed class FakeRegistryClient : IDataverseEnvironmentRegistryClient
     {
+        // MED#10 SESSION-19: track UpdateColumnsAsync so the Cosmos-first tests
+        // can assert whether the registry was mutated on a Conflict path.
+        public int UpdateColumnsCallCount { get; private set; }
+        public IReadOnlyDictionary<string, object?>? LastColumns { get; private set; }
+
+        // MED#10 SESSION-19: opt-in failure modes on the promoted-columns PATCH
+        // so tests can exercise the registry-stale-warning path without
+        // reaching for a full mock framework.
+        public Func<RegistryUpdateOutcome>? UpdateColumnsBehavior { get; set; }
+
         public Task<DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(string tenantId, CancellationToken ct)
             => Task.FromResult<DataverseEnvironmentRegistrySnapshot?>(null);
 
@@ -684,6 +910,25 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
             RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
             => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
+
+        // REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24, 2026-08-27):
+        // H13 step 9.5 invokes UpdateColumnsAsync to promote run-derived values
+        // into the sprk_dataverseenvironment row BEFORE the Ready transition.
+        // The fake accepts any column set + returns Success (or the configured
+        // behavior for MED#10 tests) so H13 tests focus on the aggregation
+        // logic + gate-decision + Cosmos-first ordering behavior.
+        public Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+            string environmentId,
+            IReadOnlyDictionary<string, object?> columns,
+            string customerIdForLog,
+            string runIdForLog,
+            CancellationToken cancellationToken)
+        {
+            UpdateColumnsCallCount++;
+            LastColumns = columns;
+            var outcome = UpdateColumnsBehavior?.Invoke() ?? new RegistryUpdateOutcome.Success();
+            return Task.FromResult(outcome);
+        }
     }
 
     private sealed class FakeValidator : IE2EValidationRunner
@@ -742,9 +987,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             return new FakeTrapVerifier(new TrapCatalogVerificationResult(outcomes));
         }
 
+        public TrapVerificationRequest? LastRequest { get; private set; }
+
         public Task<TrapCatalogVerificationResult> VerifyAllAsync(TrapVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             if (_throws is not null) throw _throws;
             return Task.FromResult(_result);
         }
@@ -826,9 +1074,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
                 ExceedsAdvisoryThreshold: true, Summary: $"drift={drift:P0}")));
         public static FakeCostChecker Throws(Exception ex) => new(() => throw ex);
 
+        public CostEnvelopeRequest? LastRequest { get; private set; }
+
         public Task<CostEnvelopeReport> CheckAsync(CostEnvelopeRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return _check();
         }
     }

@@ -54,9 +54,12 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,
+  canDetectDocumentChanges: false,
+  canOpenDesktopWord: false,
   minApiVersion: '1.3',
   supportedRequirementSet: 'WordApi 1.3',
 };
@@ -96,6 +99,7 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     insertLink: jest.fn(),
     attachFile: jest.fn(),
     composeNewEmail: jest.fn(),
+    registerDocumentChangeHandler: jest.fn().mockResolvedValue(() => undefined),
     ...overrides,
   };
 }
@@ -315,6 +319,66 @@ describe('SaveView', () => {
       expect(props.canOpenRecord).toBe(false);
       expect(props.canSuggestRelatedRecords).toBe(false);
       expect(props.canProvideDocumentName).toBe(false);
+    });
+
+    // Task 094.
+    it('reflects canDetectDocumentChanges and canOpenDesktopWord from the adapter', async () => {
+      const capabilities: HostCapabilities = {
+        ...WORD_CAPABILITIES,
+        canDetectDocumentChanges: true,
+        canOpenDesktopWord: true,
+      };
+      const adapter = makeWordAdapter({ getCapabilities: () => capabilities });
+      renderSaveView(adapter);
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect(props.canDetectDocumentChanges).toBe(true);
+      expect(props.canOpenDesktopWord).toBe(true);
+    });
+
+    it('defaults canDetectDocumentChanges/canOpenDesktopWord to false (WORD_CAPABILITIES fixture)', async () => {
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter);
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect(props.canDetectDocumentChanges).toBe(false);
+      expect(props.canOpenDesktopWord).toBe(false);
+    });
+  });
+
+  // Task 094: the lifted saved-state bundle passes through untouched when supplied, and is omitted
+  // entirely (SaveFlow keeps its own uncontrolled copy) when not.
+  describe('savedState / onSavedStateChange passthrough (task 094)', () => {
+    it('forwards both when supplied', async () => {
+      const onSavedStateChange = jest.fn();
+      const savedState = {
+        savedDocument: null,
+        profileRefreshSignal: 0,
+        contentChangedSinceSave: false,
+      };
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter, { savedState, onSavedStateChange });
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect(props.savedState).toBe(savedState);
+      expect(props.onSavedStateChange).toBe(onSavedStateChange);
+    });
+
+    it('omits both entirely when not supplied', async () => {
+      const adapter = makeWordAdapter();
+      renderSaveView(adapter);
+
+      await waitFor(() => expect(mockedSaveFlow).toHaveBeenCalled());
+
+      const props = lastSaveFlowProps();
+      expect('savedState' in props).toBe(false);
+      expect('onSavedStateChange' in props).toBe(false);
     });
   });
 

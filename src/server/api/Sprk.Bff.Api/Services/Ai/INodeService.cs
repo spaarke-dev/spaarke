@@ -63,18 +63,6 @@ public interface INodeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Reorder nodes within a playbook.
-    /// Updates execution order based on the provided node ID sequence.
-    /// </summary>
-    /// <param name="playbookId">Playbook ID.</param>
-    /// <param name="nodeIds">Ordered array of node IDs representing new order.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    Task ReorderNodesAsync(
-        Guid playbookId,
-        Guid[] nodeIds,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Update node scopes (skills and knowledge sources).
     /// </summary>
     /// <param name="nodeId">Node ID.</param>

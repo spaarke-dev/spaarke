@@ -3,6 +3,7 @@
 > **Auto-updated by task-execute and context-handoff skills**
 > **Last Updated**: {YYYY-MM-DD HH:MM}
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Format**: CURRENT state only. Each checkpoint REWRITES this file; never prepend new blocks above old ones. Target ≤ 10 KB. Standing directives and gotchas go to the project `CLAUDE.md`, decisions to notes, history to commit messages (`.claude/skills/context-handoff/SKILL.md` "State, not history").
 
 ---
 
@@ -102,21 +103,15 @@
 
 ## Session Notes
 
-<!-- Free-form notes for current session context -->
-<!-- These persist across compaction for context recovery -->
+<!-- Notes for the CURRENT session only. Rewritten each checkpoint, never accumulated. -->
 
 ### Current Session
 - Started: {YYYY-MM-DD HH:MM}
 - Focus: {What we're working on}
 
-### Key Learnings
-<!-- Gotchas, warnings, or important discoveries -->
-
-*None yet*
-
 ### Handoff Notes
-<!-- Used when context budget is high or session ending -->
-<!-- Another Claude instance should be able to continue from these notes -->
+<!-- What the next instance needs to continue THIS work. -->
+<!-- A gotcha or directive that will outlive this task goes to the project CLAUDE.md "Standing directives & gotchas" section, not here. -->
 
 *No handoff notes*
 

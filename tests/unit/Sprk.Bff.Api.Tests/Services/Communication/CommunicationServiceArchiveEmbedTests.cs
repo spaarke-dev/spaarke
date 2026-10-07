@@ -1,5 +1,6 @@
 using System.Net.Http;
 using System.Text;
+using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Logging;
@@ -8,7 +9,6 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using MimeKit;
 using Moq;
-using Azure.Messaging.ServiceBus;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -139,6 +139,7 @@ public class CommunicationServiceArchiveEmbedTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }
@@ -170,9 +171,11 @@ public class CommunicationServiceArchiveEmbedTests
             .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == AttachmentEntity), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>(attachments)));
 
-        // Not yet archived — FindExistingArchiveDocumentAsync returns empty.
+        // Not yet archived — FindExistingArchiveDocumentAsync returns empty. The lookup must filter on the SAME column the
+        // archive create writes (sprk_relatedcommunication); a query on any other column gets no answer here and fails the test.
         entityService
-            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == DocumentEntity), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == DocumentEntity
+                && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_relatedcommunication")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>()));
 
         entityService
@@ -191,19 +194,68 @@ public class CommunicationServiceArchiveEmbedTests
         return entityService;
     }
 
-    private static Entity Attachment(string name, string itemId, string driveId) =>
-        new(AttachmentEntity, Guid.NewGuid())
+    /// <summary>
+    /// An attachment row as the inbound processor writes it: its SPE pointer AND the <c>sprk_document</c> it belongs to,
+    /// against which the pointer is verified before the app-only download (task 166 r1).
+    /// </summary>
+    private static Entity Attachment(string name, string itemId, string driveId, bool linkedToDocument = true)
+    {
+        var row = new Entity(AttachmentEntity, Guid.NewGuid())
         {
             ["sprk_name"] = name,
             ["sprk_graphitemid"] = itemId,
             ["sprk_graphdriveid"] = driveId,
         };
+        if (linkedToDocument)
+        {
+            row["sprk_document"] = new EntityReference(DocumentEntity, Guid.NewGuid());
+        }
+
+        return row;
+    }
 
     private static Entity ArchiveDocument(List<(Entity Entity, Guid Id)> created) =>
         created.Single(d => d.Entity.GetAttributeValue<bool>("sprk_isemailarchive")).Entity;
 
     private static Guid ArchiveDocumentId(List<(Entity Entity, Guid Id)> created) =>
         created.Single(d => d.Entity.GetAttributeValue<bool>("sprk_isemailarchive")).Id;
+
+    [Fact]
+    public async Task ArchiveExistingAsync_WhenAnAttachmentPointerCannotBeVerified_EmbedsOnlyTheVerifiedOnes()
+    {
+        // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the embed follows each attachment row's
+        // pointer as the application. A pointer into a container this environment does not own, or a row naming no
+        // document to verify it against, is skipped — never downloaded.
+        var communicationId = Guid.NewGuid();
+        var attachments = new[]
+        {
+            Attachment("contract.pdf", "item-a", "drive-a"),
+            Attachment("foreign.pdf", "item-f", "b!another-customers-container"),
+            Attachment("orphan.txt", "item-o", "drive-o", linkedToDocument: false),
+        };
+        var created = new List<(Entity, Guid)>();
+        var entityService = BuildEntityService(communicationId, attachments, created);
+
+        byte[]? uploadedEml = null;
+        var downloaded = new List<string>();
+        var speMock = BuildSpeMock(
+            downloadBytesForItemId: itemId =>
+            {
+                downloaded.Add(itemId);
+                return Encoding.UTF8.GetBytes($"bytes-of-{itemId}");
+            },
+            captureUploadedEml: bytes => uploadedEml = bytes);
+        var jobMock = BuildJobMock(new List<JobContract>());
+
+        var sut = BuildSut(entityService.Object, speMock.Object, jobMock.Object);
+
+        await sut.ArchiveExistingAsync(communicationId, CancellationToken.None);
+
+        using var stream = new MemoryStream(uploadedEml!);
+        var embeddedNames = MimeMessage.Load(stream).Attachments.OfType<MimePart>().Select(p => p.FileName).ToArray();
+        embeddedNames.Should().BeEquivalentTo(new[] { "contract.pdf" });
+        downloaded.Should().BeEquivalentTo(new[] { "item-a" }, "an unverified pointer must never be downloaded");
+    }
 
     [Fact]
     public async Task ArchiveExistingAsync_WhenCommunicationHasAttachments_EmbedsAllInEml()

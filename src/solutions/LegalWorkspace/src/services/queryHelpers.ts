@@ -437,6 +437,7 @@ export const DOCUMENT_TAB_SELECT_FIELDS: string[] = [
   'statuscode',
   '_ownerid_value',
   '_createdby_value',
+  '_sprk_createdbyperson_value', // UAC-r2 task 147 r1: the person who asked for a BFF-created document
   '_modifiedby_value',
   '_sprk_matter_value',
   'createdon',
@@ -460,6 +461,9 @@ export function buildDocumentsTabFilter(userId: string, ctx?: IOwnershipContext)
   const clauses = [
     ownerClause,
     `(_createdby_value eq ${userId} and createdon ge ${thirtyDaysAgo})`,
+    // UAC-r2 task 147 r1 (owner round 28 item 1): a document the BFF created as the application names the person who
+    // asked in sprk_createdbyperson ("createdbyperson, else createdby").
+    `(_sprk_createdbyperson_value eq ${userId} and createdon ge ${thirtyDaysAgo})`,
     `(_modifiedby_value eq ${userId} and modifiedon ge ${thirtyDaysAgo})`,
     `sprk_workspaceflag eq true`,
     `(statuscode eq 421500001 and _sprk_checkedoutby_value eq ${userId})`,

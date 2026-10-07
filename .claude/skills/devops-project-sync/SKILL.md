@@ -42,6 +42,8 @@ This is the workhorse — most automation hooks call this skill at end-of-host-s
 - Worktree existence + last commit date → Status heuristic
 - Open PR for branch → also influences Status
 
+**Not in scope**: `AI Spend (est.)` / `AI Calls` / `AI Spend As Of` are updated by the separate `/project-spend-update` skill, triggered manually — not tied to task completion. See `.claude/skills/project-spend-update/SKILL.md` (added 2026-10-04, reuse-governance finding, revised same day to decouple from this skill per owner direction — a task-execute-tied refresh under-covers Workflow-tool-driven sessions that don't route through Step 9.6).
+
 ### Step 2: Query current Issue field values
 
 ```graphql

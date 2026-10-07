@@ -50,9 +50,12 @@ const WORD_CAPABILITIES: HostCapabilities = {
   canAttachFile: false,
   canOpenBrowserWindow: false,
   canComposeEmail: false,
+  canEmailFromPane: false,
   canShowLinkedTodos: false,
   canSuggestRelatedRecords: false,
   canProvideDocumentName: true,
+  canDetectDocumentChanges: false,
+  canOpenDesktopWord: false,
   minApiVersion: '1.3',
   supportedRequirementSet: 'WordApi 1.3',
 };
@@ -90,6 +93,7 @@ function makeWordAdapter(overrides: Partial<IHostAdapter> = {}): IHostAdapter {
     insertLink: jest.fn(),
     attachFile: jest.fn(),
     composeNewEmail: jest.fn(),
+    registerDocumentChangeHandler: jest.fn().mockResolvedValue(() => undefined),
     ...overrides,
   };
 }

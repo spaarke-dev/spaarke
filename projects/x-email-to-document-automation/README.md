@@ -1,5 +1,7 @@
 # Email-to-Document Automation
 
+> **Portfolio**: [Project #1271](https://github.com/spaarke-dev/spaarke/issues/1271) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: ✅ Complete
 > **Started**: 2025-12-14
 > **Completed**: 2026-01-09

@@ -40,31 +40,15 @@
               expect requiresSession=true AND requiresDuplicateDetection=true.
            c. `az webapp config appsettings list` on every site touched ->
               expect the NFR-05 fail-fast config keys to be present + non-
-              empty (see "CONFIG-KEY VERIFICATION" note below — the .Api and
-              .Worker key SHAPES currently differ; this is a real, filed gap,
-              not a script bug).
+              empty (see "CONFIG-KEY VERIFICATION" below).
 
-    CONFIG-KEY VERIFICATION — DISCOVERED DRIFT (documented, not silently
-    special-cased around; task 113 author-time finding):
-      task 109 (DS-5 C5.1) renamed the .Api Bicep module's config keys to
-      the canonical NFR-05 shape (Cosmos__AccountEndpoint,
-      ServiceBus__FullyQualifiedNamespace, ManagedIdentity__ClientId, MI-only
-      -- no connection string). Task 109's own TASK-INDEX row explicitly
-      files a follow-on: "controlplane-worker-app-service.bicep (task 101)
-      carries the identical C5.1 key-shape drift, out of this task's scope."
-      That follow-on was never picked up by a numbered task. The Worker's
-      Bicep module (modules/controlplane-worker-app-service.bicep, as of
-      this script's authoring) STILL emits the pre-fix shape: Cosmos__Endpoint
-      / Cosmos__Database / Cosmos__RunsContainer + ServiceBus__ConnectionString
-      (KV-ref) -- and has NO ManagedIdentity__ClientId setting at all (only
-      the Azure-native AZURE_CLIENT_ID). Checking the .Api-shaped keys
-      against the Worker would make this script permanently fail for
-      -Target Worker/Both, not because the Worker is misconfigured, but
-      because the check would be wrong. $script:WorkerRequiredConfigKeys
-      below therefore checks the Worker's ACTUAL current Bicep-declared
-      keys. When a future task closes this gap (rename the Worker's Bicep
-      keys to match .Api's canonical shape), update
-      $script:WorkerRequiredConfigKeys to match -- and delete this note.
+    CONFIG-KEY VERIFICATION:
+      .Api and .Worker both emit the canonical NFR-05 shape
+      (Cosmos__AccountEndpoint, ServiceBus__FullyQualifiedNamespace,
+      ManagedIdentity__ClientId; the Worker also sets AZURE_CLIENT_ID). Until
+      2026-10-04 the Worker list below still checked the pre-rename key
+      Cosmos__Endpoint, so every -Target Worker/Both run failed this check on a
+      correctly configured Worker (found and fixed in task 251).
 
     keyVaultReferenceIdentity PATCH — OWNED BY THIS SCRIPT (post-authoring
     audit defect #8, Wave G-8 Batch 4):
@@ -311,11 +295,9 @@
 
     DISCOVERED-AT-AUTHOR-TIME GAPS (documented per CLAUDE.md §6.5 -- NOT
     silently worked around):
-      - .Worker's Bicep-declared config-key shape still diverges from
-        .Api's DS-5 C5.1 canonical shape (Cosmos__Endpoint vs
-        Cosmos__AccountEndpoint; no ManagedIdentity__ClientId). Filed by
-        task 109 as a follow-on with no owning task number as of this
-        script's authoring. See $script:WorkerRequiredConfigKeys below.
+      - (Closed) .Worker's config-key shape diverged from .Api's DS-5 C5.1
+        canonical shape; the Bicep module now emits the canonical keys and
+        $script:WorkerRequiredConfigKeys checks them (task 251).
       - .Api had NO /healthz route despite the App Service platform health
         probe expecting one since task 033. FIXED at discovery in this same
         commit (Endpoints/HealthEndpoints.cs) -- see file header there.
@@ -459,16 +441,16 @@ $ApiBaseUrl = "https://$ApiAppServiceName.azurewebsites.net"
 $ApiStagingBaseUrl = "https://$ApiAppServiceName-$SlotName.azurewebsites.net"
 $WorkerBaseUrl = "https://$WorkerAppServiceName.azurewebsites.net"
 
-# NFR-05 fail-fast config keys, PER TARGET. See .DESCRIPTION /
-# "CONFIG-KEY VERIFICATION — DISCOVERED DRIFT" for why these two lists are
-# NOT the same shape today.
+# NFR-05 fail-fast config keys, PER TARGET (see .DESCRIPTION "CONFIG-KEY VERIFICATION").
 $script:ApiRequiredConfigKeys = @(
     'Cosmos__AccountEndpoint',
     'ServiceBus__FullyQualifiedNamespace',
     'ManagedIdentity__ClientId'
 )
 $script:WorkerRequiredConfigKeys = @(
-    'Cosmos__Endpoint',
+    'Cosmos__AccountEndpoint',
+    'ServiceBus__FullyQualifiedNamespace',
+    'ManagedIdentity__ClientId',
     'AZURE_CLIENT_ID'
 )
 
@@ -872,11 +854,17 @@ function Invoke-ProductionZipDeploy {
         [Parameter(Mandatory)][string]$ZipPath
     )
     $ErrorActionPreference = 'Continue'
+    # --track-status false (task 248, 2026-10-03): the Worker is deployed while STOPPED (stop -> deploy ->
+    # start). With startup tracking on (the az default for Linux), `--async false` waits for a site start
+    # that cannot happen until the caller's finally-block starts the site — the deploy completed in ~30 s
+    # and the CLI then sat polling for 15+ minutes. The deployment itself is still awaited; /healthz after
+    # the start is the startup check.
     $output = az webapp deploy `
         --resource-group $AppServiceRg `
         --name $AppServiceName `
         --src-path $ZipPath `
         --type zip `
+        --track-status false `
         --async false 2>&1 | Out-String
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'

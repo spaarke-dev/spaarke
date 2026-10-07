@@ -32,8 +32,8 @@
 //   T6  Subscription vCPU insufficient: Failure with distinct
 //                                        quota-subscription-vcpu rejection
 //                                        code.
-//   T7  SPE cert missing: Failure with distinct spe-cert-bootstrap-missing
-//                          rejection code.
+//   T7  SPE owner check fails: H0 uses the code the probe names
+//       (SpeOwnerCredentialProbe has three — task 248), not a check-name default.
 //   T8  Run not found in Cosmos partition: Failure(Resumable, run-not-found).
 //   T9  HandlerId mismatch: throws InvalidOperationException (defensive
 //                            dispatch bug detector).
@@ -54,14 +54,28 @@
 //       upgrade-compat-matrix-unavailable); no probe fires.
 //   (Non-upgrade runs implicitly assert the matrix is NEVER queried: the
 //   default matrix stub used by T1–T9 throws on any call.)
+//
+//   HANDLER-03 (F1) OpenAI pin-freshness — Wave 2.5 live-impl-replaces-scaffold:
+//   H03-A Stub-probe test proves H0 rejection-code mapping:
+//         PreflightCheckNames.OpenAiPinFreshness → "quota-openai-pin-stale".
+//   H03-B Real-probe end-to-end test wires ArmOpenAiPinFreshnessProbe (real
+//         Azure.ResourceManager.CognitiveServices SDK) against a fake ARM HTTP
+//         transport returning lifecycleStatus="Deprecating" for gpt-4o@2024-08-06;
+//         asserts H0 returns Failure(Resumable, "quota-openai-pin-stale") with
+//         model name + pinned version in the diagnostic + evidence payload.
+//         Proves the probe genuinely reaches ARM (URL asserted) — closes the
+//         "verify probe is not stubbed" gap called out on the punchlist.
 // -----------------------------------------------------------------------------
 
+using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Xunit;
@@ -70,7 +84,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class H0PreflightHandlerTests
 {
-    private const string CustomerId = "acme-corp";
+    private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-preflight-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
 
@@ -87,7 +101,7 @@ public sealed class H0PreflightHandlerTests
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
             FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
         var handler = CreateHandler(repo, enqueuer, probes);
 
@@ -178,7 +192,7 @@ public sealed class H0PreflightHandlerTests
     [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
     [InlineData(PreflightCheckNames.DataverseEnvCreationRate, "quota-dataverse-env-rate")]
     [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
-    [InlineData(PreflightCheckNames.SpeCertBootstrap, "spe-cert-bootstrap-missing")]
+    [InlineData(PreflightCheckNames.SpeOwnerCredential, SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
         string failingCheck,
         string expectedRejectionCode)
@@ -197,9 +211,10 @@ public sealed class H0PreflightHandlerTests
             failingCheck == PreflightCheckNames.SubscriptionVCpuQuota
                 ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-            failingCheck == PreflightCheckNames.SpeCertBootstrap
-                ? FakeProbe.Fail(PreflightCheckNames.SpeCertBootstrap, "SPE cert: secret 'spe-owner-cert-pfx' not found in vault spaarke-platform-kv")
-                : FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            failingCheck == PreflightCheckNames.SpeOwnerCredential
+                ? FakeProbe.Fail(PreflightCheckNames.SpeOwnerCredential, "SPE owner: token exchange failed",
+                    SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)
+                : FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
         var handler = CreateHandler(repo, enqueuer, probes);
 
@@ -404,18 +419,583 @@ public sealed class H0PreflightHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
+    // ---------- HANDLER-03 (F1) OpenAiPinFreshness → quota-openai-pin-stale ----------
+    //
+    // Wave 2.5 live-impl-replaces-scaffold coverage (pre-dispatch audit
+    // 2026-08-27 punchlist HANDLER-03). Wave 2 landed the probe + the H0
+    // BuildRejectionCode case + probe-level Evaluate() unit tests but had NO
+    // handler-level integration proof that a Deprecating pin flows through
+    // H0PreflightHandler as Failure(Resumable, "quota-openai-pin-stale", ...).
+    // These two tests close that gap:
+    //   * H03-A — stub-probe test proves the H0 rejection-code mapping
+    //     verbatim (parity with the T4–T7 [Theory] but for the fifth probe).
+    //     The stub returns Passed=false; H0 must map CheckName
+    //     "OpenAiPinFreshness" → RejectionCode "quota-openai-pin-stale".
+    //   * H03-B — real-probe + fake-ARM-transport end-to-end test proves
+    //     ArmOpenAiPinFreshnessProbe genuinely calls the Azure Resource
+    //     Manager `Microsoft.CognitiveServices/.../models` endpoint (not a
+    //     hard-coded Passed), correctly parses lifecycleStatus="Deprecating"
+    //     on a real ADR-020-pinned model, and that H0 surfaces the per-pin
+    //     diagnostic (model name + pinned version) verbatim through the
+    //     ErrorDetail + preflight-quota-openai-pin-stale gate-state evidence.
+    //     Parity with ArmCognitiveServicesTpmProbeTests.CheckAsync_CallsRealArmUsageEndpoint;
+    //     reuses the shared ArmSdkTestFakes (CLAUDE.md §11 — extend, don't
+    //     duplicate).
+
+    [Fact]
+    public async Task OpenAiPinFreshnessProbeFailure_H0MapsToQuotaOpenAiPinStaleRejectionCode()
+    {
+        // Arrange — five probes, only the pin-freshness one fails. Fake stub
+        // returns the exact per-pin diagnostic shape the real probe emits so
+        // the assertion on ErrorDetail is meaningful.
+        var run = BuildRunWithTenant();
+        var repo = new FakeRepository(run, etag: "etag-h03a");
+        var enqueuer = new FakeEnqueuer();
+        var probes = new IPreflightQuotaProbe[]
+        {
+            FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
+            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
+            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
+            FakeProbe.Fail(
+                PreflightCheckNames.OpenAiPinFreshness,
+                "ADR-020 pinned OpenAI model freshness check FAILED for 1 of 3 pinned deployments in region 'westus3'. " +
+                "gpt-4o@2024-08-06: lifecycleStatus='Deprecating' inferenceDeprecationOn=2026-11-30T00:00:00Z. " +
+                "ADR-020 pin bump required BEFORE next provisioning run (H2a would otherwise fail with ServiceModelDeprecated)."),
+        };
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        // Act
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        // Assert — Failure(Resumable, quota-openai-pin-stale) with the probe
+        // diagnostic surfaced verbatim + Cosmos state marked Failed with the
+        // exact gate-state key.
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("quota-openai-pin-stale");
+        failure.Diagnostic.Should().Contain("gpt-4o@2024-08-06")
+            .And.Contain("Deprecating")
+            .And.Contain("ADR-020 pin bump");
+
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain("quota-openai-pin-stale");
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-quota-openai-pin-stale");
+        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
+    }
+
+    [Fact]
+    public async Task OpenAiPinFreshness_EndToEnd_RealProbeAgainstDeprecatingArmResponse_H0FailsWithQuotaOpenAiPinStale()
+    {
+        // Arrange — a run with region + subscriptionId + tenantId so the real
+        // probe can dispatch its ARM SDK call.
+        const string region = "westus3";
+        const string subscriptionId = "22222222-3333-4444-5555-666666666666";
+
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret["region"] = region;
+        run.Parameters.NonSecret["subscriptionId"] = subscriptionId;
+        var repo = new FakeRepository(run, etag: "etag-h03b");
+        var enqueuer = new FakeEnqueuer();
+
+        // Fake ARM transport returns a `Microsoft.CognitiveServices/models`
+        // page where the gpt-4o@2024-08-06 pin is scheduled to deprecate and
+        // its lifecycleStatus is "Deprecating". Inference-deprecation date is
+        // set far in the future (500 days) so the "window-expired" branch
+        // does NOT also fire — the failure is unambiguously the deprecating
+        // status. Other two pins are healthy so exactly ONE pin fails.
+        var pathHits = new List<string>();
+        var armHandler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            pathHits.Add(path);
+            path.Should().Contain("Microsoft.CognitiveServices",
+                "the probe MUST call the real Azure.ResourceManager.CognitiveServices endpoint " +
+                "(SubscriptionResource.GetModelsAsync), not a hard-coded stub");
+            path.Should().Contain("/models",
+                "the probe MUST call the models-list endpoint per Azure.ResourceManager.CognitiveServices " +
+                "1.5.2 XML docs: `/subscriptions/{sub}/providers/Microsoft.CognitiveServices/locations/{location}/models`");
+
+            var farFutureIso = DateTimeOffset.UtcNow.AddDays(500).ToString("O");
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, $$"""
+                {
+                  "value": [
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "gpt-4o",
+                        "version": "2024-08-06",
+                        "skus": [],
+                        "deprecation": { "inference": "{{farFutureIso}}" },
+                        "lifecycleStatus": "Deprecating"
+                      }
+                    },
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "gpt-4o-mini",
+                        "version": "2024-07-18",
+                        "skus": [],
+                        "lifecycleStatus": "GenerallyAvailable"
+                      }
+                    },
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "text-embedding-3-large",
+                        "version": "1",
+                        "skus": [],
+                        "lifecycleStatus": "GenerallyAvailable"
+                      }
+                    }
+                  ]
+                }
+                """);
+        });
+
+        var realPinnedProbe = new ArmOpenAiPinFreshnessProbe(
+            ArmSdkTestFakes.NewArmClient(armHandler),
+            PinnedModelCatalog.Models,
+            TimeProvider.System,
+            NullLogger<ArmOpenAiPinFreshnessProbe>.Instance);
+
+        // Compose alongside the four other probes as no-ops so the H0
+        // orchestration decision is driven by the pin-freshness verdict
+        // alone.
+        var probes = new IPreflightQuotaProbe[]
+        {
+            FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
+            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
+            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
+            FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
+            realPinnedProbe,
+        };
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        // Act
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        // Assert — the probe truly reached the ARM SDK, and the H0 handler
+        // translated the probe verdict into the exact rejection code +
+        // diagnostic + gate-state the punchlist mandates.
+        pathHits.Should().NotBeEmpty(
+            "the real ArmOpenAiPinFreshnessProbe must dispatch at least one HTTP call to Azure " +
+            "Resource Manager — proving CheckAsync is NOT stubbed");
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("quota-openai-pin-stale");
+        // Diagnostic MUST carry the specific ADR-020 pinned model name +
+        // pinned version that failed so the operator's remediation is
+        // deterministic (F1 lesson: "F1 pin freshness probe" must tell the
+        // operator WHICH pin to bump).
+        failure.Diagnostic.Should().Contain("gpt-4o@2024-08-06")
+            .And.Contain("Deprecating");
+
+        // Cosmos state — Failed + gate-state keyed by rejection code, with
+        // per-pin evidence payload the operator can inspect via the L2 GET
+        // /api/runs/{id} without pulling logs.
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain("quota-openai-pin-stale");
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-quota-openai-pin-stale");
+
+        var evidence = repo.LastWrittenRun.GateStates["preflight-quota-openai-pin-stale"].Evidence;
+        evidence.Should().NotBeNull("the H0 handler MUST persist the probe's headroom payload as gate-state evidence");
+        var evidenceJson = evidence!.Value.GetRawText();
+        evidenceJson.Should().Contain("gpt-4o@2024-08-06",
+            "the per-pin breakdown must identify the specific failing pin by name + version");
+        evidenceJson.Should().Contain("deprecating-status",
+            "the machine-stable reason code must accompany the human-readable diagnostic");
+
+        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
+    }
+
+    // ---------- COMP-10 cost-envelope gate (SESSION 17) ----------
+
+    [Fact]
+    public async Task CostEnvelope_OverrunAbortPolicy_FailsResumable_WithGateEntry()
+    {
+        // Red path: shared-trial tier + estimated $500/mo > $430 ceiling +
+        // default abortOnOverrun policy → Failure(Resumable, quota-cost-overrun).
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "500";
+        // costEnvelopePolicy intentionally absent → default abortOnOverrun.
+        var repo = new FakeRepository(run, etag: "etag-comp10-red");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H0PreflightHandler.CostOverrunRejectionCode);
+        failure.Diagnostic.Should()
+            .Contain("shared-trial").And.Contain("500.00").And.Contain("430.00");
+
+        // Probes MUST NOT fire — the gate is before the probe fan-out.
+        probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue(
+            "COMP-10: cost-envelope gate MUST short-circuit before any Azure probe fires");
+        enqueuer.Sent.Should().BeEmpty("H0 blocks; no H0.5 dispatch on cost overrun");
+
+        // Cosmos: Failed + gate-state carrying the evidence blob.
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain(H0PreflightHandler.CostOverrunRejectionCode);
+        repo.LastWrittenRun.GateStates.Should().ContainKey(
+            $"preflight-{H0PreflightHandler.CostOverrunRejectionCode}");
+
+        var evidence = repo.LastWrittenRun.GateStates[
+            $"preflight-{H0PreflightHandler.CostOverrunRejectionCode}"].Evidence;
+        evidence.Should().NotBeNull();
+        var evidenceJson = evidence!.Value.GetRawText();
+        evidenceJson.Should().Contain("shared-trial");
+        evidenceJson.Should().Contain("500");
+        evidenceJson.Should().Contain("430");
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model1_OverrunWarnAndProceedPolicy_ProceedsWithoutFail()
+    {
+        // Yellow path (Model 1 shared-trial): same overrun BUT
+        // costEnvelopePolicy = warnAndProceed → proceed. This is the ONLY
+        // legitimate warnAndProceed case per intake.schema.json costEnvelopePolicy
+        // description ("Model 1 shared-trial ONLY"). Model2Dedicated + warnAndProceed
+        // is rejected server-side by the Bucket B HIGH#12 SESSION 18 enforcement
+        // gate — see CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbort
+        // below.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1";  // Bucket B HIGH#12 SESSION 18: warnAndProceed only permitted for Model1Shared
+        run.Profile = "spaarke-hosted-model2";
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
+            H0PreflightHandler.CostEnvelopePolicyWarnAndProceed;
+        var repo = new FakeRepository(run, etag: "etag-comp10-yellow");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "warnAndProceed policy on Model1Shared MUST NOT block the run even when over-budget");
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue(
+            "warn-and-proceed reaches the probe fan-out");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("missing-tier", null, "3000")]                   // tier absent → strict-mode fail
+    [InlineData("unknown-tier", "some-invented-tier", "500")]    // tier not in ceiling table → strict-mode fail
+    [InlineData("missing-estimate", "dedicated", null)]          // estimate absent → strict-mode fail
+    [InlineData("unparseable-estimate", "dedicated", "not-a-number")] // estimate not decimal → strict-mode fail
+    public async Task CostEnvelope_Model2Dedicated_FailsClosed_On_Missing_Or_Invalid_Inputs_BucketB_MED4_MED5(
+        string scenario, string? tier, string? estimate)
+    {
+        // Bucket B MED#4/#5 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): Model2Dedicated MUST fail
+        // CLOSED on any missing/invalid cost-gate input (default
+        // RequireCostEnvelopeForModel2Dedicated=true). Dedicated-stamp
+        // tenancies burn real budget, so a silent skip on a Model2Dedicated
+        // run is a security-adjacent hole. The four scenarios cover:
+        //   - missing-tier: no tier param at all
+        //   - unknown-tier: tier value not in default table AND not configured
+        //   - missing-estimate: no estimatedMonthlyUsd param
+        //   - unparseable-estimate: estimatedMonthlyUsd is not a decimal
+        var run = BuildRunWithTenant();
+        // BuildRun() defaults TenancyModel="Model2" + tier="dedicated" + estimate="3000" (safe defaults).
+        // Override each param independently: null means REMOVE (exercise the missing branch); non-null means SET.
+        if (tier is null)
+        {
+            run.Parameters.NonSecret.Remove(H0PreflightHandler.TierParameterKey);
+        }
+        else
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = tier;
+        }
+        if (estimate is null)
+        {
+            run.Parameters.NonSecret.Remove(H0PreflightHandler.EstimatedMonthlyUsdParameterKey);
+        }
+        else
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = estimate;
+        }
+        var repo = new FakeRepository(run, etag: $"etag-med4-med5-{scenario}");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>(
+            $"scenario={scenario}: Model2Dedicated + strict-mode MUST fail-closed on any invalid cost-gate input").Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "operator can fix intake + resume");
+        failure.RejectionCode.Should().StartWith("quota-cost-envelope-",
+            $"scenario={scenario}: rejection code MUST be a distinct machine-stable literal (quota-cost-envelope-required-missing / -unknown-tier / -unparseable-estimate) so operators can grep post-hoc");
+        enqueuer.Sent.Should().BeEmpty(
+            "the run must NOT advance past H0 — abort BEFORE any Azure probe fires");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model1_Missing_Tier_Skips_LogOnly_BucketB_MED4()
+    {
+        // Bucket B MED#4 SESSION 18 non-regression: Model1Shared retains the
+        // pre-Bucket-B log-only skip on missing inputs (the shared-trial user
+        // sees the WARN log inline; blast radius is limited compared to
+        // Model2Dedicated). This test locks the asymmetry — a future refactor
+        // that expands strict-mode to Model1 without owner sign-off would
+        // fail this test.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1";
+        run.Profile = "spaarke-hosted-model2";
+        // Deliberately omit both tier + estimatedMonthlyUsd.
+        var repo = new FakeRepository(run, etag: "etag-med4-model1-skip");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "Model1Shared retains log-only skip on missing cost-gate inputs (Bucket B MED#4 SESSION 18 asymmetry)");
+        enqueuer.Sent.Should().ContainSingle(
+            "run advances past H0 — gate skipped but H0 itself succeeded");
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model2Dedicated_StrictModeOff_ReturnsToLogOnlySkip_BucketB_MED4()
+    {
+        // Bucket B MED#4 SESSION 18 escape hatch: H0Options.
+        // RequireCostEnvelopeForModel2Dedicated=false disables strict-mode,
+        // restoring the pre-Bucket-B log-only skip for internal-test envs
+        // where the operator has confirmed cost analytically before dispatch.
+        var run = BuildRunWithTenant();
+        // Model2Dedicated by BuildRun() default.
+        // Deliberately omit tier + estimate.
+        var repo = new FakeRepository(run, etag: "etag-med4-escape");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var h0Options = Microsoft.Extensions.Options.Options.Create(new H0Options
+        {
+            CostEnvelopeAbortsPreflight = true,
+            RequireCostEnvelopeForModel2Dedicated = false,  // escape hatch enabled
+        });
+        var handler = CreateHandler(repo, enqueuer, probes, h0Options: h0Options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "RequireCostEnvelopeForModel2Dedicated=false MUST restore log-only skip for Model2Dedicated");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("warnAndProceed")]     // canonical casing
+    [InlineData("WarnAndProceed")]     // PascalCase typo
+    [InlineData("WARNANDPROCEED")]     // all upper
+    [InlineData("warnandproceed")]     // all lower
+    public async Task CostEnvelopePolicy_CaseInsensitive_Match_BucketB_LOW1(string policyValue)
+    {
+        // Bucket B LOW#1 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the H0 policy comparison
+        // is OrdinalIgnoreCase, docstring now aligned. This test locks the
+        // case-insensitive semantic so a future refactor that flips to Ordinal
+        // (case-sensitive) fails here rather than silently changing the
+        // operator-facing contract. Uses Model1Shared so the HIGH#12
+        // Model2Dedicated abort-override does not fire.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1";
+        run.Profile = "spaarke-hosted-model2";
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] = policyValue;
+        var repo = new FakeRepository(run, etag: $"etag-low1-{policyValue}");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            $"policyValue='{policyValue}' MUST case-insensitively match warnAndProceed and skip the abort branch");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbortOnOverrun()
+    {
+        // Bucket B HIGH#12 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the intake schema declares
+        // "warnAndProceed MUST reject for Model2Dedicated" and the SKILL.md batch
+        // loader enforces it at Step 1.0. A direct-API caller (retry script /
+        // ad-hoc curl / non-skill orchestrator) that bypasses the skill and POSTs
+        // Model2Dedicated + warnAndProceed + over-budget MUST be caught server-side.
+        // H0 must FORCE the abortOnOverrun branch — a dedicated stamp running
+        // uncapped budget contradicts the schema invariant regardless of who POSTed.
+        var run = BuildRunWithTenant();
+        // BuildRun() already sets TenancyModel="Model2" (line 845) — the
+        // exact rogue-dispatch pair this test guards.
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "dedicated";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "9999";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
+            H0PreflightHandler.CostEnvelopePolicyWarnAndProceed;
+        var repo = new FakeRepository(run, etag: "etag-h12-reject");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "cost overrun is Resumable — operator resolves budget / changes policy then resumes");
+        failure.RejectionCode.Should().Be(H0PreflightHandler.CostOverrunRejectionCode,
+            "warnAndProceed on Model2Dedicated is forced through the abortOnOverrun branch, producing " +
+            "the same rejection code as an explicit abortOnOverrun run");
+        enqueuer.Sent.Should().BeEmpty(
+            "the run must NOT advance to H0.5 — abort fires before probe fan-out returns");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed,
+            "H0 marks the run Failed(Resumable) so operator can fix + resume");
+    }
+
+    [Fact]
+    public async Task CostEnvelope_UnderCeiling_Proceeds()
+    {
+        // Green path: estimated $200/mo ≤ $430 shared-trial ceiling → proceed.
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "200";
+        var repo = new FakeRepository(run, etag: "etag-comp10-green");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CostEnvelope_DisabledInOptions_SkipsGateEvenOnOverrun()
+    {
+        // Options.CostEnvelopeAbortsPreflight = false → gate SKIPPED entirely,
+        // even when the run is over-budget. Proves the operator escape hatch
+        // works so an internal-test env can disable the gate without touching
+        // handler code. Under-budget probes still fire.
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "5000";
+        var repo = new FakeRepository(run, etag: "etag-comp10-disabled");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var options = Options.Create(new H0Options { CostEnvelopeAbortsPreflight = false });
+        var handler = CreateHandler(repo, enqueuer, probes, h0Options: options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "disabled gate MUST NOT block even a wildly-over-budget run");
+    }
+
+    [Theory]
+    [InlineData(null)]        // missing tier
+    [InlineData("")]          // blank tier
+    [InlineData("bogus-tier")] // unknown tier — no ceiling → log-only skip
+    public async Task CostEnvelope_Model1_MissingOrUnknownTier_LogOnlySkip(string? tier)
+    {
+        // Bucket B MED#5 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): missing/unknown tier
+        // remains a LOG-ONLY skip for Model1Shared (see also
+        // CostEnvelope_Model2Dedicated_FailsClosed_On_Missing_Or_Invalid_Inputs_BucketB_MED4_MED5
+        // for the Model2Dedicated strict-mode variant). This test was renamed
+        // from CostEnvelope_MissingOrUnknownTier_LogOnlySkip and switched to
+        // Model1Shared so the intent (Model 1 log-only skip retained) is
+        // explicit in the name.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1";
+        run.Profile = "spaarke-hosted-model2";
+        // Override BuildRun()'s default tier (dedicated) — this test needs to
+        // clear/replace it to exercise the missing/unknown-tier code path.
+        run.Parameters.NonSecret.Remove(H0PreflightHandler.TierParameterKey);
+        if (tier is not null)
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = tier;
+        }
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "9999";
+        var repo = new FakeRepository(run, etag: "etag-comp10-skip");
+        var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "Bucket B MED#5 SESSION 18: Model1Shared retains LOG-ONLY skip on missing/unknown tier " +
+            "(Model2Dedicated fail-closes per the separate strict-mode test)");
+    }
+
+    [Theory]
+    [InlineData(null)]        // missing estimatedMonthlyUsd
+    [InlineData("")]          // blank
+    [InlineData("not-a-number")] // unparseable
+    public async Task CostEnvelope_Model1_MissingOrUnparseableEstimate_LogOnlySkip(string? raw)
+    {
+        // Bucket B MED#4 SESSION 18: Model1Shared retains LOG-ONLY skip on
+        // missing/unparseable estimatedMonthlyUsd. Model2Dedicated variant
+        // covered by CostEnvelope_Model2Dedicated_FailsClosed_...
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1";
+        run.Profile = "spaarke-hosted-model2";
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        // Override BuildRun()'s default estimate — this test clears/replaces it.
+        run.Parameters.NonSecret.Remove(H0PreflightHandler.EstimatedMonthlyUsdParameterKey);
+        if (raw is not null)
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = raw;
+        }
+        var repo = new FakeRepository(run, etag: "etag-comp10-skip-est");
+        var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "Bucket B MED#4 SESSION 18: Model1Shared retains LOG-ONLY skip on missing/unparseable estimatedMonthlyUsd");
+    }
+
     // ---------- helpers ----------
 
     /// <summary>
     /// Constructs the handler under test. When <paramref name="matrix"/> is
     /// omitted, a throwing stub is injected — non-upgrade tests therefore
     /// implicitly assert that first-install runs NEVER query the matrix.
+    /// COMP-10 (SESSION 17): the h0Options parameter defaults to null which
+    /// the handler ctor resolves to <see cref="H0Options"/> built-in defaults
+    /// (CostEnvelopeAbortsPreflight=true + built-in tier ceilings). Tests
+    /// that need to exercise the cost-envelope gate override it via an
+    /// explicit IOptions&lt;H0Options&gt; wrapper.
     /// </summary>
     private static H0PreflightHandler CreateHandler(
         FakeRepository repo,
         FakeEnqueuer enqueuer,
         IPreflightQuotaProbe[] probes,
-        IVersionCompatMatrix? matrix = null)
+        IVersionCompatMatrix? matrix = null,
+        IOptions<H0Options>? h0Options = null)
         => new(
             repo,
             enqueuer,
@@ -424,6 +1004,7 @@ public sealed class H0PreflightHandlerTests
                 VersionCompatVerdict.Green,
                 throws: new InvalidOperationException(
                     "IVersionCompatMatrix must not be queried outside upgrade mode")),
+            h0Options,
             NullLogger<H0PreflightHandler>.Instance);
 
     private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]
@@ -431,7 +1012,7 @@ public sealed class H0PreflightHandlerTests
         FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
         FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
         FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
-        FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+        FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
     };
 
     private static ProvisioningRun BuildUpgradeRun(bool includeVersions = true)
@@ -464,12 +1045,21 @@ public sealed class H0PreflightHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.NotStarted,
-            Profile = "spaarke-hosted-model2",
+            Profile = "customer-owned-model2",
         };
         run.Parameters.NonSecret["region"] = "eastus";
         run.Parameters.NonSecret["subscriptionId"] = "sub-1";
+        // Bucket B MED#4 SESSION 18: default TenancyModel="Model2" now
+        // triggers strict-mode cost-envelope enforcement (H0Options.
+        // RequireCostEnvelopeForModel2Dedicated=true). Populate valid tier +
+        // estimatedMonthlyUsd defaults so tests that don't focus on the
+        // cost-gate (probe failures, tenant guard, etc.) don't trip over it.
+        // Tests that specifically exercise missing/invalid cost-gate inputs
+        // MUST override or clear these defaults explicitly.
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "dedicated";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "3000";  // well under $5000 dedicated ceiling
         return run;
     }
 
@@ -578,18 +1168,21 @@ public sealed class H0PreflightHandlerTests
     {
         private readonly bool _pass;
         private readonly string _diagnostic;
+        private readonly string? _rejectionCode;
         public int CallCount { get; private set; }
         public string CheckName { get; }
 
-        private FakeProbe(string checkName, bool pass, string diagnostic)
+        private FakeProbe(string checkName, bool pass, string diagnostic, string? rejectionCode = null)
         {
             CheckName = checkName;
             _pass = pass;
             _diagnostic = diagnostic;
+            _rejectionCode = rejectionCode;
         }
 
         public static FakeProbe Pass(string checkName) => new(checkName, pass: true, diagnostic: "Pass");
-        public static FakeProbe Fail(string checkName, string diagnostic) => new(checkName, pass: false, diagnostic);
+        public static FakeProbe Fail(string checkName, string diagnostic, string? rejectionCode = null) =>
+            new(checkName, pass: false, diagnostic, rejectionCode);
 
         public Task<PreflightCheckResult> CheckAsync(PreflightProbeInput input, CancellationToken cancellationToken)
         {
@@ -599,7 +1192,8 @@ public sealed class H0PreflightHandlerTests
                 CheckName: CheckName,
                 Passed: _pass,
                 Headroom: doc.RootElement.Clone(),
-                Diagnostic: _diagnostic));
+                Diagnostic: _diagnostic,
+                RejectionCode: _rejectionCode));
         }
     }
 }

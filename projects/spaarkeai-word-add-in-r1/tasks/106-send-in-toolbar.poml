@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 8 (1) — Send Email moves into the toolbar next to Find, labelled "Send" with the mail icon</title>
+    <phase>6 UAT round 8 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`App.tsx`, `TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `TaskPaneNavigation.tsx`) and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only UI move, decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>096, 103</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 8 (2026-10-06), item 1. Record: `notes/042-uat-round8-2026-10-06.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>The Send Email action sits in the toolbar right after Find as a mail icon + "Send", in place of the full-width button in the pane body; Word's Email tab reads "Send" too.</goal>
+
+  <context>
+    <background>
+      - Outlook's Send Email (task 036) opens Outlook's native compose window; it is an action, not a tab ("Outlook unchanged", task 096). Today it renders as a full-width secondary button above the tab content (`App.tsx` `sendEmailRow`), shown only when there is a document or related record to link (`resolveSendEmailAffordance`).
+      - Word's Email tab (task 096, `canEmailFromPane`) is already in the toolbar, labelled "Email".
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 1">Toolbar, directly after Find; mail icon + "Send"; Word's Email tab label becomes "Send".</constraint>
+    <constraint source="task 036 / NFR-10">Gating unchanged: capability-only via `resolveSendEmailAffordance`; absent (not disabled) when there is nothing to link; spinner + disabled while sending; errors still shown in the pane body and announced.</constraint>
+    <constraint source="ADR-021">Fluent v9 subtle button matching the tabs' size; fits the 320 px minimum pane width with the Expand and ⋮ buttons.</constraint>
+    <constraint source="ADR-038">Toolbar tests: Send renders after Find only when supplied, calls the handler, disabled while sending; Word tab label "Send".</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Outlook, after a save: toolbar reads Save · To Do · Find · Send; the body has no Send Email button; clicking Send opens compose as before.</criterion>
+    <criterion testable="true">Outlook, before anything is saved/linked: no Send in the toolbar.</criterion>
+    <criterion testable="true">Word: the Email tab is labelled "Send" and still opens the in-pane email form.</criterion>
+    <criterion testable="true">Gates: full jest green; lint 0; typecheck 0 production.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Toolbar: optional `onSendEmail` / `isSendingEmail` props; render a subtle button after the tab list.</step>
+    <step>Shell passes them through; App supplies them when `canSendEmail`, removes the body button, keeps the error bar + live region.</step>
+    <step>Word tab label → "Send"; tests; gates; note; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>Send Email handler and toolbar exist.</existing>
+    <extension>Yes — the existing handler is rendered in the existing toolbar.</extension>
+    <cost-of-doing-nothing>Owner UAT round 8 item 1: a full-width button takes body space for an action that belongs with the tabs.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round8-2026-10-06.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

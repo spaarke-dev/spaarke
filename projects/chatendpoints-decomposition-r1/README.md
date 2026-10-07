@@ -1,5 +1,7 @@
 # ChatEndpoints Split — R1
 
+> **Portfolio**: [Project #1150](https://github.com/spaarke-dev/spaarke/issues/1150) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: INITIALIZED (folder + design only; execution not started, operator-gated)
 > **Origin**: code-quality-and-assurance-r3 follow-on seed `notes/red-item-analyses/RED-2-chatendpoints-split.md`
 > **Epic**: Code Quality (#427) · **Type**: refactor / decomposition · **Surface**: BFF (`Sprk.Bff.Api`)

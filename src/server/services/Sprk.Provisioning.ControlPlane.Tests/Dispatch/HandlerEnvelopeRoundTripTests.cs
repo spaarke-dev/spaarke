@@ -151,7 +151,7 @@ public sealed class HandlerEnvelopeRoundTripTests
     {
         HandlerId = "H4",
         RunId = "01J7Q3ZPABCDEF0000000001",
-        CustomerId = "acme-corp",
+        CustomerId = "acme",
         ParametersJson = parametersJson ?? "{\"kvUri\":\"@Microsoft.KeyVault(SecretUri=https://example.vault.azure.net/secrets/x)\"}",
         EnqueuedAt = DateTimeOffset.Parse("2026-08-19T14:00:00Z"),
         Attempt = attempt,

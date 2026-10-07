@@ -4,7 +4,7 @@
     <title>Class-B B11 staging-slot shadow-worker defect — verify `.Api` split status + complete `.Core/.Api/.Worker` split OR slot-sticky Enabled flags (DS-3 §5)</title>
     <phase>Pre-Live-Fire — Class-B architectural refactor (post-186 safe)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Structural refactor of L2 control-plane topology — high blast radius (touches project structure, deploy topology, Bicep slot config). Per root CLAUDE.md §8: `l2-controlplane` + `deploy` + architectural-refactor = FULL rigor. Publish-slot semantic changes are irreversible-adjacent (wrong split can silently double-process on production traffic).</rigor-reason>
     <model-tier>opus</model-tier>

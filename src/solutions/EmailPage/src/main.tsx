@@ -218,7 +218,7 @@ function resolveEmailLaunch(): {
   // cast to a minimal local shape (repo `as unknown as` idiom) rather than any.
   if (!id) {
     try {
-      const xrm = getXrm() as unknown as HostFormXrm | null;
+      const xrm = getXrm((x: any) => typeof x.Utility?.getPageContext === 'function' || !!x.Page?.data) as unknown as HostFormXrm | null;
       const input = xrm?.Utility?.getPageContext?.()?.input;
       if (input?.entityId && (!input.entityName || input.entityName === COMMUNICATION_ENTITY)) {
         id = normalizeId(input.entityId);
@@ -428,7 +428,7 @@ function Root() {
       }),
     [authenticatedFetch, bffBaseUrl]
   );
-  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
+  const dataverseUrl = React.useMemo(() => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
 
   // Signed-in user's mailbox for the compose "From:" row (item 3) — the email surface
   // defaults From to send-as this user (switchable to the Spaarke shared mailbox).

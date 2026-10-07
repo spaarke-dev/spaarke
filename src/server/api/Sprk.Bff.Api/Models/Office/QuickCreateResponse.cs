@@ -50,3 +50,31 @@ public record QuickCreateResponse
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IReadOnlyList<string>? Warnings { get; init; }
 }
+
+/// <summary>
+/// Response model for <c>GET /office/quickcreate/defaults</c> (task 100, owner decision B): what the pane's "+ New"
+/// form prefills, stated by the server so the prefill and the server's own default are the same answer.
+/// </summary>
+public record QuickCreateDefaultsResponse
+{
+    /// <summary>
+    /// The caller's own linked contact (task 141's user↔contact link — never an email match), or
+    /// <see langword="null"/> when the caller has none or it could not be read. The pane prefills Assigned To with it;
+    /// it is the same contact a Matter or Project is assigned to when the request names none.
+    /// </summary>
+    public QuickCreateContactOption? AssignedTo { get; init; }
+}
+
+/// <summary>A contact as the pane's Assigned To field shows it.</summary>
+public record QuickCreateContactOption
+{
+    /// <summary><c>contactid</c>.</summary>
+    public required Guid Id { get; init; }
+
+    /// <summary>The contact's <c>fullname</c>.</summary>
+    public required string Name { get; init; }
+
+    /// <summary>The contact's <c>emailaddress1</c>, when set.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Email { get; init; }
+}

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai;
@@ -14,6 +15,7 @@ using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
+using ExecutorType = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
 
@@ -71,8 +73,16 @@ public class InsightsOrchestratorTests
     // a null/default-row-fallback return to exercise the "unregistered" failure path.
     private readonly Mock<IConsumerRoutingService> _consumerRoutingMock = new();
 
+    // Task 163 — the run guard reads the playbook's node list. Default: a node list with NO node that can write to the
+    // subject, so the existing synthesis tests run unchanged; the guard tests below state the shape they rely on.
+    private readonly Mock<INodeService> _nodeServiceMock = new();
+
     public InsightsOrchestratorTests()
     {
+        _nodeServiceMock
+            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync([new PlaybookNodeDto { SprkExecutortype = ExecutorType.LiveFact, ConfigJson = "{\"subject\":\"matter:{{matterId}}\"}" }]);
+
         // Task 044: the orchestrator resolves the request-scoped HttpContext itself
         // (the deleted engine shell used to do this) — supply one for the synthesis path.
         _httpContextAccessorMock
@@ -113,6 +123,7 @@ public class InsightsOrchestratorTests
             _consumerRoutingMock.Object,
             _ragServiceMock.Object,
             BuildAssistantHandler(),
+            _nodeServiceMock.Object,
             NullLogger<InsightsOrchestrator>.Instance);
 
     private static InsightsAgentRequest MakeAgentRequest(
@@ -336,7 +347,190 @@ public class InsightsOrchestratorTests
         captured.Parameters!.Should().Contain("k1", "v1");
         captured.Parameters.Should().Contain("k2", "v2");
         captured.Parameters.Should().Contain("matterId", "M-9999");
+        captured.Parameters.Should().Contain("tenantId", TenantId,
+            "task 163: tenantId is server-owned (the shared parameter policy refuses it from a caller) and is bound here");
         captured.Ttl.Should().BeNull("orchestrator defers to cache DefaultTtl");
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_TheRunsTenantId_IsTheRequestsTenant_NeverAParameterValue()
+    {
+        PlaybookRunRequest? run = null;
+        ArrangeCacheMissThatDrainsTheEngine();
+        _playbookOrchestrationMock.Setup(o => o.ExecuteAsync(
+                It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Callback<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((r, _, _) => run = r)
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((_, _, ct) => SyntheticEngineStreamAsync(ct));
+
+        await CreateSut().AnswerQuestionAsync(MakeAgentRequest(new Dictionary<string, string> { ["TENANTID"] = "someone-elses-tenant" }));
+
+        run.Should().NotBeNull();
+        run!.Parameters.Should().ContainKey("tenantId").WhoseValue.Should().Be(TenantId);
+        run.Parameters!.Values.Should().NotContain("someone-elses-tenant");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 163 — the run guard (owner round 16 item 1: "Read suffices only for non-persisting playbooks")
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static PlaybookNodeDto Node(ExecutorType? type, string configJson) =>
+        new() { Id = Guid.NewGuid(), SprkExecutortype = type, ConfigJson = configJson };
+
+    /// <summary>matter-health-single's shape: an UpdateRecord whose recordId is the subject's {{matterId}}.</summary>
+    private static PlaybookNodeDto[] WritesToTheMatterSubject() =>
+    [
+        Node(ExecutorType.LiveFact, "{\"subject\":\"matter:{{matterId}}\"}"),
+        Node(ExecutorType.UpdateRecord, "{\"entityLogicalName\":\"sprk_matter\",\"recordId\":\"{{matterId}}\"}"),
+    ];
+
+    /// <summary>A cache MISS whose engine stream records whether it was ever enumerated.</summary>
+    private StrongBox<bool> ArrangeCacheMissThatDrainsTheEngine()
+    {
+        var engineEnumerated = new StrongBox<bool>(false);
+        _cacheMock.Setup(c => c.GetOrExecuteAsync(
+                It.IsAny<InsightsPlaybookExecutionRequest>(),
+                It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns<InsightsPlaybookExecutionRequest, Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>, CancellationToken>(
+                async (_, factory, ct) =>
+                {
+                    await foreach (var drained in factory(ct).WithCancellation(ct)) { }
+                    return InsightsEngineRunResult.FromArtifact(MakeArtifact());
+                });
+        _playbookOrchestrationMock.Setup(o => o.ExecuteAsync(
+                It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>(
+                (_, _, ct) => RecordingEngineStreamAsync(engineEnumerated, ct));
+        return engineEnumerated;
+    }
+
+    [Theory]
+    [InlineData("writes to the subject")]
+    [InlineData("an unclassifiable node names the subject")]
+    [InlineData("no nodes")]
+    [InlineData("unreadable node list")]
+    public async Task AnswerQuestionAsync_WithoutEstablishedSubjectWrite_ARunThatCanWriteTheSubject_IsRefusedBeforeItsFirstNode(string shape)
+    {
+        var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
+        PlaybookNodeDto[]? nodes = shape switch
+        {
+            "writes to the subject" => WritesToTheMatterSubject(),
+            "an unclassifiable node names the subject" => [Node(null, "{\"recordId\":\"{{matterId}}\"}")],
+            "no nodes" => [],
+            _ => null,
+        };
+        _nodeServiceMock.Setup(n => n.GetNodesAsync(Question, It.IsAny<CancellationToken>())).ReturnsAsync(nodes!);
+
+        var act = () => CreateSut().AnswerQuestionAsync(MakeAgentRequest());
+
+        (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>())
+            .Which.Code.Should().Be(InsightsAgentRequest.SubjectWriteRequiredCode, shape);
+        engineEnumerated.Value.Should().BeFalse("no node of the run may execute");
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_WithEstablishedSubjectWrite_ThePersistingRunExecutes_AndNoNodesAreReadForTheGuard()
+    {
+        var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
+        _nodeServiceMock.Setup(n => n.GetNodesAsync(Question, It.IsAny<CancellationToken>())).ReturnsAsync(WritesToTheMatterSubject());
+
+        var result = await CreateSut().AnswerQuestionAsync(MakeAgentRequest() with { SubjectWriteAuthorized = true });
+
+        result.Artifact.Should().NotBeNull();
+        engineEnumerated.Value.Should().BeTrue();
+        _nodeServiceMock.Verify(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("a side-effecting node that does not name the subject")]
+    [InlineData("a writer that names another subject's key")]
+    public async Task AnswerQuestionAsync_WithoutEstablishedSubjectWrite_ARunThatCannotWriteTheSubject_Executes(string shape)
+    {
+        var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
+        PlaybookNodeDto[] nodes = shape.StartsWith("a side-effecting", StringComparison.Ordinal)
+            ? [Node(ExecutorType.LiveFact, "{\"subject\":\"matter:{{matterId}}\"}"), Node(ExecutorType.AgentService, "{\"tenantId\":\"{{tenantId}}\"}")]
+            : [Node(ExecutorType.UpdateRecord, "{\"recordId\":\"{{projectId}}\"}")];
+        _nodeServiceMock.Setup(n => n.GetNodesAsync(Question, It.IsAny<CancellationToken>())).ReturnsAsync(nodes);
+
+        var result = await CreateSut().AnswerQuestionAsync(MakeAgentRequest());
+
+        result.Artifact.Should().NotBeNull(shape);
+        engineEnumerated.Value.Should().BeTrue(shape);
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_AProjectSubject_IsGuardedThroughItsOwnKey()
+    {
+        var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
+        _nodeServiceMock.Setup(n => n.GetNodesAsync(Question, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Node(ExecutorType.UpdateRecord, "{\"recordId\":\"{{projectId}}\"}")]);
+        var projectRequest = new InsightsAgentRequest(Question, $"project:{Guid.NewGuid()}", null, TenantId, ScopeHash);
+
+        var act = () => CreateSut().AnswerQuestionAsync(projectRequest);
+
+        (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>())
+            .Which.Code.Should().Be(InsightsAgentRequest.SubjectWriteRequiredCode);
+        engineEnumerated.Value.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task AnswerQuestionAsync_ACacheHit_RunsNothing_SoTheGuardReadsNoNodes()
+    {
+        _cacheMock.Setup(c => c.GetOrExecuteAsync(
+                It.IsAny<InsightsPlaybookExecutionRequest>(),
+                It.IsAny<Func<CancellationToken, IAsyncEnumerable<PlaybookStreamEvent>>>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(InsightsEngineRunResult.FromArtifact(MakeArtifact()));
+
+        await CreateSut().AnswerQuestionAsync(MakeAgentRequest());
+
+        _nodeServiceMock.Verify(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AssistantQuery_PlaybookPath_CarriesTheRoutesEstablishedSubjectWrite_SingleShotAndStreaming(bool streaming)
+    {
+        // forceMode "playbook" → the default insights-ask Binding → a playbook that writes to the matter subject.
+        var defaultPlaybook = Guid.NewGuid();
+        _consumerRoutingMock
+            .Setup(r => r.ResolveBindingAsync(ConsumerTypes.InsightsAsk, "default",
+                It.IsAny<IRoutingContext?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = Guid.NewGuid(), ConsumerType = ConsumerTypes.InsightsAsk, ConsumerCode = "default", PlaybookId = defaultPlaybook,
+            });
+        _nodeServiceMock.Setup(n => n.GetNodesAsync(defaultPlaybook, It.IsAny<CancellationToken>())).ReturnsAsync(WritesToTheMatterSubject());
+        var engineEnumerated = ArrangeCacheMissThatDrainsTheEngine();
+
+        AssistantQueryFacadeRequest Request(bool writeEstablished) => new(
+            Query: "how healthy is this matter?", ParentEntityType: "matter", ParentEntityId: Guid.NewGuid().ToString(),
+            Subject: $"matter:{Guid.NewGuid()}", ForceMode: "playbook", ConversationId: null, PreviousTurnSummary: null,
+            TenantId: TenantId, CallerOid: "caller-oid", CallerPrincipal: new System.Security.Claims.ClaimsPrincipal())
+        {
+            SubjectWriteAuthorized = writeEstablished,
+        };
+
+        async Task RunAsync(AssistantQueryFacadeRequest request)
+        {
+            if (streaming)
+            {
+                await foreach (var _ in CreateSut().AssistantQueryStreamAsync(request)) { }
+            }
+            else
+            {
+                await CreateSut().AssistantQueryAsync(request);
+            }
+        }
+
+        var refused = () => RunAsync(Request(writeEstablished: false));
+        (await refused.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>())
+            .Which.Code.Should().Be(InsightsAgentRequest.SubjectWriteRequiredCode);
+        engineEnumerated.Value.Should().BeFalse("a caller without Write on the subject never runs a playbook that writes to it");
+
+        await RunAsync(Request(writeEstablished: true));
+        engineEnumerated.Value.Should().BeTrue("the same playbook runs once the route established the caller's Write");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -923,6 +1117,17 @@ public class InsightsOrchestratorTests
         yield return PlaybookStreamEvent.RunStarted(runId, playbookId, 1);
         await Task.Yield();
         yield return PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics());
+    }
+
+    private static async IAsyncEnumerable<PlaybookStreamEvent> RecordingEngineStreamAsync(
+        StrongBox<bool> enumerated,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        enumerated.Value = true;
+        await foreach (var playbookEvent in SyntheticEngineStreamAsync(ct))
+        {
+            yield return playbookEvent;
+        }
     }
 
     private static async IAsyncEnumerable<PlaybookStreamEvent> ThrowingStreamAsync(

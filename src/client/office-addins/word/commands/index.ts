@@ -29,6 +29,7 @@ import {
   describeQuickSaveSuccess,
   describeQuickSaveFailure,
   describeUnsavableIdentity,
+  buildQuickSaveRecordLink,
   type QuickSaveStage,
   type QuickSaveTarget,
   type QuickSaveSavedDocument,
@@ -38,7 +39,8 @@ import {
   configuredSpaarkeAppName,
   openFileUrl,
 } from '@shared/taskpane/services/openRecordLauncher';
-import { cleanGuid } from '@shared/taskpane/utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { openQuickSaveDialog } from './quickSaveDialog';
 
 // Register global functions for Office to call
 declare global {
@@ -252,10 +254,15 @@ async function readSavedDocument(
  * 6. **The notification says what happened, in words**: "Saved to Spaarke as '{name}'", "Saved a new version of
  *    '{name}'", or the server's own message for a refusal. Never the fixed "Failed to save" text.
  *
- * Never opens the task pane. `event.completed()` fires on every path via `finally` — asserted by
- * `__tests__/commands.test.ts`, not by inspection.
+ * Task 110 (UAT round 11, item 2): the Spaarke dialog opens at the START with a progress state and is then updated in
+ * place with the result — success (plus an "Open in Spaarke" link to the document record, when `ORG_URL` is set) or
+ * the error. See `quickSaveDialog.ts` for the host-support paths and the `event.completed()` lifetime.
+ *
+ * Never opens the task pane. `event.completed()` is called exactly once on every path — when the save is over and the
+ * dialog is closed (or capped), or at once with no dialog — asserted by `__tests__/commands.test.ts`, not by inspection.
  */
 async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
+  const dialog = await openQuickSaveDialog({ onComplete: () => event.completed(), orgUrl: process.env.ORG_URL });
   let stage: QuickSaveStage = 'connect';
   try {
     const adapter = await ensureBootstrapped();
@@ -274,7 +281,7 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
     }
     const unsavable = describeUnsavableIdentity(identity);
     if (unsavable) {
-      notify(unsavable, 'error');
+      await dialog.show({ message: unsavable, status: 'error' });
       return;
     }
 
@@ -298,28 +305,35 @@ async function quickSave(event: Office.AddinCommands.Event): Promise<void> {
       target.mode === 'version' ? target.existingDocumentId : null
     );
     if (saved.kind === 'failed') {
-      notify(`Spaarke could not finish saving this document: ${saved.reason}.`, 'error');
+      await dialog.show({
+        message: `Spaarke could not finish saving this document: ${saved.reason}.`,
+        status: 'error',
+      });
       return;
     }
     if (saved.kind === 'saved') {
       await writeIdentityStampAfterSave(adapter, saved.document.documentId);
     }
 
-    notify(
-      describeQuickSaveSuccess({
+    await dialog.show({
+      message: describeQuickSaveSuccess({
         target,
         requestedFileName: request.document.fileName,
         documentLabel: identity.kind === 'resolved' ? identity.documentName || identity.fileName || null : null,
         saved: saved.kind === 'saved' ? saved.document : null,
         duplicate: response?.duplicate === true,
       }),
-      'success'
-    );
+      status: 'success',
+      linkUrl:
+        saved.kind === 'saved'
+          ? buildQuickSaveRecordLink(process.env.ORG_URL, configuredSpaarkeAppName(), saved.document.documentId)
+          : null,
+    });
   } catch (error) {
     console.error('Quick save failed:', error);
-    notify(describeQuickSaveFailure(error, stage), 'error');
+    await dialog.show({ message: describeQuickSaveFailure(error, stage), status: 'error' });
   } finally {
-    event.completed();
+    dialog.finish();
   }
 }
 

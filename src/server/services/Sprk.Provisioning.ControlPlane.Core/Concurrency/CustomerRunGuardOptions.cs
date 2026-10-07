@@ -26,6 +26,13 @@
 // tenant intrinsically (same reasoning as DataverseEnvironmentRegistryClient's
 // "NO TenantId set" note). It stays on the options for diagnostics + config parity
 // with the sibling H6/H7 writers, which still address customer tenants explicitly.
+//
+// REG-02 / REG-05 RESTORED 2026-10-05 (task 242b, while merging to master): commit 3d60b9e59
+// (2026-08-27) made the guard default ON, made TenantId optional, fell back to
+// DataverseEnvironmentRegistry:AdminEnvironmentUrl and cross-checked the two admin URLs. A
+// later master merge kept #847's version of these two files (the managed-identity half of the
+// same change) and silently dropped the rest, leaving CustomerRunGuardModulePostConfigureTests
+// red (task 221's last six failures). Restored on top of #847's credential code.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Concurrency;
@@ -40,15 +47,22 @@ public sealed class CustomerRunGuardOptions
     /// <summary>Configuration section name (bound via <see cref="CustomerRunGuardModule.AddCustomerRunGuard"/>).</summary>
     public const string SectionName = "CustomerRunGuard";
 
+    /// <summary>The registry client's admin-environment setting the guard falls back to (REG-05).</summary>
+    internal const string RegistryAdminEnvironmentUrlKey =
+        Registry.DataverseEnvironmentRegistryOptions.SectionName + ":AdminEnvironmentUrl";
+
     /// <summary>
     /// Admin Dataverse environment URL (e.g. <c>https://spaarke-admin.crm.dynamics.com</c>).
-    /// Must be an absolute URI. Required when <see cref="Enabled"/> is true.
+    /// Must be an absolute URI. Required when <see cref="Enabled"/> is true. When unset,
+    /// <see cref="CustomerRunGuardModule"/> falls back to
+    /// <c>DataverseEnvironmentRegistry:AdminEnvironmentUrl</c> (REG-05: both clients read and write
+    /// the same <c>sprk_dataverseenvironment</c> rows); when both are set their hosts must match.
     /// </summary>
     public string? TargetDataverseUrl { get; set; }
 
     /// <summary>
-    /// Entra tenant id used to acquire the confidential-client token.
-    /// Required when <see cref="Enabled"/> is true.
+    /// Entra tenant id. Optional and not used for token issuance since the managed-identity
+    /// migration (see the file header) — kept for diagnostics and config parity.
     /// </summary>
     public string? TenantId { get; set; }
 
@@ -88,16 +102,13 @@ public sealed class CustomerRunGuardOptions
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Kill-switch. Defaults to <c>false</c> so a fresh L2 deployment without
-    /// the admin-env credentials configured does not crash at boot; the guard
-    /// detects the disabled state and returns <see cref="AcquireResult.Success"/>
-    /// unconditionally per the null-object kill-switch pattern (ADR-032). A
-    /// WARN-level log fires on every acquire attempt so operators notice.
-    /// Production deployments MUST set this to <c>true</c> after wiring the
-    /// KV references. Test hosts leave this false — the endpoint tests replace
-    /// <see cref="ICustomerRunGuard"/> with an in-memory fake.
+    /// Kill-switch. Defaults to <c>true</c> (REG-02): with the managed identity there is no
+    /// credential left to be missing, and spec FR-32 requires the guard on in production. Set
+    /// <c>false</c> explicitly to disable it (ADR-032 null-object behaviour: the guard returns
+    /// <see cref="AcquireResult.Success"/> with a WARN log on every acquire). Endpoint test hosts set
+    /// it false or replace <see cref="ICustomerRunGuard"/> with an in-memory fake.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Startup validation applied by <see cref="CustomerRunGuardModule"/>.
@@ -118,19 +129,17 @@ public sealed class CustomerRunGuardOptions
         if (string.IsNullOrWhiteSpace(TargetDataverseUrl))
         {
             throw new InvalidOperationException(
-                $"Configuration '{SectionName}:TargetDataverseUrl' is required when '{SectionName}:Enabled' is true.");
+                $"Configuration '{SectionName}:TargetDataverseUrl' is required when '{SectionName}:Enabled' is true. " +
+                $"When it is unset the module falls back to '{RegistryAdminEnvironmentUrlKey}' — set one or the other " +
+                "(when both are set their hosts must match).");
         }
         if (!Uri.TryCreate(TargetDataverseUrl, UriKind.Absolute, out _))
         {
             throw new InvalidOperationException(
                 $"Configuration '{SectionName}:TargetDataverseUrl' must be an absolute URI (actual: '{TargetDataverseUrl}').");
         }
-        if (string.IsNullOrWhiteSpace(TenantId))
-        {
-            throw new InvalidOperationException(
-                $"Configuration '{SectionName}:TenantId' is required when '{SectionName}:Enabled' is true.");
-        }
-        // ClientId / ClientSecret checks removed 2026-08-27 with the fields themselves. The store
+        // TenantId, ClientId and ClientSecret are not required: the store authenticates as the L2 UAMI (TenantId is
+        // diagnostics-only; ClientId / ClientSecret were removed 2026-08-27 with the fields themselves). The store
         // now authenticates as the L2 UAMI; ManagedIdentityClientId is OPTIONAL by design (empty
         // means "the ambient identity"), so there is nothing further to require here.
         if (string.IsNullOrWhiteSpace(EntitySetName))

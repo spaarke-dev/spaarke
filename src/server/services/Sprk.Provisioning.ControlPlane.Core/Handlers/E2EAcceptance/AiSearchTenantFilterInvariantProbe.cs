@@ -10,28 +10,24 @@
 //   Every AI Search query MUST include an unconditional `tenantId eq '{TenantId}'`
 //   filter. This probe verifies that constraint holds AT ONBOARDING TIME by
 //   issuing a live SAMPLE QUERY against the customer's AI Search endpoint and
-//   asserting the filter is (a) SHAPE-CORRECT (per task 124's Model 1
-//   tenant-filter template document) and (b) ENFORCED SERVER-SIDE (the query
+//   asserting the filter is (a) ACCEPTED by the index (tenantId filterable) and
+//   (b) ENFORCED SERVER-SIDE (the query
 //   round-trips 200 + any returned documents match request.TenantId — a
 //   foreign-tenant doc in the response would be a CATASTROPHIC §4D I2
 //   violation).
 //
-// WHY I DID NOT MERELY RE-CHECK THE TEMPLATE DOCUMENT (POML explicit):
-//   The POML prompt says verbatim: "not merely present in the template, but
-//   actually applied server-side to a live query". Re-reading the Cosmos-stored
-//   template document (task 124's artifact) confirms the ARTIFACT SHAPE but
-//   NOT that the AI Search service ACCEPTS the filter at query time — those are
-//   two different checks. This probe does BOTH: it verifies the template shape
-//   (Model 1 only — Model 2 has no template artifact by design) AND issues an
-//   actual /docs/search POST with the filter, asserting HTTP 200 + returned
-//   documents (if any) belong to the requested tenant. Every foreign-tenant doc
-//   in a filtered response = Failed (server did not enforce). A malformed
-//   filter payload rejected with HTTP 400 = Failed (tenantId field not
-//   filterable — H2b's schema-verifier missed it). Empty results (HTTP 200 with
-//   zero docs) are Pass-eligible provided the endpoint is reachable + accepts
-//   the filter syntax — combined with H2b's structural "tenantId is filterable"
-//   check (task 045's RestApiAiSearchIndexVerifier), the filter mechanic is
-//   proven applicable at query time even when no data yet exists.
+// LIVE QUERY, NOT AN ARTIFACT CHECK (task 173 POML: "actually applied server-side
+//   to a live query"): the probe issues an actual /docs/search POST with the filter
+//   on every canonical index, asserting HTTP 200 + returned documents (if any)
+//   belong to the requested tenant. Every foreign-tenant doc in a filtered response
+//   = Failed (server did not enforce). A malformed filter payload rejected with
+//   HTTP 400 = Failed (tenantId field not filterable — H2b's schema-verifier missed
+//   it). Empty results (HTTP 200 with zero docs) are Pass-eligible provided the
+//   endpoint is reachable + accepts the filter syntax — combined with H2b's
+//   structural "tenantId is filterable" check (RestApiAiSearchIndexVerifier), the
+//   filter mechanic is proven applicable at query time even when no data yet exists.
+//   (Task 225b retired the Model 1 template-artifact check with H2b's shared-platform
+//   branch.)
 //
 // WHAT THE PROBE CAN AND CANNOT CONCLUSIVELY DETECT:
 //   CAN detect (Failed, CATASTROPHIC):
@@ -39,27 +35,20 @@
 //       tenantId → the filter is being IGNORED server-side (cross-tenant leak).
 //     * Server rejects the query with HTTP 4xx because the tenantId field
 //       isn't filterable on the index → I2 filter cannot be applied at all.
-//     * Model 1 template artifact carries a different tenantId than the
-//       request → the onboarding record was written under the WRONG tenant
-//       identity (silent-fail trap that would put future filtered queries on
-//       the wrong scope).
-//     * Model 1 template artifact's per-index filter predicate does not match
-//       the exact shape `tenantId eq '{escaped-tenantId}'` → the recorded
-//       enforcement intent is malformed.
-//     * Model 1 template artifact is MISSING for a Model 1 tenant → H2b
-//       silently failed OR the run isn't Model 1 as its parameters claim.
 //     * Response body malformed / missing `value` array → server contract
 //       violation.
 //   CANNOT detect (Pass-eligible under this probe alone):
+//     * Bleed between two Model 1 customers: every Model 1 stamp carries Spaarke's tenantId, so the
+//       `tenantId eq` filter cannot tell them apart. Isolation between Model 1 customers comes from each
+//       stamp having its OWN AI Search service (task 225b, D-12), not from this filter.
 //     * A completely EMPTY index with the customer as the only tenant → the
-//       positive probe returns 0 docs; combined with H2b's structural check
-//       + template-artifact shape check, this is treated as Pass (the filter
+//       positive probe returns 0 docs; combined with H2b's structural check,
+//       this is treated as Pass (the filter
 //       APPLIES; the index just has no data). This is the honest limit of a
 //       runtime probe without invasive test-data injection.
 //
 // EDGE CASES + INFRA-FAULT DISCIPLINE (Waves G-4..G-6 pattern):
 //   * ProvisioningRun not found → InfraFault (retry from Cosmos).
-//   * Model 1 template store unreachable → InfraFault (Cosmos transient).
 //   * AI Search endpoint unreachable → InfraFault (network transient).
 //   * AAD token acquisition failure → InfraFault (auth transient).
 //   * Response body cannot be parsed → InfraFault (probe-side deserializer bug
@@ -68,16 +57,12 @@
 //   evidence so the operator can jump straight to the offender without
 //   correlating logs.
 //
-// TENANCY-MODEL BRANCH (design.md §4.1a):
-//   * Model 1 (Model1Shared): template artifact EXISTS in Cosmos (task 124's
-//     H2b M1 branch provisions it). Endpoint comes from template.SearchEndpoint
-//     (the shared platform Search service). Expected filters come from the
-//     template's per-index list.
-//   * Model 2 (Model2Dedicated): template artifact does NOT exist by design
-//     (H2b M2 branch does not provision it — the customer has their own
-//     dedicated Search service). Endpoint comes from request.AiSearchEndpoint
-//     (InterStepState populated by H2a). Expected filters are derived from
-//     ICanonicalIndexCatalog.CanonicalIndexNames × `tenantId eq '{tenantId}'`.
+// TENANCY MODEL (task 225b, D-12):
+//   Both models are dedicated stamps: the endpoint comes from request.AiSearchEndpoint
+//   (InterStepState populated by H2a) and the expected filters are derived from
+//   ICanonicalIndexCatalog.CanonicalIndexNames × `tenantId eq '{tenantId}'`. The run's
+//   tenancyModel is still parsed (Task 223: an unparseable / blank value is an
+//   InfraFault with TenancyModelParser.FormatExpectedValues()), but it selects nothing.
 //
 // SEAM JUSTIFICATION (ADR-010 / CLAUDE.md §11 extension test):
 //   Existing: <see cref="IE2EInvariantVerifier"/> aggregate seam +
@@ -108,8 +93,7 @@
 //     E2EAcceptanceModule; no feature-gate branch.
 //   * ADR-038 (integration-heavy pyramid): tests exercise the probe against a
 //     hand-rolled FakeHttpMessageHandler (never Mock&lt;HttpMessageHandler&gt;),
-//     a hand-rolled FakeTenantFilterTemplateStore, a hand-rolled
-//     FakeProvisioningRunRepository, a FakeCanonicalIndexCatalog, and a
+//     a hand-rolled FakeProvisioningRunRepository, a FakeCanonicalIndexCatalog, and a
 //     FakeTokenCredential — parity with ArmSdkTestFakes (task 123).
 // -----------------------------------------------------------------------------
 
@@ -130,19 +114,16 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// <see cref="IInvariantProbe"/> for <see cref="InvariantKind.I2AiSearchTenantFilter"/> —
 /// issues a live sample search query against the customer's AI Search endpoint
 /// and asserts the tenantId filter is enforced server-side. See file header
-/// for the branch semantics (Model 1 vs Model 2) and the honest can-vs-cannot-
-/// detect breakdown.
+/// for the honest can-vs-cannot-detect breakdown.
 /// </summary>
 public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
 {
     /// <summary>AAD OAuth2 scope for AI Search AAD-authenticated REST calls (parity with RestApiAiSearchIndexVerifier).</summary>
     private static readonly string[] SearchAadScope = new[] { "https://search.azure.com/.default" };
 
-    /// <summary>Canonical Model 1 tenancy-model marker (matches H2bAiSearchIndexHandler's own comparison).</summary>
-    private const string Model1TenancyModel = "Model1Shared";
-
-    /// <summary>Canonical Model 2 tenancy-model marker (matches H2bAiSearchIndexHandler's own comparison).</summary>
-    private const string Model2TenancyModel = "Model2Dedicated";
+    // Task 223 (D-12): file-private Model1TenancyModel / Model2TenancyModel constants deleted —
+    // the shared Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel enum + TenancyModelParser
+    // replace them. Do NOT reintroduce local copies.
 
     /// <summary>Default HttpClient name — the module registers this HttpClient by name so the probe can pull it via IHttpClientFactory.</summary>
     public const string HttpClientName = "H13-I2-AiSearchTenantFilterProbe";
@@ -161,7 +142,6 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
     };
 
     private readonly IProvisioningRunRepository _repository;
-    private readonly ITenantFilterTemplateStore _templateStore;
     private readonly ICanonicalIndexCatalog _catalog;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly TokenCredential _credential;
@@ -171,7 +151,6 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
     /// <summary>Constructs the probe. All collaborators are seams (ADR-010 ≥2 impls per test suite).</summary>
     public AiSearchTenantFilterInvariantProbe(
         IProvisioningRunRepository repository,
-        ITenantFilterTemplateStore templateStore,
         ICanonicalIndexCatalog catalog,
         IHttpClientFactory httpClientFactory,
         TokenCredential credential,
@@ -179,7 +158,6 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
         ILogger<AiSearchTenantFilterInvariantProbe> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
-        ArgumentNullException.ThrowIfNull(templateStore);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(credential);
@@ -187,7 +165,6 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
-        _templateStore = templateStore;
         _catalog = catalog;
         _httpClientFactory = httpClientFactory;
         _credential = credential;
@@ -206,7 +183,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
 
         if (string.IsNullOrWhiteSpace(request.CustomerId))
         {
-            return InfraFault("request.CustomerId is empty — cannot look up ProvisioningRun / template.");
+            return InfraFault("request.CustomerId is empty — cannot look up ProvisioningRun.");
         }
         if (string.IsNullOrWhiteSpace(request.RunId))
         {
@@ -220,7 +197,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
             return InfraFault("request.TenantId is empty — I2 probe cannot verify tenant scope without an explicit tenantId (§4D I1 defense-in-depth).");
         }
 
-        // (1) Load the run to determine tenancyModel — I2 branches on it.
+        // (1) Load the run (a run that does not exist, or carries no parseable tenancy model, is corrupt).
         ProvisioningRunReadResult? read;
         try
         {
@@ -234,105 +211,51 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
         {
             return InfraFault(
                 $"ProvisioningRun '{request.RunId}' not found in customer partition '{request.CustomerId}'. " +
-                "The run must exist for the probe to determine tenancyModel.");
+                "The run must exist for the probe to run.");
         }
 
-        var tenancyModel = string.IsNullOrWhiteSpace(read.Run.TenancyModel)
-            ? Model2TenancyModel // Match H2b's own default fallback.
-            : read.Run.TenancyModel;
+        // Task 223 (D-12): reject unparseable tenancy rather than silently defaulting to Model 2.
+        // Pre-D-12 the probe MATCHED H2b's own blank→Model2 default; that default is retired
+        // (Item 2 / D3), so the probe now surfaces InfraFault with the accepted-set formatted
+        // by the enum's own name list. Unknown / mixed-case values fail here rather than
+        // silently misrouting to Model 2's dedicated-service branch.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(read.Run.TenancyModel, out var tenancyModel))
+        {
+            return InfraFault(
+                $"ProvisioningRun.tenancyModel '{read.Run.TenancyModel ?? "(null)"}' on run '{request.RunId}' is not " +
+                $"a recognized TenancyModel. Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}. " +
+                "Pre-D-12 the probe defaulted blank to Model2Dedicated; Task 223 retires that silent default (D3).");
+        }
 
-        // (2) Determine endpoint + expected per-index filter set.
+        // (2) Determine endpoint + expected per-index filter set. The tenancy model is parsed above to
+        //     reject a corrupted run (and is logged); it no longer selects a branch.
         string endpoint;
         ImmutableArray<(string IndexName, string ExpectedFilterPredicate)> targets;
 
         var expectedPredicateForRequestTenant = BuildFilterPredicate(request.TenantId);
 
-        if (string.Equals(tenancyModel, Model1TenancyModel, StringComparison.OrdinalIgnoreCase))
-        {
-            TenantFilterTemplateDocument? template;
-            try
-            {
-                template = await _templateStore.TryReadAsync(request.CustomerId, cancellationToken).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                return InfraFault($"Model 1 tenant-filter template read failed: {ex.GetType().Name}: {ex.Message}.");
-            }
-
-            if (template is null)
-            {
-                return Failed(
-                    "Model 1 tenant-filter template artifact is MISSING for this customer. H2b's Model 1 branch " +
-                    "provisions this artifact at onboarding (task 124 real impl); its absence means H2b silently " +
-                    "failed OR the run's tenancyModel claim ('Model1Shared') is inconsistent with H2b's actual " +
-                    "execution branch. Either way I2's onboarding-time enforcement decision was NOT recorded.");
-            }
-            if (!string.Equals(template.TenantId, request.TenantId, StringComparison.Ordinal))
-            {
-                return Failed(
-                    $"Model 1 template tenantId mismatch: template records '{template.TenantId}' but the H13 " +
-                    $"request scopes to '{request.TenantId}'. Silent-fail-trap: any filtered query built from " +
-                    "the template would apply the WRONG tenant scope — every future AI Search query for this " +
-                    "customer would be under the wrong identity (§4D I1 CATASTROPHIC).");
-            }
-
-            var templateEntries = ImmutableArray.CreateBuilder<(string, string)>(template.Filters.Count);
-            foreach (var entry in template.Filters)
-            {
-                if (!string.Equals(entry.FilterPredicate, expectedPredicateForRequestTenant, StringComparison.Ordinal))
-                {
-                    return Failed(
-                        $"Model 1 template FILTER PREDICATE malformed for index '{entry.IndexName}': recorded " +
-                        $"'{entry.FilterPredicate}' but expected '{expectedPredicateForRequestTenant}'. The template " +
-                        "would apply an incorrect / bypassable filter — I2 enforcement is compromised.");
-                }
-                templateEntries.Add((entry.IndexName, entry.FilterPredicate));
-            }
-            if (templateEntries.Count == 0)
-            {
-                return Failed(
-                    "Model 1 template has ZERO per-index filter entries — no I2 enforcement recorded at all. " +
-                    "H2b silently produced an empty template.");
-            }
-
-            endpoint = template.SearchEndpoint;
-            targets = templateEntries.ToImmutable();
-        }
-        else if (string.Equals(tenancyModel, Model2TenancyModel, StringComparison.OrdinalIgnoreCase))
-        {
-            if (string.IsNullOrWhiteSpace(request.AiSearchEndpoint))
-            {
-                return InfraFault(
-                    "Model 2 branch requires request.AiSearchEndpoint (populated by H2a from InterStepState). " +
-                    "H2a may not have completed OR its output was not persisted — H13 upstream should have " +
-                    "caught this, but I2 defense-in-depth surfaces it explicitly.");
-            }
-            endpoint = request.AiSearchEndpoint;
-            var canonical = _catalog.CanonicalIndexNames;
-            if (canonical.IsDefaultOrEmpty)
-            {
-                return InfraFault("ICanonicalIndexCatalog.CanonicalIndexNames returned an empty set — probe cannot select target indexes.");
-            }
-            var derived = ImmutableArray.CreateBuilder<(string, string)>(canonical.Length);
-            foreach (var name in canonical)
-            {
-                derived.Add((name, expectedPredicateForRequestTenant));
-            }
-            targets = derived.ToImmutable();
-        }
-        else
+        // Task 225b (D-12): both tenancy models are dedicated stamps — the endpoint is the stamp's own
+        // AI Search service (H2a output) and the targets are the canonical indexes. The retired Model 1
+        // branch read a Cosmos tenant-filter template written by H2b's shared-platform branch.
+        if (string.IsNullOrWhiteSpace(request.AiSearchEndpoint))
         {
             return InfraFault(
-                $"Unknown tenancyModel '{tenancyModel}' on ProvisioningRun '{request.RunId}'. " +
-                $"Expected '{Model1TenancyModel}' or '{Model2TenancyModel}'.");
+                "I2 probe requires request.AiSearchEndpoint (populated by H2a from InterStepState). " +
+                "H2a may not have completed OR its output was not persisted — H13 upstream should have " +
+                "caught this, but I2 defense-in-depth surfaces it explicitly.");
         }
-
-        if (string.IsNullOrWhiteSpace(endpoint))
+        endpoint = request.AiSearchEndpoint;
+        var canonical = _catalog.CanonicalIndexNames;
+        if (canonical.IsDefaultOrEmpty)
         {
-            return InfraFault(
-                $"Resolved AI Search endpoint is empty for tenancyModel '{tenancyModel}'. " +
-                "Model 1 template.SearchEndpoint OR Model 2 request.AiSearchEndpoint MUST be non-empty.");
+            return InfraFault("ICanonicalIndexCatalog.CanonicalIndexNames returned an empty set — probe cannot select target indexes.");
         }
+        var derived = ImmutableArray.CreateBuilder<(string, string)>(canonical.Length);
+        foreach (var name in canonical)
+        {
+            derived.Add((name, expectedPredicateForRequestTenant));
+        }
+        targets = derived.ToImmutable();
 
         // (3) Acquire an AAD token for the AI Search AAD scope.
         AccessToken token;
@@ -519,8 +442,7 @@ public sealed class AiSearchTenantFilterInvariantProbe : IInvariantProbe
 
     /// <summary>
     /// Builds the canonical `tenantId eq '{tenantId}'` OData filter predicate,
-    /// applying OData string-literal escaping (doubled single-quote) — parity
-    /// with AiSearchTenantFilterTemplateProvisioner's BuildFilterEntries.
+    /// applying OData string-literal escaping (doubled single-quote).
     /// </summary>
     private static string BuildFilterPredicate(string tenantId)
     {

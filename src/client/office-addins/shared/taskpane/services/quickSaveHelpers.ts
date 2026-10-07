@@ -2,6 +2,8 @@ import type { EntitySearchResult } from '../hooks/useEntitySearch';
 import { stripDocumentExtension, toDocxFileName } from '../utils/documentFileName';
 import { mapProblemDetailsToMessage, type ProblemDetails } from '../utils/errorMessages';
 import type { DocumentIdentityOutcome } from './documentIdentityService';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { buildOpenRecordUrl } from './openRecordLauncher';
 
 /**
  * quickSaveHelpers.ts
@@ -395,4 +397,40 @@ export function arrayBufferToBase64(buffer: ArrayBuffer): string {
     binary += String.fromCharCode(bytes[i] ?? 0);
   }
   return btoa(binary);
+}
+
+/**
+ * The "Open in Spaarke" link for a Quick Save's document record (task 110, UAT round 11 item 2): the existing
+ * {@link buildOpenRecordUrl} for `sprk_document/{id}` — no second builder. `null` (so no link is shown, and nothing
+ * is said about it) when `ORG_URL` is unset or blank or the id is not a GUID, never a broken link.
+ */
+export function buildQuickSaveRecordLink(
+  orgUrl: string | undefined,
+  appName: string,
+  documentId: string | null | undefined
+): string | null {
+  const org = (orgUrl ?? '').trim().replace(/\/+$/, '');
+  const id = cleanGuid(documentId);
+  if (!org || !id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) {
+    return null;
+  }
+  return buildOpenRecordUrl(org, 'sprk_document', id, appName);
+}
+
+/**
+ * Whether `url` is an https/http URL on the SAME ORIGIN as the configured `orgUrl`. The Quick Save dialog asks the
+ * command to open a link; the command only opens one that points at the user's own Spaarke environment (task 110
+ * NFR/security) — anything else, including an unset `orgUrl`, is refused.
+ */
+export function isUrlOnConfiguredOrigin(url: unknown, orgUrl: string | undefined): boolean {
+  if (typeof url !== 'string' || !(orgUrl ?? '').trim()) {
+    return false;
+  }
+  try {
+    const target = new URL(url);
+    const org = new URL((orgUrl ?? '').trim());
+    return (target.protocol === 'https:' || target.protocol === 'http:') && target.origin === org.origin;
+  } catch {
+    return false;
+  }
 }

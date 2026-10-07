@@ -113,6 +113,14 @@ function extractStampId(xml: string): string | null {
 export class WordAdapter implements IHostAdapter {
   private _initialized = false;
   private _documentUrl: string | null = null;
+  /**
+   * Task 094: true while {@link writeDocumentStamp} is writing. A registered
+   * {@link registerDocumentChangeHandler} wrapper checks this before invoking its callback, so the
+   * pane's own identity-mark write can never flip "Saved" back into "Save" (AC3). Belt-and-suspenders:
+   * a custom XML part write is not expected to fire a paragraph event at all (it touches no paragraph),
+   * but nothing in the Word JS API documentation guarantees that, so this suppression is defensive.
+   */
+  private _suppressDocumentChangeEvents = false;
 
   /**
    * Get the Office host type.
@@ -375,6 +383,7 @@ export class WordAdapter implements IHostAdapter {
       throw this.createError('UNKNOWN_ERROR', 'The document id to stamp is not a canonical GUID.');
     }
 
+    this._suppressDocumentChangeEvents = true;
     try {
       const parts = await this.getCustomXmlPartsByNamespace(STAMP_NAMESPACE);
 
@@ -406,7 +415,73 @@ export class WordAdapter implements IHostAdapter {
         'UNKNOWN_ERROR',
         `Word did not store the Spaarke identity mark: ${message || 'unknown error'}.`
       );
+    } finally {
+      this._suppressDocumentChangeEvents = false;
     }
+  }
+
+  /**
+   * Register a handler for the open document's content-change events (spaarkeai-word-add-in-r1 task
+   * 094). Guarded by `isSetSupported('WordApi', '1.6')` (the requirement set that carries
+   * `onParagraphAdded` / `onParagraphChanged` / `onParagraphDeleted` — verified GA, not preview, on
+   * Microsoft Learn 2026-10-04). Registers all three events (added/changed/deleted each cover a
+   * distinct edit shape; a single paragraph-level edit can fire any of them) behind ONE wrapped
+   * callback, so the caller sees one notification per qualifying change regardless of which event
+   * actually fired.
+   *
+   * The wrapper checks {@link _suppressDocumentChangeEvents} before invoking `onChange`, so the
+   * pane's own {@link writeDocumentStamp} write can never be mistaken for a user edit (AC3).
+   */
+  async registerDocumentChangeHandler(onChange: () => void): Promise<() => void> {
+    this.ensureInitialized();
+
+    if (!this.checkRequirementSet('WordApi', '1.6')) {
+      throw this.createError(
+        'CAPABILITY_NOT_SUPPORTED',
+        'This version of Word cannot report document content changes.'
+      );
+    }
+
+    // `EventHandlers.add` requires a promise-returning handler (Office.js convention) even though
+    // this handler does no async work itself and ignores the event args — `unknown` is a safe
+    // parameter type here (a supertype of every event's actual args type), letting ONE handler be
+    // shared across all three `.add()` calls below.
+    const wrapped = async (_event: unknown): Promise<void> => {
+      if (this._suppressDocumentChangeEvents) {
+        return;
+      }
+      onChange();
+    };
+
+    let handlers: OfficeExtension.EventHandlerResult<unknown>[] = [];
+    await Word.run(async context => {
+      handlers = [
+        context.document.onParagraphAdded.add(wrapped),
+        context.document.onParagraphChanged.add(wrapped),
+        context.document.onParagraphDeleted.add(wrapped),
+      ];
+      await context.sync();
+    });
+
+    return () => {
+      const toRemove = handlers;
+      handlers = [];
+      if (toRemove.length === 0) {
+        return;
+      }
+      // Microsoft Learn's documented removal pattern (`Word.run(eventContext.context, ...)`) is for
+      // Excel/Visio's overload that takes a context directly — Word.run has no such overload. The
+      // SAME effect is `handler.remove()` (queues the removal) followed by `context.sync()` on the
+      // handler's OWN RequestContext (Office Context.sync() the typed removal needs) — exactly the
+      // "same RequestContext the handler was added in" rule, without going back through `Word.run`.
+      const context = toRemove[0]!.context;
+      for (const handler of toRemove) {
+        handler.remove();
+      }
+      void context.sync().catch((error: unknown) => {
+        console.warn('[Spaarke] Could not remove the document change-detection handler', error);
+      });
+    };
   }
 
   /**
@@ -621,6 +696,12 @@ export class WordAdapter implements IHostAdapter {
     // adapter's WordApi 1.3 floor and still lack the separate Common `CustomXmlParts` requirement set (019
     // condition 4). Bare one-arg call: the set is unversioned (019 §6 cond. 4). Checked once for read and write.
     const hasCustomXmlParts = this.checkRequirementSet('CustomXmlParts');
+    // task 094: GA (not preview) requirement set — onParagraphAdded/Changed/Deleted on Word.Document.
+    const canDetectDocumentChanges = this.checkRequirementSet('WordApi', '1.6');
+    // task 094: platform, never hostType (NFR-10) — the ms-word: anchor-click trial only has community
+    // evidence of working on desktop Word (Win/Mac); Office on the web/mobile cannot register it.
+    const platform = this.getPlatform();
+    const canOpenDesktopWord = platform === Office.PlatformType.PC || platform === Office.PlatformType.Mac;
 
     return {
       canGetAttachments: false,
@@ -639,6 +720,11 @@ export class WordAdapter implements IHostAdapter {
       // task 036 / FR-15: `Office.context.mailbox` does not exist in Word — always false. Never
       // reachable via a `hostType` conditional in a view; the view reads this flag.
       canComposeEmail: false,
+      // task 096 (UAT round 4): Word's Email tab — an in-pane form (shared compose engine) that attaches the
+      // open document. It needs no Office API beyond what the pane already uses, so the only gate is the build
+      // setting: held OFF until the send route authorizes each attachment and association (owner 2026-10-04,
+      // task 097 note §6). Read per call, so a test can switch it.
+      canEmailFromPane: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true',
       // task 040 / FR-19: linked-todos is spec'd Outlook-only (spec.md Assumptions) — Word has no
       // `sprk_communication` counterpart for the banner's query to key off.
       canShowLinkedTodos: false,
@@ -650,6 +736,8 @@ export class WordAdapter implements IHostAdapter {
       // Title, or "Untitled Document"), so no separate requirement-set check is needed here, matching
       // `canGetDocumentUrl`'s unconditional-true pattern above.
       canProvideDocumentName: true,
+      canDetectDocumentChanges,
+      canOpenDesktopWord,
       minApiVersion: MIN_WORD_API_VERSION,
       supportedRequirementSet: `WordApi ${MIN_WORD_API_VERSION}`,
     };
@@ -799,6 +887,18 @@ export class WordAdapter implements IHostAdapter {
         : Office.context.requirements.isSetSupported(set, version);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * Read `Office.context.platform` defensively (task 094) — a host that somehow lacks it (or throws
+   * reading it) is simply "not a known desktop platform", never a crash.
+   */
+  private getPlatform(): Office.PlatformType | undefined {
+    try {
+      return Office.context.platform;
+    } catch {
+      return undefined;
     }
   }
 

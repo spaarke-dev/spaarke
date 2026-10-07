@@ -183,9 +183,9 @@ Run these checks after deployment to confirm everything is healthy.
 ### Health Check
 
 ```bash
-# BFF API health endpoint
-curl -s https://<appServiceUrl>/health
-# Expected: 200 OK
+# BFF API liveness probe (also the App Service health check path)
+curl -s https://<appServiceUrl>/healthz
+# Expected: 200 OK, body "Healthy" (it is rate limited per client IP: 120/min)
 ```
 
 ### Resource Verification

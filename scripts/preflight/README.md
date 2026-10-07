@@ -18,7 +18,7 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 1. **Azure OpenAI regional TPM headroom** — 150+200+30+350 per-model TPM sum per NFR-12
 2. **Dataverse environment-creation rate** — ~4/hour per tenant typical
 3. **Subscription vCPU quota** — per SKU family per region for App Service Plan + AI Search stamps
-4. **SPE cert-bootstrap status** — cert present in KV AND ≥24h old (SPE replication complete per FR-11 T6)
+4. ~~**SPE cert-bootstrap status** — cert present in KV AND ≥24h old (SPE replication complete per FR-11 T6)~~ — **RETIRED 2026-10-03 (task 248)**. The L2 control plane signs in as the SPE owning app through a managed-identity federated identity credential (MI-FIC) trusting the L2 Worker UAMI; there is no certificate to bootstrap. H0 runs `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`) in C# instead — see below.
 
 ---
 
@@ -57,7 +57,7 @@ Four reusable PowerShell prep modules invoked by the **H0 preflight handler** (W
 | `Test-AzureOpenAiTpmHeadroom.ps1` | Regional TPM headroom for gpt-4o + gpt-4o-mini + text-embedding-3-large + text-embedding-3-small (150+200+30+350 TPM sum per NFR-12) | `az cognitiveservices usage list --location <region>` |
 | `Test-DataverseEnvCreationRate.ps1` | ≥1 environment-creation slot available in the current hourly bucket (~4/hr typical per tenant) | `pac admin list --query` (or Dataverse API for quota when PAC output unavailable) |
 | `Test-SubscriptionVCpuQuota.ps1` | Per-SKU-family regional vCPU headroom for the expected +1-customer stamp (App Service Plan + AI Search) | `az vm list-usage --location <region>` |
-| `Test-SpeCertBootstrap.ps1` | KV cert-secret exists AND is ≥24h old (SPE container-type replication complete per FR-11 T6) | `az keyvault secret show --vault-name <vault> --name <secret>` |
+| `Test-SpeCertBootstrap.ps1` | **RETIRED 2026-10-03 (task 248) — throws on invocation.** Formerly: KV cert-secret `SPE-OwnerCert-Pfx` exists AND is ≥24h old. Replaced by L2's `SpeOwnerCredentialProbe` (check `SpeOwnerCredential`: owner entry → owning-app token through the Worker UAMI's federated credential → container type registration GET; codes `spe-owner-not-configured`, `spe-owner-token-failed`, `spe-container-type-not-registered`; no age gate). Set-up: `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` | — (formerly `az keyvault secret show`) |
 
 ---
 
@@ -97,11 +97,16 @@ $r = & ./Test-SubscriptionVCpuQuota.ps1 `
     }
 ```
 
-### SPE cert-bootstrap
+### SPE cert-bootstrap — RETIRED (task 248)
+`Test-SpeCertBootstrap.ps1` throws immediately; the certificate it checked no longer exists in the design. The SPE
+owner check is L2's `SpeOwnerCredentialProbe` — verify it by dispatching a provisioning run and reading H0's
+`SpeOwnerCredential` result (`docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` Step 8). Former invocation, kept for
+reference only:
 ```powershell
+# RETIRED — throws
 $r = & ./Test-SpeCertBootstrap.ps1 `
     -KeyVaultName $env:SPE_KV_NAME `
-    -CertSecretName 'spe-owner-cert-pfx' `
+    -CertSecretName 'SPE-OwnerCert-Pfx' `
     -MinAgeHours 24
 ```
 
@@ -125,7 +130,7 @@ The H0 handler (forthcoming, tagged `l1-handler`, `orchestration`) will:
 Each script has a "pass-path" mode and a "simulated fail-path" mode:
 
 - **Pass path**: run against a healthy dev subscription/tenant/KV with reasonable RequestedTpm/vCPU values.
-- **Fail path**: pass absurdly high requested values (e.g., `RequestedTpm = 999999`) or point at a KV that lacks the cert — verify the diagnostic cites both observed and requested.
+- **Fail path**: pass absurdly high requested values (e.g., `RequestedTpm = 999999`) — verify the diagnostic cites both observed and requested. (`Test-SpeCertBootstrap.ps1` is retired and has no pass/fail path.)
 
 The scripts do not depend on each other and can be tested independently (per FR-01 constraint: "no cross-module state").
 

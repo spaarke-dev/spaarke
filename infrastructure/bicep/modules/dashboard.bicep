@@ -594,182 +594,12 @@ resource dashboard 'Microsoft.Portal/dashboards@2020-09-01-preview' = {
           }
 
           // =====================================================
-          // Row 4: Export Metrics
+          // Row 4: Circuit Breaker & Cache
           // =====================================================
           {
             position: {
               x: 0
               y: 10
-              rowSpan: 1
-              colSpan: 12
-            }
-            metadata: {
-              type: 'Extension/HubsExtension/PartType/MarkdownPart'
-              inputs: []
-              settings: {
-                content: {
-                  settings: {
-                    content: '## Export Operations\nDOCX, PDF, Email export success rates and performance'
-                  }
-                }
-              }
-            }
-          }
-          {
-            position: {
-              x: 0
-              y: 11
-              rowSpan: 3
-              colSpan: 4
-            }
-            metadata: {
-              type: 'Extension/HubsExtension/PartType/MonitorChartPart'
-              inputs: [
-                {
-                  name: 'options'
-                  value: {
-                    chart: {
-                      metrics: [
-                        {
-                          resourceMetadata: {
-                            id: appInsightsId
-                          }
-                          name: 'customMetrics/ai.export.requests'
-                          aggregationType: 1
-                          namespace: 'microsoft.insights/components'
-                          metricVisualization: {
-                            displayName: 'Export Requests'
-                            color: '#00B294'
-                          }
-                        }
-                      ]
-                      title: 'Export Requests'
-                      titleKind: 1
-                      visualization: {
-                        chartType: 2
-                        legendVisualization: {
-                          isVisible: true
-                          position: 2
-                          hideSubtitle: false
-                        }
-                      }
-                      timespan: {
-                        relative: {
-                          duration: 86400000
-                        }
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          }
-          {
-            position: {
-              x: 4
-              y: 11
-              rowSpan: 3
-              colSpan: 4
-            }
-            metadata: {
-              type: 'Extension/HubsExtension/PartType/MonitorChartPart'
-              inputs: [
-                {
-                  name: 'options'
-                  value: {
-                    chart: {
-                      metrics: [
-                        {
-                          resourceMetadata: {
-                            id: appInsightsId
-                          }
-                          name: 'customMetrics/ai.export.duration'
-                          aggregationType: 4
-                          namespace: 'microsoft.insights/components'
-                          metricVisualization: {
-                            displayName: 'Avg Duration'
-                            color: '#FFB900'
-                          }
-                        }
-                      ]
-                      title: 'Export Latency (ms)'
-                      titleKind: 1
-                      visualization: {
-                        chartType: 2
-                        legendVisualization: {
-                          isVisible: true
-                          position: 2
-                          hideSubtitle: false
-                        }
-                      }
-                      timespan: {
-                        relative: {
-                          duration: 86400000
-                        }
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          }
-          {
-            position: {
-              x: 8
-              y: 11
-              rowSpan: 3
-              colSpan: 4
-            }
-            metadata: {
-              type: 'Extension/HubsExtension/PartType/MonitorChartPart'
-              inputs: [
-                {
-                  name: 'options'
-                  value: {
-                    chart: {
-                      metrics: [
-                        {
-                          resourceMetadata: {
-                            id: appInsightsId
-                          }
-                          name: 'customMetrics/ai.export.file_size'
-                          aggregationType: 4
-                          namespace: 'microsoft.insights/components'
-                          metricVisualization: {
-                            displayName: 'Avg File Size'
-                            color: '#E3008C'
-                          }
-                        }
-                      ]
-                      title: 'Export File Size (bytes)'
-                      titleKind: 1
-                      visualization: {
-                        chartType: 2
-                        legendVisualization: {
-                          isVisible: true
-                          position: 2
-                          hideSubtitle: false
-                        }
-                      }
-                      timespan: {
-                        relative: {
-                          duration: 86400000
-                        }
-                      }
-                    }
-                  }
-                }
-              ]
-            }
-          }
-
-          // =====================================================
-          // Row 5: Circuit Breaker & Cache
-          // =====================================================
-          {
-            position: {
-              x: 0
-              y: 14
               rowSpan: 1
               colSpan: 12
             }
@@ -788,7 +618,7 @@ resource dashboard 'Microsoft.Portal/dashboards@2020-09-01-preview' = {
           {
             position: {
               x: 0
-              y: 15
+              y: 11
               rowSpan: 3
               colSpan: 4
             }
@@ -837,7 +667,7 @@ resource dashboard 'Microsoft.Portal/dashboards@2020-09-01-preview' = {
           {
             position: {
               x: 4
-              y: 15
+              y: 11
               rowSpan: 3
               colSpan: 4
             }
@@ -898,7 +728,7 @@ resource dashboard 'Microsoft.Portal/dashboards@2020-09-01-preview' = {
           {
             position: {
               x: 8
-              y: 15
+              y: 11
               rowSpan: 3
               colSpan: 4
             }

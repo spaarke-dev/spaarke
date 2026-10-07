@@ -14,9 +14,9 @@ import {
   buildOpenRecordUrl,
   buildOpenSpaarkeUrl,
   configuredSpaarkeAppName,
+  openDesktopUrl,
   openFileUrl,
   openRecord,
-  openUrlInBrowserWindow,
 } from '../openRecordLauncher';
 
 /** Runs `fn` with `SPAARKE_APP_NAME` set to `value` (`undefined` = unset), restoring it afterwards. */
@@ -112,6 +112,37 @@ describe('openFileUrl (task 088 / UAT-5 — the collision prompt opens the other
     } finally {
       warnSpy.mockRestore();
     }
+  });
+});
+
+describe('openDesktopUrl (task 094 — the "Open in Word" UAT round 4 trial)', () => {
+  const DESKTOP_URL = 'ms-word:https://contoso.sharepoint.com/contentstorage/x/Brief.docx';
+
+  it('anchor-clicks the given url and reports opened: true', () => {
+    const click = jest.fn();
+
+    const result = openDesktopUrl(DESKTOP_URL, click);
+
+    expect(result).toEqual({ opened: true });
+    expect(click).toHaveBeenCalledTimes(1);
+    const [anchor] = click.mock.calls[0]!;
+    // The raw attribute, not the resolved `.href` getter — `ms-word:` is a non-standard scheme and
+    // this avoids any URL-normalization pitfall in how jsdom serializes it back.
+    expect(anchor.getAttribute('href')).toBe(DESKTOP_URL);
+  });
+
+  it('removes the anchor from the DOM after clicking it, even if the click throws', () => {
+    const click = jest.fn(() => {
+      throw new Error('boom');
+    });
+
+    expect(() => openDesktopUrl(DESKTOP_URL, click)).toThrow('boom');
+    expect(document.querySelectorAll('a').length).toBe(0);
+  });
+
+  it('with the real (default) click — invokes HTMLAnchorElement.click() without throwing', () => {
+    // jsdom implements click() as a no-op navigation; this just proves the default path is wired up.
+    expect(() => openDesktopUrl(DESKTOP_URL)).not.toThrow();
   });
 });
 
@@ -231,23 +262,6 @@ describe('openRecord', () => {
     expect(windowOpenSpy).not.toHaveBeenCalled();
 
     windowOpenSpy.mockRestore();
-  });
-});
-
-describe('openUrlInBrowserWindow (task 086 / FR-15 — the Word Send Email choice reuses this opener)', () => {
-  it('calls the default opener (Office.context.ui.openBrowserWindow) with the given url', () => {
-    const openBrowserWindowSpy = jest.fn();
-    (global.Office.context.ui as unknown as { openBrowserWindow: jest.Mock }).openBrowserWindow = openBrowserWindowSpy;
-
-    openUrlInBrowserWindow('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
-
-    expect(openBrowserWindowSpy).toHaveBeenCalledWith('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
-  });
-
-  it('calls an injected opener instead of the default when one is supplied', () => {
-    const opener = jest.fn();
-    openUrlInBrowserWindow('https://example.test/', opener);
-    expect(opener).toHaveBeenCalledWith('https://example.test/');
   });
 });
 

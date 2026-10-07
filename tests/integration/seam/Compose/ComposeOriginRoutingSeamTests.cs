@@ -146,6 +146,41 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // (A2) uac-r2 task 166 r1 — the documentRecordId query parameter is honoured only when its row IS the row of
+    //      the item the caller just read (OBO). Otherwise it is DROPPED: no origin from that row, no session binding to
+    //      it, no profile re-dispatch against it, and it is not echoed back as the document's record.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Load_ARecordIdWhoseRowIsTheLoadedItem_IsBound_AndEchoed()
+    {
+        var (origin, echoed, recordId) = await LoadThroughWireAsync(AuthoredOptionValue, rowPointsAtTheLoadedItem: true);
+
+        origin.GetString().Should().Be("authored");
+        echoed.GetGuid().Should().Be(recordId);
+    }
+
+    [Fact]
+    public async Task Load_ARecordIdWhoseRowIsAnotherDocument_IsDropped_NotReadNotEchoed()
+    {
+        var (origin, echoed, _) = await LoadThroughWireAsync(AuthoredOptionValue, rowPointsAtTheLoadedItem: false);
+
+        origin.ValueKind.Should().Be(JsonValueKind.Null,
+            "another document's sprk_composeorigin must never reach this load (it would route this document's saves)");
+        echoed.ValueKind.Should().Be(JsonValueKind.Null,
+            "the record id is not this item's — it is dropped (Path B), never bound or echoed as this document's record");
+    }
+
+    [Fact]
+    public async Task Load_WhenTheRecordRowCannotBeRead_TheRecordIdIsDropped_FailClosed()
+    {
+        var (origin, echoed, _) = await LoadThroughWireAsync(AuthoredOptionValue, rowPointsAtTheLoadedItem: true, rowReadFaults: true);
+
+        origin.ValueKind.Should().Be(JsonValueKind.Null);
+        echoed.ValueKind.Should().Be(JsonValueKind.Null, "an unverifiable record id is not bound");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // (B) SAVE — resolves origin from the ContentModel discriminant; persists it only at create-on-save.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
@@ -252,10 +287,10 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
 
         byte[]? persisted = null;
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -342,9 +377,9 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(mintedSpeItemId, resolvedDriveId, size: 2048, eTag: "\"v1-etag\""));
 
         // No existing row → create fires. Capture the created entity to assert the persisted marker.
@@ -408,6 +443,15 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
     /// <c>origin</c> JSON element. <paramref name="storedOriginOptionValue"/> null models a legacy row
     /// with no stored marker (the RetrieveAsync entity omits the attribute entirely).</summary>
     private async Task<JsonElement> LoadOriginThroughWireAsync(int? storedOriginOptionValue)
+        => (await LoadThroughWireAsync(storedOriginOptionValue, rowPointsAtTheLoadedItem: true)).Origin;
+
+    /// <summary>
+    /// Task 166 r1: a Path A load whose record row points at the loaded item (<paramref name="rowPointsAtTheLoadedItem"/>
+    /// true — the honest client) or at ANOTHER item (a caller naming someone else's record id). Returns the response's
+    /// <c>origin</c> and <c>documentRecordId</c>.
+    /// </summary>
+    private async Task<(JsonElement Origin, JsonElement DocumentRecordId, Guid RecordId)> LoadThroughWireAsync(
+        int? storedOriginOptionValue, bool rowPointsAtTheLoadedItem, bool rowReadFaults = false)
     {
         _fixture.ResetBoundaries();
 
@@ -419,15 +463,28 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
 
         ArrangeSpeForLoad(speId, driveId, docBytes);
 
-        var documentEntity = new Entity("sprk_document", recordId);
+        var documentEntity = new Entity("sprk_document", recordId)
+        {
+            // Task 166 r1: the record id is honoured only when its row IS the row of the loaded item.
+            ["sprk_graphitemid"] = rowPointsAtTheLoadedItem ? speId : "spe-item-someone-elses-document",
+        };
         if (storedOriginOptionValue is { } value)
         {
             documentEntity[ComposeOriginAttribute] = new OptionSetValue(value);
         }
 
-        _fixture.DataverseMock
-            .Setup(d => d.RetrieveAsync("sprk_document", recordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(documentEntity);
+        if (rowReadFaults)
+        {
+            _fixture.DataverseMock
+                .Setup(d => d.RetrieveAsync("sprk_document", recordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new TimeoutException("Dataverse timed out"));
+        }
+        else
+        {
+            _fixture.DataverseMock
+                .Setup(d => d.RetrieveAsync("sprk_document", recordId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(documentEntity);
+        }
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.GetAsync(
@@ -436,10 +493,10 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
         var body = await response.Content.ReadAsStringAsync();
         response.StatusCode.Should().Be(HttpStatusCode.OK, $"a Path A load must succeed — body: {body}");
 
-        // Clone the element so it outlives the JsonDocument (which the using disposes).
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.TryGetProperty("origin", out var origin).Should().BeTrue("the origin field is always present on the load wire");
-        return origin.Clone();
+        doc.RootElement.TryGetProperty("documentRecordId", out var echoedRecord).Should().BeTrue();
+        return (origin.Clone(), echoedRecord.Clone(), recordId);
     }
 
     private void ArrangeSpeForLoad(string speId, string driveId, byte[] docBytes)

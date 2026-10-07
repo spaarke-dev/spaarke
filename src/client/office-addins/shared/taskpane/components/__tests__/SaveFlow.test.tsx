@@ -113,9 +113,9 @@ describe('SaveFlow', () => {
         </TestWrapper>
       );
 
-      // RelatedToPicker renders its own "Related to" header (UI feedback 2026-09-02) — "Associate
-      // With" was the pre-rename label (task 071).
-      expect(screen.getByText('Related to')).toBeInTheDocument();
+      // Task 095 (UAT round 4): the "Related to" label is gone — the lookup box names itself instead.
+      expect(screen.queryByText('Related to')).not.toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Look up related Matter...')).toBeInTheDocument();
       expect(screen.getByRole('form', { name: /save to spaarke/i })).toBeInTheDocument();
     });
 

@@ -22,6 +22,40 @@ $schema-doc: |
 # Manifest changelog (top-level chronology of significant changes)
 # ============================================================================
 _changelog:
+  - 2026-09-28:
+      action: customer-provisioning-orchestration-r1-task-215-spe-cert-retirement
+      summary: |
+        customer-provisioning-orchestration-r1 task 215 — retired drifted SPE bootstrap cert:
+          - environments.dev.spe.containers.cert_secrets: `certificate` (was: kv:spe-app-cert)
+            and `certificate_password` (was: kv:spe-app-cert-pass) marked RETIRED-2026-09-28
+            with _meta status=partial-retirement + history. `owning_app_secret`
+            (kv:spe-owning-app-secret) UNTOUCHED — E-1 exception per ADR-028, retained
+            indefinitely for per-customer SpeAdmin container-type rotation lifecycle.
+          - environments.dev.keyvault_inventory: `spe-app-cert` + `spe-app-cert-pass` moved
+            from `referenced:` into new `retired_soft_deleted:` subsection with 90-day
+            recoverable_until dates.
+        Rationale: H8-B (task 214, commit a26e30dd2 SESSION 21) removed the last C# consumer
+        of the pre-H8-B cert convention. New `SpeConfidentialClientGraphFactory` reads cert
+        from `SPE-OwnerCert-Pfx` per topology doc §3A E-1. Cert drift was empirically
+        confirmed 2026-08-30 during task 213.2 H8 live-test (KV thumbprint 269691A5... NOT
+        registered on any Spaarke app-reg).
+        Consumer archival: `scripts/Import-And-Register.ps1` (bootstrap script) archived to
+        `scripts/_archive/` in the same commit.
+        Scope expansion (owner-approved 2026-09-28 during FR-35 pre-check): 4 dead-config
+        App Service settings on `spaarke-bff-dev` removed alongside KV soft-delete —
+        `Graph__CertificateSource`, `Graph__CertificateThumbprint`, `Graph__KeyVaultCertName`,
+        `Graph__KeyVaultUrl`. Proven dead: `Graph__Credentials__Order__0=ManagedIdentityFederated`
+        (single entry, no cert fallback) + `Graph__Credentials__RequireSecretFreeIdentity=true`
+        + zero code consumers in src/server/** (grep). Aligns with ADR-028 A4 secret-free
+        contract already active on dev.
+        Operator actions (Ralph runs manually):
+          1. `az webapp config appsettings delete -g rg-spaarke-dev -n spaarke-bff-dev
+              --setting-names Graph__CertificateSource Graph__CertificateThumbprint
+              Graph__KeyVaultCertName Graph__KeyVaultUrl`
+          2. `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert`
+          3. `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass`
+        Soft-delete NOT purge — 90-day recovery window.
+      author: Claude Code
   - 2026-07-19:
       action: external-access-platform-r1-phase0
       summary: |
@@ -294,6 +328,9 @@ environments:
       deployment_method: GitHub Actions OIDC
       deployment_workflow: .github/workflows/deploy-bff-api.yml
       app_registration_ref: app_registrations.bff_api
+      # Redis: Azure Managed Redis, Microsoft Entra only (T242/T242b, 2026-10-05). The BFF reads the plain
+      # setting Redis__Endpoint and signs in with its managed identity — no key, no connection string.
+      redis_endpoint: spaarke-bff-redis-dev.westus2.redis.azure.net:10000
       secrets:
         # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
         # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated
@@ -302,8 +339,14 @@ environments:
         # Do NOT re-add a kv: reference here — `Graph:Credentials:RequireSecretFreeIdentity=true` makes
         # the BFF refuse to start outside Development if ClientSecret returns to the credential order.
         application_insights_key: kv:application-insights-key
-        servicebus_connection_string: kv:ServiceBus-ConnectionString
-        redis_connection_string: kv:Redis-ConnectionString
+        # servicebus_connection_string REMOVED 2026-10-05 (drift fix): `ServiceBus-ConnectionString` was soft-deleted
+        # 2026-08-25 and spaarke-bff-dev holds no Key Vault reference to it (see keyvault_inventory.retired_soft_deleted).
+        # The two Communication KV references below are wired on spaarke-bff-dev (verified 2026-10-05).
+        communication_webhook_client_state: kv:Communication-WebhookClientState # Communication__WebhookClientState
+        communication_webhook_signing_key: kv:Communication-WebhookSigningKey # Communication__WebhookSigningKey
+        # redis_connection_string REMOVED 2026-10-05 (T242b step 7): `ConnectionStrings__Redis` was deleted from
+        # spaarke-bff-dev; the cache has access keys disabled. Do NOT re-add a kv: reference — the BFF refuses a
+        # Redis connection string outside Development/Testing.
       legacy:
         _meta:
           status: legacy
@@ -409,14 +452,10 @@ environments:
         # ---------------------------------------------------------------------
         default_index_name: spaarke-records-index
         secrets:
-          # Canonical (preferred — per spec FR-21 + task 001 user Option C remediation 2026-06-26)
-          admin_key: kv:AiSearch--AdminKey
           endpoint_ref: kv:ai-search-endpoint
-          # Legacy aliases — same value as canonical (transition compatibility; retire post-migration audit)
-          # `AzureAISearchApiKey` is the older app-settings reference (BFF AiSearch__ReferencesApiKey)
-          # `ai-search-key` is the older operational name; mirrored 2026-06-26
-          admin_key_alias_legacy_app: kv:AzureAISearchApiKey
-          admin_key_alias_legacy_ops: kv:ai-search-key
+          # Admin keys RETIRED (drift fix 2026-10-05): `AiSearch--AdminKey`, `AzureAISearchApiKey` and
+          # `ai-search-key` are all soft-deleted (2026-08-18 / 2026-08-25) and spaarke-bff-dev references none of
+          # them — only `ai-search-endpoint`. See keyvault_inventory.retired_soft_deleted. Do NOT re-add.
         deployer: scripts/ai-search/Deploy-AllIndexes.ps1 # FR-07 unified deployer
         operator_runbook: docs/guides/ai-search-azure-setup.md
         catalog_doc: docs/architecture/AI-SEARCH-INDEX-CATALOG.md
@@ -450,9 +489,16 @@ environments:
           purpose: File storage container; mapped to `spaarke-files-index` (canonical plural) search index for document RAG
           ai_search_index: spaarke-files-index # canonical per spaarke-ai-azure-setup-dev-r1 FR-11 (was spaarke-file-index singular)
       cert_secrets:
-        certificate: kv:spe-app-cert
-        certificate_password: kv:spe-app-cert-pass
-        owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret
+        _meta:
+          status: partial-retirement
+          retired: 2026-09-28
+          reason_retained: "Historical: H8-B (task 214, 2026-08-30) read the owner cert from SPE-OwnerCert-Pfx (never created). Since task 248 (2026-10-03) L2 signs in as the owning app through the Worker UAMI's federated credential — no certificate. `certificate` + `certificate_password` entries below are the retired pre-H8-B references (soft-deleted in KV; retained here for archival per file's convention). `owning_app_secret` is E-1 (per-customer SpeAdmin container-type secret rotation lifecycle per ADR-028) and remains ACTIVE indefinitely."
+          history:
+            - 2026-08-30: cert `spe-app-cert` thumbprint 269691A5A60536050FA76C0163BD4A942ECD724D found NOT registered on any Spaarke app-reg (drift detected during task 213.2 H8 live-test).
+            - 2026-09-28: retired `spe-app-cert` + `spe-app-cert-pass` via KV soft-delete (task 215). `spe-owning-app-secret` preserved as E-1 exception per ADR-028.
+        certificate: RETIRED-2026-09-28 # was: kv:spe-app-cert — soft-deleted in KV `spaarke-spekvcert` per task 215; H8-B does NOT consume
+        certificate_password: RETIRED-2026-09-28 # was: kv:spe-app-cert-pass — soft-deleted in KV `spaarke-spekvcert` per task 215; H8-B does NOT consume
+        owning_app_secret: kv:spe-owning-app-secret # SPE owning app (170c98e1-...) client secret — E-1 exception per ADR-028, retained indefinitely
 
     external_spa:
       # External Secure Project Workspace SPA — Azure Static Web App (task 003).
@@ -483,16 +529,36 @@ environments:
         - ai-openai-endpoint
         - ai-openai-key
         - ai-search-endpoint
-        - ai-search-key # legacy operational alias (mirrors AiSearch--AdminKey)
-        - AiSearch--AdminKey # canonical per spec FR-21; added 2026-06-26 task 001
-        - AzureAISearchApiKey # legacy app-settings alias (mirrors AiSearch--AdminKey); added 2026-06-26 task 001
         - application-insights-key
-        - Redis-ConnectionString
-        - ServiceBus-ConnectionString
-        - spe-app-cert
-        - spe-app-cert-pass
+        - Communication-WebhookClientState
+        - Communication-WebhookSigningKey
+        - communication-trackingfooter-signingkey # read at runtime BY NAME via Communication__TrackingFooter__SigningKeySecretName (not a KV reference)
         - spe-owning-app-secret
         - ciam-graph-provisioner-cert # CIAM graph-provisioner app cert (added 2026-07-19, external-access-platform-r1 task 002)
+      retired_soft_deleted: # Secrets retired via KV soft-delete; recoverable during 90-day retention window (do NOT purge — soft-delete is reversible)
+        - name: spe-app-cert
+          retired: 2026-09-28 # task 215 — H8-B (task 214) does NOT consume; cert drifted 2026-08-30 (thumbprint 269691A5... not registered on any Spaarke app-reg)
+          deleted_utc: 2026-09-29T03:03:06Z # actual az-recorded softDelete timestamp
+          scheduled_purge_utc: 2026-12-28T03:03:06Z # 90 days from soft-delete per vault default; DO NOT purge before this date
+        - name: spe-app-cert-pass
+          retired: 2026-09-28 # task 215 — paired cert password for retired spe-app-cert
+          deleted_utc: 2026-09-29T03:03:07Z # actual az-recorded softDelete timestamp
+          scheduled_purge_utc: 2026-12-28T03:03:07Z # 90 days from soft-delete per vault default; DO NOT purge before this date
+        - name: ai-search-key
+          deleted_utc: 2026-08-18T03:30:02Z # actual az-recorded softDelete timestamp (read 2026-10-05)
+          scheduled_purge_utc: 2026-11-16T03:30:02Z # DO NOT purge before this date
+        - name: AzureAISearchApiKey
+          deleted_utc: 2026-08-18T03:29:59Z
+          scheduled_purge_utc: 2026-11-16T03:29:59Z # DO NOT purge before this date
+        - name: AiSearch--AdminKey
+          deleted_utc: 2026-08-25T02:34:13Z
+          scheduled_purge_utc: 2026-11-23T02:34:13Z # DO NOT purge before this date
+        - name: ServiceBus-ConnectionString
+          deleted_utc: 2026-08-25T02:34:11Z
+          scheduled_purge_utc: 2026-11-23T02:34:11Z # DO NOT purge before this date
+      retained_unreferenced: # In the vault, read by nothing, kept on purpose (Key Vault secrets are never deleted)
+        - footer-hmac-key # created per email-communication-intelligence-r2's operator guide, but the live setting names `communication-trackingfooter-signingkey`
+        - Redis-ConnectionString # T242b 2026-10-05 — old dev cache's key; the BFF and Worker now use Redis__Endpoint + managed identity
       not_secret_but_stored_as_secret: # These are GUIDs/URLs — should live in YAML, not KV
         - bff-api-tenant-id # = tenant.id
         - DATAVERSE-URL # = environments.dev.dataverse.env_url
@@ -508,28 +574,32 @@ environments:
         # several places: measured 2026-08-24, it held a DIFFERENT value. It was orphaned (zero code/config
         # consumers, per code-quality-and-assurance-r3 HYGIENE-2) and was deleted separately.
         - [ai-openai-key, AzureOpenAI-ApiKey] # PascalCase legacy entry
-        # AI Search admin key has 3 KV entries that all hold the same value — by intentional Option C design
-        # (task 001 user remediation 2026-06-26) to support concurrent canonical + legacy callers during transition.
-        # Retirement path: after all consumers migrate to `AiSearch--AdminKey`, drop `ai-search-key` + `AzureAISearchApiKey`.
-        - [AiSearch--AdminKey, ai-search-key, AzureAISearchApiKey]
+        # [AiSearch--AdminKey, ai-search-key, AzureAISearchApiKey] — all three soft-deleted 2026-08-18/25 (see
+        # retired_soft_deleted); no longer a live duplicate set.
       orphaned_or_unreviewed: # Not yet classified — review next sync
         []
 
   demo:
+    # Corrected 2026-10-05 (T242b) from the live subscription: this section named spaarke-bff-prod /
+    # rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist in any Spaarke subscription
+    # (that stack was decommissioned). Owner 2026-10-05: demo is the next environment used to test the
+    # provisioning orchestration.
     display_name: Demo
-    resource_group: rg-spaarke-platform-prod
+    azure_subscription_id: 2ff9ee48-6f1d-4664-865c-f11868dd1b50 # "Spaarke Demo Environment"
+    resource_group: rg-spaarke-demo
     location: westus2
     region: West US 2
-    keyvault: sprk-platform-prod-kv
-    keyvault_resource_group: rg-spaarke-platform-prod
+    keyvault: sprk-demo-kv
+    keyvault_resource_group: rg-spaarke-demo
 
     bff:
-      app_service_name: spaarke-bff-prod
-      app_service_url: https://api.spaarke.com
-      app_service_slot: staging
+      app_service_name: spaarke-bff-demo # Stopped since 2026-10-04 (needs .NET 10 + settings refresh, task 242c)
+      app_service_url: https://spaarke-bff-demo.azurewebsites.net
+      app_service_slot: null # no deployment slot exists
       app_registration_ref: app_registrations.bff_api # TBD: confirm if demo uses separate app reg
-      secrets:
-        api_client_secret: kv:API-CLIENT-SECRET
+      # Redis: Azure Managed Redis, Microsoft Entra only (T242b) — the BFF identity mi-bff-api-demo holds the access policy.
+      redis_endpoint: spaarke-bff-redis-demo.westus2.redis.azure.net:10000
+      secrets: {} # the former kv:API-CLIENT-SECRET does not exist in sprk-demo-kv (checked 2026-10-05)
 
     dataverse:
       env_url: https://spaarke-demo.crm.dynamics.com
@@ -540,7 +610,7 @@ environments:
         endpoint: https://spaarke-openai-demo.openai.azure.com/
         resource_name: spaarke-openai-demo
       ai_search:
-        resource_name: spaarke-search-demo
+        resource_name: spaarke-search-demo # NOT present in rg-spaarke-demo (checked 2026-10-05)
       document_intelligence:
         resource_name: spaarke-docintel-demo
 

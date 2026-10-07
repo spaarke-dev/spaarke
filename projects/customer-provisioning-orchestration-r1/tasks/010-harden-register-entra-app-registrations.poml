@@ -4,7 +4,7 @@
     <title>Harden scripts/Register-EntraAppRegistrations.ps1 for full 14-grant idempotency</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing PowerShell script (not BFF code); tags include powershell + auth; per root CLAUDE.md §8, non-BFF script hardening with explicit constraints = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

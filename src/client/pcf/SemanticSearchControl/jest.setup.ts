@@ -7,6 +7,12 @@ import '@testing-library/jest-dom';
 
 // Mock Xrm global object (Dataverse runtime)
 const mockXrm = {
+  // WebApi stub: the shared getXrm() walker (task 081 / C-8) only accepts a
+  // frame whose Xrm.WebApi is present, as in a real Dataverse host.
+  WebApi: {
+    retrieveRecord: jest.fn(),
+    retrieveMultipleRecords: jest.fn(),
+  },
   Navigation: {
     navigateTo: jest.fn().mockResolvedValue(undefined),
   },

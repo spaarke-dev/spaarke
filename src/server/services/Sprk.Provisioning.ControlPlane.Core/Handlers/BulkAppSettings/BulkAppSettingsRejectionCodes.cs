@@ -3,7 +3,7 @@
 //
 // Task 201 — machine-stable rejection codes emitted by
 // H4bBulkAppSettingsHandler. `h4b-*` prefix so operator UI can distinguish
-// H4 vs H4-shared vs H4b failures at a glance. STABILITY: strings are used
+// H4 vs H4b failures at a glance. STABILITY: strings are used
 // by external tools; do NOT rename.
 // -----------------------------------------------------------------------------
 
@@ -18,20 +18,18 @@ public static class BulkAppSettingsRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing.</summary>
     public const string MissingSubscriptionId = "h4b-missing-subscription-id";
 
-    /// <summary>Run parameter <c>keyVaultName</c> missing — needed for the generated script's -VaultName arg.</summary>
+    /// <summary><c>InterStepState.KeyVaultName</c> (H2a output) missing — needed for the generated script's -VaultName arg.</summary>
     public const string MissingKeyVaultName = "h4b-missing-kv-name";
 
-    /// <summary>Run parameter <c>resourceGroupName</c> missing — needed for the generated script's -ResourceGroupName arg.</summary>
+    /// <summary><c>InterStepState.ResourceGroupName</c> (H2a output) missing — needed for the generated script's -ResourceGroupName arg.</summary>
     public const string MissingResourceGroupName = "h4b-missing-resource-group";
 
-    /// <summary>Run parameter <c>appServiceName</c> missing — needed for the generated script's -AppServiceName arg + /healthz probe URL.</summary>
+    /// <summary><c>InterStepState.AppServiceName</c> (H2a output) missing — needed for the generated script's -AppServiceName arg + /healthz probe URL.</summary>
     public const string MissingAppServiceName = "h4b-missing-app-service-name";
 
-    /// <summary>Run parameter <c>secretsVer</c> missing — feeds idempotency key appsettings-{env}-{secretsVer}.</summary>
-    public const string MissingSecretsVersion = "h4b-missing-secrets-version";
 
-    /// <summary>Run parameter <c>environmentName</c> missing — feeds idempotency key.</summary>
-    public const string MissingEnvironmentName = "h4b-missing-environment-name";
+    // (h4b-missing-environment-name retired by task 245a: the stamp environment resolves through
+    //  IntakeParameterCatalog.ResolveEnvironmentName — CreateRun stores it, default 'prod'.)
 
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "h4b-run-not-found";
@@ -40,10 +38,11 @@ public static class BulkAppSettingsRejectionCodes
     public const string ManifestReadFailed = "h4b-manifest-read-failed";
 
     /// <summary>
-    /// A required per_env_settings entry's source key is absent from
-    /// envelope.Parameters.NonSecret. Resumable — upstream handler MUST populate
-    /// the source before H4b re-dispatches. Diagnostic names the missing
-    /// per_env_source + iOptionsModule for actionable operator triage.
+    /// A required per_env_settings entry's source (PerEnvSourceCatalog — a typed
+    /// InterStepState output or an intake value) is absent. Resumable — the
+    /// producing handler must complete (or the intake value be supplied) before
+    /// H4b re-dispatches. Diagnostic names the source, where it lives, and the
+    /// iOptionsModule for actionable operator triage.
     /// </summary>
     public const string PerEnvInputMissing = "h4b-per-env-input-missing";
 

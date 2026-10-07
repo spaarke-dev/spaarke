@@ -10,20 +10,91 @@ public class DataverseUpdateHandler : IDataverseUpdateHandler
 {
     private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly IGenericEntityService _genericEntityService;
+    private readonly CoreAncestorRestamper _restamper;
+    private readonly IRecordOwnershipResolver _ownership;
+    private readonly Sprk.Bff.Api.Services.Access.SecureRootFilingGate _rootFiling;
     private readonly ILogger<DataverseUpdateHandler> _logger;
 
     public DataverseUpdateHandler(
         IFieldMappingDataverseService fieldMappingService,
         IGenericEntityService genericEntityService,
+        CoreAncestorRestamper restamper,
+        IRecordOwnershipResolver ownership,
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate rootFiling,
         ILogger<DataverseUpdateHandler> logger)
     {
         _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _restamper = restamper ?? throw new ArgumentNullException(nameof(restamper));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+        _rootFiling = rootFiling ?? throw new ArgumentNullException(nameof(rootFiling));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
     /// <inheritdoc />
+    /// <exception cref="RecordOwnerUnresolvedException">
+    /// The update re-files a child record (an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> value onto a parent)
+    /// whose new owner cannot be resolved. Nothing was written (task 146).
+    /// </exception>
     public async Task UpdateAsync(
+        string entityLogicalName,
+        Guid recordId,
+        Dictionary<string, object?> fields,
+        ConcurrencyMode concurrencyMode,
+        int maxRetries,
+        CancellationToken ct)
+    {
+        // Task 158 (owner round 6): a work assignment or project filed under a secure matter or project is secured. Whether
+        // the record this write files it under is secure must be readable, or nothing is written (fail closed).
+        if (await _rootFiling.CheckAsync(entityLogicalName, recordId, fields, ct).ConfigureAwait(false) is { } rootRefusal)
+        {
+            throw new RecordOwnerUnresolvedException(entityLogicalName, rootRefusal);
+        }
+
+        // Task 146: an EntityReference value onto a parent FILES a child table under a record — a reparent. The child's
+        // owner is re-derived over every parent it will have (secure-if-any) BEFORE the write, and reassigned when it
+        // moves. A root's own lookups never reassign it (provisioning owns a root's ownership).
+        //
+        // A NULL value may CLEAR a lookup — moving the child OUT of a parent — so every null is passed as a candidate
+        // clear (verifier item 8). This handler cannot tell a lookup from a text column; the resolver reads the row and
+        // treats a null for a column that holds no parent as no parent change (the write then decides no owner).
+        var parentChanges = RecordOwnershipResolver.IsReparentableChild(entityLogicalName)
+            ? RecordReparent.ParentChangesWithClearsIn(fields)
+            : new Dictionary<string, Microsoft.Xrm.Sdk.EntityReference?>();
+        if (parentChanges.Count == 0)
+        {
+            await WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, ct);
+        }
+        else
+        {
+            var reparent = await _ownership.ReparentAsync(
+                new RecordReparent
+                {
+                    EntityLogicalName = entityLogicalName,
+                    RecordId = recordId,
+                    ParentChanges = parentChanges,
+                },
+                token => WriteAsync(entityLogicalName, recordId, fields, concurrencyMode, maxRetries, token),
+                ct);
+            if (reparent.IsRefused)
+            {
+                throw new RecordOwnerUnresolvedException(entityLogicalName, reparent);
+            }
+        }
+
+        // Task 156 (owner round 4 item 5, option b): this generic update can write what a to-do / event / communication /
+        // analysis is filed under, or the matter / project of a record others are filed under — so the affected copies
+        // are re-stamped in the same operation, after whichever path wrote it (the plain write, or the re-file once its
+        // owner is settled; batch 4 integration). A write that cannot move a stamp reads nothing. Never thrown: a child
+        // that fails is logged and the reconciliation job repairs it; this record's own update stands.
+        await _restamper.AfterWriteAsync(entityLogicalName, recordId, fields.Keys, CancellationToken.None)
+            .ConfigureAwait(false);
+        // Task 158: a work assignment or project this write filed under a secure record is secured now (never thrown; an
+        // incomplete securing is logged and the secure-root inheritance job completes it).
+        await _rootFiling.SecureAfterWriteAsync(entityLogicalName, recordId, fields.Keys, traceId: null);
+    }
+
+    private async Task WriteAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,

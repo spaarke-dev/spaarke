@@ -27,6 +27,11 @@
 .PARAMETER IncludeSlots
     Also configure the staging slot. Default: $true
 
+.PARAMETER RedisEndpoint
+    host:port of the prod Azure Managed Redis (e.g. spaarke-bff-redis-prod.westus2.redis.azure.net:10000).
+    Required. The cache has access keys disabled (task 242, owner D12/D13): the BFF connects with its
+    managed identity (ManagedIdentity__ClientId), so there is no Redis connection string or Key Vault secret.
+
 .EXAMPLE
     .\Configure-ProductionAppSettings.ps1
 #>
@@ -35,7 +40,11 @@ param(
     [string]$ResourceGroupName = "rg-spaarke-platform-prod",
     [string]$AppServiceName = "spaarke-bff-prod",
     [string]$VaultName = "sprk-platform-prod-kv",
-    [bool]$IncludeSlots = $true
+    [bool]$IncludeSlots = $true,
+    # host:port only — never a connection string (the BFF refuses one in Production).
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[A-Za-z0-9.-]+:\d+$')]
+    [string]$RedisEndpoint
 )
 
 $ErrorActionPreference = "Stop"
@@ -93,8 +102,8 @@ $settings = @(
     # --- Service Bus ---
     "ServiceBus__ConnectionString=$(KVRef 'ServiceBus-ConnectionString')",
 
-    # --- Redis ---
-    "ConnectionStrings__Redis=$(KVRef 'Redis-ConnectionString')",
+    # --- Redis (Azure Managed Redis, Entra only — task 242; plain setting, not a secret) ---
+    "Redis__Endpoint=$RedisEndpoint",
 
     # --- Document Intelligence ---
     "DocumentIntelligence__OpenAiEndpoint=$(KVRef 'ai-openai-endpoint')",

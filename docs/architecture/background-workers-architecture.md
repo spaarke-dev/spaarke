@@ -51,7 +51,13 @@ These workers execute on a recurring schedule using `PeriodicTimer` or delay-unt
 | DemoExpirationService | `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs` | Once daily at midnight UTC | Delay-until-midnight loop; expires demo accounts (disable Entra, revoke SPE access, notify) |
 | PlaybookSchedulerService | `src/server/api/Sprk.Bff.Api/Services/PlaybookSchedulerService.cs` | 1 hour | PeriodicTimer; executes notification-mode playbooks for all active users; 5 parallel users per playbook |
 | TodoGenerationService | `src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` | 24 hours | PeriodicTimer; scans for deadline-approaching and budget-alert conditions, creates to-do records |
-| SpeDashboardSyncService | `src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeDashboardSyncService.cs` | 15 minutes (default) | PeriodicTimer + on-demand Channel trigger; syncs SPE container metrics to Redis cache |
+
+> **Migrated (unified-access-control-r2 task 165, 2026-10-04):** `SpeDashboardSyncService` is no longer a timer service.
+> It is an `IScheduledJob` (`spe-dashboard-sync`) on `ScheduledJobHost` (ADR-036), its cron compiled from
+> `SpeAdmin:DashboardSyncIntervalMinutes` (default every 15 minutes), one run per schedule across instances (distributed
+> lease). `POST /api/spe/dashboard/refresh` runs it through `ScheduledJobHost.TriggerNowAsync`; the first dashboard view
+> with nothing cached starts a run. It attributes every container to the config of the business unit that owns it (the
+> container's `spaarkeBusinessUnitId` stamp), so the cached metrics carry per-config counts and storage.
 
 ### Event-Driven Channel Consumers (1)
 
@@ -90,7 +96,7 @@ These workers run once at startup (if enabled) and then exit.
 ### Scheduling Patterns
 
 **PeriodicTimer** (existing services only — new scheduled work uses `IScheduledJob`, ADR-036):
-- Used by: ScheduledRagIndexingService, GraphSubscriptionManager, InboundPollingBackupService, PlaybookSchedulerService, TodoGenerationService, SpeDashboardSyncService
+- Used by: ScheduledRagIndexingService, GraphSubscriptionManager, InboundPollingBackupService, PlaybookSchedulerService, TodoGenerationService
 - Pattern: `using var timer = new PeriodicTimer(interval); while (await timer.WaitForNextTickAsync(ct)) { ... }`
 
 **Delay-until-time** (for wall-clock scheduling):
@@ -116,7 +122,7 @@ These workers run once at startup (if enabled) and then exit.
 | Depends on | Azure OpenAI | IOpenAiClient | Embedding generation in migration services |
 | Depends on | Azure AI Search | SearchIndexClient | Index operations in migration and indexing services |
 | Consumed by | API endpoints | BulkOperationService.EnqueueAsync() | Endpoints submit bulk ops to channel for background processing |
-| Consumed by | API endpoints | SpeDashboardSyncService refresh channel | On-demand dashboard refresh trigger |
+| Consumed by | API endpoints | `ScheduledJobHost.TriggerNowAsync("spe-dashboard-sync")` | On-demand dashboard refresh (task 165; replaced the refresh channel) |
 
 ## Design Decisions
 

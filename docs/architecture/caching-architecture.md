@@ -22,9 +22,9 @@ The Spaarke BFF API follows ADR-009 (Redis-First Caching) as its primary caching
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory `AllowFallback` for local dev only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` in non-Development environment unless `AllowFallback=true` |
+| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory fallback (`Redis:AllowInMemoryFallback`) for Development and Testing only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` outside Development/Testing — with or without the fallback flag |
 | ITenantCache | `src/server/shared/Spaarke.Core/Cache/ITenantCache.cs` | **Mandatory wrapper** over `IDistributedCache`; injects `tenant:{tenantId}:` prefix; central seam for metrics, key validation, and future multi-Redis routing (NFR-12). **All Sprk.Bff.Api cache call sites MUST use this wrapper** (FR-06 atomic migration) |
-| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `ConnectionString` (Key Vault reference MANDATORY in deployed envs per ADR-028), `InstanceName=spaarke:`, `AllowFallback` (env-guarded; `true` only valid in Development) |
+| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `Endpoint` (Azure Managed Redis host:10000 — the BFF authenticates with its managed identity over RESP3; required in deployed envs, task 242), `ConnectionString` (Development/Testing only), `InstanceName=spaarke:`, `AllowInMemoryFallback` (env-guarded; honoured only in Development and Testing) |
 | DistributedCacheExtensions | `src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs` | GetOrCreateAsync with versioned keys, standard key builder, TTL constants. **Now invoked via ITenantCache, not directly** |
 | RequestCache | `src/server/shared/Spaarke.Core/Cache/RequestCache.cs` | Scoped per-request in-memory cache to collapse duplicate loads within a single HTTP request |
 | GraphTokenCache | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` | Caches OBO Graph tokens by SHA256 hash of user token; 55-min TTL; tenant-scoped via `ITenantCache` |
@@ -61,8 +61,12 @@ The primary cache layer. All services inject **`ITenantCache`** (not `IDistribut
 
 | TTL | Cache Type | Key Pattern | Rationale |
 |-----|-----------|-------------|-----------|
-| 60s | Authorization resource access | `spaarke:tenant:{tenantId}:auth:access:{userId}:{resourceId}` | Most security-sensitive; short TTL reduces stale permission risk |
-| 2 min | Authorization roles/teams | `spaarke:tenant:{tenantId}:auth:roles:{userId}`, `spaarke:tenant:{tenantId}:auth:teams:{userId}` | Security-sensitive but user-level (reusable across resources) |
+| 60s | Authorization document access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-access:{authMode}:{userOid}:{documentId}:v2` | Most security-sensitive; short TTL reduces stale permission risk. A FAULTED or degraded snapshot is never cached (task 132). The document id is normalised (`D` format) so an eviction reaches it however the request spelled it; evicted for ALL users of the document on a BFF re-own or share write |
+| 60s | Authorization record access (`CachedAccessDataSource`) | `spaarke:tenant:{tenantId}:auth-record-access:{entitySet}:{userOid}:{recordId}:v2` | Same; evicted for ALL users of a record on a BFF re-own or share write (task 132). A table an Assign cascade re-owns (`sharepointdocumentlocation`, `sharepointdocument`) is never cached |
+| 60s | External grant set (`ExternalParticipationService`) | `spaarke:tenant:{tenantId}:external-access-grant:{contactId}:v5` | Grant data; evicted by every BFF grant write (task 137); a fault-derived set is never cached (task 132) |
+| 2 min | Membership identity (`IdentityNormalizationService`) | `spaarke:tenant:{tenantId}:membership-identity:{systemUserId}:v2` | Teams, BU, linked contact; was 10 min until task 132; evicted by BFF team / BU writes |
+| 2 min | Membership resolution (`MembershipResolverService`) | `spaarke:tenant:{tenantId}:membership-resolved:{subject}:{entityType}:{optionsHash}:v5` | Was 5 min until task 132; evicted per user (team / BU writes) and per entity type (re-own) |
+| 2 min | Impersonated root sets (`ImpersonatedRootSetSource`) | `spaarke:tenant:{tenantId}:impersonated-root-set:{systemUserId}:{entityType}:v1` | Was 5 min until task 132; evicted per user (share, team) and per entity type (re-own) |
 | 2 min | Folder listings | `spaarke:tenant:{tenantId}:graph:children:{driveId}:{itemId}` | Folder contents change frequently with uploads/deletes |
 | 5 min | File metadata | `spaarke:tenant:{tenantId}:graph:metadata:{driveId}:{itemId}:v{etag}` | Document metadata with ETag-versioned keys |
 | 5 min | Security data (standard) | Via `DistributedCacheExtensions.SecurityDataTtl` | UAC snapshots and similar authorization data |
@@ -96,8 +100,14 @@ Where `{InstanceName}` is the StackExchange.Redis instance prefix (configured to
 | Era | Key example |
 |-----|-------------|
 | Pre-remediation | `sdap:auth:access:user123:doc456` |
-| Post-remediation (Phase 1) | `spaarke:tenant:3f2a91c4-7b88-4e1d-9a6c-0d5e2f814bb7:auth:access:user123:doc456` |
+| Post-remediation (Phase 1) | `spaarke:tenant:3f2a91c4-7b88-4e1d-9a6c-0d5e2f814bb7:auth-access:obo:user123:doc456:v1` |
 | Versioned metadata | `spaarke:tenant:3f2a91c4-7b88-4e1d-9a6c-0d5e2f814bb7:graph:metadata:driveA:item789:v"abc123etag"` |
+
+> ⚠️ **The authorization snapshot keys reached that shape only with unified-access-control-r2 task 132 (2026-10).**
+> Until then `CachedAccessDataSource` wrote plain `IDistributedCache` keys (`sdap:auth:access:{mode}:{oid}:{doc}`,
+> `sdap:auth:record:…`) with no tenant segment and no version, plus two write-only user-level keys; this table claimed
+> the tenant-scoped shape regardless. Task 132 moved the two live keys onto `ITenantCache` (ADR-009 path C) and deleted
+> the write-only ones.
 
 > ⚠️ **`{tenantId}` is an Entra tenant GUID**, and the examples above show one. They previously showed a
 > domain name (`contoso.onmicrosoft.com`), which read as "one customer per key prefix" — the exact
@@ -119,11 +129,12 @@ as customer isolation, which it never was.
 
 **What delivers customer separation is the dedicated per-customer Redis instance** — a resource boundary in
 the customer's own Azure subscription, not a key convention. Per D-12 §3, Redis is **dedicated per customer
-in both models, at Standard tier** (Standard supplies the SLA and replication that Basic lacks; Premium's
-exclusives — VNet injection, which is unused and Microsoft-deprecated, RDB persistence, geo-replication,
-clustering — are not in use, and losing this cache costs a cold start, not data). Redis is the clearest case
-for a boundary rather than a filter because **its auth is per-instance, not per-keyspace**: a connection
-string reaches every key.
+in both models** — since owner decision D12 (2026-09-30, task 242) **Azure Managed Redis `Balanced_B0` with
+high availability, Microsoft Entra only** (access keys disabled; the stamp UAMI holds the only access-policy
+assignment). Azure Cache for Redis Basic/Standard/Premium retires 2028-09-30 and has blocked new-customer
+creation since 2026-04-01. Losing this cache costs a cold start, not data. Redis is the clearest case for a
+boundary rather than a filter because **its access control is per-instance, not per-keyspace**: any identity
+the cache admits reaches every key.
 
 ⚠️ **How much the shared case would have mattered, stated precisely.** A collision also needs
 `{resource}:{id}` to repeat across customers. At most call sites `{id}` is a GUID or hash (conversation id,
@@ -184,9 +195,9 @@ The BFF API is designed to run as multiple App Service instances behind a load b
 
 ### Local development (in-memory mode)
 
-- When `Redis:Enabled=false` AND `Redis:AllowFallback=true` AND `ASPNETCORE_ENVIRONMENT=Development`, `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
+- When `Redis:Enabled=false` AND `Redis:AllowInMemoryFallback=true` AND `ASPNETCORE_ENVIRONMENT` is `Development` or `Testing` (the latter for CI test hosts), `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
 - **Known limitation (Q-B)**: In-memory mode is **single-instance only**. The Null-Object's `Subscribe(...)` is a no-op — Pub/Sub messages are never delivered. Running multiple local instances against in-memory cache will produce stale views; the operational guide [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) documents this limitation.
-- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` AND `ASPNETCORE_ENVIRONMENT != "Development"` AND `AllowFallback != true` (and even with `AllowFallback=true`, non-Development envs log a CRITICAL warning).
+- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` in any environment other than Development or Testing — `AllowInMemoryFallback=true` does not change that (CacheModule branch c).
 
 ## Cache Instance Registry
 
@@ -198,9 +209,10 @@ non-production rows below are shared development infrastructure, not a customer-
 
 | Environment | Redis instance | Resource group | SKU |
 |-------------|---------------|----------------|-----|
-| dev | `spaarke-bff-redis-dev` | `rg-spaarke-dev` | Basic C0 |
-| staging | `spaarke-bff-redis-staging` | `rg-spaarke-staging` | Standard C0+ |
-| customer (prod, both models) | one per customer, in the customer's own subscription | the customer's own resource group | **Standard C2+** (D-12 §3 — Premium is not justified by any feature in use) |
+| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-dev.bicepparam`; access policy: the dev BFF's and the L2 Worker's managed identities). Cut over 2026-10-05 (task 242b): the BFF and Worker reach it through `Redis__Endpoint`; the old Basic C0 cache of the same name is being retired |
+| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-demo.bicepparam`; access policy: the demo BFF's managed identity) |
+| staging | `spaarke-bff-redis-staging` (not deployed) | — | Azure Managed Redis Balanced_B0, HA (`redis-staging.bicepparam`) |
+| customer (prod, both models) | `sprk-{customerId}-{env}-redis`, one per customer, in the customer's own subscription | the customer's own resource group | **Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12; size up only on a measured memory metric — no scale-down) |
 
 **Customer separation is the dedicated instance, not the key prefix.** The `tenant:{tenantId}:` prefix and
 the subject segment remain mandatory on top of it (see Tenant Isolation).
@@ -220,10 +232,11 @@ These remain explicit non-goals for the current Phase 1 remediation; the wrapper
 |---------|---------|---------|
 | TTL expiration | All caches | Automatic; each entry has `AbsoluteExpirationRelativeToNow` |
 | Explicit delete | GraphMetadataCache | After file upload, delete, rename, or metadata update |
-| Version-based key rotation | DistributedCacheExtensions, GraphMetadataCache | New ETag/version creates new key; old key expires naturally |
-| Fire-and-forget cache write | CachedAccessDataSource | Authorization snapshot cached asynchronously after Dataverse fetch |
+| Version-based key rotation | DistributedCacheExtensions, GraphMetadataCache, membership identity (v2) / resolution (v5) | New ETag/version creates new key; old key expires naturally. Task 132 bumped the two membership versions so no pre-fix (possibly fault-derived) entry is served |
+| Fire-and-forget cache write | CachedAccessDataSource, ExternalParticipationService | Snapshot / grant set cached asynchronously after the Dataverse fetch — **unless it is FAULTED** (task 132): a failed read, a 429 / 5xx / timeout, or a degraded probe-derived answer is returned to its request and never stored |
 | Token removal | GraphTokenCache | On logout or token invalidation via `RemoveTokenAsync` |
-| Pub/Sub broadcast invalidation | (future) cross-instance invalidation | Redis Pub/Sub channel; no-op in in-memory dev mode |
+| BFF write-path eviction (SCAN + DEL) | `IMembershipCacheInvalidator.InvalidateUserAccessAsync` / `InvalidateRecordOwnerChangeAsync` / `InvalidateRecordShareChangeAsync` (task 132) | Team add / remove and BU bind (per user: identity, membership, root sets); re-own (per entity type: membership, root sets; per record: snapshots); every POA share write — grant, rights change, revoke — notified by `DataverseWebApiService` itself through `IRecordShareWriteObserver` (round 55), whoever called it (per root type: root sets; per record: snapshots). Every tenant segment; no HttpContext needed; patterns built from the readers' own key builders, and only for a cache that can hold the type (a child an Assign cascade re-owns gets no pattern and no SCAN). Active whenever Redis is the cache — independent of the junction channel switch |
+| Pub/Sub broadcast invalidation | `MembershipCacheInvalidator.PublishInvalidationAsync` + `MembershipCacheInvalidationSubscriber` (junction-row writes) | Redis Pub/Sub channel, only with `Membership:CacheInvalidator:Enabled=true`; no-op in in-memory dev mode |
 
 ## Data Flow
 
@@ -284,12 +297,12 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 
 | Failure mode | Environment | Detection | System behavior | Alert threshold | Operator action |
 |--------------|-------------|-----------|-----------------|-----------------|-----------------|
-| **Redis unreachable at startup** | Deployed (dev/staging/prod) | `AbortOnConnectFail=true` raises `RedisConnectionException` during `CacheModule` init | Process exits non-zero; App Service restart loop; health probe fails | First failed startup (immediate page) | Verify Key Vault reference resolves; check Redis instance status; check NSG / private endpoint; check Managed Identity has KV read; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Troubleshooting |
+| **Redis unreachable at startup** | Deployed (dev/staging/prod) | `AbortOnConnectFail=true` raises `RedisConnectionException` during `CacheModule` init (or the Entra token request fails) | Process exits non-zero; App Service restart loop; health probe fails | First failed startup (immediate page) | Verify `Redis__Endpoint` (host:10000) and that the identity named by `ManagedIdentity__ClientId` holds an access-policy assignment on the cache's database; check Redis instance status; check NSG / private endpoint; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Troubleshooting |
 | **Redis unreachable at runtime (transient)** | All | Per-call exception caught in `ITenantCache` | Cache treated as miss; falls through to source; warning logged; latency increases | >5% miss-rate spike over baseline for 5 min | Investigate Redis CPU / memory / network; check for failover event |
 | **Pub/Sub channel degraded** | Deployed (multi-instance) | Subscriber message delivery latency > 1s OR delivery failures | Stale-cache risk: invalidation events do not fan out; tenants on instance A may see stale data after instance B writes | Pub/Sub delivery latency P95 > 500 ms for 5 min | Investigate Redis Pub/Sub channel health; consider scaling SKU; check `JobStatusService` connection state |
 | **Pub/Sub absent (in-memory dev mode)** | Local dev only | Null-Object `Subscribe(...)` no-op | **Single-instance only invariant** holds; multi-instance dev = stale views | N/A (dev-only; documented limitation) | Single instance only locally; switch to deployed dev for multi-instance validation |
-| **SKU undersize (memory or throughput)** | All | Redis memory usage > 80%, eviction rate spike, or Redis CPU > 70% | Eviction of hot keys → cache hit rate drops; P95 endpoint latency degrades (Graph round-trips no longer absorbed) | Memory > 75%, hit rate < 60% sustained for 10 min, OR P95 endpoint latency > 1.5x baseline | Scale Redis SKU (e.g., Basic C0 → Standard C1 → Premium P1); check for runaway cache writes / TTL misconfig |
-| **Connection-string secret rotation lag** | Deployed | App Settings still references old secret URI after rotation | Cache connections fail with auth error after rotation | Any auth failure on Redis connection | Update KV reference URI; force App Service restart; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Secret Rotation |
+| **SKU undersize (memory or throughput)** | All | Redis memory usage > 80%, eviction rate spike, or Redis CPU > 70% | Eviction of hot keys → cache hit rate drops; P95 endpoint latency degrades (Graph round-trips no longer absorbed) | Memory > 75%, hit rate < 60% sustained for 10 min, OR P95 endpoint latency > 1.5x baseline | Scale the Azure Managed Redis SKU up (e.g., Balanced_B0 → B1 → B3; there is no scale-down); check for runaway cache writes / TTL misconfig |
+| **Access-policy assignment missing** | Deployed | The managed identity has no access-policy assignment on the Managed Redis database (e.g. a re-created identity) | Startup connect fails with an authentication error (no key fallback exists) | First failed startup | Re-deploy the Bicep that assigns it (`customer.bicep` / `redis-{env}.bicepparam` principal list) |
 | **In-memory fallback in non-Development env** | Deployed (misconfig) | `CacheModule` throws at startup if `Redis:Enabled=false` AND env != Development | Process exits non-zero (fail-fast); prevents silent degraded prod | Any occurrence | Restore Redis config; do NOT use `AllowFallback=true` outside local dev |
 | **Cross-tenant key leakage** | All | Code path bypassing `ITenantCache`; key missing `tenant:` segment | Stored data potentially served to wrong tenant | Any direct `IDistributedCache.*` invocation outside wrapper + tests (grep gate) | Treat as security incident; rotate affected keys; PR fix via wrapper |
 
@@ -297,8 +310,8 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 
 | Direction | Subsystem | Interface | Notes |
 |-----------|-----------|-----------|-------|
-| Depends on | Redis (Azure Cache for Redis) | StackExchange.Redis via `ITenantCache` → `IDistributedCache` | Required in deployed envs; Null-Object in local dev only |
-| Depends on | Key Vault | App Settings KV reference for `Redis-ConnectionString` | MANDATORY per ADR-028; no plaintext in App Settings (FR-14) |
+| Depends on | Redis (Azure Managed Redis) | StackExchange.Redis + `Microsoft.Azure.StackExchangeRedis` (Entra, RESP3) via `ITenantCache` → `IDistributedCache` | Required in deployed envs; Null-Object in local dev only |
+| Depends on | Managed identity | `Redis__Endpoint` + `ManagedIdentity__ClientId` (plain settings) | No Redis key, connection string or Key Vault secret exists (task 242, ADR-028 A4 / D13) |
 | Consumed by | GraphClientFactory | GraphTokenCache → ITenantCache | OBO token caching |
 | Consumed by | RagService, SemanticSearchService | EmbeddingCache → ITenantCache | AI embedding caching |
 | Consumed by | SpeFileStore, DriveItemOperations | GraphMetadataCache → ITenantCache | Graph API response caching |
@@ -329,10 +342,11 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 - **MUST**: Every cache key carry `tenant:{tenantId}:` prefix UNLESS on the System-Level Exception Allow-List (FR-05). ⚠️ This separates **Entra tenants**, not customers — customer separation is the dedicated per-customer Redis instance (D-12 §3)
 - **MUST**: The key part **after** the tenant segment discriminate the subject (user / session / record) whenever the cached value is not identical for every principal in the tenant — `{resource}:{id}` MUST NOT both be compile-time constants (ADR-009 §5, added 2026-09-28)
 - **MUST**: `Redis:InstanceName = "spaarke:"` in all environments (FR-07)
-- **MUST**: Redis connection string sourced from Key Vault via `@Microsoft.KeyVault(...)` reference in deployed envs (FR-14, ADR-028)
+- **MUST**: Deployed envs authenticate to Redis with the managed identity only (`Redis__Endpoint`, RESP3; access keys disabled on the cache). A connection string is accepted only in Development/Testing (task 242, owner D12/D13; supersedes FR-14's Key Vault-reference rule)
 - **MUST**: Fail-fast (`AbortOnConnectFail=true`) when Redis is configured but unreachable in deployed envs (ADR-009 amended)
 - **MUST**: Handle runtime cache errors gracefully; never let cache errors propagate to the caller
-- **MUST**: Keep authorization cache TTLs at 2 minutes or less (security-sensitive data)
+- **MUST**: Keep authorization cache TTLs at 2 minutes or less (security-sensitive data) — true of the code since unified-access-control-r2 task 132 (identity / membership / impersonated root sets 2 min; snapshots and grant sets 60 s)
+- **MUST NOT**: Cache a fault-derived result as if it were an answer — a failed read is returned to its request (fail closed) and never stored (task 132)
 - **MUST**: Symmetric DI registration of `IConnectionMultiplexer` (real or Null-Object) per ADR-032
 - **MUST NOT**: Cache authorization decisions; only cache authorization data (ADR-003)
 - **MUST NOT**: Store plaintext tokens in cache keys or logs; always hash with SHA256
@@ -346,9 +360,29 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 - **Pub/Sub silent in local dev**: In-memory mode's Null-Object `IConnectionMultiplexer.Subscribe(...)` is a no-op. Multi-instance local testing of Pub/Sub-dependent features (job status fan-out, future cross-instance invalidation) requires a deployed dev environment with real Redis.
 - **IConnectionMultiplexer singleton coupling**: A single `ConnectionMultiplexer` serves both `IDistributedCache` and Pub/Sub (used by `JobStatusService`). Connection issues affect both caching and real-time job status simultaneously.
 - **Embedding cache size**: 1536-float vectors at 4 bytes each = ~6KB per cached embedding. High-volume workloads can accumulate significant Redis memory; the 7-day TTL provides natural eviction; monitor against the SKU-undersize alert threshold above.
-- **Authorization cache staleness**: 2-minute TTL means permission changes (role assignment, team membership) can take up to 2 minutes to take effect. This is an acceptable tradeoff documented in ADR-003.
+- **Authorization cache staleness**: a change made OUTSIDE the BFF (MDA Assign / Change BU, admin UI, flows) can take up to the bounds in § Access cache residual staleness to take effect — at most 4 minutes (identity 2 min + membership 2 min, stacked). The BFF's own team / BU / owner / share writes evict immediately. Signed off by the owner (rounds 3 R3/R4).
 - **System-level allow-list creep**: Each new entry on the System-Level Exception Allow-List weakens tenant isolation defense-in-depth. Treat additions as architecture decisions, not routine code changes.
 - **Tenant-ID resolution in background work**: `ServiceBusJobProcessor` and other background paths must explicitly pass `tenantId` to `ITenantCache` (no ambient `HttpContext`). Reuse the event payload's tenant claim.
+
+## Access cache residual staleness (unified-access-control-r2 task 132 · defect C12)
+
+After task 132, staleness remains only for changes the BFF cannot observe (no Dataverse plugins, ADR-002): the
+Dataverse admin UI, MDA Assign / Change BU, flows, imports. **Owner sign-off: rounds 3 R3/R4, 2026-09-30 (BINDING) —
+"access changes must take effect in MINUTES, never hourly", safety net ≤ 5 min.** Every bound below is ≤ 4 minutes.
+
+| # | Cache | TTL | Invalidated by (BFF writes) | Outside-BFF bound | Direction |
+|---|---|---|---|---|---|
+| 1 | External grant set | 60 s | grant / revoke / close / expiry (every tenant; organization members fanned out — task 137) | 60 s | after a removal the old access persists ≤ bound (over-grant); after an addition new access appears ≤ bound (under-grant) |
+| 2 | Membership identity (teams, BU, linked contact) | 2 min | team add / remove, BU bind | 2 min | same |
+| 3 | Membership resolution | 2 min | the user's team / BU writes (per user); every re-own of the entity type (per entity) | **4 min** (identity + membership stacked) | same |
+| 4 | Access snapshots (RetrievePrincipalAccess answers) | 60 s | every re-own of the record and every BFF share write on it — grant / rights change / revoke, notified by `DataverseWebApiService` itself, whoever called it (all users) | 60 s — includes a user's team change (keyed by Entra oid, not evicted) | same |
+| 5 | Impersonated root sets | 2 min | all users of the root type on every BFF share write (the POA seam) and on a re-own; per user on team add / remove | 2 min | same |
+| 6 | Fault-derived results | never cached | — | — | a fault denies one request, never a TTL |
+
+A read that started before an eviction and writes after it can re-cache a pre-change answer for one TTL (inherent to
+cache-aside eviction). The rows an Assign cascade re-owns as a side effect (`sharepointdocumentlocation`,
+`sharepointdocument`) are held by no access cache at all — no BFF write follows the cascade's owner changes, so they are
+read live (batch 4 integration residual). Record: `projects/unified-access-control-r2/notes/task-132-access-cache-faults-and-staleness.md`.
 
 ## Related
 

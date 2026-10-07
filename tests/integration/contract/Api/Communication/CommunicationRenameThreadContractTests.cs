@@ -46,6 +46,8 @@ public class CommunicationRenameThreadContractTests : IClassFixture<Communicatio
     {
         _factory = factory;
         _client = factory.CreateClient();
+        // Task 161: the record gate asks every rights question with the caller's own token.
+        _client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token");
     }
 
     [Fact]
@@ -64,9 +66,11 @@ public class CommunicationRenameThreadContractTests : IClassFixture<Communicatio
     public async Task RenameThread_WithBlankName_Returns400()
     {
         _factory.ResolveCaller(CallerSystemUserId);
+        var threadId = Guid.NewGuid();
+        _factory.Probe.Grant("sprk_communicationthreads", threadId, AccessRights.Read | AccessRights.Write);
 
         var response = await _client.PostAsJsonAsync(
-            $"/api/communications/threads/{Guid.NewGuid()}/rename", new { name = "   " });
+            $"/api/communications/threads/{threadId}/rename", new { name = "   " });
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
     }
@@ -94,7 +98,9 @@ public class CommunicationRenameThreadContractTests : IClassFixture<Communicatio
     {
         var threadId = Guid.NewGuid();
         _factory.ResolveCaller(CallerSystemUserId);
-        // The IMPERSONATED visibility projection returns the thread → the caller may see it.
+        // The IMPERSONATED visibility projection returns the thread → the caller may see it; and (task 161) the
+        // caller holds Write on it, because the rename writes the shared thread record.
+        _factory.Probe.Grant("sprk_communicationthreads", threadId, AccessRights.Read | AccessRights.Write);
         _factory.SetThreadVisibleRows(new[]
         {
             new Dictionary<string, JsonElement>
@@ -139,6 +145,9 @@ public sealed class CommunicationRenameTestWebAppFactory : WebApplicationFactory
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
     public Mock<IImpersonatedCommunicationQuery> ImpersonatedQueryMock { get; } = new();
     public Mock<ICallerSystemUserResolver> CallerResolverMock { get; } = new();
+
+    /// <summary>Task 161: the record gate asks the probe for Write on the thread (the rename/pin/delete write the SHARED record).</summary>
+    public RecordingProbe Probe { get; } = new();
 
     private readonly bool _disableAuth;
 
@@ -267,6 +276,8 @@ public sealed class CommunicationRenameTestWebAppFactory : WebApplicationFactory
             services.AddSingleton(ImpersonatedQueryMock.Object);
             services.RemoveAll<ICallerSystemUserResolver>();
             services.AddScoped(_ => CallerResolverMock.Object);
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(Probe);
 
             // Avoid a real Dataverse boot (mirrors OfficeCommunicationsTestWebAppFactory).
             var dataverseServiceMock = new Mock<IDataverseService>();

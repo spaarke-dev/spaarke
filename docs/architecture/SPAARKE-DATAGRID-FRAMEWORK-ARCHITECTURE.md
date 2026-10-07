@@ -29,7 +29,7 @@ import { DataGrid, XrmDataverseClient } from '@spaarke/ui-components';
 <DataGrid
   configId="3019a06e-9b5e-f111-ab0c-7c1e521545d7"   // sprk_gridconfiguration record ID
   parentContext={{ matterId }}                       // optional — drives parent-context filter overlay
-  dataverseClient={new XrmDataverseClient()}         // or BffDataverseClient (code-page / non-MDA)
+  dataverseClient={new XrmDataverseClient()}         // or BffDataverseClient (external seam only — see §4)
   theme={resolvedTheme}                              // optional — for portal dark-mode propagation
   onBack={() => window.close()}                      // optional — back-arrow handler
 />
@@ -94,9 +94,11 @@ Two implementations ship in R1:
 | Implementation | Host | Mechanism |
 |---|---|---|
 | **`XrmDataverseClient`** | Model-Driven Apps, Custom Pages launched from MDA, anywhere `window.Xrm` exists | Wraps `Xrm.WebApi`, `Xrm.Utility`, and direct `EntityDefinitions` Web API for attribute display-name fetch. |
-| **`BffDataverseClient`** | Workspace SPA, external-access surfaces, anywhere `window.Xrm` is unavailable | Calls Spaarke BFF passthrough endpoints (Phase B, tasks 010–013) using `@spaarke/auth.authenticatedFetch` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). |
+| **`BffDataverseClient`** | External-access surfaces (the outside-counsel workspace), with `bffBaseUrl = {BFF}/api/v1/external` | Calls the BFF's external module seam (`/api/v1/external/api/dataverse/*`, `ExternalModuleDataEndpoints.cs`) using `@spaarke/auth.authenticatedFetch` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). |
 
 A future host that can produce a `IDataverseClient` (e.g. a Teams app shell) gets the same framework with zero changes to the component.
+
+**The BFF adapter's security model (2026-10-03, unified-access-control-r2 task 160).** A row read through `BffDataverseClient` is only as scoped as the BFF route behind it, because the BFF reads Dataverse with its own application identity unless the route says otherwise. The external module seam scopes every read itself: it injects the caller's accessible-record set into the FetchXML (Tier 2), allow-lists the columns per module, and refuses a record id outside that set before any read — it must, because a CIAM contact cannot be impersonated. The INTERNAL passthrough had no equivalent: `POST /api/dataverse/fetch` and `GET /api/dataverse/record/{entityLogicalName}/{id}` ran the caller's query app-only behind `DataverseAuthorizationFilter`, which checks only that the caller holds a table Read privilege at any depth, so any signed-in user read every row and column of the org (route sweep findings #9 and #10). Neither had a caller, so both were **deleted**; the internal `/api/dataverse/*` group now serves only schema and view definitions (savedquery, savedqueries, metadata, gridconfigurations). Every in-repo internal grid host uses `XrmDataverseClient`, where Dataverse enforces the user's own rights. An internal non-MDA host that needs `BffDataverseClient` row reads first needs a BFF read path that runs **as the caller** (impersonated, or a record-level pre-check) — never an app-only passthrough.
 
 ---
 
@@ -241,7 +243,7 @@ const membershipResolver = createMembershipResolver(
 
 **Reference deployment** — the "My Tasks" grid (`sprk_gridconfiguration` "My Tasks (Assistant)"): sources the "My Tasks Open" saved query (Deadline+Task+Reminder, eventstatus=Open, **no owner filter**) and applies `membershipFilter: true`, so the Assistant's `list-tasks` capability opens "the open task-type events I'm on."
 
-**Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 5-min/user). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
+**Boundaries.** Requires a host `authenticatedFetch` (works in SpaarkeAi + Code Pages; MDA subgrids degrade). One membership round-trip per grid load (Redis-cached server-side, 2-min/user since UAC-r2 task 132). Bounded by the endpoint's id cap (default ~500, hard 5000); a user on more records than the cap needs continuation-token paging (documented follow-up).
 
 **Implementation:** `MembershipFilter` (`types/DataGridConfiguration.ts`) · `createMembershipResolver` (`services/membership.ts`) · `overlayMembershipFilter` (`components/DataGrid/fetchXmlOverlay.ts`) · the gated resolve effect in `DataGrid.tsx` · widget plumbing in `DataverseEntityViewWidget.tsx`.
 
@@ -304,7 +306,7 @@ Hosts that need custom row-click behavior (registered side panes, bespoke React 
 />
 ```
 
-**Use sparingly**: the framework's default is the standard for a reason (Layout 1 unification, dark-mode compatibility, dirty-check-free simplicity). If a host needs a custom `onRecordOpen`, the reason SHOULD appear in the project's spec.md "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29). Audit as of 2026-07-01: **no** production consumer under `src/solutions/**` passes an `onRecordOpen` override — every consumer inherits the framework default.
+**Use sparingly**: the framework's default is the standard for a reason (Layout 1 unification, dark-mode compatibility, dirty-check-free simplicity). If a host needs a custom `onRecordOpen`, the reason SHOULD appear in the project's spec.md "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflicts). Audit as of 2026-07-01: **no** production consumer under `src/solutions/**` passes an `onRecordOpen` override — every consumer inherits the framework default.
 
 ---
 
@@ -313,14 +315,14 @@ Hosts that need custom row-click behavior (registered side panes, bespoke React 
 | ADR | What it constrains |
 |---|---|
 | [ADR-006](../../.claude/adr/ADR-006-pcf-over-webresources.md) | New UI defaults to Custom Pages, NOT PCFs. The PCF predecessor retires in Phase F. |
-| [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) | The 5 BFF passthrough endpoints (`/api/dataverse/*`) all use the standard endpoint-authorization filter pattern. |
+| [ADR-008](../../.claude/adr/ADR-008-endpoint-filters.md) | The internal BFF passthrough endpoints (`/api/dataverse/*`: savedquery, savedqueries, metadata, gridconfigurations) use the standard endpoint-authorization filter pattern. That filter is entity-level only; the fetch and record routes were deleted in task 160 (see §4). |
 | [ADR-012](../../.claude/adr/ADR-012-shared-components.md) | The framework lives in `@spaarke/ui-components`, NOT in any individual host. `IDataverseClient` is the canonical Dataverse contract for shared components. |
 | [ADR-019](../../.claude/adr/ADR-019-problemdetails.md) | BFF passthrough errors emit ProblemDetails. |
 | [ADR-021](../../.claude/adr/ADR-021-fluent-design-system.md) | Fluent v9 only. NO raw hex. Dark mode on every portal surface (`applyStylesToPortals={true}` re-wraps on Popover, Menu, Dialog, Combobox). |
 | [ADR-022](../../.claude/adr/ADR-022-pcf-platform-libraries.md) | Framework code MUST be React-16-safe so PCF hosts can consume it. Custom Page hosts may use React 18 / 19. |
 | [ADR-026](../../.claude/adr/ADR-026-full-page-custom-page-standard.md) | Full-page Custom Page = Vite + `vite-plugin-singlefile` + React 19. The Custom Page shell is presentational only. |
 | [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) | `BffDataverseClient` uses `@spaarke/auth.authenticatedFetch` exclusively. |
-| [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) | The 5 passthrough endpoints stay within the BFF publish-size baseline. |
+| [ADR-029](../../.claude/adr/ADR-029-bff-publish-hygiene.md) | The passthrough endpoints stay within the BFF publish-size baseline. |
 
 ---
 

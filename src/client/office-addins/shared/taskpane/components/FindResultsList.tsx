@@ -14,7 +14,8 @@ import {
 import { useLazyResults } from '../hooks/useLazyResults';
 import type { AnnounceMode } from '../hooks/useAnnounce';
 import type { RecordSeedSource, RecordMatch, UseFindRecordMatchesResult } from '../hooks/useFindRecordMatches';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
+import { FindSplitPane } from './FindSplitPane';
 
 /**
  * FindResultsList — renders the Find tab's results (spaarkeai-word-add-in-r1 task 034, extended task 077,
@@ -29,11 +30,12 @@ import { cleanGuid } from '../utils/cleanGuid';
  * side by side, each owning its own heading, loading spinner, empty copy and error MessageBar — neither
  * section's render path reads the other's state.
  *
- * **Still exactly ONE scroll container (UAT-3).** Both sections live inside the SAME `scrollArea` div
- * (`data-testid="find-results-scroll-area"`) — there is deliberately no per-section `overflow`/`maxHeight`
- * (the pre-092 `maxHeight: '360px'` cap is gone entirely). `FindView` no longer gives its own container an
- * `overflow: 'auto'` either (see that file) — the chain is `flex: 1; minHeight: 0` all the way down to this
- * one scroller, which is the single active scroll context for the whole Find tab.
+ * **Task 102 (UAT round 6 item 4) — SUPERSEDES task 092's "one scroll container".** The two sections are
+ * now separate panes ("Similar Documents", "Matching records"), each a fixed heading + its OWN scroll
+ * container (`find-documents-scroll`, `find-records-scroll`), sharing the Find tab's height through a
+ * draggable/keyboard-operable divider (`FindSplitPane`). The pre-092 fixed-height cap stays gone — heights
+ * come from the split ratio, never a pixel cap. Each progressive-load sentinel (documents reveal, records
+ * paging) sits at the end of its own scroller, so each is triggered by its OWN list's scroll.
  *
  * **Path 2 (owner-approved 2026-09-15, Find list only)** — the documented exception to ADR-051's literal
  * "fetch progressively" MUST, for the DOCUMENTS half only. `GET /api/ai/visualization/related/{documentId}`
@@ -228,25 +230,27 @@ const useStyles = makeStyles({
     minHeight: 0,
     padding: tokens.spacingVerticalXS,
   },
-  // Task 092: the ONE scroll container for the whole Find tab — no maxHeight, flex:1/minHeight:0 so it
-  // consumes exactly the space FindView's container leaves it. Both sections live inside this div.
-  scrollArea: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalL,
-    flex: 1,
-    minHeight: 0,
-    overflowY: 'auto',
-    ...thinScrollbarStyle,
-  },
-  // Task 092: each section renders at its natural content height — never squeezed by the scroll
-  // container's flex layout (an overflow:auto flex container's automatic minimum size is 0, which
-  // would otherwise let a section get crushed instead of the OUTER area scrolling).
+  // Task 102 (UAT round 6 item 4): each section is a pane = fixed heading + its OWN scroll container.
+  // The pane fills whatever height `FindSplitPane` gives its region (flex:1/minHeight:0); the heading
+  // never scrolls away, the `scroller` below it does. The scroller is a grid with max-content rows so
+  // rows keep their natural height and the scroller scrolls instead of crushing them.
   section: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    flexShrink: 0,
+    flex: 1,
+    minHeight: 0,
+  },
+  scroller: {
+    display: 'grid',
+    gridTemplateColumns: 'minmax(0, 1fr)',
+    gridAutoRows: 'max-content',
+    alignContent: 'start',
+    gap: tokens.spacingVerticalXS,
+    flex: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    ...thinScrollbarStyle,
   },
   row: {
     display: 'flex',
@@ -345,7 +349,7 @@ function HubSection({
         This document&rsquo;s record{hubNodes.length > 1 ? 's' : ''} — not a similarity match
       </Text>
       {hubNodes.map(node => {
-        const label = `${HUB_LABELS[node.type] ?? 'Related record'}: ${node.data.label || 'Untitled'}`;
+        const label = hubRowLabel(node);
         const target = onOpenRecord ? extractHubRecordId(node) : null;
         if (target) {
           return (
@@ -370,9 +374,37 @@ function HubSection({
   );
 }
 
+/**
+ * Task 102 label check. The BFF's `CreateParentHubNode` builds `Label = sourceDoc.MatterName ?? "Matter"`
+ * (likewise Project/Invoice/Email), so when the parent record's NAME is unavailable the "name" it sends is
+ * the TYPE word — which this row used to render as "Matter: Matter". A label equal to the type word is a
+ * placeholder, not a name: show the type with an honest "name unavailable" instead of repeating it.
+ */
+function hubRowLabel(node: FindResultNode): string {
+  const typeLabel = HUB_LABELS[node.type] ?? 'Related record';
+  const name = node.data.label?.trim();
+  if (!name || name.toLowerCase() === typeLabel.toLowerCase()) {
+    return `${typeLabel} (name unavailable)`;
+  }
+  return `${typeLabel}: ${name}`;
+}
+
+/**
+ * The BFF's `CreateNode` sends `DocumentType = document.DocumentType ?? "Unknown"` — a server fallback
+ * for an index row with no document type, not a type. Showing it as a type is noise, so it is omitted.
+ */
+function displayableDocumentType(documentType: string | null | undefined): string | null {
+  const trimmed = documentType?.trim();
+  return trimmed && trimmed.toLowerCase() !== 'unknown' ? trimmed : null;
+}
+
 function rowMetaText(node: FindResultNode): string {
   const similarityPct = typeof node.data.similarity === 'number' ? Math.round(node.data.similarity * 100) : null;
-  return [node.data.documentType, similarityPct !== null ? `${similarityPct}% match` : null, node.data.parentEntityName]
+  return [
+    displayableDocumentType(node.data.documentType),
+    similarityPct !== null ? `${similarityPct}% match` : null,
+    node.data.parentEntityName,
+  ]
     .filter((part): part is string => Boolean(part))
     .join(' · ');
 }
@@ -458,53 +490,59 @@ function DocumentsSection({
 
   return (
     <div className={styles.section} data-testid="find-documents-section">
-      <Text className={styles.heading}>Most similar documents</Text>
+      <Text className={styles.heading}>Similar Documents</Text>
+      <div className={styles.scroller} data-testid="find-documents-scroll">
+        {documents.kind === 'loading' && (
+          <div className={styles.loadingLine}>
+            <Spinner size="tiny" />
+            <Text size={200}>Finding similar documents…</Text>
+          </div>
+        )}
 
-      {documents.kind === 'loading' && (
-        <div className={styles.loadingLine}>
-          <Spinner size="tiny" />
-          <Text size={200}>Finding similar documents…</Text>
-        </div>
-      )}
+        {documents.kind === 'error' && (
+          <MessageBar intent="error" layout="multiline">
+            <MessageBarBody>
+              <MessageBarTitle>Couldn&rsquo;t load similar documents</MessageBarTitle>
+              {documents.message}
+            </MessageBarBody>
+          </MessageBar>
+        )}
 
-      {documents.kind === 'error' && (
-        <MessageBar intent="error" layout="multiline">
-          <MessageBarBody>
-            <MessageBarTitle>Couldn&rsquo;t load similar documents</MessageBarTitle>
-            {documents.message}
-          </MessageBarBody>
-        </MessageBar>
-      )}
-
-      {documents.kind === 'loaded' && (
-        <>
-          {documents.partialResultsWarning && (
-            <MessageBar intent="warning" layout="multiline">
-              <MessageBarBody>
-                <MessageBarTitle>Results may be incomplete</MessageBarTitle>
-                {documents.partialResultsWarning}
-              </MessageBarBody>
-            </MessageBar>
-          )}
-          {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} onOpenRecord={onOpenRecord} styles={styles} />}
-          {resultRows.length === 0 ? (
-            <Text className={styles.emptyLine}>No similar documents found</Text>
-          ) : (
-            // A real list for screen readers (NFR-11). The sentinel sits outside the list, but must
-            // stay inside the scroll area: the observer only sees it once it scrolls into view there.
-            <div role="list" aria-label="Most similar documents" className={styles.list}>
-              {visibleItems.map(node => (
-                <div key={node.id} role="listitem">
-                  <ResultRow node={node} onOpenRecord={onOpenRecord} styles={styles} />
-                </div>
-              ))}
-            </div>
-          )}
-          {hasMore && (
-            <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" data-testid="find-results-sentinel" />
-          )}
-        </>
-      )}
+        {documents.kind === 'loaded' && (
+          <>
+            {documents.partialResultsWarning && (
+              <MessageBar intent="warning" layout="multiline">
+                <MessageBarBody>
+                  <MessageBarTitle>Results may be incomplete</MessageBarTitle>
+                  {documents.partialResultsWarning}
+                </MessageBarBody>
+              </MessageBar>
+            )}
+            {hubNodes.length > 0 && <HubSection hubNodes={hubNodes} onOpenRecord={onOpenRecord} styles={styles} />}
+            {resultRows.length === 0 ? (
+              <Text className={styles.emptyLine}>No similar documents found</Text>
+            ) : (
+              // A real list for screen readers (NFR-11). The sentinel sits outside the list, but must
+              // stay inside the scroll area: the observer only sees it once it scrolls into view there.
+              <div role="list" aria-label="Similar Documents" className={styles.list}>
+                {visibleItems.map(node => (
+                  <div key={node.id} role="listitem">
+                    <ResultRow node={node} onOpenRecord={onOpenRecord} styles={styles} />
+                  </div>
+                ))}
+              </div>
+            )}
+            {hasMore && (
+              <div
+                ref={sentinelRef}
+                className={styles.sentinel}
+                aria-hidden="true"
+                data-testid="find-results-sentinel"
+              />
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -612,59 +650,61 @@ function RecordsSection({
   return (
     <div className={styles.section} data-testid="find-records-section">
       <Text className={styles.heading}>Matching records</Text>
-      {records.seedSource && <Text className={styles.groupCaption}>{SEED_SOURCE_CAPTION[records.seedSource]}</Text>}
+      <div className={styles.scroller} data-testid="find-records-scroll">
+        {records.seedSource && <Text className={styles.groupCaption}>{SEED_SOURCE_CAPTION[records.seedSource]}</Text>}
 
-      {records.status === 'no-seed' && <Text className={styles.groupCaption}>{NO_SEED_CAPTION}</Text>}
+        {records.status === 'no-seed' && <Text className={styles.groupCaption}>{NO_SEED_CAPTION}</Text>}
 
-      {records.status === 'loading' && (
-        <div className={styles.inlineStatus}>
-          <Spinner size="tiny" />
-          <Text size={200}>Finding matching records…</Text>
-        </div>
-      )}
+        {records.status === 'loading' && (
+          <div className={styles.inlineStatus}>
+            <Spinner size="tiny" />
+            <Text size={200}>Finding matching records…</Text>
+          </div>
+        )}
 
-      {records.status === 'error' && (
-        <Text className={styles.inlineError} role="alert">
-          Couldn&rsquo;t load matching records. {records.error}
-        </Text>
-      )}
+        {records.status === 'error' && (
+          <Text className={styles.inlineError} role="alert">
+            Couldn&rsquo;t load matching records. {records.error}
+          </Text>
+        )}
 
-      {records.status === 'ready' && records.records.length === 0 && (
-        <Text className={styles.emptyLine}>No matching records found</Text>
-      )}
+        {records.status === 'ready' && records.records.length === 0 && (
+          <Text className={styles.emptyLine}>No matching records found</Text>
+        )}
 
-      {records.status === 'ready' && records.records.length > 0 && (
-        <div role="list" aria-label="Matching records" className={styles.list}>
-          {records.records.map(record => (
-            <div key={`${record.recordType}:${record.recordId}`} role="listitem">
-              <RecordRow record={record} onOpenRecord={onOpenRecord} styles={styles} />
-            </div>
-          ))}
-        </div>
-      )}
+        {records.status === 'ready' && records.records.length > 0 && (
+          <div role="list" aria-label="Matching records" className={styles.list}>
+            {records.records.map(record => (
+              <div key={`${record.recordType}:${record.recordId}`} role="listitem">
+                <RecordRow record={record} onOpenRecord={onOpenRecord} styles={styles} />
+              </div>
+            ))}
+          </div>
+        )}
 
-      {records.isLoadingMore && (
-        <div className={styles.inlineStatus}>
-          <Spinner size="tiny" />
-          <Text size={200}>Loading more records…</Text>
-        </div>
-      )}
+        {records.isLoadingMore && (
+          <div className={styles.inlineStatus}>
+            <Spinner size="tiny" />
+            <Text size={200}>Loading more records…</Text>
+          </div>
+        )}
 
-      {records.loadMoreError && (
-        <Text className={styles.inlineError} role="alert">
-          Couldn&rsquo;t load more records. {records.loadMoreError}
-        </Text>
-      )}
+        {records.loadMoreError && (
+          <Text className={styles.inlineError} role="alert">
+            Couldn&rsquo;t load more records. {records.loadMoreError}
+          </Text>
+        )}
 
-      {/* The progressive-fetch sentinel (ADR-051). Must sit inside the scroll area, after the last row. */}
-      {records.status === 'ready' && records.hasMore && (
-        <div
-          ref={records.sentinelRef}
-          className={styles.sentinel}
-          aria-hidden="true"
-          data-testid="find-records-sentinel"
-        />
-      )}
+        {/* The progressive-fetch sentinel (ADR-051). Must sit inside the scroll area, after the last row. */}
+        {records.status === 'ready' && records.hasMore && (
+          <div
+            ref={records.sentinelRef}
+            className={styles.sentinel}
+            aria-hidden="true"
+            data-testid="find-records-sentinel"
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -729,14 +769,23 @@ export const FindResultsList: React.FC<FindResultsListProps> = ({ documents, ann
     }
   }, [recordsStatus, recordsCount, announce]);
 
+  const documentsSection = (
+    <DocumentsSection documents={documents} onOpenRecord={onOpenRecord} announce={announce} styles={styles} />
+  );
+
   return (
     <div className={styles.root}>
-      {/* Task 092 — the ONE scroll container for the Find tab. Both sections live inside it, always,
-          independently of each other's state (UAT-3: records must not wait on documents). */}
-      <div className={styles.scrollArea} data-testid="find-results-scroll-area">
-        <DocumentsSection documents={documents} onOpenRecord={onOpenRecord} announce={announce} styles={styles} />
-        {records !== undefined && <RecordsSection records={records} onOpenRecord={onOpenRecord} styles={styles} />}
-      </div>
+      {/* Task 102 — two sections, each with its OWN scroll container, sharing the height through a
+          draggable divider. Both always render, independently of each other's state (task 092 / UAT-3:
+          records must not wait on documents). Without `records` only the documents pane renders. */}
+      {records !== undefined ? (
+        <FindSplitPane
+          top={documentsSection}
+          bottom={<RecordsSection records={records} onOpenRecord={onOpenRecord} styles={styles} />}
+        />
+      ) : (
+        documentsSection
+      )}
     </div>
   );
 };

@@ -436,7 +436,7 @@ describe('FindView (component)', () => {
       // Task 092: the hub section now shares the ONE scroll container with the ranked list (by
       // design — a single scroll container is the whole point), so the scope that matters is the
       // RANKED LIST itself, not the shared scroller around it.
-      const rankedList = screen.getByRole('list', { name: 'Most similar documents' });
+      const rankedList = screen.getByRole('list', { name: 'Similar Documents' });
       expect(rankedList.textContent).not.toContain('Smith v Smith');
     });
 

@@ -43,9 +43,9 @@ npm run typecheck          # production code is clean (0 errors); errors remaini
                             # ACCEPTED" decision in projects/spaarkeai-word-add-in-r1/CLAUDE.md § Decisions Made
 ```
 
-- **Deploy is CI-only**: push the branch → GitHub Actions **`deploy-office-addins.yml`** (holds SWA secrets) deploys to the live SWA. It is **not** an agent-run script. Confirm green via `gh run list --workflow=deploy-office-addins.yml`.
+- **Deploy is CI**: every merge to `master` runs GitHub Actions **`deploy-office-addins.yml`** (holds SWA secrets) and deploys the live SWA; a branch build needs `workflow_dispatch` (owner's go). It is **not** an agent-run script. Confirm green via `gh run list --workflow=deploy-office-addins.yml`.
 - **Manifests — two eras, keep them apart** (full rules: architecture doc § Manifests):
-  - **LIVE = XML for both hosts**: `outlook/outlook-manifest.xml`, `word/word-manifest.xml` — 4-part version, then M365 re-register. ⚠️ Outlook's production XML is `/outlook/outlook-manifest.xml`; `/outlook/manifest.xml` 404s.
+  - **LIVE = the unified app package** (2026-10-03: the owner removed the TEST package and both legacy XML add-ins from the admin center; unified 1.1.1 is installed). The XML manifests (`outlook/outlook-manifest.xml`, `word/word-manifest.xml`) are legacy — not deployed; Outlook desktop may show a cached legacy button for up to 72 h after removal.
   - **Unified app package (task 078)** — ONE app for Outlook AND Word, built by `packaging/mergeUnifiedManifest.js` (tests in `packaging/__tests__/`) into `dist/spaarke/` and zipped by `scripts/Package-OfficeAddinUnified.ps1`. 3-part `UNIFIED_PACKAGE.VERSION` in `webpack.config.js`. `outlook/manifest.json` / `word/manifest.json` are the per-host SOURCES of it. Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md`.
   - ⚠️ Do NOT name a folder `build/` here — the repo-root `.gitignore` ignores every `build/`, so its contents are never committed (task 078 shipped a broken commit that way).
 

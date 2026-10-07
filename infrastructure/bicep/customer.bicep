@@ -1,25 +1,19 @@
 // infrastructure/bicep/customer.bicep
 // Per-customer Bicep template for Spaarke production environment
 // Deploys isolated data resources into a dedicated customer resource group.
-// Run once per customer onboarding via Provision-Customer.ps1.
+// The ONLY customer-stamp template (owner D19, task 249): deployed by L2 handler H2a (ArmDeploymentRunner)
+// into the customer's own subscription, for new stamps and upgrades alike.
 //
 // Resources deployed:
 //   - Storage Account (temp files, document processing)
 //   - Key Vault (customer-specific secrets)
 //   - Service Bus namespace (job queues)
+//   - Azure Managed Redis (per-customer cache, Microsoft Entra only — see REDIS CACHE below)
 //
-// Note (UPDATED 2026-08-19, task 128b -- E2 reconciliation): per-customer Redis
-// WAS deprecated per Q-E Architecture 1 / FR-12 (spaarke-redis-cache-remediation-r1
-// + r2, which removed this template's Redis module call in r2 task 020). Owner
-// reconciliation (2026-08-19): this template is confirmed (task 129 background) to
-// be the SOLE template deployed for the Model2Dedicated branch, where env=customer
-// 1:1 -- so "per-environment" and "per-customer" are the same unit for THIS
-// template. modules/redis.bicep is wired unconditionally below (see REDIS CACHE
-// section) as the per-environment Redis for that customer's dedicated environment.
-// Model 1 (shared/trial) Redis is UNAFFECTED -- it remains per-env-shared via
-// scripts/Deploy-RedisCache.ps1 and has no code path through this file. See
-// spec.md v3.6 FR-04 / § MUST Rules and design.md v3.6 §7.2 for the Model 1 vs
-// Model 2 distinction this reconciliation introduced.
+// Note (Redis): every customer stamp has its own Redis (D-12, 2026-09-28: Redis access control is per
+// instance, so a shared cache cannot separate customers). Since task 242 (owner D12/D13, 2026-09-30) it is
+// Azure Managed Redis Balanced_B0 with high availability, access keys disabled, reached by the stamp UAMI
+// through an access-policy assignment. No Redis key, connection string or Key Vault secret exists for a stamp.
 
 targetScope = 'subscription'
 
@@ -62,8 +56,8 @@ param environmentName string = 'prod'
 @description('Primary Azure region for all customer resources')
 param location string = 'westus2'
 
-@description('Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020.')
-param platformKeyVaultName string = 'sprk-${environmentName}-kv'
+@description('Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it.')
+param openAiLocation string = 'westus3'
 
 // --- Storage Account options ---
 
@@ -92,7 +86,7 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
-@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. Empty default skips the grant (what-if isolation only); real per-customer deploys MUST supply the L2 UAMI principalId.')
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the per-customer BFF Website Contributor grant (customer-provisioning-orchestration-r1 task 203b, punch list row A21 / task 201 Deferred #1): the L2 Worker`s H4b handler fetches Kudu docker logs from this customer`s BFF App Service and the H9 handler zip-deploys BFF artifacts to the same site -- both operations require Website Contributor. H2a (ArmDeploymentRunner) sends it for Model 1 stamps only (task 249): a Model 2 stamp is in the customer\'s tenant, where a role assignment cannot name a Spaarke-tenant principal, and L2 reaches it through its Lighthouse delegation. Empty skips the grant.')
 param controlPlaneUamiPrincipalId string = ''
 
 // --- Optional SignalR (per ADR-032 Null-Object Kill-Switch pattern; ADR-034 realtime spine) ---
@@ -121,25 +115,33 @@ param acsWebhookEndpointUrl string = ''
 @allowed(['B1', 'B2', 'B3', 'S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
 param appServiceSku string = 'S1'
 
-// --- Redis Cache options (Phase C — customer-provisioning-orchestration-r1, task 128b;
-// E2 reconciliation — per-customer Redis for Model2Dedicated, see header note) ---
+// --- Azure Managed Redis options (task 242, owner D12) ---
 
-@description('SKU for the per-customer Redis Cache. Default Basic (dev-cost-optimized, ~$15/mo) per redis-dev.bicepparam precedent — single overridable default, not environment-conditional Bicep logic; override via CLI --parameters for staging/prod, matching appServiceSku default S1 being overridden the same way.')
-@allowed(['Basic', 'Standard', 'Premium'])
-param redisSku string = 'Basic'
+@description('Azure Managed Redis SKU for the per-customer cache. Owner D12: Balanced_B0. Size up only on a measured memory metric — Managed Redis has no scale-down.')
+@allowed(['Balanced_B0', 'Balanced_B1', 'Balanced_B3', 'Balanced_B5', 'Balanced_B10'])
+param redisSkuName string = 'Balanced_B0'
 
-@description('SKU capacity (family size) for the per-customer Redis Cache. Default 0 (Basic C0, cheapest tier) per redis-dev.bicepparam precedent.')
-param redisCapacity int = 0
+@description('High availability for the per-customer cache. Owner D12: Enabled. Fixed at create time — changing it on an existing stamp is rejected by Azure.')
+@allowed(['Enabled', 'Disabled'])
+param redisHighAvailability string = 'Enabled'
 
 // --- Tags ---
 
+// task 249 (D19, 2026-10-02): `createdDate: utcNow(...)` was dropped from the default. A `utcNow()`
+// parameter default is evaluated at EVERY deployment (not compile time), so on an UPGRADE run the tag
+// value changes on every deploy even though nothing about the customer or environment changed — the
+// upgrade what-if then reports a spurious tag Modify on every tagged resource (ArmWhatIfDriftDetector /
+// T225a CR-1 pattern). There is no Bicep-only way to compute a value that is genuinely stable "since
+// first deploy" without an external input this template does not have, and ARM already records creation
+// time (`systemData.createdAt` on most resource types; `createdTime` via `$expand=createdTime` on resource
+// listings) — this tag added nothing the platform doesn't expose, while actively causing drift. Dropped, not
+// replaced. One-time effect: the first upgrade of a stamp deployed before task 249 sees a tag-removal Modify.
 @description('Tags applied to ALL resources for cost tracking and management')
 param tags object = {
   customer: customerId
   environment: environmentName
   application: 'spaarke'
   managedBy: 'bicep'
-  createdDate: utcNow('yyyy-MM-dd')
 }
 
 // ============================================================================
@@ -194,9 +196,7 @@ var logAnalyticsName = 'sprk-${customerId}-${environmentName}-logs'
 // Document Intelligence: sprk-{customer}-{env}-docintel (per design.md §7.1 naming convention).
 var docIntelligenceName = 'sprk-${customerId}-${environmentName}-docintel'
 
-// Redis Cache: sprk-{customer}-{env}-redis (task 128b / E2 reconciliation -- not yet a
-// canonical design.md §7.1 row; matches the existing SignalR/OpenAI/AI Search naming
-// shape used elsewhere in this file. See design.md v3.6 §7.1 amendment.)
+// Azure Managed Redis: sprk-{customer}-{env}-redis (task 128b naming; Managed Redis since task 242).
 var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
 
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
@@ -251,6 +251,15 @@ module keyVault 'modules/key-vault.bicep' = {
     // per-customer UAMI (uami.bicep, task 028) via key-vault.bicep's existing
     // `userAssignedIdentityPrincipalId` param (task 030 wiring point).
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    // task 249 (D19, 2026-10-02): wire audit-log diagnostics to the stamp's OWN Log Analytics
+    // workspace (`monitoring` module below) via key-vault.bicep's existing `logAnalyticsWorkspaceId`
+    // param. It takes the workspace's ARM RESOURCE ID (`logAnalyticsId`) — NOT monitoring's
+    // `logAnalyticsWorkspaceId` output, which is the workspace's customerId GUID and makes the
+    // diagnostic setting fail at deploy time. The module already declares the diagnosticSettings resource (conditional on this being
+    // non-empty); this caller simply never supplied it. Referencing `monitoring.outputs.*` here creates
+    // an implicit dependency (keyVault after monitoring) regardless of declaration order — no cycle,
+    // since monitoring does not reference keyVault.
+    logAnalyticsWorkspaceId: monitoring.outputs.logAnalyticsId
     tags: tags
   }
 }
@@ -322,12 +331,10 @@ module serviceBus 'modules/service-bus.bicep' = {
 // COSMOS DB (Per-customer AI platform state — Wave C2 prep, task 014)
 // Per spec §5.3 + FR-04 + R11 + § MUST rules: Cosmos MUST be per-customer (BFF prereq —
 // BFF will not start without it, R11). Unconditional invocation (no feature gate).
-// Wave C2 (task 032) will refactor into the multi-stack composition (model1-shared /
-// model2-full); this scaffold ensures the module is wired so C2 lands cleanly.
-// Redis IS now provisioned per-customer (task 128b, E2 reconciliation) -- see the
-// REDIS CACHE section below + the updated header note. Redis is not co-located
-// with Cosmos DB in this file; it is grouped with the other supporting-infra
-// resources (Document Intelligence + Monitoring) after AI Search per §7.6.
+// (Wave C2's multi-stack plan is moot: this is the template H2a deploys — Model 2 today, Model 1
+// with tasks 225b + 228 (D-12); task 225a retired stacks/model1-shared.bicep.)
+// Redis is per-customer too (see the REDIS CACHE section below + the header note). It is
+// grouped with the other supporting-infra resources after AI Search per §7.6.
 // Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.
 // ============================================================================
 
@@ -368,7 +375,7 @@ module openAi 'modules/openai.bicep' = {
   name: 'openAi-${baseName}'
   params: {
     openAiName: openAiName
-    location: location
+    location: openAiLocation
     sku: 'S0'
     userAssignedIdentityPrincipalId: uami.outputs.principalId
     tags: tags
@@ -413,7 +420,7 @@ module aiSearch 'modules/ai-search.bicep' = {
 // the module's existing `userAssignedIdentityPrincipalId` param, same pattern
 // task 128 wired for openai.bicep/ai-search.bicep. `docIntelligenceEndpoint`
 // output name is LOAD-BEARING -- ArmDeploymentRunner.MapOutputs (task 123)
-// reads it exactly. Raw `docIntelligenceKey` is intentionally NOT echoed here.
+// reads it exactly. The module has no key output (T243: the BFF uses the stamp UAMI).
 // ============================================================================
 
 module docIntelligence 'modules/doc-intelligence.bicep' = {
@@ -429,26 +436,13 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
-// REDIS CACHE (Phase C — customer-provisioning-orchestration-r1, task 128b;
-// module authored by spaarke-redis-cache-remediation-r1 task 020, FR-09
-// hardened). Per the owner's E2 reconciliation (2026-08-19; see the updated
-// header note above): this template is confirmed to be the SOLE template
-// deployed for the Model2Dedicated branch, where "per-environment" and
-// "per-customer" are the same unit -- so modules/redis.bicep is wired
-// UNCONDITIONALLY (no feature-gate param), matching Cosmos DB's unconditional-
-// invocation precedent in this file. Model 1 (shared/trial) is NOT affected --
-// it has no code path through this file and continues to use the per-env-
-// shared Redis via scripts/Deploy-RedisCache.ps1. `redisSku`/`redisCapacity`
-// default to 'Basic'/0 (dev-appropriate cost posture per redis-dev.bicepparam
-// precedent, same pattern as `appServiceSku`'s single overridable default --
-// staging/prod override at deploy time via CLI `--parameters`, not env-
-// conditional Bicep logic). No UAMI RBAC param -- Redis auth is access-key
-// based, not MI-based. No `subnetId`/`staticIP` override -- this file has no
-// VNet module; public network access matches Cosmos DB / OpenAI / AI Search's
-// own public-endpoint posture here. Raw `redisPrimaryKey`/`redisConnectionString`
-// are intentionally NOT echoed as top-level outputs (secret-output-hygiene
-// precedent from task 128) -- future task-129-style kv-secrets wiring can
-// reference `redis.outputs.*` symbolically in-file.
+// REDIS CACHE — Azure Managed Redis, Microsoft Entra only (task 242, owner D12/D13)
+// Balanced_B0 with high availability by default; one database ('default', port 10000,
+// OSSCluster, AllKeysLRU) with access keys DISABLED. The stamp UAMI is the only identity
+// with a data-access policy: the BFF runs as the UAMI (ADR-028) and connects with
+// Microsoft.Azure.StackExchangeRedis over RESP3 using `Redis__Endpoint` (host:10000, a
+// plain app setting — not a secret). Public endpoint, matching Cosmos DB / OpenAI /
+// AI Search in this file (no VNet module here).
 // ============================================================================
 
 module redisCache 'modules/redis.bicep' = {
@@ -457,8 +451,11 @@ module redisCache 'modules/redis.bicep' = {
   params: {
     redisName: redisCacheName
     location: location
-    sku: redisSku
-    capacity: redisCapacity
+    skuName: redisSkuName
+    highAvailability: redisHighAvailability
+    accessPolicyPrincipalIds: [
+      uami.outputs.principalId
+    ]
     tags: tags
   }
 }
@@ -510,8 +507,8 @@ module acsCommunication 'modules/acs-communication.bicep' = if (deployAcsMessagi
 //   - Feature-gated on `signalrEnabled` (default false). When false, NO SignalR
 //     resource is deployed AND the BFF DI container resolves the Null-Object
 //     variant (per ADR-032 P3 Fail-fast Null-Object).
-//   - When true, provisions the resource + grants the BFF Managed Identity the
-//     built-in "SignalR App Server" role (only when bffPrincipalId is non-empty).
+//   - When true, provisions the resource + grants the stamp's BFF identity (the per-customer
+//     UAMI, `uami.outputs.principalId` — task 249) the built-in "SignalR App Server" role.
 //   - `signalrEnabled=true` in Bicep is the *caller-side* half of the switch; the
 //     BFF-side half is the `Notifications:SignalRSpine:Enabled` config flag. Both
 //     must be true for end-to-end realtime; either false = feature disabled with
@@ -525,7 +522,12 @@ module signalr 'modules/signalr.bicep' = if (signalrEnabled) {
     signalrName: signalrName
     location: location
     signalrSku: signalrSku
-    bffPrincipalId: bffPrincipalId
+    // task 249 (D19, 2026-10-02): the stamp's BFF runs AS the UAMI (ADR-028 — no separate "BFF
+    // principal" exists; `bffPrincipalId` above defaults '' and H2a never passes it, so the role
+    // assignment this module makes conditional on a non-empty principal never fired). Pass the stamp
+    // UAMI's principalId — the same identity bffRuntimeRbac/cosmosDb/openAi/aiSearch already grant.
+    // Key auth stays disabled (signalr.bicep's own `disableLocalAuth: true` default — unchanged).
+    bffPrincipalId: uami.outputs.principalId
     tags: tags
   }
 }
@@ -566,19 +568,29 @@ module bffApi 'modules/app-service.bicep' = {
     // G-8 Batch 1 defect #14: this invocation previously passed ZERO appSettings
     // — the Model 2 BFF booted with no config and no AZURE_CLIENT_ID UAMI pin,
     // so DefaultAzureCredential could not resolve the UAMI and the H9 health
-    // probe 404'd post-zip-deploy. Mirrors the model1-shared.bicep sharedBffApi
-    // pattern, adapted per-customer:
+    // probe 404'd post-zip-deploy. Mirrored the (since retired, task 225a)
+    // model1-shared.bicep sharedBffApi pattern, adapted per-customer:
     //   - KV references target the CUSTOMER vault using the CANONICAL secret
     //     names written by the kvSecrets module below (kv-secrets.generated.bicep
-    //     / manifest.yaml) — NOT the legacy lowercase names model1-shared still
-    //     carries for Redis/ServiceBus/Storage.
-    //   - Only secrets in this file's resolvable kvSecretValues set get KV refs.
-    //     OPENAI_API_KEY (AzureOpenAI-ApiKey, value_source=from-run-parameter) is
-    //     deliberately OMITTED: an unresolvable KV ref surfaces the literal
-    //     @Microsoft.KeyVault(...) string as the setting value and would be sent
-    //     as an API key. Absent the setting, the BFF falls back to
-    //     DefaultAzureCredential (MI) per ADR-028 — and the UAMI already holds
-    //     Cognitive Services User on the OpenAI resource (openAi module above).
+    //     / manifest.yaml) — NOT the legacy lowercase names the retired shared
+    //     stack carried for Redis/ServiceBus/Storage.
+    //   - Only secrets in this file's resolvable kvSecretValues set get KV refs. An
+    //     unresolvable KV ref surfaces the literal @Microsoft.KeyVault(...) string as the
+    //     setting value, which the BFF would then send as a key.
+    //   - T226 (owner 2026-09-30): OpenAI, AI Search and Service Bus are reached with
+    //     the stamp UAMI (ADR-028) - no key setting is emitted for them. The UAMI holds
+    //     Cognitive Services User on OpenAI and Data Sender/Receiver + Index
+    //     Data/Service Contributor on Service Bus + AI Search (bffRuntimeRbac below).
+    //     H4b adds the MI selectors (ServiceBus__FullyQualifiedNamespace,
+    //     AiSearch__ManagedIdentity__Enabled). Storage's connection string was unused
+    //     by any BFF code and is not emitted. KNOWN GAP (plan G16): modules/ai-search.bicep
+    //     still creates the service keys-only, so its MI calls 403 until T244 enables
+    //     Entra auth on it.
+    //   - Document Intelligence is reached with the stamp UAMI too (T243, owner D13): the
+    //     BFF uses managed identity when no DocumentIntelligence__DocIntelKey is set, and no
+    //     stamp is given one. The module sets a custom subdomain (Entra needs it) and grants
+    //     the UAMI Cognitive Services User. H4b emits DocumentIntelligence__Enabled=true
+    //     (the BFF's AI master switch) and the endpoint.
     //   - KV references resolve only after H4 PATCHes keyVaultReferenceIdentity
     //     to the UAMI on both slots (ArmAppServiceIdentityPatcher, task 125) and
     //     the kvSecrets module has written real values. No ARM dependsOn needed:
@@ -602,26 +614,20 @@ module bffApi 'modules/app-service.bicep' = {
       AZURE_CLIENT_ID: uami.outputs.clientId
       ManagedIdentity__ClientId: uami.outputs.clientId
 
-      // Redis (per-customer, task 128b)
+      // Redis (per-customer Azure Managed Redis, Entra only — task 242). The BFF authenticates
+      // with the UAMI (ManagedIdentity__ClientId above); there is no Redis key or connection
+      // string. H4b writes the same Redis__Endpoint value (per_env_settings, from H2a's output).
       Redis__Enabled: 'true'
-      Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Redis-ConnectionString)'
+      Redis__Endpoint: redisCache.outputs.redisEndpoint
       Redis__InstanceName: 'spaarke:' // Prefix for key isolation
 
-      // Service Bus (per-customer)
-      ConnectionStrings__ServiceBus: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=ServiceBus-ConnectionString)'
-
-      // Storage (per-customer)
-      ConnectionStrings__Storage: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=Storage-ConnectionString)'
-
-      // AI Services — endpoints direct from sibling-module outputs; admin key via
-      // canonical KV ref. OpenAI auth is MI-only here (see header note above).
+      // AI Services — endpoints direct from sibling-module outputs; auth is the stamp
+      // UAMI for OpenAI and AI Search (see header note above).
       OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
       AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
-      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=AiSearch--AdminKey)'
 
       // Document Intelligence (per-customer, task 128b)
       DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
-      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=DocumentIntelligence-ApiKey)'
 
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
@@ -650,8 +656,7 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
 // / task 201 "Deferred #1"). Enables H4b Kudu docker-log fetch + H9 zip-deploy
 // from the L2 Worker. Split into modules/customer-l2-bff-rbac.bicep because
 // this stack (targetScope='subscription') cannot inline RG-scoped role
-// assignments (BCP139) -- same pattern as modules/model1-shared-l2-rbac.bicep
-// for the Model 1 tier.
+// assignments (BCP139) -- same pattern as modules/bff-runtime-rbac.bicep.
 // ============================================================================
 
 module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {
@@ -715,39 +720,44 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 // therefore the actual value-writer H4 depends on to no-op/succeed on these
 // entries instead of failing QuarantineRequired on a fresh customer.
 //
-// Resolvable (10) -- direct sibling-module output references:
-//   AiSearch--AdminKey, AiSearch-Endpoint, AppInsights-ConnectionString,
-//   AzureOpenAI-Endpoint, Communication-WebhookUrl, DocumentIntelligence-ApiKey,
-//   DocumentIntelligence-Endpoint, Redis-ConnectionString,
-//   ServiceBus-ConnectionString, Storage-ConnectionString
+// Resolvable (5) -- direct sibling-module output references:
+//   AiSearch-Endpoint, AppInsights-ConnectionString, AzureOpenAI-Endpoint,
+//   Communication-WebhookUrl, DocumentIntelligence-Endpoint
+//
+// REMOVED FROM THE PROCESS (T226, owner 2026-09-30) -- the BFF reaches these services
+// with the stamp UAMI, so no key is written to the vault for them:
+//   AiSearch--AdminKey, ServiceBus-ConnectionString, AzureOpenAI-ApiKey;
+//   Storage-ConnectionString (no BFF reader at all); DocumentIntelligence-ApiKey (T243);
+//   Redis-ConnectionString (T242: Azure Managed Redis with access keys disabled — the BFF
+//     connects with the UAMI using the plain Redis__Endpoint app setting).
 //
 // Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
-//   SPE-ContainerTypeId, SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
-//     -> H8/H9 RUNTIME outputs (SPE container-type creation + 24h replication);
-//        no ARM-deploy-time value exists. Resolved at runtime via H4's
-//        FromRunParameters path after H8/H9 execute (expected, not a failure).
-//        Recommended owner: H8/H9 handler authors (Wave G-3, tasks 131/132).
+//   SPE-ContainerTypeId
+//     -> topology-scoped (one container type per Spaarke tier), not a customer
+//        resource. manifest value_source = from-topology-constants: H4 writes it
+//        from the run's containerTypeId parameter (the /provision-environment skill
+//        reads it from spaarke-constants.yaml).
+//   SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
+//     -> per-customer SPE containers created at RUNTIME (H8); no ARM-deploy-time
+//        value exists. KNOWN GAP (plan G18): the manifest still labels both
+//        from-bicep-output and nothing writes them, so H4 quarantines on a fresh
+//        customer until the H8 write path is wired.
 //   BFF-API-ClientId, BFF-API-Audience
-//     -> H3 (task 130) creates the per-customer BFF app-registration at RUNTIME
-//        and writes ClientId/Audience to RunParameters.Secrets. manifest.yaml
-//        reclassified these from FromBicepOutput to FromRunParameters (task 129
-//        step 6, owner E3 2026-08-19) -- no Bicep resource produces these
-//        values; this Bicep composition correctly has nothing to contribute
-//        here. Recommended owner: H3 handler author (Wave G-3, task 130).
+//     -> H3 creates the per-customer BFF app-registration at RUNTIME and writes
+//        ClientId/Audience to this vault itself (manifest value_source
+//        `written-by-h3`, task 245a; H4 skips them). No Bicep resource produces
+//        these values; this composition correctly has nothing to contribute.
+//   RunContextContractTests rule (g) checks this map against the manifest's
+//   from-bicep-output entries in both directions.
 // ============================================================================
 
 var kvSecretValues = {
-  'AiSearch--AdminKey': aiSearch.outputs.searchServiceAdminKey
   'AiSearch-Endpoint': aiSearch.outputs.searchServiceEndpoint
   'AppInsights-ConnectionString': monitoring.outputs.connectionString
   'AzureOpenAI-Endpoint': openAi.outputs.openAiEndpoint
   'Communication-WebhookUrl': '${bffApi.outputs.appServiceUrl}/api/communications/incoming-webhook'
-  'DocumentIntelligence-ApiKey': docIntelligence.outputs.docIntelligenceKey
   'DocumentIntelligence-Endpoint': docIntelligence.outputs.docIntelligenceEndpoint
-  'Redis-ConnectionString': redisCache.outputs.redisConnectionString
-  'ServiceBus-ConnectionString': serviceBus.outputs.serviceBusConnectionString
-  'Storage-ConnectionString': storage.outputs.connectionString
 }
 
 module kvSecrets '../../scripts/canonical-secret-catalog/generated/kv-secrets.generated.bicep' = {
@@ -809,9 +819,8 @@ output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 
 // --- Document Intelligence (task 128b / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.DocIntelligenceEndpoint. Raw `docIntelligenceKey` is
-// intentionally NOT echoed here — flows through a future kv-secrets wiring
-// task instead (task 129 territory). ---
+// BicepDeployOutputs.DocIntelligenceEndpoint. There is no key output: the stamp BFF
+// reaches Document Intelligence with its UAMI (T243). ---
 output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
 output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
 
@@ -823,12 +832,13 @@ output appInsightsId string = monitoring.outputs.appInsightsId
 output logAnalyticsName string = monitoring.outputs.logAnalyticsName
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
 
-// --- Redis Cache (task 128b / Phase C — E2 reconciliation). Raw
-// `redisPrimaryKey`/`redisConnectionString` are intentionally NOT echoed here —
-// flows through a future kv-secrets wiring task instead (task 129 territory). ---
+// --- Azure Managed Redis (task 242). Output name `redisEndpoint` is LOAD-BEARING:
+// ArmDeploymentRunner.MapOutputs reads it into BicepDeployOutputs.RedisEndpoint → InterStepState →
+// H4b's Redis__Endpoint. Not a secret (host:port); the cache has no keys. ---
 output redisName string = redisCache.outputs.redisName
 output redisHostName string = redisCache.outputs.redisHostName
 output redisPort int = redisCache.outputs.redisPort
+output redisEndpoint string = redisCache.outputs.redisEndpoint
 
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName
@@ -860,6 +870,3 @@ output userAssignedIdentityClientId string = uami.outputs.clientId
 // (task 123) reads these exact names to populate BicepDeployOutputs.AppServiceName / AppServiceStagingSlotName. ---
 output appServiceName string = bffApi.outputs.appServiceName
 output appServiceStagingSlotName string = bffApiSlot.outputs.slotName
-
-// --- Platform cross-reference ---
-output platformKeyVaultName string = platformKeyVaultName

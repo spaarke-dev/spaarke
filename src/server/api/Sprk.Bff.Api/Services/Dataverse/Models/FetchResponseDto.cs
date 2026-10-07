@@ -1,7 +1,9 @@
 namespace Sprk.Bff.Api.Services.Dataverse.Models;
 
 /// <summary>
-/// Response payload for <c>POST /api/dataverse/fetch</c> (FR-BFF-04).
+/// Result of <c>FetchService.ExecuteAsync</c> (FR-BFF-04), consumed by the external module seam
+/// (<c>POST /api/v1/external/api/dataverse/fetch</c>). The internal <c>POST /api/dataverse/fetch</c> that
+/// first returned it was deleted by unified-access-control-r2 task 160.
 /// </summary>
 /// <param name="Entities">
 /// Result rows as a list of attribute-name → value dictionaries. Each dictionary

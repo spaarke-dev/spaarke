@@ -27,7 +27,7 @@ import {
   TableRegular,
   SlideTextRegular,
 } from "@fluentui/react-icons";
-import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import { resolveCodePageTheme, setupCodePageThemeListener, getXrm } from "@spaarke/ui-components";
 import { VersionHistoryModal } from "./VersionHistoryModal";
 
 // ---------------------------------------------------------------------------
@@ -186,10 +186,6 @@ const useStyles = makeStyles({
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getXrm(): any {
-  return (window as any)?.Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-}
-
 function getFileIcon(filetype?: string) {
   const t = (filetype ?? "").toLowerCase();
   if (t === "pdf") return DocumentPdfRegular;
@@ -211,7 +207,9 @@ function formatDate(iso?: string): string {
 }
 
 async function fetchDocuments(): Promise<IDocument[]> {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm();
   if (!xrm?.WebApi) return [];
 
   const result = await xrm.WebApi.retrieveMultipleRecords(
@@ -222,7 +220,9 @@ async function fetchDocuments(): Promise<IDocument[]> {
 }
 
 function openRecord(documentId: string): void {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('openForm');
   xrm?.Navigation?.openForm?.({ entityName: "sprk_document", entityId: documentId });
 }
 

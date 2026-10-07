@@ -1,5 +1,7 @@
 # AI Procedure Quality R1
 
+> **Portfolio**: [Project #1134](https://github.com/spaarke-dev/spaarke/issues/1134) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Setup Complete — Ready for Phase 0 Execution
 > **Started**: 2026-05-14
 > **Branch**: `work/ai-procedure-quality-r1`

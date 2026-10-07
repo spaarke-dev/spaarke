@@ -83,7 +83,7 @@ public sealed class ComposeServiceUploadFidelityTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
     /// unmodified by any editor round-trip.</summary>
@@ -131,9 +131,9 @@ public sealed class ComposeServiceUploadFidelityTests
             .ReturnsAsync(ResolvedDriveId);
 
         byte[]? captured = null;
-        _spe.Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+        _spe.Setup(s => s.UploadSmallAsync(
+                ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var buffer = new MemoryStream();
                 stream.CopyTo(buffer);

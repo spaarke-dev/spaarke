@@ -320,7 +320,8 @@ public class GrantorCeilingTests
         var result = await Grant(ContactGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
 
         Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
-        Detail(result).Should().Contain("No Access list");
+        Detail(result).Should().Contain("No Access list")
+            .And.NotContain("could not be checked", "an entry is the record's policy, never a fault (task 142 r4)");
         _dataverse.Creates.Should().BeEmpty();
         _denyReader.Queries.Should().BePositive("the decision came from the shared deny-list reader");
     }
@@ -381,62 +382,136 @@ public class GrantorCeilingTests
             .AccessRecordId.Should().NotBeEmpty();
     }
 
+    /// <summary>
+    /// Task 142 r4 (owner round 13 item 4): a No Access check that could not be completed is a FAULT — 503
+    /// <c>no_access_unverifiable</c>, retryable, counted as a server-side failure — never absorbed into the 422
+    /// <c>grantee_denied</c> an ENTRY gets. Every read fault the deny-veto code meets: the ones it used to absorb into
+    /// "denied" (an unreadable membership read, an unreadable referenced-organization read, a fail-closed deny-list read, a
+    /// 5xx-shaped throw) and the timeouts it rethrows alike. Fail closed: nothing is written. The twin is
+    /// <see cref="Grant_ToAContactOnTheRecordsNoAccessList_Is422_AndWritesNothing"/> (an entry: 422, never "could not be
+    /// checked"); the positive twin is <see cref="Grant_ToAContactNotOnTheList_IsWritten"/> (the reads answer).
+    /// </summary>
     [Theory]
     [InlineData("reader-fault")]
     [InlineData("memberships-unreadable")]
-    public async Task Grant_WhenTheNoAccessListCannotBeChecked_IsAMessageBearingRefusal(string fault)
+    [InlineData("referenced-organizations-unreadable")]
+    [InlineData("referenced-organizations-throw")]
+    [InlineData("referenced-organizations-timeout")]
+    [InlineData("no-access-list-timeout")]
+    public async Task Grant_WhenTheNoAccessListCannotBeChecked_Is503NoAccessUnverifiable_AFaultNeverAnEntry_AndWritesNothing(
+        string fault)
     {
-        if (fault == "reader-fault")
-            _denyReader.Faults = true;
-        else
-            _participations.MembershipsUnreadable = true;
+        InjectNoAccessFault(fault);
 
         var result = await Grant(ContactGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
 
-        Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
-        Detail(result).Should().Contain("could not be checked");
+        Problem(result).Should().Be((503, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode),
+            "a check that could not be completed is reported as the fault it is, not as an entry on the list");
+        Detail(result).Should().Contain("could not be checked").And.Contain("Try again");
+        _dataverse.Creates.Should().BeEmpty("a No Access check that could not finish must never grant");
+        _dataverse.Updates.Should().BeEmpty();
+        if (fault is "reader-fault" or "no-access-list-timeout")
+            _denyReader.Queries.Should().BePositive("the fault came from the shared deny-list reader itself");
+    }
+
+    /// <summary>The same faults on <c>/invite-and-grant</c>: 503 before onboarding, nothing created or bound.</summary>
+    [Theory]
+    [InlineData("reader-fault")]
+    [InlineData("memberships-unreadable")]
+    [InlineData("referenced-organizations-timeout")]
+    public async Task InviteAndGrant_WhenTheNoAccessListCannotBeChecked_Is503BeforeOnboarding(string fault)
+    {
+        SeedUnboundInvitee();
+        InjectNoAccessFault(fault);
+
+        var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+
+        Problem(result).Should().Be((503, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode));
+        AssertNothingOnboardedOrWritten();
+    }
+
+    /// <summary>
+    /// Called DIRECTLY (the path the Assigned-To materializer and task 140's route take): the core reports an
+    /// unverifiable check as a fault — <see cref="GrantPolicyDecision.IsDenyListReadFault"/>, its own code — and an
+    /// entry as an entry. Neither writes.
+    /// </summary>
+    [Fact]
+    public async Task CreateGrantAsync_CalledDirectly_ReportsAnUnverifiableNoAccessCheckAsAFault_AndAnEntryAsAnEntry()
+    {
+        var ceiling = GrantCeiling.FromGrantorRights(FullAccessCaller);
+        _participations.MembershipsUnreadable = true;
+
+        var faulted = await Core(ContactGrant(ExternalAccessLevel.ViewOnly), ceiling);
+
+        faulted.Refusal!.IsDenyListReadFault.Should().BeTrue();
+        faulted.Refusal.ReasonCode.Should().Be(ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode);
+        faulted.Refusal.StatusCode.Should().Be(503);
+
+        _participations.MembershipsUnreadable = false;
+        _denyReader.DenyContactOnRecord(ContactId, ProjectId);
+
+        var entry = await Core(ContactGrant(ExternalAccessLevel.ViewOnly), ceiling);
+
+        entry.Refusal!.IsDenyListReadFault.Should().BeFalse();
+        entry.Refusal.ReasonCode.Should().Be(ExternalGrantLifecycle.GranteeDeniedReasonCode);
+        entry.Refusal.StatusCode.Should().Be(422);
         _dataverse.Creates.Should().BeEmpty();
     }
 
     /// <summary>
-    /// The No Access check THROWS — not absorbed inside the deny-veto code, as the two faults above are. The veto code
-    /// rethrows every <see cref="OperationCanceledException"/>, so an HttpClient timeout (a
-    /// <see cref="TaskCanceledException"/> while the CALLER has not cancelled) in either of its reads reaches the
-    /// handler. That catch is the real fail-closed path for timeouts (ADR-003): it must refuse, never grant.
-    /// The positive twin is <see cref="Grant_ToAContactNotOnTheList_IsWritten"/> — same request, reads answer.
+    /// Task 142 r5 (r4 verifier finding 6): the core's switch over the check's answer, one row per refusing answer —
+    /// including a value outside the enum, which no production check returns: it is never "allowed", it refuses as a
+    /// FAULT (fail closed). An entry refuses as an entry. Nothing is written. The positive twin is
+    /// <see cref="CreateGrantAsync_CalledDirectly_GrantsWhenTheCheckAnswersAllowed"/> (same double, Allowed).
     /// </summary>
     [Theory]
-    [InlineData("referenced-organizations-timeout")]
-    [InlineData("no-access-list-timeout")]
-    public async Task Grant_WhenTheNoAccessCheckThrowsATimeout_Is422GranteeDenied_AndWritesNothing(string fault)
+    [InlineData((int)NoAccessCheckAnswer.Denied, ExternalGrantLifecycle.GranteeDeniedReasonCode, 422, false)]
+    [InlineData((int)NoAccessCheckAnswer.Unverifiable, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode, 503, true)]
+    [InlineData(99, ExternalGrantLifecycle.GranteeNoAccessUnverifiableReasonCode, 503, true)]
+    public async Task CreateGrantAsync_CalledDirectly_RefusesEveryAnswerButAllowed_AnUnknownAnswerAsAFault(
+        int answer, string reasonCode, int status, bool isFault)
     {
-        var timeout = new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
-        if (fault == "referenced-organizations-timeout")
-            _participations.ReferencedOrganizationsThrow = timeout;
-        else
-            _denyReader.Throws = timeout;
+        var outcome = await Core(
+            ContactGrant(ExternalAccessLevel.ViewOnly), GrantCeiling.FromGrantorRights(FullAccessCaller),
+            GrantPolicyTestDoubles.DenyListAnswering((NoAccessCheckAnswer)answer));
 
-        var result = await Grant(ContactGrant(ExternalAccessLevel.ViewOnly), FullAccessCaller);
-
-        Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
-        _dataverse.Creates.Should().BeEmpty("a No Access check that could not finish must never grant");
+        outcome.Refusal.Should().NotBeNull("only an Allowed answer grants");
+        outcome.Refusal!.ReasonCode.Should().Be(reasonCode);
+        outcome.Refusal.StatusCode.Should().Be(status);
+        outcome.Refusal.IsDenyListReadFault.Should().Be(isFault);
+        _dataverse.Creates.Should().BeEmpty("a refused grant writes nothing");
         _dataverse.Updates.Should().BeEmpty();
-        if (fault == "no-access-list-timeout")
-            _denyReader.Queries.Should().BePositive("the throw came from the shared deny-list reader itself");
     }
 
-    /// <summary>The same timeout on <c>/invite-and-grant</c>: refused before onboarding, nothing created or bound.</summary>
+    /// <summary>The positive twin: the same double answering Allowed — the grant is written.</summary>
     [Fact]
-    public async Task InviteAndGrant_WhenTheNoAccessCheckThrowsATimeout_Is422BeforeOnboarding()
+    public async Task CreateGrantAsync_CalledDirectly_GrantsWhenTheCheckAnswersAllowed()
     {
-        SeedUnboundInvitee();
-        _participations.ReferencedOrganizationsThrow =
-            new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
+        var outcome = await Core(
+            ContactGrant(ExternalAccessLevel.ViewOnly), GrantCeiling.FromGrantorRights(FullAccessCaller),
+            GrantPolicyTestDoubles.DenyListAnswering(NoAccessCheckAnswer.Allowed));
 
-        var result = await InviteAndGrant(Invite(ExternalAccessLevel.ViewOnly), FullAccessCaller);
+        outcome.Refusal.Should().BeNull();
+        _dataverse.ActiveRows.Should().ContainSingle().Which.ContactId.Should().Be(ContactId);
+    }
 
-        Problem(result).Should().Be((422, ExternalGrantLifecycle.GranteeDeniedReasonCode));
-        AssertNothingOnboardedOrWritten();
+    /// <summary>Task 142 r4: one switch per No Access read fault the write-time check can meet.</summary>
+    private void InjectNoAccessFault(string fault)
+    {
+        // The shape of an HttpClient timeout: a TaskCanceledException while the CALLER has not cancelled.
+        var timeout = new TaskCanceledException("Simulated HttpClient timeout (the caller did not cancel).");
+        switch (fault)
+        {
+            case "reader-fault": _denyReader.Faults = true; break;
+            case "memberships-unreadable": _participations.MembershipsUnreadable = true; break;
+            case "referenced-organizations-unreadable": _participations.UnreadableReferencedOrganizations[ProjectId] = true; break;
+            case "referenced-organizations-throw":
+                _participations.ReferencedOrganizationsThrow = new InvalidOperationException("Simulated Dataverse 5xx.");
+                break;
+            case "referenced-organizations-timeout": _participations.ReferencedOrganizationsThrow = timeout; break;
+            case "no-access-list-timeout": _denyReader.Throws = timeout; break;
+            default: throw new ArgumentOutOfRangeException(nameof(fault), fault, "unknown fault");
+        }
     }
 
     [Fact]
@@ -605,7 +680,8 @@ public class GrantorCeilingTests
     private Task<IResult> Grant(GrantAccessRequest request, AccessRights? callerRights) =>
         GrantExternalAccessEndpoint.GrantAccessAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
-            Mock.Of<ITenantCache>(), Context(), NullLogger<Program>.Instance, new FixedClock(Today),
+            AssignedAccessTestDoubles.InertMaterializer(),
+            Context(), NullLogger<Program>.Instance, new FixedClock(Today),
             CancellationToken.None);
 
     /// <remarks>
@@ -617,13 +693,15 @@ public class GrantorCeilingTests
         InviteAndGrantExternalUserEndpoint.InviteAndGrantAsync(
             request, _dataverse, _participations, DenyList(), new FixedRightsProbe(callerRights),
             ciamProvisioner: null!, emailService: null!, IdentityBindingTestKit.Binder(_identities),
-            Mock.Of<ITenantCache>(), PortalConfig(), Context(),
+            PortalConfig(), AssignedAccessTestDoubles.InertMaterializer(), Context(),
             NullLogger<Program>.Instance, new FixedClock(Today), CancellationToken.None);
 
-    private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(GrantAccessRequest request, GrantCeiling ceiling) =>
+    /// <param name="noAccessCheck">The write-time No Access check; the real one over the seam reader when null.</param>
+    private Task<GrantExternalAccessEndpoint.GrantUpsertOutcome> Core(
+        GrantAccessRequest request, GrantCeiling ceiling, IAccessibleRecordSetService? noAccessCheck = null) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, ceiling, callerOid: null,
-            _dataverse, _participations, DenyList(), Mock.Of<ITenantCache>(), Context(), NullLogger.Instance,
+            _dataverse, _participations, noAccessCheck ?? DenyList(), NullLogger.Instance,
             CancellationToken.None);
 
     private void AssertNothingOnboardedOrWritten()

@@ -355,7 +355,7 @@ internal sealed class ComposePdfIntakeCoordinator
             // user without access destroy the recovery path for everyone else on a tenant-scoped, per-item
             // mapping. So: fall through for this caller and leave the entry alone. It expires on its own TTL,
             // and a genuinely deleted document simply falls through for every caller until it does.
-            var visibleToCaller = await _spe.GetFileMetadataAsUserAsync(httpContext, derived.DriveId, derived.SpeId, ct)
+            var visibleToCaller = await _spe.GetMetadataForComposeAsync(httpContext, derived.DriveId, derived.SpeId, ct)
                 .ConfigureAwait(false);
             if (visibleToCaller is not null)
             {

@@ -10,7 +10,24 @@
     "paths": {
       "@spaarke/auth": ["./test/__mocks__/spaarke-auth.ts"],
       "@spaarke/ui-components": ["./test/__mocks__/spaarke-ui-components.tsx"],
-      "@spaarke/ui-components/services": ["./test/__mocks__/spaarke-ui-components-services.ts"]
+      "@spaarke/ui-components/services": ["./test/__mocks__/spaarke-ui-components-services.ts"],
+      // Type-only subpath (task 092, 2026-10-04): DailyBriefingApp.tsx imports
+      // `ILookupItem` via `import type`, which is erased at runtime (no mock
+      // needed), but ts-jest's diagnostics still resolve it at compile time.
+      // Unlike the bare specifier above, no wildcard `@spaarke/ui-components/*`
+      // path existed here at all (the base tsconfig.json has one, pointing at
+      // dist/*, but tsconfig.test.json doesn't extend it for paths — paths
+      // don't merge across `extends`). Point this one narrow subpath straight
+      // at the real compiled declaration rather than adding a broad wildcard
+      // that could silently stop routing other subpaths through their mocks.
+      "@spaarke/ui-components/types/LookupTypes": ["../Spaarke.UI.Components/dist/types/LookupTypes.d.ts"],
+      "@spaarke/compose-components": ["./test/__mocks__/spaarke-compose-components.tsx"],
+      "@spaarke/ai-widgets": ["./test/__mocks__/spaarke-ai-widgets.tsx"],
+      // Task 081 round 6 (R5-3): the Daily Briefing Code Page's handler
+      // (solutions/DailyBriefing/src/browsePlaybooks.ts) imports this package by
+      // name. In a package-only install (CI) nothing links it, so resolve the
+      // subpath to this package's own source (mirrors package.json "exports").
+      "@spaarke/daily-briefing-components/*": ["./src/*/index.ts"]
     }
   },
   "include": ["src", "test"]

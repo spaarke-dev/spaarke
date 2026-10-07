@@ -77,7 +77,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private static ReadOnlyMemory<byte> DraftBytes() =>
         new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x01, 0x02, 0x03 };
@@ -102,8 +102,8 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
 
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
-        _spe.Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+        _spe.Setup(s => s.UploadSmallAsync(
+                ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(UploadedDriveItem());
     }
 

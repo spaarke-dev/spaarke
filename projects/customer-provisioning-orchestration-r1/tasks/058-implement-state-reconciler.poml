@@ -4,7 +4,7 @@
     <title>Implement state-reconciler BackgroundService (5s Cosmos polling + DAG advancement + idempotency)</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler'; implements the core execution engine — bug here = pipeline stalls or double-fires. FR-22/R20 acceptance scope. Modifies .cs files across L2 + integration paths.</rigor-reason>
     <model-tier>opus</model-tier>

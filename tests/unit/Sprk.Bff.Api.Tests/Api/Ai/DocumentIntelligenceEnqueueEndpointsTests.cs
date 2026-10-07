@@ -15,9 +15,11 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 public class DocumentIntelligenceEnqueueEndpointsTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
 
     public DocumentIntelligenceEnqueueEndpointsTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -29,11 +31,12 @@ public class DocumentIntelligenceEnqueueEndpointsTests : IClassFixture<CustomWeb
         // Arrange
         var request = new DocumentAnalysisRequest(Guid.NewGuid(), "drive-id", "item-id");
 
-        // Act - endpoint should exist and return 401 without auth (not 404)
+        // Act - anonymous: answers 401 (the FallbackPolicy answers 401 for a missing route too, UAC-r2 task 167)
         var response = await _client.PostAsJsonAsync("/api/ai/document-intelligence/enqueue", request);
 
-        // Assert - endpoint exists (401 means auth required, not 404)
+        // Assert - registration is proven by the endpoint table, not by the anonymous status (task 167 f1/f2)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", "/api/ai/document-intelligence/enqueue");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
         response.StatusCode.Should().BeOneOf(
             HttpStatusCode.Unauthorized,
             HttpStatusCode.OK,
@@ -85,11 +88,12 @@ public class DocumentIntelligenceEnqueueEndpointsTests : IClassFixture<CustomWeb
             new(Guid.NewGuid(), "drive-id-2", "item-id-2")
         });
 
-        // Act - endpoint should exist and return 401 without auth (not 404)
+        // Act - anonymous: answers 401 (the FallbackPolicy answers 401 for a missing route too, UAC-r2 task 167)
         var response = await _client.PostAsJsonAsync("/api/ai/document-intelligence/enqueue-batch", request);
 
-        // Assert - endpoint exists (401 means auth required, not 404)
+        // Assert - registration is proven by the endpoint table, not by the anonymous status (task 167 f1/f2)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", "/api/ai/document-intelligence/enqueue-batch");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
         response.StatusCode.Should().BeOneOf(
             HttpStatusCode.Unauthorized,
             HttpStatusCode.OK,

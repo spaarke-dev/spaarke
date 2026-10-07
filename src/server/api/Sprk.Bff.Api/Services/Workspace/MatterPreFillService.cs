@@ -328,7 +328,7 @@ public sealed class MatterPreFillService
                 // FLAT staging-container root — see the twin in ProjectPreFillService. The folder prefix
                 // was minted implicitly by Graph on every upload; the {requestId} that was carrying the
                 // per-request uniqueness moves into the filename rather than being dropped, because the
-                // path-keyed simple PUT behind UploadSmallAsUserAsync silently replaces on collision.
+                // path-keyed simple PUT behind UploadSmallToStagingAsUserAsync silently replaces on collision.
                 // SANITIZED 2026-08-29: fileName is Path.GetFileName(IFormFile.FileName) — client-supplied,
                 // and GetFileName splits on the HOST OS separator only, so on the linux-x64 runtime a
                 // "a\b.docx" survives intact while Graph may still read the backslash as a separator.
@@ -340,7 +340,7 @@ public sealed class MatterPreFillService
                     await fileStream.CopyToAsync(buffer, cancellationToken);
                     buffer.Position = 0;
 
-                    var uploadResult = await _speFileStore.UploadSmallAsUserAsync(
+                    var uploadResult = await _speFileStore.UploadSmallToStagingAsUserAsync(
                         httpContext,
                         stagingContainerId,
                         stagingPath,

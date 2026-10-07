@@ -38,8 +38,9 @@ import {
   EventsCalendar,
   SmartTodo,
   InviteUserDialog,
+  IssuedGrantsList,
 } from '../components';
-import { useAccessLevel } from '../hooks/useAccessLevel';
+import { canInvite, useAccessLevel } from '../hooks/useAccessLevel';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -279,30 +280,38 @@ interface ContactsTabContentProps {
 const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, accessLevel }) => {
   const styles = useStyles();
   const [inviteDialogOpen, setInviteDialogOpen] = React.useState<boolean>(false);
-  const canUserInvite = accessLevel === AccessLevel.FullAccess;
+  const [grantsRefresh, setGrantsRefresh] = React.useState<number>(0);
+  // Owner C4 (task 140): Collaborate AND Full Access may grant colleagues of their own organization; View Only may
+  // not. The ONE capability helper decides — this page used to carry its own FullAccess-only check.
+  const canUserInvite = canInvite(accessLevel);
 
   return (
     <div>
-      {/* Invite button — only for FullAccess users */}
+      {/* Invite button — Collaborate and Full Access */}
       {canUserInvite && (
         <div className={styles.contactsHeader}>
-          <Text size={300}>Manage external users who have access to this project.</Text>
+          <Text size={300}>Give colleagues from your organization access to this project.</Text>
           <Button appearance="primary" icon={<PersonAddRegular />} onClick={() => setInviteDialogOpen(true)}>
             Invite User
           </Button>
         </div>
       )}
 
+      {/* The access this user granted, with Revoke */}
+      {canUserInvite && <IssuedGrantsList recordType="project" recordId={projectId} refreshKey={grantsRefresh} />}
+
       {/* Contacts and Organizations read-only view */}
       <ContactsOrganizations projectId={projectId} />
 
-      {/* Invite User Dialog — only rendered/usable for FullAccess users */}
+      {/* Grant dialog — only rendered/usable for Collaborate and Full Access */}
       {canUserInvite && (
         <InviteUserDialog
+          recordType="project"
           projectId={projectId}
           accessLevel={accessLevel}
           isOpen={inviteDialogOpen}
           onClose={() => setInviteDialogOpen(false)}
+          onGranted={() => setGrantsRefresh(n => n + 1)}
         />
       )}
     </div>
@@ -332,8 +341,8 @@ const ContactsTabContent: React.FC<ContactsTabContentProps> = ({ projectId, acce
  *
  * Access level enforcement:
  *   - ViewOnly    — read-only across all tabs; no upload, create, AI, or invite
- *   - Collaborate — read + write + AI; no invite
- *   - FullAccess  — all Collaborate capabilities + Invite User button in Contacts tab
+ *   - Collaborate — read + write + AI + Invite User (grants colleagues at or below Collaborate; task 140)
+ *   - FullAccess  — all Collaborate capabilities; Invite User may grant up to Full Access
  *
  * ADR-021: All styles use Fluent v9 design tokens. No hard-coded colors.
  * ADR-022: React 18 (createRoot used in main.tsx — this component is a pure function).

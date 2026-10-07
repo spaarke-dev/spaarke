@@ -86,14 +86,21 @@ describe('triageColumnRenderers', () => {
     expect(screen.getByText('—')).toBeInTheDocument();
   });
 
-  it('drives the default grid sort by priority via the shipped config <order> (framework, not client re-sort)', () => {
+  it('drives the default grid sort by received-date (newest first) via the shipped config <order>, priority as secondary tiebreaker (framework, not client re-sort)', () => {
     const fetchXml = needsReviewConfig.source.fetchXml;
     const priorityIdx = fetchXml.indexOf('<order attribute="sprk_triagepriority"');
     const receivedIdx = fetchXml.indexOf('<order attribute="sprk_receiveddate"');
-    // Priority is the FIRST order key (ascending → Urgent=100000000 first), date secondary.
+    // Received-date (newest first) is the FIRST order key, priority (ascending →
+    // Urgent=100000000 first) is the secondary tiebreaker. Deliberately reordered
+    // 2026-08-13 (commit 4bba0d8bd2, "reconciliation grid — newest-first ordering"):
+    // UAT found a newly-captured email missing from the grid because
+    // sprk_triagepriority is null on new captures (not yet triaged), so a
+    // priority-first ASC sort buried it at position 185 of 197, past the 25-row
+    // page. This test originally pinned the OLD priority-first order (task 051,
+    // 2026-08-07) and was never updated for the 08-13 fix — task 092, 2026-10-04.
     expect(priorityIdx).toBeGreaterThanOrEqual(0);
     expect(fetchXml).toContain('<order attribute="sprk_triagepriority" descending="false" />');
-    expect(priorityIdx).toBeLessThan(receivedIdx);
+    expect(receivedIdx).toBeLessThan(priorityIdx);
     // The triage fields are all selected + laid out as columns.
     for (const f of [
       'sprk_triagepriority',

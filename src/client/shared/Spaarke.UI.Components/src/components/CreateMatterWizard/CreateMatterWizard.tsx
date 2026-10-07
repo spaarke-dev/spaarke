@@ -45,6 +45,7 @@ import {
 } from './matterService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import { EventService } from '../CreateEventWizard/eventService';
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
 import type { AuthenticatedFetchFn, IUserBuCascadeDefaults } from '../../services/EntityCreationService';
@@ -52,6 +53,7 @@ import type { AssociationResult } from '../AssociateToStep/types';
 import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -66,9 +68,8 @@ import { cleanGuid } from '../../utils/guid';
  */
 function getDataverseClientUrl(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-    const clientUrl: string | undefined = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    // Shared cross-frame walker (task 081 / C-8).
+    const clientUrl: string | undefined = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (clientUrl) return clientUrl.replace(/\/+$/, '');
   } catch {
     // Cross-origin or missing Xrm — fall through.
@@ -613,7 +614,14 @@ export const CreateMatterWizard: React.FC<ICreateMatterWizardProps> = ({
         // If the user selected an association in step 1, create the link now.
         // This is a non-blocking operation -- failure produces a warning, not an error.
         if (context.association?.recordId) {
-          const assocResult = await associateToRecord(dataService, matterId, context.association);
+          // UAC-r2 task 147 r1 (owner round 28 item 1): filing the SELECTED invoice under the new matter is a re-file of
+          // a child record — its owner follows the matter — so it goes through the BFF
+          // (`PATCH /api/v1/child-records/sprk_invoice/{id}`), never Xrm.WebApi.
+          const assocResult = await associateToRecord(
+            withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl),
+            matterId,
+            context.association
+          );
           if (!assocResult.success) {
             result.warnings.push(
               `Matter created, but could not link to "${context.association.recordName}". ` +

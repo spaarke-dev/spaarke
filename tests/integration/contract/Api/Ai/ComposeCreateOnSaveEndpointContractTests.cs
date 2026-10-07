@@ -104,9 +104,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: mintedSpeItemId,
                 Name: "draft.docx",
@@ -199,9 +199,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             "#858: the container is derived server-side from the acting user's business unit");
         resolvedContainerArg.Should().NotBe(clientSuppliedDecoyContainerId,
             "#858's whole point: a client-supplied container id must never reach the SPE write path");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-            It.IsAny<HttpContext>(), resolvedDriveId, It.IsAny<string>(),
-            It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+            resolvedDriveId, It.IsAny<string>(),
+            It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Once,
             "a new SPE drive-item was minted in the resolved BU drive");
         createdEntity.Should().NotBeNull("a new sprk_document row was created");
         createdEntity!.LogicalName.Should().Be("sprk_document");
@@ -344,10 +344,60 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
                 It.IsAny<HttpContext>(), existingDriveId, existingSpeItemId,
                 It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
             "a dedup hit replaces the EXISTING drive-item's content in place");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never,
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Never,
             "no NEW drive-item is minted when the transient key already resolves to one");
+    }
+
+    // Task 171: the transient-key hit's replace is no longer decided by SPE alone (the key is a client value, stored on
+    // the row). A caller WITHOUT Write on the matched sprk_document is refused 403 and NOTHING is written or minted.
+    [Fact]
+    public async Task CreateOnSave_WhenTransientKeyMatchesARowTheCallerMayNotWrite_Is403_AndWritesNothing()
+    {
+        const string transientKey = "transient-key-dedup-denied-171";
+        var existingDocumentId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+        _fixture.ProbeMock
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), "sprk_documents", existingDocumentId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spaarke.Dataverse.AccessRights.Read);
+
+        var existingRow = new Entity("sprk_document", existingDocumentId)
+        {
+            ["sprk_documentid"] = existingDocumentId,
+            ["sprk_graphitemid"] = "spe-item-not-yours",
+            ["sprk_graphdriveid"] = "b!drive-not-yours",
+        };
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, KeyAttributeCollection key, string[] _, CancellationToken _) =>
+                key.TryGetValue("sprk_composetransientkey", out var tk) && string.Equals(tk as string, transientKey, StringComparison.Ordinal)
+                    ? existingRow
+                    : null!);
+
+        string sessionId;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+            sessionId = (await sessions.CreateSessionAsync(
+                ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: null)).SessionId;
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new { tenantId = ComposeCreateOnSaveFixture.TestTenantId, sessionId, content = DraftBytes, displayName = "draft.docx", transientKey });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden, await response.Content.ReadAsStringAsync());
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
+            It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a refused key hit must not fall through to minting a new document either");
     }
 
     // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
@@ -371,9 +421,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: mintedSpeItemId, Name: "Corteva NDA.docx", ParentId: null,
                 Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
@@ -460,9 +510,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("drive-pdf-002");
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: "spe-item-pdf-002", Name: "x.docx", ParentId: null, Size: DraftBytes.Length,
                 CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
@@ -554,8 +604,8 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             "no SPE version exists — the outcome and the payload must agree");
 
         _fixture.SpeMock.Verify(
-            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            s => s.UploadSmallAsync(It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Never, "nothing may be written when no container could be derived");
         _fixture.DataverseMock.Verify(
             d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
@@ -584,9 +634,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync("drive-storage-failed-001");
         // The SPE mint fails softly — Graph returned nothing. Nothing is stored.
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FileHandleDto?)null);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -626,9 +676,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync("drive-persisted-001");
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: "spe-item-persisted-001",
                 Name: "draft.docx",
@@ -716,9 +766,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: mintedSpeItemId,
                 Name: "draft.docx",
@@ -788,9 +838,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         // from the acting user's business unit.
         resolvedContainerArg.Should().Be(TestActingUserBusinessUnit.ContainerId,
             "#858: with no session (and so no matter) the server derives the acting user's BU container");
-        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
-            It.IsAny<HttpContext>(), resolvedDriveId, It.IsAny<string>(),
-            It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsync(
+            resolvedDriveId, It.IsAny<string>(),
+            It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Once,
             "a new SPE drive-item was minted in the resolved BU drive");
         createdEntity.Should().NotBeNull("a new sprk_document row was persisted without a session (R5-E: file + record + index still required)");
         createdEntity!.LogicalName.Should().Be("sprk_document");
@@ -902,9 +952,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
             .ReturnsAsync("drive-secure-matter-001");
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: "spe-item-secure-001", Name: "draft.docx", ParentId: null,
                 Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
@@ -978,8 +1028,8 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         body.Should().NotContain("SdapProblemException",
             "the exception type is an implementation detail; leaking it is the opaque-500 shape DEF-14 forbids");
         _fixture.SpeMock.Verify(
-            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            s => s.UploadSmallAsync(It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Never, "denial precedes every write — nothing is stored speculatively");
         _fixture.DataverseMock.Verify(
             d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
@@ -1004,9 +1054,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
             .ReturnsAsync("drive-foreign-session-001");
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FileHandleDto(
                 Id: "spe-item-foreign-001", Name: "draft.docx", ParentId: null,
                 Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
@@ -1070,8 +1120,8 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         body.Should().Contain("compose_host_entity_unsupported",
             "the stable code makes a future project-bound session VISIBLE instead of silently misfiled");
         _fixture.SpeMock.Verify(
-            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
-                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            s => s.UploadSmallAsync(It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Never, "refusal precedes every write");
     }
 }
@@ -1084,6 +1134,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
 /// </summary>
 public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public const string TestTenantId = "tenant-create-on-save-001";
 
     public Mock<ISpeFileOperations> SpeMock { get; } = new(MockBehavior.Loose);
@@ -1112,6 +1165,12 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
         DataverseMock.Reset();
         IndexingMock.Reset();
         ProbeMock.Reset();
+
+        // Task 171: a transient-key hit now asks Dataverse (as the caller) for Write on the matched sprk_document before it
+        // replaces the file. The fixture's caller may write its own documents; a test that needs a refusal overrides this.
+        ProbeMock
+            .Setup(p => p.GetCallerRightsAsync(It.IsAny<string?>(), "sprk_documents", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write);
 
         // Issue #858: the container is SERVER-derived on every create-on-save — a matter-less draft
         // derives it from the acting user's business unit, so the real derivation reads must be
@@ -1229,6 +1288,9 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
+            // Task 146: every create resolves its owner — the resolver at its module boundary.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             services.AddSingleton(dataverseServiceMock.Object);
 
             // ── The point of this fixture: KEEP the real ComposeService; mock ONLY the external
@@ -1247,6 +1309,12 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
             // would call Dataverse; the mock answers instead. The REAL RecordContainerResolver stays.
             services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
             services.AddSingleton(ProbeMock.Object);
+
+            // Task 171: the {documentSpeId} Compose routes are tied to the document row (ComposeDocumentAuthorizationFilter),
+            // which asks the access data source about the caller; the real one calls Dataverse over HTTP. The caller here
+            // holds Read + Write (the gate has its own suite).
+            services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
+            services.AddSingleton<Spaarke.Dataverse.IAccessDataSource>(new Sprk.Bff.Api.Tests.Seam.Ai.ComposeSeamAuthorizedAccessDataSource());
         });
     }
 

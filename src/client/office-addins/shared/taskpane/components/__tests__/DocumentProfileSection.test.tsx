@@ -358,7 +358,8 @@ describe('DocumentProfileSection', () => {
       expect(mockGet).toHaveBeenCalledTimes(1);
     });
 
-    // Task 088 (UAT-6): SaveFlow's saved state turns "Saved" back into "Save version" on this callback.
+    // Task 088 (UAT-6): the pre-save callback seam. (Task 099: SaveFlow no longer re-enables Save from it — the
+    // post-save Profile has Refresh instead of Generate Profile.)
     it('calls onProfileGenerated once when the server accepts the request — and not when it refuses it', async () => {
       mockGet.mockResolvedValue(envelope({ summaryStatus: 100000000 }));
       mockPost
@@ -378,6 +379,42 @@ describe('DocumentProfileSection', () => {
       await user.click(generateProfileButton());
       await waitFor(() => expect(screen.getByText('No write access.')).toBeTruthy());
       expect(onProfileGenerated).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Task 099 (owner UAT round 5, item 6): the post-save view's Profile has a Refresh button instead of Generate
+  // Profile — it re-reads the saved document's profile, and tells the host so it can re-read the name + filing.
+  describe("mode='refresh' (post-save)", () => {
+    it('shows Refresh (and no Generate Profile); pressing it re-reads the profile and calls onRefresh', async () => {
+      mockGet.mockResolvedValue(envelope({ summaryStatus: 100000001 }));
+      const onRefresh = jest.fn();
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} mode="refresh" onRefresh={onRefresh} />);
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled());
+      expect(screen.queryByRole('button', { name: /generate profile/i })).toBeNull();
+      expect(mockGet).toHaveBeenCalledTimes(1);
+
+      await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+      await waitFor(() => expect(mockGet).toHaveBeenCalledTimes(2));
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      expect(mockPost).not.toHaveBeenCalled(); // a refresh never re-dispatches profiling
+    });
+
+    it('a profile that is still generating shows its status with Refresh available', async () => {
+      mockGet.mockResolvedValue(envelope({ summaryStatus: 100000001 }));
+
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} mode="refresh" />);
+
+      await waitFor(() => expect(screen.queryByText(/loading profile/i)).toBeNull());
+      expect(screen.getByRole('button', { name: 'Refresh' })).toBeEnabled();
+    });
+
+    it('Refresh is disabled without a saved document id', () => {
+      renderWithProvider(<DocumentProfileSection mode="refresh" />);
+
+      expect(screen.getByRole('button', { name: 'Refresh' })).toHaveAttribute('aria-disabled', 'true');
     });
   });
 });

@@ -97,6 +97,9 @@ public class StartupValidationService : IHostedService
         _logger.LogInformation("  Redis:");
         _logger.LogInformation("    - Enabled: {Enabled}", redis.Enabled);
         _logger.LogInformation("    - InstanceName: {InstanceName}", redis.InstanceName);
+        // Which authentication path is configured (task 242) — the mode only, never a value.
+        _logger.LogInformation("    - Authentication: {AuthMode}",
+            !string.IsNullOrWhiteSpace(redis.Endpoint) ? "managed identity (Redis:Endpoint)" : "connection string (Development/Testing only)");
     }
 
     /// <summary>
