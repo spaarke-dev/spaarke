@@ -20,7 +20,7 @@
 | 039 | Secure-child Signals/Decision Records (uac-r2 conditions A/B on #1355) | Own PR to master (`C:\wts-039`, `feat/secure-child-signals-039`) + possibly writer change on this branch | Review → ask owner to merge → ✅ → start **037** |
 | Stream C | 036 action catalog → 026 rule describer | Branch `stream/c-036-026` (`C:\wts-c`) | Merge into this branch (route-ledger edits one at a time) → ✅ |
 | Stream C2 | 047 response columns (D-58) → D-60 drop foreign tables from `OntologyPlatformSolution` → 046 WA create on `RecordCreationService` (D-59, uac-r2 review) | Branch `stream/c2-047-046` (`C:\wts-c2`) | Give the D-60 job a POML number (draft in notes) → merge → ✅ |
-| Stream D | 072 classifier guidance | Branch `stream/d-072` (`C:\wts-d`) | Merge → ✅ → start **073**, then **074** (recall exit gate) |
+| Stream D | 072 DONE on branch `stream/d-072` @ `ff001fb54` (agent could not run Step 9.5) — **independent review running** (`C:\wtr72`; incl. `sprk_enabled` filter gap) | Branch `stream/d-072` (`C:\wts-d`) | Fix review findings → merge into this branch → mark 072 ✅ (POML already completed; index pending) → start **073**, then **074** (measure via real ActionRunner path) |
 | Stream B | 057 Console UI kit | Own PR to master (`C:\wts-b`, `feat/console-ui-kit-057`) | Review → ask owner to merge → ✅ → start **056** (110 is merged) |
 | Stream E | 060 re-scoped (D-57): Briefing uses `IsOpenWork`, no data change | Own PR to master (`C:\wts-e`, `fix/briefing-open-work-060`) | Review → ask owner to merge → ✅ |
 
