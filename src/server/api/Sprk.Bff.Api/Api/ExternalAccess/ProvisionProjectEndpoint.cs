@@ -1846,7 +1846,7 @@ public static class ProvisionProjectEndpoint
             if (!first.Proven)
             {
                 var restored = !wroteCreatorShare
-                               || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, knownPreMask, logger, ct);
+                               || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, knownPreMask, preOwner, logger, ct);
 
                 if (restored && preOwner == DataversePrincipalRef.User(creatorId))
                 {
@@ -1892,7 +1892,7 @@ public static class ProvisionProjectEndpoint
         {
             // Read back and NOT moved: nothing moved, so undo the only other write — the share-first grant.
             var restored = !wroteCreatorShare
-                           || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, logger, ct);
+                           || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, preOwner, logger, ct);
 
             var cause = move.PatchRefused
                 ? "Dataverse refused the assignment to the Secure Record owner team. If this is a privilege error, " +
@@ -2034,7 +2034,7 @@ public static class ProvisionProjectEndpoint
             var children = await AssignCascadeChildOwners.RestoreAsync(dataverseClient, cascadeSnapshot, logger, ct);
 
             var restored = !wroteCreatorShare
-                           || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, logger, ct);
+                           || await RestoreCreatorShareAsync(recordShare, root, recordId, creatorId, preCreatorMask ?? 0, preOwner, logger, ct);
 
             // Task 132 (C12): the move back (verified) and the creator-share restore changed who can read the record, and
             // each child put back on its own owner is an owner change of its own — evict each, once, before any return.
@@ -3298,12 +3298,20 @@ public static class ProvisionProjectEndpoint
     /// Puts the creator's share back to <paramref name="targetMask"/> (0 = no share) and proves it by reading back.
     /// Returns false when that cannot be proven — the caller then says so rather than claiming a clean undo.
     /// </summary>
+    /// <param name="recordOwner">
+    /// The record's owner at the moment of the restore — every caller restores with the record on its pre-call owner (the
+    /// move was never made, was read back as not made, or was moved back and read back). When that owner is the creator, a
+    /// revoke of the creator's share runs AS the creator: Dataverse refuses an app-only revoke of the owning user's own
+    /// share ("Only owner can revoke access to the owner", 0x80040223), which left the undo of a creator-owned record
+    /// <c>sharesRestored: false</c> with the share in place. The read-back below still decides the answer.
+    /// </param>
     private static async Task<bool> RestoreCreatorShareAsync(
         IDataverseRecordShareService recordShare,
         SecureRecordRoot root,
         Guid recordId,
         Guid creatorId,
         int targetMask,
+        DataversePrincipalRef recordOwner,
         ILogger logger,
         CancellationToken ct)
     {
@@ -3315,7 +3323,7 @@ public static class ProvisionProjectEndpoint
                 return true;
 
             if (targetMask == 0)
-                await recordShare.RevokeAccessAsync(root.EntitySet, recordId, principal, ct);
+                await recordShare.RevokeAccessAsync(root.EntitySet, recordId, principal, recordOwner, ct);
             else if (current == 0)
                 await recordShare.GrantAccessAsync(root.EntitySet, recordId, principal, RecordShareLevels.RightsCsvForMask(targetMask), ct);
             else

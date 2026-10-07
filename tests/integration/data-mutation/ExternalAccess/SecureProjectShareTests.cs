@@ -378,6 +378,8 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
             "a share-first grant must never outlive a compensated run — on a team-owned record it would hand the " +
             "creator ShareAccess they did not hold before");
         _fixture.Revokes.Should().ContainSingle(r => r.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.RevokesAsOwner.Should().BeEmpty(
+            "a TEAM owns the record, so the creator's share is an ordinary sharee's - revoked app-only, never as a user");
         _fixture.CreatedContainerDisplayNames.Should().BeEmpty();
         _fixture.SomeoneCanOpen(projectId).Should().BeTrue();
     }
@@ -1200,5 +1202,131 @@ public class SecureProjectShareTests : IClassFixture<ProvisionProjectTestFixture
 
         using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         body.RootElement.GetProperty("newOwnerSystemUserId").GetGuid().Should().Be(steward);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The owner's own share (live on dev 2026-10-06): Dataverse refuses an app-only RevokeAccess of the share held by the
+    // record's CURRENT owning user — 400 0x80040223 "Only owner can revoke access to the owner" — and accepts it sent as
+    // that user (MSCRMCallerID). The fixture's share double applies that rule always, as Dataverse does.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A creator-driven unsecure hands the record back to the creator, who still holds provisioning's share. That share is
+    /// revoked AS the creator (now the owner) — before the fix it was sent app-only, refused, and every such unsecure ended
+    /// <c>sweepComplete: false</c> with the explicit share (Share included) surviving. A colleague's share is still revoked
+    /// app-only: only the owner's own share is ever sent as a user.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_ByTheCreator_RevokesTheirOwnShareAsTheOwner_AndTheSweepIsComplete()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+        var provisioned = await client.PostAsJsonAsync(ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague } });
+        provisioned.StatusCode.Should().Be(HttpStatusCode.OK, await provisioned.Content.ReadAsStringAsync());
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().NotBe(0,
+            "precondition: provisioning shared the record to its creator");
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId,
+            "precondition: the creator is the new owner, so their share is the owner's own");
+        _fixture.OwnerShareRevokesRefused.Should().BeEmpty("the owner's own share is never sent app-only");
+        _fixture.RevokesAsOwner.Should().ContainSingle()
+            .Which.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        _fixture.Revokes.Should().Contain(r => r.Principal == DataversePrincipalRef.User(colleague));
+        _fixture.RevokesAsOwner.Should().NotContain(r => r.Principal.Id == colleague,
+            "a principal that does not own the record is never impersonated");
+        _fixture.SharesOn(projectId).Should().BeEmpty("no explicit share outlives the unsecure — the owner's included");
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("sweepComplete").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharesRevoked").GetInt32().Should().Be(2);
+    }
+
+    /// <summary>
+    /// Unsecured to a NOMINATED owner who holds a share: the nominee's share is the owner's own (revoked as the nominee);
+    /// the creator's share is now an ordinary sharee's (revoked app-only). The owner the sweep acts as is the one Step 3
+    /// read back, not the caller.
+    /// </summary>
+    [Fact]
+    public async Task Unsecure_ToANominatedOwnerWhoHoldsAShare_RevokesOnlyTheNomineesShareAsTheOwner()
+    {
+        var projectId = Guid.NewGuid();
+        var steward = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+        var provisioned = await client.PostAsJsonAsync(ProvisionRoute, new { projectId, sharePrincipalIds = new[] { steward } });
+        provisioned.StatusCode.Should().Be(HttpStatusCode.OK, await provisioned.Content.ReadAsStringAsync());
+
+        var response = await client.PostAsJsonAsync(UnsecureRoute, new { projectId, reassignToSystemUserId = steward });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwningUserOf(projectId).Should().Be(steward);
+        _fixture.OwnerShareRevokesRefused.Should().BeEmpty();
+        _fixture.RevokesAsOwner.Should().ContainSingle()
+            .Which.Principal.Should().Be(DataversePrincipalRef.User(steward));
+        _fixture.Revokes.Should().Contain(r => r.Principal == DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        _fixture.SharesOn(projectId).Should().BeEmpty();
+
+        using var body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        body.RootElement.GetProperty("sweepComplete").GetBoolean().Should().BeTrue();
+        body.RootElement.GetProperty("sharesRevoked").GetInt32().Should().Be(2);
+    }
+
+    /// <summary>
+    /// Provisioning's NotMoved undo on a record the CREATOR owns: the share-first grant is revoked as the creator (still the
+    /// owner — nothing moved), read back as gone, and the response says <c>sharesRestored: true</c>. Before the fix the
+    /// app-only revoke was refused and the self-share stayed.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenTheMoveIsNotApplied_OnACreatorOwnedRecord_RevokesTheShareFirstGrantAsTheCreator()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId); // owned by the caller, as the wizard creates it
+        _fixture.OwnershipPatchIsApplied = false;
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonOwnerAssignmentNotApplied);
+        _fixture.Grants.Should().ContainSingle(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId,
+            "precondition: the share-first grant was written before the move");
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.OwnerShareRevokesRefused.Should().BeEmpty();
+        _fixture.RevokesAsOwner.Should().ContainSingle()
+            .Which.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("sharesRestored").GetBoolean().Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Compensation after the move BACK to a creator who owned the record: the creator's share is put back to "no share" as
+    /// the creator (the owner again, read back) — <c>sharesRestored: true</c>, mask 0.
+    /// </summary>
+    [Fact]
+    public async Task Provisioning_WhenCompensatedBackToTheCreator_RevokesTheCreatorsShareAsTheCreator()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId); // owned by the caller
+        _fixture.FailStrictShareReadWhileSecureOwned = true; // the post-move proof fails -> compensate
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        (await ReasonCodeOf(response)).Should().Be(ProvisionProjectEndpoint.ReasonCreatorShareFailed);
+        _fixture.OwningUserOf(projectId).Should().Be(ProvisionProjectTestFixture.CallerSystemUserId,
+            "precondition: the move was undone, back to the creator");
+        _fixture.OwnerShareRevokesRefused.Should().BeEmpty();
+        _fixture.RevokesAsOwner.Should().ContainSingle()
+            .Which.Principal.Should().Be(DataversePrincipalRef.User(ProvisionProjectTestFixture.CallerSystemUserId));
+        _fixture.ShareMaskOf(projectId, ProvisionProjectTestFixture.CallerSystemUserId).Should().Be(0);
+        using var problem = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        problem.RootElement.GetProperty("ownershipRestored").GetBoolean().Should().BeTrue();
+        problem.RootElement.GetProperty("sharesRestored").GetBoolean().Should().BeTrue();
+        problem.RootElement.GetProperty("creatorShareRemoved").GetBoolean().Should().BeFalse();
     }
 }

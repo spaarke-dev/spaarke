@@ -74,8 +74,9 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// deliberately do NOT select, accept, or return sprk_todoflag. To-dos remain exclusively on
 /// sprk_todo via /todos. If a future change makes these two surfaces overlap again, that is the
 /// regression FR-29 existed to prevent — keep them disjoint.
-/// PATCH /events/{id} was NOT restored: the only client caller (web-api-client.updateEvent) has
-/// zero call sites, so there is no consumer to justify the write surface (CLAUDE.md §11).
+/// PATCH /events/{id} was NOT restored: its only client wrapper (web-api-client.updateEvent) had zero call sites
+/// and was deleted (spaarke-ontology-platform-r1 task 097), so there is no consumer to justify the write surface
+/// (CLAUDE.md §11).
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied via route group + CallerPrincipalAuthorizationFilter.
@@ -905,6 +906,12 @@ public static class ExternalProjectDataEndpoints
         if (string.IsNullOrWhiteSpace(request.SprkName))
             return Results.Problem(statusCode: 400, title: "Bad Request",
                 detail: "sprk_name is required");
+
+        // Task 097 review F9: never write an arbitrary status integer. Draft or Open only; omitted ⇒ Open. Checked
+        // before the owner is resolved, so a malformed body costs no Dataverse read.
+        if (request.SprkStatus is { } status && !ExternalDataService.ExternalCreatableStatuses.Contains(status))
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "sprk_status must be Draft (1) or Open (659490001); omit it to create the event Open.");
 
         // Task 146: owned by the project's team (the named Secure team for a secure project), or refused.
         var (owningTeamId, ownerRefusal) = await ResolveChildOwnerAsync(ownership, "sprk_project", id, "event", ct);

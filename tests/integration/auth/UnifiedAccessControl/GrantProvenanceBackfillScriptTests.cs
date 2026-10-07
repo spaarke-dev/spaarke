@@ -163,7 +163,9 @@ public class GrantProvenanceBackfillScriptTests
         var helper = Path.Combine(RepoRoot(), "scripts", "common", "GrantProvenanceBackfill.ps1");
         File.Exists(helper).Should().BeTrue($"{helper} is the backfill the schema script dot-sources");
 
-        var script = "$ErrorActionPreference = 'Stop'\n" + $". '{helper.Replace("'", "''", StringComparison.Ordinal)}'\n" + body;
+        // The stubs throw [Microsoft.PowerShell.Commands.HttpResponseException], whose assembly loads only with the Utility
+        // module; module auto-loading made that intermittent on CI ("Unable to find type"), so load it before the stubs run.
+        var script = "$ErrorActionPreference = 'Stop'\nImport-Module Microsoft.PowerShell.Utility\n" + $". '{helper.Replace("'", "''", StringComparison.Ordinal)}'\n" + body;
         var start = new ProcessStartInfo("pwsh")
         {
             RedirectStandardOutput = true,

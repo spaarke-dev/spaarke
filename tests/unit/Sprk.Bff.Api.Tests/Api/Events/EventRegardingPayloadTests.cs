@@ -11,7 +11,7 @@ using FluentAssertions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
 using Xunit;
-using ApiEventStatusCode = Sprk.Bff.Api.Api.Events.Dtos.EventStatusCode;
+using ApiEventStatusCode = Spaarke.Dataverse.EventStatusCode;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -87,7 +87,7 @@ public class EventRegardingPayloadTests
     public void LiveNames_EventStatusCodes_AndTheStatecodeEachBelongsTo_ArePinned(int apiValue, int liveValue, int liveState)
     {
         apiValue.Should().Be(liveValue);
-        DataverseWebApiService.GetEventStateCode(liveValue).Should().Be(liveState,
+        Spaarke.Dataverse.EventStatusCode.GetStateCode(liveValue).Should().Be(liveState,
             "Dataverse refuses a statuscode written with a statecode it does not belong to (Completed is ACTIVE live)");
     }
 
@@ -164,7 +164,7 @@ public class EventRegardingPayloadTests
         var url = DataverseWebApiService.BuildEventQueryUrl(
             regardingRecordType: 1, regardingRecordId: TargetId, regardingRecordTypeRefId: null,
             eventTypeId: null, statusCode: null, priority: null, dueDateFrom: null, dueDateTo: null,
-            skip: 0, top: 50, ownerUserId: null);
+            skip: 0, top: 50, mine: null);
 
         Filter(url).Should().Be(
             $"sprk_regardingrecordid eq '{TargetId:D}' and _sprk_regardingmatter_value eq {TargetId:D}");
@@ -192,7 +192,7 @@ public class EventRegardingPayloadTests
             regardingRecordType: null, regardingRecordId: TargetId, regardingRecordTypeRefId: null,
             eventTypeId: eventType, statusCode: 659490001, priority: 2,
             dueDateFrom: new DateTime(2026, 1, 2), dueDateTo: new DateTime(2026, 3, 4),
-            skip: 0, top: 50, ownerUserId: owner);
+            skip: 0, top: 50, mine: new Spaarke.Dataverse.EventOwnershipScope(owner, null, null));
 
         Filter(url).Should().Be(
             $"_ownerid_value eq {owner:D} and sprk_regardingrecordid eq '{TargetId:D}' and "

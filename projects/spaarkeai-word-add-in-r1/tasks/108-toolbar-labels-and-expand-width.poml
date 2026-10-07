@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="108" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 10 — Expand always right-most in the toolbar; icon-only tabs at normal width and labels when expanded in both hosts; expand to 2x (document stays in view)</title>
+    <phase>6 UAT round 10 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx`/`.ts` (`TaskPaneToolbar.tsx`, `useToolbarFit.ts`, `taskPaneWidthService.ts`) and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only layout changes decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>104, 107</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 10 (2026-10-07), items 1-3. Record: `notes/042-uat-round10-2026-10-07.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>Expand/Collapse is always visible at the toolbar's right end; both hosts show icon-only tabs at a normal width and labels when wide; Word's expand keeps the document in view.</goal>
+
+  <constraints>
+    <constraint source="owner item 1">Closest feasible to "next to the ✕": the host title row cannot hold an add-in button; Expand right-most in the toolbar, never hidden in "⋮".</constraint>
+    <constraint source="owner item 2">Same label rule in Word and Outlook; icon-only items keep names (NFR-11).</constraint>
+    <constraint source="owner item 3">Expanded pane well short of the whole window on desktop.</constraint>
+    <constraint source="ADR-038">Tests for the label rule, positions and the new expand candidates.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Word and Outlook at ~395 px: icon-only tabs with names; at 640: labels.</criterion>
+    <criterion testable="true">Expand/Collapse is the right-most toolbar button at every width.</criterion>
+    <criterion testable="true">Desktop expand requests 2x default capped at 35% of the screen; web caps at half the window and 500.</criterion>
+    <criterion testable="true">Gates: full jest green; lint 0; typecheck 0 production; test-file debt not above the pin.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Rewrite useToolbarFit as a width-based label rule with the overflow guard.</step>
+    <step>Toolbar: Expand right-most, no menu item.</step>
+    <step>Expand candidates 2x / 35% screen / 85% step.</step>
+    <step>Tests; gates; notes; status.</step>
+  </steps>
+
+  <justification>
+    <existing>Toolbar, useToolbarFit (107), taskPaneWidthService (103/104).</existing>
+    <extension>Yes — all three are modified; nothing new.</extension>
+    <cost-of-doing-nothing>Owner UAT round 10: Expand hidden in a menu, hosts look different, and the expanded pane covers the document.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useToolbarFit.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/taskPaneWidthService.ts</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round10-2026-10-07.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

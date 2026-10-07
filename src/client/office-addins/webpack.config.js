@@ -49,9 +49,11 @@ const ENV_CONFIG = {
   // same in every environment; a customer whose app has another name changes this one setting. UNSET →
   // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
   SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
-  // Optional: switches Word's Email tab (task 096) on. Default OFF — owner decision 2026-10-04 (task 097 note
-  // §6): the tab stays off until `/api/communications/send` authorizes attachments and associations
-  // (unified-access-control-r2 task 161) on master AND deployed. Only the exact string "true" turns it on.
+  // Optional: switches Word's Email tab (task 096) on. Default OFF in code; only the exact string "true" turns
+  // it on. The deploy workflow (`.github/workflows/deploy-office-addins.yml`) sets it to "true" since task 097
+  // (2026-10-06): `/api/communications/send` now authorizes every attachment and association as the caller
+  // (unified-access-control-r2 task 161, on master via #1312). A local or other build without the setting
+  // keeps the tab off.
   ADDIN_EMAIL_TAB_ENABLED: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true' ? 'true' : 'false',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).

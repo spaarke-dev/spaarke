@@ -35,7 +35,7 @@ public sealed class NullPlaybookService : IPlaybookService
 
     public Task<PlaybookResponse> CreatePlaybookAsync(
         SavePlaybookRequest request,
-        Guid userId,
+        Guid ownerSystemUserId,
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CreatePlaybookAsync));
@@ -129,7 +129,7 @@ public sealed class NullPlaybookService : IPlaybookService
 
     public Task<PlaybookResponse> ClonePlaybookAsync(
         Guid sourcePlaybookId,
-        Guid userId,
+        Guid ownerSystemUserId,
         string? newName = null,
         CancellationToken cancellationToken = default)
     {

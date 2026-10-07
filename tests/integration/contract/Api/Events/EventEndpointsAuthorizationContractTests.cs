@@ -28,7 +28,7 @@ using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
 using Xunit;
-using EventStatusCode = Sprk.Bff.Api.Api.Events.Dtos.EventStatusCode;
+using EventStatusCode = Spaarke.Dataverse.EventStatusCode;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -96,13 +96,37 @@ public class EventEndpointsAuthorizationContractTests
         captured.Should().ContainSingle();
         captured[0].Caller.Should().Be(CallerSystemUserId, "the query runs AS the caller's resolved systemuserid");
         captured[0].Owner.Should().Be(CallerSystemUserId, "the kept owner narrowing uses the same resolved id");
+        // Owner decision B (task 097): "my events" is owner OR assigned contact OR created-by person — the created-by
+        // branch is what keeps a team-owned (I-6) event the BFF created visible to the person who created it.
+        captured[0].Mine!.CreatedByPersonId.Should().Be(CallerSystemUserId);
+        captured[0].Mine!.AssignedToContactId.Should().BeNull("this caller has no linked contact");
         captured[0].Status.Should().Be(EventStatusCode.Open, "the alias maps to the LIVE Open statuscode");
         (await response.Content.ReadFromJsonAsync<JsonObject>())!["totalCount"]!.GetValue<int>()
             .Should().Be(7, "TotalCount is the trimmed query's own count");
         host.Events.Verify(e => e.QueryEventsAsync(
             It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()), Times.Never);    }
+
+    [Fact]
+    public async Task List_ACallerWithALinkedContact_ListsWhatIsAssignedToThatContact()
+    {
+        // Owner decision B's assigned branch at the ROUTE (task 097 round 9; review mutation M3): the contact the identity
+        // service links to the caller reaches the query — an event assigned to the caller's contact is theirs.
+        var linkedContact = Guid.Parse("c0c0c0c0-0097-4097-8097-000000000009");
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Identity.Setup(i => i.ResolveAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(CallerSystemUserId, ContactId: linkedContact));
+        var captured = host.CaptureCallerScopedQuery(totalCount: 1);
+
+        var response = await host.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/api/v1/events"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var mine = captured.Should().ContainSingle().Subject.Mine!;
+        mine.AssignedToContactId.Should().Be(linkedContact);
+        mine.OwnerUserId.Should().Be(CallerSystemUserId);
+        mine.CreatedByPersonId.Should().Be(CallerSystemUserId);
+
     }
 
     public static TheoryData<string> UnresolvedCallers => new()
@@ -393,6 +417,169 @@ public class EventEndpointsAuthorizationContractTests
         payload.Keys.Should().NotContain("sprk_RegardingRecordType@odata.bind", "this environment double has no record-type row for analysis");
     }
 
+    /// <summary>
+    /// Task 097 round 9: the regarding NUMBER column is the one the type's <c>sprk_recordtype_ref</c> row names
+    /// (<c>sprk_regardingrecordnumberfield</c>, live spaarkedev1 values below) — every type, not only matter/project.
+    /// </summary>
+    [Theory]
+    [InlineData(0, "sprk_project", "sprk_projects", "sprk_projectnumber", "PRJ-0097")]
+    [InlineData(1, "sprk_matter", "sprk_matters", "sprk_matternumber", "MAT-0097")]
+    [InlineData(2, "sprk_invoice", "sprk_invoices", "sprk_invoicenumber", "INV-0097")]
+    [InlineData(3, "sprk_analysis", "sprk_analysises", "sprk_analysis_number", "AN-0097")]
+    [InlineData(4, "account", "accounts", "accountnumber", "ACC-0097")]
+    [InlineData(6, "sprk_workassignment", "sprk_workassignments", "sprk_workassignmentnumber", "WA-0097")]
+    [InlineData(7, "sprk_budget", "sprk_budgets", "sprk_budgetnumber", "BUD-0097")]
+    public async Task Create_WritesTheRegardingNumber_FromTheColumnTheCatalogRowNames(
+        int type, string logicalName, string entitySet, string numberColumn, string number)
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var target = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(entitySet, target, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync(logicalName, It.IsAny<CancellationToken>())).ReturnsAsync(entitySet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(logicalName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = numberColumn });
+        host.Entities.Setup(e => e.RetrieveAsync(logicalName, target, It.Is<string[]>(c => c.Contains(numberColumn)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(logicalName, target) { [numberColumn] = number });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Numbered", regardingRecordType = type, regardingRecordId = target }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().Be(number);
+    }
+
+    [Fact]
+    public async Task Create_ACatalogNamingAColumnTheRecordLacks_StillWritesTheServersName()
+    {
+        // Task 097 round 10: the combined name+number read faults on a column the record lacks; the name is read alone.
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_nosuchnumber" });
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Contains("sprk_nosuchnumber")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("'sprk_matter' entity doesn't contain attribute with Name = 'sprk_nosuchnumber'"));
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matter) { ["sprk_mattername"] = "Acme Holdings" });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new
+        {
+            subject = "Named", regardingRecordType = 1, regardingRecordId = matter, regardingRecordName = "MAT-100",
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = creates.Should().ContainSingle().Subject;
+        created.RegardingRecordName.Should().Be("Acme Holdings");
+        created.RegardingRecordNumber.Should().BeNull();
+    }
+    // ── Round 11: the event create has no catalog cache, so a transient catalog fault is retried ONCE ────────────────
+
+    private static void MatterWithNumber(EventsAuthHost host, Guid matter)
+    {
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matter) { ["sprk_mattername"] = "Acme Holdings", ["sprk_matternumber"] = "MAT-0097" });
+    }
+
+    private static Entity MatterCatalogRow() =>
+        new("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" };
+
+    [Fact]
+    public async Task Create_ACatalogTimeout_IsRetriedOnce_AndTheNumberIsStillWritten()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.SetupSequence(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"))
+            .ReturnsAsync(MatterCatalogRow());
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Retried", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().Be("MAT-0097");
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Create_APersistentCatalogTimeout_LeavesTheNumberEmpty_AndTheCreateStillSucceeds()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"));
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Unnumbered", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = creates.Should().ContainSingle().Subject;
+        created.RegardingRecordNumber.Should().BeNull();
+        created.RegardingRecordName.Should().Be("Acme Holdings");
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2),
+            "once, then exactly one retry");
+    }
+
+    [Fact]
+    public async Task Create_APermanentCatalogFault_IsNotRetried()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("privilege check failed"));
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Not retried", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void TransientCatalogFault_IsATimeoutOrAThrottle_NeverTheCallersCancellationOrARejection()
+    {
+        var throttle = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147015902 }, "Number of requests exceeded the limit");
+        var rejection = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147220960 }, "Principal user is missing prvReadsprk_recordtype_ref");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        EventEndpoints.IsTransientCatalogFault(new TimeoutException(), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(new TaskCanceledException("HttpClient timeout"), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(throttle, CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(
+            new HttpRequestException("429", null, HttpStatusCode.TooManyRequests), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(rejection, CancellationToken.None).Should().BeFalse();
+        EventEndpoints.IsTransientCatalogFault(new InvalidOperationException(), CancellationToken.None).Should().BeFalse();
+        EventEndpoints.IsTransientCatalogFault(new TaskCanceledException(), cancelled.Token).Should().BeFalse();
+    }
+    [Fact]
+    public async Task Create_ACatalogRowThatNamesNoNumberColumn_WritesNoNumber()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var contact = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("contacts", contact, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("contact", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid())); // live: contact names no number column
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Call", regardingRecordType = 5, regardingRecordId = contact }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().BeNull("never guessed");
+    }
     [Fact]
     public async Task Create_WithNoRegarding_NeedsOnlyThePrivilege()
     {
@@ -405,6 +592,23 @@ public class EventEndpointsAuthorizationContractTests
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         host.Probe.RightsCalls.Should().BeEmpty();
         creates.Should().ContainSingle().Which.RegardingRecordType.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Create_WhenTheEventLogWriteFails_StillAnswers201_BecauseTheEventExists()
+    {
+        // The event is written before its log row. A failed log (on dev it was a 400 for a column sprk_eventlog lacks)
+        // must not turn a successful create into a 500 that the caller retries into a duplicate event.
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Probe.Hold(CreateEventPrivilege);
+        var creates = host.CaptureCreates();
+        host.Events.Setup(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Response status code does not indicate success: 400 (Bad Request)."));
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Log write fails" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle();
     }
 
     [Fact]
@@ -636,7 +840,7 @@ public class EventEndpointsAuthorizationContractTests
         return node.ToJsonString();
     }
 
-    internal sealed record CallerScopedQuery(Guid Caller, int? Type, Guid? RegardingId, Guid? RecordTypeRef, int? Status, Guid? Owner);
+    internal sealed record CallerScopedQuery(Guid Caller, int? Type, Guid? RegardingId, Guid? RecordTypeRef, int? Status, Guid? Owner, EventOwnershipScope? Mine = null);
 
     /// <summary>
     /// <see cref="CallerRecordAccessProbe"/> at its virtual seams: answers from a rights table and a held-privilege set,
@@ -815,11 +1019,11 @@ public class EventEndpointsAuthorizationContractTests
             Events.Setup(e => e.QueryEventsAsCallerAsync(
                     It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(),
                     It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<DateTime?>(), It.IsAny<DateTime?>(),
-                    It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<int>(), It.IsAny<int>(), It.IsAny<EventOwnershipScope?>(), It.IsAny<CancellationToken>()))
                 .Returns((Guid caller, int? type, Guid? regardingId, Guid? typeRef, Guid? _, int? status, int? _,
-                    DateTime? _, DateTime? _, int _, int _, Guid? owner, CancellationToken _) =>
+                    DateTime? _, DateTime? _, int _, int _, EventOwnershipScope? mine, CancellationToken _) =>
                 {
-                    captured.Add(new CallerScopedQuery(caller, type, regardingId, typeRef, status, owner));
+                    captured.Add(new CallerScopedQuery(caller, type, regardingId, typeRef, status, mine?.OwnerUserId, mine));
                     return Task.FromResult((Array.Empty<EventEntity>(), totalCount));
                 });
             return captured;

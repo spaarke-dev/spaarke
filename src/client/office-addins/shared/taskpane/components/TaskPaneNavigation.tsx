@@ -134,8 +134,10 @@ const TAB_CONFIGS: TabConfig[] = [
     // 'Find'"): an in-pane form, built from the shared Spaarke compose engine, that emails the open document as
     // an attachment from the user's own mailbox. Word only by the owner's decision ("Outlook unchanged") —
     // expressed as the `canEmailFromPane` CAPABILITY (Word true, Outlook false), never a `hostType` list.
+    // Task 106 (owner UAT round 8): labelled "Send" - the mail icon already says it is email - matching
+    // Outlook's Send action in the same toolbar position.
     value: 'email',
-    label: 'Email',
+    label: 'Send',
     icon: <MailRegular />,
     availableFor: ['outlook', 'word'],
     requiresCapability: 'canEmailFromPane',

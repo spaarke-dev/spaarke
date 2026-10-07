@@ -176,6 +176,141 @@ public class ExternalAccessReconciliationTests
         Rule("R3")["Planned"].Should().Be(0);
     }
 
+    // ── R4: a grant whose record is gone stops reading as active (owner round 71) ─────────────────────
+    //
+    // Deleting a matter or work assignment does not delete its grants: the lookup's delete behaviour is RemoveLink, so the row
+    // survives ACTIVE with every record lookup empty. R4 deactivates it through the same chunked, claimed write path as R2/R3.
+
+    [Theory]
+    [InlineData("dated")]                 // the ordinary case: a contact grant with an expiry, record deleted
+    [InlineData("undated")]               // R4 beats R1 — a row with no record is ended, never stamped +90
+    [InlineData("inactive-organization")] // R4 beats R2 — one row, one update
+    public async Task R4_AnActiveGrantWhoseRecordIsGone_IsDeactivatedWithBothStateAndStatus(string shape)
+    {
+        var id = shape switch
+        {
+            "undated" => SeedGrant(expires: null, recordGone: true),
+            "inactive-organization" => SeedGrant(expires: Today.AddDays(30), organization: InactiveOrg, organizationState: 1, recordGone: true),
+            _ => SeedGrant(expires: Today.AddDays(30), recordGone: true),
+        };
+
+        var result = await RunAsync(writes: true);
+
+        State(Grant(id)).Should().Be(1);
+        Status(Grant(id)).Should().Be(2);
+        Grant(id).Contains(ExternalAccessReconciliationJob.ExpiresDateAttribute).Should().Be(shape != "undated",
+            "an ended row is not also stamped");
+        Rule("R4")["Planned"].Should().Be(1);
+        Rule("R4")["Changed"].Should().Be(1);
+        Rule("R1")["Planned"].Should().Be(0);
+        Rule("R2")["Planned"].Should().Be(0);
+        _dataverse.Writes.Should().ContainSingle().Which.Updates.Should().ContainSingle()
+            .Which.Fields.Keys.Should().BeEquivalentTo(new[] { "statecode", "statuscode" });
+        Heartbeat()["R4Planned"].Should().Be(1);
+        Heartbeat()["R4Changed"].Should().Be(1);
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.ProcessedItems.Should().Be(1);
+    }
+
+    /// <summary>
+    /// A CONTACT-issued undated row whose record is gone ends under R4 — it is never handed to R1's issuer resolution (whose
+    /// "the issuer holds a grant there" has no "there" to read).
+    /// </summary>
+    [Fact]
+    public async Task R4_AContactIssuedUndatedRowWhoseRecordIsGone_IsEndedByR4_WithNoIssuerRead()
+    {
+        var row = SeedContactIssued(issuer: Issuer, level: Collaborate);
+        Grant(row).Attributes.Remove("sprk_project"); // the record was deleted (RemoveLink)
+
+        await RunAsync(writes: true);
+
+        State(Grant(row)).Should().Be(1);
+        Rule("R4")["Changed"].Should().Be(1);
+        Rule("R1")["Planned"].Should().Be(0);
+        ContactIssued().GetProperty("rows").GetArrayLength().Should().Be(0);
+        AssertIssuerKept(row);
+    }
+
+    [Fact]
+    public async Task R4_InReportOnlyMode_IsCountedAndListed_ButNothingIsWritten()
+    {
+        var id = SeedGrant(expires: Today.AddDays(30), recordGone: true);
+
+        var result = await RunAsync(writes: null);
+
+        _dataverse.Writes.Should().BeEmpty();
+        State(Grant(id)).Should().Be(0);
+        Rule("R4")["Planned"].Should().Be(1);
+        Rule("R4")["Changed"].Should().Be(0);
+        result.ProcessedItems.Should().Be(0);
+        BeforeStateFor(id).Should().ContainSingle().Which.Should().Contain("mode=report-only")
+            .And.Contain("sprk_matter=(empty)")
+            .And.Contain("its record is gone");
+    }
+
+    [Theory]
+    [InlineData("sprk_project")]
+    [InlineData("sprk_matter")]
+    [InlineData("sprk_workassignment")]
+    public async Task R4_AGrantThatNamesALiveRecordThroughAnyOfItsLookups_IsLeftUnchanged(string recordLookup)
+    {
+        var id = SeedGrant(expires: Today.AddDays(30), recordLookup: recordLookup);
+
+        await RunAsync(writes: true);
+
+        _dataverse.Writes.Should().BeEmpty();
+        State(Grant(id)).Should().Be(0);
+        Rule("R4")["Planned"].Should().Be(0);
+    }
+
+    [Fact]
+    public async Task R4_AnInactiveGrantWhoseRecordIsGone_IsNotTouched()
+    {
+        SeedGrant(expires: Today.AddDays(30), state: 1, recordGone: true);
+
+        await RunAsync(writes: true);
+
+        _dataverse.Writes.Should().BeEmpty();
+        Rule("R4")["Planned"].Should().Be(0);
+    }
+
+    /// <summary>A grant scan that fails reconciles nothing — never a mass deactivation on an error — and the run is recorded failed.</summary>
+    [Fact]
+    public async Task R4_WhenTheGrantScanFails_AnOrphanIsLeftActive_AndTheRunIsRecordedFailed()
+    {
+        var id = SeedGrant(expires: Today.AddDays(30), recordGone: true);
+        _dataverse.ScanFailures[GrantEntity] = new InvalidOperationException("Dataverse is unavailable");
+
+        var result = await RunAsync(writes: true);
+
+        result.Success.Should().BeFalse();
+        _dataverse.Writes.Should().BeEmpty();
+        State(Grant(id)).Should().Be(0);
+        Rule("R4")["ScanFailed"].Should().Be(true);
+        Rule("R4")["Planned"].Should().Be(0);
+    }
+
+    /// <summary>
+    /// The scan must bring an orphan back even though it carries a date and no organization (R1's and R2's disjuncts both
+    /// miss it), and it must SELECT every record lookup — one left out would read as empty and end a live row.
+    /// </summary>
+    [Fact]
+    public void TheGrantScan_SelectsEveryRecordLookup_AndAdmitsARowWhoseRecordLookupsAreAllEmpty()
+    {
+        var fetch = XDocument.Parse(ExternalAccessReconciliationJob.BuildGrantScanFetchXml(1, null));
+        var entity = fetch.Descendants("entity").Single();
+        var lookups = ExternalAccessReconciliationJob.RootLookupAttributes.Select(r => r.Attribute).ToArray();
+
+        entity.Elements("attribute").Select(a => (string?)a.Attribute("name")).Should().Contain(lookups);
+
+        var recordGone = entity.Descendants("filter").Single(f =>
+            (string?)f.Attribute("type") == "and"
+            && f.Elements("condition").Any()
+            && f.Elements("condition").All(c => (string?)c.Attribute("operator") == "null"));
+        recordGone.Elements("condition").Select(c => (string?)c.Attribute("attribute")).Should().BeEquivalentTo(lookups);
+        ((string?)recordGone.Parent!.Attribute("type")).Should().Be("or", "it is one more way a row can need reconciling");
+    }
+
     // ── The boundary every rule shares ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -447,11 +582,12 @@ public class ExternalAccessReconciliationTests
         result.Skipped.Should().BeFalse("Skipped belongs to the host (ADR-036 A1 rule 1), never to a job");
 
         var rules = Report().GetProperty("rules").EnumerateArray().ToList();
-        rules.Should().HaveCount(3);
+        rules.Should().HaveCount(4);
         rules.Select(r => r.GetProperty("rule").GetString()).Should().Equal(
             ExternalAccessReconciliationJob.RuleStampDefaultExpiry,
             ExternalAccessReconciliationJob.RuleDeactivateOrphanedOrgGrant,
-            ExternalAccessReconciliationJob.RuleDeactivateEndedMembership);
+            ExternalAccessReconciliationJob.RuleDeactivateEndedMembership,
+            ExternalAccessReconciliationJob.RuleDeactivateRecordGone);
 
         foreach (var rule in rules)
         {
@@ -951,12 +1087,22 @@ public class ExternalAccessReconciliationTests
 
     // ── Harness ─────────────────────────────────────────────────────────────────────────────────────
 
-    private Guid SeedGrant(DateOnly? expires, Guid? organization = null, int? organizationState = null, int? state = 0)
+    /// <summary>
+    /// A grant row on a live MATTER, unless <paramref name="recordGone"/> — its record was deleted and the RemoveLink cascade
+    /// emptied every record lookup (owner round 71, R4). <paramref name="recordLookup"/> picks which lookup names the record.
+    /// </summary>
+    private Guid SeedGrant(DateOnly? expires, Guid? organization = null, int? organizationState = null, int? state = 0,
+        bool recordGone = false, string recordLookup = "sprk_matter")
     {
         var row = new Entity(GrantEntity, Guid.NewGuid());
         if (state is { } s)
         {
             row["statecode"] = new OptionSetValue(s);
+        }
+
+        if (!recordGone)
+        {
+            row[recordLookup] = new EntityReference(recordLookup, Guid.NewGuid());
         }
 
         if (expires is { } e)
@@ -1052,6 +1198,7 @@ public class ExternalAccessReconciliationTests
         {
             "R1" => ExternalAccessReconciliationJob.RuleStampDefaultExpiry,
             "R2" => ExternalAccessReconciliationJob.RuleDeactivateOrphanedOrgGrant,
+            "R4" => ExternalAccessReconciliationJob.RuleDeactivateRecordGone,
             _ => ExternalAccessReconciliationJob.RuleDeactivateEndedMembership,
         };
 

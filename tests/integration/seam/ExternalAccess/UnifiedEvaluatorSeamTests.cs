@@ -396,7 +396,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.SetGrants(SingleGrant(ProjectEntity, deniedRecord, ExternalAccessLevel.FullAccess));
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), deniedRecord));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), deniedRecord));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -425,7 +425,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ReferencedOrgs[record] = new[] { opposingCounselOrg };
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", OrgObjectRow(Guid.NewGuid(), opposingCounselOrg));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", OrgObjectRow(Guid.NewGuid(), opposingCounselOrg));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -447,7 +447,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA);
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), record));
+        denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), record));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -472,7 +472,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA);
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", OrgObjectRow(Guid.NewGuid(), deniedOrg));
+        denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", OrgObjectRow(Guid.NewGuid(), deniedOrg));
 
         var dataverse = BuildDataverse(contactHeld: false);
         var membership = new Mock<IMembershipResolverService>(MockBehavior.Strict);
@@ -779,10 +779,10 @@ public sealed class UnifiedEvaluatorSeamTests
         var denyReader = new SeamNoAccessListReader();
         var (subject, row) = shape switch
         {
-            "contact x record" => ($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), denied)),
-            "contact x organization" => ($"sprk_subjectcontact eq {ContactId}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
-            "organization x record" => ($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), denied)),
-            "organization x organization" => ($"sprk_subjectorganization eq {OrgA}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            "contact x record" => ($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "contact x organization" => ($"_sprk_subjectcontact_value eq {ContactId}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
+            "organization x record" => ($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), denied)),
+            "organization x organization" => ($"_sprk_subjectorganization_value eq {OrgA}", OrgObjectRow(Guid.NewGuid(), referencedOrg)),
             _ => throw new ArgumentOutOfRangeException(nameof(shape), shape, "Unknown key shape."),
         };
         denyReader.AddEntry(subject, row);
@@ -807,7 +807,7 @@ public sealed class UnifiedEvaluatorSeamTests
         participations.ActiveOrgIds.Add(OrgA); // both contacts belong to OrgA
 
         var denyReader = new SeamNoAccessListReader();
-        denyReader.AddEntry($"sprk_subjectcontact eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
+        denyReader.AddEntry($"_sprk_subjectcontact_value eq {ContactId}", RecordObjectRow(Guid.NewGuid(), record));
         var evaluator = GrantOnlySut(participations, denyReader);
 
         var named = await ResolveCiamAsync(evaluator);
@@ -972,7 +972,7 @@ public sealed class UnifiedEvaluatorSeamTests
                 case "no access entry":
                     rows.Add((entityType, Direct(first, ExternalAccessLevel.FullAccess)));
                     rows.Add((entityType, Direct(second, ExternalAccessLevel.Collaborate)));
-                    denyReader.AddEntry($"sprk_subjectorganization eq {OrgA}", RecordObjectRow(Guid.NewGuid(), first));
+                    denyReader.AddEntry($"_sprk_subjectorganization_value eq {OrgA}", RecordObjectRow(Guid.NewGuid(), first));
                     answer[second] = Rights(ExternalAccessLevel.Collaborate);
                     break;
                 default:
@@ -1903,7 +1903,7 @@ public sealed class UnifiedEvaluatorSeamTests
 
         /// <summary>
         /// Adds an active entry. Its SUBJECT column is set from <paramref name="requiredSubjectSubstring"/>
-        /// (<c>"sprk_subjectcontact eq {id}"</c> / <c>"sprk_subjectorganization eq {id}"</c>) — a real row carries the
+        /// (<c>"_sprk_subjectcontact_value eq {id}"</c> / <c>"_sprk_subjectorganization_value eq {id}"</c>) — a real row carries the
         /// subject the query matched it on, and since task 143 the reader treats a row with no subject as malformed.
         /// </summary>
         public void AddEntry(string requiredSubjectSubstring, NoAccessEntryRow row)
@@ -1913,13 +1913,13 @@ public sealed class UnifiedEvaluatorSeamTests
             {
                 switch (parts[0])
                 {
-                    case "sprk_subjectcontact":
+                    case "_sprk_subjectcontact_value":
                         row._sprk_subjectcontact_value ??= subjectId;
                         break;
-                    case "sprk_subjectorganization":
+                    case "_sprk_subjectorganization_value":
                         row._sprk_subjectorganization_value ??= subjectId;
                         break;
-                    case "sprk_subjectsystemuser":
+                    case "_sprk_subjectsystemuser_value":
                         row._sprk_subjectsystemuser_value ??= subjectId;
                         break;
                 }
@@ -1936,7 +1936,7 @@ public sealed class UnifiedEvaluatorSeamTests
                 throw new InvalidOperationException("simulated sprk_noaccessentry query outage");
             }
 
-            var isOrgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var isOrgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             var matching = _entries
                 .Where(e => subjectFilter.Contains(e.RequiredSubjectSubstring, StringComparison.Ordinal))
                 .Select(e => e.Row)

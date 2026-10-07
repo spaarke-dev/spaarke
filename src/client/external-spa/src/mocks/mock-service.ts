@@ -93,8 +93,8 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_eventid: `evt-mock-${Date.now()}`,
       sprk_name: body.sprk_name ?? 'New Event',
       sprk_duedate: body.sprk_duedate ?? null,
-      sprk_status: body.sprk_status ?? 0,
-      _sprk_projectid_value: createEvent[1],
+      sprk_status: body.sprk_status ?? 659490001, // Open (statuscode) — the BFF default
+      _sprk_regardingproject_value: createEvent[1], // sprk_event's project lookup (it has no sprk_projectid)
       createdon: new Date().toISOString(),
     };
     return delay(newEvent as unknown as T, 600);
@@ -126,12 +126,6 @@ export function getMockResponse<T>(path: string, options: RequestInit = {}): Pro
       sprk_regardingrecordurl: `/main.aspx?pagetype=entityrecord&etn=sprk_project&id=${projectId}`,
     };
     return delay(newTodo as unknown as T, 600);
-  }
-
-  // PATCH /api/v1/external/events/:id (update event)
-  const updateEvent = path.match(/^\/api\/v1\/external\/events\/([^/]+)$/);
-  if (method === 'PATCH' && updateEvent) {
-    return delay(undefined as unknown as T, 300);
   }
 
   // PATCH /api/v1/external/todos/:id (update to-do — NEW, R3 task 007)

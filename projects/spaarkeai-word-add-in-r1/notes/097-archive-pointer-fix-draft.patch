@@ -1,0 +1,437 @@
+diff --git a/src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs b/src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs
+index ee8a97bc3..00b0d048f 100644
+--- a/src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs
++++ b/src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs
+@@ -1135,10 +1135,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+ 
+         // Step 1b: Download and validate attachments (if any)
+         List<ChannelAttachment>? fileAttachments = null;
++        IReadOnlyList<OutboundAttachmentSource>? attachmentSources = null;
+         if (request.AttachmentDocumentIds is { Length: > 0 })
+         {
+-            fileAttachments = await DownloadAndBuildAttachmentsAsync(
++            var prepared = await DownloadAndBuildAttachmentsAsync(
+                 request.AttachmentDocumentIds, correlationId, cancellationToken);
++            fileAttachments = prepared.Attachments;
++            attachmentSources = prepared.Sources;
+         }
+ 
+         // Step 2: Resolve sender
+@@ -1330,18 +1333,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+                 }
+ 
+                 // Archive outbound attachments as child sprk_document records (best-effort)
+-                if (archivedDocumentId.HasValue && request.AttachmentDocumentIds is { Length: > 0 })
++                if (archivedDocumentId.HasValue && attachmentSources is { Count: > 0 })
+                 {
+                     try
+                     {
+-                        var driveId = _options.ArchiveContainerId;
+                         var attNames = fileAttachments?
+                             .Select(fa => fa.Name ?? "Unknown")
+                             .ToArray() ?? Array.Empty<string>();
+ 
+                         await ArchiveOutboundAttachmentsAsync(
+-                            communicationId.Value, request.AttachmentDocumentIds, attNames,
+-                            driveId!, correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
++                            communicationId.Value, attachmentSources, attNames,
++                            correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
+                     }
+                     catch (Exception attArchEx)
+                     {
+@@ -1498,10 +1500,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+ 
+         // Step 1c: Download and validate attachments (if any)
+         List<ChannelAttachment>? fileAttachments = null;
++        IReadOnlyList<OutboundAttachmentSource>? attachmentSources = null;
+         if (request.AttachmentDocumentIds is { Length: > 0 })
+         {
+-            fileAttachments = await DownloadAndBuildAttachmentsAsync(
++            var prepared = await DownloadAndBuildAttachmentsAsync(
+                 request.AttachmentDocumentIds, correlationId, ct);
++            fileAttachments = prepared.Attachments;
++            attachmentSources = prepared.Sources;
+         }
+ 
+         // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
+@@ -1650,18 +1655,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+                 }
+ 
+                 // Archive outbound attachments as child sprk_document records (best-effort)
+-                if (archivedDocumentId.HasValue && request.AttachmentDocumentIds is { Length: > 0 })
++                if (archivedDocumentId.HasValue && attachmentSources is { Count: > 0 })
+                 {
+                     try
+                     {
+-                        var driveId = _options.ArchiveContainerId;
+                         var attNames = fileAttachments?
+                             .Select(fa => fa.Name ?? "Unknown")
+                             .ToArray() ?? Array.Empty<string>();
+ 
+                         await ArchiveOutboundAttachmentsAsync(
+-                            communicationId.Value, request.AttachmentDocumentIds, attNames,
+-                            driveId!, correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
++                            communicationId.Value, attachmentSources, attNames,
++                            correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
+                     }
+                     catch (Exception attArchEx)
+                     {
+@@ -2493,11 +2497,17 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+     /// Creates child sprk_document records for each outbound attachment and enqueues AI analysis jobs.
+     /// Each attachment gets a document record linked to the communication, with source type CommunicationArchive.
+     /// </summary>
++    /// <remarks>
++    /// <para><b>Pointer (word-add-in-r1 task 097).</b> Each archived document points at the file the attachment was
++    /// read from: the SOURCE document's own <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>, carried from
++    /// <see cref="DownloadAndBuildAttachmentsAsync"/>. The bytes are not copied, so the file stays where the source
++    /// document keeps it. This used to write the source <c>sprk_document</c> id into <c>sprk_graphitemid</c> and
++    /// <c>Communication:ArchiveContainerId</c> into <c>sprk_graphdriveid</c>, a pointer that named no file.</para>
++    /// </remarks>
+     private async Task ArchiveOutboundAttachmentsAsync(
+         Guid communicationId,
+-        string[] attachmentDocumentIds,
++        IReadOnlyList<OutboundAttachmentSource> attachmentSources,
+         string[] attachmentNames,
+-        string driveId,
+         string correlationId,
+         CancellationToken ct,
+         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
+@@ -2513,9 +2523,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+             return;
+         }
+ 
+-        for (var i = 0; i < attachmentDocumentIds.Length; i++)
++        for (var i = 0; i < attachmentSources.Count; i++)
+         {
+-            var speItemId = attachmentDocumentIds[i];
++            var source = attachmentSources[i];
+             var fileName = i < attachmentNames.Length ? attachmentNames[i] : $"Attachment {i + 1}";
+ 
+             try
+@@ -2527,8 +2537,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+                     ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
+                     ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+-                    ["sprk_graphitemid"] = speItemId,
+-                    ["sprk_graphdriveid"] = driveId,
++                    // Task 097: the source document's own file — never its sprk_document id, never the archive container.
++                    ["sprk_graphitemid"] = source.ItemId,
++                    ["sprk_graphdriveid"] = source.DriveId,
+                 };
+                 ApplyContentOwner(attachmentDoc, docOwner);
+ 
+@@ -2545,8 +2556,8 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+             {
+                 _logger.LogWarning(
+                     ex,
+-                    "Failed to archive outbound attachment {Index}/{Total} (non-fatal) | SpeItemId: {SpeItemId}, FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+-                    i + 1, attachmentDocumentIds.Length, speItemId, fileName, communicationId, correlationId);
++                    "Failed to archive outbound attachment {Index}/{Total} (non-fatal) | SourceDocumentId: {SourceDocumentId}, SpeItemId: {SpeItemId}, FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
++                    i + 1, attachmentSources.Count, source.DocumentId, source.ItemId, fileName, communicationId, correlationId);
+             }
+         }
+     }
+@@ -2602,15 +2613,27 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+     /// </summary>
+     private const long MaxTotalAttachmentSizeBytes = 36_700_160;
+ 
++    /// <summary>
++    /// Where one outbound attachment's file lives: the source <c>sprk_document</c> and the SPE drive + item its row
++    /// names (word-add-in-r1 task 097). Read once, by the attachment fetch, and carried to the outbound archive so the
++    /// archived attachment document points at the real file instead of at the source document's id.
++    /// </summary>
++    private sealed record OutboundAttachmentSource(string DocumentId, string DriveId, string ItemId);
++
++    /// <summary>The attachments a send transmits, index-aligned with the files they were read from.</summary>
++    private sealed record PreparedAttachments(
++        List<ChannelAttachment> Attachments, IReadOnlyList<OutboundAttachmentSource> Sources);
++
+     /// <summary>
+     /// Downloads files from SPE, validates attachment count and total size limits,
+-    /// and builds a list of channel-neutral <see cref="Channels.ChannelAttachment"/> objects for the sender.
++    /// and builds a list of channel-neutral <see cref="Channels.ChannelAttachment"/> objects for the sender,
++    /// together with each attachment's source pointer (index-aligned; task 097).
+     /// </summary>
+     /// <exception cref="SdapProblemException">
+     /// Thrown when attachment count exceeds 150, total size exceeds 35MB,
+     /// or an individual file download fails.
+     /// </exception>
+-    private async Task<List<ChannelAttachment>> DownloadAndBuildAttachmentsAsync(
++    private async Task<PreparedAttachments> DownloadAndBuildAttachmentsAsync(
+         string[] attachmentDocumentIds,
+         string correlationId,
+         CancellationToken ct)
+@@ -2637,6 +2660,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+         // container) and sprk_graphitemid (file in that container).
+         // The legacy _options.ArchiveContainerId is no longer used here.
+         var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
++        var sources = new List<OutboundAttachmentSource>(attachmentDocumentIds.Length);
+         long totalSize = 0;
+ 
+         // SpeFileStore is Scoped — resolve once for this whole download operation (R9); the scope
+@@ -2848,6 +2872,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+                 ContentType = InferContentType(metadata.Name ?? "attachment"),
+                 Content = contentBytes
+             });
++            sources.Add(new OutboundAttachmentSource(sprkDocumentId, driveId, itemId));
+ 
+             _logger.LogDebug(
+                 "Attachment {Index}/{Total} prepared | Name: {Name}, Size: {Size} bytes, CorrelationId: {CorrelationId}",
+@@ -2858,7 +2883,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
+             "All attachments prepared | Count: {Count}, TotalSize: {TotalSize} bytes, CorrelationId: {CorrelationId}",
+             attachments.Count, totalSize, correlationId);
+ 
+-        return attachments;
++        return new PreparedAttachments(attachments, sources);
+     }
+ 
+     /// <summary>
+diff --git a/tests/unit/Sprk.Bff.Api.Tests/Services/Communication/OutboundAttachmentArchivePointerTests.cs b/tests/unit/Sprk.Bff.Api.Tests/Services/Communication/OutboundAttachmentArchivePointerTests.cs
+new file mode 100644
+index 000000000..fa2b38ef9
+--- /dev/null
++++ b/tests/unit/Sprk.Bff.Api.Tests/Services/Communication/OutboundAttachmentArchivePointerTests.cs
+@@ -0,0 +1,243 @@
++using System.Security.Claims;
++using System.Text;
++using Azure.Messaging.ServiceBus;
++using FluentAssertions;
++using Microsoft.AspNetCore.Http;
++using Microsoft.Extensions.Caching.Distributed;
++using Microsoft.Extensions.Caching.Memory;
++using Microsoft.Extensions.Logging;
++using Microsoft.Extensions.Options;
++using Microsoft.Xrm.Sdk;
++using Moq;
++using Spaarke.Dataverse;
++using Sprk.Bff.Api.Configuration;
++using Sprk.Bff.Api.Infrastructure.Graph;
++using Sprk.Bff.Api.Models;
++using Sprk.Bff.Api.Services.Communication;
++using Sprk.Bff.Api.Services.Communication.Channels;
++using Sprk.Bff.Api.Services.Communication.Models;
++using Sprk.Bff.Api.Services.Jobs;
++using Sprk.Bff.Api.Tests.TestInfrastructure;
++using Xunit;
++
++namespace Sprk.Bff.Api.Tests.Services.Communication;
++
++/// <summary>
++/// Regression (spaarkeai-word-add-in-r1 task 097): a send with <c>ArchiveToSpe</c> archives each attachment as a
++/// <c>sprk_document</c> linked to the communication. That document must point at the file the attachment was read
++/// from — the SOURCE document's own <c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>. It used to store the source
++/// <c>sprk_document</c> id as the Graph item id and <c>Communication:ArchiveContainerId</c> as the drive, a pointer
++/// that named no file. Both send modes reach the archive, so both are pinned.
++/// </summary>
++/// <remarks>
++/// Module-boundary doubles only (ADR-038 §4): the channel sender seam (<see cref="ICommunicationChannelSender"/>),
++/// the <see cref="SpeFileStore"/> facade's virtual download/upload, the document read
++/// (<see cref="IDocumentDataverseService"/>), the Dataverse writer (<see cref="IGenericEntityService"/>) and the job
++/// queue. File metadata comes from the real <see cref="GraphMetadataCache"/> over an in-memory cache, so no Graph
++/// transport is touched (no <c>HttpMessageHandler</c>). The document-pointer check runs for real
++/// (<see cref="SpeScopeFactoryStub"/>: every <c>drive-…</c> container is a business unit's).
++/// </remarks>
++public class OutboundAttachmentArchivePointerTests
++{
++    private const string ArchiveContainerId = "drive-archive";
++    private const int EmailAttachmentSourceType = 659490004;
++
++    private static readonly SourceDocument ContractDoc = new(Guid.NewGuid(), "drive-bu-north", "item-contract", "contract.docx");
++    private static readonly SourceDocument ExhibitDoc = new(Guid.NewGuid(), "drive-bu-south", "item-exhibit", "exhibit.pdf");
++
++    private sealed record SourceDocument(Guid Id, string DriveId, string ItemId, string Name);
++
++    [Theory]
++    [InlineData(SendMode.SharedMailbox)]
++    [InlineData(SendMode.User)]
++    public async Task SendAsync_WithArchiveToSpe_ArchivedAttachmentsPointAtEachSourceDocumentsFile(SendMode sendMode)
++    {
++        // Arrange — two attachments whose files live in two different drives.
++        var created = new List<Entity>();
++        var sut = await BuildSutAsync(created, ContractDoc, ExhibitDoc);
++        var request = new SendCommunicationRequest
++        {
++            To = new[] { "recipient@example.com" },
++            Subject = "Draft for review",
++            Body = "<p>Attached.</p>",
++            BodyFormat = BodyFormat.HTML,
++            CommunicationType = CommunicationType.Email,
++            SendMode = sendMode,
++            ArchiveToSpe = true,
++            AttachmentDocumentIds = new[] { ContractDoc.Id.ToString(), ExhibitDoc.Id.ToString() },
++        };
++
++        // Act
++        var response = await sut.SendAsync(request, sendMode == SendMode.User ? UserContext() : null);
++
++        // Assert — the send archived, and each archived attachment document names its own source file.
++        response.ArchivedDocumentId.Should().NotBeNull(
++            "the .eml archive must succeed for the attachments to archive (warning: {0})", response.ArchivalWarning);
++
++        var archivedAttachments = created
++            .Where(e => e.LogicalName == "sprk_document"
++                        && e.GetAttributeValue<OptionSetValue>("sprk_sourcetype")?.Value == EmailAttachmentSourceType)
++            .ToList();
++
++        archivedAttachments
++            .Select(e => (Drive: e.GetAttributeValue<string>("sprk_graphdriveid"), Item: e.GetAttributeValue<string>("sprk_graphitemid")))
++            .Should().BeEquivalentTo(new[]
++            {
++                (ContractDoc.DriveId, ContractDoc.ItemId),
++                (ExhibitDoc.DriveId, ExhibitDoc.ItemId),
++            }, "each archived attachment must point at the file its source document keeps — never at the "
++               + "sprk_document id, never at the archive container");
++
++        // Task 146 stays intact: every archived attachment is owned like its communication.
++        archivedAttachments.Should().OnlyContain(e =>
++            e.GetAttributeValue<EntityReference>("ownerid") != null
++            && e.GetAttributeValue<EntityReference>("ownerid").Id == RecordOwnershipResolverDouble.DefaultTeamId);
++    }
++
++    private static async Task<CommunicationService> BuildSutAsync(List<Entity> created, params SourceDocument[] documents)
++    {
++        var options = new CommunicationOptions
++        {
++            ApprovedSenders = new[]
++            {
++                new ApprovedSenderConfig { Email = "noreply@contoso.com", DisplayName = "Contoso", IsDefault = true }
++            },
++            DefaultMailbox = "noreply@contoso.com",
++            ArchiveContainerId = ArchiveContainerId,
++        };
++
++        // The document read: sprk_document id → its own drive + item.
++        var documentService = new Mock<IDocumentDataverseService>();
++        foreach (var doc in documents)
++        {
++            documentService
++                .Setup(s => s.GetDocumentAsync(doc.Id.ToString(), It.IsAny<CancellationToken>()))
++                .ReturnsAsync(new DocumentEntity
++                {
++                    Id = doc.Id.ToString(),
++                    Name = doc.Name,
++                    GraphDriveId = doc.DriveId,
++                    GraphItemId = doc.ItemId,
++                });
++        }
++
++        // File metadata through the real cache-aside read (no Graph transport).
++        var metadataCache = new GraphMetadataCache(
++            new MemoryDistributedCache(Microsoft.Extensions.Options.Options.Create(new MemoryDistributedCacheOptions())),
++            Mock.Of<ILogger<GraphMetadataCache>>());
++        foreach (var doc in documents)
++        {
++            await metadataCache.SetFileMetadataAsync(doc.DriveId, doc.ItemId, new FileHandleDto(
++                Id: doc.ItemId, Name: doc.Name, ParentId: null, Size: 64,
++                CreatedDateTime: DateTimeOffset.UnixEpoch, LastModifiedDateTime: DateTimeOffset.UnixEpoch,
++                ETag: null, IsFolder: false, WebUrl: null));
++        }
++
++        var speFileStore = BuildSpeFileStore(metadataCache);
++
++        // The Dataverse writer: capture every create.
++        var entityService = new Mock<IGenericEntityService>();
++        entityService
++            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(new EntityCollection());
++        entityService
++            .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((Entity e, CancellationToken _) =>
++            {
++                created.Add(e);
++                return Guid.NewGuid();
++            });
++
++        // The email channel seam: the provider send succeeds.
++        var sender = new Mock<ICommunicationChannelSender>();
++        sender.SetupGet(s => s.SupportedType).Returns(CommunicationType.Email);
++        sender
++            .Setup(s => s.SendAsync(It.IsAny<ChannelSendRequest>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((ChannelSendRequest r, CancellationToken _) => new ChannelSendResult { FromAddress = r.FromAddress });
++
++        var dispatcher = new CommunicationChannelDispatcher(
++            new[] { sender.Object },
++            new ICommunicationArchiver[] { new EmailArchiver(new EmlGenerationService(Mock.Of<ILogger<EmlGenerationService>>())) });
++
++        var accountService = new CommunicationAccountService(
++            Mock.Of<IDataverseService>(),
++            Mock.Of<IDataverseService>(),
++            Mock.Of<IDistributedCache>(),
++            Mock.Of<ILogger<CommunicationAccountService>>());
++        var senderValidator = new ApprovedSenderValidator(
++            Microsoft.Extensions.Options.Options.Create(options),
++            accountService,
++            Mock.Of<IDistributedCache>(),
++            Mock.Of<ILogger<ApprovedSenderValidator>>());
++
++        return new CommunicationService(
++            dispatcher,
++            senderValidator,
++            Mock.Of<ICommunicationDataverseService>(),
++            entityService.Object,
++            documentService.Object,
++            accountService,
++            BuildJobQueue(),
++            Mock.Of<ICommunicationEnrichmentService>(),
++            Microsoft.Extensions.Options.Options.Create(options),
++            CoreAncestorResolverFixtures.Inert(),
++            new RecordOwnershipResolverDouble(),
++            Mock.Of<ILogger<CommunicationService>>(),
++            scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
++    }
++
++    /// <summary>The SPE facade over real operation classes; only its virtual download + upload are doubled.</summary>
++    private static SpeFileStore BuildSpeFileStore(GraphMetadataCache metadataCache)
++    {
++        var gcf = Mock.Of<IGraphClientFactory>();
++        var speMock = new Mock<SpeFileStore>(
++            MockBehavior.Loose,
++            new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>()),
++            new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>(), metadataCache),
++            new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
++            new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>()),
++            null!);
++
++        speMock
++            .Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((string _, string itemId, CancellationToken _) =>
++                (Stream)new MemoryStream(Encoding.UTF8.GetBytes($"bytes-of-{itemId}")));
++
++        speMock
++            .Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((string _, string path, Stream _, CancellationToken _) => (FileHandleDto?)new FileHandleDto(
++                Id: "item-eml", Name: path, ParentId: null, Size: 1,
++                CreatedDateTime: DateTimeOffset.UnixEpoch, LastModifiedDateTime: DateTimeOffset.UnixEpoch,
++                ETag: null, IsFolder: false, WebUrl: null));
++
++        return speMock.Object;
++    }
++
++    private static JobSubmissionService BuildJobQueue()
++    {
++        var sbOptions = new Mock<IOptions<ServiceBusOptions>>();
++        sbOptions.Setup(o => o.Value).Returns(new ServiceBusOptions
++        {
++            QueueName = "test-jobs",
++            ConnectionString = "Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=k;SharedAccessKey=v",
++        });
++
++        var jobs = new Mock<JobSubmissionService>(
++            MockBehavior.Loose,
++            sbOptions.Object,
++            Mock.Of<ILogger<JobSubmissionService>>(),
++            new Mock<ServiceBusClient>().Object);
++        jobs.Setup(j => j.SubmitJobAsync(It.IsAny<JobContract>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
++        return jobs.Object;
++    }
++
++    /// <summary>A signed-in user (User send mode resolves the sender from these claims).</summary>
++    private static HttpContext UserContext() => new DefaultHttpContext
++    {
++        User = new ClaimsPrincipal(new ClaimsIdentity(new[]
++        {
++            new Claim("preferred_username", "author@contoso.com"),
++            new Claim("oid", Guid.NewGuid().ToString()),
++        }, "Test")),
++    };
++}

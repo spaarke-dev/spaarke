@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 7 (3-4) — View Document and Copy Link confirm the click visibly, and the Profile's Summary area is resizable with the same handle as Find</title>
+    <phase>6 UAT round 7 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`SaveFlow.tsx`, `DocumentProfileSection.tsx`, `FindSplitPane.tsx`) and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only UI feedback and a reuse refactor, decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT7-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 104. 105 MUST NOT edit `taskPaneWidthService.ts` or its tests (104's). Do not edit `ci-gated-suites.txt` — report new suites to the main session.</parallel-reason>
+    <deps>099, 102</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 7 (2026-10-06), items 3 and 4. Record: `notes/042-uat-round7-2026-10-06.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>Clicking View Document or Copy Link visibly confirms that it worked, and the user can make the Profile's Summary area taller or shorter with the same drag/keyboard handle Find uses.</goal>
+
+  <context>
+    <background>
+      - **Item 3**: after a save, the confirmation shows **View Document** and **Copy Link** (task 099 kept them). Both work but give no visual cue. Add a short confirmation on each: Copy Link → the button changes to a check icon + "Copied" for about 2 seconds and the pane announces "Link copied" (polite live region); a copy failure shows "Couldn't copy" instead. View Document → a brief "Opened" state (check icon) after the open call succeeds, or the existing error if it fails. Return to the normal label after the timeout; no layout jump (keep button width stable).
+      - **Item 4**: the Profile section (`DocumentProfileSection.tsx`) shows the AI Summary in a fixed-height viewport. Make its height adjustable with the SAME handle as Find's divider (task 102, `FindSplitPane.tsx`: ARIA `role="separator"`, pointer drag with capture, Up/Down/Home/End, min height, remembered per viewer in localStorage with try/catch). Extract the handle from `FindSplitPane` into a shared local component (e.g. `ResizeHandle.tsx`) and use it in both places — do not duplicate the logic (CLAUDE.md §11). Check `@spaarke/ui-components` first for an existing resizable/splitter component (ADR-012 amended: reuse by default).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 3">Visible confirmation on both buttons after a successful click, reverting after ~2 s; a polite announcement for screen readers; failures show their own message; button width does not jump.</constraint>
+    <constraint source="owner item 4">The Summary viewport has a resize handle below it; drag and keyboard both work; min/max heights keep it usable; the chosen height is remembered per viewer (localStorage, try/catch).</constraint>
+    <constraint source="§11">One shared handle component used by Find and the Profile; Find's behaviour and tests unchanged.</constraint>
+    <constraint source="NFR-10 / ADR-021">Same in both hosts; Fluent v9 tokens; dark mode; visible focus.</constraint>
+    <constraint source="ADR-038">Tests for both confirmations (success + failure), the Summary resize (pointer + keyboard + min), and Find's existing divider tests still green; report new suites for `ci-gated-suites.txt`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Copy Link shows "Copied" with a check for ~2 s and announces it; a clipboard failure shows "Couldn't copy".</criterion>
+    <criterion testable="true">View Document shows an "Opened" state after a successful open; a failed open shows its error.</criterion>
+    <criterion testable="true">The Summary viewport resizes by drag and by Up/Down; it respects its minimum; the height is remembered.</criterion>
+    <criterion testable="true">Find uses the same extracted handle and its tests pass unchanged in behaviour.</criterion>
+    <criterion testable="true">Gates: full jest green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): as above. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-7 note, the 099 and 102 notes, `SaveFlow.tsx` (post-save confirmation), `DocumentProfileSection.tsx`, `FindSplitPane.tsx`.</step>
+    <step>Button confirmations; tests.</step>
+    <step>Extract the handle; Summary resize; tests.</step>
+    <step>Gates; `notes/105-post-save-feedback-profile-resize.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The post-save confirmation (099), the Profile section and Find's divider (102) exist.</existing>
+    <extension>Yes — feedback states on existing buttons; the divider's handle extracted and reused.</extension>
+    <cost-of-doing-nothing>Owner UAT round 7 items 3-4: users cannot tell the buttons worked, and long summaries are cramped.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Round 7 feedback and resize">
+      <steps>
+        <step>Save; click Copy Link → "Copied" briefly; click View Document → opens, "Opened" briefly.</step>
+        <step>Drag the handle under the Summary; Tab to it and press Up/Down; reopen the pane — the height is kept.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/FindSplitPane.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/105-post-save-feedback-profile-resize.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round7-2026-10-06.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/099-save-tab-round5.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/102-find-split-sections.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/105-post-save-feedback-profile-resize.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

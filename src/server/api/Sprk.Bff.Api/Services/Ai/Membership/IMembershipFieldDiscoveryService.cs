@@ -137,6 +137,13 @@ public interface IMembershipFieldDiscoveryService
 /// Ordered list of fields that resolved to a configured identity table.
 /// Stable ordering by <c>Field</c> ascending to keep the admin-endpoint
 /// response deterministic across cache hits.
+/// <para>
+/// ⚠️ A field is NOT unique in this list (task 172, GitHub #1011): a polymorphic lookup
+/// carries one descriptor per matched identity type, in target order — <c>ownerid</c> is
+/// <c>SystemUser</c> then <c>Team</c>, same field, same role. A consumer that keys by
+/// <see cref="MembershipDescriptor.Field"/> must de-duplicate or select by
+/// <see cref="MembershipDescriptor.IdentityType"/> explicitly.
+/// </para>
 /// </param>
 /// <param name="ExcludedFields">
 /// Fields removed by configured exclusions (global or per-entity).

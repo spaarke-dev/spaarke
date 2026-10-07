@@ -216,6 +216,37 @@ public class MembershipReconciliationJobTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PolymorphicOwnerDiscoveredAsUserAndTeam_DispatchesOncePerValue()
+    {
+        // Task 172 (GitHub #1011): discovery now emits the polymorphic Owner column TWICE — SystemUser and Team, same
+        // field and role. The job works per FIELD (one projected column, an orphan scan keyed by field, the value
+        // typed from its own EntityReference), so it must keep one descriptor per field: no duplicate-key failure,
+        // and each owner value dispatched exactly once, typed by what it IS (a team-owned row's team → Team).
+        var (job, updater, discovery, entityService) = BuildSut();
+        SetupDiscovery(discovery, MatterEntity,
+            new MembershipDescriptor("ownerid", "owner", "SystemUser", "systemuser", "auto"),
+            new MembershipDescriptor("ownerid", "owner", "Team", "team", "auto"));
+        var teamId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var teamOwned = new Entity(MatterEntity, MatterA) { ["ownerid"] = new EntityReference("team", teamId) };
+        var userOwned = new Entity(MatterEntity, MatterB) { ["ownerid"] = new EntityReference("systemuser", UserA) };
+        SetupParentScanReturnsOnce(entityService, MatterEntity, teamOwned, userOwned);
+        SetupOrphanScanReturnsOnce(entityService);
+
+        var result = await job.ExecuteAsync(BuildCtx(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.ProcessedItems.Should().Be(2, "one Updated event per owner VALUE, not per descriptor");
+        updater.Verify(u => u.HandleAsync(
+            It.Is<MembershipChangedEvent>(e => e.EntityRecordId == MatterA && e.PersonId == teamId
+                && e.PersonIdType == PersonIdentityType.Team && e.SourceField == "ownerid"),
+            It.IsAny<CancellationToken>()), Times.Once);
+        updater.Verify(u => u.HandleAsync(
+            It.Is<MembershipChangedEvent>(e => e.EntityRecordId == MatterB && e.PersonId == UserA
+                && e.PersonIdType == PersonIdentityType.User && e.SourceField == "ownerid"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task ExecuteAsync_MissingJunctionRow_EmitsUpdatedEventForHandlerSelfHeal()
     {
         // The recon job dispatches Updated for every populated lookup. The

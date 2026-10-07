@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="104" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 7 (1) — Expand sizes the pane from the Office/browser WINDOW, not the screen, so it never overshoots a window that is not full screen</title>
+    <phase>6 UAT round 7 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts` (`taskPaneWidthService.ts`) and its tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-located client change; needs a short platform check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT7-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 105. 104 edits only `taskPaneWidthService.ts` and its tests (`taskPaneExpand.test.ts`, `taskPaneWidthService.test.ts`). Client-only.</parallel-reason>
+    <deps>103</deps>
+    <tags>frontend, office-addins, typescript, task-pane, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 7 (2026-10-06), item 1: "for the expand, it expands to the screen, not the window; so if the browser is not full screen the expand is too wide". Record: `notes/042-uat-round7-2026-10-06.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (Office.js task panes, Word on the web and desktop).</role>
+
+  <goal>Expand widens the pane relative to the window the user actually has (the browser window for Word on the web, the Word window on desktop), so the expanded pane never exceeds what fits.</goal>
+
+  <context>
+    <background>
+      - Task 103 (`notes/103-pane-scroll-and-expand.md`): `expandCandidateWidths` tries 3x the platform default, then 50/40/30% of `window.screen.availWidth`, then 500 on web, accepting the first width that changes `window.innerWidth`. Observed live: Word on the web ACCEPTED a large width (so the documented 500 px web cap is not enforced as documented), and because the fractions are of the SCREEN, a browser window narrower than the screen gets a pane that is too wide.
+      - Inside the task-pane iframe/webview, `window.outerWidth` reports the outer width of the top-level window (the browser window on Word on the web). On desktop (WebView2 inside Word) check what `outerWidth` reports — if it is only the pane, fall back. Confirm on Microsoft Learn / MDN (researcher subagent if needed) and record the evidence.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 1">Candidate widths are fractions of the WINDOW width (`window.outerWidth` when it is meaningfully larger than the pane's `innerWidth`), never of the screen when a window width is available. Cap the expanded pane at 50% of the window (Office's documented desktop limit; also a sensible web cap) and at 3x the platform default, whichever is smaller. Fall back to `screen.availWidth` fractions only when no window width is available.</constraint>
+    <constraint source="103">Keep: step down when a request is ignored; collapse = round-4 width; never throws; capability gating unchanged.</constraint>
+    <constraint source="ADR-038">Update `taskPaneExpand.test.ts` for the window-based candidates (a browser window of 1200 px on a 2560 px screen expands to at most 600 px; no window width → screen fallback).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">With outerWidth 1200 and screen 2560 (web), the first candidate is min(3x default, 600) and nothing above 600 is requested.</criterion>
+    <criterion testable="true">With no usable outerWidth, the screen fallback applies as before.</criterion>
+    <criterion testable="true">Gates: jest on the width suites + full suite green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live: Word on the web in a half-width browser window expands to about half the window; desktop expands within the Word window. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-7 note, the 103 note, `taskPaneWidthService.ts`; confirm `outerWidth` behaviour per platform.</step>
+    <step>Window-based candidates; tests.</step>
+    <step>Gates; `notes/104-expand-to-window-width.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>`expandCandidateWidths` / `expandTaskPane` (task 103).</existing>
+    <extension>Yes — changes the candidate base from screen to window.</extension>
+    <cost-of-doing-nothing>Owner UAT round 7 item 1: in a non-full-screen window the expanded pane overshoots.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/services/taskPaneWidthService.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/104-expand-to-window-width.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round7-2026-10-06.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/103-pane-scroll-and-expand.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/104-expand-to-window-width.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>
