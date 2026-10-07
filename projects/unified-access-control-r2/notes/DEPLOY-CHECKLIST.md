@@ -212,7 +212,16 @@ posture on 2026-10-02 (§4.1). **Neither is a deploy step you choose: the code s
 | Switch | Ships as | Meaning |
 |---|---|---|
 | Scheduled-job registration | **enabled** (`AddScheduledJob<ExternalAccessReconciliationJob>(DefaultCronSchedule)`, daily `0 5 * * *`) | every tick runs and reports |
-| `ExternalAccess:Reconciliation:WritesEnabled` | **`false`** (explicit in `appsettings.template.json`; absent / empty / unparseable also = `false`) | report-only: R1/R2/R3 are counted and listed, nothing is written |
+| `ExternalAccess:Reconciliation:WritesEnabled` | **`false`** (explicit in `appsettings.template.json`; absent / empty / unparseable also = `false`) | report-only: R1/R2/R3/R4 are counted and listed, nothing is written |
+
+**R4** *(owner round 71, 2026-10-06)*: an ACTIVE grant whose record is gone (`sprk_project`, `sprk_matter`,
+`sprk_workassignment` all empty — a deleted matter / work assignment leaves its grants active, RemoveLink) is
+deactivated; it confers nothing, so R4 removes no access, only a misleading "active" row. It rides the same switch.
+Post-deploy check: create a throwaway matter + a contact grant on it, delete the matter, then
+`POST /api/admin/jobs/external-access-reconciliation/trigger` → `GET …/status`: `R4-deactivate-grant-whose-record-is-gone`
+`planned: 1`, `changed: 0` (report-only), and a `before-state … rule=R4-… sprk_matter=(empty)` trace. The ledger side
+(`sprk_assignedaccess` rows of a deleted record → `Revoked` / `root-deleted`) is done by the Assigned-To job, which
+writes it without a switch (no access changes) after reading the record and getting "not found".
 
 Writes stay off because rules R2 and R3 **remove access that exists today**, and R1 turns a row that (since task 107)
 confers nothing into one that confers access for 90 more days (`ExternalAccessModule.cs`, the comment above the

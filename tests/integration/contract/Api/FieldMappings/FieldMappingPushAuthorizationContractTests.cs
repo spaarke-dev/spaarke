@@ -251,9 +251,12 @@ public class FieldMappingPushAuthorizationContractTests
             "the live 'Matter to Invoice (Attorney Matrix)' profile works: sprk_invoice names its matter in sprk_matter");
         host.MetadataQueries.Should().Equal(new[]
         {
+            ("EntityDefinitions(LogicalName='sprk_matter')/Attributes",
+             (string?)"$select=LogicalName,AttributeType,IsValidODataAttribute", CallerSystemUserId),
             ("EntityDefinitions(LogicalName='sprk_invoice')/ManyToOneRelationships",
-             (string?)"$select=ReferencingAttribute,ReferencedEntity", CallerSystemUserId),
-        }, "the metadata is read through the same impersonated seam, as the caller");
+             (string?)"$select=ReferencingAttribute,ReferencedEntity,ReferencingEntityNavigationPropertyName", CallerSystemUserId),
+        }, "the metadata is read through the same impersonated seam, as the caller; with no lookup rule the source's "
+           + "relationships are not read");
         host.ChildQueries.Should().ContainSingle().Which.Should().Be(
             ("sprk_invoices", $"$filter=_sprk_matter_value eq {MatterId:D}&$select=sprk_invoiceid&$top=501", CallerSystemUserId));
     }
@@ -306,6 +309,185 @@ public class FieldMappingPushAuthorizationContractTests
         host.ProbedSources.Should().BeEmpty();
         host.VerifyNothingReadOrWritten();
         host.MetadataQueries.Should().BeEmpty();
+    }
+
+    // =========================================================================================
+    // 2026-10-06 (dev, class (a)): LOOKUP rules -- read as `_x_value`, written as `{nav}@odata.bind`
+    // =========================================================================================
+    //
+    // Every "Attorney Matrix" profile 500ed: a lookup source field went into $select by its logical name and Dataverse
+    // rejected the whole read (400 0x80060888 "Could not find a property named 'sprk_assignedattorney1'"). The write was
+    // equally impossible: a lookup cannot be PATCHed by logical name with a raw id.
+
+    private static readonly Guid AttorneyId = Guid.Parse("16616616-5555-4000-8000-000000000166");
+
+    private static Dictionary<string, JsonElement> AttorneyColumns(Guid? attorney, string? name = "Alex Attorney")
+    {
+        var columns = new Dictionary<string, JsonElement>
+        {
+            ["_sprk_assignedattorney1_value"] = JsonSerializer.SerializeToElement(attorney?.ToString()),
+        };
+        if (attorney is not null && name is not null)
+        {
+            columns["_sprk_assignedattorney1_value" + FieldMappingPushLookups.FormattedValueAnnotation] =
+                JsonSerializer.SerializeToElement(name);
+        }
+
+        return columns;
+    }
+
+    [Fact]
+    public void BuildSourceRecordQuery_SelectsALookupAsItsValueProperty_AndEveryOtherFieldByName_AndAnUnknownFieldNotAtAll()
+    {
+        var attributes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_assignedattorney1"] = "Lookup",
+            ["sprk_client"] = "Customer",
+            ["ownerid"] = "Owner",
+            ["sprk_clientreference"] = "String",
+            ["sprk_status"] = "Picklist",
+        };
+
+        var columns = FieldMappingPushLookups.SourceSelectColumns(
+            ["sprk_assignedattorney1", "sprk_clientreference", "sprk_client", "ownerid", "sprk_status", "sprk_typo", "bad field')"],
+            attributes);
+        var query = FieldMappingEndpoints.BuildSourceRecordQuery("sprk_matter", MatterId, columns);
+
+        query.Should().Be(
+            "$select=_sprk_assignedattorney1_value,sprk_clientreference,_sprk_client_value,_ownerid_value,sprk_status,sprk_matterid"
+            + $"&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+            "a lookup's Web API property is _x_value; a field the source does not have must not 400 the whole read");
+    }
+
+    [Fact]
+    public void ReadableAttributes_ExcludesAColumnThatIsNotAWebApiProperty()
+    {
+        var rows = new List<Dictionary<string, JsonElement>>
+        {
+            new() { ["LogicalName"] = JsonSerializer.SerializeToElement("sprk_assignedattorney1"), ["AttributeType"] = JsonSerializer.SerializeToElement("Lookup"), ["IsValidODataAttribute"] = JsonSerializer.SerializeToElement(true) },
+            new() { ["LogicalName"] = JsonSerializer.SerializeToElement("sprk_assignedattorney1name"), ["AttributeType"] = JsonSerializer.SerializeToElement("String"), ["IsValidODataAttribute"] = JsonSerializer.SerializeToElement(false) },
+        };
+
+        FieldMappingPushLookups.ReadableAttributes(rows).Keys.Should().Equal("sprk_assignedattorney1");
+    }
+
+    [Fact]
+    public async Task Push_ALookupRule_ReadsTheValueProperty_AndWritesTheTargetsNavigationPropertyBind_MatterToInvoice()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            targetEntity: "sprk_invoice", targetSet: "sprk_invoices", lookupsToSource: ["sprk_matter"],
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: AttorneyColumns(AttorneyId));
+
+        var response = await host.SendAsync(Authenticated(PushBody(targetEntity: "sprk_invoice")));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "the live Matter to Invoice (Attorney Matrix) push 500ed here");
+        host.SourceReads.Should().ContainSingle().Which.Should().Be(
+            ("sprk_matters", (string?)$"$select=_sprk_assignedattorney1_value,sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+             CallerSystemUserId),
+            "still read AS THE CALLER (field-level security), now with the lookup's Web API property");
+        host.MetadataQueries.Should().Contain(
+            ("EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships",
+             (string?)FieldMappingPushLookups.RelationshipMetadataQuery, CallerSystemUserId),
+            "the referenced table of the source lookup comes from its relationship metadata, read as the caller");
+        host.Writes.Should().HaveCount(2);
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(new Dictionary<string, object?>
+        {
+            ["sprk_AssignedToAttorney1@odata.bind"] = $"/contacts({AttorneyId:D})",
+            ["sprk_clientreference"] = "REF-166",
+        }, "a lookup binds through the target's navigation property; the text rule is unchanged"));
+    }
+
+    [Fact]
+    public async Task Push_AnEmptySourceLookup_IsSkipped_AndTheOtherRulesStillWrite()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: AttorneyColumns(null));
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Writes.Should().AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" }));
+    }
+
+    [Fact]
+    public async Task Push_ALookupThatCanReferenceSeveralTables_IsRefusedOnItsOwn_NeverA500()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            rules:
+            [
+                PushHost.Rule("sprk_client", 1, "sprk_assignedtoattorney1", 1),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ],
+            extraSourceColumns: new Dictionary<string, JsonElement>
+            {
+                ["_sprk_client_value"] = JsonSerializer.SerializeToElement(AttorneyId.ToString()),
+            });
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "one unresolvable lookup must not fail the whole push");
+        host.Writes.Should().HaveCount(2).And.AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" },
+            "without the record's own annotation, which table a Customer value is in cannot be known -- never guessed"));
+        var results = JsonNode.Parse(await response.Content.ReadAsStringAsync())!["fieldResults"]!.AsArray();
+        results.Where(r => r!["sourceField"]!.GetValue<string>() == "sprk_client")
+            .Should().NotBeEmpty().And.OnlyContain(r => r!["errorMessage"]!.GetValue<string>().Contains("more than one table"));
+    }
+
+    [Fact]
+    public async Task Push_ALookupCopiedIntoATextField_WritesTheDisplayName_NotTheId()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            rules: [PushHost.Rule("sprk_assignedattorney1", 1, "sprk_description", 0)],
+            extraSourceColumns: AttorneyColumns(AttorneyId, "Alex Attorney"));
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.Writes.Should().HaveCount(2).And.AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_description"] = "Alex Attorney" }));
+    }
+
+    [Fact]
+    public async Task Push_ARuleNamingAFieldTheSourceDoesNotHave_DoesNotPoisonTheRead()
+    {
+        await using var host = await PushHost.StartAsync();
+        host.Probe.Rights = AccessRights.Read;
+        host.ArrangeHappyPathData(
+            rules:
+            [
+                PushHost.Rule("sprk_assignedattorney1name", 0, "sprk_description", 0),
+                PushHost.Rule("sprk_typo", 0, "sprk_description", 0),
+                PushHost.Rule("sprk_clientreference", 0, "sprk_clientreference", 0),
+            ]);
+
+        var response = await host.SendAsync(Authenticated(PushBody()));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        host.SourceReads.Should().ContainSingle().Which.Query.Should().Be(
+            $"$select=sprk_clientreference,sprk_matterid&$filter=sprk_matterid eq {MatterId:D}&$top=1",
+            "an unknown field, or one that is not a Web API property, would 400 the whole read (FAILURE-MODES G-13)");
+        host.Writes.Should().HaveCount(2).And.AllSatisfy(w => w.Payload.Should().BeEquivalentTo(
+            new Dictionary<string, object?> { ["sprk_clientreference"] = "REF-166" }));
     }
 
     // =========================================================================================
@@ -404,7 +586,9 @@ public class FieldMappingPushAuthorizationContractTests
             string targetSet = "sprk_events",
             string[]? lookupsToSource = null,
             string? sourceValue = "REF-166",
-            bool sourceRowVisible = true)
+            bool sourceRowVisible = true,
+            FieldMappingRuleEntity[]? rules = null,
+            Dictionary<string, JsonElement>? extraSourceColumns = null)
         {
             FieldMappings
                 .Setup(f => f.GetFieldMappingProfileWithRulesAsync("sprk_matter", targetEntity, true, It.IsAny<CancellationToken>()))
@@ -415,17 +599,17 @@ public class FieldMappingPushAuthorizationContractTests
                     SourceEntity = "sprk_matter",
                     TargetEntity = targetEntity,
                     IsActive = true,
-                    Rules =
-                    [
-                        new FieldMappingRuleEntity
-                        {
-                            Id = Guid.NewGuid(), Name = "copy-ref", SourceField = "sprk_clientreference", SourceFieldType = 0,
-                            TargetField = "sprk_clientreference", TargetFieldType = 0, MappingType = 0, ExecutionOrder = 1, IsActive = true,
-                        },
-                    ],
+                    Rules = rules is null ? [Rule("sprk_clientreference", 0, "sprk_clientreference", 0)] : [.. rules],
                 });
             Entities.Setup(e => e.GetEntitySetNameAsync(targetEntity, It.IsAny<CancellationToken>())).ReturnsAsync(targetSet);
             Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+            Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+            FieldMappings
+                .Setup(f => f.UpdateRecordFieldsAsync(
+                    It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>(), It.IsAny<Guid?>()))
+                .Callback((string _, Guid id, Dictionary<string, object?> payload, CancellationToken _, Guid? _) =>
+                    Writes.Add((id, new Dictionary<string, object?>(payload))))
+                .Returns(Task.CompletedTask);
 
             // The SOURCE row, as the caller reads it (task 166 r2): a field-secured column the caller cannot read comes
             // back null; a source the caller cannot read comes back as no row.
@@ -434,16 +618,22 @@ public class FieldMappingPushAuthorizationContractTests
                 .ReturnsAsync((string set, string? query, Guid caller, CancellationToken _) =>
                 {
                     SourceReads.Add((set, query, caller));
-                    return sourceRowVisible
-                        ? new List<Dictionary<string, JsonElement>>
-                        {
-                            new()
-                            {
-                                ["sprk_matterid"] = JsonSerializer.SerializeToElement(MatterId.ToString()),
-                                ["sprk_clientreference"] = JsonSerializer.SerializeToElement(sourceValue),
-                            },
-                        }
-                        : new List<Dictionary<string, JsonElement>>();
+                    if (!sourceRowVisible)
+                    {
+                        return new List<Dictionary<string, JsonElement>>();
+                    }
+
+                    var row = new Dictionary<string, JsonElement>
+                    {
+                        ["sprk_matterid"] = JsonSerializer.SerializeToElement(MatterId.ToString()),
+                        ["sprk_clientreference"] = JsonSerializer.SerializeToElement(sourceValue),
+                    };
+                    foreach (var (column, value) in extraSourceColumns ?? new Dictionary<string, JsonElement>())
+                    {
+                        row[column] = value;
+                    }
+
+                    return new List<Dictionary<string, JsonElement>> { row };
                 });
 
             var children = visibleChildren ?? new[] { ChildA, ChildB };
@@ -459,11 +649,32 @@ public class FieldMappingPushAuthorizationContractTests
                         .ToList();
                 });
 
-            // Relationship metadata: the target's lookups to sprk_matter, plus an unrelated lookup that must be ignored.
-            var relationships = (lookupsToSource ?? ["sprk_regardingmatter"])
+            // Relationship metadata: the target's lookups to sprk_matter, plus unrelated lookups that the parent-lookup
+            // match must ignore — one of which a lookup rule binds through (its navigation property is schema-cased).
+            var targetRelationships = (lookupsToSource ?? ["sprk_regardingmatter"])
                 .Select(attribute => Relationship(attribute, "sprk_matter"))
                 .Append(Relationship("sprk_assignedto", "contact"))
+                .Append(Relationship("sprk_assignedtoattorney1", "contact", "sprk_AssignedToAttorney1"))
                 .ToList();
+
+            // The SOURCE's relationships: a single-table lookup to contact, and a Customer lookup (account OR contact).
+            var sourceRelationships = new List<Dictionary<string, JsonElement>>
+            {
+                Relationship("sprk_assignedattorney1", "contact"),
+                Relationship("sprk_client", "account"),
+                Relationship("sprk_client", "contact"),
+            };
+
+            // The SOURCE's attribute catalog (live shape, 2026-10-06): a lookup's `...name` shadow is not a Web API property.
+            var sourceAttributes = new List<Dictionary<string, JsonElement>>
+            {
+                Attribute("sprk_matterid", "Uniqueidentifier"),
+                Attribute("sprk_clientreference", "String"),
+                Attribute("sprk_assignedattorney1", "Lookup"),
+                Attribute("sprk_assignedattorney1name", "String", validOData: false),
+                Attribute("sprk_client", "Customer"),
+            };
+
             Impersonated
                 .Setup(q => q.QueryAsync(
                     It.Is<string>(set => set.StartsWith("EntityDefinitions", StringComparison.Ordinal)),
@@ -471,14 +682,37 @@ public class FieldMappingPushAuthorizationContractTests
                 .ReturnsAsync((string path, string? query, Guid caller, CancellationToken _) =>
                 {
                     MetadataQueries.Add((path, query, caller));
-                    return relationships;
+                    return path switch
+                    {
+                        "EntityDefinitions(LogicalName='sprk_matter')/Attributes" => sourceAttributes,
+                        "EntityDefinitions(LogicalName='sprk_matter')/ManyToOneRelationships" => sourceRelationships,
+                        _ => targetRelationships,
+                    };
                 });
         }
 
-        private static Dictionary<string, JsonElement> Relationship(string referencingAttribute, string referencedEntity) => new()
+        /// <summary>Every child PATCH, with a copy of its payload.</summary>
+        public List<(Guid Id, Dictionary<string, object?> Payload)> Writes { get; } = new();
+
+        internal static FieldMappingRuleEntity Rule(string sourceField, int sourceType, string targetField, int targetType) => new()
+        {
+            Id = Guid.NewGuid(), Name = $"{sourceField}->{targetField}", SourceField = sourceField, SourceFieldType = sourceType,
+            TargetField = targetField, TargetFieldType = targetType, MappingType = 0, ExecutionOrder = 1, IsActive = true,
+        };
+
+        private static Dictionary<string, JsonElement> Relationship(
+            string referencingAttribute, string referencedEntity, string? navigationProperty = null) => new()
         {
             ["ReferencingAttribute"] = JsonSerializer.SerializeToElement(referencingAttribute),
             ["ReferencedEntity"] = JsonSerializer.SerializeToElement(referencedEntity),
+            ["ReferencingEntityNavigationPropertyName"] = JsonSerializer.SerializeToElement(navigationProperty ?? referencingAttribute),
+        };
+
+        private static Dictionary<string, JsonElement> Attribute(string logicalName, string type, bool validOData = true) => new()
+        {
+            ["LogicalName"] = JsonSerializer.SerializeToElement(logicalName),
+            ["AttributeType"] = JsonSerializer.SerializeToElement(type),
+            ["IsValidODataAttribute"] = JsonSerializer.SerializeToElement(validOData),
         };
 
         public void VerifyNothingReadOrWritten()

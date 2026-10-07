@@ -7,10 +7,9 @@
 
 ## Project Status
 
-- **Phase**: Phase 0 complete; Phases 1–3 under way. **28 of 47 tasks ✅ as of 2026-09-15** (per `tasks/TASK-INDEX.md`); 026 (related-record card) and 046(a) are merged and awaiting their gate run. Open owner discussion: how Word documents are matched to avoid duplicates (decides 014 and 025). Live state: `current-task.md`
-- **Last Updated**: 2026-09-15
-- **Current Task**: see [`current-task.md`](current-task.md) — the authoritative live state; this block is a summary only
-- **Next Action**: see `current-task.md` Quick Recovery
+- **Phase**: Phase 6 — owner UAT rounds (042). **103 of 105 tasks ✅** (per `tasks/TASK-INDEX.md`, 2026-10-06); open: 042 (UAT, ongoing) and 090 (wrap-up with `/test-diet`).
+- **Last Updated**: 2026-10-06
+- **Live state**: [`current-task.md`](current-task.md) — the authoritative current state; this block is a summary only
 
 ---
 
@@ -110,12 +109,12 @@ For tasks modifying 4+ files: group by module, parallelize where files are indep
 
 ### Gotchas verified during discovery
 
-- **There is no `build:prod` script** in `src/client/office-addins` — `npm run build` *is* the production build. `src/client/office-addins/CLAUDE.md:39` names a script that does not exist.
+- **There is no `build:prod` script** in `src/client/office-addins` — `npm run build` *is* the production build (the module `CLAUDE.md` says so too; corrected 2026-10-06).
 - **There is no concise `ADR-038`** in `.claude/adr/` — point at [`docs/adr/ADR-038-testing-strategy.md`](../../docs/adr/ADR-038-testing-strategy.md).
 - **`ADR-049`** (Compose Shadow Document) governs the other `.docx` write path and was missing from the spec's ADR table. Read it before touching any `.docx` save path.
-- **`deploy-office-addins.yml` does not trigger on this branch** (only `master` and `work/SDAP-outlook-office-add-in`) — use `workflow_dispatch` or add the trigger.
+- **`deploy-office-addins.yml` runs on every push to `master`** (and on `workflow_dispatch`); a branch build needs `workflow_dispatch` (corrected 2026-10-06).
 - **`npm install` needs `--legacy-peer-deps --no-audit --no-fund`** — a bare install fails with ERESOLVE (`@testing-library/react@14` peer-requires React 18; the project is on React 19).
-- **Deploy is CI-only** — never run the workflow as an agent. Push, then `gh run list --workflow=deploy-office-addins.yml`.
+- **The add-in site deploys from CI on every master merge** — confirm with `gh run list --workflow=deploy-office-addins.yml`. An agent-triggered `workflow_dispatch` only with the owner's go (corrected 2026-10-06; the old "never run it as an agent" line predated the owner authorizing it case by case).
 
 ---
 
@@ -189,7 +188,7 @@ The Office save path writes **only the direct family**, so a card reading only `
 | 2026-10-04 | **ADR-012 Path A narrowed for ONE surface: the Word Email tab mounts the shared `EmailComposer` engine** through a new thin wrapper `SendEmailPane` (`@spaarke/ui-components`, ADR-045 one-engine/thin-wrappers), resolved by an EXACT alias to the wrapper's source (never the library barrel) and typed by a local `.d.ts`. Everything else in the pane still recreates layouts (Path A stands) | Owner, round 4: *"for the email form we should use our shared UI components so it looks consistent"*. The wrapper's 22-file import chain has no Xrm dependency and runs on the add-in's React 19 / Fluent 9; the 2026-09-04 reason (React-version + Xrm-bound components) does not apply to it. Task 096, `notes/096-email-tab.md` |
 | 2026-10-04 | **`/api/communications/send` authorization belongs to UAC-r2 task 161, not this project; the Word Email tab (096) is held OFF until 161 is on master and deployed** (build setting `ADDIN_EMAIL_TAB_ENABLED`, default off; flip it on, no code change). Task 097 is re-scoped to the outbound-archive id fix (after UAC-r2 task 146, same lines) and the live checks | Owner, 2026-10-04, choosing option 1: *"yes we can follow your recommendation - ensure we have this fully documented"*. The route attached any document and linked any record without checking the caller (found by 096's review); 161 already implements the per-item checks on the same files, so a second implementation here would duplicate security code and conflict at merge (CLAUDE.md §11). `notes/097-communications-send-authorization.md` §6 |
 | 2026-10-05 | **ADR-012: reuse the shared library by default.** The spec's ADR-012 exception is narrowed to the library **barrel** only; the add-in consumes shared components by exact-path alias (the task 096 mechanism), and a shared component that needs `Xrm` is made host-agnostic rather than copied. ADR-044's local `cleanGuid` goes back to the shared one (task 099) | Owner: *"we should use shared library wherever possible (if technically possible)"*. The "React 19" reason had expired; only the barrel's `Xrm`-bound re-exports still fail in an Office webview. `spec.md` ADR Tensions rows ADR-012 + ADR-044 amended |
-| 2026-10-05 | **Document links in email go to the Spaarke record, never a file sharing link.** `POST /api/documents/{id}/share-link` refuses SPE files with a typed code instead of relaying Graph's error; the shared composer's **Link** option inserts the Spaarke record link. External recipients open the file through the external access platform, like an internal user opening it from Spaarke (task 098) | Owner, 2026-10-05: *"the link should just be to open Spaarke record; for external, they can open the file from their external access platform (same as internal user opening from Spaarke)"*. Graph refuses item sharing links on SPE containers (round 4 note §3) |
+| 2026-10-05 | **Document links in email go to the Spaarke record, never a file sharing link.** the shared composer's **Link** option inserts the Spaarke record link (task 098). The planned typed refusal on `POST /api/documents/{id}/share-link` was REVERTED (it failed UAC-r2's share-link tests); the route has no caller left and its retirement is handed to UAC-r2 (`notes/098-share-link-route-refusal.patch`). External recipients open the file through the external access platform, like an internal user opening it from Spaarke (task 098) | Owner, 2026-10-05: *"the link should just be to open Spaarke record; for external, they can open the file from their external access platform (same as internal user opening from Spaarke)"*. Graph refuses item sharing links on SPE containers (round 4 note §3) |
 | 2026-10-05 | **UAT round 5 decisions**: (A) after a save the pane shows no Save button until the document is edited (task 094's change detection), then Save = new version; Cancel and Open Document leave the post-save view. (B) the create forms prefill Assigned To with the signed-in user's contact, **not required**; Practice Area is required for a Matter, like Matter Type. (C) the add-in's create form is built from shared field components (`LookupField` + dropdowns) and creates through the BFF (`/api/office/quick-create`, the WP-3 write path); the shared Create*Wizard steps (direct Dataverse writes, `Xrm`) are not reused | Owner 2026-10-05: "A. yes follow recommendation; B. yes … Assigned To not required; practice area same as matter type; C. yes". `notes/042-uat-round5-2026-10-05.md` §3 |
 | 2026-10-06 | **Word Email tab switched on** (`ADDIN_EMAIL_TAB_ENABLED: "true"` in the deploy workflow; code default stays off) — UAC-r2 task 161 is on master (#1312) and live on dev | Owner 2026-10-06: *"uac-r2 task 161 is working so you can proceed"*; UAC-r2 confirmed live since ~04:47 UTC. PR #1316 |
 | 2026-10-06 | **Outbound archive = option A, as protected as the source.** With `archiveToSpe`, each sent attachment is saved to SPE as its OWN new file with a normal `sprk_document` pointing at it, linked to the communication (reusing inbound archiving's building blocks); never two rows on one file. A **secure** source's copy goes to the source's secure container (owner via task 146's resolver); security unknown → that attachment is not archived (never the shared container). Cross-secure case (source secure in X, communication secure in Y) keeps its `sprk_relatedcommunication` link — readable today; must be settled before UAC-r2's `DocumentPointer__StrictDerivedContainer` is switched on (tracked) | Owner 2026-10-06: *"yes option A"*; *"yes follow recommendation"* (keep the copy as protected as the original). Notes `097-…md` §9-§11 |
@@ -251,6 +250,116 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - Office Add-ins unified manifest (`outlook/manifest.json` is the in-repo precedent)
 - Office Dialog API — Spike-2 subject
 - Microsoft Graph `/shares/u!{base64url}/driveItem` — FR-01 identity path
+
+## Standing directives & gotchas
+
+> **Why this section exists (repo procedure change, 2026-10-06).**
+> - **What changed:** `current-task.md` now holds CURRENT state only and is rewritten at each checkpoint (`.claude/skills/context-handoff/SKILL.md` "State, not history").
+> - **Why:** here it had grown to 150 KB, because every checkpoint stacked a new block over the old ones, and task-execute reads it at Step 0 + Step 2 of every task.
+> - **What this section is:** the items below were stated in that file as standing or binding and are still in force. They moved here so they survive the rewrite and are read on every recovery.
+> - **Where the rest went:** the old file is archived verbatim at `notes/handoff-history/current-task-archive-2026-10-06.md`. Items the conversion could not classify, plus stale lines it noticed in THIS file, are in `notes/handoff-history/2026-10-06-conversion-review.md`; resolve them when convenient.
+> - **Going forward:** add a new standing directive or gotcha HERE (one dated bullet), not in `current-task.md`.
+>
+> **Also new, repo-wide:** task-execute Step 9.5 "Finding triage and round limits".
+> - F1–F4 fix-now / K1–K4 known-limit.
+> - At most 2 fix rounds, each re-verifying the fix diff only.
+> - 1 verifier pass per task (2 for auth/security/tenant-isolation).
+> - Escalate any F1 still open instead of starting round 3.
+>
+> The skill files reach this worktree on the next master merge (`work/procedure-throughput-fixes-r1`); the rules apply now.
+>
+> Owner decisions with rationale stay in "Decisions Made" above.
+
+### Owner directives
+- **Fix findings here, don't defer them** (2026-09-19 / 2026-09-21): divergence and review findings are addressed in this project. Defer only with a good technical reason OR an ACTIVE hand-off note the other project is told to read — a GitHub issue alone is not a hand-off (2026-09-09).
+- **Live-environment changes need the owner's go** (2026-10-01): Dataverse role/privilege config and data changes. A dry run comes first; owner-run scripts (e.g. backfill `-Apply`) stay the owner's.
+- **Platform rules** (owner, standing): no Dataverse plugins and no form-event `.js` (ADR-002); records are always **team-owned**; `TargetEntity` is never required; access is **BU-assigned, never org-wide**.
+- **Approvals** (owner, standing): every spec amendment needs the owner's sign-off; a dev BFF deploy needs the owner's go (given per deploy); no Dataverse role/security configuration change without the owner's go. The owner prefers the best long-term solution and often delegates the pick — recommend it, then execute it.
+- **CI ownership** (2026-09-09): ci-cd-unit-test-remediation-r1 is CLOSED, so this project owns its own CI changes. React 19 stays; React Testing Library aligns to it.
+- **Business-unit layout** (owner, 2026-10-06): each customer has ONE primary business unit; the secure-record business unit is a SIBLING of the primary one (not a child). Unified-access-control-r2 owns this design — ask them for detail.
+- **Dev data is not indicative** (2026-09-10 / 2026-09-25): legacy/existing documents don't matter. Root-BU users and records are a setup artifact. Verify ownership/BU behaviour as **Test User 1** (`testuser1@spaarke.com`, BU `cb15f587…`), the only child-BU account.
+
+### Git, PRs, CI
+- **Merge with `gh pr merge N --merge`** (a merge commit, not squash); **never `--delete-branch`** — the branch continues (2026-09-30).
+- **Only `Router` is a required check** (2026-09-21 / 2026-09-30). `Tier 2 (Advisory) / Full Unit Tests` cancelled at its 30-min cap is not a failure; do not make it blocking. Read `gh pr checks N` and require pending == 0 before trusting a verdict.
+- **One build-heavy agent per worktree** (2026-09-21): concurrent agents' commits swallowed each other through the shared `.git/index`. Verify a commit with `git diff <base> HEAD -- <paths>`, never `git show --stat` or a derived count.
+- **Agent dispatch** (2026-09-17):
+  - `Set-Location` to this worktree and confirm "is a git worktree" first; create one worktree per turn.
+  - Every brief: rebase onto the LOCAL branch; never `git stash`; long jobs in the foreground; new tests in NEW files; POML line numbers are stale, so re-locate symbols by name.
+  - Agents never edit `TASK-INDEX.md`, `current-task.md`, this file or `ci-gated-suites.txt`.
+- **lint-staged reformats on commit** (`prettier --write`, `dotnet format`) (2026-09-19): the committed bytes are not the tested bytes, so re-run gates on the committed tree.
+- **Handoffs never pin the HEAD SHA** (2026-09-19): it self-invalidates on the commit that writes it. Use `git log -1`; cite only landmark/merge commits.
+- **Never touch other sessions' measurement worktrees**: `C:/tmp/bffsize/{m,b}`, `C:\wt097`, `C:\wt097r` (2026-10-04 / 2026-10-06). Our own short-path worktrees are `C:\code_files\wtNNNx`, removed after use.
+- **Before a commit, check untracked files** — no blind `git add -A` (2026-09-21).
+- **Overlap with another branch: compare by function, not by line numbers** (2026-10-04).
+- **`jq` is not installed** — use `gh … --jq`; `gh --jq` accepts no `--arg` (2026-10-06). In PowerShell, `R` is the `Invoke-History` alias — never name a helper function `R`.
+- **Shell traps** (2026-09-19):
+  - `grep -c … || echo 0` yields `0\n0`.
+  - A pipeline's exit code is the last command's — use `${PIPESTATUS[0]}`.
+  - Verify pushes by SHA (LOCAL == REMOTE).
+  - grep matches prose and comments.
+
+### Build / test
+- **Before any .NET build** (2026-09-18):
+  - Check `Get-Process testhost` and its command line before killing — it may belong to another worktree.
+  - Check the build's exit code and confirm your test appears **by name**.
+  - `--no-incremental` in a per-project loop breaks the next project's `obj/ref` (CS0006).
+  - `dotnet clean` / `Remove-Item` near build paths is rejected by the permission layer and runs nothing.
+- **Known pre-existing flakes** (2026-09-30 / 2026-10-03): `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` (`Task.Delay`) and PinnedMemory (passes alone).
+- **Office test hosts** (2026-09-30): the oid is `"test-user-oid"` (not a GUID); the factories register `RecordOwnershipResolverDouble` (`factory.Ownership`).
+- **CI pins Node 20**; this desktop runs Node 22 (2026-09-21) — local office-addins gate runs are advisory.
+- **Local add-in build needs the CI env values** from `.github/workflows/deploy-office-addins.yml` (2026-10-05): ADDIN_CLIENT_ID, TENANT_ID, BFF_API_CLIENT_ID, BFF_API_BASE_URL, ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL.
+- **`ADDIN_EMAIL_TAB_ENABLED`** (2026-10-06): the code default is OFF (`webpack.config.js`, only the exact string `"true"` turns it on). The deploy workflow sets it ON; set it back to `"false"` to hide the tab, no code change.
+- **`scripts/check-task-status-drift.ps1` and this TASK-INDEX** (2026-09-30 / 2026-10-06): status sits in cell 3. Fix `233ff9341` (customer-provisioning) is on master and the script now parses all 105 rows here with no drift (verified 2026-10-06) — trust it.
+
+### Deploy
+- **The add-in site follows master** (2026-10-05/06): every PR merge runs `deploy-office-addins.yml` on master. A branch build still needs `workflow_dispatch`.
+- **BFF deploys only from master, from a fresh `origin/master` worktree** (2026-09-30 / 2026-10-02): `spaarke-bff-dev` is shared and other projects' branch deploys overwrite it.
+- **`deploy-bff-api.yml` has failed every run since 2026-06-05** (re-verified 2026-10-06): BFF deploys are manual via `/bff-deploy`.
+- **`Deploy-BffApi.ps1` checks** (2026-09-18 / 2026-09-21):
+  - Run it under `pwsh`, not `powershell` — 5.x lacks `Get-FileHash`, which silently disables the hash check.
+  - The Kudu SHA-256 file check is the only proof: `az webapp deploy` can return 200 with Kudu `status=4`. SCM basic auth is disabled, so Kudu needs an AAD token.
+  - Package under 30 MB = incomplete zip. Since 2026-10-06 master publishes at about 36 MB (was about 45 MB) — expected, not a defect.
+  - Linux cold start is 90–120 s — a `/healthz` timeout after a passing hash check is not a reason to redeploy.
+  - Probe an authed route → 401 (404 = incomplete package).
+- **A failed Kudu upload can leave the app STOPPED** after the script's recovery (2026-09-19): check state after every deploy and start it if not `Running`.
+- **M365 Admin Center refuses a non-greater manifest/package version** ("Please update the version number") (2026-09-19): bump before any re-upload; never ask for a same-version re-upload.
+
+### Dataverse / platform facts (measured — do not re-derive)
+- **Default owner team** (2026-09-25): `team` WHERE `businessunitid` = BU AND `isdefault = true` AND `teamtype = 0`. Both predicates are required — dev has non-default Owner teams and Access teams.
+- **Containers are BU-scoped, not per-record** (2026-09-18): only `sprk_issecure` records get their own. Filename collisions are BU-wide (`Untitled Document.docx`), so diagnostics query BU-wide, never by record.
+- **Missing owner privilege** (2026-09-30): the error reads *"Read Privilege Check For Owner failed … Principal team … is missing prvRead<Table>"*. The caller's privileges are irrelevant. After a role edit the privilege cache lags about one poll — re-probe for 3 polls.
+- **`config/secure-record-owner-role.json` is THE one Secure Record Owner list** (2026-09-30): UAC-r2's 145/146 read and extend it. Apply and verify with `scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -Verify`.
+- **Dataverse error codes** (2026-09-18): `0x80060891` = alternate-key miss; `0x80040217` = by-id miss; `0x80060892` = duplicate / not-Active key, which must stay 503. Match codes exactly, never by range. Do not apply the alt-key rule to `RecordContainerResolver.IsRecordNotFound` (a security decision).
+- **Autonumber** (2026-10-03):
+  - `GetNextAutoNumberValue` / `GetAutoNumberSeed` are POST actions.
+  - GetNext returns the RAW number and reads ONE HIGH until the first number after a seed is issued.
+  - `SetAutoNumberSeed(X)` → the next create gets X; right after the format is set it can refuse `0x80060884`.
+  - A supplied value is kept; an omitted/empty one is generated.
+- **The Office save accepts only friendly types** (`matter`, `project`…) (2026-09-30): anything keyed on logical names maps through `DocumentAssociationMap.ToLogicalName`.
+- **`sprk_todo` is not in `RegardingNameFields.EntitySetName`** (2026-10-06): an Email-tab send associated to a To Do would be refused 403 `sdap.access.deny.communication.send`.
+- **App Insights** (`spe-insights-dev-67e2xz`) (2026-10-01):
+  - Get the appId with `az monitor app-insights component show … --query appId`.
+  - Query via REST `POST https://api.applicationinsights.io/v1/apps/{appId}/query` — not `az monitor app-insights query` (Windows mangles KQL).
+  - `first` / `last` / `kind` are KQL reserved words.
+  - Retention in that component is about 2 h.
+- **UAC-r2's live NFR-05 census** (2026-09-30) needs `SPAARKE_NFR05_DATAVERSE_URL=https://spaarkedev1.crm.dynamics.com SPAARKE_NFR05_REQUIRED=true AZURE_TOKEN_CREDENTIALS=AzureCliCredential`.
+- **SPE link tests only work through the BFF** (2026-09-10): only the owning or a registered app reads SPE files, so `az` / Graph Explorer 403 regardless. Word's `document.url` returns raw spaces — send it exactly as returned.
+- **Verify docs and agent reports against code/live before relaying** (2026-09-10): they have repeatedly been wrong in this area. The access model is ENFORCED in code (D-032-1 withdrawn, final).
+
+### Coordination — `unified-access-control-r2` and others
+- **Shared files: whoever lands second rebases** (2026-10-01): `OfficeService.cs`, `CallerRecordAccessProbe.cs`, `RouteAuthorizationGuardTests.cs`, `OfficeEndpointsContractTests.cs`.
+- **UAC-r2 routes through our `RecordOwnershipResolver`** (130, 146) and will not fork it (2026-10-01): message them before any resolver behaviour change (e.g. a new refusal code).
+- **UAC-r2 guard rules** (2026-09-30):
+  - An Office-route filter whose name lacks "Authorization" must be added to `ExplicitlyCreditedFilterTypeNames`.
+  - In `CommunicationsEndpoints.cs`, no code line may contain `entityService` / `IGenericEntityService`.
+- **Attaching a filter: verify both dimensions** (2026-09-30): (1) it resolves the request type — `ExtractTargetEntity` returning null makes `EntityAccessFilter` pass through; (2) some end-user role actually holds the right it enforces.
+- **No-record saves: authorize the destination container through UAC-r2's #1025** (2026-09-30), not a parallel mechanism.
+- **`sprk_communication` create** (`EmailUploadCaptureService.BuildCommunicationEntity`) belongs to the Communication project (2026-09-30): coordinate or hand off, never edit their create path.
+- **Do not edit UAC-r2's tests** (standing): `tests/integration/auth/UnifiedAccessControl/*` and `SecureBuRoleDepthAssertion*`. If our change fails one, revert or report it to UAC-r2 (task 098 precedent, 2026-10-05).
+- **Caller-identity primitives** (UAC-r2 task 082): 080 uses `ICallerSystemUserResolver`; coordinate so it does not become a fifth primitive.
+- **NFR-05 dev finding is UAC-r2's** (2026-09-30): the hotmail `#EXT#` guest in the root BU holds Spaarke Basic User Read at a depth reaching the Secure BU; UAC-r2 owns the owner decision.
+- **#1011 is unrepaired but its GitHub issue is CLOSED** (corrected 2026-10-06): it was auto-closed 2026-09-30 when #960 merged — commit `34beafe78`'s "do not close #1011" was read as a closing keyword. UAC-r2 043 routed around the defect; `MembershipFieldDiscoveryService` still binds `systemuser` first, so do not assume it is safe for other Owner-column uses. **Reopened 2026-10-06** (owner go) with an explanatory comment; owned by UAC-r2, who were sent a hand-off message via the owner.
 
 ---
 

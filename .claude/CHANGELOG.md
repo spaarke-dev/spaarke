@@ -7,6 +7,36 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Correction (owner): round limits cap review ceremony, never fixing; every found defect is fixed or surfaced
+
+The throughput entry below capped Step 9.5 at "2 fix rounds … never start round 3". In practice that left a confirmed F1 (task 171 in `unified-access-control-r2`) waiting on a round count. The owner corrected the intent the same day: the limits exist to stop unnecessary checks and pseudo-fixes, not to leave known-broken code unfixed.
+
+- `task-execute` Step 9.5:
+  - The section is renamed "Finding triage and review scope".
+  - There is no longer a round cap on fixing. The scope limits stay: re-checks cover the fix diff only, with one full verifier pass (two for auth/security).
+  - New binding rule: **every defect found is fixed in scope, or filed and reported to the operator.** That holds whether the current work caused it directly or indirectly, or only uncovered it.
+  - A K class may not hold a confirmed real-path defect.
+  - Escalation is triggered by non-convergence, not by a count.
+- Root `CLAUDE.md` §8.5 "Coverage-first review" bullet updated to match.
+- `code-review`: also report defects in code the change did not write, marked "found in passing".
+
+###### 2026-10-06 — Throughput fixes: `current-task.md` is state, not history; finding triage + round limits; seeding-proof and task-size scope (procedure-throughput-fixes-r1)
+
+Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4/day found three procedure causes. Build and test cost is real, but secondary.
+
+- **`current-task.md` accumulated history.** `context-handoff` said "don't overwrite history" and its template ended in `[... rest of current-task.md content ...]`. The file therefore grew 5 KB → 483 KB in `unified-access-control-r2`, and was read at Step 0 and Step 2 of every task.
+  - `context-handoff` gains "State, not history (BINDING)": rewrite at each checkpoint, ≤10 KB target / 20 KB trigger, and a destination table for durable items (project `CLAUDE.md` "Standing directives & gotchas", notes, commit messages, `notes/handoff-history/`).
+  - `task-execute` Step 0 gains a size guard. Steps 8.5 and 11 now rewrite instead of accumulating.
+  - `current-task.template.md` updated.
+- **Review/verify loops had no stopping rule.** `code-review` hands filtering to task-execute Step 9.5, but Step 9.5 only said "fix → re-run".
+  - Step 9.5 gains "Finding triage and round limits": classes F1–F4 fix-now and K1–K4 known-limit; 2 fix rounds re-verifying the fix diff plus its direct callers and callees (affected suites re-run); 1 adversarial-verifier pass (2 for auth/security/tenant-isolation); escalate any F1 still open.
+  - This generalizes the owner's own `unified-access-control-r2` rule (rounds 56/59).
+  - `code-review` suggests a class per finding and scopes re-reviews to the fix diff plus its direct callers and callees.
+  - Root `CLAUDE.md` §8.5 "Coverage-first review" bullet extended by one sentence so it binds session-written workflow scripts too.
+- **`task-create`:** seeding proofs only for security, isolation, fail-open and data-loss guards and pure regression guards (one per guard). Task size target ≤15 KB; fix-round history goes in notes, not the POML.
+
+Unchanged by decision: BFF publish-size per-task measurement (§10.4) stays per-task. Moving it to CI would let growth accumulate unseen before it reached CI.
+
 ###### 2026-10-06 — ci-cd skill lists the blocking Tier 1 Xrm Capability Guard (ontology task 081 round 7, PR #1309)
 
 `.claude/skills/ci-cd/SKILL.md`: the Tier 1 row adds `Xrm Capability Guard (getXrm AST scan)`, a BLOCKING job in

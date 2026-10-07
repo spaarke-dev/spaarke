@@ -13,6 +13,7 @@ import {
   Button,
   Tooltip,
   Badge,
+  Spinner,
 } from '@fluentui/react-components';
 import {
   MoreVerticalRegular,
@@ -24,6 +25,7 @@ import {
   ColorRegular,
   ArrowMaximizeRegular,
   ArrowMinimizeRegular,
+  MailRegular,
 } from '@fluentui/react-icons';
 import { getAvailableTabs, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
@@ -35,7 +37,10 @@ import { useAnnounce } from '../hooks/useAnnounce';
  *
  * Consolidates what used to be two stacked rows (logo/actions header + tab row) into
  * ONE toolbar (email-communication-intelligence-r2 UI feedback, owner 2026-09-02):
- *   [ Save ] [ To Do ] [ Find ] [ Email (Word, task 096) ] ……… [ ⋮  → Theme · Settings · Account ]
+ *   [ Save ] [ To Do ] [ Find ] [ Send ] ……… [ ⋮  → Theme · Settings · Account ]
+ *
+ * "Send" is Word's Email TAB (task 096) or, in Outlook, the Send Email ACTION button (task 106, owner UAT
+ * round 8: "should be in the tool bar next to Find") — it opens Outlook's native compose, so it is not a tab.
  *
  * Tabs are left-aligned; the per-user tools (theme/settings/account) collapse into a
  * three-dots overflow on the right. Fluent UI v9 only (ADR-021).
@@ -60,6 +65,10 @@ const useStyles = makeStyles({
   tabs: {
     flexGrow: 1,
     minWidth: 0,
+    // Task 106: the Send action sits directly after the last tab, not pushed to the right.
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalM,
   },
   // Task 091 (UAT-4): visible spacing between Save / To Do / Find — the owner's round-3 UAT found them
   // crowded together. `TabList` is itself a flex row (confirmed by `TaskPaneNavigation.tsx`'s own
@@ -101,6 +110,13 @@ export interface TaskPaneToolbarProps {
   isExpanded?: boolean;
   /** True while an expand request is stepping down; the button is disabled so presses do not stack. */
   isResizing?: boolean;
+  /**
+   * Task 106: Outlook's Send Email action (opens native compose). Supplied only when there is something to
+   * link (task 036 gating) - when absent, no button is rendered (never rendered-and-disabled).
+   */
+  onSendEmail?: () => void;
+  /** True while Send Email is opening the compose window; the button shows a spinner and is disabled. */
+  isSendingEmail?: boolean;
 }
 
 function getThemeIcon(preference: ThemePreference): React.ReactElement {
@@ -138,6 +154,8 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   onToggleExpand,
   isExpanded = false,
   isResizing = false,
+  onSendEmail,
+  isSendingEmail = false,
 }) => {
   const styles = useStyles();
   const tabs = getAvailableTabs(hostType, capabilities);
@@ -169,6 +187,19 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
               </Tab>
             ))}
           </TabList>
+          {onSendEmail && (
+            <Tooltip content="Email the document and record links" relationship="description">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={isSendingEmail ? <Spinner size="tiny" /> : <MailRegular />}
+                disabled={isSendingEmail}
+                onClick={onSendEmail}
+              >
+                Send
+              </Button>
+            </Tooltip>
+          )}
         </div>
       )}
 

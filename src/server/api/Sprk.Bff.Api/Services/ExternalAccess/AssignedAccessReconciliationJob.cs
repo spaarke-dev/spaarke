@@ -39,6 +39,20 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// the next tick picks up whatever this one could not). No chunk claims or markers: every write is decided from a fresh
 /// read of the root, its ledger and its grants/shares, and a second run repeats it as a no-op.</para>
 ///
+/// <para><b>Rows whose record was deleted</b> (owner round 71, 2026-10-06). Deleting a matter or work assignment empties the
+/// root lookup of its ledger rows (RemoveLink — a table may have only one cascade-delete parent, and the project holds it),
+/// so the rows stay live with no root: the candidate scan cannot name a root for them, the materializer never visits them,
+/// and they count toward that scan's bound forever. Each run therefore also reads the live Assigned-To rows with every root
+/// lookup empty (<see cref="AssignedAccessStore.ScanRootlessLedgerRowsAsync"/>), reads the record the row's KEY names
+/// (<see cref="AssignedAccessStore.RootFromLedgerKey"/> — the root id kept as text), and only when that read answers "no such
+/// record" marks the row <see cref="AssignedAccessState.Revoked"/> with <see cref="AssignedAccessReason.RootDeleted"/> —
+/// the state an ended assignment takes (rows are never deleted or deactivated by the BFF), written conditionally on the
+/// version read (<see cref="AssignedAccessStore.UpdateLedgerIfUnchangedAsync"/>). It changes no access — the grant such a row
+/// names is ended by <see cref="ExternalAccessReconciliationJob"/>'s rule R4 — so it is not behind the revoke switch. A read
+/// that FAILS changes nothing (the run is reported partial and the next tick retries); a record that still exists, or a key
+/// that names none, leaves the row as it is and is counted. At most <see cref="MaxRootsPerRun"/> records are read per run;
+/// the rest wait for the next tick (reported).</para>
+///
 /// <para><b>Placement</b> (ADR-052; CLAUDE.md §10): the BFF's in-process <c>Spaarke.Scheduling</c> host, registered with
 /// <c>AddScheduledJob</c> in <c>ExternalAccessModule</c> beside the No Access job — BFF domain code (the materializer,
 /// the grant core, the share seam), BFF-owned tables, BFF identity, low volume (B2/B3). Deliberately not an R4 inside
@@ -110,7 +124,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         "Every 5 minutes, gives every contact or organization named in an 'Assigned *' column of a project, matter or work " +
         "assignment its Collaborate access (or a share for a linked internal user), renews it before it lapses, records " +
         "access an operator removed outside the product so it is never re-created, and — when its switch is on — removes " +
-        "the automatic access of an assignment that ended.";
+        "the automatic access of an assignment that ended. Ledger rows whose record was deleted are marked revoked.";
 
     /// <summary>Whether the job may REMOVE access on an ended assignment. Report-only unless explicitly true.</summary>
     internal bool RevokeOnChangeEnabled =>
@@ -133,6 +147,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         var truncated = false;
         var rotating = false;
         var incompleteRoots = new List<Guid>();
+        var rootless = new RootlessLedgerReport();
 
         var tenant = ImpersonatedRootSetSource.DeploymentCacheTenant(_configuration);
         var cacheTenants = tenant is null ? Array.Empty<string>() : new[] { tenant };
@@ -200,6 +215,9 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                 if (!outcome.Complete)
                     incompleteRoots.Add(id);
             }
+
+            // ── Ledger rows whose record was deleted (owner round 71) ──
+            await RetireRootlessLedgerRowsAsync(store, rootless, context, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -232,6 +250,24 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                          "so nothing was granted, shared, suggested, renewed or put back for them (fail closed).");
         }
 
+        if (rootless.ScanFailed)
+        {
+            status = StatusError;
+            problems.Add("The ledger rows whose record was deleted could not be read; none was marked revoked.");
+        }
+
+        if (rootless.Unresolved > 0)
+        {
+            problems.Add($"{rootless.Unresolved} ledger row(s) with no record were left unchanged: the record their key names " +
+                         "could not be read, or the row could not be written. The next run retries them.");
+        }
+
+        if (rootless.Truncated || rootless.Deferred > 0)
+        {
+            problems.Add($"ROOTLESS-LEDGER: more ledger rows with no record exist than one run takes ({rootless.Deferred} " +
+                         "deferred); the next run continues.");
+        }
+
         if (!revokeOnChange && wouldRevoke > 0)
         {
             // The configured posture, not a failure: reported (heartbeat + ResultJson.wouldRevoke) so the owner's flip of
@@ -251,16 +287,22 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             "[ASSIGNED-ACCESS-RECON] heartbeat status={Status} candidates={Candidates} materialized={Materialized} " +
             "writes={Writes} wouldRevoke={WouldRevoke} revokeOnChange={RevokeOnChange} incomplete={Incomplete} " +
             "denyListUnreadable={DenyListUnreadable} " +
-            "truncated={Truncated} rotating={Rotating} cacheTenantConfigured={CacheTenant} durationMs={DurationMs} " +
+            "truncated={Truncated} rotating={Rotating} cacheTenantConfigured={CacheTenant} " +
+            "rootlessFound={RootlessFound} rootlessRevoked={RootlessRevoked} rootlessRecordExists={RootlessRecordExists} " +
+            "rootlessKeyUnparseable={RootlessKeyUnparseable} rootlessUnresolved={RootlessUnresolved} " +
+            "rootlessDeferred={RootlessDeferred} rootlessScanFailed={RootlessScanFailed} durationMs={DurationMs} " +
             "attempt={Attempt} correlationId={CorrelationId}",
             status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, denyListUnreadable,
             truncated, rotating,
-            tenant is not null, (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
+            tenant is not null,
+            rootless.Found, rootless.Revoked, rootless.RecordExists, rootless.KeyUnparseable, rootless.Unresolved,
+            rootless.Deferred, rootless.ScanFailed,
+            (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
 
         return new JobRunResult(
             Success: status == StatusOk,
             ErrorMessage: problems.Count > 0 ? string.Join(" ", problems) : null,
-            ProcessedItems: writes,
+            ProcessedItems: writes + rootless.Revoked,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(
                 new
@@ -277,9 +319,160 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     incompleteRoots = incompleteRoots.Take(MaxSampledRoots).ToArray(),
                     incompleteTotal = incompleteRoots.Count,
                     denyListUnreadable,
+                    rootlessLedger = rootless.ToReport(),
                     attempt = context.Attempt,
                 },
                 ResultJsonOptions));
+    }
+
+    /// <summary>
+    /// Marks REVOKED (<see cref="AssignedAccessReason.RootDeleted"/>) each live Assigned-To ledger row whose root lookups are all
+    /// empty AND whose key names a record that a read confirms is gone. Never on an inference: a failed read, a record that
+    /// still exists and a key naming no record all leave the row unchanged (counted). Cancellation propagates; every other
+    /// fault is counted on <paramref name="report"/>, never thrown — the materialized roots' outcome above is already decided.
+    /// </summary>
+    private async Task RetireRootlessLedgerRowsAsync(
+        AssignedAccessStore store, RootlessLedgerReport report, JobRunContext context, CancellationToken ct)
+    {
+        IReadOnlyList<AssignedAccessLedgerRow> rows;
+        try
+        {
+            (rows, report.Truncated) = await store.ScanRootlessLedgerRowsAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            report.ScanFailed = true;
+            _logger.LogError(ex,
+                "[ASSIGNED-ACCESS-RECON] The ledger rows with no record could not be scanned; none was marked revoked. " +
+                "correlationId={CorrelationId}", context.CorrelationId);
+            return;
+        }
+
+        // record -> does it exist (null = the read failed). One read per record, however many rows name it.
+        var exists = new Dictionary<AssignedRootRef, bool?>();
+        foreach (var row in rows)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            // Re-decided in code, not trusted from the scan filter: a row that names a root, or is already Revoked, is not ours.
+            if (AssignedAccessStore.RootOf(row) is not null || row.State == AssignedAccessState.Revoked)
+                continue;
+
+            report.Found++;
+            if (AssignedAccessStore.RootFromLedgerKey(row.LedgerKey) is not { } root)
+            {
+                report.KeyUnparseable++;
+                _logger.LogWarning(
+                    "[ASSIGNED-ACCESS-RECON] Ledger row {RowId} names no record and its key '{Key}' names none either; left " +
+                    "unchanged. correlationId={CorrelationId}", row.Id, row.LedgerKey, context.CorrelationId);
+                continue;
+            }
+
+            if (!exists.TryGetValue(root, out var present))
+            {
+                if (exists.Count >= MaxRootsPerRun)
+                {
+                    report.Deferred++;
+                    continue;
+                }
+
+                try
+                {
+                    present = await store.ReadRootAsync(root.RootType, root.RootId, Array.Empty<string>(), ct).ConfigureAwait(false)
+                        is not null;
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    present = null;
+                    _logger.LogError(ex,
+                        "[ASSIGNED-ACCESS-RECON] {Type} {RootId} could not be read, so its ledger rows with no record are left " +
+                        "unchanged (never revoked on a failed read). correlationId={CorrelationId}",
+                        root.RootType, root.RootId, context.CorrelationId);
+                }
+
+                exists[root] = present;
+            }
+
+            if (present is null)
+            {
+                report.Unresolved++;
+                continue;
+            }
+
+            if (present.Value)
+            {
+                // The record is there but the row's lookup is empty (cleared by hand?) — not a deletion; left as it is.
+                report.RecordExists++;
+                _logger.LogWarning(
+                    "[ASSIGNED-ACCESS-RECON] Ledger row {RowId} has no record lookup, but {Type} {RootId} its key names still " +
+                    "exists; left unchanged. correlationId={CorrelationId}",
+                    row.Id, root.RootType, root.RootId, context.CorrelationId);
+                continue;
+            }
+
+            var priorState = row.State;
+            var priorReason = row.Reason;
+            try
+            {
+                if (await store.UpdateLedgerIfUnchangedAsync(
+                        row, new AssignedAccessLedgerWrite(AssignedAccessState.Revoked, AssignedAccessReason.RootDeleted), ct)
+                    .ConfigureAwait(false))
+                {
+                    report.Revoked++;
+                    _logger.LogInformation(
+                        "[ASSIGNED-ACCESS-RECON] Ledger row {RowId} marked Revoked ({Reason}): {Type} {RootId} was deleted. " +
+                        "before=[state={PriorState} reason={PriorReason}] correlationId={CorrelationId}",
+                        row.Id, AssignedAccessReason.RootDeleted, root.RootType, root.RootId, priorState, priorReason,
+                        context.CorrelationId);
+                }
+
+                // false: the row changed since it was read — the next pass decides on it as it is now.
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                report.Unresolved++;
+                _logger.LogError(ex,
+                    "[ASSIGNED-ACCESS-RECON] Ledger row {RowId} (its record {RootId} was deleted) could not be marked revoked; " +
+                    "the next run retries it. correlationId={CorrelationId}", row.Id, root.RootId, context.CorrelationId);
+            }
+        }
+    }
+
+    /// <summary>What one run did with the live ledger rows that name no record (owner round 71).</summary>
+    private sealed class RootlessLedgerReport
+    {
+        public int Found;
+        public int Revoked;
+        public int RecordExists;
+        public int KeyUnparseable;
+        public int Unresolved;
+        public int Deferred;
+        public bool Truncated;
+        public bool ScanFailed;
+
+        public object ToReport() => new
+        {
+            found = Found,
+            revoked = Revoked,
+            recordExists = RecordExists,
+            keyUnparseable = KeyUnparseable,
+            unresolved = Unresolved,
+            deferred = Deferred,
+            truncated = Truncated,
+            scanFailed = ScanFailed,
+        };
     }
 
     /// <summary>

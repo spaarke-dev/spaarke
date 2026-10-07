@@ -67,6 +67,32 @@ public class AssignedAccessStoreODataTests
     }
 
     /// <summary>
+    /// Owner round 71: the rootless scan returns the live Assigned-To rows whose EVERY root lookup is empty — never a row that
+    /// names a root, a Revoked or deactivated one, or an inherited-share row.
+    /// </summary>
+    [Fact]
+    public async Task TheRootlessScan_ReturnsOnlyLiveAssignedToRowsWhoseEveryRootLookupIsEmpty()
+    {
+        var key = AssignedAccessStore.LedgerKey(ExternalGrantRootType.Matter, Matter, "sprk_assignedattorney1",
+            new AssignedSubject(AssignedSubjectKind.Contact, Contact));
+        _table.Add(Row(source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, key: key));
+        _table.Add(Row(source: null, state: AssignedAccessState.Declined, contact: Contact));
+        _table.Add(Row(matter: Matter, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact));
+        _table.Add(Row(project: Project, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact));
+        _table.Add(Row(workAssignment: Filed, source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact));
+        _table.Add(Row(source: "sprk_assignedattorney1", state: AssignedAccessState.Revoked, contact: Contact));
+        _table.Add(Row(source: "sprk_assignedattorney1", state: AssignedAccessState.Granted, contact: Contact, statecode: 1));
+        _table.Add(Row(source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared, user: User));
+
+        var (rows, truncated) = await _store.ScanRootlessLedgerRowsAsync(CancellationToken.None);
+
+        truncated.Should().BeFalse();
+        rows.Select(r => r.State).Should().BeEquivalentTo(new[] { AssignedAccessState.Granted, AssignedAccessState.Declined });
+        rows.Should().OnlyContain(r => AssignedAccessStore.RootOf(r) == null);
+        rows.Single(r => r.State == AssignedAccessState.Granted).LedgerKey.Should().Be(key, "the key is what names the deleted record");
+    }
+
+    /// <summary>
     /// The provenance on ONE filed record (round 30): only its live inherited-share rows, each with the principal it was
     /// passed on to — a user, or a TEAM (<c>sprk_subjectteam</c>, the column round 30 added) — never an Assigned-To row, a
     /// malformed inherited row, another record's row or a deactivated one.
