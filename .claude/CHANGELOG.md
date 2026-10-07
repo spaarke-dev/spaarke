@@ -10,6 +10,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 ###### 2026-10-06 — FAILURE-MODES G-17: cache-version pins (unified-access-control-r2 task 172)
 
 `.claude/FAILURE-MODES.md` G-17: a test pinning a cache-version constant to an exact value fails every later legitimate bump. Pin the floor and seed the pre-bump version.
+###### 2026-10-06 — Correction (owner): round limits cap review ceremony, never fixing; every found defect is fixed or surfaced
+
+The throughput entry below capped Step 9.5 at "2 fix rounds … never start round 3". In practice that left a confirmed F1 (task 171 in `unified-access-control-r2`) waiting on a round count. The owner corrected the intent the same day: the limits exist to stop unnecessary checks and pseudo-fixes, not to leave known-broken code unfixed.
+
+- `task-execute` Step 9.5:
+  - The section is renamed "Finding triage and review scope".
+  - There is no longer a round cap on fixing. The scope limits stay: re-checks cover the fix diff only, with one full verifier pass (two for auth/security).
+  - New binding rule: **every defect found is fixed in scope, or filed and reported to the operator.** That holds whether the current work caused it directly or indirectly, or only uncovered it.
+  - A K class may not hold a confirmed real-path defect.
+  - Escalation is triggered by non-convergence, not by a count.
+- Root `CLAUDE.md` §8.5 "Coverage-first review" bullet updated to match.
+- `code-review`: also report defects in code the change did not write, marked "found in passing".
 
 ###### 2026-10-06 — Throughput fixes: `current-task.md` is state, not history; finding triage + round limits; seeding-proof and task-size scope (procedure-throughput-fixes-r1)
 
