@@ -210,6 +210,22 @@ public sealed class IntakeSchemaProfileParityTests
         allOf.Any(r => IsPresetUsersRule(r, UserProvisioningIntake.B2BGuest, ["email"]))
             .Should().BeTrue("B2BGuest users need an email — H11's rule");
 
+        // T232: Model1 → B2BGuest only (owner D2); B2BGuest → the environment security group, a GUID.
+        allOf.Any(r => r.TryGetProperty("if", out var c)
+                && c.GetProperty("properties").TryGetProperty("tenancyModel", out var tm)
+                && tm.GetProperty("const").GetString() == UserProvisioningIntake.Model1TenancyModel
+                && r.GetProperty("then").GetProperty("properties").TryGetProperty("identityPreset", out var p)
+                && p.GetProperty("const").GetString() == UserProvisioningIntake.B2BGuest)
+            .Should().BeTrue("a Model1 run takes only B2BGuest — H11's rule (userprov-model1-requires-b2b-guest)");
+        allOf.Any(r => r.TryGetProperty("if", out var c)
+                && c.GetProperty("properties").TryGetProperty("identityPreset", out var p)
+                && p.GetProperty("const").GetString() == UserProvisioningIntake.B2BGuest
+                && r.GetProperty("then").TryGetProperty("required", out var req)
+                && Strings(req).Contains("environmentSecurityGroupId"))
+            .Should().BeTrue("a B2BGuest run needs the environment security group — H11's rule");
+        properties.GetProperty("environmentSecurityGroupId").GetProperty("format").GetString().Should().Be("uuid",
+            "POST /api/runs refuses a group id that is not a GUID (userprov-invalid-security-group-id)");
+
         static IEnumerable<string> Strings(JsonElement array) => array.EnumerateArray().Select(e => e.GetString()!);
 
         static bool IsAtLeastOneGraphResourceRule(JsonElement rule)
@@ -241,22 +257,32 @@ public sealed class IntakeSchemaProfileParityTests
         foreach (var example in examples)
         {
             var nonSecret = ToOperatorNonSecret(example);
-            RunsEndpoints.ValidateOperatorIntake(nonSecret).Should().BeNull(
+            var tenancyModel = example.GetProperty("tenancyModel").GetString();
+            RunsEndpoints.ValidateOperatorIntake(tenancyModel, nonSecret).Should().BeNull(
                 "a schema example ({0}) is a complete intake", example.GetProperty("customerId").GetString());
 
             foreach (var (schemaKey, apiKey) in OperatorKeys.Where(k => schemaRequired.Contains(k.SchemaKey)))
             {
                 var without = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
                 without.Remove(apiKey);
-                RunsEndpoints.ValidateOperatorIntake(without).Should().NotBeNull(
+                RunsEndpoints.ValidateOperatorIntake(tenancyModel, without).Should().NotBeNull(
                     "the schema requires '{0}', so POST /api/runs must refuse a run without '{1}'", schemaKey, apiKey);
             }
 
             var noGraphResource = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
             noGraphResource.Remove("communicationGraphResource");
             noGraphResource.Remove("emailGraphResource");
-            RunsEndpoints.ValidateOperatorIntake(noGraphResource).Should().NotBeNull(
+            RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGraphResource).Should().NotBeNull(
                 "the schema requires at least one Graph resource, so POST /api/runs must too");
+
+            // T232: the schema requires the group for B2BGuest — so must POST /api/runs.
+            if (nonSecret.GetValueOrDefault("identityPreset") == UserProvisioningIntake.B2BGuest)
+            {
+                var noGroup = new Dictionary<string, string>(nonSecret, StringComparer.Ordinal);
+                noGroup.Remove("environmentSecurityGroupId");
+                RunsEndpoints.ValidateOperatorIntake(tenancyModel, noGroup).Should().NotBeNull(
+                    "the schema requires environmentSecurityGroupId for B2BGuest, so POST /api/runs must too");
+            }
         }
     }
 
@@ -321,6 +347,7 @@ public sealed class IntakeSchemaProfileParityTests
     [
         ("identityPreset", "identityPreset"),
         ("users", "usersJson"),
+        ("environmentSecurityGroupId", "environmentSecurityGroupId"),   // T232
         ("exchangePolicyScopeGroupId", "exchangePolicyScopeGroupId"),
         ("communicationGraphResource", "communicationGraphResource"),
         ("emailGraphResource", "emailGraphResource"),

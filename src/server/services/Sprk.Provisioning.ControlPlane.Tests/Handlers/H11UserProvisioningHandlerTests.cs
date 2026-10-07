@@ -32,10 +32,20 @@
 //         collaborator not called for that user).
 //   AC-15 B2BGuest invitation failure — Resumable, fail-fast.
 //   AC-16 Idempotency key format determinism (users-{customerId}).
+//   T232  (D2, G10 — Model 1 guests usable): Model1 refuses NativeAccount; a
+//         B2BGuest run needs the security group id; the group must be
+//         sprk-{customerId}-users and security-enabled and guest access must be
+//         allowed — each refused BEFORE any invitation; after redemption each
+//         guest joins the group and becomes a Dataverse user with the
+//         configured roles (systemuserid recorded); a missing role / membership /
+//         user failure is Resumable and names the entry; Pending writes nothing
+//         to the group or Dataverse; NativeAccount without a licence SKU creates
+//         nobody.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
@@ -50,6 +60,8 @@ public sealed class H11UserProvisioningHandlerTests
     private const string CustomerId = "acme";
     private const string RunId = "01j7q3zp-h11-run";
     private const string TenantId = "00000000-1111-2222-3333-444444444444";
+    private const string GroupId = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b";
+    private const string EnvUrl = "https://spaarke-acme.crm.dynamics.com/";
 
     private const string NativeUsersJson =
         "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@acme.com\",\"companyName\":\"Acme\"}," +
@@ -119,6 +131,202 @@ public sealed class H11UserProvisioningHandlerTests
         userProvisioner.AssignLicenseCallCount.Should().Be(0);
     }
 
+    // ---------- T232 Model 1 guests usable ----------
+
+    [Fact]
+    public async Task T232_RedeemedGuests_JoinTheGroupAndBecomeDataverseUsersWithTheRoles()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, tenancyModel: "Model1");
+        var repo = new FakeRepository(run, etag: "etag-t232");
+        var group = FakeSecurityGroupClient.ThisCustomers();
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), group, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        group.ReadGroupIds.Should().Equal(GroupId);
+        group.AddedMembers.Should().Equal((GroupId, "guestid-Ada"), (GroupId, "guestid-Grace"));
+        writer.Requests.Select(r => (r.EnvironmentUrl, r.TenantId, r.EntraObjectId)).Should().Equal(
+            (EnvUrl, TenantId, "guestid-Ada"), (EnvUrl, TenantId, "guestid-Grace"));
+        writer.Requests.Should().OnlyContain(r => r.SecurityRoleNames.SequenceEqual(new[] { "Spaarke Basic User" }));
+        repo.LastWrittenRun!.InterStepState.ProvisionedUsers!.Select(u => u.DataverseSystemUserId)
+            .Should().Equal("sysuser-guestid-Ada", "sysuser-guestid-Grace");
+    }
+
+    [Fact]
+    public async Task T232_Model1WithNativeAccount_IsRefusedBeforeAnyGraphCall()
+    {
+        var run = BuildRun(identityPreset: "NativeAccount", usersJson: NativeUsersJson, tenancyModel: "Model1");
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.Model1RequiresB2BGuest);
+        userProvisioner.CreateCallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T232_B2BGuestWithoutTheSecurityGroupId_IsRefusedBeforeAnyInvitation()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson, securityGroupId: null);
+        var invitations = FakeInvitationClient.Success();
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H11Rejections.MissingSecurityGroupId);
+        invitations.CallCount.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("sprk-other-users", true)]    // another customer's group
+    [InlineData("acme users", true)]          // not the naming rule
+    [InlineData("sprk-acme-users", false)]    // a Microsoft 365 group, not security-enabled
+    public async Task T232_AGroupThatIsNotThisCustomersSecurityGroup_IsRefusedAndNothingIsWritten(
+        string displayName, bool securityEnabled)
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var repo = new FakeRepository(run, "e");
+        var invitations = FakeInvitationClient.Success();
+        var group = FakeSecurityGroupClient.Returning(new SecurityGroupReadOutcome.Found(displayName, securityEnabled));
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), invitations, FakeConsentVerifier.Verified(),
+            group, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.SecurityGroupRejected);
+        failure.Diagnostic.Should().Contain(GroupId);
+        invitations.CallCount.Should().Be(0, "a group that is not this customer's is refused before anyone is invited");
+        group.AddedMembers.Should().BeEmpty();
+        writer.Requests.Should().BeEmpty();
+        repo.LastWrittenRun!.InterStepState.ProvisionedUsers.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task T232_AnUnreadableGroup_IsRefusedBeforeAnyInvitation()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var invitations = FakeInvitationClient.Success();
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified(),
+            FakeSecurityGroupClient.Returning(new SecurityGroupReadOutcome.Failure("404 Not Found")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H11Rejections.SecurityGroupRejected);
+        invitations.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T232_RestrictedGuestAccess_IsRefusedBeforeAnyInvitation()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var invitations = FakeInvitationClient.Success();
+        var writer = FakeGuestUserWriter.AllSucceed(guestAccess: new GuestAccessOutcome.Restricted());
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(H11Rejections.GuestAccessRestricted);
+        failure.Diagnostic.Should().Contain("PRQ-C-12");
+        invitations.CallCount.Should().Be(0);
+        writer.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T232_WithoutH5sEnvironment_IsRefusedBeforeAnyInvitation()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        run.InterStepState.DataverseEnvUrl = null;
+        var invitations = FakeInvitationClient.Success();
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H11Rejections.MissingDataverseEnvUrl);
+        invitations.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task T232_AConfiguredRoleTheEnvironmentLacks_IsResumable_NamingTheRole()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var repo = new FakeRepository(run, "e");
+        var writer = FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.RoleNotFound("Spaarke Basic User"));
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.SecurityRoleNotFound);
+        failure.Diagnostic.Should().Contain("'Spaarke Basic User'").And.Contain("entry 1");
+        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T232_AGroupMembershipFailure_IsResumable_AndMakesNoDataverseUser()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var group = FakeSecurityGroupClient.ThisCustomers(membership: new SecurityGroupMembershipOutcome.Failure("403"));
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
+            FakeInvitationClient.Success(), FakeConsentVerifier.Verified(), group, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.SecurityGroupMembershipFailed);
+        writer.Requests.Should().BeEmpty("Dataverse adds a user only once it is a member of the environment's group");
+    }
+
+    [Fact]
+    public async Task T232_ADataverseUserFailure_IsResumable_NamingTheEntryByPosition()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
+            FakeInvitationClient.Success(), FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(),
+            FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.Failure("403 Forbidden")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.DataverseUserFailed);
+        failure.Diagnostic.Should().Contain("entry 1").And.NotContain("ada@customer.com");
+    }
+
+    [Fact]
+    public async Task T232_NativeAccountWithoutALicenceSku_CreatesNobody()
+    {
+        var run = BuildRun(identityPreset: "NativeAccount", usersJson: NativeUsersJson);
+        var userProvisioner = FakeUserProvisioner.AllSucceed();
+        var handler = BuildHandler(new FakeRepository(run, "e"), userProvisioner, FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), options: new H11UserProvisioningOptions());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.LicenseSkuNotConfigured);
+        userProvisioner.CreateCallCount.Should().Be(0, "an unlicensed user cannot open the environment — none is created");
+    }
+
     // ---------- AC-3 B2BGuest consent pending -> WaitingOnGate ----------
 
     [Fact]
@@ -126,14 +334,18 @@ public sealed class H11UserProvisioningHandlerTests
     {
         var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
         var repo = new FakeRepository(run, etag: "etag-3");
+        var pendingGroup = FakeSecurityGroupClient.ThisCustomers();
+        var pendingWriter = FakeGuestUserWriter.AllSucceed();
         var handler = BuildHandler(
             repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
-            FakeConsentVerifier.Pending(accepted: 1, expected: 2));
+            FakeConsentVerifier.Pending(accepted: 1, expected: 2), pendingGroup, pendingWriter);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var success = result.Should().BeOfType<HandlerResult.Success>().Subject;
         success.IdempotencyKey.Should().Be(H11UserProvisioningHandler.BuildIdempotencyKey(CustomerId));
+        pendingGroup.AddedMembers.Should().BeEmpty("T232: nobody joins the group or Dataverse until every guest has redeemed");
+        pendingWriter.Requests.Should().BeEmpty();
 
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.WaitingOnGate);
         repo.LastWrittenRun.CompletedPhases.Should().BeEmpty("H11 has not finished its job yet");
@@ -406,8 +618,14 @@ public sealed class H11UserProvisioningHandlerTests
         FakeRepository repo,
         FakeUserProvisioner userProvisioner,
         FakeInvitationClient invitationClient,
-        FakeConsentVerifier consentVerifier)
+        FakeConsentVerifier consentVerifier,
+        FakeSecurityGroupClient? securityGroupClient = null,
+        FakeGuestUserWriter? guestUserWriter = null,
+        H11UserProvisioningOptions? options = null)
         => new(repo, userProvisioner, invitationClient, consentVerifier,
+            securityGroupClient ?? FakeSecurityGroupClient.ThisCustomers(),
+            guestUserWriter ?? FakeGuestUserWriter.AllSucceed(),
+            Options.Create(options ?? new H11UserProvisioningOptions { PowerAppsPlan2TrialSkuId = "sku-power-apps" }),
             NullLogger<H11UserProvisioningHandler>.Instance);
 
     private static HandlerEnvelope BuildEnvelope() => new()
@@ -420,17 +638,23 @@ public sealed class H11UserProvisioningHandlerTests
     };
 
     private static ProvisioningRun BuildRun(
-        string? identityPreset, string? usersJson, bool includeTenantId = true)
+        string? identityPreset, string? usersJson, bool includeTenantId = true, string tenancyModel = "Model2",
+        string? securityGroupId = GroupId)
     {
         var run = new ProvisioningRun
         {
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2",
+            TenancyModel = tenancyModel,
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
+        run.InterStepState.DataverseEnvUrl = EnvUrl;   // H5's output (H5 → H10 → H11)
+        if (securityGroupId is not null)
+        {
+            run.Parameters.NonSecret[H11UserProvisioningHandler.EnvironmentSecurityGroupIdParameterKey] = securityGroupId;
+        }
         if (includeTenantId)
         {
             run.Parameters.NonSecret[H11UserProvisioningHandler.TenantIdParameterKey] = TenantId;
@@ -538,6 +762,72 @@ public sealed class H11UserProvisioningHandlerTests
             CallCount++;
             return Task.FromResult(_behavior(entry));
         }
+    }
+
+    private sealed class FakeSecurityGroupClient : IEnvironmentSecurityGroupClient
+    {
+        private readonly SecurityGroupReadOutcome _read;
+        private readonly SecurityGroupMembershipOutcome _membership;
+        public List<string> ReadGroupIds { get; } = [];
+        public List<(string GroupId, string UserId)> AddedMembers { get; } = [];
+
+        private FakeSecurityGroupClient(SecurityGroupReadOutcome read, SecurityGroupMembershipOutcome membership)
+        {
+            _read = read;
+            _membership = membership;
+        }
+
+        public static FakeSecurityGroupClient ThisCustomers(SecurityGroupMembershipOutcome? membership = null)
+            => new(new SecurityGroupReadOutcome.Found($"sprk-{CustomerId}-users", SecurityEnabled: true),
+                membership ?? new SecurityGroupMembershipOutcome.Success());
+
+        public static FakeSecurityGroupClient Returning(SecurityGroupReadOutcome read)
+            => new(read, new SecurityGroupMembershipOutcome.Success());
+
+        public Task<SecurityGroupReadOutcome> ReadAsync(string groupId, string tenantId, CancellationToken ct)
+        {
+            ReadGroupIds.Add(groupId);
+            return Task.FromResult(_read);
+        }
+
+        public Task<SecurityGroupMembershipOutcome> AddMemberAsync(string groupId, string userId, string tenantId, CancellationToken ct)
+        {
+            if (_membership is SecurityGroupMembershipOutcome.Success)
+            {
+                AddedMembers.Add((groupId, userId));
+            }
+            return Task.FromResult(_membership);
+        }
+    }
+
+    private sealed class FakeGuestUserWriter : IDataverseGuestUserWriter
+    {
+        private readonly Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> _behavior;
+        private readonly GuestAccessOutcome _guestAccess;
+        public List<DataverseGuestUserRequest> Requests { get; } = [];
+
+        private FakeGuestUserWriter(
+            Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> behavior, GuestAccessOutcome guestAccess)
+        {
+            _behavior = behavior;
+            _guestAccess = guestAccess;
+        }
+
+        public static FakeGuestUserWriter AllSucceed(GuestAccessOutcome? guestAccess = null)
+            => new(r => new DataverseGuestUserOutcome.Success($"sysuser-{r.EntraObjectId}"),
+                guestAccess ?? new GuestAccessOutcome.Allowed());
+
+        public static FakeGuestUserWriter Returning(DataverseGuestUserOutcome outcome)
+            => new(_ => outcome, new GuestAccessOutcome.Allowed());
+
+        public Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken ct)
+        {
+            Requests.Add(request);
+            return Task.FromResult(_behavior(request));
+        }
+
+        public Task<GuestAccessOutcome> ReadGuestAccessAsync(string environmentUrl, string tenantId, CancellationToken ct)
+            => Task.FromResult(_guestAccess);
     }
 
     private sealed class FakeConsentVerifier : IB2BConsentVerifier

@@ -925,9 +925,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["operatorUpn"] = "operator@spaarke.com",
             ["containerTypeId"] = "33333333-3333-3333-3333-333333333333",
             ["dataverseEnvUrl"] = "https://spaarke-testcust.crm.dynamics.com/",   // T228
-            // T245c: the operator intake H11 / H14 / H4 need.
-            ["identityPreset"] = "NativeAccount",
-            ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"companyName\":\"Contoso\"}]",
+            // T245c: the operator intake H11 / H14 / H4 need. T232: Model 1 takes only B2BGuest + the environment group.
+            ["identityPreset"] = "B2BGuest",
+            ["usersJson"] = "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\",\"companyName\":\"Contoso\"}]",
+            ["environmentSecurityGroupId"] = "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b",
             ["exchangePolicyScopeGroupId"] = "spaarke-mail-scope@contoso.com",
             ["communicationGraphResource"] = "users/comms@contoso.com/messages",
             ["emailGraphResource"] = null!,   // Step 4.0 always sends the key; null when the intake omits it
@@ -953,7 +954,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("usersJson", "[]", "userprov-missing-users")]
     [InlineData("usersJson", "{\"firstName\":\"Ada\"}", "userprov-malformed-users-payload")]   // an object, not an array
     [InlineData("usersJson", "[{\"firstName\":\"Ada\"", "userprov-malformed-users-payload")]  // truncated
-    [InlineData("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\" \"}]", "userprov-invalid-user-entry")]
+    [InlineData("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\" \"}]", "userprov-invalid-user-entry")]   // a guest without an email
+    [InlineData("identityPreset", "NativeAccount", "userprov-model1-requires-b2b-guest")]            // T232 (owner D2)
+    [InlineData("environmentSecurityGroupId", null, "userprov-missing-security-group-id")]            // T232
+    [InlineData("environmentSecurityGroupId", "sprk-testcust-users", "userprov-invalid-security-group-id")]   // a name, not the object id
     [InlineData("exchangePolicyScopeGroupId", null, "h14a-missing-policy-scope-group-id")]
     [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
     [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]
@@ -992,10 +996,10 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     [Theory]
-    [InlineData("NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email optional for NativeAccount
-    [InlineData("B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email and group optional for NativeAccount (Model 2 only — T232)
+    [InlineData("Model1", "B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
     public async Task PostRuns_CompleteOperatorIntake_Returns202_AndStoresTheValues(
-        string identityPreset, string usersJson, string graphResourceKey)
+        string tenancyModel, string identityPreset, string usersJson, string graphResourceKey)
     {
         using var factory = new L2WebApplicationFactory();
         var client = factory.CreateClient();
@@ -1004,8 +1008,12 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret[graphResourceKey] = "users/comms@contoso.com/messages";
         nonSecret["identityPreset"] = identityPreset;
         nonSecret["usersJson"] = usersJson;
+        if (identityPreset == "NativeAccount")
+        {
+            nonSecret.Remove("environmentSecurityGroupId");
+        }
 
-        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret));
+        var response = await client.SendAsync(BuildCreateRunRequest("testcust", nonSecret, tenancyModel));
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
         factory.Repository.CreatedRuns.Single().Parameters.NonSecret.Should().Contain(new Dictionary<string, string>
@@ -1076,8 +1084,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     /// </summary>
     internal static Dictionary<string, string> WithOperatorIntake(Dictionary<string, string> nonSecret)
     {
-        nonSecret.TryAdd("identityPreset", "NativeAccount");
-        nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]");
+        // T232: the request builder sends Model1, which takes only B2BGuest — guests need an email and the environment's
+        // security group.
+        nonSecret.TryAdd("identityPreset", "B2BGuest");
+        nonSecret.TryAdd("usersJson", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@contoso.com\"}]");
+        nonSecret.TryAdd("environmentSecurityGroupId", "6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b");
         nonSecret.TryAdd("exchangePolicyScopeGroupId", "spaarke-mail-scope@contoso.com");
         nonSecret.TryAdd("communicationGraphResource", "users/comms@contoso.com/messages");
         nonSecret.TryAdd("communicationDefaultMailbox", "comms@contoso.com");
@@ -1107,7 +1118,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["dataverseEnvUrl"] = $"https://spaarke-{customerId}.crm.dynamics.com/",   // T228: named for THIS customer
         }));
 
-    private static HttpRequestMessage BuildCreateRunRequest(string customerId, Dictionary<string, string> nonSecretParameters)
+    private static HttpRequestMessage BuildCreateRunRequest(
+        string customerId, Dictionary<string, string> nonSecretParameters, string tenancyModel = "Model1")
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
         {
@@ -1115,8 +1127,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             {
                 customerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1",
-                profile = "spaarke-hosted-model2",
+                tenancyModel,
+                profile = tenancyModel == "Model2" ? "customer-owned-model2" : "spaarke-hosted-model2",
                 nonSecretParameters,
             }),
         };
