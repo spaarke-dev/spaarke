@@ -87,9 +87,11 @@ export interface IProvisionProjectResponse {
   /** The project's own SPE container, recorded on sprk_containerid. */
   speContainerId: string;
   /**
-   * The creating user the project was explicitly shared to (task 061). A successful response always
-   * carries it — the owner team has no members, so without this share the project is unreachable,
-   * and provisioning fails rather than return without it.
+   * The creating user the project was explicitly shared to (task 061). Normally present — the owner team
+   * has no members, so without this share the project is unreachable, and provisioning fails rather than
+   * return without it. Exception (task 114, owner rounds 67/76): on a Restricted record a creator flagged
+   * external is NOT shared to; the value is then the empty GUID, the creator is listed in
+   * `skippedPrincipals` (`principal_external_on_restricted`), and `noInternalReader` may be set.
    */
   sharedToCreatorSystemUserId: string;
   /**
@@ -135,6 +137,14 @@ export interface IProvisionProjectResponse {
    * (`describeSkippedPrincipal`, round 29) and returned as `warnings` on the result.
    */
   skippedPrincipals?: IProvisionSkippedPrincipal[];
+  /**
+   * unified-access-control-r2 task 114 (owner round 67: Restricted wins over the last-reader rule): on a Restricted record
+   * the person it would be shared to was flagged external and NOT shared to; `true` when nobody internal can open the
+   * record now. Optional because the server added it.
+   */
+  noInternalReader?: boolean | null;
+  /** Task 114: the server's plain-language sentence for `noInternalReader`, shown as a warning when present. */
+  noInternalReaderMessage?: string | null;
 }
 
 /** One named colleague the server did not share to (mirrors `ProvisionSkippedPrincipal`). */
@@ -547,6 +557,9 @@ const SKIPPED_PRINCIPAL_COPY: Readonly<Record<string, (name: string) => string>>
     `Whether ${name} may access this project could not be checked, so the project was not shared with them. You can share it with them later from Manage Access.`,
   'sdap.provision.principal_share_failed': name =>
     `${name} was not given access to this project. You can share it with them later from Manage Access.`,
+  // Task 114 (owner round 67, owner wording): a person flagged external on a Restricted record.
+  'sdap.provision.principal_external_on_restricted': name =>
+    `${name} is flagged as an external user and can't be given access to a Restricted record.`,
 };
 
 /**
@@ -970,6 +983,11 @@ export async function provisionSecureProject(
           reasonCode: skipped.reasonCode,
         });
       }
+    }
+
+    // Task 114: when nobody internal can open the record any more, the server says so — shown last, verbatim.
+    if (typeof data.noInternalReaderMessage === 'string' && data.noInternalReaderMessage.trim()) {
+      warnings.push(data.noInternalReaderMessage);
     }
 
     return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data };

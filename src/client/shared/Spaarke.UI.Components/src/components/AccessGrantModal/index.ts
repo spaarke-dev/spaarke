@@ -5,6 +5,8 @@ export {
   describeResidualAccess,
   buildRevokeNotice,
   ASSIGNED_ACCESS_LEVEL,
+  // Task 114: the label of an external user's share on a Restricted record.
+  EXTERNAL_USER_NO_ACCESS_LABEL,
 } from './AccessGrantModal';
 export type { IAssignedAccessEntry } from './AccessGrantModal';
 // Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).

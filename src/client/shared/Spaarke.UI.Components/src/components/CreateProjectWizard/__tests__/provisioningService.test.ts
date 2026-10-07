@@ -453,6 +453,8 @@ describe('provisionSecureProject — failure classification', () => {
     ['sdap.provision.principal_no_access_unverifiable', 'per-person-warning', false],
     // Task 150 (round 33 items 1 and 5): a named colleague whose share itself failed — named, never silent.
     ['sdap.provision.principal_share_failed', 'per-person-warning', false],
+    // Task 114 (owner round 67): a person flagged external on a Restricted record — named, never silent.
+    ['sdap.provision.principal_external_on_restricted', 'per-person-warning', false],
   ];
 
   const FAILURE_CODES = EMITTED.filter(([, kind]) => kind !== 'per-person-warning');
@@ -579,7 +581,7 @@ describe('provisionSecureProject — failure classification', () => {
     for (const [code] of WARNING_CODES) {
       expect(describeSkippedPrincipal(code, 'Dana Reyes')).toBeDefined();
     }
-    expect(EMITTED).toHaveLength(40);
+    expect(EMITTED).toHaveLength(41);
   });
 
   // Task 150 round 53 item 1: provisioning's own code for an unreadable floor (codes are namespaced by endpoint — F3's
@@ -755,6 +757,32 @@ describe('provisionSecureProject — failure classification', () => {
     expect(describeSkippedPrincipal('sdap.provision.principal_no_access', '')).toBe(
       "Someone is on this project's No Access list, so the project was not shared with them."
     );
+  });
+
+  // Task 114 (owner round 67: Restricted wins over the last-reader rule): the person not shared to on a Restricted record
+  // is named in the owner's wording, and the server's "nobody internal can open it" sentence is shown last, verbatim.
+  it('names a person flagged external on a Restricted record, and shows the server sentence when nobody internal can open it', async () => {
+    const systemUserId = '77777777-7777-7777-7777-777777777777';
+    const authFetch = jest.fn().mockResolvedValue(
+      okResponse({
+        ...successBody,
+        skippedPrincipals: [
+          { systemUserId, reasonCode: 'sdap.provision.principal_external_on_restricted', message: 'x' },
+        ],
+        noInternalReader: true,
+        noInternalReaderMessage: 'Nobody internal can open this project now. An administrator must share it with an internal user.',
+      })
+    );
+
+    const result = await provisionSecureProject({ projectId: PROJECT_ID }, authFetch as never, BFF, {
+      [systemUserId]: 'Ext Erin',
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.warnings).toEqual([
+      "Ext Erin is flagged as an external user and can't be given access to a Restricted record.",
+      'Nobody internal can open this project now. An administrator must share it with an internal user.',
+    ]);
   });
 
   it('returns no warnings when no colleague was skipped', async () => {

@@ -69,6 +69,12 @@ export interface IAccessGrantRecord {
    * every row kind is task 066 — this modal only needs the row to exist, be
    * labeled, and be revocable. */
   provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown' | 'share';
+  /**
+   * Share rows only (unified-access-control-r2 task 114, owner round 67 amendment 4(c)): the record is Restricted and
+   * this user is flagged external (`externalNoAccess` from `/user-shares`). Rendered as "External user — no access"
+   * until the server removes the share (the record's next save, or its 5-minute job). Still revocable here.
+   */
+  externalNoAccess?: boolean;
 }
 
 /** A single Dataverse Contact search result (named-contact person-picker). */

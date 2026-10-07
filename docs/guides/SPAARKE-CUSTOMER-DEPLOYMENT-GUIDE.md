@@ -1195,6 +1195,13 @@ stamp subscription (owner 2026-10-07): the operator links the environment to a b
 month**. `NativeAccount` (Model 2) still assigns the configured licence SKUs and refuses to create anyone when none is
 configured (`userprov-license-sku-not-configured`).
 
+**B2B guests are flagged external** (unified-access-control-r2 task 114, owner round 67). A blank
+`systemuser.sprk_isexternal` means NOT external, so every B2B guest (`#EXT#` in its user name) must carry
+`sprk_isexternal = Yes`: `scripts/Set-ExternalFlagForB2BGuests.ps1` (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b).
+A user flagged external is refused a share on a Restricted record and gets no internal-only message. **In an existing
+environment this runs BEFORE the BFF carrying task 114 is deployed** (see Phase 7b) — that BFF reads a blank flag as
+internal.
+
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 
 **H12a** and **H12b** are DAG-parallel (no cross-dependency):
@@ -1430,11 +1437,29 @@ pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
 .\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 # Phase 6 — BFF deploy
+# ⚠️ EXISTING environment receiving the BFF that carries unified-access-control-r2 task 114: run Phase 7b (all three
+# steps, -Verify exit 0) BEFORE this deploy. That BFF reads a BLANK sprk_isexternal as internal, so a B2B guest still
+# blank when it starts is shared with on Restricted records and receives internal-only messages. (A NEW environment has
+# no users yet: Phase 7b follows H11 below, before anyone is given access.)
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production
 
 # Phase 7 — Dataverse App User + Graph app-role parity
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
+
+# Phase 7b — B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
+# after the users exist, and again whenever B2B guests are added outside the product). A BLANK sprk_isexternal means
+# NOT external: Manage Access "+ User" and the Assigned-To rule share with the user, internal-only messages reach them,
+# and a Restricted record keeps their share. This sets sprk_isexternal = Yes on every systemuser whose user name holds
+# "#EXT#" and changes nothing else. Dry run first and review the list with the owner, then -Apply, then -Verify (exit 0).
+# ORDER: in an EXISTING environment this runs BEFORE Phase 6 deploys the BFF carrying task 114 (the BFF before it already
+# treats a blank flag as external, so running this first changes nothing for it). If that BFF was deployed first: run
+# this at once, and allow 10 minutes after -Apply — the identity resolver caches sprk_isexternal for 10 minutes, and that
+# cached answer also decides a licensed user's Restricted-record access on the SPA/Teams plane.
+# Within 5 minutes of -Apply the BFF removes each newly flagged guest's share on every Restricted record.
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>"            # dry run (read-only)
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Apply
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Verify    # MUST exit 0
 
 # Phase 8 — config seed
 .\scripts\seed-data\Deploy-All-AI-SeedData.ps1 -EnvironmentUrl "<dv-org-url>"

@@ -264,4 +264,85 @@ public sealed class FanOutTargetingSecuritySeamTests
         recipients.Should().Contain(internalUser, "the genuinely internal systemuser participant is still targeted");
         recipients.Should().HaveCount(1);
     }
+
+    // ── (h) unified-access-control-r2 task 114 (owner round 67 amendment 2): a BLANK flag is INTERNAL ─────────────────
+    // Through the REAL SystemUserIdentityResolver (only its Dataverse and cache boundaries doubled): a systemuser whose
+    // sprk_isexternal holds no value — 7 of 11 enabled person users on dev — receives an internal-only message; only a
+    // stored true is external; an unknown systemuser (no row) is still external (fail closed).
+
+    [Fact]
+    public async Task GetEligibleRecipients_InternalOnlyMessage_ThroughTheRealResolver_ABlankFlagIsInternal_OnlyTrueIsExcluded()
+    {
+        var blankFlagUser = Guid.NewGuid();
+        var falseFlagUser = Guid.NewGuid();
+        var trueFlagUser = Guid.NewGuid();
+        var unknownUser = Guid.NewGuid(); // no systemuser row
+        var flags = new Dictionary<Guid, bool?>
+        {
+            [blankFlagUser] = null,
+            [falseFlagUser] = false,
+            [trueFlagUser] = true,
+        };
+
+        var sut = CreateServiceWithRealResolver(
+            new[]
+            {
+                SystemUserParticipant(blankFlagUser),
+                SystemUserParticipant(falseFlagUser),
+                SystemUserParticipant(trueFlagUser),
+                SystemUserParticipant(unknownUser),
+            },
+            flags);
+
+        var recipients = await sut.GetEligibleRecipientsAsync(
+            Message(Guid.NewGuid(), isInternalOnly: true), OpenThread(Guid.NewGuid()));
+
+        recipients.Should().BeEquivalentTo(new[] { blankFlagUser, falseFlagUser },
+            "a blank sprk_isexternal is internal (round 67); a stored true and an unknown systemuser are external");
+    }
+
+    /// <summary>
+    /// The fan-out over the REAL <see cref="SystemUserIdentityResolver"/>: the resolver's one Dataverse call is answered from
+    /// <paramref name="flags"/> (a null value is a row WITHOUT the attribute — a blank column), and a user not listed has
+    /// no row. The cache always misses, so every answer is the live read.
+    /// </summary>
+    private static CommunicationFanOutTargetingService CreateServiceWithRealResolver(
+        IReadOnlyList<DataverseEntity> junctionRows, IReadOnlyDictionary<Guid, bool?> flags)
+    {
+        var entity = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entity
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_communicationparticipant"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(junctionRows.ToList()));
+
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(d => d.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+            {
+                var id = query.Criteria.Conditions
+                    .FirstOrDefault(c => c.AttributeName == "systemuserid")?.Values.FirstOrDefault();
+                if (id is not Guid userId || !flags.TryGetValue(userId, out var flag))
+                    return new EntityCollection(new List<DataverseEntity>());
+
+                var row = new DataverseEntity("systemuser", userId);
+                if (flag is { } value)
+                    row["sprk_isexternal"] = value; // a blank column is simply absent from the row
+                return new EntityCollection(new List<DataverseEntity> { row });
+            });
+
+        var resolver = new SystemUserIdentityResolver(
+            dataverse.Object,
+            new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+                Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+            NullLogger<SystemUserIdentityResolver>.Instance);
+
+        return new CommunicationFanOutTargetingService(
+            entity.Object,
+            new CommunicationAccessFilter(NullLogger<CommunicationAccessFilter>.Instance),
+            new DenyAllThreadPrivateGrantProvider(),
+            resolver,
+            NullLogger<CommunicationFanOutTargetingService>.Instance);
+    }
 }

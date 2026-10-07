@@ -12,7 +12,7 @@
 | File | Role |
 |---|---|
 | `access-group.template.xml` | The ONE authored definition: a FlyoutAnchor "Access" (Sequence 905) on `Mscrm.Form.{{entity}}.MainTab.Actions.Controls._children`, holding "Update Access" (10), "Make Secure" (20, task 150, release-gated) and "Remove Secure" (30, task 150). Never hand-edit a per-entity copy. |
-| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. `-SecureTransitionDeployed` keeps Make Secure; without it the generator removes it. |
+| `Merge-AccessRibbon.ps1` | The mechanical per-entity generator: instantiates the template for one entity and merges it into a FRESH export of that entity's `RibbonDiff.xml`. Pure file transformation — no Dataverse call. `-SecureTransitionDeployed` keeps Make Secure; without it the generator removes it. `-ShareCommandXml` (task 114) copies the platform's form Share command, read live by `Set-AccessRibbon.ps1`, with the ShareAllowed rule appended. |
 | `Set-AccessRibbon.ps1` | Task 150: the three forms in one step — dry run (default; 142's checked-in exports, no Dataverse call), `-Apply` (live: records the live command lists, exports the dedicated ribbon solution, checks in the work-assignment export, merges, packs, imports, publishes, then verifies) and `-Verify` (read-only `RetrieveEntityRibbon`: the before-list is intact, the Access commands call `access_ribbon.js`, Make Secure present exactly when `-SecureTransitionDeployed`). |
 
 ### Make Secure is release-gated (task 150 acceptance (b); owner R3b / F7)
@@ -62,6 +62,32 @@ reason gets the generic warning and is logged — never silent, round 33 item 5;
 The command script is `src/client/webresources/js/sprk_access_ribbon.js` (web resource `sprk_/scripts/access_ribbon.js`,
 namespace `Spaarke.Access.Ribbon`). It reuses `Spaarke.BffAuth` (`sprk_/scripts/bff_auth.js`) and the ONE sync call in
 `Spaarke.AssignedAccess` (`sprk_/scripts/assignedaccess_postsave.js`, `src/solutions/webresources/sprk_assignedaccess_postsave.js`).
+
+### The platform's Share command is hidden on Restricted records (task 114, owner round 67 amendment 4(a))
+
+A Restricted record (`sprk_accesspermission` = Restricted) is for internal use only, so the platform's own form **Share**
+command is hidden on it and sharing goes through Manage Access "+ User", which refuses a user flagged
+`sprk_isexternal = true` there. The rule is `sprk.Access.{{entity}}.ShareAllowed.EnableRule` in the template, calling
+`Spaarke.Access.Ribbon.isShareAllowed` (`access_ribbon.js` 1.6.0): the form's `sprk_accesspermission` when the form
+carries it (`assignedaccess_postsave.js` 1.1.0 refreshes the command bar when it changes), else one saved-value read;
+a read that fails hides Share.
+
+The command it is appended to is the PLATFORM's, never authored here: `Set-AccessRibbon.ps1 -Apply` reads the live
+effective ribbon, takes the `Command` of the `Mscrm.Form.<entity>.Share` button (an id it never assumes) and its
+CommandDefinition, and `Merge-AccessRibbon.ps1 -ShareCommandXml` copies that definition into the RibbonDiff with the
+rule appended — every platform enable and display rule is kept, a re-run replaces the copy (idempotent), and `-Verify`
+checks the live Share command carries the rule. The dry run uses `fixtures/share-command.dry-run-sample.xml`, a
+stand-in that only exercises the transformation (never imported).
+
+The GRID and SUBGRID Share (on selected rows) get the same treatment (task 114 follow-up): `Set-AccessRibbon.ps1 -Apply`
+reads the live ribbon (location `All`), takes the `Command` of `Mscrm.HomepageGrid.<entity>.Share` (required) and
+`Mscrm.SubGrid.<entity>.Share` (when present), and `Merge-AccessRibbon.ps1 -GridShareCommandXml` appends
+`sprk.Access.{{entity}}.ShareAllowedSelection.EnableRule` → `isShareAllowedForSelection(SelectedControlSelectedItemIds,
+SelectedEntityTypeName)`, which hides Share when ANY selected row is Restricted (one batched read; a row that does not come
+back, or a failed read, hides it). A command the form and grid buttons share is refused (one copy cannot carry both rules).
+`-Verify` checks every grid Share button present. Dry run: `fixtures/grid-share-command.dry-run-sample.xml`. The server
+still removes such a share on a Restricted record (the record's save, the 5-minute job: `RestrictedExternalShareRemover`),
+and Manage Access labels it "External user — no access" until then.
 
 ## Why a FlyoutAnchor (realisation choice)
 

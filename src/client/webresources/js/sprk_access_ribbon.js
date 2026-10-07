@@ -74,8 +74,11 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // secure transition, the in-place retry, "Someone" for a name that cannot be resolved. 1.4.0 - round 46 item 4: a
     // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
     // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
-    // caller_rights_unverifiable refusal in this script's own words.
-    ns.VERSION = "1.5.0";
+    // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
+    // isShareAllowed / isShareAllowedForSelection, the rules that hide the platform's form and grid Share commands on a
+    // Restricted record (any selected Restricted row, on a grid); the principal_external_on_restricted warning and the
+    // server's no-internal-reader sentence after Make Secure.
+    ns.VERSION = "1.6.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -172,6 +175,112 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      */
     ns.isAccessMenuVisible = function (primaryControl) {
         return ns.canUpdateAccess(primaryControl);
+    };
+
+    // =========================================================================================================
+    // Task 114 - the platform's Share command on a Restricted record (owner round 67 amendment 4(a))
+    // =========================================================================================================
+
+    /** sprk_accesspermission = Restricted (internal use only). The same integer the BFF reads (Restricted 100000002). */
+    ns.ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+    /**
+     * EnableRule ADDED to the platform's own form Share command on the project, matter and work assignment main forms
+     * (Merge-AccessRibbon.ps1 copies that command from the live ribbon and appends this rule): Share is hidden on a
+     * Restricted record, so sharing goes through Manage Access "+ User", which refuses a user flagged external there. A
+     * convenience only - the BFF removes such a share wherever it came from (task 114's Restricted remover, on the save
+     * and every 5 minutes).
+     *
+     * Reads the form's own sprk_accesspermission when the form carries it (so an unsaved change to Restricted hides Share
+     * once the ribbon refreshes - assignedaccess_postsave.js refreshes it on change); otherwise the saved value with ONE
+     * Xrm.WebApi.retrieveRecord. A read that fails hides Share (fail closed): "+ User" is still there. An unsaved record
+     * answers true - the platform's own rules keep Share off a new form.
+     * @param {object} primaryControl - the form context
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowed = function (primaryControl) {
+        try {
+            var attribute = primaryControl && typeof primaryControl.getAttribute === "function"
+                ? primaryControl.getAttribute("sprk_accesspermission")
+                : null;
+            if (attribute) {
+                return attribute.getValue() !== ns.ACCESS_PERMISSION_RESTRICTED;
+            }
+
+            var entity = primaryControl && primaryControl.data && primaryControl.data.entity;
+            var recordId = entity ? (entity.getId() || "").replace(/[{}]/g, "").toLowerCase() : "";
+            if (!recordId) {
+                return true;
+            }
+
+            return Promise.resolve(Xrm.WebApi.retrieveRecord(entity.getEntityName(), recordId, "?$select=sprk_accesspermission"))
+                .then(function (row) {
+                    return !!row && row.sprk_accesspermission !== ns.ACCESS_PERMISSION_RESTRICTED;
+                }, function (error) {
+                    console.warn(LOG, "sprk_accesspermission could not be read; Share stays hidden (use Manage Access).", error);
+                    return false;
+                });
+        } catch (error) {
+            console.error(LOG, "isShareAllowed failed; Share stays hidden.", error);
+            return false;
+        }
+    };
+
+    /** Ids per selection read - keeps the OData filter far below the URL limit. */
+    var SELECTION_BATCH = 50;
+
+    /**
+     * EnableRule ADDED to the platform's own GRID and SUBGRID Share command (task 114 follow-up; Merge-AccessRibbon.ps1
+     * copies those commands from the live ribbon and appends this rule): Share is hidden when ANY selected row is
+     * Restricted. Reads the selected rows' saved sprk_accesspermission (Xrm.WebApi, batched). A row that does not come
+     * back, or a read that fails, hides Share (fail closed); nothing selected answers true (the platform's own rules keep
+     * Share off then). The server's Restricted remover is the backstop either way.
+     * @param {string[]} selectedIds - SelectedControlSelectedItemIds
+     * @param {string} entityName - SelectedEntityTypeName
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowedForSelection = function (selectedIds, entityName) {
+        try {
+            var ids = (selectedIds || [])
+                .map(function (id) { return String(id || "").replace(/[{}]/g, "").toLowerCase(); })
+                .filter(function (id) { return id.length > 0; });
+            if (ids.length === 0) {
+                return true;
+            }
+            if (!entityName) {
+                return false;
+            }
+
+            var idColumn = entityName + "id";
+            var batches = [];
+            for (var i = 0; i < ids.length; i += SELECTION_BATCH) {
+                batches.push(ids.slice(i, i + SELECTION_BATCH));
+            }
+
+            return Promise.all(batches.map(function (batch) {
+                var filter = batch.map(function (id) { return idColumn + " eq " + id; }).join(" or ");
+                return Promise.resolve(Xrm.WebApi.retrieveMultipleRecords(
+                    entityName, "?$select=" + idColumn + ",sprk_accesspermission&$filter=(" + filter + ")"));
+            })).then(function (results) {
+                var rows = [];
+                results.forEach(function (result) { rows = rows.concat((result && result.entities) || []); });
+                var seen = {};
+                rows.forEach(function (row) { seen[String(row[idColumn] || "").toLowerCase()] = row; });
+                for (var j = 0; j < ids.length; j++) {
+                    var row = seen[ids[j]];
+                    if (!row || row.sprk_accesspermission === ns.ACCESS_PERMISSION_RESTRICTED) {
+                        return false; // Restricted, or not readable: hidden
+                    }
+                }
+                return true;
+            }, function (error) {
+                console.warn(LOG, "The selected rows' sprk_accesspermission could not be read; Share stays hidden.", error);
+                return false;
+            });
+        } catch (error) {
+            console.error(LOG, "isShareAllowedForSelection failed; Share stays hidden.", error);
+            return false;
+        }
     };
 
     // =========================================================================================================
@@ -567,7 +676,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             "Whether {name} may access this {record} could not be checked, so the {record} was not shared with them. You " +
             "can share it with them later from Manage Access.",
         "sdap.provision.principal_share_failed":
-            "{name} was not given access to this {record}. You can share it with them later from Manage Access."
+            "{name} was not given access to this {record}. You can share it with them later from Manage Access.",
+        // Task 114 (owner round 67, owner wording): a person flagged external on a Restricted record.
+        "sdap.provision.principal_external_on_restricted":
+            "{name} is flagged as an external user and can't be given access to a Restricted record."
     });
 
     /** Round 33 item 5: the warning for a reason code this script does not know (the code is logged as well). */
@@ -629,6 +741,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return ns.describeSkippedPrincipal(person ? person.reasonCode : undefined, name, entityName);
             });
         })).then(function (lines) {
+            // Task 114: when nobody internal can open the record any more, the server says so - shown last, verbatim.
+            if (body && typeof body.noInternalReaderMessage === "string" && body.noInternalReaderMessage.trim()) {
+                lines.push(body.noInternalReaderMessage);
+            }
             alert(commandName, lines.join("\n\n"));
         });
     }

@@ -223,13 +223,17 @@ public class SpeContainerMembershipSync
     }
 
     /// <summary>The round-70 population: an enabled, internal person (blank <c>sprk_isexternal</c> is internal).</summary>
+    /// <remarks>A container holds many records, so a user flagged external is NEVER a standing writer (owner round 70),
+    /// whatever any one record's Restricted state: the eligibility rule is asked as for a Restricted record
+    /// (<c>rootIsRestricted: true</c>), which bars exactly a stored <c>sprk_isexternal = true</c>.</remarks>
     internal static bool IsStandingEligible(Entity user)
         => !string.IsNullOrWhiteSpace(user.GetAttributeValue<string>("domainname"))
            && InternalShareEndpoints.ClassifyEligibility(
                   user.GetAttributeValue<bool?>("isdisabled"),
                   user.GetAttributeValue<OptionSetValue>("accessmode")?.Value,
                   user.GetAttributeValue<Guid?>("applicationid"),
-                  user.GetAttributeValue<bool?>("sprk_isexternal") ?? false)
+                  user.GetAttributeValue<bool?>("sprk_isexternal") ?? false,
+                  rootIsRestricted: true)
               == InternalShareEndpoints.ShareEligibility.Eligible;
 
     private async Task<Verdict> StandingVerdictAsync(

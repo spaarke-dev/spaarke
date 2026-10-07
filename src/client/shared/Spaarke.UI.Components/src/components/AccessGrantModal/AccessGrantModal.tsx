@@ -655,6 +655,12 @@ function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success'
 }
 
 /**
+ * Task 114 (owner round 67 amendment 4(c), owner-authored copy): the label of a user share on a Restricted record whose
+ * holder is flagged external (`externalNoAccess` from `/user-shares`) — shown until the server removes the share.
+ */
+export const EXTERNAL_USER_NO_ACCESS_LABEL = 'External user — no access';
+
+/**
  * The ONE explanatory MessageBar for a record's Access Permission (task 138;
  * owner O1 FINAL, 2026-10-01: "Secure – Restricted" with the explanation when
  * the record is secure AND Restricted; a "Secure" explanation when secure only).
@@ -833,6 +839,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         fullName?: string | null;
         accessLevel?: number | null;
         modifiedOn?: string;
+        externalNoAccess?: boolean;
       }>;
     }>(`/api/v1/external-access/user-shares?${query}`);
     return (data.shares ?? []).map(s => ({
@@ -845,6 +852,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       accessLevel: s.accessLevel ?? 0,
       grantedDate: s.modifiedOn,
       provenance: 'share' as const,
+      // Task 114: Restricted record + user flagged external — shown as "External user — no access" until removed.
+      externalNoAccess: s.externalNoAccess === true,
     }));
   }, [getJson, recordType, recordId]);
 
@@ -1812,7 +1821,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               )}
                               <Text className={styles.rowMeta}>
                                 {isUserShare
-                                  ? `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
+                                  ? grant.externalNoAccess
+                                    ? EXTERNAL_USER_NO_ACCESS_LABEL
+                                    : `Internal user share — last updated ${formatGrantDate(grant.grantedDate)}`
                                   : isStanding
                                     ? 'Standing grant — ongoing access to assigned records'
                                     : isOrg

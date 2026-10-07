@@ -44,7 +44,10 @@ public enum AssignedAccessState
 /// <summary>Stable <c>sprk_reason</c> values (ledger) and outcome reasons (sync / job report).</summary>
 public static class AssignedAccessReason
 {
-    /// <summary>The record is Restricted: no contact or organization access (owner round 2 item 3).</summary>
+    /// <summary>
+    /// The record is Restricted: no contact or organization access (owner round 2 item 3), and no share for a linked user
+    /// flagged external (owner round 67).
+    /// </summary>
     public const string Restricted = "restricted";
 
     /// <summary>An organization on a SECURE record: only named, direct grants count (owner round 2 item 3).</summary>
@@ -882,6 +885,32 @@ public class AssignedAccessStore
         var rows = await _dataverse.QueryAsync<JsonElement>(
             ExternalGrantRoot.BindFor(rootType).EntitySet,
             filter: "(" + string.Join(" or ", fields.Select(f => $"_{f}_value ne null")) + ")",
+            select: $"{idColumn},modifiedon",
+            top: MaxScanRows + 1,
+            cancellationToken: ct).ConfigureAwait(false);
+
+        var roots = rows
+            .Select(r => (Id: ReadGuid(r, idColumn), Modified: ReadDate(r, "modifiedon")))
+            .Where(r => r.Id is not null)
+            .Select(r => new AssignedRootRef(rootType, r.Id!.Value, r.Modified))
+            .ToList();
+
+        return roots.Count > MaxScanRows ? (roots.Take(MaxScanRows).ToList(), true) : (roots, false);
+    }
+
+    /// <summary>
+    /// Task 114 (owner round 67 amendment 4(b)): roots of one type whose Access Permission is RESTRICTED, newest change
+    /// first — the candidates of <see cref="Sprk.Bff.Api.Infrastructure.ExternalAccess.RestrictedExternalShareRemover"/> in the
+    /// job (a share made through the platform's Share dialog after the record became Restricted). <c>Truncated</c> when more
+    /// exist than one scan reads. Exceptions propagate.
+    /// </summary>
+    internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
+        ExternalGrantRootType rootType, CancellationToken ct)
+    {
+        var idColumn = RootIdColumnFor(rootType);
+        var rows = await _dataverse.QueryAsync<JsonElement>(
+            ExternalGrantRoot.BindFor(rootType).EntitySet,
+            filter: $"sprk_accesspermission eq {ExternalParticipationService.AccessPermissionRestricted}",
             select: $"{idColumn},modifiedon",
             top: MaxScanRows + 1,
             cancellationToken: ct).ConfigureAwait(false);

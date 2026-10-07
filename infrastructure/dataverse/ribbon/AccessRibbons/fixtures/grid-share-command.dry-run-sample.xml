@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DRY-RUN FIXTURE ONLY - never imported, and NOT a copy of the platform's definition.
+
+  unified-access-control-r2 task 114 follow-up. Set-AccessRibbon.ps1's dry run has no Dataverse to read the platform's
+  GRID / SUBGRID Share command from, so it hands Merge-AccessRibbon.ps1 -GridShareCommandXml this stand-in, which has the
+  SHAPE the merge works on, so the transformation (copy, strip sprk.Access.* rule references, append
+  sprk.Access.<entity>.ShareAllowedSelection.EnableRule, idempotent) is exercised before any import. -Apply reads the live
+  commands (the Command of the Mscrm.HomepageGrid.<entity>.Share and Mscrm.SubGrid.<entity>.Share buttons) and merges THEM.
+-->
+<GridShareCommands>
+  <CommandDefinition Id="Mscrm.ShareSelectedRecord">
+    <EnableRules>
+      <EnableRule Id="Mscrm.SelectionCountAtLeastOne" />
+    </EnableRules>
+    <DisplayRules>
+      <DisplayRule Id="Mscrm.ShareSelectedEntityPermission" />
+    </DisplayRules>
+    <Actions />
+  </CommandDefinition>
+</GridShareCommands>
