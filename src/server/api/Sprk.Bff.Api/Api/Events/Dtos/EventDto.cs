@@ -77,7 +77,9 @@ public record EventDto
     public int StateCode { get; init; }
 
     /// <summary>
-    /// Status reason — a live <see cref="EventStatusCode"/> value (e.g. Draft 1, Open 659490001, Completed 659490002).
+    /// Status reason (statuscode) — live values in <see cref="Spaarke.Dataverse.EventStatusCode"/>:
+    /// Draft (1), Open (659490001), Completed (659490002), Closed (659490003), Cancelled (659490004),
+    /// Transferred (659490005), On Hold (659490006), Reassigned (659490007), No Further Action (2).
     /// </summary>
     public int StatusCode { get; init; }
 
@@ -87,7 +89,8 @@ public record EventDto
     public string Status { get; init; } = string.Empty;
 
     /// <summary>
-    /// Event priority: Low (0), Normal (1), High (2), Urgent (3).
+    /// Event priority (sprk_priority) — live <see cref="Spaarke.Dataverse.EventPriority"/> value: Low (100000000),
+    /// Normal (100000001), High (100000002), Urgent (100000003).
     /// </summary>
     public int? Priority { get; init; }
 
@@ -112,67 +115,11 @@ public record EventDto
     public DateTime ModifiedOn { get; init; }
 }
 
-/// <summary>
-/// Status code values for Event records — the LIVE <c>sprk_event.statuscode</c> option set.
-/// </summary>
-/// <remarks>
-/// unified-access-control-r2 task 159 (#1098): these used to be 1-7 (Draft/Planned/Open/OnHold/Completed/Cancelled/
-/// Deleted), values that do not exist on the table, so the create default, complete and the list's status filter
-/// wrote or matched options Dataverse does not have. Read from live metadata (spaarkedev1, 2026-10-03; task note
-/// §0.2 (e)) and pinned by EventRegardingPayloadTests. There is no "Planned" and no "Deleted" status.
-/// </remarks>
-public static class EventStatusCode
-{
-    public const int Draft = 1;
-    public const int NoFurtherAction = 2;
-    public const int Open = 659490001;
-    public const int Completed = 659490002;
-    public const int Closed = 659490003;
-    public const int Cancelled = 659490004;
-    public const int Transferred = 659490005;
-    public const int OnHold = 659490006;
-    public const int Reassigned = 659490007;
+// Status reason values: Spaarke.Dataverse.EventStatusCode — ONE home, next to the payload builders that write them
+// (task 097; unified-access-control-r2 task 159 fixed the same values independently in a copy here — merged into one).
 
-    /// <summary>
-    /// Converts status code to display name.
-    /// </summary>
-    public static string GetDisplayName(int statusCode) => statusCode switch
-    {
-        Draft => "Draft",
-        NoFurtherAction => "No Further Action",
-        Open => "Open",
-        Completed => "Completed",
-        Closed => "Closed",
-        Cancelled => "Cancelled",
-        Transferred => "Transferred",
-        OnHold => "On Hold",
-        Reassigned => "Reassigned",
-        _ => "Unknown"
-    };
-}
-
-/// <summary>
-/// Priority values for Event records.
-/// </summary>
-public static class EventPriority
-{
-    public const int Low = 0;
-    public const int Normal = 1;
-    public const int High = 2;
-    public const int Urgent = 3;
-
-    /// <summary>
-    /// Converts priority value to display name.
-    /// </summary>
-    public static string GetDisplayName(int priority) => priority switch
-    {
-        Low => "Low",
-        Normal => "Normal",
-        High => "High",
-        Urgent => "Urgent",
-        _ => "Normal"
-    };
-}
+// Priority values: Spaarke.Dataverse.EventPriority (task 097 — the former 0..3 set that lived here was rejected by
+// Dataverse; live sprk_priority is Low 100000000 … Urgent 100000003).
 
 /// <summary>
 /// The API's regarding record type values (0-7). These are NOT Dataverse values: <c>sprk_regardingrecordtype</c> is a

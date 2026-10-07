@@ -226,25 +226,12 @@ public sealed class WorkspaceAiService
         var dueDate = entity.GetAttributeValue<DateTime?>("sprk_duedate");
         var statusCode = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 0;
 
-        var priorityLabel = priority switch
-        {
-            0 => "Low",
-            1 => "Normal",
-            2 => "High",
-            3 => "Urgent",
-            _ => "Unknown"
-        };
-        var statusLabel = statusCode switch
-        {
-            1 => "Draft",
-            2 => "Planned",
-            3 => "Open",
-            4 => "On Hold",
-            5 => "Completed",
-            6 => "Cancelled",
-            7 => "Deleted",
-            _ => "Unknown"
-        };
+        // Task 097: live sprk_event priorities (the former 0..3 map labelled every live value "Unknown").
+        var priorityLabel = priority.HasValue
+            ? Spaarke.Dataverse.EventPriority.GetDisplayName(priority.Value)
+            : "Unknown";
+        // Task 097: live sprk_event status reasons (the former 1..7 map labelled every live Open/Completed "Unknown").
+        var statusLabel = Spaarke.Dataverse.EventStatusCode.GetDisplayName(statusCode);
 
         var parts = new List<string>
         {

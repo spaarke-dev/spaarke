@@ -112,6 +112,8 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
 4. **✅ DONE (RED-4 B, 2026-08-17) — silent-empty SDK stubs → throw.** The 8 event/field-mapping query stubs on
    `DataverseServiceClientImpl` (`QueryEventsAsync`, `GetEventAsync`, `QueryEventLogsAsync`, `GetEventTypesAsync`,
    `GetEventTypeAsync`, `QueryFieldMappingProfilesAsync`, `GetFieldMappingProfileAsync`, `GetFieldMappingRulesAsync`)
+   — *`GetEventTypesAsync`/`GetEventTypeAsync` were later deleted outright (no callers; their `sprk_eventtypes`
+   entity set returns 404 live — the table is `sprk_eventtype_ref`), spaarke-ontology-platform-r1 task 097* —
    returned empty + `LogWarning` — masking a mis-route as "no data" (the DEF-1 bug class). Now they `throw
    NotImplementedException`, consistent with the sibling event/field-mapping methods, so a mis-route (injecting
    the composite `IDataverseService` instead of the narrow interface) fails LOUD. Gated behind DEF-1: done only

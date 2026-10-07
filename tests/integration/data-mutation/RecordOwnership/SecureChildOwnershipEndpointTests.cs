@@ -222,13 +222,13 @@ public class SecureChildOwnershipEndpointTests
         public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
             int? regardingRecordType = null, Guid? regardingRecordId = null, Guid? eventTypeId = null, int? statusCode = null,
             int? priority = null, DateTime? dueDateFrom = null, DateTime? dueDateTo = null, int skip = 0, int top = 50,
-            Guid? ownerUserId = null, CancellationToken ct = default) =>
+            Guid? ownerUserId = null, IReadOnlyCollection<int>? excludeStatusCodes = null, CancellationToken ct = default) =>
             Task.FromResult((Array.Empty<EventEntity>(), 0));
 
         public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
             Guid callerSystemUserId, int? regardingRecordType = null, Guid? regardingRecordId = null,
             Guid? regardingRecordTypeRefId = null, Guid? eventTypeId = null, int? statusCode = null, int? priority = null,
-            DateTime? dueDateFrom = null, DateTime? dueDateTo = null, int skip = 0, int top = 50, Guid? ownerUserId = null,
+            DateTime? dueDateFrom = null, DateTime? dueDateTo = null, int skip = 0, int top = 50, EventOwnershipScope? mine = null,
             CancellationToken ct = default) =>
             Task.FromResult((Array.Empty<EventEntity>(), 0));
 
@@ -238,11 +238,6 @@ public class SecureChildOwnershipEndpointTests
             return Task.CompletedTask;
         }
 
-        public Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default) =>
-            Task.FromResult(Array.Empty<EventTypeEntity>());
-
-        public Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult<EventTypeEntity?>(null);
     }
 
     /// <summary>The shared minimal host: fake authentication, the real authorization stack at the access seam.</summary>

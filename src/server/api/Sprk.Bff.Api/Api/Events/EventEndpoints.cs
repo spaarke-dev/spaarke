@@ -69,6 +69,25 @@ public static class EventEndpoints
     /// <summary>A create whose FR-26 core-ancestor stamp could not be derived: nothing is written.</summary>
     internal const string RegardingStampFailedErrorCode = "events.regarding_stamp_failed";
 
+    /// <summary>The 400 text for a priority outside the live <c>sprk_priority</c> option set (task 097).</summary>
+    internal static readonly string PriorityValidationMessage =
+        "Priority must be a sprk_priority value: " +
+        string.Join(", ", EventPriority.All.Select(p => $"{p.Label} ({p.Value})")) + ".";
+
+    /// <summary>Meter for the events API (registered in TelemetryModule).</summary>
+    public const string MeterName = "Sprk.Bff.Api.Events";
+
+    private static readonly System.Diagnostics.Metrics.Meter AuditMeter = new(MeterName);
+
+    private static readonly System.Diagnostics.Metrics.Counter<long> AuditLogWriteFailures =
+        AuditMeter.CreateCounter<long>(
+            name: "event_audit_log_write_failures_total",
+            unit: "{write}",
+            description: "sprk_eventlog audit rows that could not be written after the event write committed, by action.");
+
+    /// <summary>Stable log event id for an audit-log write failure (alert on it).</summary>
+    internal static readonly EventId AuditLogWriteFailedEventId = new(9701, "EventAuditLogWriteFailed");
+
     /// <summary>
     /// Registers event endpoints with the application.
     /// </summary>
@@ -151,7 +170,7 @@ public static class EventEndpoints
             .WithName("CompleteEvent")
             .WithSummary("Mark an event as completed")
             .WithDescription("Changes the event status to Completed. " +
-                "Can only complete events with status Draft, Open or On Hold. " +
+                "Can only complete events with status Draft, Open, On Hold or Reassigned. " +
                 "Returns 200 OK with action details on success, 400 if status transition is invalid, 404 if not found.")
             .Produces<EventActionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -233,12 +252,13 @@ public static class EventEndpoints
     private static IResult? ValidateCommonFields(
         int? priority, int? regardingRecordType, Guid? regardingRecordId, DateTime? scheduledStart, DateTime? scheduledEnd)
     {
-        // Validate priority if provided
-        if (priority.HasValue && (priority < 0 || priority > 3))
+        // Validate priority if provided — against the LIVE sprk_priority option set (task 097: the former 0..3 range is
+        // not an option of the column, so every create carrying a priority was a Dataverse 400).
+        if (priority.HasValue && !EventPriority.IsDefined(priority.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["Priority"] = ["Priority must be between 0 (Low) and 3 (Urgent)."]
+                ["Priority"] = [PriorityValidationMessage]
             });
         }
 
@@ -353,6 +373,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService = null!,
         ICommunicationDataverseService communicationService = null!,
         ICallerSystemUserResolver callerResolver = null!,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
     {
@@ -409,12 +430,12 @@ public static class EventEndpoints
             regardingId = parsed;
         }
 
-        // Validate priority if provided
-        if (priority.HasValue && (priority < 0 || priority > 3))
+        // Validate priority if provided — live sprk_priority values (task 097; 0..3 never matched a row).
+        if (priority.HasValue && !EventPriority.IsDefined(priority.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["priority"] = ["Priority must be between 0 (Low) and 3 (Urgent)."]
+                ["priority"] = [PriorityValidationMessage]
             });
         }
 
@@ -494,7 +515,19 @@ public static class EventEndpoints
                 regardingTypeRefId = row.Id;
             }
 
-            // ── (4) The query, AS the caller. The owner narrowing is kept, with the same resolved id. ──────────
+            // ── (4) The query, AS the caller, narrowed to "my events" (OWNER DECISION B, task 097): owned by the caller,
+            //    OR assigned to their linked contact, OR created by them (sprk_createdbyperson). A BFF-created event is
+            //    owned by a business-unit TEAM (task 146 / I-6), so owner alone would hide it from its own creator.
+            Guid? linkedContact = null;
+            try
+            {
+                linkedContact = (await identity.ResolveAsync(callerSystemUserId, ct)).ContactId;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex, "Event list: the caller's linked contact could not be resolved; listing owned/created events only.");
+            }
+
             var (entities, totalCount) = await dataverseService.QueryEventsAsCallerAsync(
                 callerSystemUserId,
                 regardingRecordType,
@@ -507,8 +540,8 @@ public static class EventEndpoints
                 dueDateTo,
                 (int)skip,
                 pageSize,
-                ownerUserId: callerSystemUserId,
-                ct);
+                mine: MyEventsScope(callerSystemUserId, linkedContact),
+                ct: ct);
 
             var response = new EventListResponse
             {
@@ -789,6 +822,61 @@ public static class EventEndpoints
         string? Number,
         IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps);
 
+    /// <summary>Pause before the one catalog retry: long enough for a throttle window to pass, short for a request.</summary>
+    internal static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// The type's <c>sprk_recordtype_ref</c> row, read once more after a TRANSIENT fault (task 097 round 11). The event
+    /// create has no catalog cache, and since round 9 the regarding NUMBER column comes from this row — so one timeout
+    /// would otherwise leave the number empty where the old hard-coded map (matter / project / invoice) still wrote it.
+    /// A second fault, or a permanent one, propagates to the caller's handler: the number is left empty and the create
+    /// still succeeds.
+    /// </summary>
+    internal static async Task<Microsoft.Xrm.Sdk.Entity?> ReadRecordTypeRefWithOneRetryAsync(
+        ICommunicationDataverseService recordTypes, string logicalName, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            return await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+        }
+        catch (Exception ex) when (IsTransientCatalogFault(ex, ct))
+        {
+            logger.LogWarning(ex, "sprk_recordtype_ref read for '{Entity}' hit a transient fault; retrying once.", logicalName);
+            await Task.Delay(CatalogRetryDelay, ct);
+            return await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+        }
+    }
+
+    // Dataverse service-protection (throttling) fault codes — the same set GrantExpiryReminderJob retries on.
+    // https://learn.microsoft.com/power-apps/developer/data-platform/api-limits
+    private static readonly HashSet<int> ThrottlingErrorCodes = new() { -2147015902, -2147015903, -2147015898 };
+
+    /// <summary>
+    /// A timeout or a throttle — the faults a second attempt can clear. The caller's own cancellation is not one; neither
+    /// is a rejection (privilege, a missing column), which would fail the same way again.
+    /// </summary>
+    internal static bool IsTransientCatalogFault(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return false;
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case TimeoutException or TaskCanceledException:
+                    return true;
+                case HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests
+                    or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout }:
+                    return true;
+                case System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault:
+                    return ThrottlingErrorCodes.Contains(fault.Detail?.ErrorCode ?? 0);
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Resolves the regarding write set for <paramref name="regardingType"/>/<paramref name="regardingId"/>, or returns
     /// null when the FR-26 core-ancestor stamp cannot be derived — the caller then writes NOTHING (fail closed).
@@ -800,7 +888,8 @@ public static class EventEndpoints
     ///   <item>entity set — <see cref="IGenericEntityService.GetEntitySetNameAsync"/>, the SAME call the filter made;</item>
     ///   <item>record-type row — <see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>; absent or faulted →
     ///   the record-type lookup is left unset with a warning (non-fatal, as TodoRegardingBuilder);</item>
-    ///   <item>name/number — the target's own columns for matter/project (non-fatal; the request's name otherwise);</item>
+    ///   <item>name/number — the target's own columns: the name from the one display-name map, the number from the column the</item>
+    ///   <item>record-type row names (non-fatal; the request's name otherwise, no number);</item>
     ///   <item>core stamps — <see cref="CoreAncestorResolver.DeriveForHostAsync"/>; an Error outcome, or a stamp whose
     ///   entity set cannot be read, refuses the write.</item>
     /// </list>
@@ -821,12 +910,16 @@ public static class EventEndpoints
         var entitySet = await entities.GetEntitySetNameAsync(logicalName, ct);
 
         Guid? recordTypeRefId = null;
+        string? numberField = null;
         try
         {
-            var row = await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+            var row = await ReadRecordTypeRefWithOneRetryAsync(recordTypes, logicalName, logger, ct);
             if (row is not null && row.Id != Guid.Empty)
             {
                 recordTypeRefId = row.Id;
+                // Task 097 round 9: the type's reference-number column, as its catalog row names it (invoice, analysis,
+                // account, work assignment and budget had no number before — the hard-coded map knew matter/project only).
+                numberField = DataverseRegardingRecordType.RecordNumberFieldOf(row);
             }
             else
             {
@@ -845,7 +938,6 @@ public static class EventEndpoints
         var name = requestName;
         string? number = null;
         var nameField = DataverseRegardingRecordType.GetPrimaryNameField(logicalName);
-        var numberField = DataverseRegardingRecordType.GetReferenceNumberField(logicalName);
         if (nameField is not null || numberField is not null)
         {
             try
@@ -866,6 +958,24 @@ public static class EventEndpoints
             {
                 logger.LogWarning(ex,
                     "Regarding name/number read failed for {Entity}; keeping the request's name.", logicalName);
+
+                // Task 097 round 10: a catalog row can name a number column this environment lacks — the combined read
+                // then faults. Read the name again on its own so a bad number column never costs the server's name.
+                if (nameField is not null && numberField is not null)
+                {
+                    try
+                    {
+                        var nameOnly = await entities.RetrieveAsync(logicalName, regardingId, new[] { nameField }, ct);
+                        if (nameOnly.GetAttributeValue<string>(nameField) is { Length: > 0 } serverName)
+                        {
+                            name = serverName;
+                        }
+                    }
+                    catch (Exception retry) when (retry is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        logger.LogDebug(retry, "Regarding name read failed for {Entity}; keeping the request's name.", logicalName);
+                    }
+                }
             }
         }
 
@@ -964,8 +1074,9 @@ public static class EventEndpoints
         // Create the event record
         var (id, createdOn) = await dataverseService.CreateEventAsync(dataverseRequest, ct);
 
-        // Create Event Log entry for the creation. Best-effort, like every other log write here: the event already
-        // exists, so a failed log must not turn the create into a 500 the caller retries into a duplicate event.
+        // Create Event Log entry for the creation. Task 097 review F1: the event row is already committed, so an audit
+        // failure must never become a 500 (a client retry would create a SECOND event) — it is an Error with a stable
+        // event id and a counter (AuditLogWriteFailed), never swallowed silently.
         try
         {
             await dataverseService.CreateEventLogAsync(
@@ -976,10 +1087,9 @@ public static class EventEndpoints
                 createdByPersonId,
                 ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            logger.LogWarning(ex, "Failed to create event log entry. EventId={EventId}, Action={Action}",
-                id, Spaarke.Dataverse.EventLogAction.Created);
+            ReportAuditLogFailure(logger, ex, id, Spaarke.Dataverse.EventLogAction.Created);
         }
 
         return (id, createdOn);
@@ -1042,7 +1152,7 @@ public static class EventEndpoints
     /// Marks an event as completed. The filter has established Write; the status-transition check runs AFTER it,
     /// because it would otherwise disclose the state of an event the caller may not see.
     /// </summary>
-    private static async Task<IResult> CompleteEventAsync(
+    internal static async Task<IResult> CompleteEventAsync(
         Guid id,
         HttpContext httpContext,
         IEventDataverseService dataverseService,
@@ -1063,7 +1173,7 @@ public static class EventEndpoints
                 return ProblemDetailsHelper.UniformRecordNotFound(httpContext);
             }
 
-            // Validate status transition: Can only complete if status is Draft, Open, or OnHold
+            // Validate status transition: only from open work (EventStatusCode.IsOpenWork — OWNER DECISION A).
             if (!CanCompleteEvent(existing.StatusCode))
             {
                 var validStatuses = GetValidStatusesForCompletion();
@@ -1120,21 +1230,21 @@ public static class EventEndpoints
     /// Checks if an event can be completed based on its current status.
     /// </summary>
     /// <remarks>
-    /// Valid transitions to Completed (live option set, task 159): Draft, Open, On Hold. Every other status —
-    /// Completed, Closed, Cancelled, Transferred, Reassigned, No Further Action — is not completable through the API.
+    /// OWNER DECISION A (2026-10-06, task 097): an event is completable exactly when it is open work —
+    /// <see cref="EventStatusCode.IsOpenWork"/> (Draft, Open, On Hold, Reassigned), the SAME predicate the To Do
+    /// generation rules use. Completed, Closed, Cancelled, Transferred and No Further Action are refused.
     /// </remarks>
-    private static bool CanCompleteEvent(int statusCode) =>
-        statusCode is EventStatusCode.Draft
-            or EventStatusCode.Open
-            or EventStatusCode.OnHold;
+    internal static bool CanCompleteEvent(int statusCode) => EventStatusCode.IsOpenWork(statusCode);
 
     /// <summary>
     /// Gets the list of valid statuses for completion as a display string.
     /// </summary>
     private static string GetValidStatusesForCompletion() =>
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Draft)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Open)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.OnHold)}";
+        string.Join(", ", EventStatusCode.All.Where(s => EventStatusCode.IsOpenWork(s.Value)).Select(s => s.Label));
+
+    /// <summary>"My events" (owner decision B): owner OR assigned contact OR created-by person — the caller each time.</summary>
+    internal static EventOwnershipScope MyEventsScope(Guid callerSystemUserId, Guid? linkedContactId) =>
+        new(callerSystemUserId, linkedContactId is { } c && c != Guid.Empty ? c : null, callerSystemUserId);
 
     /// <summary>
     /// Updates an event's status in Dataverse.
@@ -1187,10 +1297,23 @@ public static class EventEndpoints
             var (logOwner, logPerson) = await ResolveEventLogOwnerAsync(ownership, eventId, httpContext, ct);
             await dataverseService.CreateEventLogAsync(eventId, action, description, logOwner, logPerson, ct);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            // Log but don't fail the main operation if event log creation fails
-            logger.LogWarning(ex, "Failed to create event log entry. EventId={EventId}, Action={Action}", eventId, action);
+            // Don't fail the main operation (it already committed) — but never silently (task 097 review F1).
+            ReportAuditLogFailure(logger, ex, eventId, action);
         }
+    }
+
+    /// <summary>
+    /// An audit-log write that failed AFTER its event write committed: an Error with the stable
+    /// <see cref="AuditLogWriteFailedEventId"/> and one <c>event_audit_log_write_failures_total</c> increment, tagged with
+    /// the action — alertable, never a 500 that would invite a retry of the committed write.
+    /// </summary>
+    private static void ReportAuditLogFailure(ILogger logger, Exception ex, Guid eventId, int action)
+    {
+        AuditLogWriteFailures.Add(1, new KeyValuePair<string, object?>("action", EventLogAction.GetDisplayName(action)));
+        logger.LogError(AuditLogWriteFailedEventId, ex,
+            "Event audit-log row could not be written after the event write committed. EventId={EventId}, Action={Action}",
+            eventId, EventLogAction.GetDisplayName(action));
     }
 }

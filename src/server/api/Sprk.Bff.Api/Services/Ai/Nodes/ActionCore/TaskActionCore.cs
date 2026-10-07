@@ -71,7 +71,7 @@ internal sealed class TaskActionCore
     /// so a task created with any other status cannot be surfaced. Live option set: Draft(1) /
     /// Open(659490001) / Completed(659490002) / Cancelled(659490004).
     /// </summary>
-    private const int EventStatusOpen = 659490001;
+    private const int EventStatusOpen = EventStatusCode.Open; // task 097 review F8: the one source of truth
 
     /// <summary>
     /// A caller-supplied regarding (polymorphic on the OOB task) maps to <c>sprk_event</c>'s TYPED regarding

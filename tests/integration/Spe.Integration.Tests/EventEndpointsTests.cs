@@ -112,8 +112,10 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
     {
         SkipIfNotConfigured();
 
-        // Arrange - include filter query parameters
-        var url = "/api/v1/events?statusCode=3&priority=1&pageNumber=1&pageSize=20";
+        // Arrange - include filter query parameters. Task 097: the values are the LIVE sprk_event option-set values
+        // (statuscode Open 659490001, sprk_priority High 100000002). The former statusCode=3 / priority=1 do not exist in
+        // Dataverse; priority is validated against the live set, so priority=1 is (correctly) a 400.
+        var url = $"/api/v1/events?statusCode={Spaarke.Dataverse.EventStatusCode.Open}&priority={Spaarke.Dataverse.EventPriority.High}&pageNumber=1&pageSize=20";
 
         // Act
         var response = await _httpClient!.GetAsync(url);
@@ -284,7 +286,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         var request = new CreateEventRequest(
             Subject: "Test Event",
             Description: "Test Description",
-            Priority: 1
+            Priority: Spaarke.Dataverse.EventPriority.Normal
         );
 
         // Act
@@ -303,7 +305,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
         SkipIfNotConfigured();
 
         // Arrange - send raw JSON with proper content type
-        var json = """{"subject":"Test Event","description":"Test Description","priority":1}""";
+        var json = """{"subject":"Test Event","description":"Test Description","priority":100000001}""";
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         // Act
@@ -334,7 +336,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
             ScheduledStart: DateTime.UtcNow,
             ScheduledEnd: DateTime.UtcNow.AddHours(1),
             DueDate: DateTime.UtcNow.AddDays(7),
-            Priority: 2
+            Priority: Spaarke.Dataverse.EventPriority.High
         );
 
         // Act
@@ -676,7 +678,7 @@ public class EventEndpointsTests : IClassFixture<IntegrationTestFixture>
     {
         SkipIfNotConfigured();
 
-        // Arrange - Priority is out of range (0-3)
+        // Arrange - Priority is not a live sprk_priority value (100000000..100000003)
         var json = """{"subject":"Test","priority":10}""";
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 

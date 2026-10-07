@@ -106,16 +106,26 @@ const KNOWN_NAV_PROPERTIES: Record<string, string> = {
  * Map statuscode → required statecode for valid Dataverse state transitions.
  * Dataverse requires statecode + statuscode to be set together.
  *
- * Active (statecode 0): Draft, Open, On Hold
- * Inactive (statecode 1): Completed, Closed, Cancelled
+ * LIVE sprk_event option set (verified spaarkedev1 2026-10-05; task 097):
+ * Active (statecode 0): Draft, Open, Completed, Closed, On Hold, Reassigned
+ * Inactive (statecode 1): No Further Action, Cancelled, Transferred
+ *
+ * Completed and Closed are ACTIVE — pairing them with statecode 1 is rejected by
+ * Dataverse ("not a valid status code for state code Inactive"), which made
+ * every "mark Completed / Closed" save from this pane fail. Pinned against
+ * docs/data-model/sprk_event-related-tables.md by the BFF test
+ * EventStatusWritePathTests.EventDetailSidePane_StatusMap_PairsEveryStatusWithItsLiveState.
  */
 const STATUSCODE_STATECODE_MAP: Record<number, number> = {
   1:         0, // Draft → Active
   659490001: 0, // Open → Active
+  659490002: 0, // Completed → Active
+  659490003: 0, // Closed → Active
   659490006: 0, // On Hold → Active
-  659490002: 1, // Completed → Inactive
-  659490003: 1, // Closed → Inactive
+  659490007: 0, // Reassigned → Active
+  2:         1, // No Further Action → Inactive
   659490004: 1, // Cancelled → Inactive
+  659490005: 1, // Transferred → Inactive
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
