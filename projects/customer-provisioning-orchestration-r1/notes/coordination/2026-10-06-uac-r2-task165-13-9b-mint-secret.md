@@ -23,4 +23,4 @@ UAC-r2's `notes/task-165-admin-surfaces.md` §13.9(b) — carried unchanged into
 What UAC-r2 can still do safely: `Test-SpeConfigSecretNames.ps1 -Verify` (read-only), and decide whether an EMPTY secret name
 is acceptable to its `spe-owning-app-` prefix rule (round 35 item 3) now that no SPE Admin path reads a secret.
 
-Status: **NOT YET DELIVERED** — tracked in `current-task.md` "Cross-project deliveries".
+Status: **handed to the owner for relay on 2026-10-07**, as part of one message to UAC-r2 (with issues #1363 and #1364).

@@ -96,7 +96,10 @@ Rationale: `notes/decisions.md`. The owner's D1–D29 are in plan §2.
 - Every live Azure/Entra/Dataverse/Exchange change and every deploy needs the owner's OK, per action. Read-only checks are fine. Record each action in the task POML notes.
 
 **Keep — never delete or alter without the owner**
-- `rg-spaarke-shared-prod` (subscription "Spaarke Shared Production" `cd95fcec…`) and the `Spaarke Model 1` SPE billing account (Syntex) in it (D23). Add no lock and no tags to the RG (2026-10-03). *(verify: it already carries five Bicep tags, e.g. `scope: platform-shared`. Did the decision mean no new protective tags, or no tags at all?)*
+- `rg-spaarke-shared-prod` (subscription "Spaarke Shared Production" `cd95fcec…`) and the `Spaarke Model 1` SPE billing account `Microsoft.Syntex/accounts` `dc4749c2-…` in it (D23). The billing binding is permanent and cannot be re-attached.
+  - Keep the RG's Bicep tags as they are.
+  - Put no lock on the RG: it would block T241's deletion of the 13 shared-tier resources inside it.
+  - At T241's close, propose a resource-level `CanNotDelete` lock on the Syntex account only. It is a live action, so ask first (owner 2026-10-07: do what is technically required or helpful).
 - `sprk-prod-kv`: not before 2026-11-23 (T241; KV lifecycle).
 - Registry rows (`sprk_dataverseenvironment`): never delete, deactivate instead (T237).
 - `Spaarke Exchange Admin` `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`, `Spaarke SPE Model 1 Owner` `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, and Graph Explorer's grant on `Spaarke Model 1` (2026-10-03).

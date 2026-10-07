@@ -28,9 +28,14 @@
 
 ## Cross-project deliveries (track until delivered)
 
-- **INCOMING-141 + INCOMING-145 from UAC-r2** — on master since #1312; ACCEPTED here as T255 / T256 (2026-10-06). Still to do: acknowledge to UAC-r2 (owner relays, or a #1094 comment — **ask the owner first**).
-- **`sprk_noaccessentry` prerequisite — NOT RECEIVED as a hand-off** (2026-10-06). UAC-r2 documents it only in its own notes (`DEPLOY-CHECKLIST.md`, `batch4-integration-steps.md`, `docs/data-model/INDEX.md`); no INCOMING file tells provisioning how a new environment gets the table (solution component? which solution? before H9?). Ask UAC-r2 (via the owner) for it; T256 / T218 depend on it.
-- **To UAC-r2: do NOT run `task-165-admin-surfaces.md` §13.9(b)/§14.9(b) step 2 (`-MintClientSecret` on `bfac7f6e`)** — conflicts with D16/T250 and is unnecessary since SPE Admin runs as the BFF identity (2026-10-04). Note: `notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md`. **NOT YET DELIVERED** — ask the owner how to deliver (relay or #1094).
+- **2026-10-07: one relay message for UAC-r2 handed to the owner** (the owner relays it). It covers:
+  - the acknowledgement of INCOMING-141/145 (accepted as T255/T256);
+  - the `sprk_noaccessentry` request — issue **#1364** (`notes/defer-issues.md` ISS-001);
+  - the demo-grant marker defect in their task-171 code — issue **#1363** (ISS-002);
+  - the §13.9(b) do-not-mint note (`notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md`);
+  - how the merge re-routed their app-only SPE calls through `SpeContainerOwnershipGuard`.
+
+  Still open: UAC-r2's answer on #1364, which T256/T218/T186 wait on, and its fix for #1363.
 
 ## Open items (no task yet)
 
