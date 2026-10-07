@@ -7,8 +7,8 @@
 //   [widget call] → [collector queries Dataverse live, 6 entity types] → [narrator] → [response].
 //
 // MVP SCOPE (this file) — 6 operator-specified channels per wave12-mvp-completion-plan §2.1:
-//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate in next N days, status=Open
-//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate before the caller's local today, status=Open (D-43)
+//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate in next N days, status=open work (IsOpenWork)
+//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate before the caller's local today, status=open work (IsOpenWork) (D-43)
 //   (D-27, task 065 folded into 098: sprk_duedate is THE due date — the one the Do lane shows and Reschedule
 //   writes. sprk_finalduedate is informational and never decides membership, order or the displayed date.)
 //   3. Documents      — sprk_document, modifiedon in the recency window
@@ -127,8 +127,13 @@ public class DailyBriefingCollector : ICodedWorkflow
     // Source of truth: sprk_eventtype_ref records in spaarkedev1.
     private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
 
-    // sprk_event statuscode values (consistent with deployed notification playbooks).
-    private const int EventStatusOpen = Spaarke.Dataverse.EventStatusCode.Open; // task 097 review F8: the one source of truth
+    // sprk_event "open work" statuscode clause: the ONE predicate, EventStatusCode.IsOpenWork (Draft, Open, On Hold,
+    // Reassigned), expressed as an OData OR-list. Owner decision D-57 (2026-10-07): the briefing no longer filters on
+    // Open alone, which hid every event that landed in Draft (the form / wizard default).
+    private static readonly string EventOpenWorkStatusFilter =
+        "(" + string.Join(" or ", Spaarke.Dataverse.EventStatusCode.All
+            .Where(s => Spaarke.Dataverse.EventStatusCode.IsOpenWork(s.Value))
+            .Select(s => $"statuscode eq {s.Value.ToString(CultureInfo.InvariantCulture)}")) + ")";
 
     // sprk_todo statuscode values per docs/data-model schema (Open=1, In Progress=659490001).
     // Treat both as "active" for the today/tomorrow surface.
@@ -840,7 +845,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     };
 
     /// <summary>
-    /// Upcoming Tasks — sprk_event of type Task, due in the next N days, status Open.
+    /// Upcoming Tasks — sprk_event of type Task, due in the next N days, status open work (IsOpenWork).
     /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
     private Task<ChannelResult> QueryUpcomingTasksAsync(
@@ -864,7 +869,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// Overdue Tasks — sprk_event of type Task, due before the caller's local today (D-43), status Open.
+    /// Overdue Tasks — sprk_event of type Task, due before the caller's local today (D-43), status open work (IsOpenWork).
     /// For the caller: the event itself, or its regarding matter / project.
     /// </summary>
     private async Task<ChannelResult> QueryOverdueTasksAsync(
@@ -896,7 +901,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     }
 
     /// <summary>
-    /// The sprk_event read shared by Upcoming + Overdue: type=Task, status=Open, the caller-provided date clause, and
+    /// The sprk_event read shared by Upcoming + Overdue: type=Task, status=open work (EventStatusCode.IsOpenWork), the caller-provided date clause, and
     /// the event-side OR regarding-matter OR regarding-project people-targeted terms.
     /// </summary>
     private async Task<ChannelResult> QueryEventsAsync(
@@ -915,7 +920,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             new[]
             {
                 $"_sprk_eventtype_ref_value eq {EventTypeTask}",
-                $"statuscode eq {EventStatusOpen.ToString(CultureInfo.InvariantCulture)}",
+                EventOpenWorkStatusFilter,
                 dateFilter,
             },
             new[]

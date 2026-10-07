@@ -274,6 +274,34 @@ public sealed class DailyBriefingCollectorTests
     }
 
     [Fact]
+    public async Task CollectAsync_TaskChannels_SelectExactlyTheOpenWorkStatuses()
+    {
+        // D-57 (2026-10-07): the briefing uses the same open-work predicate as everything else
+        // (EventStatusCode.IsOpenWork). The old filter was `statuscode eq Open` alone, which hid every Draft event
+        // (the platform default) and every On Hold / Reassigned one. Evaluate the clause the collector sent against
+        // every real status: Draft, Open, On Hold, Reassigned appear; Completed, Closed, Cancelled etc. do not.
+        var query = AllChannelsQuery();
+        await Sut(query, PeopleResolver(AllSets))
+            .CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        var eventCalls = query.Calls.Where(c => c.EntitySet == "sprk_events").ToList();
+        eventCalls.Should().NotBeEmpty();
+        foreach (var call in eventCalls)
+        {
+            var matched = System.Text.RegularExpressions.Regex.Matches(call.Query, @"statuscode eq (\d+)")
+                .Select(m => int.Parse(m.Groups[1].Value)).ToHashSet();
+
+            foreach (var (value, label, _) in EventStatusCode.All)
+            {
+                matched.Contains(value).Should().Be(EventStatusCode.IsOpenWork(value),
+                    $"status {label} must be {(EventStatusCode.IsOpenWork(value) ? "included in" : "excluded from")} the briefing's task channels");
+            }
+            matched.Should().Contain(new[] { EventStatusCode.Draft, EventStatusCode.OnHold })
+                .And.NotContain(EventStatusCode.Completed);
+        }
+    }
+
+    [Fact]
     public void Collector_HasNoAppOnlyDataverseClient()
     {
         // Criterion 10 made structural: the collector cannot issue an app-only read of a returned row because it
