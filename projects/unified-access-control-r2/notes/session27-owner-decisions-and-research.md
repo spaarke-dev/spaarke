@@ -1089,6 +1089,14 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Owner: "yes add this check/deactivation".** The existing `ExternalAccessReconciliationJob` gains rule R4: it deactivates an active grant whose record is gone, through the same lifecycle path as R1-R3. Ledger rows get the equivalent cleanup in `AssignedAccessReconciliationJob` if that is a small extension.
 - **The rule honours the job's mode.** On dev it only reports until the owner decides `ExternalAccess:Reconciliation:WritesEnabled` (task 137).
 
+## Round 72 (2026-10-06). BINDING. OWNER decisions on task 171's open items.
+
+1. **F4: ADD the locked item-id copy.** A field-security-locked `sprk_graphitemidbound` ("Spaarke BFF-Managed Field Writers" profile, so only the BFF writes it), written wherever the BFF sets a pointer. The pointer check requires `sprk_graphitemid` to equal it. A one-off backfill copies the current value (the pre-lock residual is accepted, as it was for the drive id).
+2. **F10: REFUSE share-link** for documents on secure or Restricted records (clear message). Standard documents keep it.
+3. **"Modified by" = the BFF app for app-only writes: ACCEPTED.** Owner: "if it is technically convoluted then ok". Graph's driveItem `createdBy`/`lastModifiedBy` are system-set and read-only; the SharePoint `ValidateUpdateListItem` author/editor rewrite is not supported on SPE containers. Spaarke records the person, and Office/Word desktop edits show the real user.
+4. **Delete the 20 empty test SPE containers** (ids in `notes/batch4-live-gates-2026-10-06.md` and round 68). The BFF has no delete route and the admin Graph token is refused, so the owner runs it as a SharePoint admin step.
+5. **The owner is available for the screen session now** (2026-10-06).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
