@@ -312,6 +312,7 @@ public sealed class EventRoutesLiveTests
             return; // not opted in
 
         var projectId = Guid.Parse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_EVENTS_PROJECT_ID")!);
+        var matterId = Guid.Parse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_EVENTS_MATTER_ID")!);
         var credential = new AzureCliCredential();
         using var dv = await DataverseClientAsync(dataverseUrl, credential);
         var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
@@ -325,6 +326,7 @@ public sealed class EventRoutesLiveTests
         _out.WriteLine($"operator {operatorId}: Dataverse time zone {code} = {zoneName}");
 
         await using var factory = new LiveEventsFactory(dataverseUrl, credential, _out);
+        await factory.ActAsAsync(operatorId); // as the 097 leg: the routes resolve the caller (master)
         using var bff = factory.CreateClient();
         bff.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "live-test");
 
@@ -338,6 +340,9 @@ public sealed class EventRoutesLiveTests
                 subject = "zz-098-test dates",
                 dueDate = "2026-10-20",
                 scheduledStart = "2026-10-01",
+                // Task 146 (master): an event is owned by its regarding record's team, never app-owned.
+                regardingRecordType = RegardingRecordType.Matter,
+                regardingRecordId = matterId,
             });
             var id = await RegisterCreatedAsync(post, createdEvents);
             Log("POST /api/v1/events (dueDate 2026-10-20, scheduledStart 2026-10-01)", post);
