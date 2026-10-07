@@ -1141,6 +1141,17 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
   - #1345: three ui-components jest suites fail on master.
 - **Earlier, from task 172:** #1339 (byRole attribution) and #1340 (membership role/identity vocabulary).
 
+## Round 77 (2026-10-07): BINDING. OWNER decision: accept the business-unit read gap on non-secure Restricted records
+
+- **The gap:** a licensed user flagged `sprk_isexternal = true` can still read a NON-secure Restricted record in their own business unit through the model-driven app. Dataverse's business-unit read privilege applies whatever the shares are, so removing shares can't stop it.
+- **Decision:** accept it as a known limit. The rejected alternatives were a separate business unit for external-flagged users, and making Restricted imply secure.
+- **Still enforced (task 114):**
+  - no share is given or kept;
+  - the OOB Share is hidden;
+  - the external SPA/Teams plane vetoes Restricted records for external-flagged system users (added after the 114 verifier's K1);
+  - secure Restricted records are fully closed.
+- **Recorded in:** task 114's note and PR as a known limit.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
