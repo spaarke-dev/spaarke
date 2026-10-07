@@ -127,7 +127,9 @@ public sealed record RestrictedExternalShareReport(
 /// <para><b>An external OWNER</b> keeps access by ownership, which no share revoke removes (and Dataverse refuses an
 /// app-only revoke of the owner's own share, 0x80040223): their share is left alone and reported once as
 /// <see cref="RestrictedExternalShareReport.OwnerIsExternal"/> — "reassign the record" — with a warning naming the record.
-/// Ownership is never changed here. When the owner cannot be read the revokes proceed, and a refused one is a failure.</para>
+/// Ownership is never changed here. When the owner cannot be read the revokes of the proven-external sharers still
+/// proceed, but the pass reports <c>owner-unreadable</c> and is INCOMPLETE (so the 5-minute job retries); a refused
+/// revoke is a failure too.</para>
 ///
 /// <para><b>Its children follow.</b> After any removal, <see cref="SecureChildShareSynchronizer.SyncRootAsync"/> mirrors
 /// the record's remaining shares onto its secure children at once (a no-op for an ordinary record); a fan-out that could

@@ -87,9 +87,11 @@ export interface IProvisionProjectResponse {
   /** The project's own SPE container, recorded on sprk_containerid. */
   speContainerId: string;
   /**
-   * The creating user the project was explicitly shared to (task 061). A successful response always
-   * carries it — the owner team has no members, so without this share the project is unreachable,
-   * and provisioning fails rather than return without it.
+   * The creating user the project was explicitly shared to (task 061). Normally present — the owner team
+   * has no members, so without this share the project is unreachable, and provisioning fails rather than
+   * return without it. Exception (task 114, owner rounds 67/76): on a Restricted record a creator flagged
+   * external is NOT shared to; the value is then the empty GUID, the creator is listed in
+   * `skippedPrincipals` (`principal_external_on_restricted`), and `noInternalReader` may be set.
    */
   sharedToCreatorSystemUserId: string;
   /**
