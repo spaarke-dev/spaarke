@@ -2,28 +2,30 @@
 
 > **Format:** CURRENT state only. Rewrite this file at each checkpoint, never prepend; keep it ≤10 KB. Standing rules live in the project `CLAUDE.md` ("Standing directives & gotchas"). Decisions live in `notes/session27-owner-decisions-and-research.md` (numbered rounds). Narrative goes in checkpoint commit messages. The old journal is `notes/handoff-history/current-task-archive-2026-10-06.md`: grep it, never load it.
 
-> **Last Updated**: 2026-10-06 ~23:30 UTC (checkpoint #19, after the conversion self-review).
+> **Last Updated**: 2026-10-06 ~23:50 UTC (checkpoint #20, before /compact).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 5 started. **Task 171** (broker-only SPE document bytes + JIT Office edit) is built and verified, and is DRAFT PR **#1333**. It waits on 2 owner decisions (F4, F10 below). 116/168 tasks complete. |
-| **Status** | Waiting on the owner. Nothing is running: no workflows, no background agents. |
-| **Next Action** | (1) On the owner's F4/F10 answers: implement them on `task/uac-r2-171` (worktree `C:\wt171`), re-verify ONLY that fix diff (review limits: at most 2 fix rounds; 171 has used 1), mark the PR ready, merge on Router green, deploy the BFF and the DocumentUploadWizard, then run 171's live checklist (`notes/task-171-broker-only-document-bytes.md` on that branch: A–J, D0, C2). (2) Then batch 5: 154 → 113, 114 (round 67), 105, 101 → 064 → 153, 067 → 099 → 036 → 090. (3) The owner screen session when the owner is available (list below). |
+| **Task** | Batch 5 started. **Task 171** (broker-only SPE document bytes + JIT Office edit) is DRAFT PR **#1333**, branch `task/uac-r2-171`, worktree `C:\wt171`. 116/168 tasks complete. |
+| **Status** | **RUNNING:** Agent-tool agent `exec171` (SendMessage by name is allowed) is implementing owner round 72 F4 and F10. This is FIX ROUND 2 OF 2 for 171. It produces scripts only, with no live changes. |
+| **Next Action** | (1) When `exec171` reports: run ONE narrow re-verification of the round-2 diff only, plus its direct callers and callees (171 is security work: 2 verifier passes allowed, both now used). Any F1 left open is ESCALATED, never a round 3. Then apply its F4 schema/FLS script and backfill on dev in the order it gives (owner-approved by round 72), mark #1333 ready, merge on Router green, deploy the BFF and the DocumentUploadWizard code page, and run 171's live checklist (`notes/task-171-broker-only-document-bytes.md` on that branch: A–J, D0, C2). (2) **The owner is ready for the screen session NOW** (list below); run it right after /compact. (3) The owner approved deleting the 20 empty test SPE containers: give the owner SharePoint-admin commands (`Remove-SPOContainer`), because the BFF has no delete route. (4) Then batch 5: 154 → 113, 114 (round 67), 105, 101 → 064 → 153, 067 → 099 → 036 → 090. |
 
-## Owner decisions pending
-- **171 F4** (the pointer can be re-targeted now that every upload is BFF-created): (A) a field-security-locked `sprk_graphitemidbound` copy, checked by the pointer rule (recommended), or (B) a known limit.
-- **171 F10** (share-link mints organization-wide view links): refuse it for secure and Restricted records (recommended), or keep it.
-- **171:** SPE "Modified by" shows the BFF app for BFF-written files; Spaarke records the person (recommend accept).
-- **G146-3:** which admin systemuser gets `Communication__OwnershipHoldAlertUserIds__0`. It's an app setting, so setting it restarts the BFF.
-- **137:** `ExternalAccess:Reconciliation:WritesEnabled`. The report shows 0 changes. It now also gates R4 (round 71).
-- **036:** accept the ADR-034 amendment (path B) before 036 merges.
-- **Smaller:**
-  - delete 20 empty test SPE containers (ids in `notes/batch4-live-gates-2026-10-06.md` and round 68; an operator step, because the BFF has no delete route);
-  - accept 133(e)'s `sharesRestored` as proven by tests;
-  - close 166's reporting gates as "not configured" and Redis-down as proven by tests;
-  - is the Copilot agent deployed in dev (164 j/d)?
+## Owner decisions
+- **Decided in round 72:**
+  - F4: add the locked `sprk_graphitemidbound` copy.
+  - F10: refuse share-link on secure and Restricted records.
+  - "Modified by" = the BFF app is accepted.
+  - The test containers are to be deleted.
+- **Owner said "not following, but ok" (2026-10-06). Explain plainly and confirm the concrete action before changing any app setting (a change restarts the BFF; do it AFTER the screen session):**
+  - G146-3: name the admin who receives ownership-hold alerts (`Communication__OwnershipHoldAlertUserIds__0`; proposed: the owner's own systemuser).
+  - 137: set `ExternalAccess:Reconciliation:WritesEnabled=true` on dev (the report shows 0 changes; it also enables R4's deactivations).
+- **Still pending:**
+  - 036's ADR-034 amendment (path B), before 036 merges.
+  - Accept 133(e)'s `sharesRestored` as proven by tests.
+  - Close 166's reporting gates as "not configured" and Redis-down as proven by tests.
+  - Is the Copilot agent deployed in dev (164 j/d)?
 
 ## Owner screen session (~2.5–3 h)
 - **CIAM:** 136/037/039/135, 137's observations, 140's invite flows (needs 3–4 CIAM identities), 157's grid walk.
