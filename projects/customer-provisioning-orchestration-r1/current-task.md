@@ -2,16 +2,16 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure 2026-10-06): F1–F4 fix now / K1–K4 known limit; ≤ 2 fix rounds re-verifying only the fix diff + direct callers/callees; 1 verifier pass per task (2 for auth/security); escalate an F1 still open instead of a round 3.
 
-> **Last Updated**: 2026-10-06 SESSION 41 END (context-handoff + hygiene self-review). Tree clean after the hygiene commit.
+> **Last Updated**: 2026-10-06 SESSION 41 — T254 step 1 done (checkpoint).
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
 | **Task** | **T254** — optional per-customer OpenAI spend limit (G37): `tasks/254-optional-openai-spend-limit.poml` (FULL, opus/high, BFF hot path). |
-| **Step** | 0 — not started. |
-| **Status** | pending. T230b ✅ SESSION 41 (`3eeb76788`). |
-| **Next Action** | `task-execute` 254. No live action without owner approval. |
+| **Step** | 1 of 4 ✅ (BFF). Next: step 2 — intake `openAiMonthlyLimitUsd` + H4b optional `AiSpendLimit__MonthlyLimitUsd` + generator optional-param fix. |
+| **Status** | in-progress. Decisions: `notes/t254-ai-spend-limit-decisions.md` (D1 one limit per STAMP, not per tid; D2 Redis ledger; D3 both AI seams; the 077 gate had been dropped by merge `28c2c1b385`). |
+| **Next Action** | Step 2: IntakeParameterCatalog + RunsEndpoints validation + intake.schema.json + PerEnvSourceCatalog `from-intake-parameter:openai_monthly_limit_usd` + manifest `required: false` entry + generator optional handling + regenerate; then step 3 `scripts/Set-AiSpendLimit.ps1` + guide + skill; step 4 verify + Step 9.5. No live action. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 

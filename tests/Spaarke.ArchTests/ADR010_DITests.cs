@@ -296,7 +296,12 @@ public class ADR010_DITests
         // which Infrastructure/Diagnostics/KeylessProofService reaches the AI-owned probes, and the module boundary the
         // keyless-proof contract test substitutes — the real probes call Azure OpenAI, Document Intelligence, AI Search,
         // Cosmos, Blob and Content Safety. Same category as IFileSummarizeAi / IPreferenceMemoryCapture.
-        const int knownOneToOneCeiling = 159;
+        //
+        // ───────── Ceiling LOWERED 159 → 157, 2026-10-06 (customer-provisioning-orchestration-r1 task 254) ─────────
+        // The two "⚠️ WEAKEST" seams grandfathered above are gone. ITenantBudgetPolicy is replaced by the concrete
+        // AiSpendLimit; ITenantTokenLedger by IAiSpendLedger, which has TWO implementations (RedisAiSpendLedger — the
+        // "Redis successor" that note anticipated — and InMemoryAiSpendLedger), so it is not a 1:1 mapping.
+        const int knownOneToOneCeiling = 157;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

@@ -45,6 +45,12 @@ public static class MiddlewarePipelineExtensions
                         $"Failed to exchange user token for Graph API token: {ms.Message}"
                     ),
 
+                    // Task 254: the stamp's optional monthly OpenAI spend limit — 429 + Retry-After (next UTC month).
+                    Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException sl => (
+                        429, Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException.ErrorCode,
+                        "AI Usage Limit Reached", sl.Message
+                    ),
+
                     Microsoft.Graph.Models.ODataErrors.ODataError gs => (
                         (int?)gs.ResponseStatusCode ?? 500, "graph_error", "Graph API Error",
                         gs.Error?.Message ?? gs.Message
@@ -62,6 +68,11 @@ public static class MiddlewarePipelineExtensions
 
                 ctx.Response.StatusCode = status;
                 ctx.Response.ContentType = "application/problem+json";
+                if (exception is Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException spendLimit)
+                {
+                    ctx.Response.Headers.RetryAfter =
+                        spendLimit.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
 
                 var origin = ctx.Request.Headers.Origin.FirstOrDefault();
                 if (!string.IsNullOrEmpty(origin) && !ctx.Response.Headers.ContainsKey("Access-Control-Allow-Origin"))

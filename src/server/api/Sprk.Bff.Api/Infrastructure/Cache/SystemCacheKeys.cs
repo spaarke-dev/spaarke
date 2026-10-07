@@ -16,9 +16,10 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 15 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
+/// 16 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
 /// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068 and approved by the owner on review 2026-10-02, its
-/// justification in its own remarks; see
+/// justification in its own remarks; <see cref="AiSpendMonth"/> added 2026-10-06 by customer-provisioning-orchestration-r1
+/// task 254, justified in its remarks; see
 /// <c>projects/spaarke-redis-cache-remediation-r1/notes/system-cache-exceptions.md</c> for the earlier per-exception
 /// three-question justification).
 /// </para>
@@ -95,6 +96,17 @@ public static class SystemCacheKeys
     /// slower instance wakes; like <see cref="RecordSyncWatermark"/> it is a system-wide bookmark.
     /// </summary>
     public const string SchedulerLastFire = "scheduler-last-fire";
+
+    /// <summary>
+    /// The stamp's month-to-date estimated Azure OpenAI spend, read by the optional monthly spend limit
+    /// (customer-provisioning-orchestration-r1 task 254). Site: <c>Services/Ai/Metering/RedisAiSpendLedger.cs</c>. Raw key:
+    /// <c>{InstanceName}ai-spend:month:{yyyy-MM}</c>.
+    /// Justification: the limit is per STAMP, and under D-12 a stamp serves one customer — whose users sign in from
+    /// several tenants (its workforce tenants, External Access) and whose background jobs carry no tenant at all. A
+    /// tenant-scoped key would split one bill across keys no limit could add up; like <see cref="RecordSyncWatermark"/>
+    /// it is a system-wide figure.
+    /// </summary>
+    public const string AiSpendMonth = "ai-spend-month";
 
     /// <summary>
     /// The SSE event number line of one Office job (task 068, #1086). Site: <c>Services/Office/JobStatusService.cs</c>.
