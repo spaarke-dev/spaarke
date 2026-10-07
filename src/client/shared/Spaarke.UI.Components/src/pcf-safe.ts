@@ -4,8 +4,9 @@
  * This entry point exports ONLY components, hooks, services, and types that are
  * verified compatible with React 16/17 (the PCF platform-provided version).
  *
- * PCF controls MUST import from this entry point:
- *   import { RelationshipCountCard } from '@spaarke/ui-components/src/pcf-safe';
+ * PCF controls import the COMPILED build of this entry point (or deep dist/ paths, ADR-012) —
+ * never a src/ path, which pulls React-19 types into the PCF (ADR-022, TS2786):
+ *   import { RelationshipCountCard } from '@spaarke/ui-components/dist/pcf-safe';
  *
  * Code pages should import from the main barrel:
  *   import { SprkChat, WizardShell } from '@spaarke/ui-components';

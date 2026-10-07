@@ -102,7 +102,7 @@ az account show --query "{Name:name, Id:id}" -o table
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key for Email webhooks (48-byte base64) |
 
 **Full environment reference**: See `docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md` → Environment Configuration
-**Auth-specific runbook**: See [`docs/guides/auth-deployment-setup.md`](../../../docs/guides/auth-deployment-setup.md) — 10 sections including §5 MI Graph permission grants, §6 Dataverse Application User, §7 Exchange ApplicationAccessPolicy
+**Auth-specific runbook**: See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — §6.5 App Service configuration, §7.7 Graph app roles + Dataverse Application User, §7.9 Exchange mailbox access (`auth-deployment-setup.md` is a retired stub)
 **Canonical auth ADR**: [`ADR-028`](../../adr/ADR-028-spaarke-auth-architecture.md) — function-based contract, MI for outbound, HMAC webhooks, named API keys
 
 ---

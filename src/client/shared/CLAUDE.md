@@ -12,7 +12,7 @@ Shared React/TypeScript libraries consumed by PCF controls, Code Pages (`src/sol
 
 **`@spaarke/ui-components`** (`Spaarke.UI.Components/`) has two entry points:
 - `src/index.ts` — the main barrel, for Code Pages (React 19);
-- `src/pcf-safe.ts` — only exports verified compatible with React 16/17. **PCF controls consume the compiled `dist/pcf-safe` or deep `dist/...` paths, never `src/`** (ADR-012 "PCF Import Pattern", ADR-022); the header comment in `pcf-safe.ts` showing a `src/` import is out of date. Type drift between the two React versions: [`.claude/patterns/ui/fluent-v9-react-version-boundaries.md`](../../../.claude/patterns/ui/fluent-v9-react-version-boundaries.md).
+- `src/pcf-safe.ts` — only exports verified compatible with React 16/17. **PCF controls consume the compiled `dist/pcf-safe` or deep `dist/...` paths, never `src/`** (ADR-012 "PCF Import Pattern", ADR-022). Exports added to the main barrel reach the nine PCFs that import it through a webpack stub (`src/client/pcf/CLAUDE.md`) — a new heavy dependency there can break their builds. Type drift between the two React versions: [`.claude/patterns/ui/fluent-v9-react-version-boundaries.md`](../../../.claude/patterns/ui/fluent-v9-react-version-boundaries.md).
 
 Consumers reference packages by relative path (`"@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"`), not a workspace protocol.
 

@@ -22,6 +22,12 @@ A module `CLAUDE.md` loads whenever an agent reads a file in its folder, and age
 
 **Adjacent fixes:** `TEST-ARCHITECTURE.md` §3 listed six KEEP categories and called anything outside them a DELETE candidate — that made every seam test and fitness function a delete target; now eight, illustrative examples labelled. KEEP count also corrected in ADR-038 §2/§3, both ADR indexes, `docs/INDEX.md`, `constraints/testing.md`. `CODE-REVIEW-BY-MODULE.md` stated the Core/Dataverse dependency backwards. `provisioning-runs/_templates/CLAUDE.md`: Key Vault paraphrase → pointer to the live "KV credential lifecycle" rule; root §6.5 escalation fields. `office-addins`: header history trimmed.
 
+**Drift found by the audits and fixed here:**
+- Exchange mailbox access: control-plane stamps use Exchange RBAC for Applications (H14a, owner D26); Application Access Policies are legacy. Legacy-mechanism notes added to `COMMUNICATION-DEPLOYMENT-GUIDE.md`, `MI-CONFIGURATION-PATTERNS.md`, `SPAARKE-SELF-SERVICE-USER-REGISTRATION.md`; `bff-deploy` / `spe-integration` / `azure-deploy` skills, `sdap-auth-patterns.md` (also: MI is user-assigned), `sdap-overview.md`, `docs/architecture/INDEX.md`, `DATAVERSE-AUTHENTICATION-GUIDE.md`, `docs/guides/INDEX.md` stop pointing at the retired `auth-deployment-setup.md` stub; `GraphAppRoles.cs` comment.
+- PCF shared-library imports: `pcf-safe.ts` header, `.claude/constraints/react-versioning.md`, `universal-dataset-grid-architecture.md` no longer say `src/pcf-safe` (ADR-012/022: compiled `dist/` paths). The nine PCFs importing the bare barrel are documented as working only through their per-control webpack stubs (task 092).
+- Stale KEEP counts and cites in test comments/READMEs (`tests/integration/auth/README.md`, `tests/eval/*`, `contract/README.md`, `LayerDependencyTests`, `ComposeEndpointsContractTests`, `FetchXmlGuardSelfJoinTests`, `AnalysisOrchestrationServiceTests`) — comments only.
+- Left to the owning project (its branch is editing these files): `AZURE-SETUP-SELF-SERVICE-REGISTRATION.md`, `PROVISIONING-PREREQUISITES.md`, ControlPlane comments naming ApplicationAccessPolicy, and five ControlPlane test comments citing "7 KEEP paths".
+
 ---
 ###### 2026-10-07 — Root CLAUDE.md cleanup: 66,657 → 18,569 bytes (−48,088), 499 → 215 lines; 16.6 KB / 187 lines as injected (claude-md-cleanup-r1)
 
