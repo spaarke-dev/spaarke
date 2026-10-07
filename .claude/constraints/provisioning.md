@@ -194,6 +194,12 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
   shared client app. A shared client's own sign-in redirects live on that client app, once, never per customer.
 - **`EntraAppRegOptions__SpaarkeTenantId`** (Worker Bicep, the deployment's tenant) is the FIC issuer for Model 1; without
   it every Model 1 run fails at H3.
+- **H3 adopts an existing `spaarke-bff-api-{customerId}` only if nobody but the control plane can act as it** (one match,
+  no secret or certificate, no foreign FIC, no owner but the control plane); otherwise `appreg-adoption-refused`, nothing
+  written. Never relax this to "adopt by name".
+- **One environment per customer (D6).** The registration is per customer (D-13) while H3 sets its redirect, FIC and
+  pre-authorizations per run, so a second environment for the same customer would overwrite the first's. Per-customer
+  staging/dev needs a per-stamp registration first (`notes/defer-issues.md`).
 
 ## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
 

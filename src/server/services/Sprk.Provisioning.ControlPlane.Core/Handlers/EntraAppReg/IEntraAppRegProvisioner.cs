@@ -124,10 +124,12 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// </param>
 /// <param name="SpaRedirectUris">
 /// T240a: the app registration's exact <c>spa.redirectUris</c> — the customer's own Dataverse origin, where its code
-/// pages sign in (<c>redirectUri = window.location.origin</c>). H3 sets exactly this list.
+/// pages sign in (<c>redirectUri = window.location.origin</c>). H3 sets exactly this list. <c>null</c> leaves the
+/// registration's redirects untouched (never "clear them").
 /// </param>
 /// <param name="PreAuthorizedClientAppIds">
-/// T240a: the shared client apps pre-authorized on the app's <c>user_impersonation</c> scope (H3 sets exactly this list).
+/// T240a: the shared client apps pre-authorized on the app's <c>user_impersonation</c> scope (H3 sets exactly this list;
+/// empty removes every pre-authorization). <c>null</c> leaves the pre-authorizations untouched.
 /// </param>
 public sealed record EntraAppRegRequest(
     string CustomerId,

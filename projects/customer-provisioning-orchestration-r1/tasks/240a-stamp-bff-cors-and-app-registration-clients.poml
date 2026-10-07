@@ -4,7 +4,7 @@
     <title>Every stamp BFF starts and serves its clients: provisioning sets Cors__AllowedOrigins (Dataverse + shared M365 client origins); H3 gives the customer's BFF app registration the SPA redirects for its own Dataverse origin(s) and pre-authorizes the shared add-in client</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T240 (G14; owner D9/D11; owner input 2026-10-07)</phase>
     <gate>after 233 (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 handlers H3/H4b + settings catalog + an Entra app-registration shape; auth-adjacent (token audience, pre-authorization, redirect URIs).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -82,5 +82,11 @@
     <trigger>Graph refuses preAuthorizedApplications for a client in this shape — stop and report.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-07">COMPLETED. Commits b0e244c17 (steps 1-4) + the review-fix commit. ControlPlane 2307/0 (1 skip), ArchTests 841/841, Api/Worker 0 warnings, catalog generator -Verify OK, platform-controlplane.json rebuilt in sync.</note>
+    <note date="2026-10-07">LIVE ACTIONS (owner-approved, outside the code): Static Web Apps swa-spaarke-office-addins-prod and swa-spaarke-external-spa-prod in rg-spaarke-shared-prod; custom domains addins.spaarke.com and external.spaarke.com (owner added the Namecheap CNAMEs); both Ready with managed certificates. Recorded in notes/t240-plan.md.</note>
+    <note date="2026-10-07">DEVIATIONS (directional steps; acceptance criteria amended here): (a) AC1 — no Dataverse origin or `.api.` variant in Cors__AllowedOrigins: CorsModule already admits *.dynamics.com / *.powerapps.com by suffix, so those entries would change nothing; the list carries the two shared client sites as manifest literals, which keeps it non-empty (the startup failure). (b) Constraint "shared origins per platform environment" — one global literal list: every stamp is reached by the same production client sites (K4: dev/staging stamps get the production origins; no failure today). (c) AC3 — origins are build-time literals, so the refusal is a build-time test (FilePerEnvSettingsManifestTests: exact https origins) plus CorsModule's own startup check, not a run-time H4b failure. (d) Step 3 — no H13 probe for a shared origin: H4b's and H13's /healthz already prove the BFF started with a valid list, and the values are pinned by the manifest test.</note>
+    <note date="2026-10-07">FOUND + FIXED IN SCOPE: (1) F1 — the Worker never set EntraAppRegOptions__SpaarkeTenantId, so every Model 1 run (profile spaarke-hosted-model2) failed at H3's FIC step; the Worker Bicep sets it from tenant().tenantId. (2) F1 (review, tenant isolation, pre-existing) — H3 adopted ANY registration named spaarke-bff-api-{customerId}; now refused unless exactly one match, no secret/certificate, no foreign FIC, no owner but the control plane (AdoptionRefusal + appreg-adoption-refused). Live read: the legacy spaarke-bff-api-prod (no owners, 1 client secret) would now be refused for a customer id 'prod'. (3) F2 — config-key names in diagnostics (EntraAppReg: -> EntraAppRegOptions:), stale option docs, dead shell-out options, comments citing a deleted file, swapped test comments; null request lists now mean "leave untouched"; Guid.Empty refused; preAuthorizedClientAppIds threaded through platform-controlplane.bicep.</note>
+    <note date="2026-10-07">KNOWN LIMITS / FILED: ISS-003 (#1376) — one registration per customer: a second environment would overwrite the first's redirect/FIC (D6 keeps one environment per customer; binding note in provisioning.md). ISS-004 (#1377) — any Spaarke-tenant user can get any customer BFF token; data access still bounded by the stamp; consider appRoleAssignmentRequired. K2 — a stale read right after the reconcile PATCH fails resumable (appreg-client-access-failed). K3 — runs that completed H3 before this change are not re-applied (none could, SpaarkeTenantId was missing). The acct optional claim on the registration stays with T255.</note>
+  </notes>
 </task>

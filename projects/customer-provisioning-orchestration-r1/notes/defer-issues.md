@@ -36,6 +36,46 @@ it, when it must exist, what to seed, or how H13 verifies it.
 UAC-r2 answers the four questions in the issue (packaging, ordering, verification, upgrade); provisioning turns the
 answer into T256 handler work and T218 package content.
 
+### ISS-003 — A second environment for the same customer overwrites the first one's BFF app registration
+
+| Field | Value |
+|---|---|
+| **Status** | Open — not needed while owner D6 holds (one environment per customer) |
+| **Urgency** | later (before per-customer staging/dev) |
+| **Filed** | 2026-10-07 |
+| **Source** | T240a review, verifier pass 2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1376 |
+
+**Description**
+
+The registration is per customer (D-13) but H3 sets its SPA redirect, FIC (`spaarke-uami-trust`) and pre-authorizations
+per run, so a second environment for the same customer breaks the first's code-page sign-in and BFF credential.
+
+**Suggested fix**
+
+A per-stamp registration (`spaarke-bff-api-{customerId}-{env}`), or intake refusing a second environment until then.
+
+### ISS-004 — Any Spaarke-tenant user can get any customer BFF token (no stamp-level token gate)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — investigate (known limit; no cross-customer data path found) |
+| **Urgency** | before the first external customer |
+| **Filed** | 2026-10-07 |
+| **Source** | T240a review, verifier pass 2 |
+| **GitHub Issue** | https://github.com/spaarke-dev/spaarke/issues/1377 |
+
+**Description**
+
+All Model 1 BFF registrations are in Spaarke's tenant; any member or guest can get a token for any customer's BFF. Record
+access is still bounded by the stamp's Dataverse/SPE authorization, but record-free endpoints (AI chat) may run on that
+customer's OpenAI quota.
+
+**Suggested fix**
+
+`appRoleAssignmentRequired` per BFF service principal with `sprk-{customerId}-users` assigned — after checking the Type-2
+external workforce plane (UAC-r2 task 141) and the External Access SPA (T240d).
+
 ### ISS-002 — Demo self-registration SPE grant: marker keyed to the demo Dataverse; expiry leaves it behind (UAC-r2 code)
 
 | Field | Value |

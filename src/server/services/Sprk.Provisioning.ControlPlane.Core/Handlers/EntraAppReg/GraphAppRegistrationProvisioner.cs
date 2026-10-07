@@ -175,13 +175,36 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
 
         try
         {
-            // (1) Get-or-create the app-reg.
-            var app = await FindByDisplayNameAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
+            // (1) Get-or-create the app-reg. An existing one is adopted only when it is provably ours (T240a review):
+            //     the name is predictable, and an adopted registration gets the stamp's FIC and, via H10, Dataverse admin.
+            var matches = await FindByDisplayNameAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
+            if (matches.Count > 1)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"{matches.Count} application registrations are named '{displayName}' " +
+                    $"({string.Join(", ", matches.Select(m => m.AppId))}); H3 adopts none of them. Remove the ones that " +
+                    $"are not this customer's BFF registration, then resume. [{EntraAppRegRejectionCodes.AdoptionRefused}]");
+            }
+            var app = matches.SingleOrDefault();
             var created = false;
             if (app is null)
             {
                 app = await CreateAppAsync(graph, displayName, cancellationToken).ConfigureAwait(false);
                 created = true;
+            }
+            else
+            {
+                var refusal = await CheckAdoptionAsync(graph, app, request, cancellationToken).ConfigureAwait(false);
+                if (refusal is not null)
+                {
+                    _logger.LogError(
+                        "H3 refused to adopt the existing registration {DisplayName} ({AppId}): {Reason} customerId={CustomerId}",
+                        displayName, app.AppId, refusal, request.CustomerId);
+                    return new EntraAppRegOutcome.Failure(
+                        $"The existing application registration '{displayName}' ({app.AppId}) is not safe to adopt: " +
+                        $"{refusal}. Nothing was written. Investigate who created it; if it is not this customer's BFF " +
+                        $"registration, delete it and resume. [{EntraAppRegRejectionCodes.AdoptionRefused}]");
+                }
             }
 
             if (string.IsNullOrWhiteSpace(app.Id) || string.IsNullOrWhiteSpace(app.AppId))
@@ -329,7 +352,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // App-reg ensure / reconcile
     // ---------------------------------------------------------------------
 
-    private async Task<Application?> FindByDisplayNameAsync(
+    private async Task<IReadOnlyList<Application>> FindByDisplayNameAsync(
         GraphServiceClient graph, string displayName, CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -339,7 +362,79 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         {
             rc.QueryParameters.Filter = filter;
         }, timeoutCts.Token).ConfigureAwait(false);
-        return page?.Value?.FirstOrDefault();
+        return page?.Value ?? new List<Application>();
+    }
+
+    /// <summary>
+    /// Reads the existing registration's owners and federated credentials and returns why it must not be adopted, or
+    /// null (T240a review). The owner check runs for Spaarke-tenant profiles only: in a customer-owned (Model 2) tenant
+    /// the control plane's principal id is a different object.
+    /// </summary>
+    private async Task<string?> CheckAdoptionAsync(
+        GraphServiceClient graph, Application app, EntraAppRegRequest request, CancellationToken ct)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+        var owners = await graph.Applications[app.Id].Owners
+            .GetAsync(rc => rc.QueryParameters.Select = ["id"], timeoutCts.Token).ConfigureAwait(false);
+        var fics = await graph.Applications[app.Id].FederatedIdentityCredentials
+            .GetAsync(rc => rc.QueryParameters.Select = ["name"], timeoutCts.Token).ConfigureAwait(false);
+
+        var customerOwned = string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase);
+        return AdoptionRefusal(
+            app,
+            (owners?.Value ?? []).Select(o => o.Id ?? string.Empty).ToList(),
+            (fics?.Value ?? []).Select(f => f.Name ?? string.Empty).ToList(),
+            customerOwned ? null : _identity.CanonicalPrincipalObjectId(),
+            _options.FicName,
+            request.RequireSecretFreeIdentity);
+    }
+
+    /// <summary>
+    /// Why an existing <c>spaarke-bff-api-{customerId}</c> registration must not be adopted, or null when it is safe
+    /// (T240a review). Safe means nobody but the control plane can act as it, now or later: no client secret or
+    /// certificate (stamps are secret-free), no federated credential other than H3's own (<paramref name="ficName"/>),
+    /// and no owner other than the control plane (an owner could add a credential after H3 finishes). An app with no
+    /// owner at all is safe. <paramref name="controlPlanePrincipalId"/> null skips the owner check (Model 2).
+    /// </summary>
+    internal static string? AdoptionRefusal(
+        Application existing,
+        IReadOnlyCollection<string> ownerIds,
+        IReadOnlyCollection<string> ficNames,
+        string? controlPlanePrincipalId,
+        string ficName,
+        bool requireSecretFreeIdentity)
+    {
+        ArgumentNullException.ThrowIfNull(existing);
+        var reasons = new List<string>();
+
+        var secrets = existing.PasswordCredentials?.Count ?? 0;
+        var certificates = existing.KeyCredentials?.Count ?? 0;
+        if (requireSecretFreeIdentity && secrets + certificates > 0)
+        {
+            reasons.Add($"it holds {secrets} client secret(s) and {certificates} certificate(s), and a stamp's BFF " +
+                        "registration is secret-free");
+        }
+
+        var foreignFics = ficNames.Where(n => !string.Equals(n, ficName, StringComparison.Ordinal)).ToList();
+        if (foreignFics.Count > 0)
+        {
+            reasons.Add($"it carries federated credential(s) H3 did not create: {string.Join(", ", foreignFics)}");
+        }
+
+        if (controlPlanePrincipalId is not null)
+        {
+            var foreignOwners = ownerIds
+                .Where(id => !string.Equals(id, controlPlanePrincipalId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            if (foreignOwners.Count > 0)
+            {
+                reasons.Add($"it is owned by {string.Join(", ", foreignOwners)}, not only by the provisioning control plane");
+            }
+        }
+
+        return reasons.Count == 0 ? null : string.Join("; ", reasons);
     }
 
     private async Task<Application> CreateAppAsync(
@@ -467,15 +562,21 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     /// cannot drop them whether Graph merges or replaces the <c>api</c> object.
     /// </summary>
     internal static ClientAccessPlan PlanClientAccess(
-        Application current, IReadOnlyList<string> spaRedirectUris, IReadOnlyList<string> preAuthorizedClientAppIds)
+        Application current, IReadOnlyList<string>? spaRedirectUris, IReadOnlyList<string>? preAuthorizedClientAppIds)
     {
         ArgumentNullException.ThrowIfNull(current);
-        ArgumentNullException.ThrowIfNull(spaRedirectUris);
-        ArgumentNullException.ThrowIfNull(preAuthorizedClientAppIds);
 
-        var desiredSpa = spaRedirectUris.Distinct(StringComparer.Ordinal).ToList();
+        // null = leave that part untouched; an empty list = make it empty.
+        var desiredSpa = spaRedirectUris?.Distinct(StringComparer.Ordinal).ToList();
         var currentSpa = current.Spa?.RedirectUris ?? new List<string>();
-        var spaChanged = !currentSpa.ToHashSet(StringComparer.Ordinal).SetEquals(desiredSpa);
+        var spaChanged = desiredSpa is not null && !currentSpa.ToHashSet(StringComparer.Ordinal).SetEquals(desiredSpa);
+
+        if (preAuthorizedClientAppIds is null)
+        {
+            return spaChanged
+                ? new ClientAccessPlan(new Application { Spa = new SpaApplication { RedirectUris = desiredSpa } }, null)
+                : new ClientAccessPlan(null, null);
+        }
 
         var clients = preAuthorizedClientAppIds
             .Where(id => !string.Equals(id, current.AppId, StringComparison.OrdinalIgnoreCase))
@@ -507,7 +608,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         var patch = new Application();
         if (spaChanged)
         {
-            patch.Spa = new SpaApplication { RedirectUris = desiredSpa };
+            patch.Spa = new SpaApplication { RedirectUris = desiredSpa! };
         }
         if (preChanged)
         {
@@ -565,8 +666,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                         $"Graph GET /applications/{appObjectId} returned nothing. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
                 }
 
-                var plan = PlanClientAccess(
-                    current, request.SpaRedirectUris ?? [], request.PreAuthorizedClientAppIds ?? []);
+                var plan = PlanClientAccess(current, request.SpaRedirectUris, request.PreAuthorizedClientAppIds);
                 if (plan.Error is not null)
                 {
                     return new EntraAppRegOutcome.Failure($"{plan.Error}. [{EntraAppRegRejectionCodes.ClientAccessFailed}]");
@@ -881,7 +981,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         {
             return new EntraAppRegOutcome.Failure(
                 $"Cannot compute FIC issuer — profile='{request.Profile}' requires " +
-                $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppReg:SpaarkeTenantId config")}, " +
+                $"{(string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase) ? "request.TenantId" : "EntraAppRegOptions:SpaarkeTenantId config (Worker setting EntraAppRegOptions__SpaarkeTenantId)")}, " +
                 $"which is blank. [{EntraAppRegRejectionCodes.FicCreationFailed}]");
         }
 

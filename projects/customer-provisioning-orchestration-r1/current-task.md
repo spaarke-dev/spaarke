@@ -8,12 +8,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T240a** — Stamp BFF starts and serves its clients (CORS literals `addins.spaarke.com` / `external.spaarke.com`; H3 SPA redirect = customer Dataverse origin + pre-authorized shared clients; fixed: Worker never set `EntraAppRegOptions__SpaarkeTenantId` → every Model 1 run failed at H3). POML `tasks/240a-…poml`; plan `notes/t240-plan.md`. |
-| **Step** | Steps 1–4 done (WIP `b0e244c17`, pushed). Step 9.5 running: two verifier passes (code-review; adr-check + auth/tenant-isolation). H13 shared-origin probe deliberately not added (record in POML notes). |
-| **Status** | in-progress (quality gates). |
-| **Next Action** | Triage the two verifier reports (F-class → fix, re-verify fix scope, re-run ControlPlane tests); POML notes (deviations: no `.api.`/Dataverse CORS entries — suffix rule; no H13 shared-origin probe; acct claim stays with T255); close T240a (POML + index + drift check), commit, push. Live state 2026-10-07: `addins.spaarke.com` + `external.spaarke.com` Ready (owner-approved). PR #1365 open. No live action without owner approval. |
+| **Task** | **T240b** — Live test: a work-account B2B guest gets a Spaarke-tenant token for the dev BFF in Outlook/Word (NAA, desktop + web). POML `tasks/240b-…poml`. T240a ✅ 2026-10-07. |
+| **Step** | 0 — waiting on (1) a work-account guest from another organization (owner) and (2) spaarkeai-word-add-in-r1's dev diagnostics build (message `notes/coordination/2026-10-07-to-word-add-in-r1-2.md`). |
+| **Status** | blocked on owner + word-add-in-r1. Next unblocked task: T218 (T240c/T240d wait on 240b, owner OK and external-access-r3). |
+| **Next Action** | Owner: provide the guest account; relay `…-to-word-add-in-r1-3.md` (production site ready) and `…-to-external-access-r3-2.md`. Meanwhile `task-execute` T218. Live state: addins.spaarke.com + external.spaarke.com Ready (empty). The Worker Bicep change (SpaarkeTenantId, pre-authorized clients) reaches L2 at its next deploy (owner OK). PR #1365 open. No live action without owner approval. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — master merged again 2026-10-07 SESSION 42 (0 behind at merge). Measure with `git rev-list --count HEAD..origin/master`; merge master again before T186 and before any BFF deploy from this branch. The merge re-routed master's new task-171 app-only SPE calls through `SpeContainerOwnershipGuard` (see CLAUDE.md §6). |
-| **Order** | T254 ✅ → T232 ✅ → T233 ✅ → T240a → T240b → T240c → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145; waits on #1364) → T186. T252 also carries the Bicep "shared BFF app-reg" description fix (T233 hand-off). T242c / T241 when the owner wants them. |
+| **Order** | T254 ✅ → T232 ✅ → T233 ✅ → T240a ✅ → T240b → T240c → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145; waits on #1364) → T186. T252 also carries the Bicep "shared BFF app-reg" description fix (T233 hand-off). T242c / T241 when the owner wants them. |
 
 ## Owner items
 

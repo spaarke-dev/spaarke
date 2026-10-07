@@ -184,6 +184,11 @@ param redisEndpoint string
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
 
+@description('Client apps H3 pre-authorizes on every customer BFF app registration (user_impersonation) — threaded to modules/controlplane-worker-app-service.bicep (T240a). Default: the shared Office add-in client; the Teams client joins when it exists (T240c).')
+param preAuthorizedClientAppIds array = [
+  'c1258e2d-1688-49d2-ac99-a7485ebd9995'
+]
+
 
 @description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
@@ -486,6 +491,7 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
     controlPlanePrincipalId: uami.outputs.principalId
     speContainerTypeOwners: speContainerTypeOwners
+    preAuthorizedClientAppIds: preAuthorizedClientAppIds
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
     // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses

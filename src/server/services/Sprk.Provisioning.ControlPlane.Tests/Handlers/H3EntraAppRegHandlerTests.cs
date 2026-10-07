@@ -538,6 +538,23 @@ public sealed class H3EntraAppRegHandlerTests
             "client ids are canonical (lowercase) and de-duplicated");
     }
 
+    [Fact]
+    public async Task T240a_1b_EnvironmentNamedUrl_IsTheRedirect()
+    {
+        var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1),
+            dataverseEnvUrl: "https://spaarke-acme-prod.crm4.dynamics.com/");
+        run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = "prod";
+        var repo = new FakeRepository(run, etag: "etag-t240a-1b");
+        var provisioner = FakeProvisioner.Success(BuildOutputs(BuildPendingWrites()));
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified(ExpectedScopeCount));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastProvisionRequest!.SpaRedirectUris.Should().Equal(["https://spaarke-acme-prod.crm4.dynamics.com"]);
+        provisioner.LastProvisionRequest.PreAuthorizedClientAppIds.Should().BeEmpty("none configured");
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("https://spaarke-other.crm.dynamics.com/")]
@@ -561,6 +578,7 @@ public sealed class H3EntraAppRegHandlerTests
     [Theory]
     [InlineData("not-a-guid")]
     [InlineData("")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
     public async Task T240a_3_InvalidPreAuthorizedClientId_FailsResumable_NoProvisionerCall(string badClientId)
     {
         var run = BuildRun(tenancyModel: nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1));

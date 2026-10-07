@@ -2,8 +2,8 @@
 // EntraAppRegOptions.cs
 //
 // Bound options for the H3 handler's collaborators (Graph SDK provisioner +
-// real admin-consent verifier). Loaded from the "EntraAppReg" configuration
-// section by Worker/Program.cs.
+// real admin-consent verifier). Loaded from the "EntraAppRegOptions" configuration
+// section by Worker/Program.cs (nameof(EntraAppRegOptions); App Service form EntraAppRegOptions__*).
 //
 // TASK 130 (Wave G-3) REWRITE: replaces the Wave-C4 scaffold's
 // PwshExecutable / RegisterEntraAppRegistrationsScriptPath / ExpectedAppRoleCount
@@ -96,12 +96,13 @@ public sealed class EntraAppRegOptions
     public TimeSpan FicExchangeRetryDelay { get; set; } = TimeSpan.FromSeconds(3);
 
     /// <summary>
-    /// Attempts for the keyless-proof app-role assignment (task 230b). Entra answers 400 (role not yet visible) or 404
-    /// (service principal not yet replicated) right after H3 created them; both are retried.
+    /// Attempts for H3's Entra propagation retries: the keyless-proof app-role assignment (task 230b; Entra answers 400
+    /// while the role is not yet visible or 404 while the service principal is not yet replicated) and the client-access
+    /// read of a just-created app (T240a; 404).
     /// </summary>
     public int RoleAssignmentRetryCount { get; set; } = 6;
 
-    /// <summary>Delay between keyless-proof app-role assignment attempts (task 230b).</summary>
+    /// <summary>Delay between H3's Entra propagation retries (keyless-proof role assignment, client-access read).</summary>
     public TimeSpan RoleAssignmentRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>Timeout for a single Graph SDK call (create/patch/get). Graph is normally sub-second; generous ceiling for throttle/backoff.</summary>

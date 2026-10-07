@@ -122,19 +122,11 @@ public sealed class ClientAccessPlanTests
     }
 
     [Theory]
-    [InlineData(false, true)]   // no user_impersonation scope at all
-    [InlineData(true, false)]   // the scope exists but is disabled
+    [InlineData(false, true)]   // the scope exists but is disabled
+    [InlineData(true, false)]   // no user_impersonation scope at all
     public void ClientsConfigured_ButNoEnabledScope_IsAnError_NotASilentSkip(bool scopeEnabled, bool withScope)
     {
         var current = App(scopeEnabled: scopeEnabled, withScope: withScope);
-        if (!withScope)
-        {
-            current.Api!.Oauth2PermissionScopes = [];
-        }
-        else
-        {
-            current.Api!.Oauth2PermissionScopes![0].IsEnabled = false;
-        }
 
         var plan = GraphAppRegistrationProvisioner.PlanClientAccess(current, [Origin], [AddInClientId]);
 
@@ -152,6 +144,44 @@ public sealed class ClientAccessPlanTests
 
         plan.Patch!.Api!.RequestedAccessTokenVersion.Should().Be(2);
         plan.Patch.Api.KnownClientApplications.Should().BeNull("an explicit null would ask Graph to clear the list");
+        plan.Patch.Api.AcceptMappedClaims.Should().BeNull();
+    }
+
+    [Fact]
+    public void KnownClientsAndAcceptMappedClaims_AreCarriedWhenSet()
+    {
+        var known = Guid.NewGuid();
+        var current = App(spa: [Origin]);
+        current.Api!.KnownClientApplications = [known];
+        current.Api.AcceptMappedClaims = true;
+
+        var plan = GraphAppRegistrationProvisioner.PlanClientAccess(current, [Origin], [AddInClientId]);
+
+        plan.Patch!.Api!.KnownClientApplications.Should().Equal(known);
+        plan.Patch.Api.AcceptMappedClaims.Should().BeTrue();
+    }
+
+    [Fact]
+    public void NoClientsConfigured_ButSomePreAuthorized_RemovesThemAll()
+    {
+        var current = App(spa: [Origin], preAuthorized: [Pre(AddInClientId), Pre(TeamsClientId)]);
+
+        var plan = GraphAppRegistrationProvisioner.PlanClientAccess(current, [Origin], []);
+
+        plan.Patch!.Spa.Should().BeNull("the redirect already matches");
+        plan.Patch.Api!.PreAuthorizedApplications.Should().BeEmpty();
+        plan.Patch.Api.Oauth2PermissionScopes.Should().ContainSingle();
+    }
+
+    [Fact]
+    public void NullLists_LeaveTheRegistrationUntouched_NeverClearIt()
+    {
+        var current = App(spa: ["https://somewhere.example.com"], preAuthorized: [Pre(TeamsClientId)]);
+
+        GraphAppRegistrationProvisioner.PlanClientAccess(current, null, null).Patch.Should().BeNull();
+        var spaOnly = GraphAppRegistrationProvisioner.PlanClientAccess(current, [Origin], null);
+        spaOnly.Patch!.Spa!.RedirectUris.Should().Equal(Origin);
+        spaOnly.Patch.Api.Should().BeNull("null pre-authorizations are left as they are");
     }
 
     [Fact]

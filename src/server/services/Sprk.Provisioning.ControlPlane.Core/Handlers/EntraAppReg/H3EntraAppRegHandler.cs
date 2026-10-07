@@ -262,7 +262,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         if (_options.ExpectedDelegatedScopeCount < 1)
         {
             var diagnostic =
-                $"EntraAppReg:ExpectedDelegatedScopeCount is {_options.ExpectedDelegatedScopeCount} — MUST be >= 1. " +
+                $"EntraAppRegOptions:ExpectedDelegatedScopeCount is {_options.ExpectedDelegatedScopeCount} — MUST be >= 1. " +
                 "Configuration drift; defaults to 5 per EntraAppRegPermissionCatalog.All.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 EntraAppRegRejectionCodes.NullAppRoleIdInCatalog, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -550,7 +550,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
         var result = new List<string>();
         foreach (var raw in configured ?? [])
         {
-            if (!Guid.TryParse(raw, out var id))
+            if (!Guid.TryParse(raw, out var id) || id == Guid.Empty)
             {
                 normalized = [];
                 invalid = raw ?? string.Empty;

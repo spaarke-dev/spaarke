@@ -183,6 +183,16 @@ public static class EntraAppRegRejectionCodes
     /// own reconcile added it — Entra state H3 cannot repair. Resumable.
     /// </summary>
     public const string ClientAccessFailed = "appreg-client-access-failed";
+
+    /// <summary>
+    /// T240a review: an EXISTING registration named <c>spaarke-bff-api-{customerId}</c> is not safe to adopt — more than
+    /// one has that name, it holds a client secret or certificate (stamps are secret-free), it carries a federated
+    /// credential H3 did not create, or someone other than the control plane owns it. H3 would otherwise give it the
+    /// stamp's federated credential and H10 would make it the customer's Dataverse administrator, so a registration
+    /// pre-created under that predictable name by anyone in the tenant must never be taken over. Nothing is written;
+    /// the operator investigates and removes the impostor (or the stale registration), then resumes.
+    /// </summary>
+    public const string AdoptionRefused = "appreg-adoption-refused";
 }
 
 /// <summary>
