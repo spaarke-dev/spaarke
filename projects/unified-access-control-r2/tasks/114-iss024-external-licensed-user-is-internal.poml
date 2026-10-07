@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-024 — an external *licensed* system user is treated the same as an internal one (owner-decided)</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Share write path (.cs, Api/ExternalAccess); tags bff-api/auth; modifies tests. Removes a refusal, i.e. widens who can be granted access.</rigor-reason>
     <model-tier>sonnet</model-tier>

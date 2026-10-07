@@ -4,7 +4,7 @@
     <title>Broker-only document bytes: every internal upload and read of SPE content runs app-only after the BFF's own Dataverse check, and Office edit gets just-in-time container membership (owner round 69)</title>
     <phase>Batch 5, first (owner round 69, 2026-10-06)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-adjacent byte paths on many live BFF routes (tags bff-api, auth, security, spe). It changes WHICH identity reads and writes customer documents, and adds the only code path that grants a user an SPE container role.</rigor-reason>
     <model-tier>opus</model-tier>
