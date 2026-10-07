@@ -175,8 +175,8 @@ internal sealed class TaskActionCore
         if (input.ScheduledEnd.HasValue)
             entity["sprk_duedate"] = AsCalendarDate(input.ScheduledEnd.Value);
 
-        // sprk_finalduedate is the OUTER bound. DailyBriefingCollector reads it FIRST and falls back to
-        // sprk_duedate, and its task channels filter by date -- a task with neither set cannot surface.
+        // sprk_finalduedate is the OUTER bound, informational since D-27 (task 065, folded into 098): the Briefing,
+        // the Do lane and Reschedule use sprk_duedate alone, so a task without sprk_duedate cannot surface there.
         if (input.FinalDueDate.HasValue)
             entity["sprk_finalduedate"] = AsCalendarDate(input.FinalDueDate.Value);
 

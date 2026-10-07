@@ -51,9 +51,9 @@ public sealed class CommsPolicyOptions
     /// Added 2026-09-29 (owner decision). The due dates are **declared on the rule row** — this is only the
     /// fallback, exactly as <see cref="DefaultConfidenceThreshold"/> is for the threshold.
     /// <para>
-    /// These are not cosmetic. <c>DailyBriefingCollector</c>'s task channels read <c>sprk_finalduedate</c>
-    /// first, fall back to <c>sprk_duedate</c>, and **filter by date** — so a task created with neither set
-    /// cannot appear in the briefing at all. Every RI task before this change had both null.
+    /// These are not cosmetic. <c>DailyBriefingCollector</c>'s task channels **filter by date** on
+    /// <c>sprk_duedate</c> (alone since D-27; <c>sprk_finalduedate</c> is informational) — so a task created
+    /// without it cannot appear in the briefing at all. Every RI task before this change had both null.
     /// </para>
     /// </remarks>
     public int DefaultTaskDueDays { get; set; } = 1;

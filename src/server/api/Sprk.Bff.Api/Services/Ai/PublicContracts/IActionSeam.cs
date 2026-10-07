@@ -129,9 +129,10 @@ public sealed record CreateTaskRequest
     /// <see cref="DueDate"/>.
     /// </summary>
     /// <remarks>
-    /// Added 2026-09-29 (<c>spaarke-ontology-platform-r1</c>). <c>DailyBriefingCollector</c>'s task channels
-    /// read <c>sprk_finalduedate</c> FIRST and fall back to <c>sprk_duedate</c>, and they filter by date — so a
-    /// task with neither set cannot appear in the briefing at all, however correctly it was created.
+    /// Added 2026-09-29 (<c>spaarke-ontology-platform-r1</c>). Since D-27 (task 065, folded into 098) this column is
+    /// informational: <c>DailyBriefingCollector</c>, the Do lane and Reschedule use <see cref="DueDate"/>
+    /// (<c>sprk_duedate</c>) alone, and the briefing's task channels filter by it — a task without it cannot appear
+    /// there.
     /// </remarks>
     public DateTime? FinalDueDate { get; init; }
 

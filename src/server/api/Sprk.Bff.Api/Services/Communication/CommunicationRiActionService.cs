@@ -193,8 +193,8 @@ public sealed class CommunicationRiActionService
             //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
             //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
             // 🔴 Due dates added 2026-09-29. Previously BOTH were left null, and
-            // DailyBriefingCollector's task channels read sprk_finalduedate first, fall back to sprk_duedate,
-            // and FILTER BY DATE — so every RI task ever created was outside the briefing's window and could
+            // DailyBriefingCollector's task channels FILTER BY DATE (sprk_duedate alone since D-27; then
+            // sprk_finalduedate first) — so every RI task ever created was outside the briefing's window and could
             // never surface there, however correctly it was written. The day counts are DECLARED on the
             // matched sprk_communicationrule row (sprk_taskduedays / sprk_taskfinalduedays), falling back
             // to CommsPolicyOptions — the same rule-wins-over-options pattern as the confidence threshold, so

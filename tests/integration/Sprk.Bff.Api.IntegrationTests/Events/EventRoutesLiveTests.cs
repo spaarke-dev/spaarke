@@ -405,6 +405,113 @@ public sealed class EventRoutesLiveTests
         leaks.Should().BeEmpty("every zz-098-test record this run created must be gone");
     }
 
+    /// <summary>
+    /// D-27 (task 065, folded into task 098): the Daily Briefing judges a task by <c>sprk_duedate</c> — the date the Do lane
+    /// shows and Reschedule writes — and never by <c>sprk_finalduedate</c>. Two real Open Task events whose two due dates
+    /// DIFFER are written to the environment and read back; the PRODUCTION collector then reads them AS the operator
+    /// through the production impersonated query. Same opt-in and cleanup discipline as the other legs ("zz-098-test").
+    /// </summary>
+    [Fact]
+    public async Task LiveMode_DailyBriefing_JudgesTasksBySprkDuedate_NotTheFinalDueDate()
+    {
+        var dataverseUrl = Environment.GetEnvironmentVariable(UrlVar);
+        if (string.IsNullOrWhiteSpace(dataverseUrl))
+            return; // not opted in
+
+        var credential = new AzureCliCredential();
+        using var dv = await DataverseClientAsync(dataverseUrl, credential);
+        var operatorId = (await dv.GetFromJsonAsync<JsonElement>("WhoAmI()")).GetProperty("UserId").GetGuid();
+        var code = (await dv.GetFromJsonAsync<JsonElement>($"usersettingscollection({operatorId})?$select=timezonecode"))
+            .GetProperty("timezonecode").GetInt32();
+        var zoneName = (await dv.GetFromJsonAsync<JsonElement>($"timezonedefinitions?$select=standardname&$filter=timezonecode eq {code}"))
+            .GetProperty("value")[0].GetProperty("standardname").GetString()!;
+        var today = DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, TimeZoneInfo.FindSystemTimeZoneById(zoneName)).DateTime);
+        string Day(int offset) => DataverseDateOnly.Format(today.AddDays(offset));
+        _out.WriteLine($"operator {operatorId}: local today {Day(0)} ({zoneName})");
+
+        await using var factory = new LiveEventsFactory(dataverseUrl, credential, _out);
+        var createdEvents = new List<Guid>();
+        var leaks = new List<string>();
+        try
+        {
+            async Task<Guid> CreateTaskAsync(string name, string due, string finalDue)
+            {
+                var r = await dv.PostAsJsonAsync("sprk_events", new Dictionary<string, object>
+                {
+                    ["sprk_eventname"] = name,
+                    ["sprk_EventType_Ref@odata.bind"] = "/sprk_eventtype_refs(124f5fc9-98ff-f011-8406-7c1e525abd8b)", // Task
+                    ["statuscode"] = EventStatusCode.Open,
+                    ["sprk_duedate"] = due,
+                    ["sprk_finalduedate"] = finalDue,
+                    ["sprk_highpriority"] = true,
+                });
+                Log($"POST sprk_events '{name}' (due {due}, final due {finalDue})", r);
+                r.EnsureSuccessStatusCode();
+                var id = Guid.Parse(r.Headers.GetValues("OData-EntityId").Single().Split('(', ')')[1]);
+                createdEvents.Add(id);
+                return id;
+            }
+
+            // Overdue by sprk_duedate (8 days ago, past the 5-day cutoff); its final due date is in the Due-soon window.
+            var overdue = await CreateTaskAsync("zz-098-test d27 overdue by due date", Day(-8), Day(2));
+            // A reschedule moved sprk_duedate into the window; the final due date has passed.
+            var rescheduled = await CreateTaskAsync("zz-098-test d27 rescheduled", Day(2), Day(-8));
+
+            // The live read: both events really carry two DIFFERENT due dates.
+            foreach (var (id, due, finalDue) in new[] { (overdue, Day(-8), Day(2)), (rescheduled, Day(2), Day(-8)) })
+            {
+                var row = await ReadDatesAsync(dv, id);
+                Log($"read back {id}", row);
+                row.GetProperty("sprk_duedate").GetString().Should().Be(due);
+                row.GetProperty("sprk_finalduedate").GetString().Should().Be(finalDue);
+            }
+
+            // The production collector, reading AS the operator through the production impersonated query. Who the
+            // records are for (people targeting) is not under test here, so the resolver names the two events.
+            var resolver = new Mock<IMembershipResolverService>();
+            resolver.Setup(r => r.ResolveAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()))
+                .Returns((Guid _, string entity, MembershipResolveOptions? _, CancellationToken _) =>
+                {
+                    var ids = entity == "sprk_event" ? new[] { overdue, rescheduled } : Array.Empty<Guid>();
+                    return Task.FromResult(new MembershipResponse(entity, new PersonIdentity(operatorId), ids,
+                        new Dictionary<string, IReadOnlyList<Guid>>(), ids.Length, DateTimeOffset.UtcNow.AddMinutes(5)));
+                });
+            var collector = new Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector(
+                new Sprk.Bff.Api.Services.Communication.DataverseImpersonatedCommunicationQuery(
+                    factory.Services.GetRequiredService<DataverseWebApiService>()),
+                resolver.Object,
+                factory.Services.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>>());
+
+            var briefing = await collector.CollectAsync(operatorId,
+                Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+            string[] Ids(string channel) => briefing.Channels.SingleOrDefault(c => c.Category == channel)?.Items
+                .Select(i => i.Id).ToArray() ?? Array.Empty<string>();
+            var overdueChannel = Ids(Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.ChannelOverdueTasks);
+            var upcomingChannel = Ids(Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector.ChannelUpcomingTasks);
+            _out.WriteLine($"Briefing: overdue-tasks = [{string.Join(", ", overdueChannel)}]; upcoming-tasks = [{string.Join(", ", upcomingChannel)}]");
+
+            overdueChannel.Should().Contain(overdue.ToString()).And.NotContain(rescheduled.ToString(),
+                "overdue is judged by sprk_duedate; the rescheduled task's passed final due date does not make it overdue");
+            upcomingChannel.Should().Contain(rescheduled.ToString()).And.NotContain(overdue.ToString(),
+                "due soon is judged by sprk_duedate; the overdue task's final due date in the window does not pull it in");
+
+            var highPriority = await collector.CollectHighPriorityAsync(operatorId, CancellationToken.None);
+            string ActionOf(Guid id) => highPriority.Items.Single(i => i.EntityId == id.ToString()).Action;
+            _out.WriteLine($"High Priority: overdue -> {ActionOf(overdue)}; rescheduled -> {ActionOf(rescheduled)}");
+            ActionOf(overdue).Should().Be("Overdue");
+            ActionOf(rescheduled).Should().Be("DueSoon");
+        }
+        finally
+        {
+            foreach (var eventId in createdEvents)
+                leaks.AddRange(await DeleteEventWithLogsAsync(dv, eventId));
+            _out.WriteLine($"cleanup: {createdEvents.Count} zz-098-test events attempted; {leaks.Count} NOT deleted"
+                + (leaks.Count > 0 ? ":" + Environment.NewLine + "  " + string.Join(Environment.NewLine + "  ", leaks) : "."));
+        }
+
+        leaks.Should().BeEmpty("every zz-098-test record this run created must be gone");
+    }
+
     private static async Task<JsonElement> ReadDatesAsync(HttpClient dv, Guid id) =>
         await dv.GetFromJsonAsync<JsonElement>(
             $"sprk_events({id})?$select=sprk_duedate,sprk_finalduedate,sprk_basedate,sprk_completeddate,sprk_approveddate,sprk_meetingdate");

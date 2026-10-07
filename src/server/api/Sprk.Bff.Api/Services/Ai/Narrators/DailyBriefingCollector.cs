@@ -7,8 +7,10 @@
 //   [widget call] → [collector queries Dataverse live, 6 entity types] → [narrator] → [response].
 //
 // MVP SCOPE (this file) — 6 operator-specified channels per wave12-mvp-completion-plan §2.1:
-//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate OR sprk_finalduedate in next N days, status=Open
-//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate OR sprk_finalduedate > 5 days past, status=Open
+//   1. Upcoming Tasks — sprk_event, type=Task, sprk_duedate in next N days, status=Open
+//   2. Overdue Tasks  — sprk_event, type=Task, sprk_duedate > 5 days past, status=Open
+//   (D-27, task 065 folded into 098: sprk_duedate is THE due date — the one the Do lane shows and Reschedule
+//   writes. sprk_finalduedate is informational and never decides membership, order or the displayed date.)
 //   3. Documents      — sprk_document, modifiedon in the recency window
 //   4. Matters        — sprk_matter, modifiedon in the recency window, statecode=Active
 //   5. Projects       — sprk_project, modifiedon in the recency window, statecode=Active
@@ -475,15 +477,16 @@ public class DailyBriefingCollector : ICodedWorkflow
         new(EntityWorkAssignment, "sprk_workassignments", "sprk_workassignmentid", "sprk_name", "sprk_description",
             DueDateColumn: "sprk_responseduedate", FallbackDueDateColumn: null, KindLabel: "Work Assignment",
             IncludeStateFilter: true),
-        // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
-        // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
+        // Event has both sprk_duedate and sprk_finalduedate. D-27 (task 065, folded into 098): sprk_duedate ALWAYS —
+        // it is the date the Do lane shows and Reschedule writes; sprk_finalduedate is informational and is NOT a
+        // fallback (an event with only a final due date has no due date here). Same column as the task channels.
         // 🔴 Fixed 2026-09-29 (spaarke-ontology-platform-r1, master #1032): the description column was
         // "sprk_eventdescription", which DOES NOT EXIST on sprk_event — the real column is "sprk_description", exactly
         // as every sibling entry in this list already uses. The bad column made Dataverse reject the whole retrieve, so
         // this channel threw on every briefing run and the briefing could not see tasks at all (AP-14). Merged with task
         // 152's people-targeting spec shape (entity set, no per-spec owner switch).
         new(EntityEvent, "sprk_events", "sprk_eventid", "sprk_eventname", "sprk_description",
-            DueDateColumn: "sprk_finalduedate", FallbackDueDateColumn: "sprk_duedate", KindLabel: "Task",
+            DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "Task",
             IncludeStateFilter: false),
         new(EntityTodo, "sprk_todos", "sprk_todoid", "sprk_name", "sprk_description",
             DueDateColumn: "sprk_duedate", FallbackDueDateColumn: null, KindLabel: "To Do", IncludeStateFilter: true),
@@ -839,7 +842,8 @@ public class DailyBriefingCollector : ICodedWorkflow
 
     private static readonly string[] EventColumns =
     {
-        "sprk_eventid", "sprk_eventname", "sprk_duedate", "sprk_finalduedate", "modifiedon",
+        // D-27: sprk_finalduedate is not read — it decides nothing in the Briefing.
+        "sprk_eventid", "sprk_eventname", "sprk_duedate", "modifiedon",
         "_sprk_regardingmatter_value", "_sprk_regardingproject_value", "sprk_priority",
     };
 
@@ -862,9 +866,8 @@ public class DailyBriefingCollector : ICodedWorkflow
             events,
             matters,
             projects,
-            // sprk_duedate OR sprk_finalduedate within the user's Due-soon window (days).
-            $"(Microsoft.Dynamics.CRM.NextXDays(PropertyName='sprk_duedate',PropertyValue={days}) or "
-            + $"Microsoft.Dynamics.CRM.NextXDays(PropertyName='sprk_finalduedate',PropertyValue={days}))",
+            // sprk_duedate within the user's Due-soon window (days). D-27: never sprk_finalduedate.
+            $"Microsoft.Dynamics.CRM.NextXDays(PropertyName='sprk_duedate',PropertyValue={days})",
             ct);
     }
 
@@ -892,8 +895,8 @@ public class DailyBriefingCollector : ICodedWorkflow
             events,
             matters,
             projects,
-            $"(Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{cutoff}') or "
-            + $"Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_finalduedate',PropertyValue='{cutoff}'))",
+            // D-27: sprk_duedate only — a final due date in the past does not make a rescheduled task overdue.
+            $"Microsoft.Dynamics.CRM.OnOrBefore(PropertyName='sprk_duedate',PropertyValue='{cutoff}')",
             ct).ConfigureAwait(false);
     }
 
@@ -927,15 +930,14 @@ public class DailyBriefingCollector : ICodedWorkflow
                 new IdTerm("_sprk_regardingproject_value", projects),
             },
             EventColumns,
-            "sprk_finalduedate asc,sprk_duedate asc",
+            "sprk_duedate asc,sprk_eventid asc", // D-27: ordered by sprk_duedate; the id makes ties stable
             label,
             ct).ConfigureAwait(false);
 
         if (read.Failed) return ChannelResult.FailedChannel;
 
         var items = read.Rows
-            .OrderBy(r => GetDate(r, "sprk_finalduedate") ?? DateTimeOffset.MaxValue)
-            .ThenBy(r => GetDate(r, "sprk_duedate") ?? DateTimeOffset.MaxValue)
+            .OrderBy(r => GetDate(r, "sprk_duedate") ?? DateTimeOffset.MaxValue)
             .Take(PerChannelMaxRows)
             .Select(MapEventToBriefingItem)
             .ToArray();
@@ -1125,7 +1127,7 @@ public class DailyBriefingCollector : ICodedWorkflow
             EntityId = id.ToString(),
             Title = GetString(row, "sprk_eventname") ?? "(untitled event)",
             Priority = MapPriority(GetInt(row, "sprk_priority")),
-            DueDate = GetDate(row, "sprk_finalduedate") ?? GetDate(row, "sprk_duedate"),
+            DueDate = GetDate(row, "sprk_duedate"), // D-27: the due date shown is sprk_duedate
             RegardingMatterName = matterId is null ? null : GetFormatted(row, "_sprk_regardingmatter_value"),
             RegardingMatterId = matterId?.ToString(),
             ModifiedOn = GetDate(row, "modifiedon"),
@@ -1292,9 +1294,10 @@ public class DailyBriefingCollector : ICodedWorkflow
     {
         // R5 task 034 (FR-C5) — de-dup across the 6 channels before assembling
         // categories/priorityItems/channels/total below. An item reachable via more than
-        // one channel — e.g. an sprk_event whose sprk_duedate falls in the Overdue window
-        // while its sprk_finalduedate falls in the Upcoming window (QueryEventsAsync's OR
-        // date-filter allows both) — must appear exactly once in the assembled output.
+        // one channel must appear exactly once in the assembled output. (Before D-27 the
+        // task channels OR-ed sprk_duedate with sprk_finalduedate, so one event could sit
+        // in both Overdue and Upcoming. They now read sprk_duedate alone, so those two
+        // windows are disjoint; the de-dup stays as the general rule.)
         // Keys on stable record identity (EntityType + EntityId), NEVER display text, so
         // two genuinely-distinct records sharing a title both survive. First-occurrence
         // wins in this fixed channel-priority order (upcoming, overdue, documents,

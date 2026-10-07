@@ -597,7 +597,7 @@ public sealed class DailyBriefingCollectorTests
         query.Add("sprk_matters", FlaggedRow("sprk_matterid", "sprk_mattername", matterId, "Zeta Matter"), matterId);
         query.Add("sprk_projects", FlaggedRow("sprk_projectid", "sprk_projectname", projectId, "Alpha Project"), projectId);
         query.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", eventId, "Earliest-Due Task",
-            ("sprk_finalduedate", DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-ddTHH:mm:ssZ"))), eventId);
+            ("sprk_duedate", DateTime.UtcNow.Date.AddDays(1).ToString("yyyy-MM-dd"))), eventId);
         var sets = new Dictionary<string, Guid[]>
         {
             ["sprk_matter"] = new[] { matterId }, ["sprk_project"] = new[] { projectId }, ["sprk_event"] = new[] { eventId },
@@ -780,9 +780,9 @@ public sealed class DailyBriefingCollectorTests
         var dueYesterday = Guid.NewGuid();
         var dueTomorrow = Guid.NewGuid();
         var inner = new FakeCallerQuery();
-        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "due today (Eastern)", ("sprk_finalduedate", "2026-10-05")), dueToday);
-        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "due yesterday", ("sprk_finalduedate", "2026-10-04")), dueYesterday);
-        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueTomorrow, "due tomorrow", ("sprk_finalduedate", "2026-10-06")), dueTomorrow);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueToday, "due today (Eastern)", ("sprk_duedate", "2026-10-05")), dueToday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueYesterday, "due yesterday", ("sprk_duedate", "2026-10-04")), dueYesterday);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", dueTomorrow, "due tomorrow", ("sprk_duedate", "2026-10-06")), dueTomorrow);
         var query = new EasternCallerQuery(inner);
 
         var result = await SutAt(query, PeopleResolver(new Dictionary<string, Guid[]>
@@ -853,6 +853,109 @@ public sealed class DailyBriefingCollectorTests
     public void DueDayOf_IsTheCalendarDayInTheCallersZone(string raw, string expected) =>
         DailyBriefingCollector.DueDayOf(raw, TimeZoneInfo.FindSystemTimeZoneById("Eastern Standard Time"))
             .Should().Be(DateOnly.Parse(expected, System.Globalization.CultureInfo.InvariantCulture));
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // D-27 (task 065, folded into 098): sprk_duedate is THE due date — the one the Do lane shows and Reschedule
+    // writes. sprk_finalduedate is informational and decides nothing: not membership, not order, not the date shown.
+    // The caller's local today is 2026-10-05 (EveningEastern); every event below has two DIFFERENT dates.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CollectHighPriorityAsync_ClassifiesAndOrdersTaskEventsBySprkDuedate_NotTheFinalDueDate()
+    {
+        var overdue = Guid.NewGuid();
+        var rescheduled = Guid.NewGuid();
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", overdue, "due yesterday, final due later",
+            ("sprk_duedate", "2026-10-04"), ("sprk_finalduedate", "2026-10-20")), overdue);
+        inner.Add("sprk_events", FlaggedRow("sprk_eventid", "sprk_eventname", rescheduled, "rescheduled to Oct 8, final due passed",
+            ("sprk_duedate", "2026-10-08"), ("sprk_finalduedate", "2026-10-01")), rescheduled);
+
+        var items = (await SutAt(new EasternCallerQuery(inner), PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { overdue, rescheduled },
+        })).CollectHighPriorityAsync(SystemUserId, CancellationToken.None)).Items;
+
+        string ActionOf(Guid id) => items.Single(i => i.EntityId == id.ToString()).Action;
+        ActionOf(overdue).Should().Be("Overdue", "sprk_duedate (Oct 4) has passed; the later final due date does not rescue it");
+        ActionOf(rescheduled).Should().Be("DueSoon", "a reschedule moved sprk_duedate to Oct 8; the passed final due date is informational");
+        items.Select(i => i.EntityId).Should().ContainInOrder(new[] { overdue.ToString(), rescheduled.ToString() },
+            "ordered by sprk_duedate (Oct 4 before Oct 8); the final due dates would order them the other way");
+    }
+
+    /// <summary>
+    /// Evaluates the task channels' date clauses on sprk_events the way Dataverse would, for a caller whose local
+    /// today is <paramref name="today"/>: <c>NextXDays(X, N)</c> is today ≤ X ≤ today + N, <c>OnOrBefore(X, D)</c> is
+    /// X ≤ D, clauses joined by <c>or</c>. A fake that ignored the filter could not tell which column decides.
+    /// </summary>
+    private sealed class DateEvaluatingEventsQuery(IImpersonatedCommunicationQuery inner, DateOnly today) : IImpersonatedCommunicationQuery
+    {
+        private static readonly System.Text.RegularExpressions.Regex Clause = new(
+            @"Microsoft\.Dynamics\.CRM\.(?<op>NextXDays|OnOrBefore)\(PropertyName='(?<col>\w+)',PropertyValue='?(?<val>[^')]+)'?\)");
+
+        public async Task<IReadOnlyList<Dictionary<string, JsonElement>>> QueryAsync(
+            string entitySetName, string? odataQuery, Guid callerSystemUserId, CancellationToken ct)
+        {
+            var rows = await inner.QueryAsync(entitySetName, odataQuery, callerSystemUserId, ct);
+            var clauses = Clause.Matches(odataQuery ?? string.Empty);
+            if (entitySetName != "sprk_events" || clauses.Count == 0)
+                return rows;
+
+            bool Holds(Dictionary<string, JsonElement> row, System.Text.RegularExpressions.Match m)
+            {
+                if (!row.TryGetValue(m.Groups["col"].Value, out var v) || v.ValueKind != JsonValueKind.String)
+                    return false;
+                var day = DateOnly.Parse(v.GetString()!, System.Globalization.CultureInfo.InvariantCulture);
+                var arg = m.Groups["val"].Value;
+                return m.Groups["op"].Value == "NextXDays"
+                    ? day >= today && day <= today.AddDays(int.Parse(arg, System.Globalization.CultureInfo.InvariantCulture))
+                    : day <= DateOnly.Parse(arg, System.Globalization.CultureInfo.InvariantCulture);
+            }
+
+            return rows.Where(r => clauses.Any(m => Holds(r, m))).ToList();
+        }
+    }
+
+    private static Dictionary<string, JsonElement> DatedEventRow(Guid id, string name, string dueDate, string finalDueDate) =>
+        Row(new Dictionary<string, object?>
+        {
+            ["sprk_eventid"] = id.ToString("D"),
+            ["sprk_eventname"] = name,
+            ["sprk_duedate"] = dueDate,
+            ["sprk_finalduedate"] = finalDueDate,
+        });
+
+    [Fact]
+    public async Task CollectAsync_TaskChannels_SelectOrderAndShowBySprkDuedate_NotTheFinalDueDate()
+    {
+        var overdue = Guid.NewGuid();     // due Sep 28 (past the 5-day cutoff, Sep 30); final due Oct 7 (in the window)
+        var rescheduled = Guid.NewGuid(); // a reschedule moved sprk_duedate to Oct 8; the final due date Sep 20 has passed
+        var dueOct9 = Guid.NewGuid();     // due Oct 9, final due Oct 6
+        var dueOct7 = Guid.NewGuid();     // due Oct 7, final due Oct 30 (outside the window)
+        var inner = new FakeCallerQuery();
+        inner.Add("sprk_events", DatedEventRow(overdue, "Overdue by its due date", "2026-09-28", "2026-10-07"), overdue);
+        inner.Add("sprk_events", DatedEventRow(rescheduled, "Rescheduled", "2026-10-08", "2026-09-20"), rescheduled);
+        inner.Add("sprk_events", DatedEventRow(dueOct9, "Due Oct 9", "2026-10-09", "2026-10-06"), dueOct9);
+        inner.Add("sprk_events", DatedEventRow(dueOct7, "Due Oct 7", "2026-10-07", "2026-10-30"), dueOct7);
+        var query = new EasternCallerQuery(new DateEvaluatingEventsQuery(inner, new DateOnly(2026, 10, 5)));
+
+        var request = await SutAt(query, PeopleResolver(new Dictionary<string, Guid[]>
+        {
+            ["sprk_event"] = new[] { overdue, rescheduled, dueOct9, dueOct7 },
+        })).CollectAsync(SystemUserId, DailyBriefingCollector.BriefingWindowOptions.Default, CancellationToken.None);
+
+        string[] Ids(string category) =>
+            request.Channels.SingleOrDefault(c => c.Category == category)?.Items.Select(i => i.Id).ToArray() ?? Array.Empty<string>();
+
+        Ids(DailyBriefingCollector.ChannelOverdueTasks).Should().Equal(new[] { overdue.ToString() },
+            "overdue by sprk_duedate; the rescheduled task's passed final due date does not make it overdue");
+        Ids(DailyBriefingCollector.ChannelUpcomingTasks).Should().Equal(
+            new[] { dueOct7.ToString(), rescheduled.ToString(), dueOct9.ToString() },
+            "upcoming = sprk_duedate within 5 days, ordered by sprk_duedate (Oct 7, 8, 9); the overdue task's final due "
+            + "date (Oct 7) does not pull it in");
+        request.PriorityItems.Single(p => p.Title == "Due Oct 7").DueDate!.Value.Date
+            .Should().Be(new DateTime(2026, 10, 7), "the date shown is sprk_duedate, not the final due date (Oct 30)");
+    }
 }
 
 /// <summary>
