@@ -34,7 +34,7 @@
 //
 // PATH (per docs/standards/TEST-ARCHITECTURE.md §3 KEEP categories):
 //   L2 project-scoped test — mirrors existing L2 Handlers/*Tests.cs pattern.
-//   The 7 KEEP path convention applies to tests/** (repo-level) — the L2
+//   The ADR-038 KEEP path convention (eight paths) applies to tests/** (repo-level) — the L2
 //   project has its own Sprk.Provisioning.ControlPlane.Tests project which
 //   is where every L2 handler test lives.
 // -----------------------------------------------------------------------------

@@ -9,7 +9,7 @@
 // ADR-038 path #1 + KEEP-path rules per .claude/constraints/testing.md section
 // MUST NOT B1).
 //
-// PATH: tests/CLAUDE.md 7 KEEP paths -- this file is a component-scoped unit
+// PATH: ADR-038 KEEP paths (eight, incl. Amendment A1) -- this file is a component-scoped unit
 // test of the runner class (a pure L2 seam with no BFF wiring). It exercises
 // behavior through the runner's PUBLIC RunAsync surface. It lives in the
 // existing Tests project alongside the sibling H13 real-probe test files

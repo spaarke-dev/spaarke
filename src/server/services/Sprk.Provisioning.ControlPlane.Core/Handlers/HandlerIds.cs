@@ -106,7 +106,8 @@ public static class HandlerIds
     public const string H14 = "H14";
 
     /// <summary>
-    /// H14a -- Exchange ApplicationAccessPolicy sub-step. In-process only
+    /// H14a -- Exchange RBAC for Applications sub-step (group-scoped "Application Mail.*" role
+    /// assignments for the stamp's managed identity; replaced ApplicationAccessPolicy, owner D26). In-process only
     /// (see class remarks) -- NOT in <see cref="Dispatchable"/>.
     /// </summary>
     public const string H14a = "H14a";

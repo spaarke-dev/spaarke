@@ -824,7 +824,7 @@ builder.Services.AddScoped<H11UserProvisioningHandler>();
 builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 
 // Task 073 (Batch 3F): H14 post-deploy integration wiring handler (parent) +
-// its 3 DAG-parallel sub-handlers (H14a Exchange ApplicationAccessPolicy —
+// its 3 DAG-parallel sub-handlers (H14a Exchange RBAC for Applications —
 // T4 silent-fail trap owner; H14b Graph webhook subscriptions; H14c Dataverse
 // service-endpoint webhook) + FOUR collaborator seams. Registered via a
 // single AddH14IntegrationWiringHandler() extension method

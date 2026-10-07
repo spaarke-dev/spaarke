@@ -1248,7 +1248,7 @@ public static class RunsEndpoints
         {
             return (H14aRejections.MissingPolicyScopeGroupId,
                 $"nonSecretParameters['{IntakeParameterCatalog.ExchangePolicyScopeGroupId}'] is required — the " +
-                "mail-enabled security group that scopes the Exchange ApplicationAccessPolicy H14a creates. The " +
+                "mail-enabled security group that scopes the Exchange RBAC for Applications role assignments H14a creates. The " +
                 "Exchange admin of the stamp's tenant (the customer's for Model 2, Spaarke's for Model 1) creates it " +
                 "before the run (prerequisite PRQ-C-08).");
         }

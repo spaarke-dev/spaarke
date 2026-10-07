@@ -312,6 +312,12 @@ pac solution list
 
 ## Phase 3: PCF Controls (R2)
 
+> **Removed — history only (2026-10-07).** The AnalysisBuilder and AnalysisWorkspace PCF controls were deleted from the
+> repository on 2026-03-15 (commit `ded4e037c2`, "remove 10 deprecated PCF controls"); `src/client/pcf/AnalysisBuilder/`
+> and `src/client/pcf/AnalysisWorkspace/` no longer exist. Sections 3.1 and 3.2 describe them for history only.
+> **Release any PCF control through `/pcf-deploy`** (solution ZIP import, `npm run build:prod`), never with
+> `pac pcf push` (a development inner-loop command) or `npm run build` (development mode — `.claude/FAILURE-MODES.md` AP-1).
+
 ### 3.1 AnalysisBuilder PCF Control
 
 **Purpose**: Modal dialog for configuring and executing AI document analyses
@@ -346,11 +352,7 @@ cd src/client/pcf/AnalysisBuilder
 # Install dependencies
 npm install
 
-# Build
-npm run build
-
-# Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
+# Historical (control removed). Releases: /pcf-deploy — never pac pcf push or npm run build.
 ```
 
 ### 3.2 AnalysisWorkspace PCF Control
@@ -383,11 +385,7 @@ cd src/client/pcf/AnalysisWorkspace
 # Install dependencies
 npm install
 
-# Build
-npm run build
-
-# Deploy to Dataverse
-pac pcf push --publisher-prefix sprk
+# Historical (control removed). Releases: /pcf-deploy — never pac pcf push or npm run build.
 ```
 
 ### 3.3 Environment Variable Configuration

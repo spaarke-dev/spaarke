@@ -86,8 +86,8 @@ public static class IntakeParameterCatalog
     public const string EnvironmentSecurityGroupId = "environmentSecurityGroupId";
 
     /// <summary>
-    /// H14a — the mail-enabled security group that scopes the Exchange ApplicationAccessPolicy (which mailboxes the
-    /// BFF app + UAMI may use). Created by the Exchange admin of the stamp's tenant (the customer's for Model 2,
+    /// H14a — the mail-enabled security group that scopes the Exchange RBAC for Applications role assignments (which
+    /// mailboxes the stamp's managed identity may use; owner D26 replaced ApplicationAccessPolicy). Created by the Exchange admin of the stamp's tenant (the customer's for Model 2,
     /// Spaarke's for Model 1) before the run (prereqs.yaml <c>PRQ-C-08</c>; owner decision D14). Required.
     /// </summary>
     public const string ExchangePolicyScopeGroupId = "exchangePolicyScopeGroupId";
@@ -145,7 +145,7 @@ public static class IntakeParameterCatalog
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6); a Model1 run takes only B2BGuest (owner D2, T232). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(EnvironmentSecurityGroupId, "H11 (T232): object id of the customer environment's security group sprk-{customerId}-users, created by the operator and set on the environment before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model 1 run); validated at POST /api/runs (UserProvisioningIntake). H11 adds each guest to it."),
-        new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange ApplicationAccessPolicy — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
+        new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange RBAC for Applications role assignments — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
         new(CommunicationGraphResource, "H14b: Graph subscription resource for the Communication module. At least one of this and emailGraphResource."),
         new(EmailGraphResource, "H14b: Graph subscription resource for the Email module. At least one of this and communicationGraphResource."),
         new(CommunicationDefaultMailbox, "H4: Communication module default mailbox address (KV Communication-DefaultMailbox). Required."),

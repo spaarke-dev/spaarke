@@ -9,7 +9,7 @@
 // the task-176 BFF-diagnostic variant's tests (retired with it by task 227f);
 // this file exercises the INDEPENDENT ARM-config-read variant.
 //
-// PATH: tests/CLAUDE.md 7 KEEP paths — component-scoped unit test of the probe
+// PATH: ADR-038 KEEP paths (eight, incl. Amendment A1) — component-scoped unit test of the probe
 // class through its PUBLIC ProbeAsync surface. Sits alongside sibling H13
 // real-probe test files (the retired task-176 probe tests,
 // AiSearchTenantFilterInvariantProbeTests, CosmosPartitionKeyInvariantProbeTests).

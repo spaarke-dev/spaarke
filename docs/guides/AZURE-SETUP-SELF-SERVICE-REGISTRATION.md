@@ -184,6 +184,13 @@ Security Defaults enforce MFA for all users and **cannot exclude groups**. You m
 
 ## Exchange Application Access Policy
 
+> **Legacy — shared dev/demo BFF only (2026-10-07).** This section applies only to the shared dev/demo BFF app that
+> sends the self-service registration emails. Microsoft calls ApplicationAccessPolicy legacy. **Customer stamps do not
+> use it:** provisioning step H14a gives the stamp's managed identity the Exchange *RBAC for Applications* mailbox roles,
+> scoped to the customer's mail-enabled security group (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §4.2.1 and §7.9). Those
+> mailbox roles must **not** also be granted as Entra app roles: Exchange role assignments add to Entra permissions, so an
+> Entra grant would remove the group scope (§7.7). Do not create an ApplicationAccessPolicy for a stamp.
+
 The BFF API sends welcome and expiration notification emails from a shared mailbox. Exchange Application Access Policies restrict which mailboxes the app can send from.
 
 ### Step 1: Connect to Exchange Online
@@ -427,7 +434,7 @@ Use this checklist when setting up the self-service registration system in a bra
 
 - [ ] Conditional Access: ALL MFA-requiring policies updated with demo group exclusion
 - [ ] Conditional Access: Verified via "What If" that demo users are not prompted for MFA
-- [ ] Exchange Application Access Policy configured for BFF API to send from demo mailbox
+- [ ] Exchange Application Access Policy configured for BFF API to send from demo mailbox (legacy; shared dev/demo BFF only — stamps use H14a)
 - [ ] Exchange policy verified via `Test-ApplicationAccessPolicy` (result: Granted)
 
 ### BFF API Configuration
@@ -473,7 +480,7 @@ Use this checklist when setting up the self-service registration system in a bra
 | 403 on approve/reject endpoint | User not assigned `Admin` app role | Assign role via Enterprise Applications > Users and groups |
 | Provisioning fails with "Insufficient privileges" | Application permissions not granted or missing admin consent | Re-grant admin consent; verify green checkmarks |
 | Demo user prompted for MFA | Conditional Access exclusion not applied to all policies | Check ALL MFA policies, not just the primary one |
-| Email sending fails with 403 | Exchange Application Access Policy missing or not propagated | Verify with `Test-ApplicationAccessPolicy`; wait up to 30 min for propagation |
+| Email sending fails with 403 | Shared dev/demo BFF: Exchange Application Access Policy missing or not propagated. A customer stamp: H14a's RBAC for Applications assignments (deployment guide §7.9) | Dev/demo: verify with `Test-ApplicationAccessPolicy`; wait up to 30 min for propagation. Stamp: `Test-ServicePrincipalAuthorization` for the stamp's managed identity |
 | License assignment fails | SKU ID incorrect or license unavailable in tenant | Re-run `Get-LicenseSkuIds.ps1`; ensure trial/license is active |
 | Double-path errors (`/api/api/...`) | `BFF_API_URL` includes `/api` suffix | Remove `/api` -- use host only |
 | User created but cannot access Dataverse | Team membership not assigned, or Business Unit missing | Verify "Spaarke Demo" Owner Team exists with correct security role |
@@ -490,7 +497,7 @@ az ad group member list --group "Spaarke Demo Users" --output table
 # Check assigned licenses for a user
 az ad user show --id "user@demo.spaarke.com" --query "assignedLicenses"
 
-# Check Exchange Application Access Policy
+# Check Exchange Application Access Policy (legacy; shared dev/demo BFF only)
 Connect-ExchangeOnline -UserPrincipalName admin@spaarke.com
 Get-ApplicationAccessPolicy | Format-List
 Test-ApplicationAccessPolicy -Identity "demo@demo.spaarke.com" -AppId "{bff-api-client-id}"
