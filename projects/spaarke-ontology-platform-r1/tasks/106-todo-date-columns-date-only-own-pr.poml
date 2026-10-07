@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="106" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>sprk_todo date columns to Date Only, own PR</title>
+    <phase>8 Remaining cleanup and repairs</phase>
+    <gate>startable after 098 merges</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>One-way Dataverse schema change plus a data conversion, then BFF and client date handling.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Irreversible schema change on live dev data; every step must be evidenced.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>I2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Own worktree and branch off origin/master; To Do date columns and their readers/writers only.</parallel-reason>
+    <deps>098</deps>
+    <tags>dataverse,schema,bff-api,frontend,separate-pr</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Convert sprk_todo's date columns from User Local timestamps to Date Only behaviour, so every surface shows and judges the day the user picked; then make every reader and writer treat them as calendar dates, the way task 098 did for sprk_event.</prompt>
+  <role>SPAARKE engineer. A due date that is a day off is a defect users see; an irreversible change is evidenced before and after.</role>
+  <goal>Every date column on sprk_todo that represents a calendar day (at least sprk_duedate) has Date Only behaviour in spaarkedev1; every existing value reads back as the day the user picked; every reader and writer (BFF, SmartTodo, shared components, To Do generation, Daily Briefing, ribbon/web resources, Outlook add-in paths) handles them as calendar dates; the change is recorded so it ships to other environments.</goal>
+
+  <context>
+    <background>Found 2026-10-07 by task 024: sprk_todo.sprk_duedate looks like a date but is stored as the UTC instant of the user's local midnight (the same defect task 098 fixed for six sprk_event columns; 098 did not cover sprk_todo). Owner decision D-41 (spec §9): convert as its own task, modelled on 098. Task 031's per-item "today" (D-25) and the Do-lane rules (D-31) compare against this column, so 031 depends on this task. Reuse 098's helpers (shared DataverseUserTimeZone, dateLocal formatDateOnly/parseDueDate, the DataGrid dateonly renderer) — do not write second copies.</background>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Approved 2026-10-07 (D-41): set CanChangeDateTimeBehavior = True on the To Do calendar-day date columns, change DateTimeBehavior to DateOnly (one-way), convert existing rows with ConvertDateAndTimeBehavior, and correct by hand any values the conversion would shift. Only sprk_todo columns that represent a calendar day; a column that is a real instant (e.g. a completed-at timestamp) stays as it is — list each column and its classification first.</constraint>
+    <constraint source="project">Before any change: inventory every sprk_todo date column (describe), its owning solution, and every reader and writer in src/ (BFF, SmartTodo, Spaarke.UI.Components, TodoGenerationService, Daily Briefing, ribbon/web resources, office add-ins, field-mapping rules). Re-run a value analysis like task 098's (how many values sit at 00:00 UTC vs a local midnight vs a computed instant) and record each value's before state. If a UTC-rule conversion would shift values beyond a small, hand-correctable set, STOP and report.</constraint>
+    <constraint source="project">The change must ship to other environments: record what has to be exported/replicated (the owning solution) and write the per-environment procedure (re-running the value analysis there), in docs/data-model next to task 098's sprk_event procedure. Do not export or import solutions yourself.</constraint>
+    <constraint source="project">Code changes go in their own worktree off origin/master and their own PR. Root CLAUDE.md section 10 applies to the BFF part (placement, publish size against a fresh master from short paths, CVE). #1309's blocking Xrm capability guard applies to any getXrm use. Never use --no-verify or bare git stash. You cannot write .claude/.</constraint>
+    <constraint source="project">A one-way schema change breaks every reader/writer of the column: fix the dev surfaces broken by the conversion in the same PR (task 098's lesson), and prove writes live (no HTTP 400 on To Do create/update/complete/reschedule paths).</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare the rigor level and reason per root CLAUDE.md section 8.</step>
+    <step order="1">Inventory columns (classify calendar-day vs instant), readers and writers; run the value analysis; record before-state.</step>
+    <step order="2">Set CanChangeDateTimeBehavior = True on the calendar-day columns; verify.</step>
+    <step order="3">Change DateTimeBehavior to DateOnly; publish the entity only; verify metadata.</step>
+    <step order="4">Run ConvertDateAndTimeBehavior; wait for the async job; verify success.</step>
+    <step order="5">Re-read every value; hand-correct shifted values to the user's picked day; re-read again.</step>
+    <step order="6">Write the per-environment procedure and what must ship.</step>
+    <step order="7">Code: fix every reader/writer with 098's helpers; tests that fail on the old code; live proof of every To Do write path; PR against master.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The calendar-day sprk_todo date columns report DateTimeBehavior DateOnly in spaarkedev1; instant columns are listed and unchanged.</criterion>
+    <criterion testable="true">Every pre-existing value reads back as the day the user picked; before/after evidence is recorded.</criterion>
+    <criterion testable="true">The per-environment procedure and the owning-solution export requirement are written down.</criterion>
+    <criterion testable="true">Every To Do write path (create, update, complete, reschedule, generation) succeeds live and stores the picked day; every reader shows the same day for a user west of UTC in the evening; a test per class fails on the old code.</criterion>
+    <criterion testable="true">No second copy of 098's date helpers is introduced.</criterion>
+    <criterion testable="true">A PR against master is open with the evidence in its body.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The value analysis shows a population a conversion would break beyond a small hand-correctable set.</trigger>
+    <trigger>A date column's meaning (calendar day vs instant) is unclear from code and data.</trigger>
+  </escalation>
+
+  <notes>Created 2026-10-07 by the main session on owner decision D-41 (found by task 024).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

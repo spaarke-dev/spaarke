@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Tasks 025, 032, 033, 034, 038 and 101 all attach to this job or its evaluation core.</parallel-reason>
-    <deps>030, 003, 007, 008, 009, 024, 037, 039, 098</deps>
+    <deps>030, 003, 007, 008, 009, 024, 037, 039, 098, 106</deps>
     <tags>bff-api,scheduled-job,signals</tags>
     <estimated-effort>1-1.5 days</estimated-effort>
   </metadata>

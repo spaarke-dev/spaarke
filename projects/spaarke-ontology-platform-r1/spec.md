@@ -1064,6 +1064,8 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 | **D-37** (O-23) | Two core records | The item's **direct filed-under (regarding) core record** wins; if ambiguous, matter over project | 037 |
 | **D-38** (O-24) | Narrow skip | **Dropped** — no skips; every item is protected via its core record, or owner-only (D-35) | 031, 037 |
 | **D-39** (O-25) | No-core items | Suppression per **(policy, item)**; the Decision Record is **owned by the item's owner** and visible like its Signal | 034, 040 |
+| **D-40** (2026-10-07, task 024 escalation) | Date ranges in rules | A date field may take **one lower plus one upper bound** (e.g. `{">=": "now", "<=": "now+3d"}`) — nothing more (no OR, no third bound, no join); still one Dataverse filter. Needed so "due within 3 days" excludes overdue items | Task 024 |
+| **D-41** (2026-10-07, task 024 finding) | To Do dates | `sprk_todo` due dates are UTC timestamps of the user's local midnight (not converted by 098). **Convert To Do date columns to Date Only as their own task**, modelled on 098 (inventory columns + readers/writers first, convert in spaarkedev1 with before/after evidence, fix readers/writers, per-environment procedure, own PR) | New task 106; 031 depends on it for per-item "today" (D-25) |
 | **D-29** | Smaller | To Do composite score → **calendar days**, one shared function (boards re-rank once). Writer gets **AppendTo** on `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_workassignment` (closes F26). Caller-unresolved stays **#1312's single 403**. Tier 2 ADR Compliance timeout → **5 min** (own small PR) | Role edits; To Do scoring task; CI PR |
 
 ---
