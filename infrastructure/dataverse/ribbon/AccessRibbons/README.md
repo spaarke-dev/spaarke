@@ -201,7 +201,11 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
    (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:
    the AFTER list is the BEFORE list plus `sprk.Access.*`), packs, imports with publish, and runs `-Verify` against
-   `before.json`. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition, the
+   `before.json`. **The effective ribbon lags the publish**: on spaarkedev1 (2026-10-07) the verify run right after
+   "Published All Customizations" reported partial, per-entity FAILs and a read-only `-Verify` 75 s later passed on all
+   three, so `-Apply` retries its verify with a bounded backoff (15/30/45/60/30 s, about 3 minutes) and reports
+   `VERIFY FAILED` only when the last attempt still fails. The standalone read-only `-Verify` does not retry — straight
+   after an import, give it a few minutes. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition, the
    wired file relocation AND its `SecureChildReconciliationJob` backstop with writes on.
    Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
