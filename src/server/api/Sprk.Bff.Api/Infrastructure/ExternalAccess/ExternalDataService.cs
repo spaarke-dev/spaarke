@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -102,12 +103,28 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
     }
 
+    // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
+    // 'sprk_name'" — so the external events list and create always failed). The live columns are sprk_eventname (the
+    // primary name) and, for status, statuscode — the column the rest of the BFF (and POST /events/{id}/complete) writes.
+    // Review F2 (coordinator interim decision, pending the owner's two-status-columns decision): statuscode is the status
+    // of record; sprk_eventstatus is neither read nor written here. The SPA wire names (sprk_name / sprk_status on
+    // ExternalEventDto) are unchanged; only the Dataverse side is mapped here.
+    internal const string EventNameColumn = "sprk_eventname";
+    internal const string EventStatusColumn = "statuscode";
+
+    /// <summary>
+    /// The statuses an external caller may create an event in (review F9): Draft or Open — both Active. Any other value
+    /// is refused with 400. When omitted the event is created Open, matching POST /api/v1/events.
+    /// </summary>
+    internal static readonly IReadOnlySet<int> ExternalCreatableStatuses =
+        new HashSet<int> { EventStatusCode.Draft, EventStatusCode.Open };
+
     private sealed class EventRow
     {
         [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
-        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
+        [JsonPropertyName(EventNameColumn)] public string? SprkName { get; set; }
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
-        [JsonPropertyName("sprk_status")] public int? SprkStatus { get; set; }
+        [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
     }
@@ -602,9 +619,7 @@ public class ExternalDataService
     /// </remarks>
     public virtual async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
-        var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,createdon,_sprk_regardingproject_value";
-        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+        var url = $"{GetApiUrl()}/{BuildEventsQuery(projectId)}";
 
         var rows = await GetCollectionAsync<EventRow>(url, ct);
         return rows.Select(MapEvent).ToList();
@@ -657,9 +672,22 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names).
+    /// Internal for tests.
+    /// </summary>
+    internal static string BuildEventsQuery(Guid projectId)
+    {
+        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value";
+        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
+        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+    }
+
+    /// <summary>
     /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
     /// OWNER the route resolved from the project (task 146 — the named Secure team for a secure project). Pure so a
-    /// test can read it.
+    /// test can read it. Task 097: the DTO's sprk_name / sprk_status are written to the LIVE sprk_eventname / statuscode
+    /// (with the paired statecode) — sprk_event has neither sprk_name nor sprk_status, so the former body was a 400.
+    /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
     /// </summary>
     internal static Dictionary<string, object?> BuildEventCreatePayload(
         Guid projectId, CreateExternalEventRequest request, Guid owningTeamId)
@@ -669,18 +697,22 @@ public class ExternalDataService
         ArgumentNullException.ThrowIfNull(request);
         RequireOwner(owningTeamId, "sprk_event");
 
+        var status = request.SprkStatus ?? EventStatusCode.Open;
+        if (!ExternalCreatableStatuses.Contains(status))
+            throw new ArgumentOutOfRangeException(nameof(request), status,
+                "sprk_status must be Draft (1) or Open (659490001).");
+
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
-            body["sprk_name"] = request.SprkName;
+            body[EventNameColumn] = request.SprkName;
         if (request.SprkDuedate is not null)
             body["sprk_duedate"] = request.SprkDuedate;
-        if (request.SprkStatus.HasValue)
-            body["sprk_status"] = request.SprkStatus.Value;
+        body[EventStatusColumn] = status;
+        body["statecode"] = EventStatusCode.GetStateCode(status);
 
         // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
         body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
         body[OwnerBindKey] = $"/teams({owningTeamId})";
-
         return body;
     }
 

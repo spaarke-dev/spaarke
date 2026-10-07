@@ -133,7 +133,7 @@ public class DataverseWebApiServiceImpersonationTests
         var handler = new RecordingHandler(_ => Json("{\"value\":[],\"@odata.count\":0}"));
         var sut = new OfflineService(handler);
 
-        await sut.QueryEventsAsCallerAsync(CallerSystemUserId, ownerUserId: CallerSystemUserId);
+        await sut.QueryEventsAsCallerAsync(CallerSystemUserId, mine: new EventOwnershipScope(CallerSystemUserId, null, null));
 
         var sent = handler.Requests.Should().ContainSingle().Subject;
         sent.Values("MSCRMCallerID").Should().ContainSingle().Which.Should().Be(CallerSystemUserId.ToString());

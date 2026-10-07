@@ -17,7 +17,8 @@ internal static class AssociationTestSupport
         bool enabled = true,
         double threshold = 0.85,
         Dictionary<string, AutoFileTenantOverride>? tenants = null,
-        bool rung2And3AutoFileEnabled = false)
+        bool rung2And3AutoFileEnabled = false,
+        List<string>? coreWritableEntities = null)
     {
         var options = new AutoFileOptions
         {
@@ -26,11 +27,15 @@ internal static class AssociationTestSupport
             Rung2And3AutoFileEnabled = rung2And3AutoFileEnabled,
             Tenants = tenants ?? new Dictionary<string, AutoFileTenantOverride>(StringComparer.OrdinalIgnoreCase),
         };
+        if (coreWritableEntities is not null)
+            options.CoreWritableEntities = coreWritableEntities;
         var monitor = Mock.Of<IOptionsMonitor<AutoFileOptions>>(m => m.CurrentValue == options);
         return new AutoFileGate(monitor);
     }
 
     public static AssociationStatusMapper Mapper(
-        bool enabled = true, double threshold = 0.85, bool rung2And3AutoFileEnabled = false) =>
-        new(Gate(enabled, threshold, rung2And3AutoFileEnabled: rung2And3AutoFileEnabled), NullLogger<AssociationStatusMapper>.Instance);
+        bool enabled = true, double threshold = 0.85, bool rung2And3AutoFileEnabled = false,
+        List<string>? coreWritableEntities = null) =>
+        new(Gate(enabled, threshold, rung2And3AutoFileEnabled: rung2And3AutoFileEnabled, coreWritableEntities: coreWritableEntities),
+            NullLogger<AssociationStatusMapper>.Instance);
 }

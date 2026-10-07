@@ -1,7 +1,7 @@
 namespace Spaarke.Dataverse;
 
 /// <summary>
-/// Event management, event logs, and event type operations.
+/// Event management and event log operations.
 /// Part of the IDataverseService composite (ISP segregation).
 /// </summary>
 public interface IEventDataverseService
@@ -28,6 +28,7 @@ public interface IEventDataverseService
         int skip = 0,
         int top = 50,
         Guid? ownerUserId = null,
+        IReadOnlyCollection<int>? excludeStatusCodes = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -43,6 +44,10 @@ public interface IEventDataverseService
     /// The <c>sprk_recordtype_ref</c> row of <paramref name="regardingRecordType"/>, required when the type is given
     /// without a <paramref name="regardingRecordId"/> (the type filter is a lookup, not an option set).
     /// </param>
+    /// <param name="mine">
+    /// The "my events" narrowing (owner decision B, task 097): owner OR assigned contact OR <c>sprk_createdbyperson</c>.
+    /// Null = no narrowing (the impersonated query alone trims).
+    /// </param>
     Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
         Guid callerSystemUserId,
         int? regardingRecordType = null,
@@ -55,7 +60,7 @@ public interface IEventDataverseService
         DateTime? dueDateTo = null,
         int skip = 0,
         int top = 50,
-        Guid? ownerUserId = null,
+        EventOwnershipScope? mine = null,
         CancellationToken ct = default);
 
     Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default);
@@ -67,7 +72,8 @@ public interface IEventDataverseService
     /// team-owned) and the row keeps its creator. Required positionally so every caller decides.
     /// </param>
     /// <param name="description">
-    /// Not stored: <c>sprk_eventlog</c> has no description column. Callers trace it in their own log line.
+    /// Not a column: <c>sprk_eventlog</c> has none. It is folded into <c>sprk_eventlogname</c> (cut to 850 characters) by
+    /// <c>DataverseWebApiService.BuildCreateEventLogPayload</c> (task 097 review F1).
     /// </param>
     /// <param name="createdByPersonId">
     /// The person whose change the log records (task 146 c1-r1, owner round 13 item 9) — written as
@@ -75,6 +81,4 @@ public interface IEventDataverseService
     /// no person.
     /// </param>
     Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default);
-    Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default);
-    Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default);
 }
