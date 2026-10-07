@@ -1,7 +1,7 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
 > **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-39
-> (spec §9) · **93 tasks** across 14 phases (33 ✅ · 2 🔄 (079, 098) · 57 🔲 · 1 superseded)
+> (spec §9) · **93 tasks** across 14 phases (34 ✅ · 2 🔄 (079, 098) · 56 🔲 · 1 superseded)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
 > 100-105, 110-114); 17 existing POMLs amended (031-034, 040, 042, 050-055, 061-064, 070); **053 superseded** by 058 + 043.
@@ -89,7 +89,7 @@ and the **commit route** (043, which composes 040, 044, 046, 070). **074 can sti
 | ✅ [done] 005 | [Seed dev data + 2 negative controls](005-seed-dev-data-and-negative-controls.poml) | STANDARD | sonnet/medium | 004 | — | Live-classified via `/api/office/save`; see `notes/seed-data-state.md` for all GUIDs + seeded-vs-real |
 | ✅ [done] 006 | [Provision the dedicated writer identity](006-provision-dedicated-writer-identity.poml) | FULL | **opus**/high | — | — | **Owner: option A** for 002. Azure changes need owner confirmation |
 | ✅ [done] 007 | [Schema: v4 data needs + episode-scoped dedupe key](007-schema-v4-data-needs-and-episode-key.poml) | FULL | sonnet/high | 001 | — | **D-13** key `…|{episode}` (re-key dev rows as episode 1); `sprk_signal.sprk_duedate`; policy **severity (D-30)** / short name / work type / retired reason; `sprk_decisionplan`; record `sprk_steps` / `sprk_followons` / `sprk_gatetier`. Records the `sprk_matter` required level (O-21). **Before 031** |
-| 🔲 [open] 008 | [Owner-approved role edits + assignment + union re-verify](008-owner-approved-role-edits.poml) | FULL | **opus**/high | 007 | L | **D-29** writer AppendTo on communication/event/todo/WA (closes F26) · **D-18** writer Create budgetrevision · **D-14** admin Write policyversion · **D-22** admin C/W/R triagecategory, role to owner, 5 tables read-only in Spaarke Platform. **D-33**: Secure Record Owner Read on both tables, Basic User Basic Read on both, Ontology Service Assign on DR; AppendTo at Organization depth; **role edits before the BFF with the secure-child config**. Console User Signal-write removal is **049**. **Before 031** · **[uac]** |
+| ✅ [done] 008 | [Owner-approved role edits + assignment + union re-verify](008-owner-approved-role-edits.poml) | FULL | **opus**/high | 007 | L | **D-29** writer AppendTo on communication/event/todo/WA (closes F26) · **D-18** writer Create budgetrevision · **D-14** admin Write policyversion · **D-22** admin C/W/R triagecategory, role to owner, 5 tables read-only in Spaarke Platform. **D-33**: Secure Record Owner Read on both tables, Basic User Basic Read on both, Ontology Service Assign on DR; AppendTo at Organization depth; **role edits before the BFF with the secure-child config**. Console User Signal-write removal is **049**. **Before 031** · **[uac]** |
 | 🔲 [open] 009 | [Re-seed POL-COMMIT-BUDGET as v2](009-reseed-path-b-policy-v2.poml) | STANDARD | sonnet/medium | 007, 008 | — | Classification-phrased template, short name, work type, plan `send-budget-inquiry, revise-budget, approve-variance`; stamp v1 `sprk_inforceto` (D-14). Reconciliation's "008 re-seed", renumbered. **Before 031** |
 
 ### Phase 1 — Cleanup that gates the row

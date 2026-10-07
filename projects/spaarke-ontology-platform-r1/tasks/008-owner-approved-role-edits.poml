@@ -4,7 +4,7 @@
     <title>Owner-approved role edits and assignment, with the union re-verify</title>
     <phase>0 Foundations</phase>
     <gate>007 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security role changes on the tables whose append-only and visibility guarantees the project rests on.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -103,6 +103,29 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-14a (amended, D-33), FR-21 (amended, D-14), FR-52, FR-56, NFR-11; notes/secure-signals-scoping.md sections 4.2-4.4, 5.2. Task 049 removes Console User Write on sprk_signal and re-runs the same union check.</notes>
+
+  <completion>COMPLETED 2026-10-07 in spaarkedev1; evidence in notes/security-roles.md section 10.
+- uac-r2 files re-read on origin/master @ dbc58d139, unchanged since task 079's read: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver.cs, CoreAncestorResolver.cs, RecordRouteAccessAuthorizationFilter.cs, ExternalCallerContext.cs and ADR-034 are at d254d7166; CallerRecordAccessProbe.cs at 428c5bfae; RouteAuthorizationGuardTests.Ledger.cs at dae5869d2; ADR-003 at 8c5c517a1; Set-SecureRecordOwnerRolePrivileges.ps1 at 9fee1e8e2. Open uac-r2 PRs #1353 and #1342 do not overlap. Issue #1355 is open (it gates 039, not this task).
+- Edits, exactly 14 privileges, all on root-BU copies. The full before/after diff of every BU copy of six roles shows nothing else added, removed or changed.
+  - Ontology Service: AppendTo on communication, event, todo and workassignment at Global (D-29); Create on budgetrevision at Global (D-18); Assign on decisionrecord at Global (D-33c).
+  - Ontology Administrator: Write on policyversion at Deep (D-14); Create, Write and Read on triagecategory at Global (D-22; the table is org-owned).
+  - Secure Record Owner and Spaarke Basic User: Read on signal and decisionrecord at Basic (D-33a, D-33b).
+- Four SharePoint privileges the platform injected on Secure Record Owner were stripped, per uac-r2 guide section 5.4, which restores the before state. uac-r2's -Verify exits 0.
+- Console User is unchanged and still holds prvWritesprk_Signal; task 049 removes it.
+- Assignment: the owner's user ralph.schroeder@spaarke.com (1d02f31c) already held Ontology Administrator, so no call was made.
+- Union check: Write or Delete on decisionrecord is held only by Service Writer and Service Deleter (application users only, 0 humans), System Administrator and System Customizer; no Spaarke role holds it. Write on policyversion: those roles plus Ontology Administrator. The writer's effective set has no Write or Delete on decisionrecord, policyversion, budgetrevision or budget.
+- Live checks:
+  - Update and delete of a decisionrecord return 403 0x80040220 both as Chelsea Friez (human, non-admin) and as the writer.
+  - Secure Record Owners team-owned creates on signal and decisionrecord return 204 on 3 of 3 polls each; the control on policy is refused (privilegeCount=28). The before-refusals are task 079's.
+  - F26 is closed: SignalWriterSeamTests passes 2 of 2 as the writer, including the communication subject.
+- Spaarke Platform already contained the five tables (the owner did this). The Main forms were made read-only (disabled controls) and published with a targeted PublishXml.
+- Deploy order: the role edits are dated 2026-10-07 15:07Z in spaarkedev1; no BFF carrying the secure-child config exists yet.
+- Deviations and open items, in section 10.7:
+  - The Ontology Service role keeps its pre-existing Read on sprk_budget; the owner should confirm this reading of the criterion.
+  - The forms show only Name and Owner.
+  - Until 039, the section 5.4 strip would remove the two new Secure Record Owner Reads (worth noting on #1355).
+  - # github-actions-spe-infrastructure holds System Customizer.
+- TASK-INDEX.md was left for the main session to update.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

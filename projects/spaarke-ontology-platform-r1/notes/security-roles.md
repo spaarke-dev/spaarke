@@ -564,4 +564,175 @@ live 403 `0x80040220` on update and delete (§9) was already enforcement-level p
      matter.
   2. Task 030's matter lookup works **only** because of this team grant (`Spaarke Ontology Service` has Read
      on matter, not AppendTo), and communication lookups fail (F26). The writer depends on an over-grant that is
-     slated to change.
+     slated to change. *(F26 closed by §10: the writer now holds AppendTo on communication at Global in its own
+     role.)*
+
+---
+
+## 10. Task 008: owner-approved role edits, applied and union re-verified (2026-10-07)
+
+Owner decisions D-14, D-18, D-22, D-29 and D-33 (spec §9). Environment `spaarkedev1`. Applied by the dev operator
+(`ralph.schroeder@spaarke.com`, systemuser `1d02f31c-…`, az CLI token) with `AddPrivilegesRole` on each role's
+**root-BU copy** (the copy that carries privileges, §7.3). Each edit was read back from `roleprivilegescollection`
+in the same script run.
+
+### 10.0 uac-r2 coordination (spec §8.3)
+
+`origin/master` @ `dbc58d139`, fetched 2026-10-07, the same commit task 079 read. Files and last commits:
+`SecureChildLineage.cs`, `config/secure-record-owner-role.json`, `RecordOwnershipResolver.cs`,
+`CoreAncestorResolver.cs`, `RecordRouteAccessAuthorizationFilter.cs`, `ExternalCallerContext.cs`,
+`.claude/adr/ADR-034-*` all at `d254d7166`; `CallerRecordAccessProbe.cs` `428c5bfae`;
+`RouteAuthorizationGuardTests.Ledger.cs` `dae5869d2`; `.claude/adr/ADR-003-*` `8c5c517a1`;
+`scripts/Set-SecureRecordOwnerRolePrivileges.ps1` `9fee1e8e2`. **Nothing changed since 079's read, so the plan
+stands.** Open uac-r2 PRs are #1353 (task 171) and #1342 (task 114); neither touches the owner-role config or the
+lineage. #1355 (079's review request) is open with no reply yet; it gates task 039, not these role edits.
+
+What uac-r2's mechanism relies on, checked before editing:
+- **Secure Record Owner.** Its script **adds only and never removes** ("Outside the file … never removed by this
+  script"). Its `-Verify` fails only on a *missing* table, so the two new Reads cannot turn it red.
+- **Spaarke Basic User.** uac-r2's NFR-05 standing census (`SecureBuRoleDepthAssertion`) flags **Deep or Global**
+  held by a human at an ancestor of the Secure BU. The D-33(b) grant is **Basic** (own/owning-team rows only), so it
+  is outside what the census measures and cannot reach the Secure BU.
+
+### 10.1 Before → after (every BU copy enumerated)
+
+Snapshot of all privileges on every BU copy of Ontology Service, Ontology Administrator, Console User, Secure
+Record Owner, Spaarke Basic User and the Spaarke Core User control, taken before any edit and again after all
+edits. **Diff: exactly the 14 privileges below were added. Nothing was removed and no depth changed on any copy of
+any of the six roles.**
+
+| Role (root-BU copy) | Count before → after | Added (depth) | Applied (UTC) |
+|---|---|---|---|
+| Spaarke Ontology Service `b1fb7ee0-…` | 40 → 46 | D-29: `prvAppendTosprk_Communication`, `prvAppendTosprk_Event`, `prvAppendTosprk_Todo`, `prvAppendTosprk_WorkAssignment` (**Global** = Organization). D-18: `prvCreatesprk_BudgetRevision` (Global). D-33(c): `prvAssignsprk_DecisionRecord` (Global) | 15:06:21 (D-29, D-18), 15:07:14 (D-33c) |
+| Spaarke Ontology Administrator `2f2b2137-…` | 34 → 38 | D-14: `prvWritesprk_PolicyVersion` (**Deep**). D-22: `prvCreatesprk_TriageCategory`, `prvWritesprk_TriageCategory`, `prvReadsprk_TriageCategory` (**Global**; the table is OrganizationOwned and its privileges allow Global only) | 15:06:40 |
+| Secure Record Owner `e4ebabd9-…` (one copy, BU `Secure Record`) | 26 → 28 | D-33(a): `prvReadsprk_Signal`, `prvReadsprk_DecisionRecord` (**Basic**) | 15:07:05 |
+| Spaarke Basic User `11f93c04-…` | 645 → 647 | D-33(b): `prvReadsprk_Signal`, `prvReadsprk_DecisionRecord` (**Basic**) | 15:07:10 |
+| Spaarke Console User `51c924e2-…` | 23 → 23 | **none.** `prvWritesprk_Signal` (Deep) is **still present**; task 049 removes it (D-17) | — |
+
+Child-BU copies of every role still report 0, and the `Spaarke Core User` control still reads 744 on root and 0 on
+the five children. That is the inherited-shell artifact (§7.3), not a defect.
+
+**Depths chosen where the decision did not name one.** D-14 Write on `sprk_policyversion` is **Deep**, matching the
+administrator role's Create/Read/Delete on that table. D-18 Create on `sprk_budgetrevision` is **Global**, matching
+the Service role's convention. D-29's AppendTo is **Organization**, as the POML requires (Deep would not reach
+Secure-team-owned subjects in the sibling Secure Record BU once the writer moves to a customer child BU, #1094).
+
+**Platform side effect, reverted.** On Secure Record Owner, `AddPrivilegesRole` also injected
+`prvReadSharePointData`, `prvCreateSharePointData`, `prvReadSharePointDocument` and `prvWriteSharePointData`
+at Global. These were absent before the call. This is the behaviour uac-r2's `SECURE-PROJECT-ENVIRONMENT-SETUP.md`
+§5.4 documents, and its strip procedure (owner decision #1046) removes them. All four were removed with
+`RemovePrivilegeRole` at 15:07:28–32Z, which restored the before state; the 26 → 28 count above is net of the
+removal. No other role received injected privileges.
+
+Then uac-r2's own `Set-SecureRecordOwnerRolePrivileges.ps1 -Verify` (from `origin/master`, with the `origin/master`
+config) returned **exit 0**: 26 of 26 tables present, and 2 "Outside the file", namely the two new Reads.
+
+### 10.2 Role assignment (D-22)
+
+`Spaarke Ontology Administrator` is held by **Ralph Schroeder, `ralph.schroeder@spaarke.com`, systemuser
+`1d02f31c-1872-f011-b4cb-7c1e52671ad0`**, the identity the az CLI and the Dataverse calls run as. The user sits in
+the root `Spaarke` BU and holds the root copy, which carries the privileges. **The assignment already existed when
+this task started**, so no assign call was made. §7.7 recorded 0 holders on 2026-10-03, so it was made between
+then and now, presumably by the owner. It is the only holder, with no teams. Other "Ralph" accounts
+(`…@spaarke.onmicrosoft.com`, the `#EXT#` hotmail guest, two disabled test users) do **not** hold it.
+
+### 10.3 Union check (task 002 method, environment-wide)
+
+Every role in the environment holding each privilege:
+
+| Privilege | Holders |
+|---|---|
+| `prvWritesprk_DecisionRecord` | Service Writer, System Administrator, System Customizer |
+| `prvDeletesprk_DecisionRecord` | Service Deleter, System Administrator, System Customizer |
+| `prvWritesprk_PolicyVersion` | Service Writer, System Administrator, System Customizer, **Spaarke Ontology Administrator (Deep, D-14)** |
+| `prvAssignsprk_DecisionRecord` | Service Writer, System Administrator, System Customizer, **Spaarke Ontology Service (Global, D-33c)** |
+| `prvCreatesprk_Signal` | Service Writer, System Administrator, System Customizer, Spaarke Ontology Service |
+| `prvWrite`/`prvDeletesprk_BudgetRevision` | platform/admin roles + Spaarke Ontology Administrator (pre-existing). **Not** Ontology Service |
+| `prvWritesprk_Budget` | platform/admin roles + Spaarke Core User (pre-existing). **Not** Ontology Service |
+
+Classification:
+- **Platform**: Service Writer (14 members) and Service Deleter (8 members). **0 humans**, all application users
+  (§8.2: Microsoft first-party). Not stripped.
+- **Admin**: System Administrator (unchanged from §8.2, including the sysadmin BFF identities accepted under option
+  A) and System Customizer, whose **2 members are both application users**: `# Microsoft Copilot Studio` and
+  **`# github-actions-spe-infrastructure`**. The second is a Spaarke CI identity. §8 did not name it, but it holds
+  the ledger privileges through an admin role, the same category the owner accepted for the sysadmin BFF
+  identities. It was not caused by this task.
+- **Human**: Spaarke Ontology Administrator → Ralph Schroeder only. It holds Write on `sprk_policyversion` (D-14),
+  and per D-14 version-body immutability is now enforced by the publish service, not by privilege.
+- **Spaarke identity**: no Spaarke role holds `prvWritesprk_DecisionRecord` or `prvDeletesprk_DecisionRecord`.
+
+**Writer effective set** (`# mi-ontology-writer-dev`, `RetrieveUserPrivileges` ∪ `RetrieveTeamPrivileges` for
+its only team, root `Spaarke`, per §9.2):
+- **Absent**: Write and Delete on `sprk_decisionrecord`, `sprk_policyversion`, `sprk_budgetrevision`; Create, Write
+  and Delete on `sprk_budget`.
+- **Present at Global through its own role**: Assign on `sprk_decisionrecord`, Create on `sprk_budgetrevision`, and
+  AppendTo on the four D-29 tables.
+
+### 10.4 Live checks
+
+**Append-only negative** (impersonation via `MSCRMCallerID`). Each principal created its own probe row, then:
+
+| Principal | Update | Delete |
+|---|---|---|
+| Chelsea Friez (`c46d44ca-…`, human, non-admin: Core User + Console User + Office Add In User + default team) | **403 `0x80040220`** 15:12:19Z (`roleCount=4, privilegeCount=794, accessMode='0 Read-Write'`) | **403 `0x80040220`** |
+| writer `# mi-ontology-writer-dev` | **403 `0x80040220`** 15:12:22Z (`accessMode='4 Non-interactive'`) | **403 `0x80040220`** |
+
+Both rows were deleted as admin (204). 0 `zz-008` rows remain.
+
+**Secure Record Owner positive probes** (guide §5.3 step 4). A create with `ownerid@odata.bind → /teams(Secure
+Record Owners 6eabc7f9-…)` returned **204 on 3 of 3 polls** for both `sprk_signal` (15:12:40, 15:13:03,
+15:13:25Z) and `sprk_decisionrecord` (15:12:42, 15:13:04, 15:13:26Z). The read-back `owningteam` was the team in
+every case, and each probe was deleted. Control: the same create on `sprk_policy` (not in the role) was refused,
+`0x80040299 … privilegeCount=28 … missing prvReadsprk_Policy`. So the reading was current. The **before** refusals
+for both tables are task 079's (`notes/079-uac-coordination.md` §3, 14:58Z, before these edits).
+
+**F26 closed.** `SignalWriterSeamTests` was run as the writer (`SIGNALS_LIVE_CALLER_ID=3121bf1b-…`) from a fresh
+detached worktree at `c7dad4812`. Both tests passed, including
+`WriteAsync_CommunicationSubject_DerivesTheRealGroupingMatter`, which failed with AppendToAccess on 2026-10-04. 0
+`ONTOLOGY-DEV-TEST-030` rows remain.
+
+### 10.5 Spaarke Platform (D-22)
+
+All five tables were **already** entity components of `Spaarke Platform` (`sprk_SpaarkePlatform`, appmoduleid
+`d908a85b-…`), added by the owner (app modified 2026-10-03). The app lists no explicit forms, so all forms are
+available. Each table's only Main form ("Information") had its bound controls set to `disabled="true"` (2 per form:
+`sprk_name`, `ownerid`). The forms had no unpublished edits pending. The change was made under
+`MSCRM.SolutionUniqueName: OntologyPlatformSolution` and published with a **targeted** `PublishXml` (the 5 entities
+and the app; no PublishAllXml) at 15:09:50Z. Form XML before the change is kept in the session scratchpad only.
+This is a form setting, not a plugin (ADR-002). The Quick View forms are read-only by type.
+
+⚠️ **The forms show only Name and Owner.** They are read-only, but they are not yet useful for inspecting a Signal
+or a Policy Version. Adding the tables' columns to the forms is form design the decision did not specify, so it
+was not done here (see 10.7).
+
+### 10.6 Deploy order (D-33) — per environment
+
+| Environment | Role edits applied | BFF carrying the new secure-child config (task 039) |
+|---|---|---|
+| `spaarkedev1` | **2026-10-07 15:06–15:07Z** | Not built. 039 waits on #1355, and the config on `origin/master` still has no `sprk_signal` / `sprk_decisionrecord` entry |
+| any other | not applied | — |
+
+Rule for every other environment: apply these role edits **before** deploying a BFF whose
+`config/secure-record-owner-role.json` / `SecureChildLineage.cs` include the two tables. Task 039 re-runs
+`-Verify` against the new config.
+
+### 10.7 Deviations from the POML and open items
+
+1. **No assign call (D-22).** The owner's user already held the role (10.2).
+2. **The five tables were already in the app.** Only the read-only form setting was applied (10.5).
+3. **Four platform-injected SharePoint privileges were removed from Secure Record Owner.** This restores the before
+   state; it is not a new privilege change (10.1).
+4. **Criterion "Ontology Service holds no privilege on `sprk_budget`" is not literally true.** The role has held
+   `prvReadsprk_Budget` (Global) since setup (§3 lists it as an evaluator input). Nothing was added on
+   `sprk_budget`, and Write/Delete on `sprk_budgetrevision` stay absent. The Read was not removed, because that
+   would be an unapproved edit that breaks the evaluator. **The owner should confirm that reading.**
+5. 🟡 **Interim hazard until task 039 lands.** uac-r2's runbook §5.4 says to strip anything the script lists as
+   "Outside the file". The two new Secure Record Owner Reads are outside the file until 039 adds the config
+   entries. If anyone runs that strip before then, it removes them, and a Secure-matter Signal create then fails
+   with `0x80040299` once 039 deploys (039's `-Verify` would catch it first). This should be noted on #1355.
+6. **Observations, no action taken.** `# github-actions-spe-infrastructure` holds System Customizer (10.3). Ontology
+   Administrator holds `prvDeletesprk_PolicyVersion` (Deep), which predates this task (§7.4) and differs from §3's
+   "Delete = None even for the admin".
+7. **Not done here:** the read-only form was not checked in a browser (no Chrome session). It was verified from the
+   published form XML.
