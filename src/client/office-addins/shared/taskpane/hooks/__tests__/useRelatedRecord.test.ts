@@ -44,6 +44,20 @@ describe('useRelatedRecord', () => {
     expect(result.current).toEqual({ kind: 'unassociated' });
   });
 
+  it('is unknown (NOT unassociated) when resolved from a stamp alone — relatedRecordKnown is false', () => {
+    const { result } = renderHook(() =>
+      useRelatedRecord({
+        kind: 'resolved',
+        documentId: 'a',
+        documentName: '',
+        fileName: '',
+        relatedRecord: null,
+        relatedRecordKnown: false,
+      })
+    );
+    expect(result.current).toEqual({ kind: 'unknown' });
+  });
+
   it('maps a resolved matter to a friendly-labeled associated view, defaulting missing fields to null', () => {
     const { result } = renderHook(() =>
       useRelatedRecord({
