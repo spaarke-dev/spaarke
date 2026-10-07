@@ -1128,6 +1128,19 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
   - The flag stays off until 142 and 143 are complete.
 - **Standing:** future ADR decisions inside 036's scope are delegated on the same test (consistent with the project's objectives). Each one is still recorded as a round and cited in the PR. A decision that is NOT clearly consistent comes back to the owner.
 
+## Round 76 (2026-10-06): BINDING. OWNER decisions on task 114's findings
+
+1. **Restricted wins over the last-reader rule.**
+   - On a Restricted record, a user flagged `sprk_isexternal = true` keeps no share, even as the record's last reader.
+   - The removal reports `no-internal-reader` so an administrator can share the record with an internal user. Admins still see it.
+   - The same rule applies in provisioning: an external-flagged creator or Make Secure caller gets no share on a Restricted record.
+   - The skip text is "{name} is flagged as an external user and can't be given access to a Restricted record."
+2. **The 'Spaarke Demo' team holds System Administrator: not deliberate.** Filed as #1343 (least-privilege role for demo users).
+- **Also filed under the round-74 rule** (found in passing during 114):
+  - #1344: CA2024 breaks `Spaarke.sln -warnaserror`.
+  - #1345: three ui-components jest suites fail on master.
+- **Earlier, from task 172:** #1339 (byRole attribution) and #1340 (membership role/identity vocabulary).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
