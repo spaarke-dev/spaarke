@@ -476,6 +476,93 @@ public class EventEndpointsAuthorizationContractTests
         created.RegardingRecordName.Should().Be("Acme Holdings");
         created.RegardingRecordNumber.Should().BeNull();
     }
+    // ── Round 11: the event create has no catalog cache, so a transient catalog fault is retried ONCE ────────────────
+
+    private static void MatterWithNumber(EventsAuthHost host, Guid matter)
+    {
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matter) { ["sprk_mattername"] = "Acme Holdings", ["sprk_matternumber"] = "MAT-0097" });
+    }
+
+    private static Entity MatterCatalogRow() =>
+        new("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_matternumber" };
+
+    [Fact]
+    public async Task Create_ACatalogTimeout_IsRetriedOnce_AndTheNumberIsStillWritten()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.SetupSequence(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"))
+            .ReturnsAsync(MatterCatalogRow());
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Retried", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().Be("MAT-0097");
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task Create_APersistentCatalogTimeout_LeavesTheNumberEmpty_AndTheCreateStillSucceeds()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"));
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Unnumbered", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = creates.Should().ContainSingle().Subject;
+        created.RegardingRecordNumber.Should().BeNull();
+        created.RegardingRecordName.Should().Be("Acme Holdings");
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2),
+            "once, then exactly one retry");
+    }
+
+    [Fact]
+    public async Task Create_APermanentCatalogFault_IsNotRetried()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        MatterWithNumber(host, matter);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("privilege check failed"));
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Not retried", regardingRecordType = 1, regardingRecordId = matter }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        host.RecordTypes.Verify(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public void TransientCatalogFault_IsATimeoutOrAThrottle_NeverTheCallersCancellationOrARejection()
+    {
+        var throttle = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147015902 }, "Number of requests exceeded the limit");
+        var rejection = new System.ServiceModel.FaultException<OrganizationServiceFault>(
+            new OrganizationServiceFault { ErrorCode = -2147220960 }, "Principal user is missing prvReadsprk_recordtype_ref");
+        using var cancelled = new CancellationTokenSource();
+        cancelled.Cancel();
+
+        EventEndpoints.IsTransientCatalogFault(new TimeoutException(), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(new TaskCanceledException("HttpClient timeout"), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(throttle, CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(
+            new HttpRequestException("429", null, HttpStatusCode.TooManyRequests), CancellationToken.None).Should().BeTrue();
+        EventEndpoints.IsTransientCatalogFault(rejection, CancellationToken.None).Should().BeFalse();
+        EventEndpoints.IsTransientCatalogFault(new InvalidOperationException(), CancellationToken.None).Should().BeFalse();
+        EventEndpoints.IsTransientCatalogFault(new TaskCanceledException(), cancelled.Token).Should().BeFalse();
+    }
     [Fact]
     public async Task Create_ACatalogRowThatNamesNoNumberColumn_WritesNoNumber()
     {

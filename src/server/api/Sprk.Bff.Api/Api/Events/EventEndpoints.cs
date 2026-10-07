@@ -822,6 +822,61 @@ public static class EventEndpoints
         string? Number,
         IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)> CoreStamps);
 
+    /// <summary>Pause before the one catalog retry: long enough for a throttle window to pass, short for a request.</summary>
+    internal static readonly TimeSpan CatalogRetryDelay = TimeSpan.FromMilliseconds(500);
+
+    /// <summary>
+    /// The type's <c>sprk_recordtype_ref</c> row, read once more after a TRANSIENT fault (task 097 round 11). The event
+    /// create has no catalog cache, and since round 9 the regarding NUMBER column comes from this row — so one timeout
+    /// would otherwise leave the number empty where the old hard-coded map (matter / project / invoice) still wrote it.
+    /// A second fault, or a permanent one, propagates to the caller's handler: the number is left empty and the create
+    /// still succeeds.
+    /// </summary>
+    internal static async Task<Microsoft.Xrm.Sdk.Entity?> ReadRecordTypeRefWithOneRetryAsync(
+        ICommunicationDataverseService recordTypes, string logicalName, ILogger logger, CancellationToken ct)
+    {
+        try
+        {
+            return await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+        }
+        catch (Exception ex) when (IsTransientCatalogFault(ex, ct))
+        {
+            logger.LogWarning(ex, "sprk_recordtype_ref read for '{Entity}' hit a transient fault; retrying once.", logicalName);
+            await Task.Delay(CatalogRetryDelay, ct);
+            return await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+        }
+    }
+
+    // Dataverse service-protection (throttling) fault codes — the same set GrantExpiryReminderJob retries on.
+    // https://learn.microsoft.com/power-apps/developer/data-platform/api-limits
+    private static readonly HashSet<int> ThrottlingErrorCodes = new() { -2147015902, -2147015903, -2147015898 };
+
+    /// <summary>
+    /// A timeout or a throttle — the faults a second attempt can clear. The caller's own cancellation is not one; neither
+    /// is a rejection (privilege, a missing column), which would fail the same way again.
+    /// </summary>
+    internal static bool IsTransientCatalogFault(Exception ex, CancellationToken ct)
+    {
+        if (ct.IsCancellationRequested)
+            return false;
+
+        for (var e = ex; e is not null; e = e.InnerException)
+        {
+            switch (e)
+            {
+                case TimeoutException or TaskCanceledException:
+                    return true;
+                case HttpRequestException { StatusCode: System.Net.HttpStatusCode.TooManyRequests
+                    or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout }:
+                    return true;
+                case System.ServiceModel.FaultException<Microsoft.Xrm.Sdk.OrganizationServiceFault> fault:
+                    return ThrottlingErrorCodes.Contains(fault.Detail?.ErrorCode ?? 0);
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Resolves the regarding write set for <paramref name="regardingType"/>/<paramref name="regardingId"/>, or returns
     /// null when the FR-26 core-ancestor stamp cannot be derived — the caller then writes NOTHING (fail closed).
@@ -858,7 +913,7 @@ public static class EventEndpoints
         string? numberField = null;
         try
         {
-            var row = await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
+            var row = await ReadRecordTypeRefWithOneRetryAsync(recordTypes, logicalName, logger, ct);
             if (row is not null && row.Id != Guid.Empty)
             {
                 recordTypeRefId = row.Id;
