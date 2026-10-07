@@ -1112,6 +1112,22 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Applied:** project CLAUDE.md; project memory; repo-wide PR #1336.
 - **Consequence for task 171:** the round-2 re-verify findings V1–V7 are all fixed in a further round, then a fix-diff-scoped check.
 
+## Round 75 (2026-10-06): BINDING. OWNER delegation; 036's ADR-034 amendment APPROVED
+
+- **The owner:** "for 036 if an ADR decision is needed and it is consistent with objectives of this project then approve it."
+- **What is approved:** the ADR-034 section 6.5 path B amendment in task 036's tension block, as reworded per owner D1 (2026-09-30).
+  - For systemuser ACCESS on the SPA/Teams plane, Dataverse's own answer (the FR-20 impersonated read) replaces the membership rules.
+  - So BU and role-depth access is honoured exactly as in the MDA, and BU-ownership matching no longer over-grants.
+  - The membership walk stays for non-access scoping and for the contact plane.
+- **Why it is consistent:**
+  - It is objective D1 itself: a user with access in the MDA has access in Teams/SPA.
+  - Path A was rejected because the BU guess is wrong in general.
+  - Path C was rejected because no compliant shape makes a pattern match equal Dataverse's answer.
+- **Unchanged:**
+  - The concise `.claude/adr/ADR-034` text and the full `docs/adr` text merge with or before 036's PR, and the PR cites this round.
+  - The flag stays off until 142 and 143 are complete.
+- **Standing:** future ADR decisions inside 036's scope are delegated on the same test (consistent with the project's objectives). Each one is still recorded as a round and cited in the PR. A decision that is NOT clearly consistent comes back to the owner.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.

@@ -21,8 +21,8 @@
 - **Owner said "not following, but ok" (2026-10-06). Explain plainly and confirm the concrete action before changing any app setting (a change restarts the BFF; do it AFTER the screen session):**
   - G146-3: name the admin who receives ownership-hold alerts (`Communication__OwnershipHoldAlertUserIds__0`; proposed: the owner's own systemuser).
   - 137: set `ExternalAccess:Reconciliation:WritesEnabled=true` on dev (the report shows 0 changes; it also enables R4's deactivations).
+- **Decided round 75:** 036's ADR-034 path B amendment APPROVED (owner delegated: approve ADR decisions consistent with the project's objectives).
 - **Still pending:**
-  - 036's ADR-034 amendment (path B), before 036 merges.
   - Accept 133(e)'s `sharesRestored` as proven by tests.
   - Close 166's reporting gates as "not configured" and Redis-down as proven by tests.
   - Is the Copilot agent deployed in dev (164 j/d)?
