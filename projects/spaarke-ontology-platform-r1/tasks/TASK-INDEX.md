@@ -1,6 +1,6 @@
 # TASK-INDEX — Spaarke Ontology Platform R1
 
-> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-35
+> **Generated**: 2026-10-03 by `/project-pipeline` · **Updated 2026-10-07** for the owner's decisions D-13..D-39
 > (spec §9) · **92 tasks** across 14 phases (31 ✅ · 1 🔄 (098) · 59 🔲 · 1 superseded)
 > **Source**: [`../spec.md`](../spec.md) (FR-01..FR-63 plus FR-14a, FR-17a — 65 FRs; NFR-01..NFR-11) · WBS in [`../plan.md`](../plan.md)
 > **2026-10-07 changes**: 34 new tasks (007-009, 024-026, 036-038, 043-046, 049, 056-059, 065-067, 079, 099,
@@ -12,8 +12,14 @@
 > `CoreAncestorResolver`; 007 adds a typed `sprk_project` lookup on both tables); suppression is per (policy, core record); an item
 > with no matter and no project is **owner-only** under "Not filed". Amended: 007, 031, 033, 034, 037, 038, 039, 040, 042, 043, 050,
 > 051, 058, 059, 061, 064. New open points O-22..O-25 (spec §11.1); O-21 decided.
+> **Fourth pass (D-36..D-39)**: all four access-control core types (matter, project, work assignment, service request), extensible
+> through `CoreAncestorResolver`'s core set + the `sprk_recordtype_ref` catalog: 007 now adds a **generic** core-record reference
+> (`sprk_corerecordtype` + `sprk_corerecordid`) that all logic reads, with typed lookups only where uac-r2's lineage requires them
+> (on `sprk_decisionrecord`: matter, project, work assignment). Direct filed-under core record wins, then matter over project (D-37);
+> **no skips** (D-38); no-core items suppress per (policy, item) and their record is owner-owned (D-39). 039 covers Secure work
+> assignments; service requests cannot be Secure. Amended: 007, 031, 033, 034, 037, 038, 039, 040, 042, 050, 051, 059, 061, 064.
 > Undecided points are carried as `<escalation><trigger>` in the named task and listed in spec §11.1 (open: O-2..O-4,
-> O-6..O-16, O-18, O-22..O-25; decided: O-1, O-5, O-17, O-19, O-21; dissolved: O-20).
+> O-6..O-16, O-18; decided: O-1, O-5, O-17, O-19, O-21..O-25; dissolved: O-20).
 > **uac-r2 coordination (owner, 2026-10-07)**: tasks marked **[uac]** below must re-read uac-r2's current code on
 > `origin/master`, check its open PRs and active work, reuse its mechanisms, route edits to its files through its review,
 > and stop if its code invalidates the plan (spec §8.3).

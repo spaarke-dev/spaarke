@@ -40,6 +40,7 @@
     <constraint source="owner">AMENDED 2026-10-07 (D-27): the old Briefing kept behind the flag is the task 065 version (due date = sprk_duedate), so reverting does not reintroduce the finalduedate disagreement.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (reconciliation B.6): use HANDOFF v4 section 1.4 (the full list) as the cutover check, recorded in notes/briefing-cutover.md, against real Dataverse.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the cutover check covers project cards and the reader's "Not filed" group as well as matter cards, verified with a non-admin reader who owns a Not filed To Do and one who does not.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): the cutover check also covers work-assignment and service-request cards.</constraint>
   </constraints>
 
   <knowledge>

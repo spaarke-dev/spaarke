@@ -40,6 +40,7 @@
     <constraint source="project">AMENDED 2026-10-07 (NFR-10): this task adds no route; it does not go through the decision commit route (task 043), which serves the worklist wizard. Do not route the consumer through it.</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34): the gate decision's record subject is the communication's CORE record (matter or project) as CoreAncestorResolver derives it, passed to task 040's writer; do not read sprk_regardingmatter directly.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36, D-37): the communication's core record may be any of the four core types; pass it to task 040's writer via the generic columns; ties follow D-37.</constraint>
   </constraints>
 
   <knowledge>
@@ -71,7 +72,7 @@
     <trigger>If the authorize and deny paths cannot share one call site without changing the gate, STOP and escalate. Modifying the gate is out of scope for this task and the gate is the audit boundary.</trigger>
     <trigger>D-33 (2026-10-07) makes every Decision Record on a Secure matter a secure child via task 040's writer; O-20 is dissolved (Restricted/Limited exclude only external contacts). If the communications gate's records cannot go through 040's resolver path unchanged, STOP and escalate.</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
-    <trigger>CoreAncestorResolver also treats sprk_workassignment and sprk_servicerequest as CORE; D-34 names only matter or project. If an item's core record is a work assignment or service request (spec section 11.1 O-22), STOP and ask the owner; do not fall back to a matter or to Not filed on your own.</trigger>
+    <trigger>If the communication's core record cannot be resolved by D-37's rule (direct filed-under, then matter over project), STOP and ask the owner.</trigger>
   </escalation>
 
   <tools>

@@ -39,6 +39,7 @@
     <constraint source="project">AMENDED 2026-10-07: the order clause uses only columns that exist and are decided: sprk_firstdetected (oldest first) then matter number. Severity and sprk_highpriority are NOT added (spec section 11.1 O-1, O-2); sprk_rankscore is not written by anything yet.</constraint>
     <constraint source="project">AMENDED 2026-10-07 (D-23): select the display columns the row needs, including sprk_signal.sprk_duedate (task 007) and the policy short name via a link to sprk_policy.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34, D-35): the queries select both core-record columns (sprk_matter, sprk_project) and order a core record's items together; rows with neither (D-35) are included in the Do-lane query and left for task 038 to return only to their owner under "Not filed". "Grouped by matter" reads "grouped by core record".</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): select sprk_corerecordtype and sprk_corerecordid (not per-type lookups) and order by them; the configuration must not name a core type.</constraint>
   </constraints>
 
   <knowledge>

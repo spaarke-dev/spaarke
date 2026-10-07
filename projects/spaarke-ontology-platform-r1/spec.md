@@ -169,7 +169,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   matter, so one dismissal would mute it on that matter for good (`notes/v4-prototype-vs-solution.md` #13, #40).
   *Amended 2026-10-07, D-34/D-35*: the key stays **per subject**; nothing in it is matter-specific. "Not suppressed"
   in the re-raise rule is evaluated per **(policy, core record)** (FR-17 as amended); for a D-35 item with no core
-  record it is per (policy, subject).
+  record it is per (policy, subject). *(Amended 2026-10-07, D-36/D-39: "not suppressed" is per (policy, core record) for every
+  core type, and per (policy, item) for an item with no core record — decided.)*
 - **FR-04**: Re-verify privileges after the FR-01/FR-02 column adds.
   *Acceptance*: `prvWritesprk_DecisionRecord` and `prvDeletesprk_DecisionRecord` remain **absent** from all
   three Spaarke Ontology roles, and the union check still shows only platform/admin roles holding them
@@ -267,6 +268,14 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   the non-secure owning BU is the **core record's** BU. **D-35 replaces D-31's ownership wording**: an item with **no
   matter and no project** gets a Signal **owned by the To Do's owner and visible to that owner only** (shown in their
   Do lane under a **"Not filed"** group); both core-record columns are null for this case only.
+  *Amended 2026-10-07, D-36/D-37*: the core record is **any** of the access-control core types —
+  `CoreAncestorResolver.CoreRecordEntities`: matter, project, work assignment, service request today — each its own
+  grouping, security and suppression grain. A work-assignment or service-request subject is **its own** core record.
+  When an item has more than one core stamp, its **direct filed-under (regarding) core record** wins, then matter over
+  project (D-37). The Signal carries the core record in a **generic** pair, `sprk_corerecordtype` (lookup to the
+  `sprk_recordtype_ref` catalog) + `sprk_corerecordid` (task 007), which every piece of logic reads; adding a core type
+  costs at most a catalog row (plus, for a new **secure-root** type, one typed lookup and a uac-r2 lineage entry). This
+  supersedes the D-34 `sprk_project` column on the Signal.
 - **FR-14a** *(added 2026-10-07, D-15; **amended 2026-10-07, D-33 — the Restricted/Limited skip is withdrawn**)*:
   ~~The evaluator **skips Restricted and Limited matters**.~~ **Signals and Decision Records on Secure matters are
   secure children** (D-33); Restricted and Limited matters get Signals normally.
@@ -285,6 +294,11 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   lineage entry on both tables. D-34 gives a project-filed To Do a core record, which removes the premise of the narrow
   skip above (its Decision Record now has a lineage lookup); whether the skip is therefore retired is **not decided**
   (§11.1 O-24) and it stays until the owner says otherwise.
+  *Amended 2026-10-07, D-38*: **the narrow skip is dropped — no skips anywhere.** Every item is protected through its
+  core record (secure child where the core record is Secure) or is owner-only (D-35). *Amended 2026-10-07, D-36*: Secure
+  **work assignments** are covered like Secure matters and projects (spaarkedev1: 0 Secure work assignments, read-only
+  2026-10-07). **Service requests cannot be Secure** (`sprk_servicerequest` has no `sprk_issecure`; uac-r2's
+  `SecureChildLineage` excludes them), so service-request-grouped items stay on the non-secure path.
   *Original D-15 text, superseded:*
   *Acceptance*: no `sprk_signal` row is written for a subject whose grouping matter's Access Permission is
   Restricted or Limited — the subject is skipped, logged and counted (never an error and never a silent drop);
@@ -330,7 +344,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Amended 2026-10-07, D-34*: the grain is **(policy, core record)** — matter **or project** (D-11 as amended by
   D-34): three dismissals for one policy on one core record suppress that pair. A D-35 item (no core record) counts per
   (policy, subject), since it has no shared record to group under (**not decided** beyond D-35's owner-only rule:
-  §11.1 O-25).
+  §11.1 O-25). *(Amended 2026-10-07, D-36/D-39 — decided: the grain is (policy, core-record type, core-record id) for
+  every core type, read from the generic columns; an item with no core record is counted per **(policy, item)**.)*
 - **FR-17a** *(added 2026-10-07, D-13)*: **Quiet window.** After a Decide-lane Signal is dismissed, the same
   subject is **not re-raised** under that policy until the policy's quiet window has passed.
   *Acceptance*: the window is a knob **in the rule body** (decision 14, knobs on the row; A-1), defaulting to
@@ -359,6 +374,10 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   than a convention (`notes/v4-prototype-vs-solution.md` #16).
   *Amended 2026-10-07, D-34/D-35*: the record's **subject is the item's core record** — `sprk_matter` **or** the new
   `sprk_decisionrecord.sprk_project` (task 007), the same record its Signal groups under; for a D-35 item both are null.
+  *Amended 2026-10-07, D-36/D-39*: the subject is carried in the generic `sprk_corerecordtype` + `sprk_corerecordid`
+  pair for every core type, plus the typed lineage lookup (`sprk_matter`, `sprk_project` or `sprk_workassignment`)
+  when the core type is a secure root — uac-r2's lineage keys on typed lookups (task 007). For an item with **no core
+  record**, the record is **owned by the item's owner** and visible like its Signal (D-39).
 - **FR-19**: Type each record with **`sprk_recordclass`** — `Judgement` · `Routine` · `Dismissal`.
   *Acceptance*: the Report Card and the action-rate metric **filter on read**; a bare completion or reschedule
   of one's own assigned work is `Routine`; any Do resolution that sends mail, creates a follow-on or closes a
@@ -413,6 +432,9 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   *Amended 2026-10-07, D-34/D-35*: the route checks the caller can read each row's **core record** (matter or project);
   a D-35 row (no core record) is returned **only to the To Do's owner**, in their Do lane under **"Not filed"**. The
   grid configuration selects both core-record columns and orders a core record's items together.
+  *Amended 2026-10-07, D-36*: "core record" covers all four core types; the access check, grouping and card labels are
+  driven by `sprk_corerecordtype` (the catalog row's logical name, display-name and number fields) and
+  `sprk_corerecordid`, with **no per-type code** in the route or the worklist.
 - **FR-25**: Build **one** row component rendering **every** signal shape, with data-driven variants.
   *Acceptance*: the three signal shapes (threshold, cross-source, SLA) and the Do-lane items all render
   through the same component; **a second row component is a design failure, not a feature.**
@@ -606,6 +628,8 @@ The five tables exist (`sprk_signal` 59 cols · `sprk_decisionrecord` 22 · `spr
   (matter or project), not only `sprk_regardingmatter`: a task or To Do filed under a **project** groups under that
   project (this answers D-16's "task filed under a project"). Only an item with **no matter and no project** is
   matterless, and D-35 makes its Signal owner-only.
+  *Amended 2026-10-07, D-36/D-37/D-38*: a work-assignment subject groups under itself; ties follow D-37 (direct
+  filed-under core record, then matter over project); there are no skips (D-38).
   *Why*: only Path B can be written or evaluated today; the Do lane, the overdue rules and the To Do subject are
   hard refusals in the validator, the compiler and the writer (#12). D-16 chose the smallest extension that keeps
   **one** evaluator.
@@ -1107,10 +1131,10 @@ where noted.
 | ~~O-19~~ | ✅ **Decided D-32**: yes, still-true subjects re-raise as new episodes | D-13 | 031, 033 |
 | ~~O-20~~ | ✅ **Dissolved by D-33**: Restricted/Limited restrict only external contacts; gate records on Secure matters are secure children like any Decision Record | D-15 | 042 |
 | ~~O-21~~ | ✅ **Decided D-35**: no matter and no project → owner-only Signal in the owner's Do lane under "Not filed"; the core-record columns are optional for this case only | D-31 | 007, 037, 038, 059 |
-| O-22 | `CoreAncestorResolver` also returns **work assignment** and **service request** as CORE records; D-34 names only matter or project. What does a Signal group under when the core record is a work assignment? This hits the **work-assignment response-overdue rule directly** (its subject IS a work assignment, so its own `sprk_regardingmatter` is not an ancestor) and any To Do or event filed under a work assignment | D-34 | 007, 037, 059 |
-| O-23 | The resolver can return **more than one** core stamp for a child (e.g. both a matter and a project set): which one is THE core record? | D-34 | 037 |
-| O-24 | Does D-34 retire D-33's narrow skip (a project-filed To Do now has a core record and a lineage lookup)? Kept until answered | D-33, D-34 | 031, 037 |
-| O-25 | Suppression and the Decision Record subject for a D-35 item (no core record): per (policy, subject)? | D-35 | 034, 040 |
+| ~~O-22~~ | ✅ **Decided D-36**: all four core types (matter, project, work assignment, service request), each its own row, security and suppression grain; extensible through the core taxonomy + `sprk_recordtype_ref` catalog | D-34 | 007, 031, 034, 037, 038, 039, 040, 059, 061 |
+| ~~O-23~~ | ✅ **Decided D-37**: the direct filed-under (regarding) core record wins; if ambiguous, matter over project | D-34 | 037 |
+| ~~O-24~~ | ✅ **Decided D-38**: the narrow skip is dropped; no skips anywhere | D-33, D-34 | 031, 037 |
+| ~~O-25~~ | ✅ **Decided D-39**: no-core items suppress per (policy, item); their Decision Record is owned by the item's owner and visible like its Signal | D-35 | 034, 040 |
 
 ---
 

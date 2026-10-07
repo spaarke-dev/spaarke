@@ -42,7 +42,8 @@
     <constraint source="project">AMENDED 2026-10-07 (reconciliation B.2 row 034): expose a read of the (policy, matter) dismissal count and the current sprk_suppresseduntil for the decision wizard's dismissal step (task 058) and admin (task 100). Authorize it as the caller (caller can read the matter) and add it to the route census (NFR-10).</constraint>
     <constraint source="owner">COORDINATION WITH uac-r2 (owner 2026-10-07): (1) Before starting, fetch origin/master and re-read the current uac-r2 implementation this task depends on, and name the files (with commit) in the completion record: SecureChildLineage.cs, config/secure-record-owner-role.json, RecordOwnershipResolver (I-6), RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs, ADR-034 and its amendments, ExternalCallerContext (ADR-003), CoreAncestorResolver (FR-26 core-ancestor stamps, D-34). (2) Check uac-r2's open PRs and active work for overlap (gh pr list --state open; the uac-r2 current-task.md and TASK-INDEX in C:\code_files\spaarke-wt-unified-access-control-r2 if present) and run /conflict-check. (3) Reuse uac-r2's mechanisms; never build a parallel one. Any change to uac-r2-owned files (the lineage list, the owner-role config, the ledger) goes through uac-r2's review, with the PR linked in this task. (4) If the uac-r2 code has changed in a way that invalidates this plan, STOP and escalate rather than adapting silently.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34; D-11 as amended): count dismissals per (policy, CORE record), the core record being the matter OR the project the Signal groups under (sprk_matter or sprk_project, task 007). Everywhere this POML says (policy, matter), read (policy, core record). The count read authorizes on the caller's read of the core record.</constraint>
-    <constraint source="owner">AMENDED 2026-10-07 (D-35): an item with no core record has no shared record to count under. Whether it counts per (policy, subject) is NOT decided (O-25): see escalation; until answered, do not suppress D-35 items.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-39): an item with no core record counts per (policy, ITEM): three dismissals of that item for one policy suppress it for 30 days. Its count read is authorized like its Signal (owner only).</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36): the grain is (policy, sprk_corerecordtype, sprk_corerecordid) for every core type, read from the generic columns (task 007). D-36 (extensibility, owner 2026-10-07): the core-record types are the access-control core taxonomy (CoreAncestorResolver.CoreRecordEntities: matter, project, work assignment, service request today) and the record-type catalog (sprk_recordtype_ref). Nothing in this task may branch on a specific core type: read the type from sprk_corerecordtype (the catalog row) and the id from sprk_corerecordid (task 007), and take display name and number fields from the catalog row (sprk_recorddisplaynamefield, sprk_regardingrecordnumberfield). A test adds a fake fifth core type through the taxonomy + a catalog row and shows this task's code handles it unchanged.</constraint>
   </constraints>
 
   <knowledge>
@@ -77,7 +78,7 @@
   <escalation>
     <trigger>If dismissals cannot be counted per (policy, matter) because the Decision Record does not carry enough to group by, STOP and escalate rather than falling back to the dedupe-key grain. The grain was chosen deliberately in D-11 and the fallback silently fails the criterion-4 fatigue case.</trigger>
     <trigger>COORDINATION WITH uac-r2 (owner 2026-10-07): if, on re-reading origin/master, the uac-r2 code this task depends on (record access, ownership, secure children, grants, the route ledger) has changed in a way that invalidates this task's plan, STOP and escalate rather than adapting silently.</trigger>
-    <trigger>Suppression grain for D-35 items (no matter, no project) is not decided (O-25). Ask the owner before counting them.</trigger>
+    <trigger>If counting per (policy, core record) needs any per-core-type code (D-36 extensibility), STOP and escalate.</trigger>
   </escalation>
 
   <justification>
@@ -107,7 +108,8 @@
     <criterion testable="true">Given the count read, when called by a caller who can read the matter, then it returns the (policy, matter) dismissal count and the until-date; when called by one who cannot, then 404; an unresolved caller gets 403; the route is in the census.</criterion>
     <criterion testable="true">All tests pass; the BFF builds.</criterion>
     <criterion testable="true">Given three dismissals for one policy on one PROJECT (no matter), when the next evaluation runs, then suppression applies to that (policy, project) pair (D-34).</criterion>
-    <criterion testable="true">Negative: a D-35 item (no core record) is never suppressed until the owner rules on O-25.</criterion>
+    <criterion testable="true">Given three dismissals of one no-core item for one policy, when the next evaluation runs, then that item is suppressed for 30 days (D-39).</criterion>
+    <criterion testable="true">Given three dismissals on one work assignment and three on one service request, when evaluation runs, then each (policy, core record) pair is suppressed independently (D-36).</criterion>
   </acceptance-criteria>
 
   <notes>spec.md FR-17, FR-17a, FR-03 (amended) and success criterion 4. design.md section 8.0c (D-11). Amended 2026-10-07 for D-13 and the reconciliation's R-8/R-10. Step 4 (exclude suppressed Signals from the worklist query) is now satisfied through task 050's FetchXML and task 038's read route.</notes>

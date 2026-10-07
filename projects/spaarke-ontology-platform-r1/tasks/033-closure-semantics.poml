@@ -40,6 +40,7 @@
     <constraint source="project">AMENDED 2026-10-07 (#15): no closure path touches a Signal that is already Resolved.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-32): Off is reversible. A policy switched On again after Off has its still-true subjects re-raised as new episodes by task 031; this task's Off closure must therefore leave each Signal's policy, subject and episode intact (no data cleared) so 031 can find the PolicyRetired episode. Retire (statuscode Retired) is not reversed by switching On.</constraint>
     <constraint source="owner">AMENDED 2026-10-07 (D-34): wherever a closure or a supersede re-raise touches suppression, the grain is (policy, core record) (matter or project), not (policy, matter); an auto-closure still never counts.</constraint>
+    <constraint source="owner">AMENDED 2026-10-07 (D-36, D-39): the suppression grain is (policy, core record) for every core type (matter, project, work assignment, service request), and (policy, item) for an item with no core record; no closure path branches on a core type.</constraint>
   </constraints>
 
   <knowledge>
