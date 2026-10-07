@@ -1,8 +1,8 @@
 # Current Task State — `customer-provisioning-orchestration-r1`
 
-> **Format (2026-10-06):** this file holds CURRENT state only and is REWRITTEN at each checkpoint — never prepend a new block on top of old ones. Standing directives + environment gotchas live in the project `CLAUDE.md` ("Standing directives & gotchas"). Session history lives in git (checkpoint commit messages) and the verbatim archive `notes/handoff-history/current-task-archive-2026-10-06.md` (do NOT load it on recovery; grep it only if you need a specific past detail). Why: see `.claude/skills/context-handoff/SKILL.md` "State, not history" and `notes/handoff-history/2026-10-06-conversion-review.md`.
+> **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure 2026-10-06): F1–F4 fix now / K1–K4 known limit; ≤ 2 fix rounds re-verifying only the fix diff + direct callers/callees; 1 verifier pass per task (2 for auth/security); escalate an F1 still open instead of a round 3.
 
-> **Last Updated**: 2026-10-06 SESSION 40 END (by context-handoff, pre-/compact) — tree clean; T229 ✅ T230a ✅; T253/T254 filed; owner APPROVED items 1–3 (W7, OwnedContainerIds on spaarke-bff-dev, remove old L2 Contributor on platform sub); G36 explained, awaiting decision. **SESSION 41: items (2)+(3) done; T230b ✅. Next: T254.** Converted to state-only format 2026-10-06 from that checkpoint (commit `fd49c6513`).
+> **Last Updated**: 2026-10-06 SESSION 41 END (context-handoff + hygiene self-review). Tree clean after the hygiene commit.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
@@ -10,52 +10,54 @@
 |-------|-------|
 | **Task** | **T254** — optional per-customer OpenAI spend limit (G37): `tasks/254-optional-openai-spend-limit.poml` (FULL, opus/high, BFF hot path). |
 | **Step** | 0 — not started. |
-| **Status** | pending. T230b ✅ (SESSION 41) — tree clean, pushed. |
+| **Status** | pending. T230b ✅ SESSION 41 (`3eeb76788`). |
 | **Next Action** | `task-execute` 254. No live action without owner approval. |
-| **Owner items** | (1) **W7 open**: deploy the L2 Api control-plane template (CustomerRunGuard config) with the next L2 Api code deploy — ask before. (2) ✅ / (3) ✅ done SESSION 41 (OwnedContainerIds on spaarke-bff-dev; L2 platform-sub Contributor removed). (4) **G36** explained, awaiting owner decision — do NOT act. Gotcha: Git Bash mangles `/subscriptions/...` → `export MSYS_NO_PATHCONV=1`. |
-| **Order** | … → T230a ✅ → T230b ✅ → **T254** → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → T186. T242c / T241 when the owner wants them. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
+| **Order** | T254 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 
-## SESSION 41 outcomes
+## Owner items
 
-- Owner items (2) + (3) applied on dev and verified.
-- **T230b ✅** keyless proof: BFF `POST /api/platform/keyless-proof` (app role `Provisioning.KeylessProof`, held only by the L2 Worker identity via H3); H13 calls it (token `api://{BffAppRegId}`) — any refusal fails, transient = Resumable; ARM keyless verifier; key-credential census ArchTest; H13's four user-workflow sample checks removed (they could never run app-only). Blob probe is `not-in-use` until compose-r8 task 063 sets `SessionFileStore__BlobEndpoint` (accepted for blob only). Publish +0.01 MB. Details: the 230b POML notes.
-- Found: BFF does not boot without `AzureOpenAI:Endpoint`+`ChatModelName` (latent F.1; stamps set both). No alert on `failed_open_auth`.
+1. **W7 (approved, open)**: deploy the L2 Api control-plane template so the Api gets `CustomerRunGuard` config — the code defaults `CustomerRunGuard:Enabled=true`, the Worker sets it false; the Api ACQUIRES the guard and the Worker RELEASES it. **Blocked by item 3 below** (every `platform-controlplane` deploy fails its Api module on the pending slot swap). Ask before deploying.
+2. ✅ SESSION 41: `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev; L2 UAMI's platform-subscription Contributor removed.
+3. **Api site's pending slot swap** — every platform-controlplane deploy fails its Api module; resolves W7.
+4. **G36** — ADR-027 management group for customer subscriptions: explained; awaiting the owner's decision — do NOT act.
+5. **G31** — H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's tenant.
+6. Board Status "Active" vs Status Reason "On hold" on Issue #438.
 
-## SESSION 40 outcomes
+## Cross-project deliveries (track until delivered)
 
-- **T229 ✅** (`f9627fac1`): `CostEnvelopeIntake` — tier (smb|enterprise|dedicated) + estimatedMonthlyUsd required for every model at POST /api/runs and H0; no shared-trial / warnAndProceed / costEnvelopePolicy / Model-2-only strictness; H0Options + H13 options ValidateOnStart; H13 one `DedicatedStampEnvelopeUsd` = $400 (list prices westus2: $337.04 fixed); skill Step 1b-ter + Step 2 hard stop.
-- **T230 split** → 230a ✅ / 230b. **T230a ✅** (`7b55890a7`): I3 = cosmos-db.bicep declared containers/keys (membership drift logged, not failed); H13 runtime invariants I2–I5 (I1 = ArchTest); H13 per-run naming check removed → merge-blocking `naming-conformance` job in `ci-tier1-blocking.yml` (the Router's required check — `sdap-ci.yml` is NOT required); R3 vault rule accepts `sprk-{customerId}-{env}-kv` (no reserved ids/env tokens, case-sensitive, ≤24); Seed-ProductionKeyVault.ps1 VaultName mandatory.
-- **New tasks**: **T253** (G38) — H4b runs `pwsh` + a generated script, H6 runs `pac` on a `DOTNETCORE|10.0` Worker with neither tool nor `scripts/` → both fail live; before T186. **T254** (G37, owner: no cap by default, per-customer limit when desired; BFF must map TenantBudgetExceededException → 429, today 500).
-- Board #438: 210 / 190.
+- **INCOMING-141 + INCOMING-145 from UAC-r2** — on master since #1312; ACCEPTED here as T255 / T256 (2026-10-06). Still to do: acknowledge to UAC-r2 (owner relays, or a #1094 comment — **ask the owner first**).
+- **To UAC-r2: do NOT run `task-165-admin-surfaces.md` §13.9(b)/§14.9(b) step 2 (`-MintClientSecret` on `bfac7f6e`)** — conflicts with D16/T250 and is unnecessary since SPE Admin runs as the BFF identity (2026-10-04). Note: `notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md`. **NOT YET DELIVERED** — ask the owner how to deliver (relay or #1094).
 
-## Notes for tasks further down the order
+## Open items (no task yet)
 
-- T250 likely superseded by master `bb8ba7251` (SPE Admin runs as the BFF MI) — raise with owner when reached.
-- T242c re-scope per D27 (demo = next env for testing the provisioning orchestration; rg-spaarke-demo has no AI Search). Demo lacks `AiSafety__ContentSafety__Endpoint` → T242c must set it.
-- Tasks without a POML yet: create from the plan `notes/model1-dedicated-remediation-plan.md` §7 rows (copy `tasks/228-…poml` format), add TASK-INDEX rows, then task-execute.
-- E-2 (OpenAI MI 401) was seen only on dev's `AIServices` account — a 401 on a stamp's `kind: OpenAI` is an owner decision (path B), since stamps now have no key fallback (T230b).
+- `RoutingConsumerTypeHealthCheck FAILED: AI catalog drift` on the dev BFF — reported to the owner, no outcome recorded.
+- BFF MI lacks `SecurityEvents.Read.All` (§6B Security tab) — no owner/task.
+- Dev Redis memory trend — recheck `performanceCounters | where name has 'Private Bytes'` on `spe-insights-dev-67e2xz` (`spe-infrastructure-westus2`).
+- No alert on `failed_open_auth` (Prompt Shield) — only H13 catches a refused Content Safety identity, at provisioning.
+- Latent: the BFF does not boot without `AzureOpenAI:Endpoint` + `ChatModelName` (chat endpoints unconditional, `IChatClient` conditional); stamps always set both.
 
-## Other open owner items (not approved/decided yet)
+## T186 (first live E2E) — open questions + live checks
 
-1. **G36** — ADR-027 management group for customer subscriptions (explained; awaiting decision — do NOT act).
-2. **G31** — H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's tenant.
-3. **Api site's pending slot swap** — every platform-controlplane deploy fails its Api module.
-4. Board Status "Active" vs Status Reason "On hold" on Issue #438.
-
-## T186 live checks recorded only here (verify at the first live run)
-
+- **Target customer undefined** after D-12/T228 (SESSION 11's trial1 answers are superseded; trial1 was never created). Needs: the customer's own subscription, Dataverse environment `spaarke-{customerId}`, container type id. Do NOT use `runs/trial1-intake.json`.
+- H12a seeds 4 of 12 artifacts (playbooks + playbook consumers pending — task 150).
 - (T228) H5 WhoAmI as the Worker in an operator-created env; H1 RG listing under Owner; H6 sign-in right after H10.
-- (T227e) Worker identity reads `environmentvariabledefinitions` in the customer env; marker PATCH right after the bind PATCH.
-- (T227g) the BFF app registration (H7's identity, before H10) can PATCH `businessunit.sprk_containerid` — a 403 surfaces as Resumable `dataverse-auth-failure` before any env-var write.
-- (T227d) marker PATCH on a just-created (inactive) container; `deletedContainers/{id}` returns the marker; Graph refuses app-only container-type operations for a stamp UAMI (plus T227b's two — see the 227b POML).
+- (T227e) Worker reads `environmentvariabledefinitions`; marker PATCH right after the bind PATCH.
+- (T227g) the BFF app registration can PATCH `businessunit.sprk_containerid` (403 → Resumable `dataverse-auth-failure`).
+- (T227d) marker PATCH on a just-created container; `deletedContainers/{id}` returns the marker; Graph refuses app-only container-type operations for a stamp UAMI.
 - (T251) W1 (group Name vs DisplayName).
-- (T230b) ADR-028 E-2 measured on the stamp's `kind: OpenAI` account (H13 log line "ADR-028 E-2 measurement"); every keyless-proof service `proved` live (Prompt Shield + groundedness on the stamp Content Safety region; Document Intelligence resource-details read under Cognitive Services User); H3's `appRoleAssignedTo` POST for the L2 identity succeeds (no 400 after the propagation retries); the L2 token for `api://{BffAppRegId}` carries `roles: Provisioning.KeylessProof` and no `scp`; ARM keyless check reads every stamp resource as the L2 identity (Owner).
+- (T230b) every keyless-proof service `proved` live; ADR-028 E-2 measured on the stamp's `kind: OpenAI` account (H13 log "ADR-028 E-2 measurement"); H3's `appRoleAssignedTo` POST succeeds; the L2 token carries `roles: Provisioning.KeylessProof`, no `scp`; ARM keyless check reads the stamp as L2 (Owner). Blob = `not-in-use` until compose-r8 task 063.
 
-## Follow-ups parked in POML notes (non-blocking)
+## Notes for later tasks
 
-T246 follow-ups a–f (worker upgrade with a run in flight; subdomain name pre-check; decommission purge of Cognitive Services accounts; H0 groundedness-region check; pre-T246 stamp drift; `spe-api-dev-67e2xz` named in ~40 docs/skills though the app no longer exists) · T247 follow-ups (a)–(c); pin refresh due before ~2027-01-14 · T244 follow-ups (CI check that checked-in `customer.json` = fresh compile; ACS `disableLocalAuth`; Model 2 Lighthouse Search roles) · G34 (GraphMetadataCache key contract) · T252 (control-plane vault sentinels).
+- T250 likely superseded by master `bb8ba7251` (SPE Admin as the BFF MI) — raise with the owner when reached.
+- T242c re-scope per D27 (demo = next env for the orchestration; `rg-spaarke-demo` has no AI Search; demo lacks `AiSafety__ContentSafety__Endpoint`).
+- T241: now lists the shared tier's non-Azure leftovers (Dataverse env, two Entra apps, a do-not-sweep list) — owner decision first on `spaarke-model1-prod` references.
+- T218: replace the hand-uploaded H6 artifacts in `sprkcpartifactsdev/provisioning-artifacts`; ship `sprk_noaccessentry` (T256).
+- Tasks without a POML: create from `notes/model1-dedicated-remediation-plan.md` §7 (copy `tasks/228-…poml`), add TASK-INDEX rows.
+- Parked follow-ups: T246 a–f, T247 (a)–(c) (pin refresh before ~2027-01-14), T244, G34, T252 — see those POML notes.
 
 ## Live state (dev)
 
-- Dev BFF `spaarke-bff-dev` runs branch build `0911515d7` (= master + health-check fix; master carries it via #1311). Any future dev BFF deploy comes from master ≥ `c8b93b294`. T227d not yet on dev (owner item 2 above).
-- Dev Redis memory trend not yet measured — recheck with `performanceCounters | where name has 'Private Bytes'` on `spe-insights-dev-67e2xz`.
+- Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master ≥ `c8b93b294`. T227d not on dev yet (OwnedContainerIds is set, ready for it).
+- Dev BFF MI holds application `full` on the Model 1 container type (owner option A) — see CLAUDE.md Keep.

@@ -8,7 +8,7 @@
 > the BFF Entra app registration is **per customer in both models (BINDING)**.
 >
 > 🔴 **Four required code changes are in THIS project**, including one where `H3EntraAppRegHandler` currently
-> does the opposite of what D-13 requires. This branch is **812 commits behind master**.
+> does the opposite of what D-13 requires. *(2026-10-06: the four D-13 changes are done — T222/T227/T228; the branch is 23 behind / 44 ahead of `origin/master` — re-measure with `git rev-list --count HEAD..origin/master` before a merge.)*
 > **Do not start work, and do not resolve a merge conflict, before reading that file.**
 
 
@@ -82,7 +82,7 @@ Per root CLAUDE.md §10 + §11 governance:
 | `.claude/patterns/auth/` | H3, H4, H10 — auth binding + OBO + SSO |
 | `.claude/patterns/dataverse/` | H5, H6, H7, H10, H12a/b/c — Dataverse operations |
 | `.claude/patterns/caching/` | Redis usage in idempotency service |
-| `.claude/patterns/testing/` | Test-adding tasks; includes `.claude/patterns/testing/god-class-ratchet.md` (NFR-07) |
+| `.claude/patterns/testing/` | Test-adding tasks (the god-class LOC ratchet was RETIRED 2026-08-20 — complexity is judged at review, root CLAUDE.md §11.5) |
 | `.claude/patterns/ui/` | (No UI in r1) |
 
 ## Canonical implementations (pattern exemplars)
@@ -102,7 +102,7 @@ Discovery report enumerates the strongest exemplars. Key ones the task POMLs ref
 | `infrastructure/bicep/customer.bicep` | H2a Bicep extension (reference — extend, don't recreate) |
 | `scripts/Provision-Customer.ps1` | 13-step orchestrator — basis for handler port |
 | `scripts/ai-search/Deploy-AllIndexes.ps1` | H2b — 7 canonical indexes; script IS the catalog authority |
-| `scripts/Deploy-DataverseSolutions.ps1` | H6 — dependency-ordered solution import (8 solutions per §11.1a) |
+| `scripts/Deploy-DataverseSolutions.ps1` | H6 — dependency-ordered solution import (9 solutions in `CanonicalSolutionCatalog`; T218 redefines the package) |
 
 ## MUST rules (spec-cited, task-execute must enforce)
 
@@ -113,10 +113,10 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
   🔴 **AMENDED 2026-09-28**: the *"+ one multitenant BFF app"* half is **REVERSED**. **MUST** create **one BFF app registration per customer**, in both models — D-13 (BINDING). The app registration determines the Dataverse application user, which determines the business unit every BFF-created record lands in. `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`
 - **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
 - 🔴 **REVERSED 2026-09-28 (D-12 §3); product + auth set by T242 (owner D12/D13, 2026-10-04).** Was: *"**MUST NOT** provision Redis per-customer **FOR MODEL 1**"*. Now: **MUST provision Redis per-customer in BOTH models** as **Azure Managed Redis (`Microsoft.Cache/redisEnterprise`) Balanced_B0, high availability on, Microsoft Entra only** (access keys disabled; the stamp UAMI holds the only access-policy assignment; the BFF reads the plain setting `Redis__Endpoint` — no key, no connection string, no Key Vault secret). Redis access control is per-instance (not per-keyspace) and it holds OBO tokens + the `uac-access` authorization cache. `customer.bicep` wires `modules/redis.bicep` unconditionally. (The earlier "Standard tier" wording is superseded — ADR-009 as amended by T242.)
-- **MUST** use confidential-client (app-only) token for SPE container-type creation (T6)
+- **MUST NOT** expect app-only SPE container-TYPE creation: creation is delegated-only (topology doc §R5 / H8-B — an operator one-time step); L2 acts as an owning app only via MI-FIC (`provisioning.md` "SPE owning app") *(corrected 2026-10-06)*
 - **MUST** PATCH App Service `keyVaultReferenceIdentity` to UAMI on both slots (T1)
 - **MUST** apply canonical KV secret + resource naming (Phase G / R1–R4); vault name is Bicep parameter
-- **MUST NOT** delete `Dataverse-ClientSecret` / `BFF-API-ClientSecret` (BINDING per r3 handoff)
+- **KV credential lifecycle**: follow `.claude/constraints/provisioning.md` §KV credential lifecycle (never create/seed/restore the BFF secrets in secret-free environments; never delete `Dataverse-ClientSecret` or purge rollback copies before 2026-11-23; E-1 secrets protected) — the old r3 blanket never-delete rule is superseded *(corrected 2026-10-06)*
 - **MUST** pre-check LIVE App Service + KV + Dataverse before removing any alias (FR-35 pre-check gate)
 - **MUST** ensure all AI Search queries include unconditional `tenantId eq` filter (§4D I2 / FR-29)
 - **MUST** ensure all Cosmos reads/writes include partition-key predicate (§4D I3 / FR-30)
@@ -125,7 +125,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 - **MUST NOT** hardcode default tenant in provisioning scripts (§4D I1 / FR-28)
 - **MUST** report BFF publish size + delta in every BFF-touching task's PR description (NFR-01)
 - **MUST** ensure BFF `/health` fails fast at boot on any Tier-1 IOptions misconfig (r3 task 061)
-- **MUST** complete 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` BEFORE first production customer
+- ✅ `GraphAppRoles.cs` `AppRoleId`s: all 14 populated 2026-08-17, a 15th added by task 144 — keep them live-verified when adding one *(corrected 2026-10-06)*
 - **MUST** enqueue handlers via Service Bus + return 202 Accepted (FR-22 / R20 — no synchronous handler in HTTP path)
 - **MUST** use `PublicContracts/` facade if H0.5 needs AI (ADR-013 forcing-function ArchTest per r3 task 040)
 
@@ -206,7 +206,7 @@ Per root CLAUDE.md §5. r1-specific:
 ## Human Escalation Triggers
 
 Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
-- Any **`GraphAppRoles.cs`** `az` enumeration returning unexpected role IDs (11 of 14 null must be verified before completing)
+- Any **`GraphAppRoles.cs`** `az` enumeration returning unexpected role IDs (all 15 are populated; a mismatch means drift)
 - Any **KV secret rename/delete** without prior LIVE App Service + KV + Dataverse pre-check (§7.9 BINDING pre-check)
 - Any **tenant-isolation invariant** (I1–I5) failure detected outside expected Phase-A ArchTest work
 - Any **Model 2 customer commitment** trigger (unblocks TF migration path — spec.md § Unresolved Questions)
@@ -255,8 +255,9 @@ Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
 
 **Keep (do not delete)**
 - `Spaarke Exchange Admin` (appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`) and `Spaarke SPE Model 1 Owner` (appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`); Graph Explorer's grant on the `Spaarke Model 1` registration (owner KEEP 2026-10-03).
+- **Dev BFF identity `mi-bff-api-dev` (appId `5967251e…`) holds application `full` / delegated `none` on the `Spaarke Model 1` container-type registration `fb3817a8`** — owner option A, 2026-10-06: the dev BFF can reach every Model 1 customer's containers; only T227d's ownership guard + `SharePointEmbedded__OwnedContainerIds` (set on spaarke-bff-dev 2026-10-06) confine it. Dev SPE config `68f9a952` `sprk_keyvaultsecretname` was changed from `"null"` to empty the same day.
 - Exchange group `sprk-t251-spike-scope` (Entra `c709af95-0332-4ea2-a9d4-6925b1666bad`, member testuser1@) = the test group for `Verify-Sidecar-Live.ps1 -InTenant` (owner 2026-10-04). `Enable-OrganizationCustomization` has been run (irreversible).
-- Never delete Key Vault secrets during cleanup — the `Exchange-Connect-Cert` sentinel stays (2026-10-04).
+- Never delete Key Vault secrets during a spike/test CLEANUP — the `Exchange-Connect-Cert` sentinel stays (2026-10-04). Planned deletions follow `provisioning.md` §KV credential lifecycle (e.g. T241's `sprk-prod-kv` only after 2026-11-23) *(scoped 2026-10-06)*.
 
 **Environment gotchas**
 - `sdap-ci.yml` is not a required check and its jobs are `continue-on-error`; a gate that must block goes in `ci-tier1-blocking.yml` (Router) (2026-10-06).
@@ -270,13 +271,16 @@ Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
 - `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt — run it in-process with `-Confirm:$false` (`-SkipBuild` to reuse a build) (2026-10-04).
 - To target another subscription without touching the shared az context, use a private `AZURE_CONFIG_DIR` copy and delete it afterwards (2026-10-04).
 - Never run destructive az commands as a "clean slate" (`az account clear` wiped the credential cache, 2026-08-23).
-- Before relying on a pac/az flag in a runbook, run its `--help` locally: `pac admin create` silently appends a digit to a taken domain, and `create-environment` is not the command (2026-10-06). *(verify: an older 2026-08-23 note says pac flags once EXECUTED a command; see conversion review)*
+- **pac: never run a pac command with flags to "check its usage"** — on 2026-08-23 that EXECUTED `pac admin create-service-principal` (created an Entra app, exposed a secret). Use a no-argument invocation or Microsoft's docs. az: `--help` is safe. Known traps: `pac admin create` silently appends a digit to a taken domain; `create-environment` is not the command (2026-10-06).
 - A prereq recipe's tokens must be resolvable at the step that runs its scope — `validate.ps1` checks documentation only (2026-10-06).
 - Check Microsoft's per-feature region table before defaulting a regional AI resource to the stamp location ("service available" ≠ "every feature available"; Content Safety defaults to westus) (2026-10-06).
 - A Bicep `@description('…')` string must not contain an apostrophe (2026-10-06).
 - Pester for `tests/scripts/*.Tests.ps1` needs `Import-Module Pester -RequiredVersion 3.4.0` (6.x rejects `-Script` / `Should Be`) (2026-10-06).
 - Edit scripts: write them with the Write tool (bash heredocs fail on quoting). In Python use `'''` when the text holds `"` before `"""` or C# raw strings, and restrict line-prefix replacements to the intended line (2026-10-06).
-- Parallel sub-agents share the git index: `git commit --only <paths>`, never `git add -A` / `git add .` (2026-08-19).
+- Parallel sub-agents share the git index: `git commit --only <paths>`, never `git add -A` / `git add .` (2026-08-19). Dispatch prompts must say "commit AND push on success" (five agents stalled without it); index-race recovery: `git reset --soft` + `git stash push --keep-index -m <tag>` (tagged, never bare).
+- **Never `az account set`** — pass `--subscription` on every az command (the az context is shared with other sessions).
+- Git Bash rewrites a leading `/subscriptions/...` argument into a Windows path → `export MSYS_NO_PATHCONV=1` before `az ... --ids /subscriptions/...` (2026-10-06).
+- Do NOT resume with the gitignored `runs/trial1-intake.json` — it is pre-D-12 (Model1Shared / shared-trial, no subscriptionId / containerTypeId / dataverseEnvUrl). T186's target customer is not yet defined (2026-10-06).
 - `scripts/check-task-status-drift.ps1` reports false "unpaired" entries for this project: its parser expects `| <marker> <id> |`, but TASK-INDEX uses `| <id> | <marker> |`. Known; not remediated (2026-09-29).
 - Azure OpenAI pin refresh due before ~2027-01-14 (T247 one-source set; `PinnedModelCatalog`) (2026-10-06).
 

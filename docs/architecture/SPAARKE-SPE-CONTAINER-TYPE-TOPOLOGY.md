@@ -305,7 +305,7 @@ certificate and no client secret**; nothing is stored in any Key Vault.
 | Federated credential | `sprk-controlplane-dev-uami-assertion` → dev Worker UAMI `sprk-controlplane-dev-uami` (principal `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044`) |
 | Billing | `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod` — the binding is permanent; never delete that resource group or account |
 | Registration in Spaarke's tenant | registered at creation (2026-10-03T22:54:58Z); `owningAppId` = the owning app; `billingStatus` `valid` |
-| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grant**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep** |
+| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grants**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep**; the **dev BFF identity** `mi-bff-api-dev` (appId `5967251e…`, application `full` / delegated `none`) — owner option A 2026-10-06: dev reaches every Model 1 customer's containers, confined only by T227d's `SpeContainerOwnershipGuard` + `SharePointEmbedded__OwnedContainerIds`. Each provisioned stamp's UAMI (application) and BFF app registration (delegated) are added by H8. |
 | Containers | none yet (list returned empty) |
 
 The admin-center creation flow prompts for a client secret on the owning app; none was added, and none

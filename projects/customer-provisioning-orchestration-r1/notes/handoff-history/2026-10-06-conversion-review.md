@@ -77,5 +77,36 @@ Verdict: the conversion is good overall. Owner directives, gotchas, T186 live ch
   - L85: the god-class-ratchet pattern was retired 2026-08-20.
   - L105: "8 solutions" (the catalog has 9).
 
+## Resolution (2026-10-06, SESSION 41 self-review)
+
+Restored / corrected / not applicable — each item above:
+
+| Item | Decision | Where |
+|---|---|---|
+| Directive 1 (no Managed Environments / Env Groups / PAYG, Model 1) | **N/A** — decided for the retired SHARED environment; since T228 the customer's Dataverse environment is an operator prerequisite (PRQ), so its settings are the operator's choice | — |
+| Directive 2 (pac `--help`) | **Corrected** — pac: never run with flags to check usage; no-arg or docs only | CLAUDE.md gotchas |
+| Directive 3 ("tenant" vs "customer") | **N/A** — scoped to T216 (dropped) | — |
+| Directive 4 (westus3 OpenAI) | **Still valid** — `customer.bicep` `openAiLocation` defaults to `westus3`; memory updated with the current parameter name | memory |
+| Directive 5 (SpaarkeMaster vs v2) | **Deferred to T218** (owns the package definition) | plan T218 row |
+| Directive 6 (KEEP trial1) | **N/A** — the SESSION 11 trial1 was never created; `rg-spaarke-trial01-prod-model1` is the 2026-08-22 stand-up stamp, deleted under T241 | plan T241 |
+| Open 7 (demo env names) | **N/A — resolved** 2026-10-05 (T242b) | — |
+| Open 8 (RoutingConsumerTypeHealthCheck AI catalog drift, dev BFF) | **Restored** as an open item | current-task |
+| Open 9 (BFF MI lacks `SecurityEvents.Read.All`) | **Restored** as an open item (no owner/task) | current-task |
+| Open 10 (dev Redis memory trend) | **Kept** as live state | current-task |
+| CLAUDE.md stale lines (812 behind, T6, never-delete, 11 of 14, god-class, 8 solutions) | **Corrected** | CLAUDE.md |
+| Audit 1 HIGH (dev BFF `full` grant on Model 1 type; §13.9(b)) | **Restored + coordination note** | CLAUDE.md Keep, topology doc, `notes/coordination/2026-10-06-uac-r2-task165-13-9b-mint-secret.md` |
+| Audit 2 (T241 non-Azure leftovers) | **Restored** | plan T241 row |
+| Audit 3 (W7 rationale + blocker) | **Restored** | current-task owner items |
+| Audit 4 (manual H6 artifacts) | **Restored** | plan T218 row |
+| Audit 5 (T186 target undefined; stale trial1-intake.json) | **Restored** | current-task + CLAUDE.md gotcha |
+| Audit 6 (never `az account set`) | **Restored** | CLAUDE.md |
+| Audit 7 (sub-agent dispatch lessons) | **Restored** | CLAUDE.md gotchas |
+| Audit 8 (H12a 4 of 12 seeds; wrong GroupMember GUID) | **Restored** (H12a → T186 checks) / **Fixed** (GUID `…6695` in the guide + `Setup-EntraInfrastructure.ps1`) | current-task; code |
+| Wrongly carried: KV never-delete too broad | **Corrected** (scoped to cleanup; planned deletions follow the KV lifecycle rule) | CLAUDE.md |
+| Wrongly carried: MSYS gotcha in owner-items cell | **Moved** | CLAUDE.md gotchas |
+| INCOMING-141 / INCOMING-145 | **Accepted** as tasks T255 / T256 (before T186); acknowledgment to UAC-r2 pending (owner or #1094 — ask first) | TASK-INDEX, plan, current-task |
+| Owner note "branch 309 behind master" | **Measured** 23 behind / 44 ahead of `origin/master` on 2026-10-06 | CLAUDE.md header, current-task |
+| Owner note "[open]/[done] token rule, Secure Projects BU name" | **N/A here** — neither appears in this project's CLAUDE.md or current-task (the BU name in use is `Secure Record`) | — |
+
 ## Cross-project item raised by the UAC-r2 audit (relevant here)
 UAC-r2 owes this project two hand-offs that were never delivered, INCOMING-141 (the workforce tenant list, `WorkforceIdentity__CustomerTenantIds`) and INCOMING-145 (H7b: secure owner team and role). Without them every new environment denies workforce-customer identities and refuses secure records. Related: an environment without the `sprk_noaccessentry` table denies every read, so provisioning must create it with or before the deploy. Expect these from UAC-r2; if they don't arrive, ask for them.

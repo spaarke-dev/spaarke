@@ -70,7 +70,7 @@ These are **Application (Role) permissions**, NOT Delegated permissions. The pro
 | Permission | Permission ID | Purpose |
 |-----------|---------------|---------|
 | `User.ReadWrite.All` | `741f803b-c850-494e-b5df-cde7c675a1ca` | Create and disable demo user accounts |
-| `GroupMember.ReadWrite.All` | `dbaae8cf-10b5-4b86-a4a1-f871c94c6571` | Add/remove users from the demo security group |
+| `GroupMember.ReadWrite.All` | `dbaae8cf-10b5-4b86-a4a1-f871c94c6695` | Add/remove users from the demo security group |
 | `Directory.ReadWrite.All` | `06b708a9-e830-4db3-a914-8e69da51d44f` | Assign licenses to demo users |
 | `Files.ReadWrite.All` | `75359482-378d-4052-8f01-80520e7db3cd` | SPE container access (may already exist) |
 | `Mail.Send` | `40dc41bc-0f7e-42ff-89bd-d9516947e474` | Send welcome and expiration notification emails (may already exist) |

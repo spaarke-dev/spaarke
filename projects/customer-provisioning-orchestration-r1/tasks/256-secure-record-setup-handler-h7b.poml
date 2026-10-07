@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="256" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>INCOMING-145 (UAC-r2 task 145, owner F10 = a): H7b — the per-environment Secure Record setup as a control-plane handler (secure owner team + role, read-then-write, idempotent), plus the sprk_noaccessentry prerequisite</title>
+    <phase>Model 1 dedicated-stamp remediation — cross-project hand-off (accepted 2026-10-06)</phase>
+    <gate>before T186</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New handler (five-place registration), Dataverse security writes, DAG change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security roles and teams in the customer's environment; a wrong privilege set is a data-access defect.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Handler registration + DAG + skill (main session).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, dataverse, model1-dedicated, testing</tags>
+    <deps>218</deps>
+  </metadata>
+
+  <prompt>Build H7b from UAC-r2's hand-off so every new environment can hold secure records.</prompt>
+
+  <role>SPAARKE platform developer (L2 handlers, Dataverse security).</role>
+
+  <goal>
+    The binding spec is `projects/unified-access-control-r2/notes/handoffs/INCOMING-145-secure-setup-handler.md` (on master since
+    #1312): §2 handler (inputs, steps S0–S9 each read-then-write, §5.4 strip after every grant, idempotency key over a hash of
+    the set, dry run, rejection codes, seam + tests), §3 acceptance, §4 open items, §6 production business-unit topology
+    (binding, one control-plane gap). Without it every new environment refuses secure records. Also from the UAC-r2 audit:
+    an environment WITHOUT the `sprk_noaccessentry` table denies every read — it must exist before the BFF deploy (solution
+    component, T218, or this handler).
+  </goal>
+
+  <context>
+    <background>
+      DAG per the hand-off: `[H7b] = {H6}`, H13 waits on it. Five-place handler registration (provisioning.md). The Worker host
+      has no pwsh/pac (G38) — Dataverse Web API from C#, as H5/H7 do. Until it ships the hand-off §5 interim operator runbook
+      applies (dev only).
+    </background>
+    <relevant-files>
+      <file>projects/unified-access-control-r2/notes/handoffs/INCOMING-145-secure-setup-handler.md</file>
+      <file>config/secure-record-owner-role.json; projects/unified-access-control-r2/notes/task-145-secure-owner-role-privileges.md</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/** (H7 as the reference); Reconciler/DagAdvancer.cs; HandlerIds.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="hand-off">Every step reads first and writes only what is missing; a second apply changes nothing; dry run supported.</constraint>
+    <constraint source="provisioning.md">Five-place registration; HandlerRegistrationCompletenessTests + HANDLER-12 parity green; RunContextContractTests green.</constraint>
+    <constraint source="owner">No live change in this task.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Read the hand-off end to end; resolve its §4 open items with the owner where they are decisions.</step>
+    <step order="2">Handler + registration + DAG; `sprk_noaccessentry` presence (with T218).</step>
+    <step order="3">Tests (read-then-write, idempotency, dry run, rejections); H13 waits; docs; acknowledge delivery to UAC-r2 (ask first).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">H7b runs after H6, before H13, and a second run writes nothing.</criterion>
+    <criterion testable="true">An environment without `sprk_noaccessentry` cannot reach the BFF deploy.</criterion>
+    <criterion testable="true">Rejection codes per the hand-off §2.4; dry run writes nothing.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>
