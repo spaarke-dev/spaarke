@@ -860,10 +860,19 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         // purpose: the alt-key lookup swallows InvalidOperationException as "not found", and the endpoint
         // maps the two identity-KEY faults itself — this is the third class, the one that used to fall
         // through to `catch (Exception)` and return a 500 reading "Save failed: ...".
+        //
+        // Task 171: the route's ComposeDocumentAuthorizationFilter looks the row up FIRST (a fault there is a fail-closed
+        // 503 BEFORE any write — pinned in ComposeDocumentAuthorizationFilterTests). This test is about a Dataverse that
+        // fails AFTER the write, so the filter's lookup finds no row (InvalidOperationException is the not-found the lookup swallows) (Path B — the OBO replace set up above) and every
+        // later lookup — the record step's — times out.
+        var lookups = 0;
         _fixture.DataverseMock
             .Setup(d => d.RetrieveByAlternateKeyAsync(
                 It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new TimeoutException("Dataverse request timed out."));
+            .Returns<string, KeyAttributeCollection, string[], CancellationToken>((_, _, _, _) =>
+                Interlocked.Increment(ref lookups) == 1
+                    ? throw new InvalidOperationException("No sprk_document row for this item (the lookup's not-found).")
+                    : throw new TimeoutException("Dataverse request timed out."));
 
         var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
         {

@@ -8,8 +8,11 @@
                                            sprk_relocationpending, the relocation ledger (task 166 f1-v1, owner round 37:
                                            it names a source the BFF may later delete, so only the BFF may write it),
                                            and sprk_relocatedversions, the relocation's version record (task 166 f1-v2,
-                                           owner round 45 item 1: it says who wrote a moved file's history). The two
-                                           relocation columns are created already secured; this grants their profiles;
+                                           owner round 45 item 1: it says who wrote a moved file's history), and
+                                           sprk_graphitemidbound, the BFF-only COPY of sprk_graphitemid (task 171, owner
+                                           round 72 item 1 — sprk_graphitemid is in an alternate key and cannot be
+                                           secured, so the BFF's pointer check compares it with this copy). Those three
+                                           are created already secured; this grants their profiles;
       -Target ReportCatalog              — sprk_report.sprk_pbi_reportid / sprk_workspaceid / sprk_datasetid /
                                            sprk_iscustom, the Power BI pointer the reporting module derives embed
                                            tokens, exports and deletes from (owner round 25 item 6).
@@ -53,8 +56,9 @@
            configuration that writes outside the BFF; it would fail every write it drives once locked);
       (p6) the table is a ROOT component of -SolutionUniqueName with rootcomponentbehavior 0 (include all
            subcomponents), so the secured columns travel with the solution to every other environment;
-      (p7) every column to lock exists (DocumentPointers: sprk_relocationpending and sprk_relocatedversions are created by
-           scripts/Set-DocumentRelocationSchema.ps1 -Apply, task 166 f1-v1 / f1-v2).
+      (p7) every column to lock exists (DocumentPointers: sprk_relocationpending, sprk_relocatedversions and
+           sprk_graphitemidbound are created by scripts/Set-DocumentRelocationSchema.ps1 -Apply, task 166 f1-v1 / f1-v2
+           and task 171 round 72).
 
     STEPS (-Apply), per column, in this order:
       (a) secure the column (IsSecured = true);
@@ -142,14 +146,16 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants ───────────────────────────────────────────────────────────────────────────────────────────────
 $Targets = @{
-    DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_relocationpending', 'sprk_relocatedversions'); What = 'the document pointers and the relocation record (ledger and version record)' }
+    DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_graphitemidbound', 'sprk_relocationpending', 'sprk_relocatedversions'); What = 'the document pointers (incl. the item-id copy) and the relocation record (ledger and version record)' }
     ReportCatalog    = @{ Table = 'sprk_report'; Columns = @('sprk_pbi_reportid', 'sprk_workspaceid', 'sprk_datasetid', 'sprk_iscustom'); What = 'the report catalog pointers' }
 }
 $Table = $Targets[$Target].Table
 $Columns = $Targets[$Target].Columns
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
-$RelocationRecordColumns = @('sprk_relocationpending', 'sprk_relocatedversions')
+# Created (already secured) by scripts/Set-DocumentRelocationSchema.ps1 — this script grants their profiles. The item-id
+# copy sprk_graphitemidbound joined them in task 171 (owner round 72 item 1): sprk_graphitemid itself cannot be secured.
+$RelocationRecordColumns = @('sprk_relocationpending', 'sprk_relocatedversions', 'sprk_graphitemidbound')
 
 # A CLIENT write of a locked document column in deployed JavaScript: Find-PointerWrite, from the ONE detector file
 # tests/Spaarke.ArchTests/ClientDocumentPointerWriteGuardTests.cs runs through pwsh over every write and read case of the

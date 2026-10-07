@@ -540,7 +540,54 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
     {
         _fixture = fixture;
         _fixture.Uploads.Clear();
+        _fixture.Conflicts.Clear();
         _fixture.RestampQueue.Children.Clear();
+    }
+
+    [Theory(DisplayName = "Task 171 (finding 1): an app-only upload asking to REPLACE is refused 409 upload_replace_not_supported before any Graph call")]
+    [InlineData("files/brief.docx?conflictBehavior=replace", "PUT")]
+    [InlineData("files/brief.docx?conflictBehavior=REPLACE", "PUT")]
+    [InlineData("upload-session?path=big.pdf&conflictBehavior=replace", "POST")]
+    public async Task Upload_Replace_IsRefused_AndNothingReachesGraph(string suffix, string method)
+    {
+        var url = $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/{suffix}";
+        var response = method == "PUT"
+            ? await _fixture.Client().PutAsync(url, new ByteArrayContent([1, 2, 3]))
+            : await _fixture.Client().PostAsync(url, content: null);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain("upload_replace_not_supported",
+            "the client must be able to tell a refused replace from a name collision, or it re-offers the collision prompt");
+        _fixture.Uploads.Should().BeEmpty(
+            "the right to file content under record B is not a right to overwrite record A's same-named file in a shared "
+            + "container — and refusing before Graph is reached means the answer reveals nothing about which names exist");
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 1): /me/files asking to REPLACE is refused the same way, before the acting user or Graph is consulted")]
+    public async Task MeFiles_Replace_IsRefused()
+    {
+        var response = await _fixture.Client().PutAsync("/api/obo/me/files/brief.docx?conflictBehavior=replace", new ByteArrayContent([1]));
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain("upload_replace_not_supported");
+        _fixture.Uploads.Should().BeEmpty();
+    }
+
+    [Theory(DisplayName = "Task 171 (finding 1): an absent or UNKNOWN conflictBehavior uploads with Fail, never Replace; rename is honoured")]
+    [InlineData("", ConflictBehavior.Fail)]
+    [InlineData("?conflictBehavior=bogus", ConflictBehavior.Fail)]
+    [InlineData("?conflictBehavior=fail", ConflictBehavior.Fail)]
+    [InlineData("?conflictBehavior=rename", ConflictBehavior.Rename)]
+    public async Task Upload_ConflictBehavior_IsFailOrRename(string query, ConflictBehavior expected)
+    {
+        var response = await _fixture.Client().PutAsync(
+            $"/api/obo/records/todo/{RecordKeyedUploadRouteFixture.TodoUnderPlainProject}/files/notes.txt{query}",
+            new ByteArrayContent([4, 5, 6]));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Conflicts.Should().ContainSingle().Which.Should().Be(expected);
     }
 
     [Fact(DisplayName = "Task 155: PUT /api/obo/records/sprk_todo/{id}/files/… for a to-do under a SECURE project stores the file in the PROJECT's own container")]
@@ -554,6 +601,31 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
         _fixture.Uploads.Should().ContainSingle()
             .Which.Should().Be(RecordKeyedUploadRouteFixture.SecureProjectContainer,
                 "a child of a secure record is secure — its bytes belong in the secure project's own container");
+    }
+
+    [Fact(DisplayName = "Task 171: POST upload-session for a to-do under a SECURE project opens an APP-ONLY session on the PROJECT's own container (the 2026-10-06 upload403 path)")]
+    public async Task UploadSession_TodoUnderASecureProject_OpensAnAppOnlySessionOnTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be("session:" + RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "the secure container has no members by design, so only an app-only session can be created on it — and "
+                + "the container is the one derived from the authorized record, never the caller's");
+    }
+
+    [Fact(DisplayName = "Task 171: POST upload-session for a to-do under an UNPROVISIONED secure project is refused and opens NO session")]
+    public async Task UploadSession_TodoUnderAnUnprovisionedSecureProject_OpensNoSession()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderUnprovisionedSecureProject}/upload-session?path=big.pdf",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().BeEmpty("an app-only session is opened only on a container derived from the authorized record");
     }
 
     [Fact(DisplayName = "Task 155: the same route for a to-do under a NON-secure project stores the file in the to-do's OWN business-unit container — no 409")]
@@ -797,6 +869,9 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     /// <summary>Every drive id an upload reached, in order. Cleared by the test class constructor.</summary>
     public ConcurrentQueue<string> Uploads { get; } = new();
 
+    /// <summary>Task 171 (finding 1): the conflict behaviour each upload reached Graph with.</summary>
+    public ConcurrentQueue<ConflictBehavior> Conflicts { get; } = new();
+
     /// <summary>Task 156: every stale row the resolver enqueued for re-stamping (no Service Bus is reached).</summary>
     internal RecordingRestampQueue RestampQueue { get; } = new();
 
@@ -826,7 +901,7 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
 
             // SCOPED: SpeFileStore's constructor dependencies are scoped (see ShareLinkTestFixture for the trap).
             services.RemoveAll<SpeFileStore>();
-            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads));
+            services.AddScoped<SpeFileStore>(sp => new RecordingSpeFileStore(sp, Uploads, Conflicts));
 
             // Task 156: where a container_ancestor_stale refusal enqueues the stale row.
             services.RemoveAll<CoreAncestorRestampQueue>();
@@ -1056,28 +1131,44 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
     private sealed class RecordingSpeFileStore : SpeFileStore
     {
         private readonly ConcurrentQueue<string> _uploads;
+        private readonly ConcurrentQueue<ConflictBehavior> _conflicts;
 
-        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads)
+        public RecordingSpeFileStore(IServiceProvider sp, ConcurrentQueue<string> uploads, ConcurrentQueue<ConflictBehavior> conflicts)
             : base(sp.GetRequiredService<ContainerOperations>(),
                    sp.GetRequiredService<DriveItemOperations>(),
                    sp.GetRequiredService<UploadSessionManager>(),
                    sp.GetRequiredService<UserOperations>())
         {
             _uploads = uploads;
+            _conflicts = conflicts;
         }
 
-        public override Task<FileHandleDto?> UploadSmallAsUserAsync(
-            HttpContext ctx,
-            string containerId,
+        // Task 171: the record-keyed routes write APP-ONLY (the record filter decided; the container came from the
+        // record). The OBO members are no longer on the facade, so a route that regressed to OBO would not compile.
+        public override Task<FileHandleDto?> UploadSmallAsync(
+            string driveId,
             string path,
             Stream content,
             ConflictBehavior conflictBehavior,
             CancellationToken ct = default)
         {
-            _uploads.Enqueue(containerId);
+            _uploads.Enqueue(driveId);
+            _conflicts.Enqueue(conflictBehavior);
             var now = DateTimeOffset.UtcNow;
             return Task.FromResult<FileHandleDto?>(new FileHandleDto(
-                "item-155", path, null, 3, now, now, null, false, null, containerId));
+                "item-155", path, null, 3, now, now, null, false, null, driveId));
+        }
+
+        public override Task<UploadSessionResponse?> CreateUploadSessionAsync(
+            string driveId,
+            string path,
+            ConflictBehavior conflictBehavior,
+            CancellationToken ct = default)
+        {
+            _uploads.Enqueue("session:" + driveId);
+            _conflicts.Enqueue(conflictBehavior);
+            return Task.FromResult<UploadSessionResponse?>(
+                new UploadSessionResponse("https://example.invalid/upload-session", DateTimeOffset.UtcNow.AddHours(1)));
         }
     }
 }

@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Xunit;
@@ -298,6 +299,11 @@ public class ShareLinkTestFixture : DocumentDestroyAuthorizationTestFixture
             // prefix); not sufficient here.
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(new ShareableDocumentDataverseService());
+
+            // Task 171: the route verifies the row's pointer before the app-only createLink. A pointer world in which every
+            // b! container is a business-unit container of the owner's subtree lets the allowed path reach the facade.
+            services.RemoveAll<RecordContainerResolver>();
+            services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!", StringComparison.Ordinal)));
         });
     }
 
@@ -368,8 +374,8 @@ public class ShareLinkTestFixture : DocumentDestroyAuthorizationTestFixture
             _minted = minted;
         }
 
-        public override Task<string?> CreateSharingLinkAsUserAsync(
-            HttpContext ctx,
+        // Task 171: the link is minted APP-ONLY now (after the "share" gate and the pointer check).
+        public override Task<string?> CreateSharingLinkAsync(
             string driveId,
             string itemId,
             string linkType,

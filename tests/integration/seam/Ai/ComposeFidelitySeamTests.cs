@@ -260,10 +260,10 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -760,6 +760,17 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
             services.RemoveAll<IGenericEntityService>();
             services.AddSingleton(DataverseMock.Object);
 
+            // Task 171: the Compose routes are now tied to the document row (ComposeDocumentAuthorizationFilter →
+            // DocumentAuthorizationFilter), so a row-backed request asks the access data source about the caller. The
+            // real one calls Dataverse over HTTP; the seam caller is an AUTHORIZED reader+writer, as before the gate
+            // existed — these suites are about fidelity, and the gate has its own suite.
+            services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
+            services.AddSingleton<Spaarke.Dataverse.IAccessDataSource>(new ComposeSeamAuthorizedAccessDataSource());
+            // ...and create-on-save's transient-key hit asks the caller-rights probe for Write on the matched row (the
+            // real probe would exchange an OBO token over the network).
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(new ComposeSeamAuthorizedProbe());
+
             services.RemoveAll<IPostUploadIndexingEnqueuer>();
             services.AddSingleton(IndexingMock.Object);
 
@@ -786,6 +797,40 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
+}
+
+/// <summary>Task 171: the seam caller holds Read + Write on every document (the gate has its own suite).</summary>
+internal sealed class ComposeSeamAuthorizedAccessDataSource : Spaarke.Dataverse.IAccessDataSource
+{
+    public Task<Spaarke.Dataverse.AccessSnapshot> GetUserAccessAsync(
+        string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
+        => Task.FromResult(Snapshot(userId, resourceId));
+
+    public Task<Spaarke.Dataverse.AccessSnapshot> GetRecordAccessAsync(
+        string userId, string entitySetName, Guid recordId, string? userAccessToken = null, CancellationToken ct = default)
+        => Task.FromResult(Snapshot(userId, recordId.ToString()));
+
+    private static Spaarke.Dataverse.AccessSnapshot Snapshot(string userId, string resourceId) => new()
+    {
+        UserId = userId,
+        ResourceId = resourceId,
+        AccessRights = Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write,
+    };
+}
+
+/// <summary>Task 171: the seam caller holds Read, Write and Append To on every record it names.</summary>
+internal sealed class ComposeSeamAuthorizedProbe : Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe
+{
+    public ComposeSeamAuthorizedProbe()
+        : base(new HttpClient(), new ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance)
+    {
+    }
+
+    public override Task<Spaarke.Dataverse.AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(Spaarke.Dataverse.AccessRights.Read | Spaarke.Dataverse.AccessRights.Write
+                           | Spaarke.Dataverse.AccessRights.Append | Spaarke.Dataverse.AccessRights.AppendTo);
 }
 
 /// <summary>Task 032 (FR-05): static fake for the central <see cref="Azure.Core.TokenCredential"/> —

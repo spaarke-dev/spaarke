@@ -245,6 +245,51 @@ public class DocumentContainerStrictRuleTests
         (await resolver.IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeTrue();
     }
 
+    // ── Owner round 72 item 1 (task 171, adversarial finding 4): the field-secured item-id copy ─────────────────────
+
+    [Theory(DisplayName = "Round 72 F4: an item id that differs from its field-secured copy is REFUSED under both rules — even where the rule alone would serve it")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ItemIdDifferingFromItsBoundCopy_IsRefused_UnderBothRules(bool strict)
+    {
+        var world = Environment(strict: strict);
+        var row = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
+        row[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = "01ANOTHERITEMTHEBFFBOUND";
+        world.Rows[("sprk_document", DocumentId)] = row;
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeFalse(
+            "sprk_graphitemid cannot be field-secured; a value the BFF did not bind is a re-point by someone else");
+    }
+
+    [Theory(DisplayName = "Round 72 F4: an item id EQUAL to its field-secured copy is served as before, under both rules")]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ItemIdEqualToItsBoundCopy_IsServed_UnderBothRules(bool strict)
+    {
+        var world = Environment(strict: strict);
+        world.ItemIdBoundBackfillComplete = true;
+        var row = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
+        row[Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = Item;
+        world.Rows[("sprk_document", DocumentId)] = row;
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeTrue();
+    }
+
+    [Theory(DisplayName = "Round 72 F4: an EMPTY copy is refused once the backfill is complete; before that it falls back to the rule in force")]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    public async Task EmptyBoundCopy_FollowsTheBackfillFlag(bool strict, bool backfillComplete, bool expected)
+    {
+        var world = Environment(strict: strict);
+        world.ItemIdBoundBackfillComplete = backfillComplete;
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().Be(expected,
+            "during the transition a row not yet backfilled is not newly refused; after it, a copy-less row is unservable");
+    }
+
     [Fact]
     public async Task Strict_RefusesAnotherContainerOfTheSameCustomer_ThatTheInterimRuleAllows()
     {

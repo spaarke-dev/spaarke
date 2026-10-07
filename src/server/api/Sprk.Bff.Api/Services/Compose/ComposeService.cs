@@ -571,13 +571,13 @@ public class ComposeService : IComposeService
         //
         //    A null stamp (metadata unavailable) degrades to the pre-#776 blind PUT rather than blocking
         //    the merge — best-effort, same convention as the save path.
-        var preMergeMetadata = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+        var preMergeMetadata = await _spe.GetMetadataForComposeAsync(httpContext, driveId, documentSpeId, cancellationToken)
             .ConfigureAwait(false);
         var preMergeETag = preMergeMetadata?.ETag;
 
         // Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
         // guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
-        var stream = await _spe.DownloadFileAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+        var stream = await _spe.DownloadForComposeAsync(httpContext, driveId, documentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
         {
@@ -706,8 +706,10 @@ public class ComposeService : IComposeService
             "Compose load: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} record={DocumentRecordId}",
             request.TenantId, request.DriveId, request.DocumentSpeId, request.DocumentRecordId);
 
-        // 1) Fetch metadata (name/size/etag). Missing → NotFound.
-        var metadata = await _spe.GetFileMetadataAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+        // 1) Fetch metadata (name/size/etag). Missing → NotFound. Task 171: APP-ONLY when ComposeDocumentAuthorizationFilter
+        //    authorized this item's sprk_document row (the decision); for a row-less item (Path B) the caller's OBO read
+        //    below remains the decision.
+        var metadata = await _spe.GetMetadataForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (metadata is null)
         {
@@ -715,7 +717,8 @@ public class ComposeService : IComposeService
                 $"SPE drive-item not found: drive={request.DriveId} item={request.DocumentSpeId}");
         }
 
-        // Task 166 r1: the caller is now authorized on THIS item (the OBO read above). The client-supplied record
+        // Task 166 r1: the caller is now authorized on THIS item (the route filter's row decision, or — Path B — the OBO
+        // read above). The client-supplied record
         // id is honoured only when it is the row OF this item — bound here, before the session binding, the origin
         // read and the G10 profile re-trigger below all consume it. One read serves the binding and the origin.
         var (boundRecordId, boundOrigin) = await ReadBoundDocumentRowAsync(
@@ -728,7 +731,7 @@ public class ComposeService : IComposeService
 
         // 2) Fetch content stream. Graph returns non-seekable HttpBaseStream → buffer to
         //    MemoryStream so Length/Seek work for downstream consumers.
-        var stream = await _spe.DownloadFileAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+        var stream = await _spe.DownloadForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
         {
@@ -975,7 +978,7 @@ public class ComposeService : IComposeService
         {
             try
             {
-                versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                versionId = await _spe.GetCurrentVersionIdForComposeAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (Exception ex)
@@ -1344,6 +1347,33 @@ public class ComposeService : IComposeService
     /// configuration, and they must reach the client as 403/409 rather than as a save step that
     /// "didn't work". Both outcomes write nothing.</para>
     /// </remarks>
+    /// <summary>
+    /// Task 171: before a create-on-save transient-key HIT replaces the matched document's file, the caller must hold
+    /// WRITE on that <c>sprk_document</c> (Dataverse's answer, asked as the caller — the same question every other Compose
+    /// write is now authorized by). A refusal is the 403 a denied OBO write produced before
+    /// (<see cref="UnauthorizedAccessException"/>), so the endpoint's mapping is unchanged. Returns whether the replace
+    /// may run APP-ONLY: only when the row's storage pointer also verifies — otherwise it keeps the caller's own (OBO)
+    /// identity, the same rule <c>ComposeDocumentAuthorizationFilter</c> applies to every other Compose route.
+    /// </summary>
+    private async Task<bool> AuthorizeTransientKeyReplaceAsync(
+        ComposeRecordResolution.TransientKeyMatch match, HttpContext httpContext, CancellationToken cancellationToken)
+    {
+        var rights = await _accessProbe
+            .GetCallerRightsAsync(TokenHelper.ExtractBearerTokenOrNull(httpContext), "sprk_documents", match.RecordId, cancellationToken)
+            .ConfigureAwait(false);
+        if (!OperationAccessPolicy.HasRequiredRights(rights, "write"))
+        {
+            _logger.LogWarning(
+                "Compose create-on-save DENIED: the transient key matched sprk_document {DocumentRecordId}, which the caller "
+                + "may not write (holds {Rights}).", match.RecordId, rights);
+            throw new UnauthorizedAccessException("The caller may not write the document this draft key belongs to.");
+        }
+
+        return await _containerResolver
+            .IsDocumentPointerContainerAllowedAsync(match.RecordId, match.DriveId, match.SpeId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private async Task<string?> ResolveCreateOnSaveContainerAsync(
         SaveComposeDocumentRequest request,
         HttpContext httpContext,
@@ -1721,7 +1751,7 @@ public class ComposeService : IComposeService
 
         if (!isTransientCreate && !string.IsNullOrWhiteSpace(request.DriveId))
         {
-            var currentMetadata = await _spe.GetFileMetadataAsUserAsync(
+            var currentMetadata = await _spe.GetMetadataForComposeAsync(
                     httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
             preWriteETag = currentMetadata?.ETag;
@@ -2019,10 +2049,20 @@ public class ComposeService : IComposeService
                 // Dedup hit: the transient key already resolved to a record with a live SPE item — replace
                 // that item's content in place. No new mint, no new row (the promote step below finds the
                 // existing record by sprk_graphitemid → idempotent no-op).
+                //
+                // Task 171 (owner round 69, broker-only): the replace is APP-ONLY, so the key alone — a client
+                // value, stored on the row where any reader can see it — must not decide it. The caller must hold
+                // WRITE on the matched sprk_document (Dataverse, as the caller) and the row's pointer must verify.
+                // Under OBO, SPE's own write check on the item stood here; it held only for a caller with a container
+                // role, which every secure container's users lack.
+                var brokered = await AuthorizeTransientKeyReplaceAsync(match, httpContext, cancellationToken).ConfigureAwait(false);
+
                 using var replaceStream = new MemoryStream(contentToPersist, writable: false);
-                var replaced = await _spe.ReplaceFileContentAsUserAsync(
-                        httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
-                    .ConfigureAwait(false);
+                var replaced = brokered
+                    ? await _spe.ReplaceFileContentAsync(match.DriveId!, match.SpeId!, replaceStream, ifMatch: null, cancellationToken)
+                        .ConfigureAwait(false)
+                    : await _spe.ReplaceFileContentAsUserAsync(httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                        .ConfigureAwait(false);
 
                 if (replaced is null || string.IsNullOrEmpty(replaced.Id))
                 {
@@ -2070,8 +2110,12 @@ public class ComposeService : IComposeService
                     return _createOnSave.BuildContainerFailedResult(request, observedAt);
                 }
 
-                // Fork B: mint the SPE drive-item in the RESOLVED container under the user's OBO identity
-                // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
+                // Fork B: mint the SPE drive-item in the RESOLVED container APP-ONLY (task 171, owner round 69). The
+                // container was derived server-side behind a Dataverse decision (Append To on the matter, or the
+                // acting user's own business unit — the record-less rule every surface shares), so the BFF writes as
+                // itself; the OBO mint failed for every user with no role on the container (every secure matter).
+                // Rename, not Replace: under the app identity a same-named file in a shared container must never be
+                // overwritten by someone else's first save — a collision becomes a NEW, distinctly named item.
                 // First save of this transient key (or a deliberate Save-New fork): once created, the record
                 // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
                 // same key takes the dedup replace path above — never a double mint.
@@ -2086,8 +2130,8 @@ public class ComposeService : IComposeService
                 // tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs.
                 var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
 
-                var created = await _spe.UploadSmallAsUserAsync(
-                        httpContext, driveId, uploadPath, createStream, cancellationToken)
+                var created = await _spe.UploadSmallAsync(
+                        driveId, uploadPath, createStream, ConflictBehavior.Rename, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (created is null || string.IsNullOrEmpty(created.Id))

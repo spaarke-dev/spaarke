@@ -343,6 +343,9 @@ public sealed class ComposeBodySessionRouteDenyContractTests
             builder.Services.AddSingleton(sessions.Object);
             builder.Services.AddSingleton(cache.Object);
             builder.Services.AddSingleton(Compose.Object);
+            // Task 171: the save route's ComposeDocumentAuthorizationFilter looks the item's sprk_document up. No row here
+            // (a loose double answers null), so the request passes through unmarked — this host is about the body session.
+            builder.Services.AddSingleton(Mock.Of<Spaarke.Dataverse.IGenericEntityService>());
             builder.WebHost.UseTestServer();
 
             _app = builder.Build();

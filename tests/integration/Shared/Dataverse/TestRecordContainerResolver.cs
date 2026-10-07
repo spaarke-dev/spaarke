@@ -210,6 +210,12 @@ internal static class TestRecordContainerResolver
         /// <summary>The STRICT derived-container rule is in force (<c>DocumentPointer:StrictDerivedContainer</c>, task 166 f1).</summary>
         public bool Strict { get; init; }
 
+        /// <summary>
+        /// <c>DocumentPointer:ItemIdBoundBackfillComplete</c> (task 171 round 72): an EMPTY field-secured item-id copy refuses.
+        /// Settable so a test can flip it on a world its helper already built.
+        /// </summary>
+        public bool ItemIdBoundBackfillComplete { get; set; }
+
         /// <summary><c>EmailProcessing:DefaultContainerId</c> — an unfiled document's container of last resort (task 166 f1).</summary>
         public string? UnfiledDefaultContainer { get; init; }
 
@@ -469,6 +475,7 @@ internal static class TestRecordContainerResolver
                 {
                     ["API_APP_ID"] = PointerWorldBffApplicationId.ToString("D"),
                     [RecordContainerResolver.StrictDerivedContainerKey] = Strict ? "true" : null,
+                    [RecordContainerResolver.ItemIdBoundBackfillCompleteKey] = ItemIdBoundBackfillComplete ? "true" : null,
                     [RecordContainerResolver.UnfiledDefaultContainerKey] = UnfiledDefaultContainer,
                 })
                 .Build();

@@ -17,10 +17,19 @@ using Sprk.Bff.Api.Services.Communication;
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
-/// File access endpoints for SharePoint Embedded files using On-Behalf-Of (OBO) authentication.
+/// File access endpoints for SharePoint Embedded files.
 /// Implements Microsoft's recommended patterns for SPE file access (Nov 2025).
 ///
-/// Updated: OBO Refactor (Jan 2025) - Uses ForUserAsync for user-context authentication
+/// 🔴 IDENTITY (unified-access-control-r2 task 171, owner round 69 — broker-only). Every route here authorizes the
+/// caller on the <c>sprk_document</c> row (<see cref="DocumentAuthorizationFilter"/>), verifies the row's SPE pointer
+/// (<c>RecordContainerResolver.EnsureDocumentPointerContainerAsync</c>), and then calls Graph APP-ONLY. Until
+/// 2026-10-06 the preview / content / office / open-links / view-url / share-link reads ran as the user (OBO), which
+/// SharePoint Embedded answers only for a caller holding a container ROLE — so they failed for everyone on a
+/// per-record secure container (no members by design) and for any user not hand-added to a business-unit container.
+/// The Office EDIT itself still runs as the user in Office; for a document in a SECURE container the /office and
+/// /open-links routes grant a just-in-time writer role to a caller with Write on the secure record
+/// (<c>OfficeEditAccessService</c>); a business-unit container's internal users are standing writers
+/// (<c>SpeContainerMembershipSyncJob</c>).
 ///
 /// References:
 /// - Preview: https://learn.microsoft.com/en-us/graph/api/driveitem-preview
@@ -29,6 +38,149 @@ namespace Sprk.Bff.Api.Api;
 /// </summary>
 public static class FileAccessEndpoints
 {
+    /// <summary>Share-link refusal: the document belongs to a SECURE record (owner round 72 item 2).</summary>
+    internal const string ShareLinkSecureRecordCode = "sdap.access.deny.share_link_secure_record";
+
+    /// <summary>Share-link refusal: the document belongs to a RESTRICTED record (owner round 72 item 2).</summary>
+    internal const string ShareLinkRestrictedRecordCode = "sdap.access.deny.share_link_restricted_record";
+
+    /// <summary>Share-link refusal: the document row could not be read, so its record's protection is unknown.</summary>
+    internal const string ShareLinkProtectionUnverifiableCode = "sdap.access.deny.share_link_protection_unverifiable";
+
+    private const string ShareLinkSecureDetail =
+        "Sharing links cannot be created for documents of a secure record: a link reaches people outside the record's "
+        + "access list. Share the record with the person instead.";
+
+    private const string ShareLinkRestrictedDetail =
+        "Sharing links cannot be created for documents of a restricted record. Share the record with the person instead.";
+
+    /// <summary>The record types that carry sprk_issecure / sprk_accesspermission (the share-link refusal reads them).</summary>
+    private static readonly HashSet<string> ShareLinkRootTypes = new(StringComparer.Ordinal)
+    {
+        "sprk_project", "sprk_matter", "sprk_workassignment",
+    };
+
+    /// <summary>
+    /// Why a sharing link may NOT be minted for <paramref name="documentId"/> — its record is SECURE or RESTRICTED (owner
+    /// round 72 item 2; task 171 adversarial findings 10 and V2) — or <see langword="null"/> for a standard document.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which records.</b> Every record the document is filed to, resolved to its project / matter / work
+    /// assignment: a ROOT link directly; any other link (communication — every email archive and attachment carries only
+    /// <c>sprk_relatedcommunication</c> — event, invoice, to-do, agreement, …) through
+    /// <see cref="CoreAncestorResolver.ResolveStampsAsync"/>, the one-hop ancestor rule the access model already uses (a
+    /// communication inherits its parent's access permission). Party links (contact, organization) carry no protection.</para>
+    /// <para><b>Which flags.</b> <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/> for every such root (an
+    /// id it cannot read comes back secure AND restricted), plus <c>RecordContainerResolver.DeriveDocumentContainersAsync</c>
+    /// <c>.IsSecure</c>.</para>
+    /// <para><b>Fail closed.</b> An unreadable row, an ancestor read that ERRORS, or — when the document has a child link —
+    /// a derivation that cannot be decided answers <see cref="ShareLinkProtectionUnverifiableCode"/>. A document whose
+    /// links are all roots (or none) keeps the earlier behaviour: an undecided derivation adds no refusal there, because
+    /// the root flags already decided every record it is filed to.</para>
+    /// </remarks>
+    internal static async Task<(string ReasonCode, string Detail)?> ShareLinkProtectionRefusalAsync(
+        Guid documentId,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var row = await entityService
+            .RetrieveAsync("sprk_document", documentId, DocumentLinkFields.LogicalNames.ToArray(), ct)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return Unverifiable("the document row could not be read");
+        }
+
+        var roots = new HashSet<(string Entity, Guid Id)>();
+        var hasChildLink = false;
+        foreach (var link in DocumentLinkFields.All)
+        {
+            if (row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(link.LogicalName) is not { Id: var linkedId }
+                || linkedId == Guid.Empty)
+            {
+                continue;
+            }
+
+            if (ShareLinkRootTypes.Contains(link.TargetEntityLogicalName))
+            {
+                roots.Add((link.TargetEntityLogicalName, linkedId));
+                continue;
+            }
+
+            var resolved = await ancestors.ResolveStampsAsync(link.TargetEntityLogicalName, linkedId, ct).ConfigureAwait(false);
+            switch (resolved.Status)
+            {
+                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Error:
+                    return Unverifiable($"the record behind {link.LogicalName} could not be resolved ({resolved.Error})");
+                case Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Unclassified:
+                    // A party (contact, organization) or a non-content type: no protection flag applies to it.
+                    continue;
+                default:
+                    // A CHILD (Derived / NoAncestor) is what makes an undecided derivation unverifiable; a core target that
+                    // is not a flag-bearing root (a service request) carries no protection flag of its own.
+                    hasChildLink |= resolved.Status is Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.Derived
+                        or Sprk.Bff.Api.Services.Dataverse.CoreAncestorStatus.NoAncestor;
+                    foreach (var stamp in resolved.Stamps)
+                    {
+                        if (ShareLinkRootTypes.Contains(stamp.EntityType) && stamp.RecordId != Guid.Empty)
+                        {
+                            roots.Add((stamp.EntityType, stamp.RecordId));
+                        }
+                    }
+
+                    break;
+            }
+        }
+
+        foreach (var group in roots.GroupBy(r => r.Entity, StringComparer.Ordinal))
+        {
+            var ids = group.Select(r => r.Id).ToArray();
+            var flags = await participations.GetRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
+            foreach (var id in ids)
+            {
+                // Every id asked about is in the map; an unreadable one is secure AND restricted (fail closed).
+                var f = flags.TryGetValue(id, out var known) ? known : Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.Unreadable;
+                if (f.IsSecure || f.IsRestricted)
+                {
+                    logger.LogInformation(
+                        "CreateShareLink REFUSED | DocumentId: {DocumentId} | {Entity} {RecordId} is {What}.",
+                        documentId, group.Key, id,
+                        f.IsUnreadable ? "unreadable (fail closed)" : f.IsSecure ? "secure" : "restricted");
+                    return f.IsSecure && !f.IsRestricted
+                        ? (ShareLinkSecureRecordCode, ShareLinkSecureDetail)
+                        : (ShareLinkRestrictedRecordCode, ShareLinkRestrictedDetail);
+                }
+            }
+        }
+
+        var derivation = await containerResolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (derivation.Decided && derivation.IsSecure)
+        {
+            logger.LogInformation(
+                "CreateShareLink REFUSED | DocumentId: {DocumentId} | the document belongs to a secure record ({Reason}).",
+                documentId, derivation.Reason);
+            return (ShareLinkSecureRecordCode, ShareLinkSecureDetail);
+        }
+
+        if (!derivation.Decided && hasChildLink)
+        {
+            return Unverifiable($"the document's container could not be derived ({derivation.Reason})");
+        }
+
+        return null;
+
+        (string ReasonCode, string Detail) Unverifiable(string why)
+        {
+            logger.LogWarning("CreateShareLink REFUSED | DocumentId: {DocumentId} | protection unverifiable: {Why}.", documentId, why);
+            return (ShareLinkProtectionUnverifiableCode,
+                "Whether this document's record allows a sharing link could not be determined, so none was created.");
+        }
+    }
+
     public static IEndpointRouteBuilder MapFileAccessEndpoints(this IEndpointRouteBuilder app)
     {
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
@@ -38,18 +190,11 @@ public static class FileAccessEndpoints
         // view-url. Each returns a url that OUTLIVES the request, and none carried a per-document
         // filter.
         //
-        // ⚠️ These are NOT the same shape as /content and /download, and the difference was verified
-        // rather than assumed: all five reach SPE through *AsUserAsync → IGraphClientFactory
-        // .ForUserAsync, i.e. genuine OBO. Graph therefore already enforces the caller's own SPE
-        // access, so — unlike the bulk-download route, whose identical-sounding claim turned out to
-        // be false because its lookup was app-only — there WAS real enforcement here. Checking that
-        // before writing this comment is the whole lesson of finding C1.
-        //
-        // The gate is still correct, and it NARROWS behaviour deliberately: SPE permission is
-        // container-scoped and coarser than per-document Dataverse rights, so a caller with
-        // container access but no Read on the sprk_document row previously succeeded and now gets
-        // 403. That caller seeing another client's document is precisely the disclosure this project
-        // exists to close (spec FR-01), so the narrowing is the point, not a side effect.
+        // Task 171: these five reached SPE as the user (OBO) until 2026-10-06, so SPE's container check stood
+        // behind the gate. They now read APP-ONLY, so this per-document filter plus the pointer check in each
+        // handler IS the whole boundary — exactly as for /content and /download. The gate NARROWS behaviour
+        // deliberately: SPE permission is container-scoped and coarser than per-document Dataverse rights, so a
+        // caller with container access but no Read on the sprk_document row gets 403 (spec FR-01).
         //
         // Operation is `read`, not a new mint-specific key. A separate key would carry the SAME
         // required right and therefore change no decision — CLAUDE.md §11 asks for a concrete
@@ -115,8 +260,8 @@ public static class FileAccessEndpoints
             .Produces(StatusCodes.Status500InternalServerError);
 
         // Recipient-openable SPE sharing link for a document (email-communication-solution-r5 R2 item
-        // 12). OBO — the caller's own SPE access authorizes the createLink. Used by the email composer's
-        // "Link" attachments so an emailed link opens the actual file (incl. for external recipients).
+        // 12). Minted APP-ONLY since task 171, after the "share" gate below and the pointer check. Used by the
+        // email composer's "Link" attachments so an emailed link opens the actual file (incl. for external recipients).
         //
         // Per-document authorization (unified-access-control-r2 task 072, spec FR-01). This was the ONE
         // route on this group with no filter — and the one that mints a credential. Its authority was the
@@ -279,13 +424,14 @@ public static class FileAccessEndpoints
 
         /// <summary>
         /// GET /api/documents/{documentId}/preview-url
-        /// Returns ephemeral preview URL using user's delegated permissions (OBO)
+        /// Returns an ephemeral preview URL, minted app-only after the per-document gate (task 171).
         /// Includes checkout status for PCF control to show lock indicators
         /// </summary>
         static async Task<IResult> GetPreviewUrl(
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
             HttpContext context,
@@ -324,11 +470,15 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4-5. Call Graph API (via SpeFileStore OBO facade) to get preview URL.
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4-5. Call Graph API (via the SpeFileStore app-only facade) to get preview URL.
             // Request chromeless preview (no SharePoint header/toolbar). Per CICD-088b,
             // the Graph SDK request/response types stay inside Infrastructure.Graph.
-            var rawPreviewUrl = await speFileStore.GetPreviewUrlAsUserAsync(
-                context,
+            var rawPreviewUrl = await speFileStore.GetEmbedPreviewUrlAsync(
                 document.GraphDriveId!,
                 document.GraphItemId!,
                 additionalData: new Dictionary<string, object>
@@ -415,12 +565,13 @@ public static class FileAccessEndpoints
 
         /// <summary>
         /// GET /api/documents/{documentId}/preview
-        /// Returns embeddable preview URL for iframe scenarios using OBO
+        /// Redirects to an embeddable preview URL (iframe scenarios), minted app-only after the gate (task 171)
         /// </summary>
         static async Task<IResult> GetPreview(
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -454,9 +605,13 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Get preview URL using OBO (via SpeFileStore facade per CICD-088b)
-            var previewUrl = await speFileStore.GetPreviewUrlAsUserAsync(
-                context,
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4. Get preview URL app-only (via SpeFileStore facade per CICD-088b)
+            var previewUrl = await speFileStore.GetEmbedPreviewUrlAsync(
                 document.GraphDriveId!,
                 document.GraphItemId!,
                 additionalData: null,
@@ -479,12 +634,13 @@ public static class FileAccessEndpoints
 
         /// <summary>
         /// GET /api/documents/{documentId}/content
-        /// Returns file content stream using OBO
+        /// Returns the file content stream, read app-only after the gate (task 171)
         /// </summary>
         static async Task<IResult> GetContent(
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -518,9 +674,14 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Download file content using OBO (via SpeFileStore facade per CICD-088b)
-            var contentStream = await speFileStore.GetContentStreamAsUserAsync(
-                context, document.GraphDriveId!, document.GraphItemId!, ct);
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4. Download file content app-only (via SpeFileStore facade per CICD-088b)
+            var contentStream = await speFileStore.DownloadFileAsync(
+                document.GraphDriveId!, document.GraphItemId!, ct);
 
             if (contentStream == null)
             {
@@ -544,12 +705,15 @@ public static class FileAccessEndpoints
 
         /// <summary>
         /// GET /api/documents/{documentId}/office
-        /// Returns Office web viewer/editor URLs using OBO
+        /// Returns the Office web URL (read app-only after the gate, task 171). For a document in a SECURE container,
+        /// a caller with Write on the secure record is granted a just-in-time writer role first (owner round 70).
         /// </summary>
         static async Task<IResult> GetOffice(
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+            Sprk.Bff.Api.Services.Documents.OfficeEditAccessService editAccess,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -583,9 +747,15 @@ public static class FileAccessEndpoints
             // 3. Validate SPE pointers
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
-            // 4. Get Office web app URL using OBO (via SpeFileStore facade per CICD-088b)
-            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
-                context, document.GraphDriveId!, document.GraphItemId!,
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4. Get Office web app URL app-only (via SpeFileStore facade per CICD-088b). The URL is a POINTER: Office
+            //    enforces the user's own role when they open it.
+            var driveItem = await speFileStore.GetDriveItemAsync(
+                document.GraphDriveId!, document.GraphItemId!,
                 selectFields: new[] { "id", "name", "webUrl" }, ct: ct);
 
             if (string.IsNullOrEmpty(driveItem?.WebUrl))
@@ -598,18 +768,22 @@ public static class FileAccessEndpoints
                 );
             }
 
-            logger.LogInformation("Office URL retrieved | WebUrl: {WebUrl}", driveItem.WebUrl);
+            logger.LogInformation("Office URL retrieved | DocumentId: {DocumentId}", documentId);
 
-            // 5. Return structured JSON response (not redirect)
-            // Office Online will enforce actual permissions when user accesses the URL
+            // 5. Edit access (owner round 70): a SECURE container has no standing members, so a caller with Write on
+            //    the secure record gets a just-in-time writer role before the URL is useful to them.
+            var edit = await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct);
+
+            // 6. Return structured JSON response (not redirect)
+            // Office Online enforces the user's own role when they open the URL.
             return TypedResults.Ok(new
             {
                 officeUrl = driveItem.WebUrl,
                 permissions = new
                 {
-                    canEdit = true,  // Unknown at BFF level - Office Online will enforce
+                    canEdit = edit.CanEdit,
                     canView = true,
-                    role = "unknown"
+                    role = edit.Role
                 },
                 correlationId = context.TraceIdentifier
             });
@@ -624,6 +798,8 @@ public static class FileAccessEndpoints
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+            Sprk.Bff.Api.Services.Documents.OfficeEditAccessService editAccess,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -661,9 +837,14 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4-5. Get DriveItem metadata via OBO (SpeFileStore facade per CICD-088b)
-            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
-                context, document.GraphDriveId!, document.GraphItemId!,
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4-5. Get DriveItem metadata app-only (SpeFileStore facade per CICD-088b). webUrl / webDavUrl are POINTERS.
+            var driveItem = await speFileStore.GetDriveItemAsync(
+                document.GraphDriveId!, document.GraphItemId!,
                 selectFields: new[] { "id", "name", "webUrl", "webDavUrl", "file", "parentReference" }, ct: ct);
 
             if (driveItem == null)
@@ -723,8 +904,8 @@ public static class FileAccessEndpoints
             var urlForDesktop = directFileUrl ?? driveItem.WebUrl;
 
             logger.LogInformation(
-                "OpenLinks URL selection | WebUrl: {WebUrl} | WebDavUrl: {WebDavUrl} | DirectFileUrl: {DirectFileUrl} | UsingUrl: {UsingUrl}",
-                driveItem.WebUrl, driveItem.WebDavUrl, directFileUrl, urlForDesktop);
+                "OpenLinks URL selection | HasWebDavUrl: {HasWebDavUrl} | UsingDirectFileUrl: {UsingDirect}",
+                !string.IsNullOrEmpty(driveItem.WebDavUrl), directFileUrl is not null);
 
             // 8. Generate desktop protocol URL using DesktopUrlBuilder
             var desktopUrl = DesktopUrlBuilder.FromMime(urlForDesktop, mimeType);
@@ -733,7 +914,12 @@ public static class FileAccessEndpoints
                 "OpenLinks generated | FileName: {FileName} | MimeType: {MimeType} | HasDesktopUrl: {HasDesktopUrl} | TraceId: {TraceId}",
                 fileName, mimeType, desktopUrl != null, context.TraceIdentifier);
 
-            // 8. Return response
+            // 9. Edit access (owner round 70): just-in-time writer role on a SECURE container for a caller with Write on
+            //    the secure record. A caller without Write gets the same pointers and no grant — SharePoint refuses
+            //    them, and the in-app preview (broker) is their view path.
+            await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, describeSharedContainer: false);
+
+            // 10. Return response
             return TypedResults.Ok(new OpenLinksResponse(
                 DesktopUrl: desktopUrl,
                 WebUrl: driveItem.WebUrl,
@@ -746,8 +932,8 @@ public static class FileAccessEndpoints
         /// POST /api/documents/{documentId}/share-link
         /// Creates a recipient-openable SPE sharing link (Graph createLink) for the document, so an
         /// emailed "Link" opens the actual file — including, on request, for external recipients
-        /// (email-communication-solution-r5 R2 item 12). OBO: the caller's own SPE access performs the
-        /// createLink; per-document authorization is the <c>"share"</c> filter on the route.
+        /// (email-communication-solution-r5 R2 item 12). APP-ONLY since task 171: per-document authorization is the
+        /// <c>"share"</c> filter on the route, plus the pointer check; the BFF identity performs the createLink.
         /// </summary>
         /// <remarks>
         /// <para>
@@ -768,6 +954,10 @@ public static class FileAccessEndpoints
             ShareLinkRequest? request,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+            IGenericEntityService entityService,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+            Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver ancestors,
             IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
             TimeProvider timeProvider,
             ILogger<Program> logger,
@@ -777,7 +967,7 @@ public static class FileAccessEndpoints
             logger.LogInformation("CreateShareLink called | DocumentId: {DocumentId} | TraceId: {TraceId}",
                 documentId, context.TraceIdentifier);
 
-            if (!Guid.TryParse(documentId, out _))
+            if (!Guid.TryParse(documentId, out var docGuid))
             {
                 throw new SdapProblemException(
                     "invalid_id", "Invalid Document ID",
@@ -794,6 +984,19 @@ public static class FileAccessEndpoints
 
             // Reuses the same SPE-pointer validation as open-links (404/409 on missing/malformed pointers).
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // Owner round 72 item 2 (task 171, adversarial finding 10): a sharing link reaches people OUTSIDE Dataverse's
+            // decision, so it is never minted for a document of a SECURE or RESTRICTED record. Standard documents keep it.
+            if (await ShareLinkProtectionRefusalAsync(docGuid, containerResolver, entityService, participations, ancestors, logger, ct)
+                is { } protection)
+            {
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(protection.ReasonCode, protection.Detail, context.TraceIdentifier);
+            }
 
             var (scope, expiresAt) = ResolveShareLinkPolicy(
                 request, shareLinkOptions.CurrentValue, timeProvider, documentId, logger, context);
@@ -822,8 +1025,8 @@ public static class FileAccessEndpoints
                 // Requires the tenant SPE/SharePoint external-sharing policy to allow "Anyone" links when
                 // scope is anonymous; if disabled Graph throws → mapped to 502 below and the caller
                 // (composer) falls back to the prior link (best-effort, never blocks the send).
-                var url = await speFileStore.CreateSharingLinkAsUserAsync(
-                    context, document.GraphDriveId!, document.GraphItemId!,
+                var url = await speFileStore.CreateSharingLinkAsync(
+                    document.GraphDriveId!, document.GraphItemId!,
                     linkType: "view", scope: scope, expiration: expiresAt, ct: ct);
 
                 if (string.IsNullOrWhiteSpace(url))
@@ -865,6 +1068,7 @@ public static class FileAccessEndpoints
             string documentId,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
             DocumentCheckoutService checkoutService,
             ILogger<Program> logger,
             HttpContext context,
@@ -903,9 +1107,14 @@ public static class FileAccessEndpoints
             logger.LogInformation("SPE pointers validated | DriveId: {DriveId} | ItemId: {ItemId}",
                 document.GraphDriveId, document.GraphItemId);
 
-            // 4-5. Get driveItem metadata for file info (via SpeFileStore facade per CICD-088b)
-            var driveItem = await speFileStore.GetDriveItemAsUserAsync(
-                context, document.GraphDriveId!, document.GraphItemId!,
+            // uac-r2 task 171: the read below runs AS THE APPLICATION, so the row's pointer must name a container this
+            // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
+            // get for free from SPE's own container ACL.
+            await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // 4-5. Get driveItem metadata for file info app-only (via SpeFileStore facade per CICD-088b)
+            var driveItem = await speFileStore.GetDriveItemAsync(
+                document.GraphDriveId!, document.GraphItemId!,
                 selectFields: new[] { "id", "name", "webUrl", "size", "lastModifiedDateTime" }, ct: ct);
 
             if (driveItem == null)
@@ -922,8 +1131,8 @@ public static class FileAccessEndpoints
             // The Preview action returns a properly authenticated URL that works in iframes
             // Note: Preview URLs are cached for 30-60 seconds by SharePoint, but this is
             // the only reliable way to get an embeddable URL for SPE containers
-            var previewUrlRaw = await speFileStore.GetPreviewUrlAsUserAsync(
-                context, document.GraphDriveId!, document.GraphItemId!,
+            var previewUrlRaw = await speFileStore.GetEmbedPreviewUrlAsync(
+                document.GraphDriveId!, document.GraphItemId!,
                 additionalData: new Dictionary<string, object>
                 {
                     { "chromeless", true },
@@ -947,8 +1156,8 @@ public static class FileAccessEndpoints
                 logger.LogWarning("Preview action failed, falling back to webUrl");
             }
 
-            logger.LogInformation("View URL constructed | FileName: {FileName} | ViewUrl: {ViewUrl}",
-                driveItem.Name, viewUrl);
+            // Task 171: never log the URL — an app-only preview URL acts as the BFF identity for whoever holds it.
+            logger.LogInformation("View URL constructed | FileName: {FileName}", driveItem.Name);
 
             // 6. Extract file extension from filename
             string? fileExtension = null;

@@ -324,12 +324,40 @@ public class FileIndexingServiceTests
 
     #region IndexFileAsync (OBO) Tests
 
+    [Fact(DisplayName = "Task 171: IndexFileAsync for a request that NAMES a document reads the file APP-ONLY (pointer-checked), never as the user")]
+    public async Task IndexFileAsync_RequestNamingADocument_ReadsAppOnly()
+    {
+        var service = CreateService();
+        var request = CreateFileIndexRequest();
+        var httpContext = new DefaultHttpContext();
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream("Test file content"u8.ToArray()));
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), request.FileName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(TextExtractionResult.Succeeded("text", TextExtractionMethod.DocumentIntelligence));
+        _chunkingServiceMock
+            .Setup(x => x.ChunkTextAsync("text", null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<TextChunk> { new() { Content = "text", Index = 0, StartPosition = 0, EndPosition = 4 } });
+        _ragServiceMock
+            .Setup(x => x.IndexDocumentsBatchAsync(It.IsAny<IEnumerable<KnowledgeDocument>>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<IndexResult> { IndexResult.Success("chunk-id-0") });
+
+        var result = await service.IndexFileAsync(request, httpContext);
+
+        result.Success.Should().BeTrue();
+        _speFileOperationsMock.Verify(
+            x => x.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "a document-backed index reads as the BFF after the caller was authorized on the document");
+    }
+
     [Fact]
     public async Task IndexFileAsync_ValidFile_IndexesSuccessfully()
     {
-        // Arrange
+        // Arrange — task 171: the OBO branch now serves ONLY a drive item named without a document (no record stands
+        // behind it, so SPE's answer for the caller is the decision).
         var service = CreateService();
-        var request = CreateFileIndexRequest();
+        var request = CreateFileIndexRequest() with { DocumentId = null };
         var httpContext = new DefaultHttpContext();
         var fileContent = new MemoryStream("Test file content"u8.ToArray());
         var extractedText = "Extracted text from the document.";
@@ -364,9 +392,9 @@ public class FileIndexingServiceTests
     [Fact]
     public async Task IndexFileAsync_DownloadFails_ReturnsFailure()
     {
-        // Arrange
+        // Arrange (no document named — the OBO branch, task 171)
         var service = CreateService();
-        var request = CreateFileIndexRequest();
+        var request = CreateFileIndexRequest() with { DocumentId = null };
         var httpContext = new DefaultHttpContext();
 
         _speFileOperationsMock

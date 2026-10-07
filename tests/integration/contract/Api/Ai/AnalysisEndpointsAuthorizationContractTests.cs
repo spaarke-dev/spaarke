@@ -1280,6 +1280,9 @@ internal sealed class AnalysisAuthHost : IAsyncDisposable
         builder.Services.AddSingleton(Mock.Of<ISpeFileOperations>());
         builder.Services.AddSingleton(Mock.Of<ITextExtractor>());
         builder.Services.AddSingleton<ITenantCache>(_cache);
+        // Task 171: document text is read app-only after the row's pointer check — a permissive pointer world here, so
+        // these tests stay about the route's Dataverse decisions.
+        builder.Services.AddSingleton(TestRecordContainerResolver.ForBusinessUnitContainers(c => true));
         builder.Services.AddSingleton<AnalysisDocumentLoader>();
         builder.Services.AddSingleton<NotificationService>();
         builder.Services.AddSingleton<IChatDataverseRepository>(ChatRepo);

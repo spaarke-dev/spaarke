@@ -518,6 +518,7 @@ public sealed class DocumentContainerRelocator
         {
             [DriveColumn] = drive,
             [ItemColumn] = item,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = item, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             [HasFileColumn] = true,
         };
         if (!string.IsNullOrWhiteSpace(webUrl))
@@ -597,6 +598,19 @@ public sealed class DocumentContainerRelocator
         if (string.IsNullOrWhiteSpace(sourceDrive) || string.IsNullOrWhiteSpace(sourceItem))
         {
             return DocumentRelocationOutcome.Of(documentId, RelocationState.NoFile, null, null, null, null, "the row carries no file");
+        }
+
+        // Task 171 round 74 (V1): the item must be the one the BFF BOUND to this row before anything is copied, re-pointed
+        // or deleted. A move writes a MATCHING copy for whatever item it moves, so moving a forged pointer would launder it
+        // (and the settle would then delete the item it was forged to). Same rule, same definition as the pointer check.
+        if (_resolver.ItemBindingRefusal(row!, sourceItem) is { } bindingRefusal)
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] Document {DocumentId} is NOT moved: {Reason}. Nothing is copied, re-pointed or deleted.",
+                documentId, bindingRefusal);
+            return DocumentRelocationOutcome.Of(
+                documentId, RelocationState.SourceUnverified, sourceDrive, sourceItem, null, null,
+                bindingRefusal + " — an administrator must repair it; it is not moved");
         }
 
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
@@ -1989,6 +2003,16 @@ public sealed class DocumentContainerRelocator
                     "it no longer names the source");
             }
 
+            // Task 171 round 74 (K1): the other row's item must be the one the BFF bound to IT — a move-along re-points the
+            // row and writes a matching copy, so moving a forged pointer along would launder it. Same rule as the main path.
+            if (_resolver.ItemBindingRefusal(row, entry.SourceItem) is { } bindingRefusal)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] Document {Other} is NOT moved along: {Reason}. Nothing is re-pointed.", other, bindingRefusal);
+                return DocumentRelocationOutcome.Of(other, RelocationState.SourceUnverified, entry.SourceDrive, entry.SourceItem,
+                    targetDrive, null, bindingRefusal + " — an administrator must repair it; it is not moved");
+            }
+
             var ledger = RelocationLedger.Parse(row.GetAttributeValue<string>(RelocationLedgerColumn));
             if (ledger is null)
             {
@@ -2058,7 +2082,8 @@ public sealed class DocumentContainerRelocator
     private async Task<Entity?> ReadRowAsync(Guid documentId, CancellationToken ct)
         => await _dataverse.RetrieveAsync(
             DocumentEntity, documentId,
-            [DriveColumn, ItemColumn, FileNameColumn, SearchIndexNameColumn, RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
+            [DriveColumn, ItemColumn, Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn, FileNameColumn, SearchIndexNameColumn,
+             RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
             .ConfigureAwait(false);
 
     private static bool SameItem(string? driveA, string? itemA, string? driveB, string? itemB)

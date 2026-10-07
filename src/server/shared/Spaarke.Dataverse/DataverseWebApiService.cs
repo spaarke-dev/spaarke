@@ -1550,14 +1550,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         Guid recordId,
         CancellationToken ct = default)
     {
-        if (principalSystemUserId == Guid.Empty)
-            throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
-
-        var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySetName}({recordId:D})\"}}");
-        using var response = await SendGetAsync(
-            $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}",
-            ct,
-            impersonateSystemUserId: principalSystemUserId);
+        using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
 
         if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Forbidden)
         {
@@ -1567,6 +1560,34 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             return AccessRights.None;
         }
 
+        return await ReadPrincipalAccessAnswerAsync(response, principalSystemUserId, entitySetName, recordId, ct);
+    }
+
+    /// <summary>
+    /// <c>RetrievePrincipalAccess</c> bound to <paramref name="principalSystemUserId"/> and asked AS that user — the one
+    /// request both readings (<see cref="RetrievePrincipalRightsAsync"/>, <see cref="RetrievePrincipalRightsOrUnknownAsync"/>)
+    /// send. The caller owns the response.
+    /// </summary>
+    private Task<HttpResponseMessage> SendRetrievePrincipalAccessAsync(
+        Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct)
+    {
+        if (principalSystemUserId == Guid.Empty)
+            throw new ArgumentException("A principal systemuserid is required.", nameof(principalSystemUserId));
+
+        var target = Uri.EscapeDataString($"{{\"@odata.id\":\"{entitySetName}({recordId:D})\"}}");
+        return SendGetAsync(
+            $"systemusers({principalSystemUserId:D})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)?@p1={target}",
+            ct,
+            impersonateSystemUserId: principalSystemUserId);
+    }
+
+    /// <summary>
+    /// The rights in a <c>RetrievePrincipalAccess</c> response that was not a 403/404: a non-success THROWS (a fault is
+    /// never "no rights"); an absent or empty rights string is an authoritative "no rights".
+    /// </summary>
+    private static async Task<AccessRights> ReadPrincipalAccessAnswerAsync(
+        HttpResponseMessage response, Guid principalSystemUserId, string entitySetName, Guid recordId, CancellationToken ct)
+    {
         if (!response.IsSuccessStatusCode)
         {
             throw new HttpRequestException(
@@ -1582,8 +1603,79 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             ? value.GetString()
             : null;
 
-        // An absent or empty rights string is an authoritative "no rights": Dataverse answered, and the answer was nothing.
         return DataverseAccessRightsMapper.FromAccessRightsString(rights);
+    }
+
+    /// <summary>
+    /// Dataverse's error code for an ACCESS-CHECK denial (<c>PrincipalPrivilegeDenied</c> / "SecLib::AccessCheckEx
+    /// failed") — the one 403 that is an answer about the principal's rights rather than a fault of the request.
+    /// </summary>
+    public const string AccessCheckDeniedErrorCode = "0x80040220";
+
+    /// <summary>
+    /// <see cref="RetrievePrincipalRightsAsync"/> for a caller that ACTS DESTRUCTIVELY on "no rights" (removing an
+    /// access grant) — unified-access-control-r2 task 171, adversarial finding 3. Returns <see langword="null"/>
+    /// (UNKNOWN) for every answer that is not about the principal's access.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why a second reading of the same call.</b> <see cref="RetrievePrincipalRightsAsync"/> maps every 403 and
+    /// 404 to <see cref="AccessRights.None"/>, which is the safe reading for its callers — they DENY on it. A caller that
+    /// REVOKES on it would read a request-level fault as "lost access": a missing <c>prvActOnBehalfOfAnotherUser</c> on the
+    /// BFF application user makes EVERY impersonated call 403 (<c>CannotActOnBehalfOfAnotherUser</c>, 0x8004A110), and
+    /// that would revoke every grant on every pass.</para>
+    /// <para><b>The mapping.</b> 2xx → the rights Dataverse answered (an empty string is an authoritative "none").
+    /// 404 → <see cref="AccessRights.None"/> (Dataverse's report of a record the principal cannot read). 403 →
+    /// <see cref="AccessRights.None"/> ONLY when the error code is <see cref="AccessCheckDeniedErrorCode"/>; any other
+    /// 403 code, or a 403 whose body cannot be read, is <see langword="null"/>. Any other failure throws, as in
+    /// <see cref="RetrievePrincipalRightsAsync"/>.</para>
+    /// </remarks>
+    public async Task<AccessRights?> RetrievePrincipalRightsOrUnknownAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+    {
+        using var response = await SendRetrievePrincipalAccessAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return AccessRights.None;
+
+        if (response.StatusCode == System.Net.HttpStatusCode.Forbidden)
+        {
+            var code = await TryReadErrorCodeAsync(response, ct).ConfigureAwait(false);
+            if (string.Equals(code, AccessCheckDeniedErrorCode, StringComparison.OrdinalIgnoreCase))
+                return AccessRights.None;
+
+            _logger.LogWarning(
+                "RetrievePrincipalAccess as {Principal} on {EntitySet}({RecordId}): 403 with error code {Code} — not an "
+                + "access answer (e.g. the application user lacks prvActOnBehalfOfAnotherUser); treated as UNKNOWN.",
+                principalSystemUserId, entitySetName, recordId, code ?? "(unreadable)");
+            return null;
+        }
+
+        return await ReadPrincipalAccessAnswerAsync(response, principalSystemUserId, entitySetName, recordId, ct);
+    }
+
+    /// <summary>The OData <c>error.code</c> of a failed response, or <see langword="null"/> when the body has none.</summary>
+    private static async Task<string?> TryReadErrorCodeAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try
+        {
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(body))
+                return null;
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.TryGetProperty("error", out var error)
+                   && error.ValueKind == JsonValueKind.Object
+                   && error.TryGetProperty("code", out var code)
+                   && code.ValueKind == JsonValueKind.String
+                ? code.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>How many records one batched share read names — keeps the OData filter far below the URL limit.</summary>
