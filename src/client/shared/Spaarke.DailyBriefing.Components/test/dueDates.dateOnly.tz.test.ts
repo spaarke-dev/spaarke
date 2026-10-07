@@ -1,3 +1,4 @@
+/** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * Daily Briefing — event due dates are calendar dates (spaarke-ontology-platform-r1 task 098, 2026-10-05).
  *

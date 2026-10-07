@@ -1,3 +1,4 @@
+/** @jest-environment ../../shared/Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * CalendarVisual — Date Only due dates bucket on their own calendar day
  * (spaarke-ontology-platform-r1 task 098, 2026-10-05).

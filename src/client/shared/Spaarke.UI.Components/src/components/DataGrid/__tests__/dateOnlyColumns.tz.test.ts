@@ -1,3 +1,4 @@
+/** @jest-environment ./jest.newYorkEnvironment.js */
 /**
  * Date Only columns in the shared grid — timezone regression guard
  * (spaarke-ontology-platform-r1 task 098, 2026-10-05).
