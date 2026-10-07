@@ -44,6 +44,7 @@
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
@@ -150,7 +151,9 @@ public sealed class H11UserProvisioningHandlerTests
         group.AddedMembers.Should().Equal((GroupId, "guestid-Ada"), (GroupId, "guestid-Grace"));
         writer.Requests.Select(r => (r.EnvironmentUrl, r.TenantId, r.EntraObjectId)).Should().Equal(
             (EnvUrl, TenantId, "guestid-Ada"), (EnvUrl, TenantId, "guestid-Grace"));
-        writer.Requests.Should().OnlyContain(r => r.SecurityRoleNames.SequenceEqual(new[] { "Spaarke Basic User" }));
+        writer.ResolvedRoleNames.Should().ContainSingle("the roles are resolved once, not per guest")
+            .Which.Should().Equal(H11UserProvisioningOptions.DefaultGuestSecurityRoleName);
+        writer.Requests.Should().OnlyContain(r => r.RoleIds.SequenceEqual(new[] { FakeGuestUserWriter.RoleId }));
         repo.LastWrittenRun!.InterStepState.ProvisionedUsers!.Select(u => u.DataverseSystemUserId)
             .Should().Equal("sysuser-guestid-Ada", "sysuser-guestid-Grace");
     }
@@ -261,21 +264,73 @@ public sealed class H11UserProvisioningHandlerTests
     }
 
     [Fact]
-    public async Task T232_AConfiguredRoleTheEnvironmentLacks_IsResumable_NamingTheRole()
+    public async Task T232_AConfiguredRoleTheEnvironmentLacks_IsRefusedBeforeAnyInvitation_NamingTheRole()
     {
         var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
         var repo = new FakeRepository(run, "e");
-        var writer = FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.RoleNotFound("Spaarke Basic User"));
-        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
-            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+        var invitations = FakeInvitationClient.Success();
+        var group = FakeSecurityGroupClient.ThisCustomers();
+        var writer = FakeGuestUserWriter.AllSucceed(roles: new GuestRoleResolution.RoleNotFound("Spaarke Basic User"));
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified(), group, writer);
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(H11Rejections.SecurityRoleNotFound);
-        failure.Diagnostic.Should().Contain("'Spaarke Basic User'").And.Contain("entry 1");
-        repo.LastWrittenRun!.CompletedPhases.Should().BeEmpty();
+        failure.Diagnostic.Should().Contain("'Spaarke Basic User'").And.Contain("no invitation sent");
+        invitations.CallCount.Should().Be(0, "a missing role must not send invitations first (the package is T218's)");
+        group.AddedMembers.Should().BeEmpty();
+        writer.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task T232_TheGroupNameMatch_IgnoresCase()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var group = FakeSecurityGroupClient.Returning(new SecurityGroupReadOutcome.Found("SPRK-ACME-Users", SecurityEnabled: true));
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(),
+            FakeInvitationClient.Success(), FakeConsentVerifier.Verified(), group);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>("Entra group names are case-insensitive for people; the id is the identity");
+    }
+
+    [Fact]
+    public async Task T232_AResumedRun_RepeatsEveryStepIdempotently_AndCompletes()
+    {
+        // The first attempt stopped after guest 1's membership (the writer failed); the resumed run re-adds guest 1
+        // (Graph treats an existing member as success) and finishes both guests.
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var repo = new FakeRepository(run, "e");
+        var group = FakeSecurityGroupClient.ThisCustomers();
+        var failing = FakeGuestUserWriter.Returning(new DataverseGuestUserOutcome.Failure("404 — not yet a member"));
+        await BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), group, failing).HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var writer = FakeGuestUserWriter.AllSucceed();
+        var result = await BuildHandler(repo, FakeUserProvisioner.AllSucceed(), FakeInvitationClient.Success(),
+            FakeConsentVerifier.Verified(), group, writer).HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.InterStepState.ProvisionedUsers!.Select(u => u.DataverseSystemUserId)
+            .Should().Equal("sysuser-guestid-Ada", "sysuser-guestid-Grace");
+    }
+
+    [Fact]
+    public void T232_ConfiguredGuestRoles_ReplaceTheDefault_NotAppendToIt()
+    {
+        // The configuration binder APPENDS to an initialised list — the default must not survive a configured value.
+        var options = new H11UserProvisioningOptions();
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["GuestSecurityRoleNames:0"] = "Spaarke Guest" })
+            .Build()
+            .Bind(options);
+
+        options.EffectiveGuestSecurityRoleNames.Should().Equal("Spaarke Guest");
+        new H11UserProvisioningOptions().EffectiveGuestSecurityRoleNames.Should().Equal(H11UserProvisioningOptions.DefaultGuestSecurityRoleName);
     }
 
     [Fact]
@@ -802,23 +857,36 @@ public sealed class H11UserProvisioningHandlerTests
 
     private sealed class FakeGuestUserWriter : IDataverseGuestUserWriter
     {
+        public static readonly Guid RoleId = Guid.Parse("cccccccc-1111-2222-3333-444444444444");
+
         private readonly Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> _behavior;
         private readonly GuestAccessOutcome _guestAccess;
+        private readonly GuestRoleResolution _roles;
         public List<DataverseGuestUserRequest> Requests { get; } = [];
+        public List<IReadOnlyList<string>> ResolvedRoleNames { get; } = [];
 
         private FakeGuestUserWriter(
-            Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> behavior, GuestAccessOutcome guestAccess)
+            Func<DataverseGuestUserRequest, DataverseGuestUserOutcome> behavior, GuestAccessOutcome guestAccess,
+            GuestRoleResolution roles)
         {
             _behavior = behavior;
             _guestAccess = guestAccess;
+            _roles = roles;
         }
 
-        public static FakeGuestUserWriter AllSucceed(GuestAccessOutcome? guestAccess = null)
+        public static FakeGuestUserWriter AllSucceed(GuestAccessOutcome? guestAccess = null, GuestRoleResolution? roles = null)
             => new(r => new DataverseGuestUserOutcome.Success($"sysuser-{r.EntraObjectId}"),
-                guestAccess ?? new GuestAccessOutcome.Allowed());
+                guestAccess ?? new GuestAccessOutcome.Allowed(), roles ?? new GuestRoleResolution.Resolved([RoleId]));
 
         public static FakeGuestUserWriter Returning(DataverseGuestUserOutcome outcome)
-            => new(_ => outcome, new GuestAccessOutcome.Allowed());
+            => new(_ => outcome, new GuestAccessOutcome.Allowed(), new GuestRoleResolution.Resolved([RoleId]));
+
+        public Task<GuestRoleResolution> ResolveRolesAsync(
+            string environmentUrl, string tenantId, IReadOnlyList<string> roleNames, CancellationToken ct)
+        {
+            ResolvedRoleNames.Add(roleNames);
+            return Task.FromResult(_roles);
+        }
 
         public Task<DataverseGuestUserOutcome> EnsureGuestUserAsync(DataverseGuestUserRequest request, CancellationToken ct)
         {

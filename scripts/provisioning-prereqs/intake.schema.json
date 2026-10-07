@@ -152,6 +152,7 @@
       "type": "string",
       "format": "uuid",
       "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+      "not": { "const": "00000000-0000-0000-0000-000000000000" },
       "description": "T232 — object id of the customer environment's security group (displayName sprk-{customerId}-users), created by the operator and set as the Dataverse environment's security group before the run (prereqs.yaml PRQ-C-10). Required for B2BGuest (every Model1 run — allOf below): H11 adds each guest to it, then makes the guest a Dataverse user. Without it every Model 1 environment would admit any user of Spaarke's tenant."
     },
     "users": {

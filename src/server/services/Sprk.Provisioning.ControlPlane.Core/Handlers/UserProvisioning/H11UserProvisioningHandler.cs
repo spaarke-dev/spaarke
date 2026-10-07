@@ -73,8 +73,10 @@
 //   │ NativeAccount: license assignment failed   │ RetryableWithCleanup      │
 //   │                                             │ (user exists; assign-    │
 //   │                                             │ License itself idempotent│
-//   │ B2BGuest: invitation failed                │ Resumable (POST           │
-//   │                                             │ /invitations idempotent)  │
+//   │ B2BGuest: invitation failed                │ Resumable (T232: an       │
+//   │                                             │ existing guest is reused, │
+//   │                                             │ never re-invited — a      │
+//   │                                             │ re-POST re-sends the mail)│
 //   │ B2B consent Pending (WaitingOnGate         │ (NOT a failure — Success  │
 //   │ transition)                                 │ with WaitingOnGate state) │
 //   │ T232: NativeAccount with no licence SKU    │ Resumable (before any     │
@@ -107,8 +109,11 @@
 //   group — the group is what keeps another customer's guests out of this
 //   environment. Once every guest has redeemed, each guest is added to that
 //   group and made a Dataverse user of H5's environment holding
-//   GuestSecurityRoleNames (IDataverseGuestUserWriter). An existing guest is
-//   reused without a second invitation email (GraphRestB2BInvitationClient).
+//   GuestSecurityRoleNames (IDataverseGuestUserWriter; the roles are resolved
+//   before anyone is invited). An existing guest is reused without a second
+//   invitation email (GraphRestB2BInvitationClient). H11 checks the group's NAME;
+//   that it is the group SET ON the environment is an operator check (skill Step
+//   1e-bis, PRQ-C-10 — the binding is visible only to a Power Platform admin).
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H11 does not enqueue a specific successor. Parity with H3/H5/H6/H10: the
@@ -421,14 +426,25 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (_options.GuestSecurityRoleNames.Count == 0
-            || _options.GuestSecurityRoleNames.Any(string.IsNullOrWhiteSpace))
+        // Every role resolved once, before anyone is invited: a missing role (the package is T218's) must not send
+        // invitations or add anyone to the group first.
+        var roleNames = _options.EffectiveGuestSecurityRoleNames;
+        var roles = await _guestUserWriter.ResolveRolesAsync(dataverseEnvUrl, tenantId, roleNames, cancellationToken)
+            .ConfigureAwait(false);
+        switch (roles)
         {
-            return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
-                "H11UserProvisioningOptions:GuestSecurityRoleNames is empty or holds a blank name — a guest without a " +
-                "role cannot use the environment. Nothing was written.",
-                cancellationToken).ConfigureAwait(false);
+            case GuestRoleResolution.RoleNotFound missingRole:
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
+                    $"Security role '{missingRole.RoleName}' (H11UserProvisioningOptions:GuestSecurityRoleNames) is not in " +
+                    "the environment's root business unit — it ships in the Spaarke solution (H6). Nothing was written " +
+                    "(no invitation sent).",
+                    cancellationToken).ConfigureAwait(false);
+            case GuestRoleResolution.Failure roleFailure:
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
+                    $"The guests' security role(s) could not be resolved: {roleFailure.Diagnostic}. Nothing was written.",
+                    cancellationToken).ConfigureAwait(false);
         }
+        var roleIds = ((GuestRoleResolution.Resolved)roles).RoleIds;
 
         var invited = new List<ProvisionedUserRecord>();
         var invitedUserIds = new List<string>();
@@ -528,21 +544,14 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             }
 
             var dataverseUser = await _guestUserWriter.EnsureGuestUserAsync(
-                new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, _options.GuestSecurityRoleNames),
+                new DataverseGuestUserRequest(dataverseEnvUrl, tenantId, guest.UserId, roleIds),
                 cancellationToken).ConfigureAwait(false);
-            switch (dataverseUser)
+            if (dataverseUser is DataverseGuestUserOutcome.Failure userFailure)
             {
-                case DataverseGuestUserOutcome.RoleNotFound missingRole:
-                    return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
-                        $"Security role '{missingRole.RoleName}' (H11UserProvisioningOptions:GuestSecurityRoleNames) is not " +
-                        "in the environment's root business unit — it ships in the Spaarke solution (H6). No user or role " +
-                        $"was written for usersJson entry {position}.",
-                        cancellationToken).ConfigureAwait(false);
-                case DataverseGuestUserOutcome.Failure userFailure:
-                    return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
-                        $"Making the guest of usersJson entry {position} (Entra user {guest.UserId}) a Dataverse user " +
-                        $"failed: {userFailure.Diagnostic}",
-                        cancellationToken).ConfigureAwait(false);
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
+                    $"Making the guest of usersJson entry {position} (Entra user {guest.UserId}) a Dataverse user " +
+                    $"failed: {userFailure.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
             }
 
             guestUsers.Add(guest with { DataverseSystemUserId = ((DataverseGuestUserOutcome.Success)dataverseUser).SystemUserId });

@@ -9,8 +9,9 @@
 > users are B2B guests whose access Spaarke pays pay-as-you-go. `PRQ-C-10` **added** (the environment's security group
 > `sprk-{customerId}-users` — intake `environmentSecurityGroupId`), `PRQ-C-11` **added** (the environment linked to a
 > pay-as-you-go billing policy on the stamp subscription), `PRQ-C-12` **added** (guest access allowed —
-> `restrictguestuseraccess` off). All three are checked by the skill (Step 1e-bis) as the operator; H11 enforces C-10
-> and C-12 again server-side.
+> `restrictguestuseraccess` off). All three are checked by the skill (Step 1e-bis) as the operator — including that the
+> group is the one SET ON the environment (Power Platform admin API). H11 re-checks the group's name and guest access
+> server-side; the group binding and the billing link are visible only to a Power Platform admin, which L2 is not.
 >
 > **v8 (2026-10-06, `customer-provisioning-orchestration-r1` T228 — owner D4 / Q1)**: the operator creates the customer's
 > subscription and Dataverse environment; L2 creates neither. `PRQ-S-00` **added** (the customer's own subscription —

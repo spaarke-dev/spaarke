@@ -958,6 +958,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     [InlineData("identityPreset", "NativeAccount", "userprov-model1-requires-b2b-guest")]            // T232 (owner D2)
     [InlineData("environmentSecurityGroupId", null, "userprov-missing-security-group-id")]            // T232
     [InlineData("environmentSecurityGroupId", "sprk-testcust-users", "userprov-invalid-security-group-id")]   // a name, not the object id
+    [InlineData("environmentSecurityGroupId", "{6f1c2b3a-4d5e-4f60-8a7b-9c0d1e2f3a4b}", "userprov-invalid-security-group-id")]   // only the schema's hyphenated form
+    [InlineData("usersJson", "[{\"email\":\"ada@contoso.com\"},{\"email\":\"ADA@contoso.com\"}]", "userprov-invalid-user-entry")]   // a repeated email (any case) would be invited twice
     [InlineData("exchangePolicyScopeGroupId", null, "h14a-missing-policy-scope-group-id")]
     [InlineData("exchangePolicyScopeGroupId", "  ", "h14a-missing-policy-scope-group-id")]
     [InlineData("communicationDefaultMailbox", null, "intake-communication-default-mailbox-invalid")]

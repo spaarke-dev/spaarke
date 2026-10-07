@@ -1016,30 +1016,55 @@ foreach ($u in $users) {
 }
 
 # T232 — B2BGuest: the environment's security group (PRQ-C-10), guest access (PRQ-C-12) and PAYG billing (PRQ-C-11),
-# checked now as the operator — H11 enforces C-10 / C-12 too, but only after H0–H10 have built the stamp.
+# checked now as the operator. H11 re-checks the group's NAME and guest access server-side, but only after H0–H10 have
+# built the stamp — and only the operator (a Power Platform admin) can see which group is SET ON the environment, or
+# its billing. A failed az/pac call is a stop with its own error, never an empty value read as an answer.
 if ($identityPreset -ceq 'B2BGuest') {
   $groupGuid = [guid]::Empty
-  while (-not [guid]::TryParse([string]$environmentSecurityGroupId, [ref]$groupGuid) -or $groupGuid -eq [guid]::Empty) {
+  while (-not [guid]::TryParseExact([string]$environmentSecurityGroupId, 'D', [ref]$groupGuid) -or $groupGuid -eq [guid]::Empty) {
     Stop-IfBatch 'environmentSecurityGroupId is required for B2BGuest — the object id (GUID) of sprk-{customerId}-users (PRQ-C-10).'
     $environmentSecurityGroupId = Read-Host "environmentSecurityGroupId (object id of sprk-$customerId-users — PRQ-C-10)"
   }
   $environmentSecurityGroupId = $groupGuid.ToString('D')
-  $group = az rest --method get --url "https://graph.microsoft.com/v1.0/groups/$environmentSecurityGroupId`?`$select=displayName,securityEnabled" -o json | ConvertFrom-Json
-  if (-not $group -or $group.displayName -ne "sprk-$customerId-users" -or -not $group.securityEnabled) {
-    Write-Error "[skill] HARD STOP (PRQ-C-10): group $environmentSecurityGroupId is '$($group.displayName)' (securityEnabled=$($group.securityEnabled)) — it must be the security group sprk-$customerId-users set on the environment. H11 would refuse it (userprov-security-group-rejected)."
+
+  # PRQ-C-10 (a): the group is this customer's security group.
+  $groupJson = az rest --method get --url "https://graph.microsoft.com/v1.0/groups/$environmentSecurityGroupId`?`$select=displayName,securityEnabled" -o json
+  if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-10): reading group $environmentSecurityGroupId failed (az output above). Is the operator signed in to the stamp's tenant?"; exit 1 }
+  $group = $groupJson | ConvertFrom-Json
+  if ($group.displayName -ne "sprk-$customerId-users" -or -not $group.securityEnabled) {
+    Write-Error "[skill] HARD STOP (PRQ-C-10): group $environmentSecurityGroupId is '$($group.displayName)' (securityEnabled=$($group.securityEnabled)) — it must be the security group sprk-$customerId-users. H11 would refuse it (userprov-security-group-rejected)."
     exit 1
   }
+
+  # PRQ-C-10 (b): it is the group SET ON the environment — the isolation boundary between Model 1 environments. Read
+  # from the Power Platform admin API (the operator is a Power Platform admin; L2 is not, so H11 cannot check this).
   $dvRes = $dataverseEnvUrl.TrimEnd('/')
+  $bapJson = az rest --method get --resource "https://service.powerapps.com/" `
+    --url "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2021-04-01" -o json
+  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-10): listing Power Platform environments failed (az output above) — the operator must be a Power Platform admin.'; exit 1 }
+  $ppEnv = @(($bapJson | ConvertFrom-Json).value | Where-Object { "$($_.properties.linkedEnvironmentMetadata.instanceUrl)".TrimEnd('/') -eq $dvRes })
+  $boundGroup = if ($ppEnv.Count -eq 1) { "$($ppEnv[0].properties.linkedEnvironmentMetadata.securityGroupId)" } else { '' }
+  if ($boundGroup -ne $environmentSecurityGroupId) {
+    Write-Error "[skill] HARD STOP (PRQ-C-10): the environment $dvRes has security group '$boundGroup' ($($ppEnv.Count) environment(s) matched the URL) — it must be $environmentSecurityGroupId (sprk-$customerId-users). Without it every user of the tenant, other customers' guests included, is admitted. Set it (admin center → Environments → Edit → Security group), then rerun."
+    exit 1
+  }
+
+  # PRQ-C-12: guests may use the environment.
   $restricted = az rest --method get --resource $dvRes --url "$dvRes/api/data/v9.2/organizations?`$select=restrictguestuseraccess" --query "value[0].restrictguestuseraccess" -o tsv
+  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-12): reading restrictguestuseraccess failed (az output above).'; exit 1 }
   if ($restricted -ne 'false') {
     Write-Error "[skill] HARD STOP (PRQ-C-12): the environment restricts guest access (restrictguestuseraccess=$restricted). Turn it off per prereqs.yaml PRQ-C-12, then rerun. H11 would refuse it (userprov-guest-access-restricted)."
     exit 1
   }
-  # PRQ-C-11: L2 cannot see billing (no Dataverse-visible setting) — the operator confirms the policy's subscription.
-  Write-Host "PRQ-C-11 — the environment's pay-as-you-go billing policy must be on subscription $subscriptionId (the stamp's):" -ForegroundColor Cyan
-  pac licensing get-environment-billing-policy --environment $dataverseEnvUrl
-  if (-not $script:SkipInteractiveIntake) {
-    $payg = Read-Host "Is the policy above Enabled and on subscription $subscriptionId? (yes/no)"
+
+  # PRQ-C-11: billed pay-as-you-go on the STAMP subscription. The command is preview and its output shape is not yet
+  # verified live (T186), so the subscription id is matched in the text; batch stops when it is absent, interactive asks.
+  $billing = pac licensing get-environment-billing-policy --environment $dataverseEnvUrl 2>&1 | Out-String
+  if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-11): pac licensing failed:`n$billing"; exit 1 }
+  Write-Host "PRQ-C-11 — billing policy of the environment:`n$billing" -ForegroundColor Cyan
+  if ($billing -notmatch [regex]::Escape($subscriptionId)) {
+    if ($script:SkipInteractiveIntake) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy does not name the stamp subscription $subscriptionId — link it to a pay-as-you-go policy on that subscription first."; exit 1 }
+    $payg = Read-Host "The output does not name $subscriptionId. Is the policy Enabled and on the stamp subscription $subscriptionId? (yes/no)"
     if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to a pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
   }
 }

@@ -11,18 +11,21 @@
 //     - an existing guest is reused: no POST /invitations (no second email);
 //     - an unknown address is invited (POST /invitations, mail sent);
 //     - an address that belongs to a Member is refused, nothing sent;
-//     - a lookup failure fails closed (no invitation);
+//     - a lookup failure fails closed (no invitation); several matches refused;
+//     - a Graph error echoing the address keeps only the error code (D15);
 //     - the OData literal doubles a quote in the address.
 //   GraphRestEnvironmentSecurityGroupClient
 //     - read returns displayName + securityEnabled; a 404 is a Failure;
 //     - add member: 204 → success; 400 "already exist" → success (idempotent);
 //       403 → Failure.
 //   DataverseWebApiGuestUserWriter
-//     - every role resolved before any write; a missing role writes nothing;
+//     - roles resolved in the root business unit; none or several matches refused;
+//       a quote in a role name doubled;
 //     - the systemuser is read by the azureactivedirectoryobjectid alternate key
 //       (which adds a group member on demand) — no POST systemusers;
 //     - roles already held are not associated again (second run writes nothing);
-//     - a refused alternate-key read is a Failure naming the group rule;
+//     - a refused alternate-key read says why (404 group rule vs other refusal);
+//     - an HTTP timeout is a Failure, not an escaped exception;
 //     - restrictguestuseraccess true/false/unreadable.
 // -----------------------------------------------------------------------------
 
@@ -32,6 +35,7 @@ using Azure.Core;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Xunit;
 
@@ -115,6 +119,31 @@ public sealed class H11GuestAccessSeamsTests
         http.Requests[0].Uri.Should().Contain("o%27%27brien%40customer.com");
     }
 
+    [Fact]
+    public async Task InviteAsync_SeveralUsersWithTheAddress_IsRefusedAndNothingIsSent()
+    {
+        var http = new FakeHttp(_ => Json(HttpStatusCode.OK,
+            $$"""{"value":[{"id":"{{GuestId}}","userType":"Guest"},{"id":"{{RoleId}}","userType":"Guest"}]}"""));
+
+        var outcome = await Invitations(http).InviteAsync(Ada, TenantId, CancellationToken.None);
+
+        outcome.Should().BeOfType<B2BInvitationOutcome.Failure>().Which.Diagnostic.Should().Contain("2 users");
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
+    [Fact]
+    public async Task InviteAsync_AGraphErrorEchoingTheAddress_KeepsOnlyTheErrorCode()
+    {
+        var http = new FakeHttp(req => req.Method == HttpMethod.Get
+            ? Json(HttpStatusCode.OK, """{"value":[]}""")
+            : Json(HttpStatusCode.BadRequest, """{"error":{"code":"BadRequest","message":"ada@customer.com is not valid"}}"""));
+
+        var outcome = await Invitations(http).InviteAsync(Ada, TenantId, CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<B2BInvitationOutcome.Failure>().Subject;
+        failure.Diagnostic.Should().Contain("BadRequest").And.NotContain("ada@customer.com", "D15 — the diagnostic is stored in the run document");
+    }
+
     // ---------------- security group client ----------------
 
     [Fact]
@@ -159,9 +188,43 @@ public sealed class H11GuestAccessSeamsTests
     // ---------------- Dataverse guest-user writer ----------------
 
     [Fact]
+    public async Task ResolveRolesAsync_FindsEachRoleInTheRootBusinessUnit()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: false);
+
+        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["Spaarke Basic User"], CancellationToken.None);
+
+        outcome.Should().BeOfType<GuestRoleResolution.Resolved>().Which.RoleIds.Should().Equal(Guid.Parse(RoleId));
+        var query = http.Requests.Single().Uri;
+        query.Should().Contain("Spaarke%20Basic%20User").And.Contain($"_businessunitid_value%20eq%20{RootBuId}");
+    }
+
+    [Theory]
+    [InlineData(0, typeof(GuestRoleResolution.RoleNotFound))]
+    [InlineData(2, typeof(GuestRoleResolution.Failure))]   // two roles of that name in the root unit — never guess
+    public async Task ResolveRolesAsync_NoneOrSeveralMatches_IsRefused(int rows, Type expected)
+    {
+        var http = DataverseFake(roleRows: rows, roleHeld: false);
+
+        var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["Spaarke Basic User"], CancellationToken.None);
+
+        outcome.Should().BeOfType(expected);
+    }
+
+    [Fact]
+    public async Task ResolveRolesAsync_AQuoteInTheRoleName_IsDoubledInTheODataLiteral()
+    {
+        var http = DataverseFake(roleRows: 1, roleHeld: false);
+
+        await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["O'Brien Role"], CancellationToken.None);
+
+        http.Requests.Single().Uri.Should().Contain("O%27%27Brien");
+    }
+
+    [Fact]
     public async Task EnsureGuestUserAsync_ReadsTheUserByItsObjectId_AndAssociatesTheRole()
     {
-        var http = DataverseFake(roleFound: true, roleHeld: false);
+        var http = DataverseFake(roleRows: 1, roleHeld: false);
 
         var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
 
@@ -178,7 +241,7 @@ public sealed class H11GuestAccessSeamsTests
     [Fact]
     public async Task EnsureGuestUserAsync_ARoleAlreadyHeld_WritesNothing()
     {
-        var http = DataverseFake(roleFound: true, roleHeld: true);
+        var http = DataverseFake(roleRows: 1, roleHeld: true);
 
         var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
 
@@ -186,30 +249,28 @@ public sealed class H11GuestAccessSeamsTests
         http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post, "a second run writes nothing new");
     }
 
-    [Fact]
-    public async Task EnsureGuestUserAsync_AMissingRole_TouchesNoUser()
+    [Theory]
+    [InlineData(HttpStatusCode.NotFound, "DIRECT member of the environment security group")]
+    [InlineData(HttpStatusCode.Forbidden, "Dataverse refused the read")]
+    public async Task EnsureGuestUserAsync_ARefusedUserRead_IsAFailureSayingWhy(HttpStatusCode status, string expected)
     {
-        var http = DataverseFake(roleFound: false, roleHeld: false);
+        var http = DataverseFake(roleRows: 1, roleHeld: false,
+            userRead: () => Json(status, """{"error":{"code":"0x80072560"}}"""));
 
         var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
 
-        outcome.Should().Be(new DataverseGuestUserOutcome.RoleNotFound("Spaarke Basic User"));
-        http.Requests.Should().NotContain(r => r.Uri.Contains("/systemusers"),
-            "every role is resolved before the user is read (and so added)");
+        outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic.Should().Contain(expected);
+        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
     }
 
     [Fact]
-    public async Task EnsureGuestUserAsync_ARefusedUserRead_IsAFailureNamingTheGroupRule()
+    public async Task EnsureGuestUserAsync_ATimeout_IsAFailure_NotAnEscapedException()
     {
-        var http = DataverseFake(roleFound: true, roleHeld: false,
-            userRead: () => Json(HttpStatusCode.Forbidden,
-                """{"error":{"code":"0x80072560","message":"The user is not a member of the organization."}}"""));
+        var http = new FakeHttp(_ => throw new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
 
         var outcome = await Writer(http).EnsureGuestUserAsync(Request(), CancellationToken.None);
 
-        outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic
-            .Should().Contain("DIRECT member of the environment security group");
-        http.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+        outcome.Should().BeOfType<DataverseGuestUserOutcome.Failure>().Which.Diagnostic.Should().Contain("timed out");
     }
 
     [Theory]
@@ -229,9 +290,9 @@ public sealed class H11GuestAccessSeamsTests
     // ---------------- helpers ----------------
 
     private static DataverseGuestUserRequest Request()
-        => new(EnvUrl, TenantId, GuestId, ["Spaarke Basic User"]);
+        => new(EnvUrl, TenantId, GuestId, [Guid.Parse(RoleId)]);
 
-    private static FakeHttp DataverseFake(bool roleFound, bool roleHeld, Func<HttpResponseMessage>? userRead = null)
+    private static FakeHttp DataverseFake(int roleRows, bool roleHeld, Func<HttpResponseMessage>? userRead = null)
         => new(req =>
         {
             var uri = req.RequestUri!.AbsoluteUri;
@@ -239,14 +300,10 @@ public sealed class H11GuestAccessSeamsTests
             {
                 return new HttpResponseMessage(HttpStatusCode.NoContent);
             }
-            if (uri.Contains("/businessunits?"))
-            {
-                return Json(HttpStatusCode.OK, $$"""{"value":[{"businessunitid":"{{RootBuId}}"}]}""");
-            }
             if (uri.Contains("/roles?"))
             {
-                uri.Should().Contain(RootBuId, "roles are looked up in the root business unit");
-                return Json(HttpStatusCode.OK, roleFound ? $$"""{"value":[{"roleid":"{{RoleId}}"}]}""" : """{"value":[]}""");
+                var rows = string.Join(",", Enumerable.Repeat($$"""{"roleid":"{{RoleId}}"}""", roleRows));
+                return Json(HttpStatusCode.OK, $$"""{"value":[{{rows}}]}""");
             }
             if (uri.Contains("/systemuserroles_association?"))
             {
@@ -256,7 +313,7 @@ public sealed class H11GuestAccessSeamsTests
             {
                 return userRead?.Invoke() ?? Json(HttpStatusCode.OK, $$"""{"systemuserid":"{{SystemUserId}}"}""");
             }
-            throw new InvalidOperationException($"unexpected request {req.Method} {uri}");
+            return Json(HttpStatusCode.BadRequest, $"{{\"error\":{{\"code\":\"unexpected request {req.Method} {uri}\"}}}}");
         });
 
     private static GraphRestB2BInvitationClient Invitations(FakeHttp http)
@@ -267,7 +324,17 @@ public sealed class H11GuestAccessSeamsTests
         => new(new HttpClient(http), Options.Create(new H11UserProvisioningOptions()), _ => new FakeCredential());
 
     private static DataverseWebApiGuestUserWriter Writer(FakeHttp http)
-        => new(new HttpClient(http), Options.Create(new H11UserProvisioningOptions()), _ => new FakeCredential());
+        => new(new HttpClient(http), Options.Create(new H11UserProvisioningOptions()), new FakeRootBusinessUnitReader(),
+            _ => new FakeCredential());
+
+    private sealed class FakeRootBusinessUnitReader : IDataverseRootBusinessUnitReader
+    {
+        public Task<Guid?> ReadRootBusinessUnitIdAsync(string environmentUrl, string tenantId, CancellationToken cancellationToken)
+            => Task.FromResult<Guid?>(Guid.Parse(RootBuId));
+
+        public Task<string?> ReadRecordedContainerIdAsync(string environmentUrl, string tenantId, CancellationToken cancellationToken)
+            => throw new NotSupportedException("not read by the guest-user writer");
+    }
 
     private static HttpResponseMessage Json(HttpStatusCode status, string body)
         => new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };

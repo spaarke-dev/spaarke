@@ -9,9 +9,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T232** — H11 makes Model 1 guests usable (D2, G10). POML: `tasks/232-h11-b2b-guests-payg-dataverse-users.poml`. Owner 2026-10-07: licensing = **pay-as-you-go** (operator links the environment to a billing policy on the stamp subscription; no per-user licences). |
-| **Step** | Steps 1–5 code DONE (builds, 0 warnings; NOT yet tests): research → `notes`-worthy findings in `.claude/agent-memory/researcher/payg-b2b-guest-dataverse-user-provisioning-2026-10-07.md`; intake (Model1→B2BGuest, `environmentSecurityGroupId`), invitation lookup (no 2nd mail), group client, Dataverse guest writer (alternate-key on-demand add, `restrictguestuseraccess` check), NativeAccount no-SKU refusal. |
+| **Step** | Steps 1–6 DONE (commits c5df5f07c code, tests, 466e75e75 docs). ControlPlane 2257/0 (1 skip). **Step 9.5 running**: code-review + adr-check sub-agents (background) + ArchTests. |
 | **Status** | in-progress (started 2026-10-07). |
-| **Next Action** | Update tests (H11UserProvisioningHandlerTests ctor + new cases; RunsEndpointsTests WithOperatorIntake → B2BGuest + group id, NativeAccount Model1 → 400; IntakeSchemaProfileParityTests ValidateOperatorIntake(tenancyModel, …) + new rules); new HTTP tests for GraphRestB2BInvitationClient, GraphRestEnvironmentSecurityGroupClient, DataverseWebApiGuestUserWriter; then Step 6 docs (prereqs PRQ-C-10 group, C-11 PAYG, C-12 guest access; skill; guide; inventory; constraints; notes/t232-guest-access-decisions.md). Owner note for close: PAYG meter is per active user PER APP. |
+| **Next Action** | Read the code-review + adr-check findings; fix F1–F4 now (≤ 2 rounds; 2 verifier passes — security/isolation task); re-run ControlPlane + ArchTests; close (POML notes, TASK-INDEX ✅, plan G10 already ✅, current-task → T233, devops sync). Owner note: PAYG meter is per active user PER APP (K1); deviation D9 (skill checks PRQs at 1e-bis, not Step 0.5). |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 

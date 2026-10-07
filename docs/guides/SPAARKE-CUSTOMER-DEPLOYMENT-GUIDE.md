@@ -1139,15 +1139,18 @@ Model 1 run takes only `B2BGuest`):
    (`userprov-security-group-rejected`), or whose environment restricts guests
    (`organization.restrictguestuseraccess`, `PRQ-C-12` — `userprov-guest-access-restricted`). The group is the
    isolation boundary between Model 1 environments: all live in Spaarke's tenant, so an environment without it admits
-   every user of that tenant, including other customers' guests.
+   every user of that tenant, including other customers' guests. H11 checks the group's **name**; that it is the group
+   **set on the environment** is checked by the skill (Step 1e-bis, Power Platform admin API) — only a Power Platform
+   admin can see it. It also resolves the guests' security role(s) here, so a missing role sends no invitation.
 2. Each user becomes a guest: an existing guest with that address is **reused without a second invitation email**; an
    address that belongs to a member of the tenant is refused.
 3. It waits for every guest to redeem the invitation (`b2b-consent` gate → `WaitingOnGate`; re-run H11 to re-check).
 4. It adds each guest to the group, then reads the guest's Dataverse user through the `azureactivedirectoryobjectid`
    alternate key — Dataverse adds a group member who is not yet a user on that read (Microsoft's documented app-only
    path; no Power Platform admin role) — and associates `H11UserProvisioningOptions:GuestSecurityRoleNames`
-   (default `Spaarke Basic User`, root business unit). A missing role → `userprov-security-role-not-found` naming it.
-   A refusal right after the group add can be membership propagation — resume.
+   (default `Spaarke Basic User`, root business unit; resolved in step 1). A refusal right after the group add can be
+   membership propagation — resume. A guest who never redeems keeps the gate pending; resend the invitation from the
+   Entra admin center, then resume (H11 never re-invites — it would re-send mail on every re-check).
 
 **Licensing**: Model 1 guests get **no licence**. Spaarke pays for their access **pay-as-you-go** on the customer's
 stamp subscription (owner 2026-10-07): the operator links the environment to a billing policy on that subscription

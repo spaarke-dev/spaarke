@@ -116,6 +116,10 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
 
             return await SendInvitationAsync(entry, token, cancellationToken).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new B2BInvitationOutcome.Failure("A Graph request timed out; nothing is known to have been sent.");
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new B2BInvitationOutcome.Failure(
@@ -136,8 +140,8 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
         if (!response.IsSuccessStatusCode)
         {
             // Fail closed: inviting without knowing whether the user exists would mail an existing guest again.
-            return (null, null, $"GET /users (existing-guest lookup) failed: {(int)response.StatusCode} {response.StatusCode}. " +
-                $"Body: {Truncate(body, 300)}");
+            return (null, null, $"GET /users (existing-guest lookup) failed: {(int)response.StatusCode} {response.StatusCode} " +
+                $"({GraphErrorCode(body)}).");
         }
 
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
@@ -191,8 +195,7 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
         if (!response.IsSuccessStatusCode)
         {
             return new B2BInvitationOutcome.Failure(
-                $"POST /invitations failed: {(int)response.StatusCode} {response.StatusCode}. " +
-                $"Body: {Truncate(body, 300)}");
+                $"POST /invitations failed: {(int)response.StatusCode} {response.StatusCode} ({GraphErrorCode(body)}).");
         }
 
         using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
@@ -213,6 +216,20 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
         return new B2BInvitationOutcome.Success(invitedUserId, invitationId);
     }
 
-    private static string Truncate(string s, int max)
-        => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
+    // D15: Graph's error message can echo the filter or the invited address, and the diagnostic is stored in the run
+    // document — keep only Graph's error code.
+    private static string GraphErrorCode(string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            return doc.RootElement.TryGetProperty("error", out var error) && error.TryGetProperty("code", out var code)
+                ? code.GetString() ?? "no error code"
+                : "no error code";
+        }
+        catch (JsonException)
+        {
+            return "no error code";
+        }
+    }
 }

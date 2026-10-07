@@ -84,6 +84,10 @@ public sealed class GraphRestEnvironmentSecurityGroupClient : IEnvironmentSecuri
                 && secProp.ValueKind == JsonValueKind.True;
             return new SecurityGroupReadOutcome.Found(displayName ?? string.Empty, securityEnabled);
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new SecurityGroupReadOutcome.Failure("GET /groups timed out.");
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new SecurityGroupReadOutcome.Failure($"Group read infrastructure error: {ex.GetType().Name}: {ex.Message}");
@@ -127,6 +131,10 @@ public sealed class GraphRestEnvironmentSecurityGroupClient : IEnvironmentSecuri
             return new SecurityGroupMembershipOutcome.Failure(
                 $"POST /groups/{groupGuid:D}/members/$ref for user {userGuid:D} failed: {(int)response.StatusCode} " +
                 $"{response.StatusCode}. Body: {Truncate(body, 300)}");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new SecurityGroupMembershipOutcome.Failure($"Adding user {userGuid:D} to the group timed out.");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

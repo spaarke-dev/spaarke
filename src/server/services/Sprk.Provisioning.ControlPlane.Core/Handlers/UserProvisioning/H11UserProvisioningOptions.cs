@@ -47,12 +47,20 @@ public sealed class H11UserProvisioningOptions
     /// </summary>
     public string InvitationRedirectUrl { get; set; } = "https://myapps.microsoft.com";
 
+    /// <summary>The role every B2B guest receives when <see cref="GuestSecurityRoleNames"/> is not configured.</summary>
+    public const string DefaultGuestSecurityRoleName = "Spaarke Basic User";
+
     /// <summary>
     /// Task 232: Dataverse security roles (root business unit, by name) each B2B guest receives. The roles ship in the
     /// Spaarke solution (H6; the package is being redefined by T218) — a name the environment lacks stops H11 with
-    /// <c>userprov-security-role-not-found</c> naming it. At least one.
+    /// <c>userprov-security-role-not-found</c> naming it. Empty by default (the configuration binder APPENDS to an
+    /// initialised list, so a default here could never be replaced) — read <see cref="EffectiveGuestSecurityRoleNames"/>.
     /// </summary>
-    public List<string> GuestSecurityRoleNames { get; set; } = ["Spaarke Basic User"];
+    public List<string> GuestSecurityRoleNames { get; set; } = [];
+
+    /// <summary>The configured roles, or <see cref="DefaultGuestSecurityRoleName"/> when none is configured.</summary>
+    public IReadOnlyList<string> EffectiveGuestSecurityRoleNames =>
+        GuestSecurityRoleNames.Count == 0 ? [DefaultGuestSecurityRoleName] : GuestSecurityRoleNames;
 
     /// <summary>Per-request timeout for Microsoft Graph REST HTTP calls.</summary>
     public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);

@@ -170,8 +170,9 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - A Model 1 run takes only `B2BGuest` (`UserProvisioningIntake`). Every B2BGuest run names the environment's security
   group `sprk-{customerId}-users` (`environmentSecurityGroupId`, PRQ-C-10). **The group is the isolation boundary between
   Model 1 environments** (all in Spaarke's tenant): H11 refuses a group with another name or not security-enabled before
-  inviting anyone, and adds guests to that group only. **MUST NOT** add a guest to any other group or make it a user of
-  another environment.
+  inviting anyone, and adds guests to that group only. That the group is the one **set on the environment** is visible
+  only to a Power Platform admin — the skill checks it (Step 1e-bis); L2 checks the name. **MUST NOT** add a guest to any
+  other group or make it a user of another environment.
 - Guests get **no licence**: Spaarke pays pay-as-you-go on the customer's stamp subscription (PRQ-C-11 — an operator
   check; L2 cannot see billing). **MUST NOT** add per-user licence assignment for B2BGuest. NativeAccount refuses a run
   with no SKU configured.

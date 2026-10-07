@@ -798,8 +798,12 @@ builder.Services.AddScoped<H10DataverseAppUserGraphParityHandler>();
 // consent-verification gate — independent GET /users/{id}?$select=
 // externalUserState re-query per invited guest, parity with H3's
 // IAdminConsentVerifier gate shape).
-builder.Services.Configure<H11UserProvisioningOptions>(
-    builder.Configuration.GetSection(nameof(H11UserProvisioningOptions)));
+// T232: validated at start — a blank role name would otherwise be found only by the first Model 1 run, after H0–H10.
+builder.Services.AddOptions<H11UserProvisioningOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(H11UserProvisioningOptions)))
+    .Validate(o => o.GuestSecurityRoleNames.TrueForAll(n => !string.IsNullOrWhiteSpace(n)),
+        "H11UserProvisioningOptions:GuestSecurityRoleNames holds a blank role name.")
+    .ValidateOnStart();
 builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>();
 builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>();
 builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>();

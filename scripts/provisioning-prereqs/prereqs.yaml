@@ -625,7 +625,7 @@ prereqs:
     check_recipe:
       cli: |
         az rest --method get --url "https://graph.microsoft.com/v1.0/groups/{environmentSecurityGroupId}?\$select=displayName,securityEnabled" --query "[displayName,securityEnabled]" -o tsv
-      expect: "`sprk-{customerId}-users	true` — AND the Power Platform admin center shows this group as the environment's security group (Environments → the environment → Edit → Security group)"
+      expect: "`sprk-{customerId}-users	true` — AND it is the environment's security group: the skill (Step 1e-bis) reads linkedEnvironmentMetadata.securityGroupId from the Power Platform admin API (or: admin center → Environments → the environment → Edit → Security group). H11 can check only the name — L2 is not a Power Platform admin"
     remediation: |
       1. Entra admin center → Groups → New group: type Security, name `sprk-{customerId}-users`, membership Assigned,
          no members (H11 adds each guest as a DIRECT member — Dataverse ignores nested groups).

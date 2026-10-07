@@ -105,7 +105,8 @@ public static class UserProvisioningIntake
                     "environment's security group (sprk-{customerId}-users), created by the operator and set on the " +
                     "environment before the run (prerequisite PRQ-C-10). H11 adds each guest to it.");
             }
-            if (!Guid.TryParse(environmentSecurityGroupId, out var groupGuid) || groupGuid == Guid.Empty)
+            // The canonical hyphenated form only — the schema's pattern (no braces, no bare 32 digits).
+            if (!Guid.TryParseExact(environmentSecurityGroupId, "D", out var groupGuid) || groupGuid == Guid.Empty)
             {
                 return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidSecurityGroupId,
                     "'environmentSecurityGroupId' must be the security group's object id (a GUID), not its name or email.");
@@ -150,10 +151,19 @@ public static class UserProvisioningIntake
                 $"'usersJson' has {users.Count} entries — at most {MaxUsers} users per run.");
         }
 
+        var firstPositionByEmail = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (var i = 0; i < users.Count; i++)
         {
             var entry = users[i];
             var position = i + 1;
+            // T232: a repeated address would be looked up before Graph shows the guest just invited for it, and invited
+            // (mailed) twice.
+            if (entry is not null && !string.IsNullOrWhiteSpace(entry.Email)
+                && !firstPositionByEmail.TryAdd(entry.Email.Trim(), position))
+            {
+                return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidUserEntry,
+                    $"'usersJson' entry {position} repeats the email of entry {firstPositionByEmail[entry.Email.Trim()]}.");
+            }
             if (entry is null)
             {
                 return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidUserEntry,
