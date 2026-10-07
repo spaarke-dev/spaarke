@@ -221,6 +221,13 @@ public static class ExternalAccessModule
         });
         services.AddScoped<NoAccessShareEnforcer>();
 
+        // unified-access-control-r2 task 114 (owner round 67 amendments 3 + 4(b)) — a Restricted record keeps no direct
+        // share held by a user flagged sprk_isexternal = true. Called by the Assigned-To sync route (the record's save —
+        // where it becomes Restricted) and by AssignedAccessReconciliationJob (the backstop for an out-of-band OOB share).
+        // UNCONDITIONAL (ADR-032): every dependency (participations, the share seam, the Web API client, the tenant cache,
+        // the secure-child synchronizer) is registered unconditionally.
+        services.AddScoped<RestrictedExternalShareRemover>();
+
         // unified-access-control-r2 task 142 (owner round 2 item 5 + Q5; round 3 A1/A2/R3) — the Assigned-To auto-grants.
         //   • AssignedAccessStore — the provenance ledger (sprk_assignedaccess) and the reads no existing reader answers
         //     (a root's registry columns, the systemusers a contact represents, an organization's state, the job's scans),

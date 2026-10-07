@@ -120,7 +120,8 @@ public sealed record AssignedAccessListEntry(
 /// The ONE invariant owner of the Assigned-To auto-grants (unified-access-control-r2 task 142 · owner round 2 item 5 +
 /// Q5; round 3 A1/A2/R3; round 3 A3–A6/A8 accepted as recommended): every registry-listed "Assigned *" contact or
 /// organization on a project, matter or work assignment holds Collaborate access — a removable grant on the record's
-/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible internal user — unless an
+/// grant-access list, or a POA share when the contact is linked (task 141) to an eligible user (an enabled person —
+/// <see cref="InternalShareEndpoints.ClassifyEligibility"/>, the rule <c>/share-user</c> applies) — unless an
 /// operator declined it, a veto forbids it, or the record's policy says otherwise.
 /// </summary>
 /// <remarks>
@@ -134,7 +135,10 @@ public sealed record AssignedAccessListEntry(
 /// <item>Level: Collaborate, uncapped (A1 / rule 5) — <see cref="GrantCeiling.AssignedToRule"/>; the share mask comes from
 /// <see cref="RecordShareLevels"/>, never a new constant. An absent expiry is today + 90 through the core's
 /// <c>DefaultExpiry</c>.</item>
-/// <item>Restricted: no contact or organization grant; a linked internal user's share is unaffected (round 2 item 3).
+/// <item>Restricted: no contact or organization grant; a linked user's share is unaffected (round 2 item 3) — unless the
+/// user is flagged external (<c>sprk_isexternal = true</c>): then no share either, and one the Restricted remover took
+/// away is recorded Skipped(restricted), never Declined, so it comes back when the record stops being Restricted (owner
+/// round 67).
 /// Secure or Limited: no organization grant. Secure: contact grants and shares are SUGGESTED, not written
 /// (A3 = prompt: <see cref="AssignedAccessState.PendingConfirmation"/>); an auto grant that existed before the record
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
@@ -696,7 +700,7 @@ public sealed class AssignedAccessMaterializer
             return;
         }
 
-        var target = await ResolveTargetAsync(subject, ct).ConfigureAwait(false);
+        var target = await ResolveTargetAsync(subject, flags, ct).ConfigureAwait(false);
 
         // (3) Access this owner created: verify it, convert it (141 link), renew it.
         if (live.FirstOrDefault(r => r.State is AssignedAccessState.Granted or AssignedAccessState.Shared) is { } ours)
@@ -815,6 +819,20 @@ public sealed class AssignedAccessMaterializer
             return false; // a malformed row: decide fresh
 
         var current = await ReadDirectShareMaskAsync(run, user, ct).ConfigureAwait(false);
+        if (current == 0 && target.Kind == TargetKind.Skip && target.SkipReason == AssignedAccessReason.Restricted
+            && target.SystemUserId == user)
+        {
+            // Owner round 67: the record became Restricted and this user is flagged external, so the Restricted remover
+            // (RestrictedExternalShareRemover) took the share away — a KNOWN cause, never an operator's removal (which
+            // would stick as Declined). Recorded as Restricted, so the share is given back once the record is not.
+            await EnsureRowsAsync(run, subject, byField,
+                new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.Restricted, null, user,
+                    ours.GrantedLevel), ct).ConfigureAwait(false);
+            run.Entry(subject, fields, user, AssignedAccessState.Skipped, AssignedAccessReason.Restricted,
+                AssignedAccessAction.Ledger);
+            return true;
+        }
+
         if (current == 0)
         {
             // Task 143's enforcer removes a WALLED user's share on a secure record: a known cause, restored once the wall
@@ -1352,7 +1370,9 @@ public sealed class AssignedAccessMaterializer
         public static Target Skip(string reason, Guid? user = null) => new(TargetKind.Skip, reason, user);
     }
 
-    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, CancellationToken ct)
+    /// <param name="flags">The root's flags, read once per run: <see cref="InternalShareEndpoints.ClassifyEligibility"/> asks
+    /// whether the record is Restricted for a linked user flagged external (owner round 67).</param>
+    private async Task<Target> ResolveTargetAsync(AssignedSubject subject, RootRecordFlags flags, CancellationToken ct)
     {
         if (subject.Kind == AssignedSubjectKind.Organization)
         {
@@ -1415,12 +1435,16 @@ public sealed class AssignedAccessMaterializer
         if (represented.Count > 1)
             return Target.Skip(AssignedAccessReason.LinkAmbiguous); // never pick one of two
 
+        // Owner round 67: the ONE rule /share-user applies. An enabled person is shared with, flagged external or not —
+        // except on a Restricted record, where a user flagged external (sprk_isexternal = true; blank is not external)
+        // gets nothing: no share, and no contact grant either, since a Restricted record admits no contact-based access.
+        // That is recorded as Restricted (the reason a contact gets there), so lifting Restricted gives the share back.
         var user = represented[0];
-        return InternalShareEndpoints.ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal) switch
+        return InternalShareEndpoints.ClassifyEligibility(
+                user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, flags.IsRestricted) switch
         {
             InternalShareEndpoints.ShareEligibility.Eligible => new Target(TargetKind.Share, null, user.SystemUserId),
-            // Refused ONLY because sprk_isexternal is not "internal": an external person gets a grant row (criterion 3).
-            InternalShareEndpoints.ShareEligibility.NotInternal => new Target(TargetKind.ContactGrant),
+            InternalShareEndpoints.ShareEligibility.ExternalOnRestricted => Target.Skip(AssignedAccessReason.Restricted, user.SystemUserId),
             _ => Target.Skip(AssignedAccessReason.Ineligible, user.SystemUserId),
         };
     }

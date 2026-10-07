@@ -30,6 +30,14 @@
 .PARAMETER Out
     Where to write the merged RibbonDiff.xml (normally back over the unpacked export before packing).
 
+.PARAMETER ShareCommandXml
+    Task 114 (owner round 67 amendment 4(a)): a file holding ONE CommandDefinition - the PLATFORM's form Share command
+    for -Entity, exactly as the live effective ribbon has it (Set-AccessRibbon.ps1 -Apply reads it with
+    RetrieveEntityRibbon: the command of the Mscrm.Form.<entity>.Share button). The merge copies it into the
+    RibbonDiff (replacing an earlier copy), strips any sprk.Access.* rule reference from it, and appends
+    sprk.Access.<entity>.ShareAllowed.EnableRule - so Share keeps every platform rule and is also hidden on a Restricted
+    record. Without it the Share rule is NOT applied (a warning says so); never hand-author the platform command.
+
 .PARAMETER SecureTransitionDeployed
     Task 150 (UX amendment acceptance (b); owner R3b / F7): include "Make Secure". Pass it ONLY when the target
     environment's BFF carries task 148's provisioning transition (existing children follow the record), round 26 item
@@ -47,6 +55,7 @@ param(
     [Parameter(Mandatory)] [string] $ExportedRibbonDiff,
     [Parameter(Mandatory)] [ValidateSet('sprk_project', 'sprk_matter', 'sprk_workassignment')] [string] $Entity,
     [Parameter(Mandatory)] [string] $Out,
+    [string] $ShareCommandXml,
     [switch] $SecureTransitionDeployed
 )
 
@@ -125,6 +134,47 @@ foreach ($sectionName in $map.Keys) {
     }
 }
 
+# Task 114 (owner round 67 amendment 4(a)): the PLATFORM's form Share command, copied from the live ribbon, with the
+# ShareAllowed rule appended - hidden on a Restricted record. Never hand-authored: the copy keeps the platform's rules.
+$shareRuleId = "sprk.Access.$Entity.ShareAllowed.EnableRule"
+$shareCommandId = $null
+if ($ShareCommandXml) {
+    [xml] $shareDoc = Get-Content -Raw -LiteralPath $ShareCommandXml
+    $shareCommand = $shareDoc.SelectSingleNode('//*[local-name()="CommandDefinition"]')
+    if (-not $shareCommand) { throw "No CommandDefinition in $ShareCommandXml." }
+    $shareCommandId = $shareCommand.GetAttribute('Id')
+    if (-not $shareCommandId -or $shareCommandId.StartsWith('sprk.')) {
+        throw "'$shareCommandId' is not the platform's Share command (expected the command of Mscrm.Form.$Entity.Share)."
+    }
+
+    # Idempotent: an earlier run's copy of the command is replaced, never doubled.
+    foreach ($node in @($commandDefinitions.ChildNodes)) {
+        if ($node -is [System.Xml.XmlElement] -and $node.GetAttribute('Id') -eq $shareCommandId) {
+            [void] $commandDefinitions.RemoveChild($node)
+        }
+    }
+
+    $copy = $ribbon.ImportNode($shareCommand, $true)
+    $rules = $copy.SelectSingleNode("*[local-name()='EnableRules']")
+    if (-not $rules) {
+        $rules = $ribbon.CreateElement('EnableRules', $copy.NamespaceURI)
+        [void] $copy.PrependChild($rules)
+    }
+    foreach ($rule in @($rules.ChildNodes)) {
+        if ($rule -is [System.Xml.XmlElement] -and $rule.GetAttribute('Id').StartsWith('sprk.Access.')) {
+            [void] $rules.RemoveChild($rule) # the live copy of a previous run's override
+        }
+    }
+    $shareRule = $ribbon.CreateElement('EnableRule', $copy.NamespaceURI)
+    $shareRule.SetAttribute('Id', $shareRuleId)
+    [void] $rules.AppendChild($shareRule)
+    [void] $commandDefinitions.AppendChild($copy)
+}
+else {
+    Write-Warning ("No -ShareCommandXml: the platform's Share command is NOT hidden on Restricted $Entity records. " +
+        "Set-AccessRibbon.ps1 -Apply reads it from the live ribbon; never hand-author it.")
+}
+
 $settings = New-Object System.Xml.XmlWriterSettings
 $settings.Indent = $true
 $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
@@ -145,3 +195,4 @@ Write-Host "Merged the Access group into $Entity -> $Out"
 Write-Host "Commands before: $($before -join ', ')"
 Write-Host "Commands after : $($after -join ', ')"
 Write-Host "Access menu    : $($menuItems -join ', ')$(if (-not $SecureTransitionDeployed) { '   (Make Secure withheld: -SecureTransitionDeployed not given)' })"
+Write-Host "Share command  : $(if ($shareCommandId) { "$shareCommandId + $shareRuleId (hidden on Restricted records)" } else { 'NOT changed (no -ShareCommandXml)' })"

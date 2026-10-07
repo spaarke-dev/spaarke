@@ -35,6 +35,7 @@ public class AssignedAccessReconciliationJobTests
         var services = new ServiceCollection();
         services.AddSingleton<AssignedAccessStore>(_h.Store);
         services.AddScoped(_ => _h.Materializer);
+        services.AddScoped(_ => _h.RestrictedRemover);
         using var provider = services.BuildServiceProvider();
 
         job ??= new AssignedAccessReconciliationJob(
@@ -195,6 +196,7 @@ public class AssignedAccessReconciliationJobTests
         var services = new ServiceCollection();
         services.AddSingleton<AssignedAccessStore>(_h.Store);
         services.AddScoped(_ => _h.Materializer);
+        services.AddScoped(_ => _h.RestrictedRemover);
         using var provider = services.BuildServiceProvider();
         var job = new AssignedAccessReconciliationJob(
             provider.GetRequiredService<IServiceScopeFactory>(), _h.Time,
@@ -439,6 +441,68 @@ public class AssignedAccessReconciliationJobTests
         AssignedAccessStore.RootFromLedgerKey(null).Should().BeNull();
         AssignedAccessStore.RootFromLedgerKey("not-a-key").Should().BeNull();
         AssignedAccessStore.RootFromLedgerKey($"account:{matter:D}:x").Should().BeNull("only a project, matter or work assignment");
+    }
+
+    // ── Task 114 (owner round 67 amendment 4(b)): the backstop for a share made on a Restricted record afterwards ──
+
+    /// <summary>
+    /// A Restricted record with no Assigned column is still a candidate: an external-flagged user's share made out of band
+    /// (the platform's Share dialog) is removed, and the run says so. An internal user's share stays.
+    /// </summary>
+    [Fact]
+    public async Task ARestrictedRoot_WithAShareOfAUserFlaggedExternal_HasItRemoved_AndTheRunReportsIt()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var external = _h.SystemUser(isExternal: true);
+        var internalUser = _h.SystemUser(isExternal: null);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(external), 1);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(internalUser), 1);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().BeNull();
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(internalUser)).Should().Be(1);
+        var json = Result(result);
+        json.GetProperty("restrictedCandidates").GetInt32().Should().Be(1);
+        json.GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
+        json.GetProperty("materialized").GetInt32().Should().Be(0, "a Restricted root with no Assigned column is not materialized");
+    }
+
+    /// <summary>A share S5 keeps (a Restricted secure record's last reader) is reported and makes the run partial, never "ok".</summary>
+    [Fact]
+    public async Task ARestrictedSecureRoot_WhoseOnlyReaderIsFlaggedExternal_KeepsTheShare_AndTheRunIsNotOk()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: true, IsRestricted: true);
+        var external = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(external), 1);
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("KEPT-LAST-READER");
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().Be(1);
+        Result(result).GetProperty("keptAsLastReader").GetInt32().Should().Be(1);
+    }
+
+    /// <summary>A Restricted record's removal that cannot be confirmed fails the run (the root is incomplete).</summary>
+    [Fact]
+    public async Task ARestrictedRoot_WhoseExternalShareCannotBeRemoved_FailsTheRun()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(_h.SystemUser(isExternal: true)), 1);
+        _h.Shares.IgnoreWrites = true;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeFalse();
+        Result(result).GetProperty("incompleteTotal").GetInt32().Should().Be(1);
     }
 
     [Fact]

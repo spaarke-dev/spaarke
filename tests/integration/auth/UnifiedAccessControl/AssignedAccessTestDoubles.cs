@@ -382,6 +382,21 @@ internal static class AssignedAccessTestDoubles
                 roots.Count > ceiling ? (roots.Take(ceiling).ToList(), true) : (roots, false));
         }
 
+        /// <summary>Task 114: the roots whose Access Permission is Restricted (what the production scan's filter selects).</summary>
+        public ConcurrentDictionary<(ExternalGrantRootType Type, Guid Id), bool> RestrictedRoots { get; } = new();
+
+        internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanRestrictedRootsAsync(
+            ExternalGrantRootType rootType, CancellationToken ct)
+        {
+            if (FailScan)
+                throw new HttpRequestException("Simulated scan failure.");
+            var roots = RestrictedRoots.Keys
+                .Where(k => k.Type == rootType)
+                .Select(k => new AssignedRootRef(rootType, k.Id, Modified.TryGetValue(k.Id, out var m) ? m : null))
+                .ToList();
+            return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
+        }
+
         internal override Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
         {
             if (FailScan)
@@ -814,6 +829,33 @@ internal static class AssignedAccessTestDoubles
         public AssignedAccessMaterializer Materializer => new(
             Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
             Children, Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
+
+        /// <summary>
+        /// Task 114: the PRODUCTION Restricted remover over this harness's flags, share table, system users
+        /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
+        /// </summary>
+        public RestrictedExternalShareRemover RestrictedRemover => new(
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children,
+            NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>
+        /// Task 114: a system user the share routes and the Restricted remover read (an enabled person; the flag as given —
+        /// <c>null</c> is a blank <c>sprk_isexternal</c>).
+        /// </summary>
+        public Guid SystemUser(bool? isExternal, bool disabled = false, Guid? id = null)
+        {
+            var userId = id ?? Guid.NewGuid();
+            Grants.SystemUsers[userId] = new Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow
+            {
+                Id = userId,
+                FullName = $"User {userId:N}",
+                IsDisabled = disabled,
+                AccessMode = 0,
+                ApplicationId = null,
+                IsExternal = isExternal,
+            };
+            return userId;
+        }
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)

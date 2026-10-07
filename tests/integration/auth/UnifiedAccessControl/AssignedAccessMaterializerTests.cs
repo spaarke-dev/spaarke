@@ -106,17 +106,78 @@ public class AssignedAccessMaterializerTests
         row.GrantedLevel.Should().Be(CollaborateMask);
     }
 
-    [Fact]
-    public async Task LinkedToAUserRefusedOnlyBecauseExternal_GetsAGrantRowInstead()
+    /// <summary>
+    /// Task 114 (owner round 67 amendment 1): the materializer asks /share-user's ONE rule. A linked user flagged external,
+    /// or with a BLANK flag, is an enabled person and is SHARED with on a record that is not Restricted — this used to
+    /// fall back to a contact grant row ("refused only because external").
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(null)]
+    public async Task LinkedToAUserFlaggedExternalOrBlank_OnAStandardRoot_IsShared_NoGrantRow(bool? isExternal)
     {
-        var (contact, _) = _h.LinkedContact(isExternal: true);
+        var (contact, user) = _h.LinkedContact(isExternal: isExternal);
         _h.Store.Assign(Matter, _matter, Attorney1, contact);
 
         await Sync();
 
-        _h.Grants.ActiveRowsOf(_matter, contact).Should().ContainSingle().Which.AccessLevel.Should().Be(Collaborate);
-        _h.Shares.Writes.Should().BeEmpty();
-        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Granted);
+        ShareMask(user).Should().Be(CollaborateMask);
+        _h.Grants.Rows.Should().BeEmpty();
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared);
+    }
+
+    /// <summary>
+    /// Task 114: on a RESTRICTED root a linked user flagged external gets nothing — no share (the rule) and no contact grant
+    /// (Restricted admits no contact access) — recorded Skipped(restricted). A blank-flag linked user is still shared.
+    /// </summary>
+    [Fact]
+    public async Task OnARestrictedRoot_ALinkedUserFlaggedExternal_GetsNoShareAndNoGrant_ButABlankFlaggedOneIsShared()
+    {
+        Restricted();
+        var (externalContact, externalUser) = _h.LinkedContact(isExternal: true);
+        var (blankContact, blankUser) = _h.LinkedContact(isExternal: null);
+        _h.Store.Assign(Matter, _matter, Attorney1, externalContact);
+        _h.Store.Assign(Matter, _matter, Paralegal1, blankContact);
+
+        await Sync();
+
+        ShareMask(externalUser).Should().BeNull();
+        _h.Grants.Rows.Should().BeEmpty();
+        var row = LedgerRow(externalContact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped);
+        row.Reason.Should().Be(AssignedAccessReason.Restricted);
+        ShareMask(blankUser).Should().Be(CollaborateMask, "a blank sprk_isexternal is not external (round 67 item 3)");
+    }
+
+    /// <summary>
+    /// Task 114 (amendment 3): a record that BECOMES Restricted loses the auto share of a user flagged external (the
+    /// Restricted remover takes it, before the materializer on the sync route) — recorded as the known cause
+    /// Skipped(restricted), never Declined; and once the record is no longer Restricted the share is given back.
+    /// </summary>
+    [Fact]
+    public async Task WhenARecordBecomesRestricted_AnExternalUsersAutoShareIsRemoved_RecordedRestricted_AndRestoredAfter()
+    {
+        var (contact, user) = _h.LinkedContact(isExternal: true);
+        _h.SystemUser(isExternal: true, id: user);
+        _h.Store.Assign(Matter, _matter, Attorney1, contact);
+        await Sync();
+        ShareMask(user).Should().Be(CollaborateMask);
+
+        Restricted();
+        var removal = await _h.RestrictedRemover.RemoveForRecordAsync(Matter, _matter, new[] { TestTenant }, CancellationToken.None);
+        await Sync();
+
+        removal.Removed.Should().Equal(user);
+        ShareMask(user).Should().BeNull();
+        var row = LedgerRow(contact, Attorney1);
+        row.State.Should().Be(AssignedAccessState.Skipped, "a known cause, not an operator's removal");
+        row.Reason.Should().Be(AssignedAccessReason.Restricted);
+
+        _h.Participations.Flags[_matter] = RootRecordFlags.None; // Standard again
+        await Sync();
+
+        ShareMask(user).Should().Be(CollaborateMask, "the share comes back once the record is not Restricted");
+        LedgerRow(contact, Attorney1).State.Should().Be(AssignedAccessState.Shared);
     }
 
     [Theory]

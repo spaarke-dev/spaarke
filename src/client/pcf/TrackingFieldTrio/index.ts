@@ -120,6 +120,10 @@
  * - The dead `onSetStandingGrant` wiring is removed (the modal has had no
  *   standing-grant control since task 073 UAT v1.0.24 #5).
  *
+ * v1.0.36 (task 114, unified-access-control-r2 — owner round 67 amendment 4(c)): no change in this file's logic; the
+ * bundled `AccessGrantModal` labels a user share the BFF marks `externalNoAccess` (a Restricted record, a user flagged
+ * `sprk_isexternal = true`) as "External user — no access" until the server removes it.
+ *
  * v1.0.35 (task 140, unified-access-control-r2 — contact-side Grant Access, owner C4 / Q2):
  * `fetchExistingGrants` also reads `_sprk_grantedbycontact_value` (the new contact-typed issuer lookup), and the
  * bundled `AccessGrantModal` shows a contact-issued grant as "Granted by {contact} (external contact)". Revoking it
@@ -1200,7 +1204,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.35 • Built 2026-10-04',
+      versionText: 'v1.0.36 • Built 2026-10-06',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

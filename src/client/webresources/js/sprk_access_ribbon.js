@@ -74,8 +74,9 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // secure transition, the in-place retry, "Someone" for a name that cannot be resolved. 1.4.0 - round 46 item 4: a
     // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
     // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
-    // caller_rights_unverifiable refusal in this script's own words.
-    ns.VERSION = "1.5.0";
+    // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
+    // isShareAllowed, the rule that hides the platform's Share command on a Restricted record.
+    ns.VERSION = "1.6.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
     var GATE_PATH = "/api/v1/external-access/can-manage-access";
@@ -172,6 +173,55 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
      */
     ns.isAccessMenuVisible = function (primaryControl) {
         return ns.canUpdateAccess(primaryControl);
+    };
+
+    // =========================================================================================================
+    // Task 114 - the platform's Share command on a Restricted record (owner round 67 amendment 4(a))
+    // =========================================================================================================
+
+    /** sprk_accesspermission = Restricted (internal use only). The same integer the BFF reads (Restricted 100000002). */
+    ns.ACCESS_PERMISSION_RESTRICTED = 100000002;
+
+    /**
+     * EnableRule ADDED to the platform's own form Share command on the project, matter and work assignment main forms
+     * (Merge-AccessRibbon.ps1 copies that command from the live ribbon and appends this rule): Share is hidden on a
+     * Restricted record, so sharing goes through Manage Access "+ User", which refuses a user flagged external there. A
+     * convenience only - the BFF removes such a share wherever it came from (task 114's Restricted remover, on the save
+     * and every 5 minutes).
+     *
+     * Reads the form's own sprk_accesspermission when the form carries it (so an unsaved change to Restricted hides Share
+     * once the ribbon refreshes - assignedaccess_postsave.js refreshes it on change); otherwise the saved value with ONE
+     * Xrm.WebApi.retrieveRecord. A read that fails hides Share (fail closed): "+ User" is still there. An unsaved record
+     * answers true - the platform's own rules keep Share off a new form.
+     * @param {object} primaryControl - the form context
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowed = function (primaryControl) {
+        try {
+            var attribute = primaryControl && typeof primaryControl.getAttribute === "function"
+                ? primaryControl.getAttribute("sprk_accesspermission")
+                : null;
+            if (attribute) {
+                return attribute.getValue() !== ns.ACCESS_PERMISSION_RESTRICTED;
+            }
+
+            var entity = primaryControl && primaryControl.data && primaryControl.data.entity;
+            var recordId = entity ? (entity.getId() || "").replace(/[{}]/g, "").toLowerCase() : "";
+            if (!recordId) {
+                return true;
+            }
+
+            return Promise.resolve(Xrm.WebApi.retrieveRecord(entity.getEntityName(), recordId, "?$select=sprk_accesspermission"))
+                .then(function (row) {
+                    return !!row && row.sprk_accesspermission !== ns.ACCESS_PERMISSION_RESTRICTED;
+                }, function (error) {
+                    console.warn(LOG, "sprk_accesspermission could not be read; Share stays hidden (use Manage Access).", error);
+                    return false;
+                });
+        } catch (error) {
+            console.error(LOG, "isShareAllowed failed; Share stays hidden.", error);
+            return false;
+        }
     };
 
     // =========================================================================================================

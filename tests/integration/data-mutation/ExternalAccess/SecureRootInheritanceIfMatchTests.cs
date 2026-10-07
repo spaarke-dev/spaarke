@@ -97,7 +97,8 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("matter", matter, user, ExternalAccessLevel.Collaborate),
-            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
+            scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, _fixture.NoAccessReads,
+            new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
                 | AccessRights.Share),

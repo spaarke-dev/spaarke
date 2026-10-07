@@ -41,11 +41,16 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// confirmed", which claims no outcome it cannot prove.</item>
 /// </list></para>
 ///
-/// <para><b>Who can be shared with.</b> A user who exists, is enabled, is a person (access mode Read-Write,
-/// Administrative or Read, and no application id — the rule task 100 applies to reminder recipients) and whose
-/// <c>sprk_isexternal</c> flag confirms them internal. An external person reaches a record through a contact grant,
-/// which carries an expiry and reminders. An unreadable value counts as the refusing one (ADR-003). Unsharing checks
-/// only that the user exists: a share must stay removable after its holder is disabled.</para>
+/// <para><b>Who can be shared with</b> (<see cref="ClassifyEligibility"/>, owner round 67, 2026-10-06). A user who exists,
+/// is enabled and is a person (access mode Read-Write, Administrative or Read, and no application id — the rule task 100
+/// applies to reminder recipients). No licence check is added: the platform's own Share dialog shares only with licensed
+/// users, and an enabled person is the proxy. <c>sprk_isexternal</c> matters on ONE kind of record: a Restricted one
+/// (<c>sprk_accesspermission</c> = Restricted) is for internal use only, so a user flagged <c>sprk_isexternal = true</c>
+/// is refused there (422 <c>user_not_internal</c>). A blank flag is NOT external. On any other record an external-flagged
+/// licensed user is shared with like anyone else (owner ruling 2026-09-18). The record's flags are read only for a user
+/// flagged external, and a read that fails refuses (500 <c>read_failed</c> — ADR-003; never "not Restricted"). An
+/// unreadable disabled or access-mode value counts as the refusing one. Unsharing checks only that the user exists: a
+/// share must stay removable after its holder is disabled or flagged external.</para>
 ///
 /// <para><b>Levels.</b> <see cref="RecordShareLevels"/> is the one level-to-rights table: View Only = Read; Collaborate =
 /// Read, Write, Append, AppendTo and Share; Full Access = Collaborate + Delete; no level carries Assign. Collaborate and
@@ -101,7 +106,10 @@ public static class InternalShareEndpoints
     /// <summary>The account is an application, support or delegated-administration account, so nothing was shared.</summary>
     internal const string UserNotAPersonReasonCode = "sdap.access.user_share.user_not_a_person";
 
-    /// <summary>The user is not confirmed internal, so nothing was shared.</summary>
+    /// <summary>
+    /// The record is Restricted (internal use only) and the user is flagged external (<c>sprk_isexternal = true</c>), so
+    /// nothing was shared (owner round 67). Not used on any other record: there an external-flagged user may be shared with.
+    /// </summary>
     internal const string UserNotInternalReasonCode = "sdap.access.user_share.user_not_internal";
 
     /// <summary>The user or the record's shares could not be read, so nothing was written.</summary>
@@ -158,7 +166,8 @@ public static class InternalShareEndpoints
 
     /// <summary>
     /// The columns the eligibility check reads. All are standard <c>systemuser</c> columns except
-    /// <c>sprk_isexternal</c>, which <c>SystemUserIdentityResolver</c> already reads on the same table.
+    /// <c>sprk_isexternal</c>, which <c>SystemUserIdentityResolver</c> already reads on the same table — still selected
+    /// because a Restricted record refuses a user flagged external (owner round 67).
     /// </summary>
     /// <remarks>
     /// <c>fullname</c> is deliberately absent (Step 9.5 review): the share path never displays a name, and every
@@ -176,8 +185,11 @@ public static class InternalShareEndpoints
     /// </remarks>
     internal const string SystemUserExistsSelect = "systemuserid";
 
-    /// <summary>The columns the share list reads for names.</summary>
-    internal const string SystemUserNameSelect = "systemuserid,fullname";
+    /// <summary>
+    /// The columns the share list reads: names, and (task 114) the external flag, so Manage Access can mark an external
+    /// user's share on a Restricted record.
+    /// </summary>
+    internal const string SystemUserNameSelect = "systemuserid,fullname,sprk_isexternal";
 
     /// <summary>What the secure-record last-reader check reads: whether each other sharer is enabled (task 139, S5).</summary>
     internal const string SystemUserEnabledSelect = "systemuserid,isdisabled";
@@ -251,14 +263,15 @@ public static class InternalShareEndpoints
     /// <summary>Handles <c>POST /api/v1/external-access/share-user</c>.</summary>
     /// <returns>
     /// 200 with the confirmed level and mask and whether the share was created, updated or already right. 400 for a
-    /// missing record, user or level. 404 for an unknown user. 422 for a user who is disabled, not a person, or not
-    /// confirmed internal. 500 when the user or the shares could not be read (nothing was written), or when a write
-    /// could not be confirmed.
+    /// missing record, user or level. 404 for an unknown user. 422 for a user who is disabled or not a person, or who is
+    /// flagged external when the record is Restricted. 500 when the user, the record's flags (read only for a user
+    /// flagged external) or the shares could not be read (nothing was written), or when a write could not be confirmed.
     /// </returns>
     internal static async Task<IResult> ShareAsync(
         ShareRecordWithUserRequest request,
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         ITenantCache cache,
         CallerRecordAccessProbe callerAccessProbe,
         SecureChildShareSynchronizer secureChildShares,
@@ -290,7 +303,7 @@ public static class InternalShareEndpoints
         var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
         var rootEntitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
 
-        // ── Who: an existing, enabled, internal person ────────────────────────
+        // ── Who: an existing, enabled person — and, on a Restricted record, not flagged external ──
         SystemUserRow? user;
         try
         {
@@ -309,13 +322,47 @@ public static class InternalShareEndpoints
             return Refused(httpContext, StatusCodes.Status404NotFound, NotSharedTitle,
                 UserNotFoundReasonCode, "No user with this id exists, so the record was not shared.");
 
-        if (EligibilityRefusal(user, httpContext) is { } ineligible)
+        // Owner round 67: whether the record is Restricted matters only for a user flagged external who would otherwise be
+        // eligible, so the flags are read only then — an ordinary share costs no extra read, and a disabled or non-person
+        // account keeps its own 422. A read that fails, or flags that come back unreadable, refuse (ADR-003) as "could not
+        // be read", never as "the record is Restricted", which it could not back (task 138's rule for the grant policy).
+        bool? rootIsRestricted = null;
+        if (user.IsExternal == true
+            && ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, rootIsRestricted: false)
+               == ShareEligibility.Eligible)
+        {
+            RootRecordFlags? readFlags = null;
+            try
+            {
+                var flags = await participations.GetRootRecordFlagsAsync(
+                    ExternalGrantRoot.LogicalNameFor(root.Type), new[] { root.Id }, ct);
+                if (flags.TryGetValue(root.Id, out var f) && !f.IsUnreadable)
+                    readFlags = f;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[USER-SHARE] Could not read the access settings of {RootType} {RootId} (caller {CallerOid}). Nothing " +
+                    "was shared.", root.Type, root.Id, callerOid);
+            }
+
+            if (readFlags is not { } known)
+                return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
+                    ReadFailedReasonCode,
+                    "This user is flagged as external, and whether this record is Restricted could not be read, so it " +
+                    "was not shared. Try again.");
+
+            rootIsRestricted = known.IsRestricted;
+        }
+
+        if (EligibilityRefusal(user, rootIsRestricted, httpContext) is { } ineligible)
         {
             logger.LogWarning(
                 "[USER-SHARE] Refused to share {RootType} {RootId} with {SystemUserId}: disabled={IsDisabled}, " +
-                "accessmode={AccessMode}, application={IsApplication}, external={IsExternal} (caller {CallerOid}).",
+                "accessmode={AccessMode}, application={IsApplication}, external={IsExternal}, restricted={IsRestricted} " +
+                "(caller {CallerOid}).",
                 root.Type, root.Id, systemUserId, user.IsDisabled, user.AccessMode, user.ApplicationId is not null,
-                user.IsExternal, callerOid);
+                user.IsExternal, rootIsRestricted, callerOid);
             return ineligible;
         }
 
@@ -872,10 +919,15 @@ public static class InternalShareEndpoints
 
     /// <summary>Handles <c>GET /api/v1/external-access/user-shares</c>.</summary>
     /// <returns>200 with the record's direct system-user shares. 400 for a missing record. 500 when the shares could not be read.</returns>
+    /// <remarks>Task 114 (owner round 67 amendment 4(c)): on a Restricted record a share held by a user flagged external is
+    /// marked <see cref="RecordUserShare.ExternalNoAccess"/>, which Manage Access shows as "External user — no access" until
+    /// the Restricted remover takes it away. The record's flags are read only when such a user is listed; display-only, so
+    /// a flag read that fails marks nothing (logged) rather than failing the list.</remarks>
     internal static async Task<IResult> ListAsync(
         [AsParameters] RecordUserSharesQuery query,
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -910,15 +962,34 @@ public static class InternalShareEndpoints
                 ModifiedOn: g.Max(s => s.ModifiedOn)))
             .ToList();
 
-        var names = await ReadNamesAsync(dataverseClient, userShares.Select(s => s.SystemUserId).ToList(), logger, ct);
+        var people = await ReadNamesAsync(dataverseClient, userShares.Select(s => s.SystemUserId).ToList(), logger, ct);
+
+        // Only a stored true is external (owner round 67). Whether the record is Restricted is read only when one is listed.
+        var restricted = false;
+        if (people.Values.Any(p => p.IsExternal == true))
+        {
+            try
+            {
+                var flags = await participations.GetRootRecordFlagsAsync(
+                    ExternalGrantRoot.LogicalNameFor(root.Type), new[] { root.Id }, ct);
+                restricted = flags.TryGetValue(root.Id, out var f) && !f.IsUnreadable && f.IsRestricted;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "[USER-SHARE] Whether {RootType} {RootId} is Restricted could not be read; external users' shares are " +
+                    "listed unmarked.", root.Type, root.Id);
+            }
+        }
 
         var listed = userShares
             .Select(s => new RecordUserShare(
                 s.SystemUserId,
-                names.GetValueOrDefault(s.SystemUserId),
+                people.GetValueOrDefault(s.SystemUserId)?.FullName,
                 s.Mask,
                 RecordShareLevels.LevelForMask(s.Mask),
-                s.ModifiedOn))
+                s.ModifiedOn,
+                ExternalNoAccess: restricted && people.GetValueOrDefault(s.SystemUserId)?.IsExternal == true))
             .OrderBy(s => s.FullName is null)
             // Ordinal, not CurrentCulture (Step 9.5 review finding 11): a server-side order must not depend on the
             // host's culture configuration, or one record lists its users in different orders across hosts — or
@@ -1086,13 +1157,14 @@ public static class InternalShareEndpoints
     }
 
     /// <summary>
-    /// Names for the listed users, read in batches. Display-only, so a failed batch leaves its names <c>null</c> rather
-    /// than failing the list: who holds which rights has already been read.
+    /// Names (and the external flag, task 114) of the listed users, read in batches. Display-only, so a failed batch leaves
+    /// its users out — names <c>null</c>, unmarked — rather than failing the list: who holds which rights has already been
+    /// read.
     /// </summary>
-    private static async Task<IReadOnlyDictionary<Guid, string?>> ReadNamesAsync(
+    private static async Task<IReadOnlyDictionary<Guid, SystemUserRow>> ReadNamesAsync(
         DataverseWebApiClient dataverseClient, IReadOnlyList<Guid> systemUserIds, ILogger logger, CancellationToken ct)
     {
-        var names = new Dictionary<Guid, string?>();
+        var names = new Dictionary<Guid, SystemUserRow>();
 
         foreach (var batch in systemUserIds.Chunk(NameBatchSize))
         {
@@ -1106,7 +1178,7 @@ public static class InternalShareEndpoints
                     cancellationToken: ct);
 
                 foreach (var row in rows.Where(r => batch.Contains(r.Id)))
-                    names[row.Id] = row.FullName;
+                    names[row.Id] = row;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
@@ -1123,30 +1195,41 @@ public static class InternalShareEndpoints
     // =========================================================================
 
     /// <summary>
-    /// The refusal for a user who cannot receive a share, or <c>null</c> for one who can. An unreadable value counts as
-    /// the refusing one (ADR-003).
+    /// The refusal for a user who cannot receive a share, or <c>null</c> for one who can (<see cref="ClassifyEligibility"/>).
     /// </summary>
-    private static IResult? EligibilityRefusal(SystemUserRow user, HttpContext httpContext)
-        => ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal) switch
+    private static IResult? EligibilityRefusal(SystemUserRow user, bool? rootIsRestricted, HttpContext httpContext)
+        => ClassifyEligibility(user.IsDisabled, user.AccessMode, user.ApplicationId, user.IsExternal, rootIsRestricted) switch
         {
             ShareEligibility.Disabled => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
                 UserDisabledReasonCode, "This user is disabled, so the record was not shared with them."),
             ShareEligibility.NotAPerson => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
                 UserNotAPersonReasonCode,
                 "This is an application, support or delegated-administration account, not a person, so the record was not shared with it."),
-            ShareEligibility.NotInternal => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
+            ShareEligibility.ExternalOnRestricted => Refused(httpContext, StatusCodes.Status422UnprocessableEntity, NotSharedTitle,
                 UserNotInternalReasonCode,
-                "This user is not confirmed as internal, so the record was not shared with them. Give an external person access with an external grant, which carries an expiry."),
+                "This record is Restricted to internal users, and this user is flagged as external, so it was not shared with them."),
             _ => null,
         };
 
     /// <summary>
-    /// The ONE share-eligibility rule (task 063), extracted for task 142's Assigned-To materializer so both ask the same
-    /// question: an existing, ENABLED PERSON (access mode Read-Write, Administrative or Read, and no application id) whose
-    /// <c>sprk_isexternal</c> confirms them internal. Checked in that order; an unreadable (null) value counts as the
-    /// refusing one (ADR-003).
+    /// The ONE share-eligibility rule, asked by <c>/share-user</c> and by task 142's Assigned-To materializer (owner round
+    /// 67, 2026-10-06 — it replaces task 063's "<c>sprk_isexternal</c> must confirm them internal"). Checked in this order:
+    /// <list type="number">
+    /// <item>enabled — an unreadable (null) value counts as disabled (ADR-003);</item>
+    /// <item>a person — access mode Read-Write, Administrative or Read, and no application id; an unreadable access mode
+    /// counts as not a person;</item>
+    /// <item>on a RESTRICTED record (<c>sprk_accesspermission</c> = Restricted, internal use only), not flagged external.
+    /// Only <c>sprk_isexternal = true</c> is external: a blank (null) flag is NOT ("sprk_isexternal means they're
+    /// external"). On any other record the flag is not consulted (owner ruling 2026-09-18).</item>
+    /// </list>
+    /// No licence check is added: the platform's Share dialog shares only with licensed users, and an enabled person is the
+    /// proxy (owner round 67).
     /// </summary>
-    internal static ShareEligibility ClassifyEligibility(bool? isDisabled, int? accessMode, Guid? applicationId, bool? isExternal)
+    /// <param name="rootIsRestricted">Whether the record is Restricted. Consulted ONLY for a user flagged external. A caller
+    /// that has not read it passes <c>null</c>, on which an external-flagged user is refused — fail closed, so a caller that
+    /// shares with such a user must read the record's flags first, as <c>/share-user</c> does.</param>
+    internal static ShareEligibility ClassifyEligibility(
+        bool? isDisabled, int? accessMode, Guid? applicationId, bool? isExternal, bool? rootIsRestricted)
     {
         if (isDisabled is not false)
             return ShareEligibility.Disabled;
@@ -1154,8 +1237,8 @@ public static class InternalShareEndpoints
         if (applicationId is not null || accessMode is not (>= 0 and <= LastPersonAccessMode))
             return ShareEligibility.NotAPerson;
 
-        if (isExternal is not false)
-            return ShareEligibility.NotInternal;
+        if (isExternal == true && rootIsRestricted is not false)
+            return ShareEligibility.ExternalOnRestricted;
 
         return ShareEligibility.Eligible;
     }
@@ -1202,7 +1285,7 @@ public static class InternalShareEndpoints
     /// <summary>The outcome of <see cref="ClassifyEligibility"/>.</summary>
     internal enum ShareEligibility
     {
-        /// <summary>An enabled, internal person: may receive a POA share.</summary>
+        /// <summary>An enabled person who may receive a POA share on this record.</summary>
         Eligible,
 
         /// <summary>Disabled (or unreadable).</summary>
@@ -1211,8 +1294,11 @@ public static class InternalShareEndpoints
         /// <summary>An application, support, non-interactive or delegated-administration account (or unreadable).</summary>
         NotAPerson,
 
-        /// <summary>Not confirmed internal: <c>sprk_isexternal</c> is true or unreadable.</summary>
-        NotInternal,
+        /// <summary>
+        /// Flagged external (<c>sprk_isexternal = true</c>) on a Restricted record — or one whose Restricted state the caller
+        /// did not read (owner round 67).
+        /// </summary>
+        ExternalOnRestricted,
     }
 
     /// <summary>The <c>systemuser</c> columns these routes read.</summary>
@@ -1235,7 +1321,7 @@ public static class InternalShareEndpoints
         [JsonPropertyName("applicationid")]
         public Guid? ApplicationId { get; set; }
 
-        /// <summary>Spaarke's internal-vs-external flag.</summary>
+        /// <summary>Spaarke's internal-vs-external flag: only <c>true</c> is external; blank is not (owner round 67).</summary>
         [JsonPropertyName("sprk_isexternal")]
         public bool? IsExternal { get; set; }
     }

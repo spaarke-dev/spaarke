@@ -1011,6 +1011,11 @@ customer's group. Exchange adds the two sources together, so an Entra mailbox gr
 
 **H11** provisions users per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow.
 
+**B2B guests are flagged external** (unified-access-control-r2 task 114, owner round 67). A blank
+`systemuser.sprk_isexternal` means NOT external, so every B2B guest (`#EXT#` in its user name) must carry
+`sprk_isexternal = Yes`: `scripts/Set-ExternalFlagForB2BGuests.ps1` (dry run → `-Apply` → `-Verify`, §12.2 Phase 7b).
+A user flagged external is refused a share on a Restricted record and gets no internal-only message.
+
 ### 7.8 Phase 8 — Configuration Seed (H12a, H12b, H12c)
 
 **H12a** and **H12b** are DAG-parallel (no cross-dependency):
@@ -1232,6 +1237,16 @@ pac admin create-environment `
 # Phase 7 — Dataverse App User + Graph app-role parity
 # Interim: PPAC UI + Graph SDK; see auth-deployment-setup stub for MI-first checklist
 # T2 verification MANDATORY: systemusers?$filter=applicationid eq {uami-app-id} returns 1
+
+# Phase 7b — B2B guests are flagged external (unified-access-control-r2 task 114, owner round 67 — per environment,
+# after the users exist, and again whenever B2B guests are added outside the product). A BLANK sprk_isexternal means
+# NOT external: Manage Access "+ User" and the Assigned-To rule share with the user, internal-only messages reach them,
+# and a Restricted record keeps their share. This sets sprk_isexternal = Yes on every systemuser whose user name holds
+# "#EXT#" and changes nothing else. Dry run first and review the list with the owner, then -Apply, then -Verify (exit 0).
+# Within 5 minutes of -Apply the BFF removes each newly flagged guest's share on every Restricted record.
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>"            # dry run (read-only)
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Apply
+.\scripts\Set-ExternalFlagForB2BGuests.ps1 -EnvironmentUrl "<dv-org-url>" -Verify    # MUST exit 0
 
 # Phase 8 — config seed
 .\scripts\seed-data\Deploy-All-AI-SeedData.ps1 -EnvironmentUrl "<dv-org-url>"

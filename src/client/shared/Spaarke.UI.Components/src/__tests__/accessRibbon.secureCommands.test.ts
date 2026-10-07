@@ -137,7 +137,7 @@ function load(): World {
   win.Spaarke.AssignedAccess._cachedApiBaseUrl = BFF;
 
   const ribbon = win.Spaarke?.Access?.Ribbon;
-  expect(ribbon?.VERSION).toBe('1.5.0'); // the real script ran
+  expect(ribbon?.VERSION).toBe('1.6.0'); // the real script ran
   return {
     ribbon,
     retrieveRecord,

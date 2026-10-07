@@ -572,7 +572,7 @@ public class SecureChildShareMirrorTests
         AccessRights callerRights = CallerHoldsEverything) =>
         InternalShareEndpoints.ShareAsync(
             new ShareRecordWithUserRequest("project", ProjectR, user, level),
-            _shares, _users.Client, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
+            _shares, _users.Client, _flags, _cache.Object, new InternalUserShareTests.StubCallerRightsProbe(callerRights),
             world.Synchronizer(_shares), SecureChildShareWorld.NobodyWalled(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
             Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(), // batch 4 integration (task 142)
             Context(), NullLogger<Program>.Instance, CancellationToken.None);
