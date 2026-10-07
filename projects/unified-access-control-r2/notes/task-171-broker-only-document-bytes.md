@@ -286,6 +286,62 @@ Verification: full BFF suite **18,123 passed, 0 failed, 54 skipped (18,177)**; A
 the DocumentUploadWizard code page (an old wizard's "Save as new version" now gets the 409 and re-shows its collision
 prompt until the user picks "Keep both").
 
+### Owner round 72 (2026-10-06) — fix round 2
+
+**F4 — the locked item-id copy.** `sprk_graphitemid` cannot be field-secured (alternate key `sprk_graphitemid_uk`,
+Dataverse 0x80060896), so `sprk_document.sprk_graphitemidbound` (single line of text, the same MaxLength, read live)
+holds the same value and is field-secured with the task-133 "Spaarke BFF-Managed Field Writers / Readers" profiles.
+- **Written** through `Spaarke.Dataverse.DocumentPointerBinding` on EVERY BFF pointer write, on the same write:
+  `DataverseServiceClientImpl.UpdateDocumentAsync` (typed — Office persistence, upload finalization, email attachments),
+  the external-portal upload, the three communication archive / attachment writers (`CommunicationService`,
+  `IncomingCommunicationProcessor`, `MessageAttachmentMaterializer`), Compose create-on-save (create and upsert), and
+  `DocumentContainerRelocator.WritePointerAsync` (the attach route `POST /api/v1/documents/{id}/file`, the legacy
+  migration and every Make Secure move). Version saves do not change the item, so they do not write it.
+- **Deliberately NOT a chokepoint in the generic write layer**: a generic write that carries `sprk_graphitemid` from
+  configuration or a playbook (Update Record node) is not bound, so such a re-point is REFUSED rather than laundered.
+- **Arch guard** `DocumentPointerBindingGuardTests`: every server file that writes `sprk_graphitemid` must also bind the
+  copy (7 writer files found; negative control included).
+- **The check** (`RecordContainerResolver.DocumentPointer`, interim AND strict rules): a copy that DIFFERS from the item
+  about to be read → refused, always. An EMPTY copy → refused once `DocumentPointer:ItemIdBoundBackfillComplete=true`;
+  until then it falls back to the rule in force. The interim rule reads the copy in the row read it already makes (no
+  extra round trip); the strict rule adds one small read.
+- **Rollout (simplest safe):** the flag defaults to false, so deploying the BFF refuses no existing document, while a
+  re-point of any row that already has a copy (every row the new BFF writes) is refused at once. Run order below.
+
+**F10 — share-link refused on secure / Restricted records.** `POST /api/documents/{id}/share-link` answers 403 with
+`sdap.access.deny.share_link_secure_record` or `…_share_link_restricted_record` (an unreadable flag — fail closed — reads
+as restricted; an unreadable document row: `…_share_link_protection_unverifiable`), before anything is minted. Reads
+reused: `ExternalParticipationService.GetRootRecordFlagsAsync` for the document's project / matter / work-assignment
+links, and `RecordContainerResolver.DeriveDocumentContainersAsync(...).IsSecure` (a document filed to a CHILD of a secure
+record). Standard documents are unchanged.
+
+**Scripts and the exact run order (main session; nothing was applied live):**
+
+| # | Step | Command |
+|---|---|---|
+| 1 | Create the column, secured from birth | `scripts/Set-DocumentRelocationSchema.ps1 -EnvironmentUrl <env>` (dry run) → `-Apply` → `-Verify` |
+| 2 | Grant the BFF-managed profiles (gate 23, now incl. the copy) | `scripts/Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl <env> -BffApplicationIds <ids>` (dry run) → `-ClientNoLongerWritesPointers -Apply` → `-Verify` |
+| 3 | Deploy the BFF (this branch) | `DocumentPointer__ItemIdBoundBackfillComplete` left UNSET |
+| 4 | Backfill existing rows | `scripts/Invoke-DocumentItemIdBoundBackfill.ps1 -EnvironmentUrl <env>` (dry run) → `-Apply` → `-Verify` |
+| 5 | End the transition | App Service setting `DocumentPointer__ItemIdBoundBackfillComplete=true` after a fresh step-4 `-Verify` |
+
+Steps 1–2 MUST precede step 3: the new BFF writes the column on every pointer write, and a write naming a column that is
+missing, or one the BFF identity may not write, fails. Step 1 adds the column to SpaarkeCore through the
+rootcomponentbehavior-0 rule (`Test-DvInSolution`), and its `-Verify` checks it travels.
+
+**Live checks (after step 5):** (a) `PATCH sprk_documents(<id>) { sprk_graphitemid: <another item of the same
+container> }` as an ordinary Write holder → succeeds in Dataverse, then `GET /api/documents/<id>/content` → 409
+`document_storage_unverified` (log: "differs from its field-secured copy"); (b) the same user's PATCH of
+`sprk_graphitemidbound` → refused by Dataverse (field security); (c) a fresh upload → both columns equal;
+(d) share-link on a document of a secure project → 403 `…share_link_secure_record`; of a Restricted matter → 403
+`…share_link_restricted_record`; of a standard project → 200.
+
+**Round-72 known limits:** (i) a document filed ONLY to a child record (event, invoice, to-do) of a RESTRICTED (not
+secure) root is not refused a share-link — Restricted is read on the document's direct project / matter / work-assignment
+links (secure is covered through the derivation); (ii) the copy is only as good as the backfilled value — a pointer forged
+before step 4 is copied (accepted pre-lock residual); (iii) a row written by an OLD BFF instance between steps 3 and 4 has
+no copy and is refused after step 5 — step 5's fresh `-Verify` catches it.
+
 ## Known limits (owner round 56 classes d–f, plus recorded trade-offs)
 
 - **(adversarial round, finding 8 — recorded, no code)** Grants NO pass revisits:

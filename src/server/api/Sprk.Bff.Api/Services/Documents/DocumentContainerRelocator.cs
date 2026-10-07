@@ -518,6 +518,7 @@ public sealed class DocumentContainerRelocator
         {
             [DriveColumn] = drive,
             [ItemColumn] = item,
+            [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn] = item, // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
             [HasFileColumn] = true,
         };
         if (!string.IsNullOrWhiteSpace(webUrl))

@@ -1,12 +1,14 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Creates the two columns of a document file's relocation record (unified-access-control-r2 task 166):
+    Creates the BFF-only columns of a document's file record (unified-access-control-r2 tasks 166 and 171):
       sprk_document.sprk_relocationpending — the relocation LEDGER (f1-v1, owner rounds 37 and 45): what a move still owes
                                              for the old item, and the old item's witness;
       sprk_document.sprk_relocatedversions — the relocation's VERSION RECORD (owner round 45 item 1): the original author,
-                                             date and size of every version a move replayed into the copy.
-    Both are created FIELD-SECURED (no window in which a user could write them). Dry run by default; -Apply writes;
+                                             date and size of every version a move replayed into the copy;
+      sprk_document.sprk_graphitemidbound  — the field-secured COPY of sprk_graphitemid (task 171, owner round 72 item 1):
+                                             single line of text, the same MaxLength as sprk_graphitemid (read live).
+    All are created FIELD-SECURED (no window in which a user could write them). Dry run by default; -Apply writes;
     -Verify checks. Idempotent.
 
 .DESCRIPTION
@@ -31,6 +33,14 @@
     "quickXorHash", "version" } } ] }. Version record JSON: { "v": 1, "item", "versions": [ { "id", "by", "byUser", "byApp",
     "at", "size", "fromItem", "fromVersion" } ] }.
 
+    WHY THE ITEM-ID COPY (task 171, owner round 72 item 1). sprk_graphitemid cannot be field-secured — it is in the
+    alternate key sprk_graphitemid_uk (Dataverse 0x80060896) — so any user with Write on a document can re-point its
+    item. The BFF writes sprk_graphitemidbound with the same value on every pointer write, and its pointer check
+    (RecordContainerResolver.DocumentPointer) refuses a row whose item id differs from the copy. Existing rows are filled
+    by scripts/Invoke-DocumentItemIdBoundBackfill.ps1 (the pre-lock residual is accepted, as it was for the drive id).
+    ⚠️ RUN THIS (and gate 23) BEFORE deploying the BFF of task 171 round 72: that BFF writes the column on every pointer
+    write, and a write naming a column that does not exist — or one the BFF identity may not write — FAILS.
+
     WHY SECURED FROM BIRTH. NOTHING but the BFF may write either column: a hand-written ledger entry would name a source
     for the BFF to delete or copy, and a hand-written version record would rewrite who wrote a document's history. Creating
     them secured leaves no window between this script and the field-security grants (gate 23,
@@ -43,10 +53,11 @@
     relocation fails closed — so run -Apply, then gate 23 (field security), BEFORE the migration's -Apply (task note
     §21.11 / §22.11 gate 23a) and before task 150's Make Secure ships. The pointer-attach route does not read them.
 
-    STEPS (-Apply), per column: (a) create it (Multiple lines of text, not required, IsSecured = true) in
-    -SolutionUniqueName — or, when it exists unsecured, secure it; (b) publish sprk_document. -Verify: each column exists,
-    is Memo with at least its MaxLength, is field-secured, and travels with the solution (sprk_document is a root
-    component with rootcomponentbehavior 0, or the attribute is a component of the solution).
+    STEPS (-Apply), per column: (a) create it (the two relocation columns: Multiple lines of text; the item-id copy:
+    Single line of text at sprk_graphitemid's MaxLength; not required, IsSecured = true) in -SolutionUniqueName — or,
+    when it exists unsecured, secure it; (b) publish sprk_document. -Verify: each column exists with its type and at
+    least its MaxLength, is field-secured, and travels with the solution (sprk_document is a root component with
+    rootcomponentbehavior 0, or the attribute is a component of the solution).
 
 .PARAMETER EnvironmentUrl
     e.g. https://spaarkedev1.crm.dynamics.com
@@ -94,6 +105,7 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 $Table = 'sprk_document'
 $ColumnSpecs = @(
     @{
+        Type        = 'Memo'
         Column      = 'sprk_relocationpending'
         SchemaName  = 'sprk_RelocationPending'
         MaxLength   = 4000
@@ -101,11 +113,21 @@ $ColumnSpecs = @(
         Description = 'The relocation ledger: what a move of this document''s file between SharePoint Embedded containers still owes for the OLD item (re-key, index, source delete), with the old item''s witness. Written ONLY by the BFF in the same update as the re-point and cleared when settled; field-secured. Do not edit by hand: an unreadable value stops the document''s file from being moved again until an administrator repairs it. unified-access-control-r2 task 166, owner rounds 37 and 45.'
     },
     @{
+        Type        = 'Memo'
         Column      = 'sprk_relocatedversions'
         SchemaName  = 'sprk_RelocatedVersions'
         MaxLength   = 1048576
         Display     = 'Relocated Versions'
         Description = 'The relocation''s version record: the ORIGINAL author, date and size of every version a move replayed into this document''s file (Graph cannot set them), against the new version id. Written ONLY by the BFF in the same update as the re-point; the version history reports it; field-secured. Do not edit by hand. unified-access-control-r2 task 166, owner round 45 item 1.'
+    },
+    @{
+        # MaxLength is read from sprk_graphitemid at run time ("the same length"), below.
+        Type          = 'String'
+        Column        = 'sprk_graphitemidbound'
+        SchemaName    = 'sprk_GraphItemIdBound'
+        MaxLengthFrom = 'sprk_graphitemid'
+        Display       = 'Graph Item Id (Bound)'
+        Description   = 'The field-secured copy of Graph Item Id, written ONLY by the BFF in the same write that sets the pointer. The BFF refuses to follow a document whose Graph Item Id differs from this copy (sprk_graphitemid cannot be field-secured: it is in the alternate key sprk_graphitemid_uk). Do not edit by hand. unified-access-control-r2 task 171, owner round 72 item 1.'
     }
 )
 
@@ -163,15 +185,23 @@ $membership = if ($solution) {
 
 foreach ($spec in $ColumnSpecs) {
     $Column = $spec.Column
+    $TypeName = if ($spec.Type -eq 'String') { 'StringAttributeMetadata' } else { 'MemoAttributeMetadata' }
+    $TypeLabel = if ($spec.Type -eq 'String') { 'Single line of text' } else { 'Multiple lines of text' }
     $MaxLength = $spec.MaxLength
+    if ($spec.MaxLengthFrom) {
+        # "The same length as" its source column, read live — never a hard-coded copy of someone else's schema.
+        $source = Try-DvGet "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$($spec.MaxLengthFrom)')/Microsoft.Dynamics.CRM.StringAttributeMetadata?`$select=MaxLength"
+        if (-not $source) { Report 'FAIL' "$Table.$($spec.MaxLengthFrom) could not be read, so $Column's length is unknown"; continue }
+        $MaxLength = [int]$source.MaxLength
+    }
     # ── (a) the column, field-secured ───────────────────────────────────────────────────────────────────────────
     Write-Host "`n(a) $Table.$Column"
     $attrPath = "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$Column')"
-    $typedPath = "$attrPath/Microsoft.Dynamics.CRM.MemoAttributeMetadata?`$select=LogicalName,MaxLength,MetadataId,IsSecured"
+    $typedPath = "$attrPath/Microsoft.Dynamics.CRM.$TypeName`?`$select=LogicalName,MaxLength,MetadataId,IsSecured"
     $attr = Try-DvGet $typedPath
     $anyAttr = if ($attr) { $attr } else { Try-DvGet "$attrPath`?`$select=LogicalName,AttributeType" }
     if ($attr) {
-        if ($attr.MaxLength -ge $MaxLength) { Report 'OK' "$Table.$Column exists (Multiple lines of text, MaxLength $($attr.MaxLength))" }
+        if ($attr.MaxLength -ge $MaxLength) { Report 'OK' "$Table.$Column exists ($TypeLabel, MaxLength $($attr.MaxLength))" }
         else { Report 'FAIL' "$Table.$Column has MaxLength $($attr.MaxLength); at least $MaxLength is required" }
         if ($attr.IsSecured) { Report 'OK' "$Table.$Column is field-secured" }
         elseif ($Verify) { Report 'FAIL' "$Table.$Column is NOT field-secured — a user with Write on a document could write it" }
@@ -183,24 +213,25 @@ foreach ($spec in $ColumnSpecs) {
             Report 'DONE' "secured $Table.$Column (gate 23 grants the BFF-managed profiles)"
         }
     } elseif ($anyAttr) {
-        Report 'FAIL' "$Table.$Column exists but is a $($anyAttr.AttributeType), not Multiple lines of text — an administrator must resolve it"
-    } elseif ($Verify) { Report 'MISSING' "$Table.$Column — every relocation fails closed until it exists" }
-    elseif ($IsDryRun) { Report 'WOULD' "create $Table.$Column (Multiple lines of text, $MaxLength, not required, field-secured) in $SolutionUniqueName" }
+        Report 'FAIL' "$Table.$Column exists but is a $($anyAttr.AttributeType), not $TypeLabel — an administrator must resolve it"
+    } elseif ($Verify) { Report 'MISSING' "$Table.$Column — every write and check that names it fails closed until it exists" }
+    elseif ($IsDryRun) { Report 'WOULD' "create $Table.$Column ($TypeLabel, $MaxLength, not required, field-secured) in $SolutionUniqueName" }
     elseif (-not $solution) { Report 'FAIL' "not created: solution '$SolutionUniqueName' not found" }
     else {
-        Invoke-DvWrite POST "EntityDefinitions(LogicalName='$Table')/Attributes" @{
-            '@odata.type' = 'Microsoft.Dynamics.CRM.MemoAttributeMetadata'
+        $body = @{
+            '@odata.type' = "Microsoft.Dynamics.CRM.$TypeName"
             SchemaName    = $spec.SchemaName
             DisplayName   = (New-Label $spec.Display)
             Description   = (New-Label $spec.Description)
             RequiredLevel = @{ Value = 'None' }
             MaxLength     = $MaxLength
-            Format        = 'TextArea'
             IsSecured     = $true
-        } @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName } | Out-Null
+        }
+        if ($spec.Type -eq 'String') { $body.FormatName = @{ Value = 'Text' } } else { $body.Format = 'TextArea' }
+        Invoke-DvWrite POST "EntityDefinitions(LogicalName='$Table')/Attributes" $body @{ 'MSCRM.SolutionUniqueName' = $SolutionUniqueName } | Out-Null
         Report 'DONE' "created $Table.$Column, field-secured, in $SolutionUniqueName"
         $attr = Wait-DvRead $typedPath "$Table.$Column metadata"
-        # The data endpoint can lag the metadata endpoint; the BFF selects the column on every relocation.
+        # The data endpoint can lag the metadata endpoint; the BFF selects these columns on every relocation / pointer check.
         Wait-DvRead "sprk_documents?`$select=sprk_documentid,$Column&`$top=1" "$Table.$Column in data queries" | Out-Null
     }
 

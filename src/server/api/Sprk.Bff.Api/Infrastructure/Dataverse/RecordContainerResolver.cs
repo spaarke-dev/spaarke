@@ -145,6 +145,7 @@ public sealed partial class RecordContainerResolver
         _speFiles = speFiles;
         _bffApplicationIds = BffApplicationIdsFrom(configuration);
         _strictDerivedContainer = StrictDerivedContainerFrom(configuration);
+        _itemIdBoundBackfillComplete = ItemIdBoundBackfillCompleteFrom(configuration);
         _unfiledDefaultContainerId = configuration?[UnfiledDefaultContainerKey];
     }
 

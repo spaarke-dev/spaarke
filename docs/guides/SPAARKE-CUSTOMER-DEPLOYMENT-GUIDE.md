@@ -571,6 +571,14 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   strict derived-container rule, and is set to `true` only after `scripts/Invoke-DocumentContainerMigration.ps1 -Verify`
   passes on that environment (task 166 note §20). `DocumentContainerMigration__WritesEnabled` is set only by that
   script's `-Apply`, for the run.
+- `DocumentPointer__ItemIdBoundBackfillComplete` — **leave unset (false) at deployment** (task 171, owner round 72
+  item 1). The BFF refuses any document whose `sprk_graphitemid` differs from its field-secured copy
+  `sprk_graphitemidbound` (only the BFF writes the copy; `sprk_graphitemid` cannot be secured because it is in an
+  alternate key). While unset, a row with an EMPTY copy falls back to the rule in force; set it to `true` only after
+  `scripts/Invoke-DocumentItemIdBoundBackfill.ps1 -Verify` passes — from then on a row with no copy is refused.
+  ⚠️ The column must exist and be field-secured (`Set-DocumentRelocationSchema.ps1 -Apply`, then
+  `Set-DocumentPointerFieldSecurity.ps1 -Apply`) **before** this BFF is deployed: it writes the copy on every pointer
+  write, and a write the BFF identity may not make fails.
 - ⚠️ **Schema, then field security, before any file relocation** (task 166 f1-v1 / f1-v2): run
   `scripts/Set-DocumentRelocationSchema.ps1 -Apply` then `-Verify` on the environment's Dataverse, then
   `scripts/Set-DocumentPointerFieldSecurity.ps1` (dry run → `-ClientNoLongerWritesPointers -Apply` → `-Verify`), before

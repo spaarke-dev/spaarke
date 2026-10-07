@@ -38,6 +38,97 @@ namespace Sprk.Bff.Api.Api;
 /// </summary>
 public static class FileAccessEndpoints
 {
+    /// <summary>Share-link refusal: the document belongs to a SECURE record (owner round 72 item 2).</summary>
+    internal const string ShareLinkSecureRecordCode = "sdap.access.deny.share_link_secure_record";
+
+    /// <summary>Share-link refusal: the document belongs to a RESTRICTED record (owner round 72 item 2).</summary>
+    internal const string ShareLinkRestrictedRecordCode = "sdap.access.deny.share_link_restricted_record";
+
+    /// <summary>Share-link refusal: the document row could not be read, so its record's protection is unknown.</summary>
+    internal const string ShareLinkProtectionUnverifiableCode = "sdap.access.deny.share_link_protection_unverifiable";
+
+    private const string ShareLinkSecureDetail =
+        "Sharing links cannot be created for documents of a secure record: a link reaches people outside the record's "
+        + "access list. Share the record with the person instead.";
+
+    private const string ShareLinkRestrictedDetail =
+        "Sharing links cannot be created for documents of a restricted record. Share the record with the person instead.";
+
+    /// <summary>The record types that carry sprk_issecure / sprk_accesspermission (the share-link refusal reads them).</summary>
+    private static readonly HashSet<string> ShareLinkRootTypes = new(StringComparer.Ordinal)
+    {
+        "sprk_project", "sprk_matter", "sprk_workassignment",
+    };
+
+    /// <summary>
+    /// Why a sharing link may NOT be minted for <paramref name="documentId"/> — its record is SECURE or RESTRICTED (owner
+    /// round 72 item 2, task 171 adversarial finding 10) — or <see langword="null"/> for a standard document.
+    /// </summary>
+    /// <remarks>
+    /// <para>Reuses the two existing reads, no new lookup: <see cref="ExternalParticipationService.GetRootRecordFlagsAsync"/>
+    /// for every project / matter / work assignment the document is filed to (an id it cannot read comes back
+    /// secure AND restricted — fail closed), and <c>RecordContainerResolver.DeriveDocumentContainersAsync</c>, whose
+    /// <c>IsSecure</c> also covers a document filed to a CHILD of a secure record (an event, invoice or to-do of a
+    /// secure project). A derivation that cannot be decided adds no refusal (the root flags already decided the
+    /// direct links), so a standard document is never newly refused.</para>
+    /// </remarks>
+    internal static async Task<(string ReasonCode, string Detail)?> ShareLinkProtectionRefusalAsync(
+        Guid documentId,
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var rootLinks = DocumentLinkFields.All
+            .Where(l => ShareLinkRootTypes.Contains(l.TargetEntityLogicalName))
+            .ToArray();
+        var row = await entityService
+            .RetrieveAsync("sprk_document", documentId, rootLinks.Select(l => l.LogicalName).ToArray(), ct)
+            .ConfigureAwait(false);
+        if (row is null)
+        {
+            return (ShareLinkProtectionUnverifiableCode,
+                "Whether this document's record allows a sharing link could not be determined, so none was created.");
+        }
+
+        foreach (var group in rootLinks
+                     .Select(l => (l.TargetEntityLogicalName, Id: row.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>(l.LogicalName)?.Id))
+                     .Where(x => x.Id is { } id && id != Guid.Empty)
+                     .GroupBy(x => x.TargetEntityLogicalName, StringComparer.Ordinal))
+        {
+            var ids = group.Select(x => x.Id!.Value).Distinct().ToArray();
+            var flags = await participations.GetRootRecordFlagsAsync(group.Key, ids, ct).ConfigureAwait(false);
+            foreach (var id in ids)
+            {
+                // Every id asked about is in the map; an unreadable one is secure AND restricted (fail closed).
+                var f = flags.TryGetValue(id, out var known) ? known : Sprk.Bff.Api.Infrastructure.ExternalAccess.RootRecordFlags.Unreadable;
+                if (f.IsSecure || f.IsRestricted)
+                {
+                    logger.LogInformation(
+                        "CreateShareLink REFUSED | DocumentId: {DocumentId} | {Entity} {RecordId} is {What}.",
+                        documentId, group.Key, id,
+                        f.IsUnreadable ? "unreadable (fail closed)" : f.IsSecure ? "secure" : "restricted");
+                    return f.IsSecure && !f.IsRestricted
+                        ? (ShareLinkSecureRecordCode, ShareLinkSecureDetail)
+                        : (ShareLinkRestrictedRecordCode, ShareLinkRestrictedDetail);
+                }
+            }
+        }
+
+        var derivation = await containerResolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (derivation.Decided && derivation.IsSecure)
+        {
+            logger.LogInformation(
+                "CreateShareLink REFUSED | DocumentId: {DocumentId} | the document belongs to a secure record ({Reason}).",
+                documentId, derivation.Reason);
+            return (ShareLinkSecureRecordCode, ShareLinkSecureDetail);
+        }
+
+        return null;
+    }
+
+
     public static IEndpointRouteBuilder MapFileAccessEndpoints(this IEndpointRouteBuilder app)
     {
         var docs = app.MapGroup("/api/documents").RequireAuthorization();
@@ -812,6 +903,8 @@ public static class FileAccessEndpoints
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
             Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
+            IGenericEntityService entityService,
+            Sprk.Bff.Api.Infrastructure.ExternalAccess.ExternalParticipationService participations,
             IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
             TimeProvider timeProvider,
             ILogger<Program> logger,
@@ -843,6 +936,14 @@ public static class FileAccessEndpoints
             // document may use (409 document_storage_unverified otherwise, before any Graph read) — the check OBO used to
             // get for free from SPE's own container ACL.
             await containerResolver.EnsureDocumentPointerContainerAsync(docGuid, document.GraphDriveId, document.GraphItemId, ct);
+
+            // Owner round 72 item 2 (task 171, adversarial finding 10): a sharing link reaches people OUTSIDE Dataverse's
+            // decision, so it is never minted for a document of a SECURE or RESTRICTED record. Standard documents keep it.
+            if (await ShareLinkProtectionRefusalAsync(docGuid, containerResolver, entityService, participations, logger, ct)
+                is { } protection)
+            {
+                return Sprk.Bff.Api.Infrastructure.Errors.ProblemDetailsHelper.Forbidden(protection.ReasonCode, protection.Detail, context.TraceIdentifier);
+            }
 
             var (scope, expiresAt) = ResolveShareLinkPolicy(
                 request, shareLinkOptions.CurrentValue, timeProvider, documentId, logger, context);

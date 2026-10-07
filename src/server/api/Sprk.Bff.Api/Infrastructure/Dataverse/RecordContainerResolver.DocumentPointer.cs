@@ -34,6 +34,16 @@ public sealed partial class RecordContainerResolver
     public const string StrictDerivedContainerKey = "DocumentPointer:StrictDerivedContainer";
 
     /// <summary>
+    /// The configuration flag that ends the transition of owner round 72 item 1 (task 171, adversarial finding 4): once
+    /// <c>scripts/Invoke-DocumentItemIdBoundBackfill.ps1 -Verify</c> has passed, the main session sets it to <c>true</c>
+    /// (App Service setting <c>DocumentPointer__ItemIdBoundBackfillComplete</c>) and a row whose field-secured item-id copy
+    /// is EMPTY is refused. Default <see langword="false"/>: an empty copy falls back to the rule in force (interim or
+    /// strict) exactly as before — a row not yet backfilled is not newly refused. A copy that DIFFERS from the item is
+    /// refused in both states.
+    /// </summary>
+    public const string ItemIdBoundBackfillCompleteKey = "DocumentPointer:ItemIdBoundBackfillComplete";
+
+    /// <summary>
     /// <c>EmailProcessing:DefaultContainerId</c> — the Office save path's last-resort container for content with no
     /// record when the acting user's business unit has none (<c>OfficeService</c>). The derived container of an UNFILED
     /// document whose owner's business unit stamps no container is this one, exactly as that save chose it.
@@ -92,6 +102,9 @@ public sealed partial class RecordContainerResolver
     /// <summary>The STRICT rule is in force (see <see cref="StrictDerivedContainerKey"/>).</summary>
     private readonly bool _strictDerivedContainer;
 
+    /// <summary>An EMPTY item-id copy refuses (see <see cref="ItemIdBoundBackfillCompleteKey"/>).</summary>
+    private readonly bool _itemIdBoundBackfillComplete;
+
     /// <summary><see cref="UnfiledDefaultContainerKey"/>, when configured.</summary>
     private readonly string? _unfiledDefaultContainerId;
 
@@ -125,6 +138,32 @@ public sealed partial class RecordContainerResolver
     /// <summary><see cref="StrictDerivedContainerKey"/> as a boolean; absent, blank or unparseable = the interim rule.</summary>
     internal static bool StrictDerivedContainerFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
         => bool.TryParse(configuration?[StrictDerivedContainerKey], out var strict) && strict;
+
+    /// <summary><see cref="ItemIdBoundBackfillCompleteKey"/> as a boolean; absent, blank or unparseable = the transition.</summary>
+    internal static bool ItemIdBoundBackfillCompleteFrom(Microsoft.Extensions.Configuration.IConfiguration? configuration)
+        => bool.TryParse(configuration?[ItemIdBoundBackfillCompleteKey], out var complete) && complete;
+
+    /// <summary>
+    /// Owner round 72 item 1 (task 171, adversarial finding 4): why the row's item id may NOT be followed because its
+    /// field-secured copy (<see cref="Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn"/>) disagrees with the
+    /// item about to be read, or <see langword="null"/> when the copy agrees (or is empty during the transition).
+    /// </summary>
+    /// <remarks>
+    /// <c>sprk_graphitemid</c> cannot be field-secured (it is in an alternate key), so any Write holder can re-point it;
+    /// the copy can only be written by the BFF. A copy naming a DIFFERENT item means the pointer was changed outside the
+    /// BFF — refused under both rules. An EMPTY copy is a row not yet backfilled (or written outside the BFF): refused once
+    /// <see cref="ItemIdBoundBackfillCompleteKey"/> is set, otherwise left to the rule in force.
+    /// </remarks>
+    private string? ItemBindingRefusal(Entity row, string item)
+        => Spaarke.Dataverse.DocumentPointerBinding.Compare(
+                row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn), item) switch
+        {
+            Spaarke.Dataverse.DocumentPointerBinding.BindingState.Mismatch =>
+                "the item id differs from its field-secured copy (sprk_graphitemidbound) — the pointer was changed outside the BFF",
+            Spaarke.Dataverse.DocumentPointerBinding.BindingState.Unbound when _itemIdBoundBackfillComplete =>
+                "the item id has no field-secured copy (sprk_graphitemidbound is empty) and the backfill is complete",
+            _ => null,
+        };
 
     /// <summary>Which rule <see cref="IsDocumentPointerContainerAllowedAsync(Guid, string?, string?, CancellationToken)"/> applies.</summary>
     internal bool StrictDerivedContainerMode => _strictDerivedContainer;
@@ -245,10 +284,17 @@ public sealed partial class RecordContainerResolver
         {
             var row = await _entityService.RetrieveAsync(
                 "sprk_document", documentId,
-                [CreatedByColumn, OwningBusinessUnitColumn, CrossPathLink.LinkedCommunicationAttribute], ct).ConfigureAwait(false);
+                [CreatedByColumn, OwningBusinessUnitColumn, CrossPathLink.LinkedCommunicationAttribute,
+                 Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
             if (row is null)
             {
                 return Refuse(documentId, "the document row could not be read");
+            }
+
+            // Round 72 item 1: before anything else, the item must be the one the BFF bound to this row.
+            if (ItemBindingRefusal(row, item) is { } bindingRefusal)
+            {
+                return Refuse(documentId, bindingRefusal);
             }
 
             if (_speFiles is null)
@@ -316,6 +362,20 @@ public sealed partial class RecordContainerResolver
         var item = pointerItemId.Trim();
         try
         {
+            // Round 72 item 1: the item must be the one the BFF bound to this row (the strict derivation does not look at
+            // the item id, so without this a pre- or post-lock re-point inside the derived container would be served).
+            var row = await _entityService.RetrieveAsync(
+                "sprk_document", documentId, [Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn], ct).ConfigureAwait(false);
+            if (row is null)
+            {
+                return Refuse(documentId, "the document row could not be read");
+            }
+
+            if (ItemBindingRefusal(row, item) is { } bindingRefusal)
+            {
+                return Refuse(documentId, bindingRefusal);
+            }
+
             var refusal = await StrictRefusalAsync(documentId, drive, item, knownItem: null, ct).ConfigureAwait(false);
             return refusal is null || Refuse(documentId, refusal);
         }

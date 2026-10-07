@@ -855,7 +855,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_mimetype"] = request.MimeType;
 
         if (request.GraphItemId != null)
+        {
             document["sprk_graphitemid"] = request.GraphItemId;
+            // Task 171 round 72 (F4): the field-secured copy the pointer check compares — same write, same value.
+            document[DocumentPointerBinding.BoundItemIdColumn] = request.GraphItemId;
+        }
 
         if (request.GraphDriveId != null)
             document["sprk_graphdriveid"] = request.GraphDriveId;
