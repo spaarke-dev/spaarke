@@ -209,6 +209,7 @@ public sealed class H11GuestAccessSeamsTests
         var outcome = await Writer(http).ResolveRolesAsync(EnvUrl, TenantId, ["Spaarke Basic User"], CancellationToken.None);
 
         outcome.Should().BeOfType(expected);
+        http.Requests.Single().Uri.Should().Contain("$top=2", "a second match must be visible to be refused");
     }
 
     [Fact]

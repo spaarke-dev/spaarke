@@ -999,6 +999,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
 
     [Theory]
     [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}]", "communicationGraphResource")]   // email and group optional for NativeAccount (Model 2 only — T232)
+    [InlineData("Model2", "NativeAccount", "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"team@contoso.com\"},{\"firstName\":\"Grace\",\"lastName\":\"Hopper\",\"email\":\"team@contoso.com\"}]", "communicationGraphResource")]   // a shared contact email is fine — nothing is invited for NativeAccount
     [InlineData("Model1", "B2BGuest", "[{\"email\":\"ada@contoso.com\"}]", "emailGraphResource")]   // a guest needs only an email; either Graph resource alone is enough
     public async Task PostRuns_CompleteOperatorIntake_Returns202_AndStoresTheValues(
         string tenancyModel, string identityPreset, string usersJson, string graphResourceKey)

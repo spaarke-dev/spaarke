@@ -299,10 +299,11 @@ public sealed class H11UserProvisioningHandlerTests
     }
 
     [Fact]
-    public async Task T232_AResumedRun_RepeatsEveryStepIdempotently_AndCompletes()
+    public async Task T232_AResumedRun_AfterAPartialFailure_RepeatsTheStepsAndCompletes()
     {
-        // The first attempt stopped after guest 1's membership (the writer failed); the resumed run re-adds guest 1
-        // (Graph treats an existing member as success) and finishes both guests.
+        // The first attempt stopped after guest 1's membership (the writer failed). The resumed run repeats guest 1's
+        // membership (each seam is idempotent — Graph treats an existing member as success; the seam tests pin that)
+        // and finishes both guests.
         var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
         var repo = new FakeRepository(run, "e");
         var group = FakeSecurityGroupClient.ThisCustomers();
@@ -315,8 +316,30 @@ public sealed class H11UserProvisioningHandlerTests
             FakeConsentVerifier.Verified(), group, writer).HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>();
+        group.AddedMembers.Should().Equal(
+            [(GroupId, "guestid-Ada"), (GroupId, "guestid-Ada"), (GroupId, "guestid-Grace")],
+            "the resumed run repeats guest 1's membership rather than skipping it");
+        failing.Requests.Should().ContainSingle("the first attempt stopped at guest 1");
+        writer.Requests.Select(r => r.EntraObjectId).Should().Equal("guestid-Ada", "guestid-Grace");
         repo.LastWrittenRun!.InterStepState.ProvisionedUsers!.Select(u => u.DataverseSystemUserId)
             .Should().Equal("sysuser-guestid-Ada", "sysuser-guestid-Grace");
+    }
+
+    [Fact]
+    public async Task T232_RolesThatCannotBeResolved_AreRefusedBeforeAnyInvitation_WithTheDataverseCode()
+    {
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson: B2BUsersJson);
+        var invitations = FakeInvitationClient.Success();
+        var writer = FakeGuestUserWriter.AllSucceed(
+            roles: new GuestRoleResolution.Failure("More than one role named 'Spaarke Basic User' in the root business unit"));
+        var handler = BuildHandler(new FakeRepository(run, "e"), FakeUserProvisioner.AllSucceed(), invitations,
+            FakeConsentVerifier.Verified(), FakeSecurityGroupClient.ThisCustomers(), writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(H11Rejections.DataverseUserFailed, "the role exists — it is ambiguous, not missing");
+        invitations.CallCount.Should().Be(0);
     }
 
     [Fact]

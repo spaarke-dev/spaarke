@@ -440,7 +440,7 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
                     "(no invitation sent).",
                     cancellationToken).ConfigureAwait(false);
             case GuestRoleResolution.Failure roleFailure:
-                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.SecurityRoleNotFound,
+                return await FailAsync(run, etag, FailureClass.Resumable, H11Rejections.DataverseUserFailed,
                     $"The guests' security role(s) could not be resolved: {roleFailure.Diagnostic}. Nothing was written.",
                     cancellationToken).ConfigureAwait(false);
         }
@@ -485,7 +485,8 @@ public sealed class H11UserProvisioningHandler : IProvisioningHandler
             consentResult = await _consentVerifier.VerifyAsync(tenantId, invitedUserIds, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // T232: an HttpClient timeout is an OperationCanceledException too — only the CALLER's cancellation propagates.
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex,
                 "H11 B2B consent verifier threw unexpected exception: runId={RunId} customerId={CustomerId}",

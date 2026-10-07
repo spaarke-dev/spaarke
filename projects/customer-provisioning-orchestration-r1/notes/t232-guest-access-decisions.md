@@ -24,6 +24,7 @@ the invitation email. Model 1 could pick NativeAccount (the schema's Model 1 exa
 | D7 | An existing guest (lookup by `mail`) is **reused without a second invitation email**; an address of a tenant **Member** is refused; a failed lookup fails closed. | Re-runs and gate re-checks no longer mail users again. |
 | D8 | NativeAccount with no licence SKU configured → refused before any user is created (`userprov-license-sku-not-configured`). | R7 "validated but not wired": it created unlicensed users and reported success. |
 | D9 | The skill checks `PRQ-C-10` (the group's name AND that it is the group set on the environment — Power Platform admin API, `linkedEnvironmentMetadata.securityGroupId`), `PRQ-C-12` and `PRQ-C-11` (subscription id matched in the `pac licensing` output; batch stops when absent, interactive asks) as the operator in Step 1e-bis, each a hard stop, every `az`/`pac` exit code checked. | Deviation from the POML's "Step 0.5": once-per-customer prerequisites are not run at Step 0.5 (deferred by design, EXEC-10); 1e-bis is where the group id and environment URL are known. H11 re-checks the group's NAME and guest access server-side; the environment's group binding and its billing are visible only to a Power Platform admin — L2 is not one (D4). |
+| D11 | Verifier round 2 (2026-10-07): PRQ-C-11 needs `Enabled` too and interactive always confirms; the environment is read by its id (no paged list); the subscription id is normalised before matching; the repeated-email rule applies to guests only (and the skill checks it locally); a consent-verifier timeout is a named failure; a role-resolution failure that is not a missing role uses `userprov-dataverse-user-failed`; Graph error-code extraction never throws; a Worker boot test pins the options validation. | NEW-F1…F8. |
 | D10 | Code-review round 1 (2026-10-07): roles resolved ONCE before anyone is invited (they used to be resolved per guest after the invitations); the role list default applied after binding (the binder appends to an initialised list); options validated at start; GUIDs read from Dataverse canonicalized (ADR-044); HTTP timeouts are named failures; Graph error text reduced to its code (D15); a repeated email refused at intake; group id only in the canonical `D` form (schema parity). | F1–F7, F9–F12, F15; ADR-check V1 + W2/W3/W5/W6/W8. |
 
 ## Known limits
@@ -31,13 +32,15 @@ the invitation email. Model 1 could pick NativeAccount (the schema's Model 1 exa
 - K1 — PAYG meter is **per active user per app per month** (Power Apps per app). Each Spaarke app a guest opens
   counts separately — the owner should know how many apps a typical guest opens.
 - K2 — PAYG includes only 1 GB database + 1 GB file capacity per environment; tenant pooled capacity does not apply.
-- K3 — `pac licensing` commands are preview; `get-environment-billing-policy`'s output shape (subscription id) is
-  unverified — the skill shows it for the operator to confirm instead of parsing it.
+- K3 — `pac licensing` commands are preview; `get-environment-billing-policy`'s output shape is unverified (T186). The
+  skill looks for the stamp subscription id AND `Enabled` in the text: batch stops when either is absent; interactive
+  always asks the operator to confirm.
 - K4 — Live unknowns for T186: on-demand add of an unlicensed guest under PAYG via the alternate key (strongly implied by
   Microsoft, not stated); the HTTP status when the guest is not (yet) a group member; group-membership propagation delay.
 - K5 — H11 never removes a guest, membership or role (no decommission — design D17).
-- K6 — The group-binding check (skill) reads the BAP admin API's `linkedEnvironmentMetadata.securityGroupId`; that
-  response shape is not verified live (T186). H11 itself can check only the group's name — Entra display names are not
+- K6 — The group-binding check (skill) reads the environment id from Dataverse (`RetrieveCurrentOrganization` →
+  `Detail.EnvironmentId`), then ONE environment from the BAP admin API (`linkedEnvironmentMetadata.securityGroupId`);
+  those response shapes are not verified live (T186) — a wrong shape is a false hard stop, never an admission. H11 itself can check only the group's name — Entra display names are not
   unique, so the skill's binding check is the real gate.
 - K7 — A guest found by mail who never redeemed (or was created by another route) keeps the `b2b-consent` gate
   pending; H11 never re-invites (that would re-send mail on every re-check). Operator path: resend the invitation from

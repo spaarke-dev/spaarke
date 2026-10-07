@@ -223,8 +223,10 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
         try
         {
             using var doc = JsonDocument.Parse(body);
-            return doc.RootElement.TryGetProperty("error", out var error) && error.TryGetProperty("code", out var code)
-                ? code.GetString() ?? "no error code"
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object
+                && error.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String
+                ? code.GetString()!
                 : "no error code";
         }
         catch (JsonException)

@@ -1014,6 +1014,11 @@ foreach ($u in $users) {
     exit 1
   }
 }
+# T232: a guest address listed twice would be invited twice (POST /api/runs refuses it too — userprov-invalid-user-entry).
+if ($identityPreset -ceq 'B2BGuest') {
+  $dupes = @($users | Group-Object { "$($_.email)".Trim().ToLowerInvariant() } | Where-Object Count -gt 1)
+  if ($dupes.Count -gt 0) { Write-Error "[skill] HARD STOP: $($dupes.Count) guest email(s) appear more than once in users — list each guest once."; exit 1 }
+}
 
 # T232 — B2BGuest: the environment's security group (PRQ-C-10), guest access (PRQ-C-12) and PAYG billing (PRQ-C-11),
 # checked now as the operator. H11 re-checks the group's NAME and guest access server-side, but only after H0–H10 have
@@ -1039,13 +1044,17 @@ if ($identityPreset -ceq 'B2BGuest') {
   # PRQ-C-10 (b): it is the group SET ON the environment — the isolation boundary between Model 1 environments. Read
   # from the Power Platform admin API (the operator is a Power Platform admin; L2 is not, so H11 cannot check this).
   $dvRes = $dataverseEnvUrl.TrimEnd('/')
+  # The environment's Power Platform id, from the environment itself — then ONE admin-API read (no list, no paging).
+  $ppEnvId = az rest --method get --resource $dvRes `
+    --url "$dvRes/api/data/v9.2/RetrieveCurrentOrganization(AccessType=@p)?@p=Microsoft.Dynamics.CRM.EndpointAccessType'Default'" `
+    --query "Detail.EnvironmentId" -o tsv
+  if ($LASTEXITCODE -ne 0 -or -not $ppEnvId) { Write-Error '[skill] HARD STOP (PRQ-C-10): reading the environment id (RetrieveCurrentOrganization) failed (az output above).'; exit 1 }
   $bapJson = az rest --method get --resource "https://service.powerapps.com/" `
-    --url "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2021-04-01" -o json
-  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-10): listing Power Platform environments failed (az output above) — the operator must be a Power Platform admin.'; exit 1 }
-  $ppEnv = @(($bapJson | ConvertFrom-Json).value | Where-Object { "$($_.properties.linkedEnvironmentMetadata.instanceUrl)".TrimEnd('/') -eq $dvRes })
-  $boundGroup = if ($ppEnv.Count -eq 1) { "$($ppEnv[0].properties.linkedEnvironmentMetadata.securityGroupId)" } else { '' }
+    --url "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments/$ppEnvId`?api-version=2021-04-01" -o json
+  if ($LASTEXITCODE -ne 0) { Write-Error '[skill] HARD STOP (PRQ-C-10): reading the environment from the Power Platform admin API failed (az output above) — the operator must be a Power Platform admin.'; exit 1 }
+  $boundGroup = "$((($bapJson | ConvertFrom-Json).properties.linkedEnvironmentMetadata).securityGroupId)"
   if ($boundGroup -ne $environmentSecurityGroupId) {
-    Write-Error "[skill] HARD STOP (PRQ-C-10): the environment $dvRes has security group '$boundGroup' ($($ppEnv.Count) environment(s) matched the URL) — it must be $environmentSecurityGroupId (sprk-$customerId-users). Without it every user of the tenant, other customers' guests included, is admitted. Set it (admin center → Environments → Edit → Security group), then rerun."
+    Write-Error "[skill] HARD STOP (PRQ-C-10): environment $ppEnvId ($dvRes) has security group '$boundGroup' — it must be $environmentSecurityGroupId (sprk-$customerId-users). Without it every user of the tenant, other customers' guests included, is admitted. Set it (admin center → Environments → Edit → Security group), then rerun."
     exit 1
   }
 
@@ -1062,10 +1071,13 @@ if ($identityPreset -ceq 'B2BGuest') {
   $billing = pac licensing get-environment-billing-policy --environment $dataverseEnvUrl 2>&1 | Out-String
   if ($LASTEXITCODE -ne 0) { Write-Error "[skill] HARD STOP (PRQ-C-11): pac licensing failed:`n$billing"; exit 1 }
   Write-Host "PRQ-C-11 — billing policy of the environment:`n$billing" -ForegroundColor Cyan
-  if ($billing -notmatch [regex]::Escape($subscriptionId)) {
-    if ($script:SkipInteractiveIntake) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy does not name the stamp subscription $subscriptionId — link it to a pay-as-you-go policy on that subscription first."; exit 1 }
-    $payg = Read-Host "The output does not name $subscriptionId. Is the policy Enabled and on the stamp subscription $subscriptionId? (yes/no)"
-    if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to a pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
+  $stampSub = ([guid]$subscriptionId).ToString('D')   # pac prints the hyphenated form
+  $billingOk = $billing -match [regex]::Escape($stampSub) -and $billing -match '\bEnabled\b'
+  if ($script:SkipInteractiveIntake) {
+    if (-not $billingOk) { Write-Error "[skill] Batch HARD STOP (PRQ-C-11): the environment's billing policy is not shown as Enabled on the stamp subscription $stampSub — link it to an enabled pay-as-you-go policy on that subscription first."; exit 1 }
+  } else {
+    $payg = Read-Host "Is the policy above Enabled and on the stamp subscription $stampSub? (yes/no)"
+    if ($payg -ne 'yes') { Write-Error '[skill] HARD STOP (PRQ-C-11): link the environment to an enabled pay-as-you-go billing policy on the stamp subscription first.'; exit 1 }
   }
 }
 

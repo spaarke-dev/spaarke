@@ -158,7 +158,7 @@ public static class UserProvisioningIntake
             var position = i + 1;
             // T232: a repeated address would be looked up before Graph shows the guest just invited for it, and invited
             // (mailed) twice.
-            if (entry is not null && !string.IsNullOrWhiteSpace(entry.Email)
+            if (!isNativeAccount && entry is not null && !string.IsNullOrWhiteSpace(entry.Email)
                 && !firstPositionByEmail.TryAdd(entry.Email.Trim(), position))
             {
                 return new UserProvisioningIntakeOutcome.Invalid(H11Rejections.InvalidUserEntry,
