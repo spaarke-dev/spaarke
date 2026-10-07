@@ -9,7 +9,9 @@ namespace Sprk.Bff.Api.Services.Signals;
 
 /// <summary>
 /// The Signal writer's DEDICATED Dataverse connection — authenticates as <c>mi-ontology-writer-dev</c> (task
-/// 006) through EXACTLY ONE code path: a pinned <see cref="Azure.Identity.ManagedIdentityCredential"/>.
+/// 006) through EXACTLY ONE code path: <see cref="OntologyWriterCredentialFactory"/>'s tenant-pinned
+/// <see cref="Azure.Identity.DefaultAzureCredential"/>, locked to the writer's own user-assigned managed identity
+/// (every other source excluded; amended 2026-10-07, owner).
 /// </summary>
 /// <remarks>
 /// <para><b>ADR-010 — Path C, comply (task 030 rework F10).</b> The original design wrapped this in a
