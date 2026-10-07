@@ -9,9 +9,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T254** — optional per-customer OpenAI spend limit (G37): `tasks/254-optional-openai-spend-limit.poml` (FULL, opus/high, BFF hot path). |
-| **Step** | 1 of 4 ✅ (BFF). Next: step 2 — intake `openAiMonthlyLimitUsd` + H4b optional `AiSpendLimit__MonthlyLimitUsd` + generator optional-param fix. |
-| **Status** | in-progress. Decisions: `notes/t254-ai-spend-limit-decisions.md` (D1 one limit per STAMP, not per tid; D2 Redis ledger; D3 both AI seams; the 077 gate had been dropped by merge `28c2c1b385`). |
-| **Next Action** | Step 2: IntakeParameterCatalog + RunsEndpoints validation + intake.schema.json + PerEnvSourceCatalog `from-intake-parameter:openai_monthly_limit_usd` + manifest `required: false` entry + generator optional handling + regenerate; then step 3 `scripts/Set-AiSpendLimit.ps1` + guide + skill; step 4 verify + Step 9.5. No live action. |
+| **Step** | Steps 1–3 ✅ (BFF `f5d193709`; intake/H4b/script `46096d320`; docs — guide §3.2b, skill Step 1b-quater, scripts/README — uncommitted). Step 9 criteria met. Now: Step 9.5 (code-review + adr-check), then publish-size vs fresh master, design §17 bullet, POML notes, close. |
+| **Status** | in-progress. Decisions: `notes/t254-ai-spend-limit-decisions.md` (D1 one limit per STAMP; D2 Redis ledger; D3 both AI seams; the 077 gate had been dropped by merge `28c2c1b385`). |
+| **Next Action** | Step 9.5 reviewers over `git diff 3eeb76788..HEAD` (T254 files only); ≤ 2 fix rounds; then publish measurement (fresh short-path worktrees, Compress-Archive). No live action. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
 | **Order** | T254 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 

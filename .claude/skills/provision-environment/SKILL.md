@@ -608,6 +608,7 @@ if ($BatchIntakeFile) {
   $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
   $tier           = $intake.tier                # T229 — REQUIRED for every model: smb | enterprise | dedicated (Step 1b-ter)
   $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
+  $openAiMonthlyLimitUsd = $intake.openAiMonthlyLimitUsd  # T254 — OPTIONAL: monthly OpenAI spend limit (USD); absent = no limit (Step 1b-quater)
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case)
@@ -825,6 +826,30 @@ if (-not $script:SkipInteractiveIntake) {
 }
 if ($tier -cnotin @('smb', 'enterprise', 'dedicated')) { Write-Error "❌ tier must be smb | enterprise | dedicated (exact case; T229)."; exit 1 }
 if ("$estimatedMonthlyUsd" -notmatch '^[0-9]+(\.[0-9]+)?$') { Write-Error "❌ estimatedMonthlyUsd must be a plain non-negative number of USD (e.g. 450)."; exit 1 }
+```
+
+#### 1b-quater. `openAiMonthlyLimitUsd` (OPTIONAL — T254, owner G37)
+
+No limit is the default: "we do not want to prevent a customer from activating and working, but we do want to have the
+ability to have a cap if necessary." Ask only whether the customer should have one; leave it empty unless the owner or
+the customer's agreement calls for a cap. When set, H4b writes `AiSpendLimit__MonthlyLimitUsd` on both slots and the
+stamp's BFF answers model calls with HTTP 429 (Retry-After = next UTC month start) once its list-price estimate of the
+month's OpenAI spend reaches it. It never blocks provisioning. Change or remove it later with
+`scripts/Set-AiSpendLimit.ps1` (guide §3.2b) — not by re-running provisioning.
+
+```powershell
+if (-not $script:SkipInteractiveIntake) {
+  $openAiMonthlyLimitUsd = Read-Host "OPTIONAL monthly Azure OpenAI spend limit in USD (Enter = no limit)"
+}
+if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
+  # Same rule as L2's OpenAiMonthlyLimitRule: plain decimal, > 0, <= 1000000. Omit for no limit — never 0.
+  $parsedLimit = [decimal]0
+  if ("$openAiMonthlyLimitUsd" -notmatch '^[0-9]+(\.[0-9]+)?$' -or
+      -not [decimal]::TryParse("$openAiMonthlyLimitUsd", [System.Globalization.NumberStyles]::AllowDecimalPoint, [cultureinfo]::InvariantCulture, [ref]$parsedLimit) -or
+      $parsedLimit -le 0 -or $parsedLimit -gt 1000000) {
+    Write-Error "❌ openAiMonthlyLimitUsd must be a plain number of USD greater than 0 and at most 1000000 (e.g. 500), or empty for no limit."; exit 1
+  }
+}
 ```
 
 #### 1c. `tenancyModel` (required)
@@ -1414,7 +1439,7 @@ $resolvedSubscriptionId = $subscriptionId
 # --- openAiRegion → openAiLocation mapping (Bicep param name is openAiLocation, intake field is openAiRegion) ---
 $resolvedOpenAiLocation = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke default per operator memory reference_azure_fresh_sub_regional_gotchas
 
-$body = @{
+$runRequest = @{
   customerId    = $customerId
   environmentId = $environmentId          # created at Step 1f
   tenancyModel  = $tenancyModel           # Model1 | Model2 (case-sensitive — T223/T224)
@@ -1451,7 +1476,13 @@ $body = @{
     # costEnvelopePolicy is GONE (T229): it carried the shared-trial warnAndProceed waiver; L2 now
     # refuses it as an unknown key.
   }
-} | ConvertTo-Json -Depth 5
+}
+# T254 — the OPTIONAL OpenAI spend limit (Step 1b-quater): sent only when set; absent = no limit. A string via [decimal]
+# like estimatedMonthlyUsd. L2 refuses a bad value with 400 quota-openai-monthly-limit-invalid.
+if (-not [string]::IsNullOrWhiteSpace("$openAiMonthlyLimitUsd")) {
+  $runRequest.nonSecretParameters.openAiMonthlyLimitUsd = ([decimal]$openAiMonthlyLimitUsd).ToString([cultureinfo]::InvariantCulture)
+}
+$body = $runRequest | ConvertTo-Json -Depth 5
 
 $response = Invoke-RestMethod `
   -Uri "$l2Base/api/runs" `

@@ -250,6 +250,34 @@ H0 refuses an estimate above the ceiling (`quota-cost-overrun`, Resumable) — t
 tier that covers the stamp. The shared-trial tier and its `costEnvelopePolicy = warnAndProceed` waiver are retired (D-12):
 POST /api/runs refuses both.
 
+#### 3.2b Optional OpenAI spend limit (T254, owner G37)
+
+**No limit is the default** — a customer is never prevented from activating and working. A limit is set only when one
+is wanted, and it caps the stamp's Azure OpenAI use, not provisioning:
+
+- **At provisioning**: intake `openAiMonthlyLimitUsd` (optional; a plain number of USD in (0, 1,000,000] — POST /api/runs
+  refuses anything else, `quota-openai-monthly-limit-invalid`). H4b writes `AiSpendLimit__MonthlyLimitUsd` on the
+  production and staging slots. Without it H4b writes nothing.
+- **Later — add, change or remove**: `scripts/Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName
+  rg-spaarke-{customerId}-prod -AppServiceName spaarke-bff-{customerId}-prod -MonthlyLimitUsd 500` (or `-Remove`). It
+  writes both slots, changes nothing when the value is already set, supports `-WhatIf`, and runs as the operator's own
+  identity. Changing an app setting restarts the site — do it outside busy hours. A later provisioning run that carries
+  the intake value re-applies it; one that does not leaves the setting alone.
+
+**What the limit does** — the stamp's BFF keeps an estimate of the month's OpenAI spend (UTC calendar month) in the
+stamp's Redis, shared by every instance and both slots: input and output tokens at list prices
+(`AiSpendLimit__InputUsdPer1MTokens` 2.50 / `AiSpendLimit__OutputUsdPer1MTokens` 10.00 by default — at or above the list
+rates of the chat models stamps deploy). Once the estimate reaches the limit, every model call is refused: HTTP 429
+ProblemDetails, code `ai_spend_limit_exceeded`, `Retry-After` = seconds to the next UTC month start; a chat turn that
+crosses it mid-turn ends with an in-band error carrying the same code. One limit per stamp — a stamp is one customer,
+whoever signs in. Application Insights `ai.metering.tokens` remains the authoritative usage record.
+
+**Known limits** — the estimate is list-price based, not the invoice: set the limit with headroom. Endpoints that turn
+every error into their own message show that message instead of the 429; background AI jobs fail their AI step while the
+month is over the limit. A call already running when the limit is crossed completes. If Redis cannot be read, calls are
+allowed (logged); if the setting is not a number, it is ignored (logged as an error). Decisions:
+`projects/customer-provisioning-orchestration-r1/notes/t254-ai-spend-limit-decisions.md`.
+
 **Keyless (owner D13, T244)**: AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB
 and (when enabled) SignalR have local (key/SAS) auth disabled, Storage has shared-key access disabled, and Redis has access keys
 disabled (T242). The BFF reaches every one with the stamp UAMI; L2 holds Search roles for H2b and the H13 probe. The

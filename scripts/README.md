@@ -291,6 +291,27 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+### `Set-AiSpendLimit.ps1`
+**Purpose:** Add, change or remove a customer stamp's OPTIONAL monthly Azure OpenAI spend limit (`AiSpendLimit__MonthlyLimitUsd`) on the BFF's production AND staging slots — customer-provisioning-orchestration-r1 task 254, owner G37 (no limit is the default)
+**Usage:** 🟡 Occasional - when a customer's agreement calls for a cap, or to lift one
+**Lifecycle:** ✅ Maintained
+**Dependencies:** Azure CLI (`az login` as the operator); write access to the stamp's App Service
+**Owner:** DevOps Team
+**Last Used:** October 2026 (new)
+
+**Command:**
+```powershell
+# Set or change (idempotent — writes only a slot whose value differs)
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -MonthlyLimitUsd 500
+
+# Remove (back to no limit); -WhatIf previews either
+.\Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName rg-spaarke-acme-prod -AppServiceName spaarke-bff-acme-prod -Remove -WhatIf
+```
+
+**Notes:** same value rule as intake (`OpenAiMonthlyLimitRule`: plain decimal in (0, 1,000,000]); `--subscription` on every az call; an app-setting change restarts the site. Behaviour of the limit: `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §3.2b. Tests: `tests/scripts/Set-AiSpendLimit.Tests.ps1` (Pester 3.4).
+
+---
+
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
