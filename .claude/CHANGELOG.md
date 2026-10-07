@@ -37,7 +37,7 @@ Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4
 
 Unchanged by decision: BFF publish-size per-task measurement (§10.4) stays per-task. Moving it to CI would let growth accumulate unseen before it reached CI.
 
-###### 2026-10-06 — ci-cd skill lists the blocking Tier 1 Xrm Capability Guard (ontology task 081 round 7, PR #1309)
+###### 2026-10-06 — Blocking Tier 1 Xrm Capability Guard + router docs-only fix; ci-cd skill updated (ontology task 081 rounds 7–8, PR #1309)
 
 `.claude/skills/ci-cd/SKILL.md`: the Tier 1 row adds `Xrm Capability Guard (getXrm AST scan)`, a BLOCKING job in
 `ci-tier1-blocking.yml` that runs on `src/client/**`, `src/solutions/**` or workflow changes, and the advisory
