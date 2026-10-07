@@ -71,7 +71,13 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
   (`access_ribbon.js` 1.6.0; the form field when present, else one saved-value read; a failed read hides Share).
   `Merge-AccessRibbon.ps1 -ShareCommandXml` copies the PLATFORM's form Share command and appends the rule (idempotent;
   verified locally: a second merge is byte-identical). `Set-AccessRibbon.ps1 -Apply` reads that command from the live
-  ribbon — the `Command` of the `Mscrm.Form.<entity>.Share` button, never an assumed id — and `-Verify` checks it.
+  ribbon — the `Command` of the platform's Share buttons, never an assumed command — and `-Verify` checks it.
+  **Corrected 2026-10-07 (live dev `-Verify` failed on all three entities):** there is no `Mscrm.Form.<entity>.Share` /
+  `Mscrm.HomepageGrid.<entity>.Share` button. The live ribbons (RetrieveEntityRibbon, read-only) expose the UCI form
+  Share as `Mscrm.Form.<entity>.Permissions.Sharing` → `Mscrm.SharePrimaryRecordRefresh` (plus the legacy flyout's
+  `Permissions.SharingNonRefresh` → `Mscrm.SharePrimaryRecord`) and the grid / subgrid Share as
+  `Mscrm.{HomepageGrid,SubGrid}.<entity>.Sharing` → `Mscrm.ShareSelectedRecord`; the script now looks there
+  (fix/uac-r2-114-share-ribbon), and the dry run with `-EnvironmentUrl` reads them live as `-Apply` does.
   The dry run uses `fixtures/share-command.dry-run-sample.xml` (a stand-in, never imported). Dry run PASSED for all
   three entities. `assignedaccess_postsave.js` 1.1.0 refreshes the command bar when Access Permission changes. **Cost:
   small** (one rule, one function, merge/apply/verify additions). **Follow-up:** the GRID and SUBGRID Share get

@@ -865,6 +865,15 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "fail closed there. This was ordinal 3 until 2026-09-03; providing this route is what made "
             + "the container-KEYED legacy route deletable, and it was deleted the same day."),
 
+        new SinkSite("Api/OBOEndpoints.cs", "DeleteFileAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "the (driveId, item.Id) THIS request just uploaded — driveId from the route's own server-derived container, "
+            + "item.Id from Graph's upload response",
+            "Task 171 attach fix (verifier K2): best-effort cleanup when the upload's attribution binding could not be "
+            + "written and the upload is answered 503 — deletes only the item this same request created, never a "
+            + "caller-named one, so no orphan nobody can attach is left behind (ADR-003; ADR-007). Same shape as "
+            + "OfficeStorageUploader's gate-after-write cleanup."),
+
         new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",

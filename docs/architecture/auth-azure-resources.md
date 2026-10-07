@@ -130,14 +130,19 @@ Both are listed in `knownClientApplications` on the BFF API app (`1e40baad-e065-
 
 | Property | Value |
 |----------|-------|
-| **Name** | `spe-api-dev-67e2xz` |
-| **Resource Group** | `spe-infrastructure-westus2` |
+| **Name** | `spaarke-bff-dev` (Linux; deployment slot `staging`) |
+| **Resource Group** | `rg-spaarke-dev` |
 | **Region** | West US 2 |
-| **URL** | `https://spe-api-dev-67e2xz.azurewebsites.net` |
+| **URL** | `https://spaarke-bff-dev.azurewebsites.net` |
+
+> **Corrected 2026-10-07.** The dev BFF moved on 2026-05-24 from the Windows app `spe-api-dev-67e2xz`
+> (`spe-infrastructure-westus2`) to the Linux app `spaarke-bff-dev` (`rg-spaarke-dev`) —
+> `config/spaarke-resources.yaml` (`environments.dev.bff`, `_changelog` 2026-05-24) and the `bff-deploy` skill. The old
+> name is NOT the dev BFF; every command on this page now names `spaarke-bff-dev`.
 
 **View Logs**:
 ```bash
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 ---
@@ -455,8 +460,8 @@ dotnet user-secrets set "API_CLIENT_SECRET" "your-secret-value"
 **Azure App Service**:
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="your-secret-value"
 ```
 
@@ -469,8 +474,8 @@ az keyvault secret set \
 
 # Then reference in App Service:
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="@Microsoft.KeyVault(SecretUri=https://spaarke-spekvcert.vault.azure.net/secrets/API-CLIENT-SECRET/)"
 ```
 
@@ -690,8 +695,8 @@ else
 ```powershell
 # Use PowerShell to avoid bash escaping issues with '!' character
 az webapp config appsettings set `
-  --name spe-api-dev-67e2xz `
-  --resource-group spe-infrastructure-westus2 `
+  --name spaarke-bff-dev `
+  --resource-group rg-spaarke-dev `
   --settings "EmailProcessing__DefaultContainerId=b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
 ```
 
@@ -725,7 +730,7 @@ See [sdap-auth-patterns.md](sdap-auth-patterns.md) Pattern 6 for details.
 
 ```bash
 # Check App Service configuration
-az webapp config appsettings list --name spe-api-dev-67e2xz -g spe-infrastructure-westus2
+az webapp config appsettings list --name spaarke-bff-dev -g rg-spaarke-dev
 
 # Verify Key Vault access
 az keyvault secret show --vault-name spe-kv-dev-67e2xz --name API-CLIENT-SECRET
@@ -801,8 +806,8 @@ If using direct App Service settings (not Key Vault references):
 
 ```bash
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings API_CLIENT_SECRET="<NEW_SECRET_VALUE>"
 ```
 
@@ -814,8 +819,8 @@ The App Service must be restarted to pick up the new secret value:
 
 ```bash
 az webapp restart \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev
 ```
 
 Allow 30-60 seconds for the app to fully restart.
@@ -824,13 +829,13 @@ Allow 30-60 seconds for the app to fully restart.
 
 ```bash
 # Check health endpoint
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz
+curl https://spaarke-bff-dev.azurewebsites.net/healthz
 
 # Check Dataverse-specific health (if applicable)
-curl https://spe-api-dev-67e2xz.azurewebsites.net/healthz/dataverse
+curl https://spaarke-bff-dev.azurewebsites.net/healthz/dataverse
 
 # Check App Service logs for auth errors
-az webapp log tail --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2
+az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev
 ```
 
 Expected results:
@@ -936,7 +941,7 @@ api://{client-id}/user_impersonation
 |----------|-----|------------|
 | **BFF API Name** | SPE BFF API | spaarke-bff-api-prod |
 | **BFF API Client ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | *(after creation)* |
-| **Redirect URI** | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
+| **App Service** | `https://spaarke-bff-dev.azurewebsites.net` (until 2026-05-24: `spe-api-dev-67e2xz`) | `https://api.spaarke.com` |
 | **Secret Storage** | App Service settings / user-secrets | Key Vault (`sprk-platform-prod-kv`) |
 | **Naming** | Legacy (pre-convention) | FR-11 compliant (`spaarke-` prefix) |
 

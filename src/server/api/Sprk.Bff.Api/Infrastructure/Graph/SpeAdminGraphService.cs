@@ -2476,12 +2476,17 @@ public sealed class SpeAdminGraphService
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RemoveConsumingTenant({containerTypeId},{appId},delegated)"); }
     }
 
-    public async Task<IReadOnlyList<SpeContainerTypePermission>?> GetContainerTypePermissionsForConfigAsync(
-        ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
+    /// <summary>
+    /// Lists the registration's <c>applicationPermissionGrants</c> — DELEGATED, for the reason given on
+    /// the consuming-app grants above: app-only reads are limited to registrations the caller owns, and the
+    /// BFF's managed identity owns none (403 accessDenied in UAT, 2026-10-07).
+    /// </summary>
+    public async Task<IReadOnlyList<SpeContainerTypePermission>?> GetContainerTypePermissionsForUserAsync(
+        HttpContext httpContext, string containerTypeId, CancellationToken ct = default)
     {
-        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
         try { return await GetContainerTypePermissionsAsync(client, containerTypeId, ct).ConfigureAwait(false); }
-        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerTypePermissions({containerTypeId})"); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerTypePermissions({containerTypeId},delegated)"); }
     }
 
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
@@ -4444,15 +4449,12 @@ public sealed class SpeAdminGraphService
 
         try
         {
+            // NO $select — same reason as ListContainerTypesAsync (task 030). The old four-field list
+            // dropped billingStatus, so the detail panel read "Billing: Unknown" for a type the list
+            // showed as Valid (UAT 2026-10-07, task 029).
             var containerType = await ExecuteWithRetryAsync(
                 () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]
-                    .GetAsync(config =>
-                    {
-                        config.QueryParameters.Select = new[]
-                        {
-                            "id", "name", "billingClassification", "createdDateTime"
-                        };
-                    }, ct),
+                    .GetAsync(cancellationToken: ct),
                 ct);
 
             if (containerType is null)
