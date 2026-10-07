@@ -98,7 +98,7 @@
     <criterion testable="true">Tests cover the stated shapes and refusals; anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
   </acceptance-criteria>
 
-  <notes>spec.md FR-05 (amended), FR-46; D-16.</notes>
+  <notes>spec.md FR-05 (amended), FR-46; D-16. NOTE FOR 025 (from task 026 review, 2026-10-07): RuleBodyDescriber validates every body as Existence only (PolicyVersionValidator.ValidateForSave with Existence), so a Threshold body is refused by the describer today; when this task lands the Threshold grammar, extend the describer for the new shapes and add its tests in the same change.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

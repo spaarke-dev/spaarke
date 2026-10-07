@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Services.Signals;
@@ -47,6 +48,21 @@ public sealed record SignalAccessDecision(SignalAccessOutcome Outcome, DecisionL
 /// cannot be resolved at all is <see cref="SignalAccessOutcome.CallerUnresolved"/>.</para>
 /// <para>The catalog row and entity-set name are configuration and metadata, not matter data, so they are read with the
 /// BFF's own <see cref="IGenericEntityService"/>; nothing read that way is returned to the caller.</para>
+/// <para><b>Core set (K2).</b> The core record's table must be one of <see cref="CoreAncestorResolver.CoreRecordEntities"/>,
+/// uac-r2's access-control core taxonomy, however the catalog row reads. Without it a user with Write on
+/// <c>sprk_signal</c> could point a Signal's core record at any row they can read and use the route as a probe.
+/// Still generic: the check is membership in uac-r2's list, not a branch per type (a fifth core type added there is
+/// accepted here unchanged).</para>
+/// <para><b>Component justification (CLAUDE.md section 11).</b> Existing: <c>AuthorizationService.GetCallerRecordAccessAsync</c>
+/// (uac-r2 task 070) already answers "may this caller read this record" for any entity set, as the caller, failing closed
+/// without a token. Extension: that method needs the caller's user id and bearer token plumbed in and returns a rights
+/// snapshot cached by <c>CachedAccessDataSource</c> (ADR-003 A1, 60 s). The decision here needs more than a rights bit: it needs
+/// the Signal row's own columns (lane, policy version, core-record pair, owner) read under the caller's Dataverse
+/// security, and a plain read answers "may they read it" and returns those columns in one call, uncached, so a revoked
+/// share takes effect on the next request. Using it would add a second call per record and a stale window for no gain.
+/// Cost of doing nothing: no check at all; the route would serve a plan for a Signal on a matter the caller cannot open.
+/// If the reviewer prefers the shared mechanism for the CORE-record half, <c>GetCallerRecordAccessAsync</c> is a drop-in
+/// for that one read.</para>
 /// <para><b>uac-r2 mechanisms reused, none rebuilt:</b> the caller-identity client (<see cref="IDataverseUserClient"/>,
 /// relocated by uac-r2 task 126) and the route-level uniform 404 / single 403 shapes. A caller-rights probe
 /// (<c>CallerRecordAccessProbe</c>) answers a different question (rights beyond Read) and is not needed for a read.</para>
@@ -85,7 +101,7 @@ public sealed class SignalCoreRecordAccess
 
             if (!signal.IsSuccess)
             {
-                return Denied(signal, "signal");
+                return await DeniedAsync(signal, "signal", ct).ConfigureAwait(false);
             }
 
             if (signal.Body is not { ValueKind: JsonValueKind.Object } row
@@ -121,13 +137,20 @@ public sealed class SignalCoreRecordAccess
                 return SignalAccessDecision.NotFound;
             }
 
+            if (!CoreAncestorResolver.CoreRecordEntities.Contains(logicalName, StringComparer.OrdinalIgnoreCase))
+            {
+                // K2: a Signal's core record can only be a core type; anything else is a forged or stale pointer.
+                _logger.LogWarning("Signal access: the core record type is not an access-control core type; denying.");
+                return SignalAccessDecision.NotFound;
+            }
+
             var entitySet = await _entities.GetEntitySetNameAsync(logicalName, ct).ConfigureAwait(false);
 
             // createdon exists on every Dataverse table; the value is not used, only whether the caller may read the row.
             var core = await _userClient.GetAsync($"{entitySet}({coreId})?$select=createdon", ct).ConfigureAwait(false);
             if (!core.IsSuccess)
             {
-                return Denied(core, "core record");
+                return await DeniedAsync(core, "core record", ct).ConfigureAwait(false);
             }
 
             return new SignalAccessDecision(SignalAccessOutcome.Allowed, lane, policyVersionId);
@@ -153,7 +176,7 @@ public sealed class SignalCoreRecordAccess
         var who = await _userClient.GetAsync("WhoAmI", ct).ConfigureAwait(false);
         if (!who.IsSuccess)
         {
-            return Denied(who, "caller identity");
+            return await DeniedAsync(who, "caller identity", ct).ConfigureAwait(false);
         }
 
         return who.Body is { ValueKind: JsonValueKind.Object } body
@@ -163,7 +186,7 @@ public sealed class SignalCoreRecordAccess
                 : SignalAccessDecision.NotFound;
     }
 
-    private SignalAccessDecision Denied(DataverseUserResponse response, string what)
+    private async Task<SignalAccessDecision> DeniedAsync(DataverseUserResponse response, string what, CancellationToken ct)
     {
         if (response.ErrorCode is DataverseUserClientErrorCodes.UserContextRequired
             or DataverseUserClientErrorCodes.OboExchangeFailed
@@ -172,6 +195,20 @@ public sealed class SignalCoreRecordAccess
             _logger.LogWarning("Signal access: the caller could not be resolved reading the {What} ({ErrorCode}).",
                 what, response.ErrorCode);
             return SignalAccessDecision.CallerUnresolved;
+        }
+
+        // A 403 from Dataverse is "no right on this row" for a user it knows, and also the answer for a valid token whose
+        // owner has no Dataverse user at all. WhoAmI needs no privilege, so asking it now tells the two apart: a caller who
+        // cannot be identified is the single 403 (D-29), as in the events list; one who can is an ordinary no-read 404.
+        if (response.ErrorCode == DataverseUserClientErrorCodes.AccessDenied && what != "caller identity")
+        {
+            var who = await _userClient.GetAsync("WhoAmI", ct).ConfigureAwait(false);
+            if (!who.IsSuccess)
+            {
+                _logger.LogWarning("Signal access: reading the {What} was denied and the caller has no Dataverse identity ({ErrorCode}).",
+                    what, who.ErrorCode);
+                return SignalAccessDecision.CallerUnresolved;
+            }
         }
 
         // 404/403 are the expected "cannot read"; anything else is a fault. Both are the same denial to the caller;

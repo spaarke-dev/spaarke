@@ -5,10 +5,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Signals;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Services.Signals.Actions;
 using Sprk.Bff.Api.Telemetry;
@@ -55,12 +58,89 @@ public class DecisionActionCatalogTests
     }
 
     [Fact]
+    public void SendBudgetInquiry_HasNoReplyDueParameter_D56_D20()
+    {
+        DecisionActionCatalog.TryGet("send-budget-inquiry", out var inquiry).Should().BeTrue();
+
+        inquiry.Parameters.Select(p => p.Code).Should().Equal("to", "subject", "body");
+    }
+
+    [Fact]
+    public void EveryChoiceParameter_CarriesOptionsOrANamedSource_AndNeverBoth()
+    {
+        var choices = DecisionActionCatalog.All.SelectMany(a => a.Parameters.Select(p => (a.Code, Param: p)))
+            .Where(x => x.Param.Kind == DecisionParameterKind.Choice).ToList();
+
+        choices.Should().NotBeEmpty();
+        foreach (var (code, param) in choices)
+        {
+            var hasOptions = param.Options is { Count: > 0 };
+            var hasSource = !string.IsNullOrWhiteSpace(param.OptionsSource);
+            (hasOptions ^ hasSource).Should().BeTrue(because: $"{code}.{param.Code} must carry options or a source, not neither or both");
+            if (hasOptions)
+            {
+                param.Options!.Select(o => o.Value).Should().OnlyHaveUniqueItems();
+                param.Options!.Should().OnlyContain(o => !string.IsNullOrWhiteSpace(o.Value) && !string.IsNullOrWhiteSpace(o.Label));
+            }
+        }
+    }
+
+    [Fact]
+    public void RecordTheResponse_OffersTheD58ResponseValues()
+    {
+        DecisionActionCatalog.TryGet("record-the-response", out var record).Should().BeTrue();
+
+        record.Parameters.Single(p => p.Code == "response").Options!.Select(o => o.Label)
+            .Should().Equal("Received outside Spaarke", "Delivered on the matter", "No longer needed");
+    }
+
+    [Fact]
+    public void Excludes_AreMutual_SoNeitherOrderOfAPairCanBothBeTaken()
+    {
+        foreach (var action in DecisionActionCatalog.All)
+        {
+            foreach (var excluded in action.Excludes)
+            {
+                DecisionActionCatalog.TryGet(excluded, out var other).Should().BeTrue();
+                other.Excludes.Should().Contain(action.Code, because: $"{action.Code} excludes {excluded}, so {excluded} must exclude {action.Code}");
+            }
+        }
+
+        DecisionActionCatalog.FirstConflict(["revise-budget", "approve-variance"]).Should().NotBeNull();
+        DecisionActionCatalog.FirstConflict(["approve-variance", "revise-budget"]).Should().NotBeNull();
+        DecisionActionCatalog.FirstConflict(["mark-complete", "reassign"]).Should().NotBeNull();
+        DecisionActionCatalog.FirstConflict(["reassign", "mark-complete"]).Should().NotBeNull();
+        DecisionActionCatalog.FirstConflict(["send-reminder", "record-the-response"]).Should().NotBeNull();
+        DecisionActionCatalog.FirstConflict(["reschedule", "reassign"]).Should().BeNull("reschedule and reassign are compatible");
+    }
+
+    [Fact]
+    public void TheSeededPlansOrder_CannotTakeReviseBudgetAndApproveVarianceTogether()
+    {
+        // POL-COMMIT-BUDGET v2 lists revise-budget BEFORE approve-variance, the order a one-way exclusion would miss.
+        var plan = DecisionPlanService.Resolve(SeededPlan, DecisionLane.Decide).Plan!;
+        plan.Actions.Select(a => a.Code).Should().Equal("send-budget-inquiry", "revise-budget", "approve-variance");
+
+        DecisionActionCatalog.FirstConflict(plan.Actions.Select(a => a.Code)).Should().Be(("revise-budget", "approve-variance"));
+        DecisionActionCatalog.FirstConflict(["send-budget-inquiry", "revise-budget"]).Should().BeNull();
+        DecisionActionCatalog.FirstConflict(["send-budget-inquiry", "approve-variance"]).Should().BeNull();
+        plan.Actions.Single(a => a.Code == "revise-budget").Excludes.Should().Equal("approve-variance");
+        plan.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
+    }
+
+    [Fact]
     public void ReviseBudget_CarriesTheBudgetPickerParameter_D18()
     {
         DecisionActionCatalog.TryGet("revise-budget", out var revise).Should().BeTrue();
 
         revise.Parameters.Should().Contain(p =>
             p.Code == "budget" && p.Kind == DecisionParameterKind.Lookup && p.LookupEntity == "sprk_budget" && p.Required);
+    }
+
+    [Fact]
+    public void NoEffectLine_ShowsAColumnOrTableName()
+    {
+        DecisionActionCatalog.All.SelectMany(a => a.EffectLines).Should().OnlyContain(l => !l.Contains("sprk_"));
     }
 
     [Fact]
@@ -173,6 +253,7 @@ public class DecisionActionCatalogTests
     [InlineData("""{"actions":["add-todo"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["send-budget-inquiry"],"nextSteps":["revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.ActionNotAllowed)]
     [InlineData("""{"actions":["revise-budget","revise-budget"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.DuplicateAction)]
+    [InlineData("""{"actions":["assign-work"],"nextSteps":["assign-work"]}""", DecisionLane.Decide, DecisionPlanRefusalReason.DuplicateAction)]
     [InlineData("""{"actions":[]}""", DecisionLane.Decide, DecisionPlanRefusalReason.PlanMissing)]
     [InlineData("", DecisionLane.Decide, DecisionPlanRefusalReason.PlanMissing)]
     [InlineData(null, DecisionLane.Decide, DecisionPlanRefusalReason.PlanMissing)]
@@ -243,16 +324,41 @@ public class DecisionActionCatalogTests
         decision.PolicyVersionId.Should().Be(VersionId);
     }
 
-    [Fact]
-    public async Task AFifthCoreRecordType_IsHandledUnchanged_BecauseTheTypeComesFromTheCatalogRow_D36()
+    [Theory]
+    [InlineData("sprk_matter", "sprk_matters")]
+    [InlineData("sprk_project", "sprk_projects")]
+    [InlineData("sprk_workassignment", "sprk_workassignments")]
+    [InlineData("sprk_servicerequest", "sprk_servicerequests")]
+    public async Task EveryCoreType_IsHandledByTheSameCode_BecauseTheTypeComesFromTheCatalogRow_D36(string table, string set)
     {
         var users = Users(signal: SignalRow(), core: Ok(new { createdon = "x" }));
-        var access = Access(users, coreTable: "sprk_fifthcoretype", coreSet: "sprk_fifthcoretypes");
+        var access = Access(users, coreTable: table, coreSet: set);
 
         var decision = await access.AuthorizeAsync(SignalId, CancellationToken.None);
 
         decision.Outcome.Should().Be(SignalAccessOutcome.Allowed);
-        await users.Received(1).GetAsync($"sprk_fifthcoretypes({CoreId})?$select=createdon", Arg.Any<CancellationToken>());
+        await users.Received(1).GetAsync($"{set}({CoreId})?$select=createdon", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public void TheAcceptedCoreTypes_AreExactlyUacR2sCoreSet_NotACopy()
+    {
+        // The route accepts what CoreAncestorResolver.CoreRecordEntities lists; this pins that the test above covers all of it.
+        CoreAncestorResolver.CoreRecordEntities.Should().BeEquivalentTo(
+            "sprk_matter", "sprk_project", "sprk_workassignment", "sprk_servicerequest");
+    }
+
+    [Theory]
+    [InlineData("account")]
+    [InlineData("sprk_document")]
+    [InlineData("sprk_signal")]
+    public async Task ASignalWhoseCoreRecordPointsAtANonCoreTable_IsDenied_AndThatTableIsNeverRead_K2(string table)
+    {
+        var users = Users(signal: SignalRow(), core: Ok(new { createdon = "x" }));
+        var access = Access(users, coreTable: table, coreSet: table + "s");
+
+        (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+        await users.DidNotReceive().GetAsync(Arg.Is<string>(p => p.Contains($"({CoreId})", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -265,7 +371,6 @@ public class DecisionActionCatalogTests
 
     [Theory]
     [InlineData(404, DataverseUserClientErrorCodes.NotFound)]
-    [InlineData(403, DataverseUserClientErrorCodes.AccessDenied)]
     [InlineData(429, DataverseUserClientErrorCodes.RateLimited)]
     [InlineData(500, "DATAVERSE_UNAVAILABLE")]
     public async Task ASignalTheCallerCannotReadOrCouldNotBeRead_IsTheUniformNotFound_AndTheCoreRecordIsNeverAsked(int status, string code)
@@ -275,6 +380,32 @@ public class DecisionActionCatalogTests
 
         (await access.AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
         await users.DidNotReceive().GetAsync(Arg.Is<string>(p => p.StartsWith("sprk_matters(", StringComparison.Ordinal)), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ADeniedRead_ForACallerDataverseKnows_IsTheUniformNotFound()
+    {
+        var users = Users(signal: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(users).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
+    }
+
+    [Fact]
+    public async Task ADeniedRead_ForAValidTokenWithNoDataverseUser_IsTheSingleCallerUnresolved_D29()
+    {
+        var users = Users(signal: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+
+        (await Access(users).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+    }
+
+    [Fact]
+    public async Task ADeniedCoreRecordRead_ForAValidTokenWithNoDataverseUser_IsCallerUnresolved_AndANormalDenialIsNot()
+    {
+        var unknown = Users(signal: SignalRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Fail(403, DataverseUserClientErrorCodes.AccessDenied));
+        var known = Users(signal: SignalRow(), core: Fail(403, DataverseUserClientErrorCodes.AccessDenied), who: Ok(new { UserId = OwnerId }));
+
+        (await Access(unknown).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.CallerUnresolved);
+        (await Access(known).AuthorizeAsync(SignalId, CancellationToken.None)).Outcome.Should().Be(SignalAccessOutcome.NotFound);
     }
 
     [Theory]
@@ -353,6 +484,34 @@ public class DecisionActionCatalogTests
         body.Actions.Single(a => a.Code == "approve-variance").Excludes.Should().Equal("revise-budget");
         body.DismissalReasons.Should().HaveCount(6);
         body.RuleDescription.Should().BeNull("a version with no describable rule body is served without a description, never a guess");
+    }
+
+    [Fact]
+    public async Task TheRoute_StillReturns200_WithANullRuleDescription_WhenTheNameReadFaults()
+    {
+        var access = Access(Users(signal: SignalRow(), core: Ok(new { createdon = "x" })));
+        var entities = EntitiesReturningPlan(SeededPlan, ruleBody: PathBBody());
+        entities.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException("dataverse is down"));
+        var plans = new DecisionPlanService(entities, NullLogger<DecisionPlanService>.Instance);
+        var describer = new RuleBodyDescriber(Validator(), entities, NullLogger<RuleBodyDescriber>.Instance);
+
+        var result = await DecisionPlanEndpoints.GetDecisionPlanAsync(SignalId, new DefaultHttpContext(), access, plans, describer, CancellationToken.None);
+
+        var body = result.Should().BeOfType<Ok<DecisionPlanResponse>>().Subject.Value!;
+        body.RuleDescription.Should().BeNull();
+        body.Actions.Should().HaveCount(3);
+    }
+
+    private static string PathBBody()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null && !File.Exists(Path.Combine(dir.FullName, "src", "server", "api", "Sprk.Bff.Api", "Program.cs")))
+        {
+            dir = dir.Parent;
+        }
+
+        return File.ReadAllText(Path.Combine(dir!.FullName, "tests", "fixtures", "signals", "pathb-existence.rulebody.json"));
     }
 
     [Fact]
@@ -450,7 +609,7 @@ public class DecisionActionCatalogTests
 
     // The rule body is absent from these fixtures, so the describer refuses; the plan must still be served (task 026 wiring).
     private static RuleBodyDescriber NoRuleDescriber() =>
-        new(Validator(), Substitute.For<IGenericEntityService>());
+        new(Validator(), Substitute.For<IGenericEntityService>(), NullLogger<RuleBodyDescriber>.Instance);
 
     private static PolicyVersionValidator Validator()
     {
@@ -458,10 +617,15 @@ public class DecisionActionCatalogTests
         return new PolicyVersionValidator(schema, new PredicateCompiler(schema, TimeProvider.System), NullLogger<PolicyVersionValidator>.Instance);
     }
 
-    private static IGenericEntityService EntitiesReturningPlan(string plan)
+    private static IGenericEntityService EntitiesReturningPlan(string plan, string? ruleBody = null)
     {
         var entities = Substitute.For<IGenericEntityService>();
         var version = new Entity("sprk_policyversion", VersionId) { ["sprk_decisionplan"] = plan };
+        if (ruleBody is not null)
+        {
+            version["sprk_rulebody"] = ruleBody;
+        }
+
         entities.RetrieveAsync("sprk_policyversion", VersionId, Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns(version);
         return entities;
     }

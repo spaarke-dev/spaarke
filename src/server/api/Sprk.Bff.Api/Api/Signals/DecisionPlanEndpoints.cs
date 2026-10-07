@@ -124,11 +124,22 @@ public sealed record DecisionActionDto(
 {
     internal static DecisionActionDto From(DecisionActionDefinition a, bool isRecommended) =>
         new(a.Code, a.Label, a.WorkType, a.RecordClass.ToString(), isRecommended,
-            a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity)).ToList(),
+            a.Parameters.Select(p => new DecisionParameterDto(p.Code, p.Label, p.Kind.ToString(), p.Required, p.Hint, p.LookupEntity,
+                p.Options?.Select(o => new DecisionOptionDto(o.Value, o.Label)).ToList(), p.OptionsSource)).ToList(),
             a.EffectLines,
             a.Excludes);
 }
 
-public sealed record DecisionParameterDto(string Code, string Label, string Kind, bool Required, string? Hint, string? LookupEntity);
+public sealed record DecisionParameterDto(
+    string Code,
+    string Label,
+    string Kind,
+    bool Required,
+    string? Hint,
+    string? LookupEntity,
+    IReadOnlyList<DecisionOptionDto>? Options,
+    string? OptionsSource);
+
+public sealed record DecisionOptionDto(string Value, string Label);
 
 public sealed record DismissalReasonDto(string Code, string Label, bool CountsTowardSuppression, bool RequiresDetail);

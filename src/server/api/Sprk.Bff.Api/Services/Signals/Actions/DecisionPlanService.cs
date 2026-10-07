@@ -107,7 +107,8 @@ public sealed class DecisionPlanService
             return Refused(DecisionPlanRefusalReason.PlanMissing);
         }
 
-        if (HasDuplicate(actionCodes) || HasDuplicate(nextStepCodes))
+        // A code in both lists would be offered as a step and again as a Next step.
+        if (HasDuplicate(actionCodes) || HasDuplicate(nextStepCodes) || actionCodes.Intersect(nextStepCodes, StringComparer.Ordinal).Any())
         {
             return Refused(DecisionPlanRefusalReason.DuplicateAction);
         }

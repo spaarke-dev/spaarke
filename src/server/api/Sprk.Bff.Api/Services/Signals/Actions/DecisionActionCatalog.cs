@@ -34,7 +34,8 @@ public enum DecisionParameterKind
 
 /// <summary>
 /// One input the wizard collects for an action. <see cref="LookupEntity"/> names the table when
-/// <see cref="Kind"/> is <see cref="DecisionParameterKind.Lookup"/>.
+/// <see cref="Kind"/> is <see cref="DecisionParameterKind.Lookup"/>. A <see cref="DecisionParameterKind.Choice"/> carries
+/// EITHER a fixed <see cref="Options"/> list OR a named <see cref="OptionsSource"/> the wizard reads (never neither).
 /// </summary>
 public sealed record DecisionActionParameter(
     string Code,
@@ -42,7 +43,13 @@ public sealed record DecisionActionParameter(
     DecisionParameterKind Kind,
     bool Required,
     string? Hint = null,
-    string? LookupEntity = null);
+    string? LookupEntity = null,
+    IReadOnlyList<DecisionParameterOption>? Options = null,
+    string? OptionsSource = null);
+
+/// <summary>One fixed choice: the stable <see cref="Value"/> the commit route receives and the <see cref="Label"/> the
+/// user sees.</summary>
+public sealed record DecisionParameterOption(string Value, string Label);
 
 /// <summary>
 /// One entry of the closed action catalog (spec FR-50; reconciliation S-8, S-9).
@@ -90,10 +97,11 @@ public sealed record DecisionDismissalReason(
 /// <para><b>Out of the catalog by owner decision D-20:</b> escalate, extend-sla, close-inquiry (the inquiry SLA is
 /// not in R1). <b>Record class:</b> Routine for reassign and extend-response-date (D-45, reconciliation C-3), mark-complete
 /// and reschedule (A-2); Judgement for everything else, and every Next-step creator.</para>
-/// <para><b>Excludes</b> are as stated in v4 (Z-4): taking <c>approve-variance</c> removes <c>revise-budget</c>;
-/// taking <c>mark-complete</c> removes <c>reschedule</c> and <c>reassign</c>; taking <c>record-the-response</c> removes
-/// <c>send-reminder</c> and <c>extend-response-date</c>. The relation is directional ("an earlier action removes the later
-/// step"), so a plan author who wants the exclusion to bite orders the excluding action first.</para>
+/// <para><b>Excludes are MUTUAL.</b> v4 (Z-4) states them one way: <c>approve-variance</c> removes <c>revise-budget</c>;
+/// <c>mark-complete</c> removes <c>reschedule</c> and <c>reassign</c>; <c>record-the-response</c> removes <c>send-reminder</c>
+/// and <c>extend-response-date</c>. They are declared once below and made symmetric when the catalog is built, so a
+/// pair can never both be taken whichever order the plan lists them in (the seeded POL-COMMIT-BUDGET v2 lists
+/// <c>revise-budget</c> before <c>approve-variance</c>). <see cref="FirstConflict"/> is the check the commit route runs.</para>
 /// </remarks>
 public static class DecisionActionCatalog
 {
@@ -106,14 +114,11 @@ public static class DecisionActionCatalog
         new("body", "Message", DecisionParameterKind.TextArea, Required: true),
     ];
 
-    private static readonly DecisionActionDefinition[] Definitions =
+    private static readonly DecisionActionDefinition[] Declared =
     [
         // ---- Decide lane ----------------------------------------------------------------------------------
         new("send-budget-inquiry", "Send budget inquiry", DecisionLane.Decide, IsNextStep: false, WorkType: "ask",
-            [
-                .. MessageParameters,
-                new("replyWithin", "Reply expected within", DecisionParameterKind.Choice, Required: true),
-            ],
+            MessageParameters,
             [
                 "Sends the message above to the recipient",
                 "Records the inquiry against the matter",
@@ -157,7 +162,7 @@ public static class DecisionActionCatalog
                 new("dueDate", "New due date", DecisionParameterKind.Date, Required: true),
                 new("reason", "Reason", DecisionParameterKind.Text, Required: true),
             ],
-            ["Moves the due date of the item (sprk_duedate)"],
+            ["Moves the due date of the item"],
             Excludes: [],
             DecisionRecordClass.Routine),
 
@@ -187,7 +192,13 @@ public static class DecisionActionCatalog
 
         new("record-the-response", "Record the response", DecisionLane.Do, IsNextStep: false, WorkType: null,
             [
-                new("response", "Response", DecisionParameterKind.Choice, Required: true),
+                new("response", "Response", DecisionParameterKind.Choice, Required: true, Options:
+                [
+                    // D-58: the values of sprk_workassignment.sprk_responseoutcome (task 047).
+                    new("received-outside-spaarke", "Received outside Spaarke"),
+                    new("delivered-on-the-matter", "Delivered on the matter"),
+                    new("no-longer-needed", "No longer needed"),
+                ]),
                 new("note", "Note", DecisionParameterKind.Text, Required: false),
             ],
             ["Records the response on the work assignment"],
@@ -232,6 +243,20 @@ public static class DecisionActionCatalog
             DecisionRecordClass.Judgement),
     ];
 
+    /// <summary>The catalog proper: <see cref="Declared"/> with every exclusion made mutual.</summary>
+    private static readonly DecisionActionDefinition[] Definitions = Mutualize(Declared);
+
+    private static DecisionActionDefinition[] Mutualize(DecisionActionDefinition[] declared) =>
+        declared
+            .Select(a => a with
+            {
+                Excludes = declared
+                    .Where(b => b.Code != a.Code && (a.Excludes.Contains(b.Code) || b.Excludes.Contains(a.Code)))
+                    .Select(b => b.Code)
+                    .ToArray(),
+            })
+            .ToArray();
+
     private static readonly FrozenDictionary<string, DecisionActionDefinition> ByCode =
         Definitions.ToFrozenDictionary(d => d.Code, StringComparer.Ordinal);
 
@@ -269,6 +294,24 @@ public static class DecisionActionCatalog
 
         definition = null!;
         return false;
+    }
+
+    /// <summary>
+    /// The first pair in <paramref name="takenCodes"/> that excludes each other, or null. Excludes are mutual, so the order
+    /// the codes are given in does not matter. An unknown code is not a conflict here (the plan resolver refuses it).
+    /// </summary>
+    public static (string First, string Second)? FirstConflict(IEnumerable<string> takenCodes)
+    {
+        var taken = takenCodes.ToList();
+        foreach (var code in taken)
+        {
+            if (TryGet(code, out var action) && taken.FirstOrDefault(other => action.Excludes.Contains(other)) is { } clash)
+            {
+                return (code, clash);
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The closed dismissal-reason list for a lane.</summary>

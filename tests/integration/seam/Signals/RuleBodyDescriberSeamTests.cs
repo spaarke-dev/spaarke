@@ -46,7 +46,7 @@ public sealed class RuleBodyDescriberSeamTests
             .Returns(call => client.RetrieveMultipleAsync(call.Arg<QueryExpression>(), call.Arg<CancellationToken>()));
         var schema = new RuleBodySchemaValidator();
         var compiler = new PredicateCompiler(schema, new FakeTimeProvider(new DateTimeOffset(2026, 10, 7, 0, 0, 0, TimeSpan.Zero)));
-        return new RuleBodyDescriber(new PolicyVersionValidator(schema, compiler, NullLogger<PolicyVersionValidator>.Instance), entities);
+        return new RuleBodyDescriber(new PolicyVersionValidator(schema, compiler, NullLogger<PolicyVersionValidator>.Instance), entities, NullLogger<RuleBodyDescriber>.Instance);
     }
 
     private static ServiceClient? Connect()

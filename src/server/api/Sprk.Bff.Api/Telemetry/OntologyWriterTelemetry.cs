@@ -54,6 +54,12 @@ public static class OntologyWriterTelemetry
         description: "Count of sprk_policyversion decision plans refused at read time (fail closed), by reason. " +
                      "A refused plan means the wizard cannot offer that Signal's actions.");
 
+    private static readonly Counter<long> RuleDescriptionRefusedCounter = Meter.CreateCounter<long>(
+        name: "ontology.ruledescription.refused",
+        unit: "{description}",
+        description: "Count of rule-body descriptions that could not be produced after the body validated, by reason " +
+                     "(a reference-table read fault, or a lookup value with no name row). The decision plan is still served.");
+
     /// <summary>
     /// Records one Signal-writer refusal/failure. <paramref name="reason"/> MUST be one of
     /// <see cref="OntologyWriterFailureReason"/>'s bounded-cardinality constants — never a raw exception
@@ -76,6 +82,21 @@ public static class OntologyWriterTelemetry
     /// </summary>
     public static void RecordDecisionPlanRefused(string reason) =>
         DecisionPlanRefusedCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+
+    /// <summary>Records one rule description that could not be produced (task 026). <paramref name="reason"/> MUST be one of
+    /// <see cref="RuleDescriptionRefusalReason"/>'s constants.</summary>
+    public static void RecordRuleDescriptionRefused(string reason) =>
+        RuleDescriptionRefusedCounter.Add(1, new KeyValuePair<string, object?>("reason", reason));
+}
+
+/// <summary>Bounded-cardinality reasons a rule description could not be produced (task 026).</summary>
+public static class RuleDescriptionRefusalReason
+{
+    /// <summary>Reading the reference table that names a lookup value failed (Dataverse fault).</summary>
+    public const string LookupReadFailed = "lookup_read_failed";
+
+    /// <summary>A lookup value has no name row, so it cannot be shown as a name.</summary>
+    public const string LookupUnresolved = "lookup_unresolved";
 }
 
 /// <summary>Bounded-cardinality reasons a decision plan is refused (task 036). Shared by the metric and the log.</summary>

@@ -48,9 +48,7 @@ is the ledger (three small insertions, below); it still needs uac-r2's review pe
 3. **The plan and the catalog/entity-set lookups use the BFF's own `IGenericEntityService`**: configuration and metadata, not
    matter data, and nothing read that way is returned except the plan and catalog.
 4. **Plan JSON shape** is task 009's `{"actions":[...],"nextSteps":[...]}`; `nextSteps` optional.
-5. **Excludes are directional** (v4 Z-4: an earlier action removes the later step): `approve-variance` excludes `revise-budget`
-   but not the reverse. A plan that lists `revise-budget` first lets both be taken. Plan authors order the excluding action
-   first; a plan-save check for this is an owner call (not built).
+5. **Excludes are directional in v4 (Z-4); made MUTUAL in round 2** (see below).
 6. **Parameter / effect-line wording** is mine (the spec fixes only approve-variance's effect line, which is verbatim). The
    Decide work types are ask / fund (v4 W-8); Do actions carry none (the rule declares it).
 7. The 036 POML says "rule description from task 026 when present": wired in task 026 as `ruleDescription` on the response.
@@ -99,3 +97,25 @@ fresh worktrees at short paths (`C:\wtcma` / `C:\wtcba` and `C:\wtcmz` / `C:\wtc
 
 code-review and adr-check were run for task 036 (skills invoked); for task 026 their checklists were applied directly to the new files without re-invoking the skills (same author, same session). No F-class finding. Known limits recorded: ADR-008 note above
 (warning, path C available); array-backed catalog collections are mutable to code that casts them (K1, own repo only).
+
+## Round 2 (independent review PASS-WITH-FINDINGS, 2026-10-07)
+
+| # | Finding | Fix |
+|---|---|---|
+| 1 | F2 `send-budget-inquiry` had a required "Reply expected within" choice with no options (D-56, D-20) | Parameter removed; the action is now to / subject / body. Test pins the three codes. |
+| 2 | F3 choice parameters could not carry options | `DecisionActionParameter` and `DecisionParameterDto` gain `Options` (`value` + `label`) and `OptionsSource`. The only remaining choice, `record-the-response` "Response", carries the D-58 values (`received-outside-spaarke`, `delivered-on-the-matter`, `no-longer-needed`; labels Received outside Spaarke / Delivered on the matter / No longer needed). The stable string values are the wizard-to-commit contract; the commit route (044) maps them to the `sprk_responseoutcome` option set from task 047. No option comes from Dataverse today, so no `OptionsSource` is in use, but the field exists for one. Test: every choice parameter has options XOR a source. |
+| 3 | F3 excludes one-way: the seeded v2 plan let revise-budget and approve-variance both be taken | Exclusions are declared once and made mutual when the catalog is built (`Mutualize`); `FirstConflict(codes)` is the order-independent check the commit route runs. Tests: mutuality over the whole catalog, and the seeded plan's order. |
+| 4 | F3 `RuleBodyDescriber` did not catch Dataverse faults, so a fault was a 500 | Faults (not cancellation) are caught, logged (EventId 50303 `RuleDescriptionRefused`, reason only) and metered (`ontology.ruledescription.refused`, reasons `lookup_read_failed` / `lookup_unresolved`); the describer returns a refusal and the route serves the plan with `ruleDescription: null`. Tests: describer-level (refusal + log + metric, message not leaked), cancellation still throws, route-level 200 with null description. |
+| 5 | K2 core-record check not limited to the core set | `SignalCoreRecordAccess` accepts only tables in `CoreAncestorResolver.CoreRecordEntities` (uac-r2's list, read at run time, no per-type branch); anything else is denied and never read. Tests: all four core types go through the same code; `account`, `sprk_document`, `sprk_signal` are denied and not read; the set is pinned. This holds until task 049 removes Console User Write on `sprk_signal`. |
+| 6 | Valid token, no Dataverse user, got 404 | A Dataverse 403 on the Signal or core read is followed by `WhoAmI` (needs no privilege): if the caller cannot be identified the result is the single 403 `caller_unresolved` (D-29), otherwise the ordinary 404. The extra call happens only on a denial. Tests for both. |
+| 7 | Same code in `actions` and `nextSteps` | Refused as `duplicate_action`. |
+| 8 | Ledger line citations | Corrected to the final file: `DecisionPlanEndpoints.cs:53` (AuthorizeAsync), `:54-56` (403), `:69` (404); `SignalCoreRecordAccess.cs:98` / `:150`. |
+| 9 | Reschedule effect line showed "(sprk_duedate)" | "Moves the due date of the item". A test asserts no effect line contains `sprk_`. |
+| 10 | Component justification | `SignalCoreRecordAccess` remarks now name `AuthorizationService.GetCallerRecordAccessAsync` (uac-r2 task 070) and say why the Signal read goes through `IDataverseUserClient`: the decision needs the Signal row's own columns under the caller's security in one uncached call, the shared method returns a rights snapshot cached 60 s and needs the user id and token plumbed in. It stays a drop-in for the core-record half if the reviewer prefers. |
+| note | Describer validates Existence only | Noted in task 025's POML `<notes>`. |
+| note | FR-54 Do-lane own work | Task 038's POML already states it. Task 043's POML had nothing; a note now says it is 038's rule and that 043 must re-check each Signal id with `SignalCoreRecordAccess` (036). |
+
+Evidence: `Domain.Signals` + `Services.Signals` unit suites 375/375 (the earlier 356 plus the new tests); the two live seam tests
+pass against spaarkedev1; `Spaarke.ArchTests` built explicitly then run 817/818, the one failure being the writer-credential I5
+test that master/docs branch fixed in `0977c274d` (not in this branch's base); `RouteAuthorizationGuardTests` 86/86. Publish
+size was not re-measured: round 2 adds no package and only small code (previous +0.03 MB).

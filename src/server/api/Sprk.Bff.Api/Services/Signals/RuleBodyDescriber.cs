@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Signals;
 
@@ -85,9 +86,11 @@ public sealed class RuleBodyDescriber
 
     private readonly PolicyVersionValidator _validator;
     private readonly IGenericEntityService _entities;
+    private readonly ILogger<RuleBodyDescriber> _logger;
 
-    public RuleBodyDescriber(PolicyVersionValidator validator, IGenericEntityService entities)
+    public RuleBodyDescriber(PolicyVersionValidator validator, IGenericEntityService entities, ILogger<RuleBodyDescriber> logger)
     {
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _validator = validator ?? throw new ArgumentNullException(nameof(validator));
         _entities = entities ?? throw new ArgumentNullException(nameof(entities));
     }
@@ -109,11 +112,25 @@ public sealed class RuleBodyDescriber
             using var doc = PredicateCompiler.ParseBounded(ruleBodyJson);
             return await DescribeParsedAsync(doc.RootElement, ct).ConfigureAwait(false);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not PredicateCompilationException)
+        {
+            // A reference-table read fault must not turn a plan read into a 500: the description is an extra, so it is
+            // refused (logged, metered, type only) and the caller serves the plan without it.
+            return Refused(RuleDescriptionRefusalReason.LookupReadFailed,
+                "A lookup name could not be read, so the rule cannot be described right now.");
+        }
         catch (PredicateCompilationException ex)
         {
             // Unreachable for a body the validator accepted; kept so a future drift between the two fails closed.
             return new RuleDescriptionResult(null, "The rule body could not be read: " + ex.Message);
         }
+    }
+
+    private RuleDescriptionResult Refused(string reason, string message)
+    {
+        _logger.LogWarning(OntologyWriterEvents.RuleDescriptionRefused, "Rule description refused (reason={Reason}).", reason);
+        OntologyWriterTelemetry.RecordRuleDescriptionRefused(reason);
+        return new RuleDescriptionResult(null, message);
     }
 
     private async Task<RuleDescriptionResult> DescribeParsedAsync(JsonElement root, CancellationToken ct)
@@ -139,7 +156,7 @@ public sealed class RuleBodyDescriber
         var names = await ResolveNamesAsync(ids, ct).ConfigureAwait(false);
         if (names is null)
         {
-            return new RuleDescriptionResult(null,
+            return Refused(RuleDescriptionRefusalReason.LookupUnresolved,
                 "A lookup value in the rule body does not resolve to a name, so it cannot be described without guessing.");
         }
 

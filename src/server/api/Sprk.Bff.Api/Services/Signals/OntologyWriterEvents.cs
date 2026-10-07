@@ -42,4 +42,11 @@ public static class OntologyWriterEvents
     /// (<see cref="Telemetry.DecisionPlanRefusalReason"/>) ONLY.
     /// </summary>
     public static readonly EventId DecisionPlanRefused = new(50302, nameof(DecisionPlanRefused));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per rule description that could not be produced after the body validated, by
+    /// <see cref="RuleBodyDescriber"/> (task 026). Structured property: <c>reason</c>
+    /// (<see cref="Telemetry.RuleDescriptionRefusalReason"/>) ONLY; never the body, a name or the exception message.
+    /// </summary>
+    public static readonly EventId RuleDescriptionRefused = new(50303, nameof(RuleDescriptionRefused));
 }
