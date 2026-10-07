@@ -61,6 +61,13 @@ No anonymous endpoint, no published customer list, and Model 2 later becomes dat
   (F12). If the tab keeps Teams SSO with the BFF as resource, each customer BFF app must also pre-authorize Teams'
   first-party clients (F9).
 
+## Live actions (each owner-approved)
+
+| Date | Action | Result |
+|---|---|---|
+| 2026-10-07 | Created Static Web App `swa-spaarke-office-addins-prod` (Standard, westus2, RG `rg-spaarke-shared-prod`, subscription Spaarke Shared Production `cd95fcec-6b89-49ea-8339-c2b579b12587`; tags application/environment/scope from the RG) for the production add-in site | default host `green-plant-09ecafa1e.1.azurestaticapps.net`; empty until word-add-in-r1 deploys |
+| 2026-10-07 | Owner adds CNAME `addins` → `green-plant-09ecafa1e.1.azurestaticapps.net` at Namecheap; then the custom domain `addins.spaarke.com` is added to the site (CNAME validation) | pending |
+
 ## Split
 
 | Task | Scope | Depends on |
