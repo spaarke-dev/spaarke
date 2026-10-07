@@ -264,19 +264,17 @@ Use `project-plan.template.md` structure:
 
 Create project-specific AI context file. **The canonical template** lives at [`references/claudemd-template.md`](references/claudemd-template.md) — copy that template, then replace `{placeholders}` (project name, dates, ADR list, key constraints) with project-specific values.
 
-Key sections the generated CLAUDE.md MUST contain (from the template):
+The generated CLAUDE.md is the project's **operating manual**: a session reading only it plus `current-task.md` must be able to act correctly in the project. It has seven sections:
 
-1. **Project Status** — Phase / Last Updated / Current Task / Next Action
-2. **Quick Reference** — Key Files + Project Metadata
-3. **Context Loading Rules** — what to load on session start
-4. **🚨 MANDATORY: Task Execution Protocol** — bind every "work on task X" trigger to the `task-execute` skill
-5. **Multi-File Work Decomposition** — when to parallelize vs serialize
-6. **Key Technical Constraints** — extracted from `spec.md` (ADRs, tech stack rules)
-7. **Decisions Made** — empty initially; updated as project progresses
-8. **Implementation Notes** — gotchas, workarounds, learnings
-9. **Resources** — applicable ADRs, related projects, external docs
+1. **Scope and status** — what the project delivers and excludes; status is a *pointer* to `TASK-INDEX.md` / `current-task.md`, never copied counts
+2. **Binding rules** — spec MUST / MUST NOT rules with FR/NFR ids; approved ADR tensions (root §6.5)
+3. **Owner directives and standing decisions** — only those still constraining work, dated, linking to `notes/decisions.md`
+4. **Coordination** — shared files/contracts with other projects; hand-offs
+5. **Environment and live actions** — what needs owner OK; deploy path; keep/never-delete resources
+6. **Gotchas** — dated, each with its fix
+7. **Key documents**
 
-See `references/claudemd-template.md` for the full template body to paste in.
+Do **not** copy repo-wide rules (task-execute triggers, decomposition, execution model) into it — they live in root `CLAUDE.md` and the skills. The template file also carries the guidance on what does not belong, size (aim ≤ 15–20 KB; prune past ~25 KB) and how to keep it current; read it before generating. Create an empty `notes/decisions.md` alongside it for the full decision log.
 
 ### Step 7: Generate current-task.md
 
@@ -489,7 +487,7 @@ Before completing project-setup, verify:
 - [ ] plan.md has at least one WBS phase with deliverables
 - [ ] plan.md phases map logically to spec sections
 - [ ] CLAUDE.md references spec.md as source
-- [ ] CLAUDE.md has project metadata filled in
+- [ ] CLAUDE.md has its scope paragraph and binding rules filled in, and copies no repo-wide rules
 - [ ] Folder structure created (tasks/, notes/ with subdirs)
 - [ ] No PII or secrets in any generated file
 - [ ] All file paths use forward slashes (cross-platform)

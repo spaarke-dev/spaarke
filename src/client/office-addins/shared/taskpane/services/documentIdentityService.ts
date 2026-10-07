@@ -66,6 +66,15 @@ export type DocumentIdentityOutcome =
       documentName: string;
       fileName: string;
       relatedRecord: ResolvedRelatedRecord | null;
+      /**
+       * Whether `relatedRecord === null` means "filed to NO record" (true / absent — the server read the document's
+       * record slots, as the URL resolution does) or merely "the pane does not know" (`false` — a stamp-only
+       * resolution, which carries no record at all). Task 111: only a KNOWN-unfiled document is offered "File to
+       * record"; an unknown one must never be, or a document already filed (even to a slot the pane cannot read) is
+       * filed a second time. A later server-side resolution of the stamp returns a record (or `null` with this
+       * absent) and the consumers need no change.
+       */
+      relatedRecordKnown?: boolean;
     }
   | {
       /**
@@ -138,6 +147,29 @@ const SYSTEM_FAILURE_REASON_CODE = ACCESS_SYSTEM_FAILURE_REASON_CODE;
 
 const RESOLVE_IDENTITY_ENDPOINT = '/api/documents/resolve-identity';
 
+/** Task 112: the same identity, read by document id (for a document identified only by its stamp). */
+const identityByIdEndpoint = (documentId: string): string =>
+  `/api/documents/${encodeURIComponent(documentId)}/identity`;
+
+/** A resolved BFF identity response as the pane's outcome (shared by the URL and by-id reads). */
+function toResolvedOutcome(response: BffDocumentIdentityResponse): DocumentIdentityOutcome {
+  return {
+    kind: 'resolved',
+    documentId: cleanGuid(response.documentId),
+    documentName: response.documentName ?? '',
+    fileName: response.fileName ?? '',
+    relatedRecord: response.relatedRecord
+      ? {
+          entityType: response.relatedRecord.entityType,
+          id: cleanGuid(response.relatedRecord.id),
+          name: response.relatedRecord.name ?? null,
+          displayName: response.relatedRecord.displayName ?? null,
+          number: response.relatedRecord.number ?? null,
+        }
+      : null,
+  };
+}
+
 function isAbsoluteUrl(url: string): boolean {
   try {
     // Constructing a URL is the standard-library way to validate absoluteness; a relative or
@@ -184,21 +216,7 @@ export async function resolveDocumentIdentity(
     });
 
     if (response.resolved) {
-      return {
-        kind: 'resolved',
-        documentId: cleanGuid(response.documentId),
-        documentName: response.documentName ?? '',
-        fileName: response.fileName ?? '',
-        relatedRecord: response.relatedRecord
-          ? {
-              entityType: response.relatedRecord.entityType,
-              id: cleanGuid(response.relatedRecord.id),
-              name: response.relatedRecord.name ?? null,
-              displayName: response.relatedRecord.displayName ?? null,
-              number: response.relatedRecord.number ?? null,
-            }
-          : null,
-      };
+      return toResolvedOutcome(response);
     }
 
     if (response.reason === 'identity_conflict') {
@@ -272,6 +290,31 @@ export async function resolveDocumentIdentity(
  * @param stampDocumentId The raw id `IHostAdapter.readDocumentStamp()` returned, or `null` for every
  * one of its own failure modes (absent, unsupported, unparseable, disagreeing parts).
  */
+/**
+ * Task 112 (owner UAT round 11, item 4): completes a STAMP-ONLY resolution (record unknown — see
+ * {@link applyStampPrecedence}) from the server: `GET /api/documents/{id}/identity`, behind the same
+ * document read authorization as resolve-identity, returns the document's names and its related record. The
+ * outcome is then an ordinary, fully-known resolved identity (filed card or the filing picker).
+ *
+ * Any other outcome is returned unchanged. Every failure (403 — which is also what an unknown id answers — 404,
+ * 503, network) keeps the stamp-only outcome as it was: the record stays UNKNOWN, so the pane never offers to
+ * file a document whose record it could not read. Never throws.
+ */
+export async function completeStampIdentity(outcome: DocumentIdentityOutcome): Promise<DocumentIdentityOutcome> {
+  if (outcome.kind !== 'resolved' || outcome.relatedRecordKnown !== false || !outcome.documentId) {
+    return outcome;
+  }
+  try {
+    const response = await apiClient.get<BffDocumentIdentityResponse>(identityByIdEndpoint(outcome.documentId));
+    if (!response.resolved) return outcome;
+    const verified = toResolvedOutcome(response);
+    // The server answered for the stamped id; a different id would mean a mismatched answer — keep the stamp's.
+    return verified.kind === 'resolved' && verified.documentId === outcome.documentId ? verified : outcome;
+  } catch {
+    return outcome;
+  }
+}
+
 export function applyStampPrecedence(
   urlOutcome: DocumentIdentityOutcome,
   stampDocumentId: string | null
@@ -290,6 +333,7 @@ export function applyStampPrecedence(
       documentName: '',
       fileName: '',
       relatedRecord: null,
+      relatedRecordKnown: false,
     };
   }
 
@@ -297,6 +341,27 @@ export function applyStampPrecedence(
   // owner's precedence names exactly three 'new' reasons as the stamp's ONLY fallback trigger — none
   // of these outcomes is in that list, so the stamp is not consulted and the outcome is unchanged.
   return urlOutcome;
+}
+
+/**
+ * Task 111: the identity after the pane FILED the open document to `record` (the "File to record" action). A pure
+ * update of a resolved identity for the same document — every other state (and a different document) is returned
+ * unchanged, by reference. The record is now known, so `relatedRecordKnown` is dropped.
+ */
+export function applyFiledRecord(
+  identity: DocumentIdentityState | undefined,
+  documentId: string,
+  record: ResolvedRelatedRecord
+): DocumentIdentityState | undefined {
+  if (!identity || identity === 'checking' || identity.kind !== 'resolved') {
+    return identity;
+  }
+  if (identity.documentId !== cleanGuid(documentId)) {
+    return identity;
+  }
+  const filed = { ...identity, relatedRecord: record };
+  delete filed.relatedRecordKnown;
+  return filed;
 }
 
 /**

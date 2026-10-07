@@ -25,7 +25,10 @@ import type { EntitySearchResult } from './hooks/useEntitySearch';
 import {
   resolveDocumentIdentity,
   applyDocumentIdentityOutcome,
+  applyFiledRecord,
+  type ResolvedRelatedRecord,
   applyStampPrecedence,
+  completeStampIdentity,
   type DocumentIdentityContext,
   type DocumentIdentityOutcome,
   type DocumentIdentityState,
@@ -362,7 +365,8 @@ export const App: React.FC<AppProps> = ({
         ? await hostAdapter.readDocumentStamp()
         : null;
 
-      settle(applyStampPrecedence(urlOutcome, stampDocumentId));
+      // Task 112: a stamp-only match carries no record; read the stamped document's identity from the server.
+      settle(await completeStampIdentity(applyStampPrecedence(urlOutcome, stampDocumentId)));
     } catch (err) {
       // getDocumentUrl()/resolveDocumentIdentity()/readDocumentStamp() are designed not to throw for
       // expected outcomes. An unexpected throw is an 'error' outcome — NOT "new": it says nothing
@@ -385,6 +389,27 @@ export const App: React.FC<AppProps> = ({
     identityResolutionAttempted.current = true;
     void resolveOpenDocumentIdentity();
   }, [isAuthenticated, hostAdapter, resolveOpenDocumentIdentity]);
+
+  // Task 111: the Save tab filed the open document to a record. The identity (which the card and the green box read)
+  // and the saved context (Create To Do's regarding) take the record at once — no reload, no re-resolve.
+  const handleDocumentFiled = useCallback((documentId: string, record: ResolvedRelatedRecord) => {
+    setDocumentIdentity(prev => applyFiledRecord(prev, documentId, record));
+    setSavedContext(prev =>
+      prev?.documentId && cleanGuid(prev.documentId) === cleanGuid(documentId)
+        ? applyDocumentIdentityOutcome(
+            prev,
+            {
+              kind: 'resolved',
+              documentId: cleanGuid(documentId),
+              documentName: prev.documentName ?? '',
+              fileName: prev.fileName ?? '',
+              relatedRecord: record,
+            },
+            toFriendlyRegardingType
+          )
+        : prev
+    );
+  }, []);
 
   // "Check again" / "Try again" in the Save tab (task 024).
   const retryDocumentIdentity = useCallback(() => {
@@ -751,6 +776,7 @@ export const App: React.FC<AppProps> = ({
             // silently. The retry re-runs task 013's resolution.
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
+            onDocumentFiled={handleDocumentFiled}
             // Task 094: lifts the Save tab's saved-state bundle above its own mount lifecycle.
             savedState={saveFlowState}
             onSavedStateChange={setSaveFlowState}

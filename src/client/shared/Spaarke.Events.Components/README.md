@@ -9,6 +9,11 @@ the SpaarkeAi Calendar workspace widget (task 115).
 `AssignedToFilter`, `RecordTypeFilter`, `StatusFilter`, `ColumnFilterHeader`,
 `ColumnHeaderMenu`, `ViewSelectorDropdown`.
 
+**Two intentional Calendar variants (moved from root CLAUDE.md §17 on 2026-10-07; corrected 2026-10-03):**
+- `CalendarSection` — workspace widget: click-day filter, controlled mode, stateless.
+- `CalendarFilterPane` — side-pane filter builder: Calendar + From/To + date-field dropdown + Apply; session-storage (R4 task 055 / B-6 hoist 2026-05-26). Same library, different intents (`notes/b6-pre-change-diff.md`).
+- `src/solutions/CalendarSidePane/` is **not currently in use but may return, so keep it working rather than deleting it.** Its `App.tsx` imports `CalendarSection` + `CalendarFilterOutput`, NOT `CalendarFilterPane` (that migration was never finished). Two of its files (`utils/parseParams.ts`, `utils/postMessage.ts`) import the type `CalendarFilterPaneOutput` from the bare `@spaarke/events-components` specifier. The components barrel now exports `CalendarFilterPane` + its types. `IEventDateInfo` is deliberately NOT re-exported from `CalendarFilterPane`, because `CalendarSection` already exports a same-named, different type from the same barrel.
+
 **Context**: `EventsPageContext` + provider + selector hooks (state
 management for filters, active event, calendar dates, grid refresh).
 

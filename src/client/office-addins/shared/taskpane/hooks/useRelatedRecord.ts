@@ -49,10 +49,13 @@ export interface RelatedRecordView {
  * - `'unassociated'` — the document IS identified, but none of the four direct slots is populated (or, by
  *   construction, the only populated slot is outside this task's read scope — the server never sends one).
  * - `'associated'` — the document is identified and filed to one of the four direct slots.
+ * - `'unknown'` — the document is identified but its record is NOT (a stamp-only identity, task 111): neither
+ *   "filed" nor "unfiled" may be claimed.
  */
 export type RelatedRecordOutcome =
   | { kind: 'absent' }
   | { kind: 'unassociated' }
+  | { kind: 'unknown' }
   | ({ kind: 'associated' } & RelatedRecordView);
 
 function toView(record: ResolvedRelatedRecord): RelatedRecordView {
@@ -81,7 +84,7 @@ export function useRelatedRecord(documentIdentity: DocumentIdentityState | undef
       return { kind: 'absent' };
     }
     if (!documentIdentity.relatedRecord) {
-      return { kind: 'unassociated' };
+      return documentIdentity.relatedRecordKnown === false ? { kind: 'unknown' } : { kind: 'unassociated' };
     }
     return { kind: 'associated', ...toView(documentIdentity.relatedRecord) };
   }, [documentIdentity]);
