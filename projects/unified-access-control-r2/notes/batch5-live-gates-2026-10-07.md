@@ -35,3 +35,38 @@ Full record: session scratchpad `gates/G10-171-results.md` and `gates/g10/g10log
   - #1352: the sync job reports Failed every run because of 65a3fab2/#1313; history is short.
 - **Note correction owed:** `desktopUrl` is `ms-word:https://…` by design (`DesktopUrlBuilder`: the `ofe|u|` form is blocked by Office security zones). The 171 note's B1 text is wrong.
 - **Leftover:** empty container `b!6BMp2UkK50GCP66tPeRxURG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`, added to the owner's container-delete script.
+
+## Update: the 171 hotfix (#1353), task 114 (#1342) and the Access ribbon (#1366), deployed 2026-10-07
+
+Dev BFF: master `dc189faac`, which contains #1353, #1342 and #1366.
+
+### 171: both F1s re-tested live, both PASS
+- **Upload then attach**, as testuser1:
+  - On secure PS 31e232ae (doc 2b97180e) and on the BU project fb73b08c (doc 08cbce55), a fresh upload followed by `POST /api/v1/documents/{id}/file` returned **200**. Each row's `sprk_graphitemid` equals its `sprk_graphitemidbound` and `sprk_hasfile` is true. `/content` returns 200 on both. This closes gate (c) and the A3 attach.
+- **Negative case:** testuser1 attached an admin-uploaded item in the same BU container to its own new doc d4300ad0. Result: **403 `NotTheUploader`**. A cross-container attempt got 409 `WrongContainer`.
+- **JIT removal after a full unshare (C2):**
+  - `open-links` gave testuser1 a writer role on PS's container. The admin then ran RevokeAccess.
+  - Scheduled run db98b221: `jit.removed: 1, unknown: 0`. PS's permission list is empty. Before the fix the same check gave `unknown: 1`.
+  - The run shows "Failed" only because of 65a3fab2 (#1352).
+  - testuser1's creator share was then restored.
+
+### 114: deployed in this order
+1. Guest flags (owner-approved): 2 `#EXT#` users set to Yes, `-Verify` PASS.
+2. BFF.
+3. Web resources `access_ribbon.js` 1.6.0 and `assignedaccess_postsave.js` 1.1.0.
+4. TrackingFieldTrio 1.0.36 (solution and control read back 1.0.36).
+5. The Access ribbon (`SpaarkeAccessRibbons`, `-SecureTransitionDeployed`), after #1366 fixed the Share button ids.
+   - `-Apply`'s own verify fails straight after publish because the ribbon cache lags; a read-only `-Verify` 75 s later PASSED on all three entities.
+   - #1368 makes `-Apply` retry.
+
+**Owed to the owner session:**
+- Share is hidden on a Restricted record's form and in a grid selection that includes one.
+- The "External user — no access" label.
+- The no-internal-reader and owner-is-external admin reports after the job's first runs.
+
+### Test data left
+- **testuser1 uploads (test data, BU1 container and PS):**
+  - `retest-*.txt`, attached to 2b97180e and 08cbce55;
+  - `retest-shape-*.txt`, unattached;
+  - `admin-owned-*.txt`, an admin upload.
+- **Row d4300ad0** on fb73b08c, unattached.
