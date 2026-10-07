@@ -464,6 +464,34 @@ function childrenIncompleteDetail(err: unknown): string | null {
  * person who can open a secure record. Its `detail` says what to do instead. */
 const UNSHARE_LAST_READER_REASON_CODE = 'sdap.access.user_share.last_reader_on_secure_record';
 
+/** Task 114 (owner test feedback 2026-10-07): `/share-user`'s refusals about the person being shared with — who cannot
+ * receive a share (disabled, not a person, external on a Restricted record, no such user), is on the record's No Access
+ * list, or could not be checked. The server's sentence says "this user"/"this person", so the modal names the person,
+ * with their email because several users can share a name. Without this they fell through to the generic "1 failed.
+ * Please try again." — wrong advice for every refusal here except the two read faults, whose own sentence says to try
+ * again. */
+const USER_SHARE_NAMED_REFUSAL_CODES = new Set([
+  'sdap.access.user_share.user_disabled',
+  'sdap.access.user_share.user_not_a_person',
+  'sdap.access.user_share.user_not_internal',
+  'sdap.access.user_share.user_not_found',
+  'sdap.access.user_share.subject_no_access',
+  'sdap.access.user_share.no_access_unverifiable',
+  'sdap.access.user_share.read_failed',
+]);
+const USER_NOT_INTERNAL_REASON_CODE = 'sdap.access.user_share.user_not_internal';
+
+/** The named sentence for a `/share-user` eligibility refusal, or `null` for any other failure. */
+function userShareRefusalDetail(err: unknown, user: IUserPick): string | null {
+  if (!(err instanceof AccessGrantModalApiError)) return null;
+  if (!err.reasonCode || !USER_SHARE_NAMED_REFUSAL_CODES.has(err.reasonCode)) return null;
+  const who = user.email ? `${user.name} (${user.email})` : user.name;
+  if (err.reasonCode === USER_NOT_INTERNAL_REASON_CODE) {
+    return `System user ${who} is an external user. Restricted records cannot be shared with external users.`;
+  }
+  return `System user ${who}: ${err.detail}`;
+}
+
 /** The server's own explanation when the record's access policy refused a
  * grant (task 138), or `null` for any other failure. */
 function grantPolicyRefusalDetail(err: unknown): string | null {
@@ -1090,7 +1118,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       }
     }
     for (const u of lookedUpUsers) {
-      items.push({ id: u.id, name: u.name, meta: 'Internal system user', kind: 'user', user: u });
+      items.push({
+        id: u.id,
+        name: u.name,
+        // Neutral: a user flagged external can be picked too (allowed on a non-Restricted record, round 78).
+        meta: u.email ? `System user · ${u.email}` : 'System user',
+        kind: 'user',
+        user: u,
+      });
     }
     return items;
   }, [candidates, lookedUpContacts, lookedUpOrgs, lookedUpUsers, contactGrantsOffered, organizationGrantsOffered]);
@@ -1194,7 +1229,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
         // Task 138: a refusal by the record's access policy carries the
         // server's own explanation — kept, and shown instead of a generic error.
-        const refusal = grantPolicyRefusalDetail(err);
+        const refusal =
+          grantPolicyRefusalDetail(err) ?? (it.kind === 'user' && it.user ? userShareRefusalDetail(err, it.user) : null);
         if (refusal) {
           policyRefusals.push(refusal);
           continue;
@@ -1290,14 +1326,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     if (!pickUser) return;
     setPicking(true);
     try {
-      const picked = await pickUser();
+      // Task 114: a Restricted record cannot be shared with a user flagged external, so the lookup leaves them out.
+      const picked = await pickUser({ excludeExternal: isRestricted });
       if (!picked) return;
       setLookedUpUsers(prev => (prev.some(u => u.id === picked.id) ? prev : [...prev, picked]));
       setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
     } finally {
       setPicking(false);
     }
-  }, [pickUser]);
+  }, [pickUser, isRestricted]);
 
   /** Task 142 (owner A3 = prompt): "Grant" on a suggestion writes through the NORMAL path — `/share-user` for a contact
    * that represents an internal user, `/grant` otherwise — at Collaborate (owner rule 5), and the server marks the entry
@@ -1326,14 +1363,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setNotice({ intent: 'success', text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` });
       } catch (err) {
         const deny = classifyAccessFailure(err);
+        // Task 149: the share WAS written; only some related records of the secure record are not updated yet.
+        const pendingDetail = deny ? null : childrenIncompleteDetail(err);
         if (deny) setAccessDenyState(deny);
-        else
+        else if (pendingDetail) {
+          await loadData();
+          setNotice({
+            intent: 'warning',
+            text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}`,
+          });
+        } else
           setNotice({
             intent: 'error',
             text:
-              err instanceof AccessGrantModalApiError && err.detail
+              (entry.systemUserId ? userShareRefusalDetail(err, { id: entry.systemUserId, name }) : null) ??
+              (err instanceof AccessGrantModalApiError && err.detail
                 ? err.detail
-                : `Failed to grant ${name} access. Please try again.`,
+                : `Failed to grant ${name} access. Please try again.`),
           });
       } finally {
         setSuggestionBusy(null);
@@ -1519,10 +1565,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         size="lg"
         dismiss="explicit"
         nonBlocking
-        // While a native advanced-lookup pane is open (picking), hide this surface
-        // so the (higher-z-index) modal doesn't cover the lookup (task 073 UAT
-        // v1.0.29 #1A). The modal stays mounted — staged picks survive.
-        hidden={picking}
+        // While a native advanced-lookup pane is open (picking), the surface moves
+        // left of the pane and dims, so it neither covers the lookup (task 073 UAT
+        // v1.0.29 #1A: it sits above the pane's z-index) nor disappears (owner test
+        // feedback 2026-10-07: hiding it read as the modal closing). It stays
+        // mounted — staged picks survive.
+        yieldToSidePane={picking}
         footerStart={
           <Button appearance="secondary" onClick={handleCancelAttempt}>
             Cancel
