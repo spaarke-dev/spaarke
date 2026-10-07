@@ -308,13 +308,18 @@ public sealed class ExternalEventDto
     [JsonPropertyName("sprk_eventid")]
     public string SprkEventid { get; init; } = "";
 
+    /// <summary>The event name — read from Dataverse <c>sprk_eventname</c> (sprk_event has no <c>sprk_name</c>; the wire
+    /// name is kept for the external SPA, task 097).</summary>
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
-    /// <summary>sprk_eventstatus choice value.</summary>
+    /// <summary>Dataverse <c>statuscode</c> — the event's status of record (live: Draft 1, Open 659490001, Completed
+    /// 659490002, Closed 659490003, Cancelled 659490004, Transferred 659490005, On Hold 659490006, Reassigned 659490007,
+    /// No Further Action 2; Spaarke.Dataverse.EventStatusCode). Wire name kept for the external SPA; sprk_event has no
+    /// <c>sprk_status</c> column (task 097, review F2).</summary>
     [JsonPropertyName("sprk_status")]
     public int? SprkStatus { get; init; }
 
@@ -332,12 +337,15 @@ public sealed class ExternalEventDto
 
 public sealed class CreateExternalEventRequest
 {
+    /// <summary>Written to Dataverse <c>sprk_eventname</c> (task 097).</summary>
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
+    /// <summary>Written to Dataverse <c>statuscode</c> (task 097, review F2/F9): Draft (1) or Open (659490001) only;
+    /// omitted ⇒ Open. Any other value is refused with 400.</summary>
     [JsonPropertyName("sprk_status")]
     public int? SprkStatus { get; init; }
 }

@@ -125,7 +125,7 @@ public class DailyBriefingCollector : ICodedWorkflow
     private const string EventTypeTask = "124f5fc9-98ff-f011-8406-7c1e525abd8b";
 
     // sprk_event statuscode values (consistent with deployed notification playbooks).
-    private const int EventStatusOpen = 659490001;
+    private const int EventStatusOpen = Spaarke.Dataverse.EventStatusCode.Open; // task 097 review F8: the one source of truth
 
     // sprk_todo statuscode values per docs/data-model schema (Open=1, In Progress=659490001).
     // Treat both as "active" for the today/tomorrow surface.

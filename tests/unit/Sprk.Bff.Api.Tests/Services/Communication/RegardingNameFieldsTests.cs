@@ -52,7 +52,9 @@ public class RegardingNameFieldsTests
         // must fail here even when no test names that key.
         var source = BffSource("Services", "Communication", "RegardingNameFields.cs");
 
-        var nameKeys = SwitchKeys(source, "PrimaryNameField");
+        // Task 097 round 9: the display-name map has ONE home, RegardingRecordType.GetPrimaryNameField in the shared
+        // library (PrimaryNameField delegates to it), so its keys are read from there.
+        var nameKeys = SwitchKeys(SharedDataverseSource("Models.cs"), "GetPrimaryNameField");
         var setKeys = SwitchKeys(source, "EntitySetName");
 
         nameKeys.Should().NotBeEmpty();
@@ -110,6 +112,33 @@ public class RegardingNameFieldsTests
         return Regex.Matches(source[start..end], "\"([a-z_]+)\"\\s*=>")
             .Select(m => m.Groups[1].Value)
             .ToList();
+    }
+
+    private static string SharedDataverseSource(string file) =>
+        File.ReadAllText(Path.Combine(Path.GetDirectoryName(BffPath())!, "..", "..", "shared", "Spaarke.Dataverse", file));
+
+    private static string BffPath()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var marker = Path.Combine(dir, ".git");
+            if (Directory.Exists(marker) || File.Exists(marker))
+                return Path.Combine(dir, "src", "server", "api", "Sprk.Bff.Api", "x");
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Could not locate the repository root.");
+    }
+
+    [Fact]
+    public void PrimaryNameField_IsTheSharedMap_NotASecondCopy()
+    {
+        // Task 097 round 9: one source. The BFF function delegates; it carries no switch of its own to drift.
+        BffSource("Services", "Communication", "RegardingNameFields.cs")
+            .Should().Contain("RegardingRecordType.GetPrimaryNameField(entityLogicalName)");
+        foreach (var key in SwitchKeys(SharedDataverseSource("Models.cs"), "GetPrimaryNameField"))
+            RegardingNameFields.PrimaryNameField(key).Should().Be(Spaarke.Dataverse.RegardingRecordType.GetPrimaryNameField(key));
     }
 
     private static string BffSource(params string[] relative)
