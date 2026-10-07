@@ -54,6 +54,7 @@ import { useHandoffFileLeg, type HandoffFileRefs } from '../CreateRecordWizard/u
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -652,33 +653,8 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 
 async function resolveCurrentUserEmail(dataService: IDataService): Promise<string | null> {
   try {
-    // Get current user ID from Xrm
-    const frames: Window[] = [window];
-    try {
-      if (window.parent !== window) frames.push(window.parent);
-    } catch {
-      /* cross-origin */
-    }
-    try {
-      if (window.top && window.top !== window) frames.push(window.top);
-    } catch {
-      /* cross-origin */
-    }
-
-    let userId = '';
-    for (const frame of frames) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (frame as any).Xrm;
-        if (xrm?.Utility?.getGlobalContext) {
-          const ctx = xrm.Utility.getGlobalContext();
-          userId = cleanGuid(ctx.userSettings?.userId);
-          if (userId) break;
-        }
-      } catch {
-        /* cross-origin */
-      }
-    }
+    // Get current user ID via the shared cross-frame walker (task 081 / C-8).
+    const userId = cleanGuid(getXrm('utility')?.Utility?.getGlobalContext?.()?.userSettings?.userId);
     if (!userId) return null;
 
     const result = await dataService.retrieveRecord('systemuser', userId, '?$select=internalemailaddress');

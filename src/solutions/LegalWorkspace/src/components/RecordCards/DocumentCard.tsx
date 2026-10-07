@@ -28,7 +28,7 @@ import { getEffectiveDarkMode } from "../../providers/ThemeProvider";
 import { authenticatedFetch } from "../../services/authInit";
 import { getDocumentOpenLinks } from "../../services/DocumentApiService";
 import { getBffBaseUrl, getTenantId } from "../../config/runtimeConfig";
-import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService } from "@spaarke/ui-components";
+import { RecordCardShell, CardIcon, AiSummaryPopover, FindSimilarViewerDialog, createXrmNavigationService, getXrm } from "@spaarke/ui-components";
 import type { ISummaryData } from "@spaarke/ui-components";
 import { FilePreviewDialog } from "../FilePreview/FilePreviewDialog";
 
@@ -189,11 +189,9 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     // ----- Tool: Find Similar -----
     const handleFindSimilar = React.useCallback(async () => {
       try {
+        // Shared cross-frame walker (task 081 / C-8), nearest frame with a client URL.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm =
-          (window.top as any)?.Xrm ??
-          (window.parent as any)?.Xrm ??
-          (window as any)?.Xrm;
+        const xrm: any = getXrm("clientUrl");
         const clientUrl =
           xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "";
         const tenantId = getTenantId();

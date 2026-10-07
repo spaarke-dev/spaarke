@@ -863,6 +863,13 @@ public partial class RouteAuthorizationGuardTests
             "The same filter attached by type (the knowledge and admin-knowledge groups): the same pass-through for every "
             + "argument it does not extract.",
             "if (documentIds.Count == 0) return await next(context) (AiAuthorizationFilter.cs:84) and zero handlers bind DocumentAnalysisRequest"),
+        // Task 171: it DECIDES (DocumentAuthorizationFilter on the row) when the route's {documentSpeId} has a sprk_document, and
+        // passes through for a row-less item (Compose Path B, reported to the owner as escalation trigger 2) — so by FORM it
+        // earns no credit, and each route keeps its own declaration (HandlerDecision / Pending) for the row-less case.
+        new NonDecidingAttachment("AddComposeDocumentAuthorizationFilter", "Api/Filters/ComposeDocumentAuthorizationFilter.cs", "171",
+            "Authorizes the item's sprk_document row (read / write) when one exists; for a row-less item it returns next "
+            + "unmarked, and the Compose byte calls keep the caller's OBO identity (SPE decides).",
+            "if (row is null) { return await next(context); } (ComposeDocumentAuthorizationFilter.cs)"),
         new NonDecidingAttachment("AddEndpointFilter<CommunicationAuthorizationFilter>", "Api/Filters/CommunicationAuthorizationFilter.cs", "161",
             "Checks IsAuthenticated and an oid, then next — nothing else. The sweep disproved its old claim that "
             + "ICommunicationAccessFilter scopes send, archive, suggest, create-task, threads, affinity, proposals and verify.",
@@ -1414,13 +1421,16 @@ public partial class RouteAuthorizationGuardTests
         new HandlerDecision("GET /api/communications/queue-feed", "GetQueueFeedAsync", "IImpersonatedCommunicationQuery", new[] { "CommunicationQueueFeedService.GetQueueFeedAsync" },
             "The feed's communications are queried AS the caller (CommunicationQueueFeedService.cs:151); the "
             + "app-only proposal read (:233) is keyed only by those visible ids."),
-        new HandlerDecision("POST /api/compose/document/{documentSpeId}/pull-annotations", "PullAnnotations", "DownloadFileAsUserAsync", Array.Empty<string>(),
-            "Reads the drive item ON BEHALF OF the caller (DownloadFileAsUserAsync(httpContext, body.DriveId, "
-            + "documentSpeId), ComposeAnnotationEndpoints.cs:139): SPE decides both caller-chosen ids; nothing "
-            + "else is read."),
-        new HandlerDecision("POST /api/compose/document/{documentSpeId}/reanchor-annotations", "ReanchorAnnotations", "DownloadFileAsUserAsync", Array.Empty<string>(),
-            "Reads the drive item ON BEHALF OF the caller (ComposeAnnotationEndpoints.cs:235), then caches "
-            + "anchors under that item id the caller just proved Read on."),
+        // Task 171: the read goes through ComposeSpeAccess.DownloadForComposeAsync — APP-ONLY exactly when
+        // ComposeDocumentAuthorizationFilter authorized the item's sprk_document row (read) and verified its pointer;
+        // otherwise (no row — Compose Path B) ON BEHALF OF the caller, where SPE decides both caller-chosen ids.
+        new HandlerDecision("POST /api/compose/document/{documentSpeId}/pull-annotations", "PullAnnotations", "DownloadForComposeAsync", Array.Empty<string>(),
+            "Reads the drive item through DownloadForComposeAsync (ComposeAnnotationEndpoints.cs:149): app-only only for "
+            + "the row the route filter authorized; otherwise ON BEHALF OF the caller, so SPE decides both caller-chosen ids. "
+            + "Nothing else is read."),
+        new HandlerDecision("POST /api/compose/document/{documentSpeId}/reanchor-annotations", "ReanchorAnnotations", "DownloadForComposeAsync", Array.Empty<string>(),
+            "Reads the drive item through DownloadForComposeAsync (ComposeAnnotationEndpoints.cs:248) — the row decision or, "
+            + "with no row, the caller's own SPE read — then caches anchors under that item id."),
         new HandlerDecision("GET /api/dataverse/savedquery/{savedQueryId:guid}", "GetSavedQueryByIdAsync", "IDataversePrivilegeChecker", Array.Empty<string>(),
             "Loads only `savedquery` (system views, SavedQueryService.cs:100-104) and refuses 403 unless the "
             + "caller holds Read on the view's entity (HasReadPrivilegeAsync, SavedQueryEndpoints.cs:122) — the "
@@ -1582,6 +1592,9 @@ public partial class RouteAuthorizationGuardTests
         {
             ["IDataverseUserClient"] = ("Infrastructure/Dataverse/IDataverseUserClient.cs",
                 "A Dataverse Web API client that runs under the CALLER's security context (OBO), so row security decides."),
+            ["DownloadForComposeAsync"] = ("Services/Compose/ComposeSpeAccess.cs",
+                "Task 171: Compose's ONE byte identity rule — app-only only for the item ComposeDocumentAuthorizationFilter "
+                + "authorized (its sprk_document row + a verified pointer); otherwise the caller's own OBO read, where SPE decides."),
             ["IImpersonatedCommunicationQuery"] = ("Services/Communication/IImpersonatedCommunicationQuery.cs",
                 "App-only query WITH MSCRMCallerID = the caller's systemuserid: Dataverse applies the caller's row security."),
             ["DataverseImpersonation"] = ("../../shared/Spaarke.Dataverse/DataverseImpersonation.cs",
@@ -2547,14 +2560,14 @@ public partial class RouteAuthorizationGuardTests
             "Summarises the uploaded files in the request (WorkspaceFileEndpoints.cs:156-198); reads no stored "
             + "file by id."),
         Permanent("POST /api/workspace/matters/pre-fill", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Analyses the uploaded files; the only storage write is an OBO upload of those bytes to the "
-            + "configured staging container (MatterPreFillService.cs:343). Reads no record by id."),
+            "Analyses the uploaded files in memory (MatterPreFillService.cs:308); writes nothing to storage (task "
+            + "227f retired the staging upload). Reads no record by id."),
         Permanent("POST /api/workspace/matters/ai-summary", PermanentBasis.CallerSuppliedContentOnly, "167",
             "Summarises the matter fields the client sends (prompt from the request, "
             + "WorkspaceMatterEndpoints.cs:235); loads no matter by id."),
         Permanent("POST /api/workspace/projects/pre-fill", PermanentBasis.CallerSuppliedContentOnly, "167",
-            "Analyses the uploaded files (AnalyzeFilesAsync(files), WorkspaceProjectEndpoints.cs:100) — the "
-            + "same staging-upload pattern as the matter pre-fill; reads no record by id."),
+            "Analyses the uploaded files (AnalyzeFilesAsync(files), WorkspaceProjectEndpoints.cs:100) in memory, "
+            + "like the matter pre-fill; writes nothing to storage and reads no record by id."),
 
         // ---------- P:CreateWithNoPriorResource ----------
         Permanent("PUT /api/obo/me/files/{*path}", PermanentBasis.CreateWithNoPriorResource, "167",

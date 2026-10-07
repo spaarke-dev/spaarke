@@ -276,7 +276,7 @@ export function useRecordHeaderToolbarActions(
   }, [entity, recordId]);
 
   const handleCheckmarkClick = React.useCallback((): void => {
-    const xrm = getXrm();
+    const xrm = getXrm('navigation');
     if (!xrm?.Navigation?.navigateTo) return;
     // v1.0.6 CRITICAL: call `xrm.Navigation.navigateTo(...)` DIRECTLY. Every
     // v1.0.2..v1.0.5 aliased it as `const navigate = xrm.Navigation.navigateTo`
@@ -297,7 +297,7 @@ export function useRecordHeaderToolbarActions(
   }, [buildSmartTodoLaunchData]);
 
   const handleAnnotationClick = React.useCallback((): void => {
-    const xrm = getXrm();
+    const xrm = getXrm('navigation');
     if (!xrm?.Navigation?.navigateTo) return;
     void (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg).call(
       xrm.Navigation,

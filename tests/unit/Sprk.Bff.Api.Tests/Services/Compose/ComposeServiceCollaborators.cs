@@ -122,7 +122,11 @@ internal static class ComposeServiceCollaborators
             {
                 var row = new Entity("systemuser", Guid.NewGuid())
                 {
-                    ["businessunitid"] = new EntityReference("businessunit", businessUnitId)
+                    ["businessunitid"] = new EntityReference("businessunit", businessUnitId),
+                    // Task 171 (finding 2): record-less content is written only for an enabled internal person.
+                    ["domainname"] = "acting.user@contoso.example",
+                    ["isdisabled"] = false,
+                    ["accessmode"] = new OptionSetValue(0),
                 };
                 var collection = new EntityCollection();
                 collection.Entities.Add(row);

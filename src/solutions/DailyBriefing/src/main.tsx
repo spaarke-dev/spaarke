@@ -28,6 +28,7 @@ if (_appInsightsKey) {
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
+import { browsePlaybooks } from "./browsePlaybooks";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 
@@ -63,56 +64,11 @@ function Root() {
     );
   }, []);
 
-  /**
-   * R7 task 095 / FR-18 — "Browse Playbooks" overflow menu item on the
-   * DigestHeader. The standalone DailyBriefing code page provides the
-   * `Xrm.Navigation.navigateTo` thunk; the shared `@spaarke/daily-briefing-components`
-   * package stays Xrm-free per ADR-012.
-   *
-   * Mirrors task 094's chat-surface wiring: the existing `sprk_playbooklibrary`
-   * Code Page is the modal wrapper (target:2, 85%×85%). Once opened in browse
-   * mode, the Library Code Page lists every playbook + consumer mapping
-   * (PlaybookCardGrid consumer-chip extension from task 094) and launches
-   * through Path A.5 (`IConsumerRoutingService` → the BFF playbook-invocation boundary) per
-   * ADR-013 — no new BFF surface, no direct AnalysisOrchestrationService
-   * bypass.
-   *
-   * Failure mode: if `Xrm.Navigation` is unavailable (e.g., standalone
-   * dev/preview outside an MDA), the thunk logs a console warning and
-   * returns silently — the surface-level cue is left to host UX (Toaster
-   * would be a future enhancement).
-   */
-  const handleBrowsePlaybooks = React.useCallback(() => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    const xrm = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-    const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
-      xrm?.Navigation?.navigateTo;
-    if (typeof navigateTo !== "function") {
-      console.warn("[DailyBriefing] Xrm.Navigation unavailable — cannot open Playbook Library.");
-      return;
-    }
-    navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_playbooklibrary",
-        data: "",
-      },
-      {
-        target: 2,
-        width: { value: 85, unit: "%" },
-        height: { value: 85, unit: "%" },
-        title: "Playbook Library",
-      }
-    ).catch((err: unknown) => {
-      console.warn("[DailyBriefing] Playbook Library navigation rejected:", err);
-    });
-  }, []);
-
+  // "Browse Playbooks": see ./browsePlaybooks.ts (R7 task 095 / FR-18).
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <AppErrorBoundary surfaceName="Daily Briefing">
-        <DailyBriefingApp params={params} onBrowsePlaybooks={handleBrowsePlaybooks} />
+        <DailyBriefingApp params={params} onBrowsePlaybooks={browsePlaybooks} />
       </AppErrorBoundary>
     </FluentProvider>
   );

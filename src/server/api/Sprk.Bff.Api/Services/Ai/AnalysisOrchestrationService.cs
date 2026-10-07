@@ -223,7 +223,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
 
             // Load document text before delegating
             yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-            var nodeDocText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+            var nodeDocText = await _documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
             _logger.LogInformation(
                 "[PLAYBOOK-EXEC] Document text extracted: {CharCount} characters", nodeDocText.Length);
             yield return AnalysisStreamChunk.TextChunk(
@@ -422,7 +422,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         // 6. Extract document text from SPE
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6: Extracting document text");
         yield return AnalysisStreamChunk.TextChunk("[Extracting document text...]\n");
-        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, httpContext, cancellationToken);
+        var documentText = await _documentLoader.ExtractDocumentTextAsync(document, cancellationToken);
 
         _logger.LogInformation("[PLAYBOOK-EXEC] Step 6 OK: Extracted {CharCount} characters from document {DocumentId}",
             documentText.Length, documentId);

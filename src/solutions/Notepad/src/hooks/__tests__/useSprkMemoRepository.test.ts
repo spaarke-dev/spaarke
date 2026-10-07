@@ -255,6 +255,28 @@ describe('useSprkMemoRepository', () => {
 
   // ─── List query shape ────────────────────────────────────────────────────
 
+  // ─── Xrm resolution (task 081 round 4, review F7) ───────────────────────
+
+  it('skips a child frame whose Xrm.WebApi cannot retrieveMultipleRecords and uses the parent', async () => {
+    const originalParent = window.parent;
+    const parentStub = {
+      retrieveMultipleRecords: jest.fn(async () => ({ entities: [] })),
+      retrieveRecord: jest.fn(async () => ({ sprk_mattername: 'Smith v Jones' })),
+      createRecord: jest.fn(async () => ({ id: 'new-memo-id' })),
+      updateRecord: jest.fn(async () => ({ id: 'existing-id' })),
+    };
+    // Child frame: a partial WebApi (e.g. an embedding host shim) without retrieveMultipleRecords.
+    (window as any).Xrm = { WebApi: { createRecord: jest.fn() } };
+    Object.defineProperty(window, 'parent', { value: { Xrm: { WebApi: parentStub } }, writable: true, configurable: true });
+    try {
+      const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
+      expect(parentStub.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+      harness.unmount();
+    } finally {
+      Object.defineProperty(window, 'parent', { value: originalParent, writable: true, configurable: true });
+    }
+  });
+
   it('list query uses the correct entity-specific lookup filter for Matter', async () => {
     const stub = installXrmStub();
     const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);

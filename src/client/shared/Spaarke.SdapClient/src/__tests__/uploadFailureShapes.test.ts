@@ -19,7 +19,7 @@
  */
 
 import { SdapApiClient } from '../SdapApiClient';
-import { UploadNameConflictError } from '../operations/UploadOperation';
+import { UploadNameConflictError, UploadReplaceNotSupportedError } from '../operations/UploadOperation';
 import { SdapHttpError } from '../operations/httpFailure';
 
 const BASE_URL = 'https://bff.example.com';
@@ -231,6 +231,23 @@ describe('task-076 upload contracts — the client cannot name a container', () 
     // 409 is the collision code too, so the conflict type wins by design; what matters is that the
     // caller gets a TYPED outcome rather than an opaque failure.
     expect(err).toBeInstanceOf(UploadNameConflictError);
+  });
+
+  it('a refused REPLACE (task 171: 409 upload_replace_not_supported) is its own type, never a re-offered collision', async () => {
+    // The BFF refuses replace before looking at the container. Mapping that 409 to UploadNameConflictError would
+    // re-open the collision prompt and loop; the dedicated type lets the caller say what to do instead.
+    const client = clientWith(throwingFetch(409, 'upload_replace_not_supported'));
+
+    const forRecord = await client
+      .uploadFileForRecord('sprk_matter', 'r', file(), { conflictBehavior: 'replace' })
+      .catch((e: unknown) => e);
+    const withoutRecord = await client
+      .uploadFileWithoutRecord(file(), { conflictBehavior: 'replace' })
+      .catch((e: unknown) => e);
+
+    expect(forRecord).toBeInstanceOf(UploadReplaceNotSupportedError);
+    expect(forRecord).not.toBeInstanceOf(UploadNameConflictError);
+    expect(withoutRecord).toBeInstanceOf(UploadReplaceNotSupportedError);
   });
 
   it('forwards conflictBehavior on both new contracts', async () => {

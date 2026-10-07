@@ -173,7 +173,10 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, on
     () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl: bffBaseUrl ?? undefined }),
     [authenticatedFetch, bffBaseUrl]
   );
-  const dataverseUrl = React.useMemo(() => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '', []);
+  const dataverseUrl = React.useMemo(
+    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '',
+    []
+  );
 
   // Signed-in user's mailbox address for the compose "From:" row (item 3). Resolved once
   // via Xrm; the email surface defaults From to send-as this user (switchable to shared).

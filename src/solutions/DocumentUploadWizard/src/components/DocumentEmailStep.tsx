@@ -30,6 +30,7 @@ import type { IWizardContext, IEmailComposerHandle } from "@spaarke/ui-component
 import type { ILookupItem } from "@spaarke/ui-components/types/LookupTypes";
 import type { ICommunicationAssociation } from "@spaarke/ui-components/services/communicationApi";
 import type { AuthenticatedFetchFn } from "@spaarke/ui-components/services/EntityCreationService";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -117,27 +118,6 @@ function formatEntityTypeLabel(entityType: string): string {
 // Xrm.WebApi: recipient typeahead (systemuser search)
 // ---------------------------------------------------------------------------
 
-/** Resolve Xrm.WebApi from the frame hierarchy. */
-function resolveXrmWebApi(): { retrieveMultipleRecords: (entity: string, options: string) => Promise<{ entities: Record<string, unknown>[] }> } | null {
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const xrm = (frame as any).Xrm;
-            if (xrm?.WebApi?.retrieveMultipleRecords) {
-                return xrm.WebApi;
-            }
-            /* eslint-enable @typescript-eslint/no-explicit-any */
-        } catch {
-            // Cross-origin frame — skip
-        }
-    }
-    return null;
-}
-
 /**
  * Recipient typeahead: searches the Dataverse systemuser table via Xrm.WebApi and
  * returns ILookupItem[] for the composer's `onSearchRecipients`. The composer's
@@ -147,8 +127,9 @@ function resolveXrmWebApi(): { retrieveMultipleRecords: (entity: string, options
 async function searchSystemUsers(query: string): Promise<ILookupItem[]> {
     if (!query || query.trim().length < 2) return [];
 
-    const webApi = resolveXrmWebApi();
-    if (!webApi) {
+    // Shared cross-frame walker (task 081 / C-8).
+    const webApi = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
+    if (!webApi?.retrieveMultipleRecords) {
         console.error("[DocumentEmailStep] Xrm.WebApi not available for user search");
         return [];
     }

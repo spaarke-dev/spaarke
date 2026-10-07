@@ -65,10 +65,7 @@ Every PR that adds material new code/dependencies to the BFF MUST be able to ans
 - Inside the BFF, the mechanism follows the trigger: queue/topic message → Service Bus + `IJobHandler` via `ServiceBusJobProcessor` (ADR-004); schedule → `IScheduledJob` on `ScheduledJobHost`, registered with `AddScheduledJob<TJob>` (ADR-036 — the host's lease gives one dispatch per schedule); startup, or a long-lived connection that is not a message consumer → plain `IHostedService`. A queue or topic consumer is never a "long-lived listener". **MUST NOT** add a hand-rolled timer `BackgroundService`.
 - **MUST** keep AI-coupled job handlers in `Services/Ai/Jobs/` (post-Outcome E reorganization) — NOT in `Services/Jobs/Handlers/`
 - **MUST NOT** add new direct LLM/Azure-OpenAI calls outside `Services/Ai/`
-- **MUST** if the background work reads an SPE file, verify the SPE writer-identity rule (Pattern 4):
-  - **File written by USER (OBO upload)** → dispatch SYNC INLINE in the OBO request scope via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, ct)` (or directly call `IFileIndexingService.IndexFileAsync(request, httpContext, ct)`). A Service Bus job that runs later under MI will 403.
-  - **File written by MI** (Office Add-in finalize, Email-to-Document, post-analysis re-index) → dispatch via `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct)` (Service Bus + `RagIndexingJobHandler` under MI). MI is on its own writes' ACLs.
-  - See [`.claude/patterns/auth/spe-writer-identity-matching.md`](../patterns/auth/spe-writer-identity-matching.md) for the decision matrix and the 2026-06-08 Phase 3a UAT incident that motivated this rule.
+- **MUST** read SPE files in background work app-only, after verifying the document pointer (`RecordContainerResolver.IsDocumentPointerContainerAllowedAsync`). Task 171 (2026-10-06) superseded the old writer-identity rule; history is in [`.claude/patterns/auth/spe-writer-identity-matching.md`](../patterns/auth/spe-writer-identity-matching.md).
 
 ### E. AI Feature Additions
 

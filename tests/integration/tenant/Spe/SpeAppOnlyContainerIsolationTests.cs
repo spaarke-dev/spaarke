@@ -180,6 +180,10 @@ public class SpeAppOnlyContainerIsolationTests
         "ListChildren", "Download", "Delete", "Metadata", "Versions", "Preview", "QuickXorHash",
         "UploadSmall", "ContainerDrive", "DriveSubscription", "DriveDelta",
         "MembershipGrant",
+        // The app-only twins added by unified-access-control-r2 task 171 (broker-only SPE bytes).
+        "ItemCreator", "MetadataUncached", "DownloadVersion", "CurrentVersionId", "EmbedPreview", "SharingLink", "DriveItem",
+        "ReplaceContent", "UploadSession",
+        "MembershipReadAccess", "MembershipReadMarkers", "MembershipGrantMarked", "MembershipRemoveMarked",
     };
 
     [Theory]
@@ -210,6 +214,23 @@ public class SpeAppOnlyContainerIsolationTests
             "DriveSubscription" => () => store.CreateDriveRootSubscriptionAsync(ForeignContainer, "https://hook.test", "state", DateTimeOffset.UtcNow.AddDays(1)),
             "DriveDelta" => () => store.EnumerateDriveDeltaAsync(ForeignContainer, null),
             "MembershipGrant" => () => membership.GrantMembershipAsync(ForeignContainer, "x@contoso.test", ExternalAccessLevel.ViewOnly),
+            "ItemCreator" => () => drive.GetItemCreatorAsync(ForeignContainer, "item"),
+            "MetadataUncached" => () => drive.GetFileMetadataUncachedAsync(ForeignContainer, "item"),
+            "DownloadVersion" => () => drive.DownloadFileVersionAsync(ForeignContainer, "item", "1.0"),
+            "CurrentVersionId" => () => drive.GetCurrentVersionIdAsync(ForeignContainer, "item"),
+            "EmbedPreview" => () => drive.GetEmbedPreviewUrlAsync(ForeignContainer, "item"),
+            "SharingLink" => () => drive.CreateSharingLinkAsync(ForeignContainer, "item", "view", "organization"),
+            "DriveItem" => () => drive.GetDriveItemAsync(ForeignContainer, "item"),
+            "ReplaceContent" => () => upload.ReplaceFileContentAsync(ForeignContainer, "item", new MemoryStream(new byte[] { 1 }), ifMatch: null),
+            "UploadSession" => () => upload.CreateUploadSessionAsync(ForeignContainer, "a.txt", Sprk.Bff.Api.Models.ConflictBehavior.Fail),
+            "MembershipReadAccess" => () => membership.ReadAccessAsync(ForeignContainer),
+            "MembershipReadMarkers" => () => membership.ReadMarkersAsync(ForeignContainer),
+            "MembershipGrantMarked" => () => membership.GrantMarkedWriterAsync(
+                ForeignContainer, SpeContainerMembershipService.JitWriterMarkerPrefix, Guid.NewGuid(), "x@contoso.test"),
+            "MembershipRemoveMarked" => () => membership.RemoveMarkedGrantAsync(
+                ForeignContainer, "marker", "perm",
+                new SpeContainerMembershipService.ContainerAccess(
+                    Array.Empty<SpeContainerMembershipService.ContainerUserRole>(), true, new Dictionary<string, string>())),
             _ => throw new ArgumentOutOfRangeException(nameof(path), path, null),
         };
 

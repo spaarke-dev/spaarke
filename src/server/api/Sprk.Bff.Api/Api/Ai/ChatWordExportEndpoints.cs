@@ -65,7 +65,7 @@ public static class ChatWordExportEndpoints
     ///   1. Validate request (content non-empty, filename ends in .docx)
     ///   2. Resolve ChatHostContext from session → get SPE container ID
     ///   3. Generate DOCX via DocxExportService.GenerateFromMarkdownAsync
-    ///   4. Upload DOCX to SPE container via SpeFileStore.UploadSmallAsUserAsync
+    ///   4. Upload DOCX to SPE container via SpeFileStore.UploadSmallToStagingAsUserAsync
     ///   5. Construct Word Online URL from uploaded file's WebUrl
     /// </summary>
     private static async Task<IResult> ExportToWordAsync(
@@ -161,7 +161,7 @@ public static class ChatWordExportEndpoints
             // FLAT CONTAINER ROOT. In SPE, uploading to a PATH makes Graph implicitly create every folder
             // segment in it, so the old "exports/" prefix minted an `exports` folder nobody asked for. The
             // prefix bought no collision protection either — there was no per-export key in it, so two
-            // exports of the same filename already replaced one another (UploadSmallAsUserAsync resolves to
+            // exports of the same filename already replaced one another (UploadSmallToStagingAsUserAsync resolves to
             // Graph's path-keyed simple PUT, which takes NO @microsoft.graph.conflictBehavior and is
             // therefore a silent, unconditional REPLACE). Dropping the prefix changes where the item lands,
             // not whether it can collide.
@@ -176,7 +176,7 @@ public static class ChatWordExportEndpoints
             // subsume this.
             var uploadPath = SpeUploadPath.SanitizeFileName(request.Filename);
 
-            var uploadResult = await speFileStore.UploadSmallAsUserAsync(
+            var uploadResult = await speFileStore.UploadSmallToStagingAsUserAsync(
                 httpContext,
                 driveId,
                 uploadPath,

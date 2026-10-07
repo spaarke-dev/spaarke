@@ -96,6 +96,11 @@ For each category, generate audit checks:
 - For each class name mentioned: grep src/ for existence
 - For each markdown link: check target resolves
 
+**Instruction-file budget (always, non-blocking report)**:
+- Root `CLAUDE.md`: report line count and bytes as injected (block-level HTML comments excluded) against the budget in its maintainer notes (< 200 lines, ≤ 30 KB). Over budget → name the sections that grew since the last review stamp.
+- Every path in root `CLAUDE.md` §17 and in `.claude/rules/*.md` resolves (the `docs/INDEX.md` links too).
+- Project `CLAUDE.md` in scope: past ~25 KB → recommend pruning per `.claude/skills/project-setup/references/claudemd-template.md`.
+
 **Pattern/constraint changes → validate pointer accuracy**:
 - For each "Read These Files" entry: verify file exists
 - For each class name: verify via grep

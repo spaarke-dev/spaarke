@@ -39,6 +39,7 @@
  */
 
 import { useEffect, useRef } from "react";
+import { getXrm } from "@spaarke/ui-components";
 import { DataverseService } from "../services/DataverseService";
 import type { IWebApi } from "../types/xrm";
 
@@ -164,12 +165,10 @@ export function useDailyDigestAutoPopup(
         // Mark session BEFORE opening to prevent race conditions with re-renders
         sessionStorage.setItem(SESSION_KEY, "shown");
 
-        // Resolve Xrm from parent frames (PCF runs in iframe)
+        // Resolve Xrm from parent frames (PCF runs in iframe).
+        // Shared cross-frame walker (task 081 / C-8).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any =
-          (window as any)?.Xrm ??
-          (window.parent as any)?.Xrm ??
-          (window.top as any)?.Xrm;
+        const xrm: any = getXrm('navigation');
 
         if (!xrm?.Navigation?.navigateTo) {
           console.warn(

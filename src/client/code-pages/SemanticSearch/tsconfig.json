@@ -15,7 +15,8 @@
     "typeRoots": ["./node_modules/@types"],
     "paths": {
       "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index"],
-      "@spaarke/document-operations": ["../../shared/Spaarke.DocumentOperations/src/index"]
+      "@spaarke/document-operations": ["../../shared/Spaarke.DocumentOperations/src/index"],
+      "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
     }
   },
   "include": ["src/**/*"],

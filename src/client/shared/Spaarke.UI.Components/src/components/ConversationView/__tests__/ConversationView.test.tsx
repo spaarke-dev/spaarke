@@ -194,6 +194,37 @@ describe('buildConversationRenderItems', () => {
     expect(items[0]).toMatchObject({ kind: 'message', key: 'a' });
     expect(items[2]).toMatchObject({ kind: 'message', key: 'b' });
   });
+
+  // task 081 (U5): the divider label's calendar-day difference now comes from
+  // the shared `daysBetweenLocalMidnight`; pin the Today / Yesterday / date
+  // boundaries in local time (midnight-adjacent instants on purpose).
+  describe('divider labels (local calendar days)', () => {
+    beforeEach(() => {
+      jest.useFakeTimers();
+      jest.setSystemTime(new Date(2026, 6, 20, 0, 5)); // 00:05 local, Jul 20
+    });
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    function labels(...sentOn: Date[]): string[] {
+      return buildConversationRenderItems(sentOn.map((d, i) => entry(String(i), d.toISOString())))
+        .filter(i => i.kind === 'divider')
+        .map(i => (i.kind === 'divider' ? i.label : ''));
+    }
+
+    it('a message 10 minutes ago, just before local midnight, is "Yesterday"; one 1 minute ago is "Today"', () => {
+      expect(labels(new Date(2026, 6, 19, 23, 55), new Date(2026, 6, 20, 0, 4))).toEqual(['Yesterday', 'Today']);
+    });
+
+    it('two calendar days back is a full date, not "Yesterday"', () => {
+      const [label] = labels(new Date(2026, 6, 18, 23, 59));
+      expect(label).not.toBe('Yesterday');
+      expect(label).toBe(
+        new Date(2026, 6, 18).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+      );
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

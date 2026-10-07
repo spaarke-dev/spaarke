@@ -131,9 +131,9 @@ public sealed class ComposeServiceUploadFidelityTests
             .ReturnsAsync(ResolvedDriveId);
 
         byte[]? captured = null;
-        _spe.Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+        _spe.Setup(s => s.UploadSmallAsync(
+                ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var buffer = new MemoryStream();
                 stream.CopyTo(buffer);

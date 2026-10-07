@@ -13,10 +13,9 @@ import * as React from 'react';
 import { SendEmailDialog } from '@spaarke/ui-components';
 import { RichFilePreviewDialog } from '@spaarke/ui-components/components/FilePreview/RichFilePreviewDialog';
 import { getDocumentPreviewUrl, getDocumentOpenLinks } from '../../services/DocumentApiService';
-import { createXrmNavigationService } from '@spaarke/ui-components';
+import { createXrmNavigationService, getXrm } from '@spaarke/ui-components';
 import { copyDocumentLink, setWorkspaceFlag } from './filePreviewService';
 import { searchUsersAsLookup } from '../CreateMatter/matterService';
-import { getXrm } from '../../services/xrmProvider';
 import { authenticatedFetch } from '../../services/authInit';
 import { getBffBaseUrl } from '../../config/runtimeConfig';
 

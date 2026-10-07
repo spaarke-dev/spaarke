@@ -205,6 +205,7 @@ import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/compo
 // react/jsx-runtime dedupe in ../webpack.config.js).
 import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
 import { cleanGuid } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import { getXrm } from '@spaarke/ui-components/dist/utils/xrmContext';
 import { initializeAuth } from './authInit';
 // Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
 // SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
@@ -600,18 +601,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return this.navService;
   }
 
-  /** Cross-frame Xrm accessor (PCF runs in an iframe). */
-  private getXrm(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  any {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    try {
-      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-    } catch {
-      return w.Xrm;
-    }
-  }
-
   /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
    * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
    * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
@@ -624,7 +613,8 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
    * 80%) so it covers the Manage Access footprint. */
   private openContactRecord = (contactId: string): void => {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation');
     const wasGrantOpen = this.isGrantModalOpen;
     const restore = (): void => {
       if (wasGrantOpen && !this.isGrantModalOpen) {
@@ -659,7 +649,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * primary attribute — entity-agnostic, no metadata call. Undefined outside an
    * MDA host (harness) or when unset (chip then shows the humanized entity type). */
   private getRecordDisplayName(): string | undefined {
-    const xrm = this.getXrm();
+    // Shared cross-frame walker (task 081 / C-8). `any` view: typed XrmContext
+    // does not declare Page.data.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm = getXrm('page') as any;
     try {
       const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
       return typeof v === 'string' && v.length > 0 ? v : undefined;

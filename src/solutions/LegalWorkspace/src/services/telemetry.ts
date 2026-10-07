@@ -20,6 +20,7 @@
  */
 
 import { ApplicationInsights } from "@microsoft/applicationinsights-web";
+import { getXrm } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Singleton
@@ -140,16 +141,10 @@ async function resolveAppInsightsKey(): Promise<string | null> {
 
 function getClientUrl(): string | null {
   if (typeof window === "undefined") return null;
-  const frames: Window[] = [window];
-  try { if (window.parent && window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-  try { if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top); } catch { /* cross-origin */ }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const ctx = (frame as any).Xrm?.Utility?.getGlobalContext?.();
-      if (ctx?.getClientUrl) return ctx.getClientUrl();
-    } catch { /* cross-origin */ }
-  }
+  // Shared cross-frame walker (task 081 / C-8).
+  try {
+    const ctx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
+    if (ctx?.getClientUrl) return ctx.getClientUrl();
+  } catch { /* getGlobalContext() unavailable */ }
   return null;
 }

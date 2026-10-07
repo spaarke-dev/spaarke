@@ -1,9 +1,11 @@
 /**
  * Xrm Access Utilities for EventDetailSidePane
  *
- * Provides access to the Xrm global object from within a web resource iframe.
- * Tries window.parent.Xrm first (Custom Page in iframe), then window.Xrm.
+ * Provides access to the Xrm global object from within a web resource iframe,
+ * via the shared cross-frame walker in @spaarke/ui-components.
  */
+
+import { getXrm, type XrmCapability } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,23 +63,17 @@ export interface IXrmContext {
 }
 
 /**
- * Get the Xrm object from the window context.
- * Tries parent window first (web resource in iframe), then current window.
+ * The nearest Xrm that has `WebApi` AND the capability the caller uses
+ * (`'metadata'` for `Utility.getEntityMetadata`, `'lookupObjects'` for the
+ * lookup dialog; default `'webApi'` alone), typed as this side pane's
+ * {@link IXrmContext}; null when no frame has both.
+ *
+ * The frame walk is the shared `getXrm` (task 081 / C-8) with the requirement
+ * checked PER FRAME. Round 5 (review R4-3): this used to require only that
+ * `Utility` exist, so a frame with a partial `Utility` could be picked for a
+ * metadata or lookup call; each caller now names the member it calls.
  */
-export function getXrm(): IXrmContext | null {
-  try {
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi && parentXrm?.Utility) {
-      return parentXrm as IXrmContext;
-    }
-
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.WebApi && windowXrm?.Utility) {
-      return windowXrm as IXrmContext;
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
+export function getXrmWithWebApiAnd(capability: XrmCapability = 'webApi'): IXrmContext | null {
+  const xrm: any = getXrm(['webApi', capability]);
+  return xrm ? (xrm as IXrmContext) : null;
 }

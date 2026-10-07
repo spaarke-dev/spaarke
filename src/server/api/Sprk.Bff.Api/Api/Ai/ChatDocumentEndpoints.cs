@@ -1158,7 +1158,7 @@ public static class ChatDocumentEndpoints
     ///    ChatHostContext or configuration fallback". <see cref="ResolveContainerId"/> takes a ChatSession
     ///    and never reads it — there is no per-entity container decision on this path, which is why the
     ///    sink is classified ServerDerivedConfig in SpeWriteSinkContainerProvenanceGuardTests.)
-    /// 5. Upload to SPE via SpeFileStore.UploadSmallAsUserAsync (ADR-007)
+    /// 5. Upload to SPE via SpeFileStore.UploadSmallToStagingAsUserAsync (ADR-007)
     /// 6. Store idempotency marker with SPE metadata
     /// 7. Return 201 Created with SPE file metadata
     ///
@@ -1304,7 +1304,7 @@ public static class ChatDocumentEndpoints
             // is correct — those are not paths, and the response should echo what the caller asked for.
             var uploadPath = SpeUploadPath.SanitizeFileName(filename);
 
-            var uploadResult = await speFileStore.UploadSmallAsUserAsync(
+            var uploadResult = await speFileStore.UploadSmallToStagingAsUserAsync(
                 httpContext,
                 driveId,
                 uploadPath,

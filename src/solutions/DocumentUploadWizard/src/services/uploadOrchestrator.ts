@@ -39,7 +39,7 @@ import {
     consoleLogger,
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
-import { cleanGuid } from "@spaarke/ui-components";
+import { cleanGuid, getXrm } from "@spaarke/ui-components";
 
 // The upload client moved OUT of @spaarke/ui-components on 2026-09-03. That package's own
 // SdapApiClient was one of three parallel upload implementations; this is the surviving one.
@@ -76,7 +76,7 @@ export interface OrchestratorFileProgress {
     /**
      * Present when this file stopped on a NAME COLLISION rather than a real failure.
      *
-     * Nothing was written to SPE, so the row can offer "Keep both" / "Save as new version" and the
+     * Nothing was written to SPE, so the row can offer "Keep both" (task 171: no replace) and the
      * caller re-invokes {@link orchestrateUpload} for just this file with the chosen
      * `conflictBehavior`.
      */
@@ -178,8 +178,8 @@ export function resolveUploadTarget(parentContext: ParentContext): UploadTarget 
  * @param config - Orchestrator configuration
  * @param onProgress - Per-file progress callback
  * @param conflictBehavior - OMIT on the first attempt: the BFF then defaults to `fail`, so a
- *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'` or
- *   `'replace'` only when the caller is RETRYING the files in `files` after the user chose. A
+ *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'`
+ *   (never `'replace'` — refused since task 171) only when the caller is RETRYING the files in `files` after the user chose. A
  *   retry is normally a single-file call, since one decision covers one file.
  * @returns Overall orchestration result
  */
@@ -350,14 +350,11 @@ export async function orchestrateUpload(
         // resolves to empty → BFF tenant-default chain applies server-side.
         let resolvedSearchIndexName: string = "";
         try {
-            // Resolver expects host-context Xrm.WebApi. Use the same window-walking
-            // pattern resolveSpeContainerId uses elsewhere — this code runs inside
-            // a code-page hosted in Power Apps, so Xrm is available on window/parent/top.
+            // Resolver expects host-context Xrm.WebApi — this code runs inside a
+            // code-page hosted in Power Apps, so Xrm is available on window/parent/top.
+            // Shared cross-frame walker (task 081 / C-8).
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const xrm: any =
-                (window as any).Xrm ??
-                (window.parent as any)?.Xrm ??
-                (window.top as any)?.Xrm;
+            const xrm: any = getXrm();
             if (xrm?.WebApi) {
                 resolvedSearchIndexName = await resolveSearchIndexNameForRecord(
                     xrm.WebApi,

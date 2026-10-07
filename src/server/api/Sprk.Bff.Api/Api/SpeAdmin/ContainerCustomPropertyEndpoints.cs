@@ -38,6 +38,20 @@ public static class ContainerCustomPropertyEndpoints
     /// <summary>Deny code: the business-unit stamp is server-owned (task 165, owner round 20 item 1).</summary>
     internal const string ContainerBindingServerOwnedCode = "spe.admin.deny.container_binding_server_owned";
 
+    /// <summary>
+    /// Refusal of a change to a container-role GRANT MARKER (<c>SprkStd…</c> / <c>SprkJit…</c>) — unified-access-control-r2
+    /// task 171, adversarial finding 7. The markers are how <c>SpeContainerMembershipSyncJob</c> tells its own grants from
+    /// hand-granted roles; they are server-owned, like the business-unit stamp.
+    /// </summary>
+    internal const string GrantMarkerServerOwnedCode = "spe.admin.deny.container_grant_marker_server_owned";
+
+    /// <summary>The properties an administrator may see: everything but the server-owned grant markers.</summary>
+    private static IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> WithoutGrantMarkers(
+        IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> properties)
+        => properties
+            .Where(p => !Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.IsGrantMarkerName(p.Name))
+            .ToList();
+
     public static void MapContainerCustomPropertyEndpoints(RouteGroupBuilder group)
     {
         // GET /api/spe/containers/{containerId}/customproperties?configId={id}
@@ -132,6 +146,10 @@ public static class ContainerCustomPropertyEndpoints
 
                 return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
+
+            // Task 171 (finding 7): the grant markers are server-owned and never shown. Graph's PATCH MERGES, so an
+            // editor that re-sends what it loaded leaves them in place.
+            properties = WithoutGrantMarkers(properties);
 
             logger.LogInformation(
                 "GetCustomProperties: returned {Count} properties for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -259,6 +277,22 @@ public static class ContainerCustomPropertyEndpoints
         // paths and the backfill script write it. Writing it here would let an administrator re-bind a container into
         // another customer's view (or out of their own). The shipped editor re-sends EVERY property it loaded, the stamp
         // included, so an UNCHANGED stamp is accepted and simply not written; any other value is refused.
+        // Task 171 (finding 7): a container-role GRANT MARKER is server-owned too — refused outright (create, change or
+        // delete alike), before anything is read or written. The editor never sees one, so it never re-sends one.
+        if (request.Properties.Any(p => Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService.IsGrantMarkerName(p?.Name)))
+        {
+            logger.LogWarning(
+                "PutCustomProperties: refused a change to a reserved container-role grant marker on container '{ContainerId}', "
+                + "configId={ConfigId}, TraceId={TraceId}",
+                containerId, configGuid, context.TraceIdentifier);
+
+            return ProblemDetailsHelper.Forbidden(
+                GrantMarkerServerOwnedCode,
+                "Custom properties named SprkStd… or SprkJit… record the container roles Spaarke granted and are managed by "
+                + "Spaarke; they cannot be set, changed or removed here.",
+                context.TraceIdentifier);
+        }
+
         var stampEntries = request.Properties.Where(p => SpeContainerBusinessUnitStamp.IsReserved(p?.Name)).ToList();
         var toWrite = request.Properties.Where(p => !SpeContainerBusinessUnitStamp.IsReserved(p?.Name)).ToList();
 
@@ -297,7 +331,8 @@ public static class ContainerCustomPropertyEndpoints
                 if (toWrite.Count == 0)
                 {
                     // Only the unchanged stamp was sent: nothing to write.
-                    return TypedResults.Ok(new CustomPropertiesResponse(current, current.Count));
+                    var visible = WithoutGrantMarkers(current);
+                    return TypedResults.Ok(new CustomPropertiesResponse(visible, visible.Count));
                 }
             }
 
@@ -312,6 +347,8 @@ public static class ContainerCustomPropertyEndpoints
 
                 return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
+
+            updated = WithoutGrantMarkers(updated);
 
             logger.LogInformation(
                 "PutCustomProperties: updated {Count} properties on container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",

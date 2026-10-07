@@ -48,6 +48,7 @@
 // `cleanGuid` moved to utils/guid.ts (C-7) — imported here (not just re-exported)
 // because this module's own functions call it internally.
 import { cleanGuid } from '../utils/guid';
+import { getXrm } from '../utils/xrmContext';
 export { cleanGuid };
 
 // ---------------------------------------------------------------------------
@@ -372,10 +373,8 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
   const cleanId = cleanGuid(recordId);
 
   try {
-    // Walk frames to find Xrm
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-    const globalCtx = xrm?.Utility?.getGlobalContext?.();
+    // Shared cross-frame walker (task 081 / C-8).
+    const globalCtx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
     const clientUrl: string = globalCtx?.getClientUrl?.() ?? '';
 
     if (clientUrl) {

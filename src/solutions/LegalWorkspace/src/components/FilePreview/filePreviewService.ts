@@ -3,7 +3,7 @@
  * Utility functions for the FilePreviewDialog toolbar actions.
  */
 
-import { getXrm } from '../../services/xrmProvider';
+import { getXrm } from '@spaarke/ui-components';
 
 /**
  * Copy a shareable document link to the clipboard.
@@ -11,8 +11,7 @@ import { getXrm } from '../../services/xrmProvider';
  */
 export async function copyDocumentLink(documentId: string): Promise<boolean> {
   try {
-    const xrm = getXrm();
-    const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
+    const clientUrl = getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl() ?? '';
     const link = clientUrl
       ? `${clientUrl}/main.aspx?etn=sprk_document&id=${encodeURIComponent(documentId)}&pagetype=entityrecord`
       : documentId;

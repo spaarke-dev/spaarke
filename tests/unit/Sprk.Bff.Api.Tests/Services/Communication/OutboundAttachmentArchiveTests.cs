@@ -145,6 +145,8 @@ public class OutboundAttachmentArchiveTests
         upload.Content.Should().Equal(large.Content, "the whole file is saved, byte for byte");
         var row = h.ArchivedAttachments.Should().ContainSingle().Subject.Entity;
         row.GetAttributeValue<string>("sprk_graphitemid").Should().Be(upload.ReturnedItemId);
+        row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn).Should().Be(upload.ReturnedItemId,
+            "round 72 F4: the archive row binds the field-secured copy on the same create");
         row.GetAttributeValue<string>("sprk_graphdriveid").Should().Be(upload.DriveId);
     }
 
@@ -204,6 +206,8 @@ public class OutboundAttachmentArchiveTests
         var row = h.ArchivedAttachments.Should().ContainSingle().Subject.Entity;
         row.GetAttributeValue<string>("sprk_graphdriveid").Should().Be("drive-secure-m1");
         row.GetAttributeValue<string>("sprk_graphitemid").Should().Be(upload.ReturnedItemId);
+        row.GetAttributeValue<string>(Spaarke.Dataverse.DocumentPointerBinding.BoundItemIdColumn).Should().Be(upload.ReturnedItemId,
+            "round 72 F4: the archive row binds the field-secured copy on the same create");
         row.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(h.CommunicationId);
         row.GetAttributeValue<EntityReference>("sprk_matter").Should().NotBeNull();
         row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(secureMatter);

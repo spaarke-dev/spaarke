@@ -112,6 +112,17 @@ public interface IDataverseRecordShareService
         => Task.FromException<AccessRights>(new NotSupportedException(
             $"{GetType().Name} does not read a principal's effective rights."));
 
+    /// <inheritdoc cref="DataverseWebApiService.RetrievePrincipalRightsOrUnknownAsync"/>
+    /// <remarks>Task 171 (adversarial finding 3): for a caller that REVOKES on "no rights". The default body faults, so a
+    /// double that predates this member answers "could not be checked" — the grant is kept.</remarks>
+    Task<AccessRights?> GetPrincipalRightsOrUnknownAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => Task.FromException<AccessRights?>(new NotSupportedException(
+            $"{GetType().Name} does not read a principal's effective rights."));
+
     /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessForRecordsOrThrowAsync"/>
     /// <remarks>unified-access-control-r2 task 149: the strict read for many records of one table, for the secure-child
     /// share synchronizer. Every record asked about is in the answer, or the call throws.</remarks>
@@ -206,6 +217,14 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default)
         => _dataverse.RetrievePrincipalRightsAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+    /// <inheritdoc />
+    public Task<AccessRights?> GetPrincipalRightsOrUnknownAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => _dataverse.RetrievePrincipalRightsOrUnknownAsync(principalSystemUserId, entitySetName, recordId, ct);
 
     public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
         string entityLogicalName,

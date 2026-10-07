@@ -111,7 +111,7 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Verification**: Search every `<LegalWorkspaceApp ` instantiation in the host. Every one MUST pass `embedded` (truthy) when there is a host `FluentProvider` ancestor. The only legal "no `embedded` prop" use is the standalone LegalWorkspace Code Page, which is **retired in R4** (no longer applies).
 
-**Reference implementation**: `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` lines 173–185 — `<LegalWorkspaceApp ... embedded />` (the boolean shorthand for `embedded={true}`). The only mount path in SpaarkeAi today.
+**Reference implementation**: `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` renderer mount — `<LegalWorkspaceApp ... embedded />` (the boolean shorthand for `embedded={true}`). The only mount path in SpaarkeAi today.
 
 ### 3.3 MUST: The host MUST own cross-device theme sync (Dataverse round-trip)
 
@@ -178,10 +178,18 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Reference implementation** (SpaarkeAi via `WorkspaceLayoutWidget`):
 
-- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` lines 91–135 — inline `locateXrm()` / `getWebApiSafe()` / `getUserIdSafe()` frame-walk (window → window.parent → window.top). This duplicates LegalWorkspace's own xrmProvider intentionally (lines 87–89 explain) so the widget bundle doesn't drag the LW internal helper into the shared lib closure.
-- Lines 156–157 — `webApi` and `userId` resolved once with `useMemo`.
-- Lines 161–171 — dev fallback: when Xrm is unavailable (e.g. Vite `npm run dev`), render an empty-state message instead of crashing inside LegalWorkspaceApp.
-- Lines 173–185 — actual `<LegalWorkspaceApp ... webApi={webApi} userId={userId} ... />` mount.
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` `getWebApiSafe()` / `getUserIdSafe()` — resolve Xrm through the shared cross-frame `getXrm()` from `@spaarke/ui-components` (`utils/xrmContext.ts`: window first, then each ancestor frame up to 10 levels, then window.top; the nearest frame whose Xrm has the capability the caller asks for — `WebApi` by default — wins, and each frame is guarded separately). Since spaarke-ontology-platform-r1 task 081 (C-8) there is no inline walker here any more, and the widget does **not** write `window.Xrm`.
+- The component body — `webApi` and `userId` resolved once with `useMemo`.
+- The `if (!webApi)` branch — dev fallback: when Xrm is unavailable (e.g. Vite `npm run dev`), render an empty-state message instead of crashing inside LegalWorkspaceApp.
+- The renderer mount — `webApi={webApi}` / `userId={userId}` passed through to the embedded workspace renderer.
+
+### 5.1a MUST NOT: The host MUST NOT publish Xrm onto `window.Xrm`, and embedded code MUST NOT rely on it
+
+**Rationale**: an earlier version of `WorkspaceLayoutWidget` (and LegalWorkspace's own standalone `xrmProvider`) copied the parent/top frame's Xrm onto `window.Xrm` as a side effect. Code inside LegalWorkspace that read `window.Xrm` only (the Summarize Files and Playbook Library launchers in `Shell/WorkspaceGrid.tsx`, `GetStarted/ActionCardHandlers.ts`, `sections/todo.registration.ts`) worked only because of that write, and silently did nothing whenever the write had not happened. Every Xrm read in LegalWorkspace now goes through `getXrm()`, which finds Xrm on the parent/top frame directly; no global write is needed or allowed.
+
+**Child frames MUST use `getXrm()`, not `parent.Xrm`.** Any code running in a child frame of the host — the embedded LegalWorkspace, a code page or web resource it opens in an iframe, a dialog's content frame — MUST resolve Xrm with `getXrm()` from `@spaarke/ui-components`, passing the capability it actually uses (`getXrm('navigation')` before `Xrm.Navigation.navigateTo`, `getXrm('clientUrl')` before `getClientUrl()`, `getXrm('page')` before `Xrm.Page`, …). It MUST NOT read `window.Xrm`, `window.parent.Xrm` or `window.top.Xrm` directly: with no global write, `window.Xrm` is `undefined` in the child frame, and `parent.Xrm` is wrong whenever the frame is nested more than one level deep (Teams-style hosts, side panes) or the parent's Xrm lacks the needed capability.
+
+**Verification**: in SpaarkeAi, open an embedded LegalWorkspace tab and launch Summarize Files and Playbook Library from it. Both dialogs MUST open. `window.Xrm` in the SpaarkeAi frame MUST still be `undefined` afterwards (DevTools console, top-level frame selector set to the SpaarkeAi iframe).
 
 ### 5.2 MUST: The host MUST also resolve and pass `userId` (Dataverse user GUID, brace-stripped)
 
@@ -189,7 +197,7 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Verification**: In DevTools, log `props.userId` from inside the host's `LegalWorkspaceApp` mount call (or set a temporary debug-prop in the host). The value MUST be a Dataverse user GUID (e.g. `12345678-1234-1234-1234-123456789012`), brace-stripped, lowercased per Dataverse convention.
 
-**Reference implementation**: `WorkspaceLayoutWidget.tsx` lines 124–135 — `getUserIdSafe()` walks `Xrm.Utility.getGlobalContext().getUserId()` → `ctx.userSettings.userId` → `Xrm.userSettings.userId`, stripping braces in all paths. Returns `""` if no Xrm context, which the dev-fallback empty state at line 161 catches.
+**Reference implementation**: `WorkspaceLayoutWidget.tsx` `getUserIdSafe()` — reads `Xrm.Utility.getGlobalContext().getUserId()` → `ctx.userSettings.userId` → `Xrm.userSettings.userId` on the Xrm returned by `getXrm()`, stripping braces in all paths. Returns `""` if no Xrm context, which the dev-fallback empty state (the `if (!webApi)` branch) catches.
 
 ### 5.3 MUST: The host MUST NOT inject a mock or shimmed `IWebApi` in production
 
@@ -197,7 +205,7 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Verification**: Search the host for any constant or function with a name like `mockWebApi`, `fakeWebApi`, `stubWebApi`. None of these may flow into the `webApi` prop on a production code path.
 
-**Reference implementation**: `WorkspaceLayoutWidget.tsx` lines 161–171 — explicit "if `!webApi` render empty state" guard. No mock injection.
+**Reference implementation**: `WorkspaceLayoutWidget.tsx` `if (!webApi)` branch — explicit "if `!webApi` render empty state" guard. No mock injection.
 
 ### 5.4 MUST: BFF calls inside the embedded LegalWorkspaceApp MUST go through `@spaarke/auth`'s `authenticatedFetch` (per ADR-028)
 
@@ -243,7 +251,7 @@ The host decides when `<LegalWorkspaceApp embedded ... />` mounts, unmounts, and
 
 **Verification**: Wrap `LegalWorkspaceApp` in `React.Profiler` (or use DevTools React Profiler). The number of renders per mounted tab MUST be small (single-digit) per user interaction. If `LegalWorkspaceApp` re-renders constantly without user interaction, the host is passing fresh prop identities.
 
-**Reference implementation**: `WorkspaceLayoutWidget.tsx` lines 156–157 — `webApi` and `userId` both wrapped in `React.useMemo(() => ..., [])` (empty deps; they're stable for the lifetime of the widget). `data.layoutId` comes from the `WorkspaceWidgetComponent` framework with stable identity per tab.
+**Reference implementation**: `WorkspaceLayoutWidget.tsx` component body — `webApi` and `userId` both wrapped in `React.useMemo(() => ..., [])` (empty deps; they're stable for the lifetime of the widget). `data.layoutId` comes from the `WorkspaceWidgetComponent` framework with stable identity per tab.
 
 ### 6.5 MUST: The host MUST NOT render UI chrome that duplicates LegalWorkspaceApp's standalone chrome
 
@@ -325,7 +333,7 @@ If any row above fails, the host is non-compliant with this contract. Re-read th
 
 - `src/solutions/SpaarkeAi/src/main.tsx` — Config dual-init (§2.1, §2.2, §2.3), Daily Digest suppression (§4.2), bootstrap sequencing (§6.1).
 - `src/solutions/SpaarkeAi/src/App.tsx` — Single `FluentProvider` ownership (§3.1).
-- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` — Xrm frame-walk + `webApi`/`userId` resolution (§5.1, §5.2), dev fallback (§5.3), memoized props (§6.4), mount call (§3.2).
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` — Xrm resolution via the shared `getXrm()` + `webApi`/`userId` resolution (§5.1, §5.1a, §5.2), dev fallback (§5.3), memoized props (§6.4), mount call (§3.2).
 - `src/solutions/LegalWorkspace/src/LegalWorkspaceApp.tsx` — Source of truth for the embedded-vs-standalone branching (lines 86–120, 145–185).
 - `src/solutions/LegalWorkspace/src/config/runtimeConfig.ts` — LegalWorkspace's runtime-config singleton (the second one initialized per §2.1).
 - `src/solutions/LegalWorkspace/src/index.ts` — Barrel export with `setLegalWorkspaceRuntimeConfig` (§2.1).

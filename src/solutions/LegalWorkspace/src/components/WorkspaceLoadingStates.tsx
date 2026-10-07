@@ -35,6 +35,7 @@ import {
 } from "@fluentui/react-components";
 import { DismissRegular } from "@fluentui/react-icons";
 import { getBffBaseUrl } from "../config/runtimeConfig";
+import { getXrm } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Session storage key for banner dismissal
@@ -225,11 +226,9 @@ export const PersonalizeBanner: React.FC = React.memo(() => {
 
   const handleOpenWizard = React.useCallback(() => {
     try {
+      // Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any =
-        (window as any)?.Xrm ??
-        (window.parent as any)?.Xrm ??
-        (window.top as any)?.Xrm;
+      const xrm: any = getXrm('navigation');
       if (!xrm?.Navigation?.navigateTo) return;
 
       xrm.Navigation.navigateTo(

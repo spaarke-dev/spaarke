@@ -61,7 +61,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync, getOobModalSize } from "@spaarke/ui-components";
+import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync, getOobModalSize, getXrm } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import { authenticatedFetch } from "../services/authInit";
@@ -191,14 +191,9 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
             return;
           }
 
-          // Loose typing — the shared lib doesn't pull in @types/xrm.
-          const xrm = (globalThis as unknown as {
-            Xrm?: {
-              Navigation?: {
-                openForm?: (opts: unknown) => Promise<unknown>;
-              };
-            };
-          }).Xrm;
+          // Shared cross-frame walker (task 081 / C-8). This used to read only
+          // this frame's global, which worked only because xrmProvider wrote window.Xrm.
+          const xrm = getXrm('openForm');
           if (xrm?.Navigation?.openForm) {
             // Defensive — page-nav fallback only.
             void xrm.Navigation.openForm({

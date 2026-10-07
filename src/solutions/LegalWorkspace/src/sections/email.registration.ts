@@ -96,7 +96,7 @@ const EmailSectionMount: React.FC<EmailSectionMountProps> = ({ bffBaseUrl }) => 
     [dataService],
   );
   const dataverseUrl = React.useMemo(
-    () => getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "",
+    () => getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "",
     [],
   );
   const [fromMailbox, setFromMailbox] = React.useState<string | undefined>();
