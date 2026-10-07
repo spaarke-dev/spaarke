@@ -59,20 +59,36 @@ public sealed class FileIndexingService : IFileIndexingService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// <para><b>Identity (unified-access-control-r2 task 171, owner round 69 — broker-only).</b> A request that names a
+    /// <c>sprk_document</c> is indexed APP-ONLY through <see cref="IndexFileAppOnlyAsync"/>, which verifies the row's
+    /// pointer first. Every caller that names a document authorized the caller on it before calling (the index-file
+    /// route's Targeted filter + the request-to-row hold, send-to-index's per-document Write check, the post-upload
+    /// enqueuer after a save the caller was authorized for). The OBO read it used to make worked only for a caller
+    /// holding a role on the container, so a secure record's documents were never indexed from the request path.</para>
+    /// <para>A request WITHOUT a document id names a drive item that no Dataverse record stands behind, so SPE's answer
+    /// for the caller remains the decision and the read stays OBO (task 171 escalation trigger 2 — reported, not
+    /// converted).</para>
+    /// </remarks>
     public async Task<FileIndexingResult> IndexFileAsync(
         FileIndexRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken = default)
     {
+        if (!string.IsNullOrWhiteSpace(request.DocumentId))
+        {
+            return await IndexFileAppOnlyAsync(request, cancellationToken);
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
             _logger.LogDebug(
-                "Starting OBO file indexing for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
+                "Starting OBO file indexing (no document named) for {FileName} (DriveId: {DriveId}, ItemId: {ItemId})",
                 request.FileName, request.DriveId, request.ItemId);
 
-            // Download via OBO authentication
+            // Download via OBO authentication: no Dataverse record stands behind this item (see remarks).
             await using var stream = await _speFileOperations.DownloadFileAsUserAsync(
                 httpContext,
                 request.DriveId,

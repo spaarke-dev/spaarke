@@ -1640,6 +1640,26 @@ public class OfficeService : IOfficeService
             });
         }
 
+        // uac-r2 task 171: the version is written AS THE APPLICATION (the user may hold no role on the container — every
+        // secure container, and any BU container they were not added to), so the row's pointer must name a container and
+        // item this document may use. Under OBO, SPE's own ACL did that; under app-only a re-pointed row would otherwise
+        // let a Write holder overwrite another container's file. Reuses OFFICE_017 ("no usable file in storage") rather
+        // than minting a code the task pane has no message for — the file this row names is not one it may write.
+        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                existingDocumentId, target.DriveId, target.ItemId, cancellationToken).ConfigureAwait(false))
+        {
+            _logger.LogWarning(
+                "Version save refused: existing document {ExistingDocumentId}'s storage pointer could not be verified.",
+                existingDocumentId);
+            return (null, new SaveError
+            {
+                Code = "OFFICE_017",
+                Message = "The document's file in storage could not be verified, so a new version could not be written. "
+                          + "Nothing was saved. An administrator must repair the document's storage location.",
+                Retryable = false
+            });
+        }
+
         return (target, null);
     }
 
@@ -1670,7 +1690,7 @@ public class OfficeService : IOfficeService
         var driveId = target.DriveId!;
         var itemId = target.ItemId!;
 
-        var write = await _storageUploader.WriteNewVersionAsync(httpContext, driveId, itemId, content, cancellationToken);
+        var write = await _storageUploader.WriteNewVersionAsync(driveId, itemId, content, cancellationToken);
         if (!write.Success)
         {
             jobRecord = jobRecord with

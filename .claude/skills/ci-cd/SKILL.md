@@ -100,7 +100,7 @@ gh run watch
 | Job | Purpose | Blocking? |
 |-----|---------|-----------|
 | `classify` (Classify Diff) | Path-aware diff classification | — |
-| Tier 1 → `ci-tier1-blocking.yml` | Compile (Debug) · Arch Tests (full suite) · Changed-Surface Integration Smoke · Auth Smoke · Eval Gate (Golden Utterances) · Tenant Isolation (I1–I5) · Compose Fidelity Gate | **Yes** |
+| Tier 1 → `ci-tier1-blocking.yml` | Compile (Debug) · Arch Tests (full suite) · Changed-Surface Integration Smoke · Auth Smoke · Eval Gate (Golden Utterances) · Tenant Isolation (I1–I5) · Compose Fidelity Gate · Xrm Capability Guard (getXrm AST scan; on client/solution/workflow changes) · DataGrid External-Host Gate (advisory until its flip) | **Yes** (DataGrid gate: no, until flipped) |
 | Tier 2 → `ci-tier2-advisory.yml` | Format (`dotnet format`) · Lint (ESLint + Prettier) · Full Unit Tests · ADR Compliance (NetArchTest) · Markdown Link Validator · Last Reviewed Stamp · Plugin Size (ADR-002) · one deduplicated advisory PR comment | No — excluded from the gate by construction |
 | `router-result` (**Router**) | `if: always()` + `re-actors/alls-green` over the tiers — its result IS the required check | **Yes** |
 
@@ -239,6 +239,7 @@ Verify:  curl https://{app}.azurewebsites.net/ping
 | Tier 1 `Compile (Debug)` | Compilation error | Fix code errors locally (`dotnet build`) |
 | Tier 1 `Arch Tests (full suite, blocking)` | Architecture rule violation | Run `dotnet test tests/Spaarke.ArchTests/` + `/adr-check` locally |
 | Tier 1 `Tenant Isolation (I1–I5 invariants)` | A tenant-isolation ArchTest failed | Read the failing invariant test; never weaken it |
+| Tier 1 `Xrm Capability Guard (getXrm AST scan)` | A `getXrm(...)` value is used for a member its requested capability does not cover, or the analyzer reported a blind spot | Read file:line in the log; request the capability the code calls (or rewrite the shape); run `npx jest src/utils/__tests__/xrmCapabilityUsage.guard.test.ts` in `Spaarke.UI.Components` |
 | Tier 1 smoke / eval / Compose gates | Changed surface broke an integration path | Read the job log; reproduce with the named test project |
 | Tier 2 (any) | Format, lint, unit test, ADR compliance, links, stamps | Advisory — does not block, but fix what the PR comment lists |
 

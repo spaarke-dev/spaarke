@@ -40,7 +40,7 @@ import type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 import { useAiSession } from "@spaarke/ai-widgets";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { resolveTenantIdSync } from "@spaarke/auth";
-import { EntityCreationService, cleanGuid } from "@spaarke/ui-components";
+import { EntityCreationService, cleanGuid, getXrm } from "@spaarke/ui-components";
 import type { ComposeWidgetData, ComposeWidgetSeed } from "./composeWidgetData";
 import { useReviewedDocumentAnalysis } from "./useReviewedDocumentAnalysis";
 
@@ -196,11 +196,9 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
   }> => {
     try {
       // The SpaarkeAi code page runs in an iframe where Xrm lives on the PARENT/TOP window, not the
-      // iframe's own globalThis — use the SAME fallback every other SpaarkeAi Xrm consumer uses
-      // (WorkspacePane, ManageWorkspacesPane, usePlaybookOptions, main.tsx).
+      // iframe's own globalThis. Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any;
-      const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm;
+      const xrm: any = getXrm(['webApi', 'utility']);
       const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
       const webApi = xrm?.WebApi;
       if (!rawUserId || !webApi) return { outcome: "unavailable" }; // no Dataverse host / not ready

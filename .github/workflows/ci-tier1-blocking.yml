@@ -16,6 +16,11 @@
 #      on Spaarke.UI.Components or a CI workflow changing, ~2 min). Added 2026-10-03
 #      by unified-access-control-r2 task 157. ADVISORY (job-level continue-on-error)
 #      until its FLIP CONDITION is met, then blocking: see the job.
+#   6. xrm-capability-guard   — the getXrm capability guard (AST scan of src/, jest,
+#      ~70s), BLOCKING, conditional on src/client/**, src/solutions/** or a CI
+#      workflow changing. Added 2026-10-06 by ontology task 081 round 7 as an
+#      owner-approved CLAUDE.md §6.5 PATH-A EXCEPTION to "do not extend without
+#      spec amendment" (FR-A02), scoped to this one job: see the job's comment.
 #
 # NOT IN TIER 1 (live in ci-tier2-advisory.yml or nightly-health.yml):
 #   format, lint, markdown link validator, dependency audit, Trivy,
@@ -108,6 +113,7 @@ jobs:
       workspace_surface: ${{ steps.filter.outputs.workspace_surface }}
       reporting_surface: ${{ steps.filter.outputs.reporting_surface }}
       datagrid_gate: ${{ steps.filter.outputs.datagrid_gate }}
+      xrm_guard: ${{ steps.filter.outputs.xrm_guard }}
       changed_namespaces: ${{ steps.derive-namespaces.outputs.value }}
     steps:
       - name: Checkout
@@ -168,6 +174,16 @@ jobs:
             datagrid_gate:
               - 'src/client/shared/Spaarke.UI.Components/**'
               - '.github/workflows/**'
+            # Added 2026-10-06 by ontology task 081 round 7: runs xrm-capability-guard.
+            # The guard scans all client code, so any client or solution change runs it;
+            # a workflow edit also runs it, so a change to the job proves the job. A
+            # server-only diff does not. A diff in which EVERY file is documentation
+            # skips Tier 1 entirely in ci-router.yml; any non-doc file runs Tier 1
+            # (fixed 2026-10-06, task 081 round 8: client + docs used to skip it).
+            xrm_guard:
+              - 'src/client/**'
+              - 'src/solutions/**'
+              - '.github/workflows/**'
 
       - name: Derive Spe.Integration.Tests namespaces from changed surface
         id: derive-namespaces
@@ -213,6 +229,7 @@ jobs:
             echo "| workspace_surface | ${{ steps.filter.outputs.workspace_surface }} |"
             echo "| reporting_surface | ${{ steps.filter.outputs.reporting_surface }} |"
             echo "| datagrid_gate (Spaarke.UI.Components, CI workflows) | ${{ steps.filter.outputs.datagrid_gate }} |"
+            echo "| xrm_guard (src/client, src/solutions, CI workflows) | ${{ steps.filter.outputs.xrm_guard }} |"
             echo ""
             echo "**BFF changed (from router)**: ${{ inputs.bff_changed }}"
             echo "**Smoke namespaces**: ${{ steps.derive-namespaces.outputs.value }}"
@@ -823,10 +840,10 @@ jobs:
   # edit to this job also runs it. The job runs unless that output is exactly
   # 'false' (fail closed: an empty output runs it), and always on a manual
   # workflow_dispatch. ci-router.yml is NOT changed by this project (owner round
-  # 13 item 12). Its pre-existing docs_only skip still applies: a PR that
-  # touches DataGrid.tsx together with only docs-class files (any `*.md`, a task
-  # note) is docs_only and skips Tier 1, this job included. That skip belongs to
-  # ci-cd-unit-test-remediation-r1; the uac-r2 main session files the issue.
+  # 13 item 12). Its docs_only skip used to apply to a PR that touched DataGrid.tsx
+  # together with only docs-class files (any `*.md`, a task note); since
+  # 2026-10-06 (ontology task 081 round 8, PR #1309) a diff is docs_only only when
+  # EVERY changed file is documentation, so such a PR runs Tier 1, this job included.
   #
   # NO SHARED-LIB DIST NEEDED: measured from a clean checkout (no Spaarke.Auth /
   # Spaarke.SdapClient dist, fresh npm install), the folder passes 8/8 suites,
@@ -910,3 +927,54 @@ jobs:
           name: datagrid-jest-results
           path: src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
           if-no-files-found: warn  # absent only if the run crashed before jest reported
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Job 6 — xrm-capability-guard (BLOCKING)
+  #
+  # §6.5 PATH-A EXCEPTION (owner-approved 2026-10-06, ontology task 081 round 7):
+  # the header's "do not extend without spec amendment" (ci-cd-unit-test-
+  # remediation-r1 FR-A02) is waived for THIS ONE JOB only. Reason: it catches a
+  # silent-failure defect class at PR time - a getXrm() lookup that selects a
+  # frame without the Xrm member the code then calls, which fails only in
+  # partial-Xrm host frames and nowhere in unit tests - for ~70s (install ~45s,
+  # the AST scan of all of src/ ~10-25s). Recorded in PR #1309 and in the
+  # ontology project's spec.
+  #
+  # BLOCKING: no continue-on-error. A failure fails this reusable workflow, so
+  # ci-router.yml's `tier1` result is failure and `CI / Router` goes red - the
+  # same path compile / arch-tests / tenant-isolation use (no router change).
+  #
+  # RUNS when classify-tier1's `xrm_guard` filter matches (src/client/**,
+  # src/solutions/**, .github/workflows/**), fail-closed (an empty output runs it),
+  # and on a manual workflow_dispatch. A server-only diff classifies 'false' and
+  # skips it. ci-router.yml skips Tier 1 entirely only when EVERY changed file is
+  # documentation (round 8); client code plus a doc file runs Tier 1 and this job.
+  # The scan needs only Spaarke.UI.Components' node_modules (typescript + jest);
+  # no shared-lib dist. Installed with `npm ci` from this package's lockfile
+  # (round 8): measured from a clean checkout it installs (38s) and the guard
+  # passes. Root CLAUDE.md §12's "avoid npm ci" is about the Vite solutions'
+  # stale lockfiles; if this lockfile ever drifts, npm ci fails loudly here
+  # rather than resolving a different tree.
+  # ──────────────────────────────────────────────────────────────────────────
+  xrm-capability-guard:
+    name: Xrm Capability Guard (getXrm AST scan)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10   # hang guard; measured ~70s
+    needs: classify-tier1
+    if: ${{ github.event_name == 'workflow_dispatch' || needs.classify-tier1.outputs.xrm_guard != 'false' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Spaarke.UI.Components deps (from the lockfile)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm ci --legacy-peer-deps --no-audit --no-fund
+
+      - name: getXrm capability guard (0 violations, 0 blind spots, every fixture fires)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/utils/__tests__/xrmCapabilityUsage.guard.test.ts

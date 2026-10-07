@@ -51,8 +51,8 @@ This skill creates a checkpoint of working state that enables another Claude ins
 
 | Content | Destination |
 |---|---|
-| Owner directives and standing rules that outlive a task | Project `CLAUDE.md` → `## Standing directives & gotchas` (one bullet each, with the date) |
-| Environment gotchas ("do not re-learn this") | Same section; if it applies beyond this project, `.claude/FAILURE-MODES.md` |
+| Owner directives and standing rules that outlive a task | Project `CLAUDE.md` → its standing-directives section (`## Standing directives & gotchas`, or `## 3. Owner directives and standing decisions` in the current template), one bullet each, with the date |
+| Environment gotchas ("do not re-learn this") | Same section (or `## 6. Gotchas` in the current template); if it applies beyond this project, `.claude/FAILURE-MODES.md` |
 | Decisions with rationale | The task's notes file (`notes/task-NNN-*.md`) or `notes/decisions.md` |
 | What happened in a session | The checkpoint **commit message** — git log is the journal |
 | A finished checkpoint you still want verbatim | Append to `notes/handoff-history/YYYY-MM.md` — never loaded on recovery; grep it only for a specific past detail |

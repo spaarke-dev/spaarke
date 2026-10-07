@@ -353,3 +353,5 @@ shared/taskpane/components/__tests__/TaskPaneExpand.test.tsx
 # UAT round 7 (2026-10-06): task 105 - View Document / Copy Link confirmation states; the Profile Summary's resize handle (shared ResizeHandle).
 shared/taskpane/components/__tests__/SaveFlow.buttonFeedback.test.tsx
 shared/taskpane/components/__tests__/DocumentProfileSection.resize.test.tsx
+# UAT rounds 9-10 (2026-10-07): tasks 107/108 - icon-only tabs at a normal width, labels when wide (both hosts), overflow guard, Expand right-most.
+shared/taskpane/components/__tests__/TaskPaneToolbar.fit.test.tsx

@@ -534,7 +534,7 @@ Communications workspace widget — shipped 2026-07-01 by ai-spaarke-ai-workspac
 
 ### To vary row-click behavior (rare)
 Do NOT pass a bespoke `onRecordOpen` handler unless you have a documented reason. The framework's default handler IS the standard. If you truly need custom behavior:
-1. Document the reason in your project's `spec.md` "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29)
+1. Document the reason in your project's `spec.md` "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflicts)
 2. Verify your custom handler still lands at Layout 1 (85% × 85%) unless a Layout 2 case applies
 
 **Anti-pattern**: iframe-hosting OOB `main.aspx` inside a proprietary shell. Retired 2026-07-01 by R2 FR-14 (`SmartTodoModal` was the last Spaarke consumer). See [`docs/standards/MODAL-DECISION-CRITERIA.md` § anti-pattern 4](../standards/MODAL-DECISION-CRITERIA.md#4-do-not-iframe-embed-oob-mainaspx-as-a-standard-pattern) for the verbatim MS Learn 2025-05-07 quote.

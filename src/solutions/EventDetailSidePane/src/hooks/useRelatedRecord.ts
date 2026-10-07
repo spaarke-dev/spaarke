@@ -12,7 +12,7 @@
 
 import { createChildThroughBff } from "../services/childRecordWrites";
 import * as React from "react";
-import { getXrm } from "../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../utils/xrmAccess";
 import { cleanGuid } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ export function useRelatedRecord(
       setIsLoading(true);
       setError(null);
 
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         setIsLoading(false);
@@ -167,7 +167,7 @@ export function useRelatedRecord(
     async (data: Record<string, unknown>): Promise<boolean> => {
       if (!recordId) return false;
 
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         return false;

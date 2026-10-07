@@ -306,7 +306,7 @@ Hosts that need custom row-click behavior (registered side panes, bespoke React 
 />
 ```
 
-**Use sparingly**: the framework's default is the standard for a reason (Layout 1 unification, dark-mode compatibility, dirty-check-free simplicity). If a host needs a custom `onRecordOpen`, the reason SHOULD appear in the project's spec.md "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29). Audit as of 2026-07-01: **no** production consumer under `src/solutions/**` passes an `onRecordOpen` override — every consumer inherits the framework default.
+**Use sparingly**: the framework's default is the standard for a reason (Layout 1 unification, dark-mode compatibility, dirty-check-free simplicity). If a host needs a custom `onRecordOpen`, the reason SHOULD appear in the project's spec.md "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflicts). Audit as of 2026-07-01: **no** production consumer under `src/solutions/**` passes an `onRecordOpen` override — every consumer inherits the framework default.
 
 ---
 

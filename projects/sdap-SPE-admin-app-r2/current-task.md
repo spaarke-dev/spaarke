@@ -1,6 +1,6 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-10-04 (late — SPE Admin made secret-free, §0.5)
+> **Last Updated**: 2026-10-07 (BFF deployed + verified; 042 closed; 050 re-probed)
 > **Recovery**: read Quick Recovery, then **§0.5 (the MI fix)**, then §0, then §1. Everything else is reference.
 
 ---
@@ -10,10 +10,10 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
-| **Status** | **SPE Admin is now secret-free** (§0.5) — PR **#1291** (auto-merge). **SPE Admin page DEPLOYED to dev** 2026-10-05 (verified in Dataverse). **BFF NOT deployed — held by operator.** Until it is: dev still runs the OLD secret-based BFF, and creating a NEW config with a blank Key Vault Secret Name returns 400 (edits are fine) |
-| **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX rows, not from memory |
-| **Next Action** | When the operator says so: **deploy the BFF** (`scripts/Deploy-BffApi.ps1`). Then the **operator steps** in §0.5: grant the BFF managed identity on the Model 1 registration, grant `SecurityEvents.Read.All` to the BFF MI, clear the `null` from the Model 1 config. Then UAT |
-| **Blocked?** | Nothing is code-blocked. Two Entra admin actions are the operator's (§0.5) |
+| **Status** | **SPE Admin is secret-free and LIVE in dev.** PR #1291 merged (`a5be02f0`); BFF deployed by the operator 2026-10-05 from master `2677d48c` — **verified in the running DLL** (new members present, `SpeAdminTokenProvider` absent, `/healthz` 200). SPE Admin page deployed 2026-10-05. Model 1 config secret field already blank |
+| **Tasks** | **27 ✅ · 2 🔄 (029 = operator UAT render; 050 = platform-blocked, §9 of its findings) · 1 🔲 (090)** of 30. 042 closed — its last item was fixed upstream by uac-r2 #1312 |
+| **Next Action** | **Operator**: (1) Consuming Tenants → grant `5967251e-…` `full`/`full` on Spaarke Model 1; (2) `SecurityEvents.Read.All` on `mi-bff-api-dev` (az command in the 2026-10-07 session reply: SP `9fd47efb…`, Graph SP `ba630d35…`, role `bf394140…`); (3) UAT incl. 029's billing render. **Then** 090 wrap-up |
+| **Blocked?** | Nothing is code-blocked. Security **Alerts** will still fail after (2): Graph says the tenant "is not provisioned" for the Security API — a licensing condition, unchanged from the old identity |
 
 ### ✅ Starting a NEW / REMOTE session? Read this
 
@@ -187,8 +187,10 @@ type per tenant · 5 containers · 1 GB each · 30 days · cannot be registered 
 
 ### 1.3 ⏳ Task 050 — archival probe, overdue
 
-`python scratchpad/probe050_optedin.py` (also `notes/probe050_optedin.py`). The 24 h replication retry
-was due **2026-08-29** and has not been run. Provisions and tears down its own container.
+✅ **Re-run 2026-10-07** with `python projects/sdap-SPE-admin-app-r2/notes/probe050_archival.py` (re-created +
+committed — the old `probe050_optedin.py` never existed in `notes/`; it was lost with a scratchpad). The 403
+refusal is **gone**; archive now returns **503 `serviceNotAvailable`**. Platform-blocked — see
+`notes/task-050-findings.md` §9. Provisions and tears down its own container.
 
 The opt-in **is** set (`IsArchiveEnabled : True`) but Graph returned a byte-identical 403 naming
 *"this **APPLICATION**"*, not the container type. 🔴 **Do NOT conclude an app-level capability from that

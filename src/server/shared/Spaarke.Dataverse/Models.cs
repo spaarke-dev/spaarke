@@ -881,7 +881,7 @@ public class EventEntity
     /// <summary>State code: Active (0), Inactive (1)</summary>
     public int StateCode { get; set; }
 
-    /// <summary>Status code: Draft (1), Planned (2), Open (3), OnHold (4), Completed (5), Cancelled (6), Deleted (7)</summary>
+    /// <summary>Status reason (statuscode) — live values in <see cref="EventStatusCode"/>.</summary>
     public int StatusCode { get; set; }
 
     /// <summary>Base date (sprk_basedate)</summary>
@@ -893,7 +893,7 @@ public class EventEntity
     /// <summary>Completed date (sprk_completeddate)</summary>
     public DateTime? CompletedDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     /// <summary>Source: User (0), System (1), Workflow (2), External (3)</summary>
@@ -902,7 +902,7 @@ public class EventEntity
     /// <summary>Remind at (sprk_remindat)</summary>
     public DateTime? RemindAt { get; set; }
 
-    /// <summary>Related Event lookup ID (_sprk_relatedevent_value)</summary>
+    /// <summary>Not populated: sprk_event has no sprk_relatedevent column (verified live 2026-10-05, task 097).</summary>
     public Guid? RelatedEventId { get; set; }
 
     /// <summary>Related Event Type: Reminder (0), Notification (1), Extension (2)</summary>
@@ -934,7 +934,7 @@ public class EventEntity
     public string? RegardingRecordId { get; set; }
     /// <summary>Regarding record display name (sprk_regardingrecordname)</summary>
     public string? RegardingRecordName { get; set; }
-    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7)</summary>
+    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7) — derived from which entity-specific regarding lookup is populated (sprk_regardingrecordtype itself is a lookup to sprk_recordtype_ref).</summary>
     public int? RegardingRecordType { get; set; }
 
     /// <summary>Created date/time</summary>
@@ -964,7 +964,7 @@ public class CreateEventRequest
     /// <summary>Due date</summary>
     public DateTime? DueDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
@@ -1020,34 +1020,9 @@ public class CreateEventRequest
     /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
     /// </summary>
     public Guid? AssignedToContactId { get; set; }
+
 }
 
-/// <summary>
-/// Event Type entity model (sprk_eventtype)
-/// </summary>
-public class EventTypeEntity
-{
-    /// <summary>Event Type ID (sprk_eventtypeid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_name) - Primary field</summary>
-    public required string Name { get; set; }
-
-    /// <summary>Event code (sprk_eventcode)</summary>
-    public string? EventCode { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>State code: Active (0), Inactive (1)</summary>
-    public int StateCode { get; set; }
-
-    /// <summary>Requires due date: No (0), Yes (1)</summary>
-    public int? RequiresDueDate { get; set; }
-
-    /// <summary>Requires base date: No (0), Yes (1)</summary>
-    public int? RequiresBaseDate { get; set; }
-}
 
 /// <summary>
 /// Event Log action constants
@@ -1069,6 +1044,189 @@ public static class EventLogAction
         Deleted => "Deleted",
         _ => "Unknown"
     };
+}
+
+/// <summary>
+/// <c>sprk_event.statuscode</c> (Status Reason) values and the <c>statecode</c> each one belongs to — the single
+/// source of truth for every BFF read and write of an event's status.
+/// </summary>
+/// <remarks>
+/// <para>Verified against the LIVE option set (spaarkedev1, 2026-10-05, <c>StatusAttributeMetadata</c> with
+/// <c>State</c> per option) and pinned by <c>EventStatusWritePathTests</c> against
+/// <c>docs/data-model/sprk_event-related-tables.md</c>.</para>
+/// <para>Two traps this class exists to close (task 097): (1) the BFF used to carry a fictional 1..7 set
+/// (Open = 3, Completed = 5, Cancelled = 6, Deleted = 7) that Dataverse rejects with <c>0x80048408</c>, so complete,
+/// cancel, soft-delete and create could never succeed; (2) <b>Completed and Closed are ACTIVE (statecode 0)</b> —
+/// pairing them with statecode 1 is rejected too ("not a valid status code for state code Inactive").</para>
+/// </remarks>
+public static class EventStatusCode
+{
+    /// <summary>Draft — statecode 0 (Active). The platform default for a new row.</summary>
+    public const int Draft = 1;
+
+    /// <summary>No Further Action — statecode 1 (Inactive). Used by the archive commands.</summary>
+    public const int NoFurtherAction = 2;
+
+    /// <summary>Open — statecode 0 (Active). What the Daily Briefing reads as open work.</summary>
+    public const int Open = 659490001;
+
+    /// <summary>Completed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Completed = 659490002;
+
+    /// <summary>Closed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Closed = 659490003;
+
+    /// <summary>Cancelled — statecode 1 (Inactive).</summary>
+    public const int Cancelled = 659490004;
+
+    /// <summary>Transferred — statecode 1 (Inactive).</summary>
+    public const int Transferred = 659490005;
+
+    /// <summary>On Hold — statecode 0 (Active).</summary>
+    public const int OnHold = 659490006;
+
+    /// <summary>Reassigned — statecode 0 (Active).</summary>
+    public const int Reassigned = 659490007;
+
+    /// <summary>statecode Active.</summary>
+    public const int StateActive = 0;
+
+    /// <summary>statecode Inactive.</summary>
+    public const int StateInactive = 1;
+
+    /// <summary>Every live value with its label and statecode, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label, int State)> All { get; } = new[]
+    {
+        (Draft, "Draft", StateActive),
+        (Open, "Open", StateActive),
+        (Completed, "Completed", StateActive),
+        (Closed, "Closed", StateActive),
+        (OnHold, "On Hold", StateActive),
+        (Reassigned, "Reassigned", StateActive),
+        (NoFurtherAction, "No Further Action", StateInactive),
+        (Cancelled, "Cancelled", StateInactive),
+        (Transferred, "Transferred", StateInactive),
+    };
+
+    /// <summary>True when <paramref name="statusCode"/> exists in the live option set.</summary>
+    public static bool IsDefined(int statusCode) => All.Any(s => s.Value == statusCode);
+
+    /// <summary>
+    /// The statecode Dataverse requires alongside <paramref name="statusCode"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not in the live option set.</exception>
+    public static int GetStateCode(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.State;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode,
+            "Not a sprk_event statuscode in the live option set.");
+    }
+
+    /// <summary>
+    /// THE definition of "open work" for events — ONE predicate for the complete gate AND the To Do generation rules
+    /// (task 097 review L2; OWNER DECISION A, 2026-10-06: Draft, Open, On Hold, Reassigned — Reassigned is completable).
+    /// <list type="bullet">
+    ///   <item>Open, On Hold, Reassigned: Active statuses whose label says the work is not finished.</item>
+    ///   <item>Draft: included because it is where the client CreateEventWizard and every Dataverse-form create LAND
+    ///   (the platform default; live 2026-10-05: most events are Draft), and the LegalWorkspace / SmartTodo Overdue
+    ///   filters already treat Draft as live work. Excluding it would make most user-created events un-completable.</item>
+    ///   <item>Not open: Completed and Closed (Active, but finished), Cancelled, Transferred, No Further Action.</item>
+    /// </list>
+    /// Used by the complete gate (EventEndpoints.CanCompleteEvent) and the To Do generation rules (<see cref="NotOpenWork"/>).
+    /// </summary>
+    public static bool IsOpenWork(int statusCode) =>
+        statusCode is Draft or Open or OnHold or Reassigned;
+
+    /// <summary>Every live status that is NOT open work (<see cref="IsOpenWork"/>), for server-side exclusion.</summary>
+    public static IReadOnlyCollection<int> NotOpenWork { get; } =
+        All.Select(s => s.Value).Where(v => !IsOpenWork(v)).ToArray();
+
+    /// <summary>The live label for <paramref name="statusCode"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.Label;
+        }
+
+        return "Unknown";
+    }
+}
+
+/// <summary>
+/// The "my events" narrowing of the caller-scoped event list (task 097 round 8; owner decision B, 2026-10-06): an event is
+/// the caller's when it is OWNED by them, OR ASSIGNED to their linked contact (<c>sprk_assignedto</c>, task 152 S1), OR
+/// CREATED by them (<c>sprk_createdbyperson</c>, a SYSTEMUSER lookup — <see cref="RecordCreatorPersonColumn"/>, task 146
+/// c1-r1). The three are OR-ed; the query still runs AS the caller, so this narrows — it never widens — what Dataverse
+/// lets them read. An event the BFF creates is owned by a business-unit TEAM (I-6), so ownership alone would hide it
+/// from the person who created it.
+/// </summary>
+public sealed record EventOwnershipScope(Guid? OwnerUserId, Guid? AssignedToContactId, Guid? CreatedByPersonId)
+{
+    /// <summary>The <c>$filter</c> clause, or null when no part is set (no narrowing).</summary>
+    public string? ToFilter(IFormatProvider inv)
+    {
+        var parts = new List<string>();
+        if (OwnerUserId is { } owner && owner != Guid.Empty)
+            parts.Add(string.Format(inv, "_ownerid_value eq {0:D}", owner));
+        if (AssignedToContactId is { } contact && contact != Guid.Empty)
+            parts.Add(string.Format(inv, "_sprk_assignedto_value eq {0:D}", contact));
+        if (CreatedByPersonId is { } person && person != Guid.Empty)
+            parts.Add(string.Format(inv, "_{0}_value eq {1:D}", RecordCreatorPersonColumn.LogicalName, person));
+        return parts.Count switch
+        {
+            0 => null,
+            1 => parts[0],
+            _ => "(" + string.Join(" or ", parts) + ")",
+        };
+    }
+}
+/// <summary>
+/// <c>sprk_event.sprk_priority</c> values — the single source of truth for every BFF read and write of an event's
+/// priority. Verified against the LIVE option set (spaarkedev1, 2026-10-05) and pinned by
+/// <c>EventReadPathTests</c> against <c>docs/data-model/sprk_event-related-tables.md</c>.
+/// </summary>
+/// <remarks>
+/// Task 097: the BFF used to accept and write 0..3, which Dataverse rejects ("The value 2 of 'sprk_priority' ... is
+/// outside the valid range"). NOTE: <c>sprk_todo.sprk_priority</c> is a DIFFERENT option set (Urgent = 100000000 …
+/// Low = 100000003) — never reuse these constants for a To Do.
+/// </remarks>
+public static class EventPriority
+{
+    public const int Low = 100000000;
+    public const int Normal = 100000001;
+    public const int High = 100000002;
+    public const int Urgent = 100000003;
+
+    /// <summary>Every live value with its label, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label)> All { get; } = new[]
+    {
+        (Low, "Low"),
+        (Normal, "Normal"),
+        (High, "High"),
+        (Urgent, "Urgent"),
+    };
+
+    /// <summary>True when <paramref name="priority"/> exists in the live option set.</summary>
+    public static bool IsDefined(int priority) => All.Any(p => p.Value == priority);
+
+    /// <summary>The live label for <paramref name="priority"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int priority)
+    {
+        foreach (var p in All)
+        {
+            if (p.Value == priority)
+                return p.Label;
+        }
+
+        return "Unknown";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1275,6 +1433,13 @@ public static class RegardingRecordType
         _ => null,
     };
 
+    /// <summary>
+    /// The ADR-024 <c>sprk_regardingrecordurl</c> value — a RELATIVE model-driven-app URL (the host origin is resolved
+    /// at click time; no org URL or tenant id is hard-coded). The single server-side owner of this format;
+    /// <c>TodoRegardingBuilder.BuildRecordUrl</c> delegates here.
+    /// </summary>
+    public static string BuildRecordUrl(string entityLogicalName, string recordId) =>
+        $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──
     // These map a target entity's LOGICAL NAME (as chosen in the client picker / AnalysisRegardingTarget)
     // to the ADR-024 fields the resolver writes on sprk_analysis. The canonical field-name maps live
@@ -1291,21 +1456,52 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    /// <summary>Primary display-name attribute for a target entity (ADR-024 sprk_regardingrecordname source).</summary>
+    // ── The display-name map: ONE source (task 097 round 9) ─────────────────────────────────────────────────
+    // The primary display-name attribute of every regarding target any writer names. It lives HERE, in the shared
+    // library, because the Spaarke.Dataverse analysis stager needs it and cannot reference the BFF; the BFF's
+    // RegardingNameFields.PrimaryNameField DELEGATES here (its own copy had drifted from this one). Every value is
+    // live-verified (spaarkedev1 EntityDefinitions; unified-access-control-r2 task 161 note §2) and pinned by
+    // RegardingNameFieldsTests: sprk_organization's name is sprk_organizationname (sprk_name does not exist there).
+    // sprk_communication is a NAME-ONLY entry — RegardingNameFields.EntitySetName deliberately has no set for it.
+
+    /// <summary>Primary display-name attribute for a regarding target (ADR-024 sprk_regardingrecordname source), or null.</summary>
     public static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
     {
         "sprk_matter" => "sprk_mattername",
         "sprk_project" => "sprk_projectname",
+        "sprk_invoice" => "sprk_name",
+        "sprk_event" => "sprk_eventname",
+        // Verified live 2026-10-02 (spaarkedev1 describe, read-only): sprk_name NVARCHAR(850), e.g. "Email: <subject>".
+        "sprk_communication" => "sprk_name",
+        "sprk_workassignment" => "sprk_name",
+        "sprk_servicerequest" => "sprk_name",
+        "sprk_budget" => "sprk_name",
+        "sprk_reportcard" => "sprk_name",
+        "sprk_analysis" => "sprk_name",
+        "sprk_organization" => "sprk_organizationname",
+        "contact" => "fullname",
+        "account" => "name",
         _ => null,
     };
 
-    /// <summary>Reference-number attribute for a target entity (ADR-024 sprk_regardingrecordnumber source); null when none.</summary>
-    public static string? GetReferenceNumberField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_matternumber",
-        "sprk_project" => "sprk_projectnumber",
-        _ => null,
-    };
+    // ── The reference NUMBER column: read from the catalog, never hard-coded (task 097 round 9) ──────────────
+    // Each sprk_recordtype_ref row names its type's number column in sprk_regardingrecordnumberfield (live spaarkedev1
+    // 2026-10-06: sprk_matternumber, sprk_projectnumber, sprk_invoicenumber, sprk_analysis_number, accountnumber,
+    // sprk_workassignmentnumber, sprk_budgetnumber, …; contact has none). The former hard-coded map covered matter and
+    // project only, so an event or analysis filed under an invoice, analysis, account, work assignment or budget was
+    // written with no number. Every writer that already reads the catalog row takes the column from it.
+
+    /// <summary>The <c>sprk_recordtype_ref</c> column naming a type's reference-number attribute.</summary>
+    public const string RecordNumberFieldColumn = "sprk_regardingrecordnumberfield";
+
+    /// <summary>
+    /// The reference-number attribute a <c>sprk_recordtype_ref</c> row names, or null when the row is absent or names
+    /// none (the number is then left unset — never guessed).
+    /// </summary>
+    public static string? RecordNumberFieldOf(Microsoft.Xrm.Sdk.Entity? recordTypeRef) =>
+        recordTypeRef?.GetAttributeValue<string>(RecordNumberFieldColumn) is { } field && !string.IsNullOrWhiteSpace(field)
+            ? field.Trim()
+            : null;
 }
 
 /// <summary>

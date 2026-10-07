@@ -25,6 +25,7 @@ public static class TelemetryModule
                 metrics.AddMeter("Sprk.Bff.Api.Cache");
                 metrics.AddMeter("Sprk.Bff.Api.CircuitBreaker");
                 metrics.AddMeter("Sprk.Bff.Api.Finance");
+                metrics.AddMeter(Sprk.Bff.Api.Api.Events.EventEndpoints.MeterName); // task 097: event audit-log write failures
                 // AI Safety meter (AIPU2-020): Prompt Shield blocked_total + latency_ms
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.PromptShieldTelemetry.MeterName);
                 // AI Capabilities meter (AIPU2-011): ai_capability_manifest_refresh_total

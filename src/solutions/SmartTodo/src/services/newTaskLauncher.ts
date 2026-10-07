@@ -24,7 +24,7 @@
  * Two regarding SOURCES, host-record preferred:
  *   1. **Host record** (`resolveHostRegardingRecord`) — reads the hosting form's
  *      current record via the shell `Xrm.Page.data.entity.getEntityReference()`
- *      (frame-walked through `getXrm`). Present when the Code Page is embedded
+ *      (resolved through the shared `getXrm`). Present when the Code Page is embedded
  *      as a web resource on a record form OR opened as a dialog over one.
  *   2. **Launch context** (`resolveRegardingSource`) — the existing URL-param
  *      pre-seed (`openTodos.regardingFilter` from VisualHost drill-through /
@@ -73,9 +73,9 @@ import {
   TODO_REGARDING_CATALOG,
   getOobModalSize,
   cleanGuid,
+  getXrm,
 } from '@spaarke/ui-components';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
-import { getXrm } from './xrmProvider';
 
 /** Entity logical name for the sprk_todo OOB create form (spec FR-10). */
 const TODO_ENTITY_NAME = 'sprk_todo';
@@ -165,7 +165,7 @@ function resolveRegardingSource(
 /**
  * Read the HOST record the Smart To Do surface is embedded in / opened over,
  * via the shell form context (`Xrm.Page.data.entity.getEntityReference()`,
- * frame-walked through `getXrm`).
+ * resolved through the shared `getXrm('page')`).
  *
  * Returns `{entityType, recordId, recordName}` for a SAVED host record, or
  * `undefined` when there is no reachable form context (standalone full-page
@@ -182,7 +182,7 @@ function resolveRegardingSource(
 export function resolveHostRegardingRecord(): IRegardingSource | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm() as any;
+    const xrm = getXrm('page') as any;
     const entity = xrm?.Page?.data?.entity;
     if (!entity || typeof entity.getEntityReference !== 'function') {
       return undefined;

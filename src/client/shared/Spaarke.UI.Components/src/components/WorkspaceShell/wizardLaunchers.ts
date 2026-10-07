@@ -53,6 +53,7 @@
 
 import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
@@ -61,39 +62,18 @@ import { cleanGuid } from '../../utils/guid';
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
- * Walks `window`, `window.parent`, `window.top` looking for an Xrm.Navigation
- * with `navigateTo`. Returns `null` in non-host environments (Vite dev, jsdom).
+ * Resolve the host `Xrm.Navigation` (with `navigateTo`) via the shared
+ * cross-frame `getXrm()` walker. Returns `null` in non-host environments
+ * (Vite dev, jsdom).
  *
- * This is the same resolver used by the widget-mount path that already worked
- * (CreateProjectWizardWidget, FindSimilarWizardWidget) — hoisted here so the
- * direct-click path uses the same resolver.
+ * Kept as an exported thin wrapper (NOT a second frame walk — task 081 / C-8
+ * converged this module's former window/parent/top loop onto
+ * `utils/xrmContext.ts` `getXrm()`) because AI.Widgets widgets import this
+ * name from `@spaarke/ui-components`.
  */
 export function resolveXrmNavigation(): any | null {
-  if (typeof window === 'undefined') return null;
-
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin — skip */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin — skip */
-  }
-
-  for (const frame of frames) {
-    try {
-      const nav = (frame as any).Xrm?.Navigation;
-      if (nav?.navigateTo) {
-        return nav;
-      }
-    } catch {
-      /* cross-origin — skip */
-    }
-  }
-  return null;
+  const nav: any = getXrm('navigation')?.Navigation;
+  return nav?.navigateTo ? nav : null;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */

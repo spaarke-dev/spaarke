@@ -1,20 +1,22 @@
 /**
- * EmptyState — displayed in the ActivityFeed when the active filter yields
- * zero results.
+ * ActivityFeedEmptyState — displayed in the ActivityFeed when the active
+ * filter yields zero results.
  *
  * Two reasons are supported:
  *   - "no-events"   : the feed has no events at all (all-filter is empty)
  *   - "no-match"    : the selected filter category returned zero items
+ *
+ * Renders the shared `EmptyState` from `@spaarke/ui-components` (task 081 /
+ * C-11 — this was a hand-rolled copy of the same icon + heading + description
+ * shape). Only the feed's copy, icon and "Show all updates" button live here;
+ * `emptyStateSpacing` keeps the pre-081 56px band and `spacingVerticalM` gap,
+ * and `description` its 300px width, on top of the shared compact size.
  */
 
 import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Button,
-} from "@fluentui/react-components";
+import { makeStyles, tokens, Button } from "@fluentui/react-components";
 import { FilterRegular, ListRegular } from "@fluentui/react-icons";
+import { EmptyState } from "@spaarke/ui-components";
 import { EventFilterCategory } from "../../types/enums";
 
 // ---------------------------------------------------------------------------
@@ -22,32 +24,17 @@ import { EventFilterCategory } from "../../types/enums";
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  container: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+  emptyStateSpacing: {
     paddingTop: "56px",
     paddingBottom: "56px",
     paddingLeft: tokens.spacingHorizontalXXL,
     paddingRight: tokens.spacingHorizontalXXL,
     gap: tokens.spacingVerticalM,
-    flex: "1 1 auto",
   },
-  iconWrapper: {
+  icon: {
     color: tokens.colorNeutralForeground4,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  heading: {
-    color: tokens.colorNeutralForeground2,
-    fontWeight: tokens.fontWeightSemibold,
-    textAlign: "center",
   },
   description: {
-    color: tokens.colorNeutralForeground3,
-    textAlign: "center",
     maxWidth: "300px",
   },
 });
@@ -87,37 +74,21 @@ export const ActivityFeedEmptyState: React.FC<IActivityFeedEmptyStateProps> = ({
     : "New activity across your matters, projects, and documents will appear here.";
 
   return (
-    <div
-      className={styles.container}
-      role="status"
-      aria-live="polite"
-      aria-label={heading}
-    >
-      <div className={styles.iconWrapper} aria-hidden="true">
-        {isNoMatch ? (
-          <FilterRegular style={{ fontSize: "48px" }} />
-        ) : (
-          <ListRegular style={{ fontSize: "48px" }} />
-        )}
-      </div>
-
-      <Text size={400} className={styles.heading}>
-        {heading}
-      </Text>
-
-      <Text size={200} className={styles.description}>
-        {description}
-      </Text>
-
-      {isNoMatch && onClearFilter && (
-        <Button
-          appearance="subtle"
-          size="small"
-          onClick={onClearFilter}
-        >
-          Show all updates
-        </Button>
-      )}
-    </div>
+    <EmptyState
+      size="compact"
+      className={styles.emptyStateSpacing}
+      descriptionClassName={styles.description}
+      ariaLabel={heading}
+      icon={isNoMatch ? <FilterRegular className={styles.icon} /> : <ListRegular className={styles.icon} />}
+      heading={heading}
+      description={description}
+      footer={
+        isNoMatch && onClearFilter ? (
+          <Button appearance="subtle" size="small" onClick={onClearFilter}>
+            Show all updates
+          </Button>
+        ) : undefined
+      }
+    />
   );
 };

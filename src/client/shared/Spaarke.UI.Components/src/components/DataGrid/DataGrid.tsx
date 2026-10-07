@@ -49,6 +49,7 @@ import type { IDataverseClient, EntityMetadata, SavedQueryResult } from '../../s
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
 import {
@@ -1180,8 +1181,10 @@ export const DataGrid: React.FC<DataGridProps> = props => {
    */
   const defaultRecordOpen = React.useCallback(
     (recordId: string, _record: Record<string, unknown>, ctx: DataGridHostContext) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
+      // Shared cross-frame walker (task 081 / C-8), nearest frame that can
+      // navigateTo — was a parent-first `parent ?? window` read with no top
+      // fallback (see `getXrm` for the window-first order rule).
+      const xrm = getXrm('navigation');
       if (!ctx.entityName || !recordId) return;
       if (!xrm?.Navigation?.navigateTo) {
         // eslint-disable-next-line no-console

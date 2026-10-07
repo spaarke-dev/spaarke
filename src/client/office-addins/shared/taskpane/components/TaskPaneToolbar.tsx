@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -23,27 +23,33 @@ import {
   WeatherMoonRegular,
   WeatherSunnyRegular,
   ColorRegular,
-  ArrowMaximizeRegular,
-  ArrowMinimizeRegular,
+  PanelRightExpandRegular,
+  PanelRightContractRegular,
   MailRegular,
 } from '@fluentui/react-icons';
 import { getAvailableTabs, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
 import type { ThemePreference } from '../hooks/useTheme';
 import { useAnnounce } from '../hooks/useAnnounce';
+import { useToolbarFit } from '../hooks/useToolbarFit';
 
 /**
  * TaskPaneToolbar — the single Spaarke row beneath Microsoft's add-in chrome.
  *
  * Consolidates what used to be two stacked rows (logo/actions header + tab row) into
  * ONE toolbar (email-communication-intelligence-r2 UI feedback, owner 2026-09-02):
- *   [ Save ] [ To Do ] [ Find ] [ Send ] ……… [ ⋮  → Theme · Settings · Account ]
+ *   [ Save ] [ To Do ] [ Find ] [ Send ] ……… [ ⋮  → Theme · Settings · Account ] [ Expand ]
  *
  * "Send" is Word's Email TAB (task 096) or, in Outlook, the Send Email ACTION button (task 106, owner UAT
  * round 8: "should be in the tool bar next to Find") — it opens Outlook's native compose, so it is not a tab.
  *
  * Tabs are left-aligned; the per-user tools (theme/settings/account) collapse into a
  * three-dots overflow on the right. Fluent UI v9 only (ADR-021).
+ *
+ * Task 108 (owner UAT round 10): one rule for both hosts — tabs are icon-only at a normal pane width and show labels
+ * once the pane is wide/expanded (`useToolbarFit`); icon-only tabs keep their names as tooltip + accessible name.
+ * Expand/Collapse (pane icons) is always the right-most item, directly below the host's close button: the title row
+ * above belongs to Word/Outlook and an add-in cannot place buttons in it (Outlook's own icon there is Outlook's).
  */
 
 const useStyles = makeStyles({
@@ -159,6 +165,19 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
 }) => {
   const styles = useStyles();
   const tabs = getAvailableTabs(hostType, capabilities);
+
+  // Task 108: labels only when the pane is wide (see useToolbarFit).
+  const headerRef = useRef<HTMLElement>(null);
+  const tabsRef = useRef<HTMLDivElement>(null);
+  const { showLabels } = useToolbarFit(
+    headerRef,
+    tabsRef,
+    `${tabs.map(t => t.value).join(',')}|${Boolean(onSendEmail)}`
+  );
+  const iconOnly = !showLabels;
+  const expandLabel = isExpanded ? 'Collapse pane' : 'Expand pane';
+  const expandIcon = isExpanded ? <PanelRightContractRegular /> : <PanelRightExpandRegular />;
+
   const hasOverflow = Boolean(onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)));
 
   // NFR-11: announce tab changes to screen readers via the React-owned live region
@@ -166,10 +185,10 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   const { announce, liveRegion } = useAnnounce();
 
   return (
-    <header className={styles.toolbar} role="banner">
+    <header ref={headerRef} className={styles.toolbar} role="banner">
       {liveRegion}
       {showTabs && isAuthenticated && tabs.length > 0 && (
-        <div className={styles.tabs}>
+        <div ref={tabsRef} className={styles.tabs}>
           <TabList
             className={styles.tabListGap}
             selectedValue={selectedTab}
@@ -181,11 +200,17 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
             }}
             size="small"
           >
-            {tabs.map(tab => (
-              <Tab key={tab.value} value={tab.value} icon={tab.icon}>
-                {tab.label}
-              </Tab>
-            ))}
+            {tabs.map(tab =>
+              iconOnly ? (
+                <Tooltip key={tab.value} content={tab.label} relationship="label">
+                  <Tab value={tab.value} icon={tab.icon} aria-label={tab.label} />
+                </Tooltip>
+              ) : (
+                <Tab key={tab.value} value={tab.value} icon={tab.icon}>
+                  {tab.label}
+                </Tab>
+              )
+            )}
           </TabList>
           {onSendEmail && (
             <Tooltip content="Email the document and record links" relationship="description">
@@ -195,8 +220,9 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
                 icon={isSendingEmail ? <Spinner size="tiny" /> : <MailRegular />}
                 disabled={isSendingEmail}
                 onClick={onSendEmail}
+                {...(iconOnly ? { 'aria-label': 'Send' } : {})}
               >
-                Send
+                {iconOnly ? null : 'Send'}
               </Button>
             </Tooltip>
           )}
@@ -205,21 +231,6 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
 
       {/* push the overflow to the right even when tabs are hidden */}
       {(!showTabs || !isAuthenticated || tabs.length === 0) && <div className={styles.tabs} />}
-
-      {onToggleExpand && (
-        <div className={styles.overflow}>
-          <Tooltip content={isExpanded ? 'Collapse pane' : 'Expand pane'} relationship="label">
-            <Button
-              appearance="subtle"
-              icon={isExpanded ? <ArrowMinimizeRegular /> : <ArrowMaximizeRegular />}
-              aria-label={isExpanded ? 'Collapse pane' : 'Expand pane'}
-              aria-pressed={isExpanded}
-              disabled={isResizing}
-              onClick={onToggleExpand}
-            />
-          </Tooltip>
-        </div>
-      )}
 
       {hasOverflow && (
         <div className={styles.overflow}>
@@ -284,6 +295,22 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
               </MenuList>
             </MenuPopover>
           </Menu>
+        </div>
+      )}
+
+      {/* Task 108: Expand/Collapse is the right-most item, directly below the host's close button. */}
+      {onToggleExpand && (
+        <div className={styles.overflow}>
+          <Tooltip content={expandLabel} relationship="label">
+            <Button
+              appearance="subtle"
+              icon={expandIcon}
+              aria-label={expandLabel}
+              aria-pressed={isExpanded}
+              disabled={isResizing}
+              onClick={onToggleExpand}
+            />
+          </Tooltip>
         </div>
       )}
     </header>

@@ -35,6 +35,9 @@ internal static class ComposeDocumentEndpoints
     {
         // (2) GET /api/compose/documents/{documentSpeId} — load DOCX bytes
         group.MapGet("/documents/{documentSpeId}", Load)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "read" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("read")
             .WithName("ComposeLoadDocument")
             .WithSummary("Load DOCX bytes from SPE for an existing Compose document")
             .RequireRateLimiting("ai-context")

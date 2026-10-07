@@ -152,7 +152,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | ADR Architecture Audit | Scheduled / advisory | Full NetArchTest ADR compliance scan; creates/updates a tracking issue |
 | `build-provisioning-sidecar.yml` | Build Provisioning Sidecar | PR/push (scoped) / dispatch | Build, Trivy-scan, and push the Exchange-policy provisioning sidecar image to the platform ACR |
 | `ci-router.yml` | CI (job: `Router`) | **Blocking — required check** | Single-gate router: classifies the diff, dispatches Tier 1 + Tier 2, aggregates into `CI / Router` |
-| `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate |
+| `ci-tier1-blocking.yml` | CI Tier 1 (Blocking) | Blocking (reusable, called by the router) | Compile, full ArchTest suite, changed-surface smoke, auth smoke, eval gate, tenant isolation, Compose fidelity gate, Xrm capability guard; the DataGrid external-host gate is advisory until its flip |
 | `ci-tier2-advisory.yml` | CI Tier 2 (Advisory) | Advisory (reusable, called by the router) | Format, lint, full unit-test suite, ADR compliance, markdown links, Last-Reviewed stamp, plugin size; posts one deduplicated PR comment |
 | `client-tests.yml` | Client Tests (Jest) | Scheduled / advisory | Nightly jest baseline across every client package with a real `test` script (40 packages as of authoring) |
 | `css-reset-gate.yml` | CSS Reset Gate | PR/push (scoped); reports only | Verifies every Code Page host `index.html` carries the box-sizing reset |
@@ -450,8 +450,8 @@ Before merging any PR to master, verify all of the following:
 
 ### Automated Checks (Must Pass)
 
-- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff.
-- [ ] **Tier 1 (blocking) jobs pass** — compile (whole solution, Debug), the full NetArchTest ArchTests suite, changed-surface integration smoke (conditional on changed BFF paths), auth smoke (conditional on auth-path changes), the golden-utterance eval gate, the I1–I5 tenant-isolation invariants, and the Compose fidelity corpus round-trip
+- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff, i.e. one in which every changed file is documentation.
+- [ ] **Tier 1 (blocking) jobs pass** — compile (whole solution, Debug), the full NetArchTest ArchTests suite, changed-surface integration smoke (conditional on changed BFF paths), auth smoke (conditional on auth-path changes), the golden-utterance eval gate, the I1–I5 tenant-isolation invariants, the Compose fidelity corpus round-trip, and the Xrm capability guard (conditional on client/solution/workflow changes)
 - [ ] **Tier 2 (advisory) results reviewed** — format, lint, the full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, and plugin size are posted as one deduplicated "Tier 2 Advisory Report" PR comment; they never block, but address real failures
 - [ ] **Path-scoped gates reviewed if touched** — `office-addins-tests.yml` (office-addins + related server/test paths), `css-reset-gate.yml` (Code Page `index.html`), `build-provisioning-sidecar.yml` (sidecar paths, hard-fails on a fixable HIGH/CRITICAL Trivy finding), `deploy-infrastructure.yml`'s `validate` job (bicep paths; lint + compile) — none of these are in the required-check list, but each reports a real pass/fail
 - [ ] **actionlint clean** — `workflows-validate.yml` lints every workflow YAML file on every PR
@@ -497,7 +497,7 @@ The subsections below are grouped by what each workflow does: the PR gate, stand
 
 **Triggers**: `pull_request` → `master`, `push` → `master`, `merge_group`
 
-The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag. `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
 
 #### `ci-tier1-blocking.yml` — CI Tier 1 (Blocking)
 
@@ -505,7 +505,7 @@ The single required status check (`CI / Router`). A `classify` job (dorny/paths-
 
 | Job | Purpose |
 |-----|---------|
-| `classify-tier1` | Fine-grained path classification (auth, AI/semantic-search/workspace/reporting surfaces) feeding `changed-surface-smoke` and `auth-smoke` |
+| `classify-tier1` | Fine-grained path classification (auth, AI/semantic-search/workspace/reporting surfaces, `datagrid_gate`, `xrm_guard`) feeding `changed-surface-smoke`, `auth-smoke`, `datagrid-external-host-gate` and `xrm-capability-guard` |
 | `compile` | `dotnet build` the **whole solution**, Debug, no `-warnaserror` (policy lives in `Directory.Build.props`) |
 | `arch-tests` | The **full** NetArchTest suite (197 tests as of authoring) — no inclusion filter, so a renamed/new test can never silently drop out of the gate |
 | `changed-surface-smoke` | `Spe.Integration.Tests` filtered to namespaces matching the changed BFF surface; no-op if nothing matches |
@@ -513,6 +513,8 @@ The single required status check (`CI / Router`). A `classify` job (dorny/paths-
 | `eval-gate` | Golden-utterance eval suite (`Category=GoldenUtteranceEval`) |
 | `tenant-isolation` | The I1–I5 tenant-isolation invariant tests (`Spaarke.ArchTests.TenantIsolation.*`) |
 | `compose-fidelity-gate` | Corpus round-trip harness over every `.docx` under `tests/fixtures/compose-corpus/` (requires Git-LFS checkout) |
+| `datagrid-external-host-gate` | The shared DataGrid's jest folder; runs on `Spaarke.UI.Components` or workflow changes. **Advisory** (job-level `continue-on-error`) until its FLIP CONDITION; see the job |
+| `xrm-capability-guard` | The `getXrm` capability guard (`xrmCapabilityUsage.guard.test.ts`, an AST scan of all of `src/`, ~70 s); runs on `src/client/**`, `src/solutions/**` or workflow changes. **Blocking**. Added 2026-10-06 as an owner-approved §6.5 path-A exception to the header's scope list (ontology task 081, PR #1309) |
 
 Spec budget: p95 ≤ 3 min (NFR-01). `eval-gate`, `tenant-isolation`, and `compose-fidelity-gate` run on `windows-latest` and were ported verbatim from `sdap-ci.yml` because they are fast, security/fidelity-critical gates that must never be advisory.
 
@@ -829,6 +831,7 @@ gh run rerun {previous-run-id}
 | `eval-gate` | Tier 1 | A `Category=GoldenUtteranceEval` test regressed | Run `dotnet test ... --filter "Category=GoldenUtteranceEval"` locally |
 | `tenant-isolation` | Tier 1 | An I1–I5 invariant broke (treat as a security incident, not a flake) | Run `dotnet test ... --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation"` locally |
 | `compose-fidelity-gate` | Tier 1 | A Compose corpus document round-trip lost fidelity | Download the `fidelity-gate-result` artifact for the per-document breakdown |
+| `xrm-capability-guard` | Tier 1 | A `getXrm(...)` value is used for a member its requested capability does not cover, or the analyzer hit a shape it cannot follow (blind spot) | The log names file:line and the site; request the capability the code calls, or rewrite the shape. Run `npx jest src/utils/__tests__/xrmCapabilityUsage.guard.test.ts` in `Spaarke.UI.Components` |
 | `format` / `lint` (Tier 2) | `ci-tier2-advisory.yml` | Formatting/lint violation | `dotnet format whitespace`; `npx prettier --write "src/client/**/*.{ts,tsx}"`; `cd src/client/pcf && npx eslint . --fix` |
 | `full-unit-tests` (Tier 2) | `ci-tier2-advisory.yml` | A unit test failed on both pass 1 and the pass-2 retry | Download the `tier2-unit-test-results-Debug-<shard>` artifact of the shard that failed |
 | legacy `security-scan`/`build-test`/`client-quality`/`code-quality` | `sdap-ci.yml` | Same classes as above, legacy job names | These no longer gate the merge (superseded by `CI / Router`), but a real red is still worth fixing |

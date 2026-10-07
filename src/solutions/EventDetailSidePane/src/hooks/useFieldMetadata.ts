@@ -10,7 +10,7 @@
  */
 
 import * as React from "react";
-import { getXrm } from "../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../utils/xrmAccess";
 import type { IFormConfig, IFieldMetadata, IChoiceOption } from "../types/FormConfig";
 import { extractChoiceFieldNames } from "../types/FormConfig";
 
@@ -57,7 +57,7 @@ export function useFieldMetadata(
     let cancelled = false;
 
     async function fetchMetadata() {
-      const xrm = getXrm();
+      const xrm = getXrmWithWebApiAnd('metadata');
       if (!xrm?.Utility?.getEntityMetadata) {
         console.warn("[useFieldMetadata] Xrm.Utility.getEntityMetadata not available");
         return;

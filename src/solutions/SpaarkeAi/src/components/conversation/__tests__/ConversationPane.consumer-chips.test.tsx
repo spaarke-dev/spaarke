@@ -29,6 +29,7 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 import type { ISprkChatProps } from '@spaarke/ui-components';
+import { getXrm } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Mock SprkChat (prop capture) + createConsumerDispatcher (dispatch spy).
@@ -253,8 +254,11 @@ describe('Suggested Next Steps cards — "More" affordance (task 043 / FR-G1)', 
   beforeEach(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     originalXrm = (window as any).Xrm;
+    // WebApi + Navigation so the stub satisfies ANY getXrm capability (task 081
+    // round 3): with Navigation alone, the default WebApi lookup skipped it and
+    // the `navigateToSpy` "not called" assertion below was vacuous.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (window as any).Xrm = { Navigation: { navigateTo: navigateToSpy } };
+    (window as any).Xrm = { WebApi: {}, Navigation: { navigateTo: navigateToSpy } };
     navigateToSpy.mockClear();
   });
 
@@ -280,6 +284,10 @@ describe('Suggested Next Steps cards — "More" affordance (task 043 / FR-G1)', 
     deliverChips([{ target_binding_id: 'b-summarize-all', chip_label: 'Summarize all?' }]);
 
     expect(screen.queryByTestId('quick-start-modal')).not.toBeInTheDocument();
+    // Control: the stub IS what the shared lookup resolves (default and
+    // 'navigation'), so "navigateTo not called" below is a real assertion.
+    expect(getXrm()?.Navigation?.navigateTo).toBe(navigateToSpy);
+    expect(getXrm('navigation')?.Navigation?.navigateTo).toBe(navigateToSpy);
 
     fireEvent.click(screen.getByTestId('consumer-chips-more'));
 

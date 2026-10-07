@@ -74,6 +74,13 @@ const STATUSCODE_COMPLETED = 2;
 /** statuscode = Dismissed (Inactive). */
 const STATUSCODE_DISMISSED = 659490002;
 
+/**
+ * Entity set the `sprk_todo.sprk_assignedto` lookup targets (`contact`, live metadata,
+ * nav prop `sprk_AssignedTo`). Exported so the schema-parity test can pin it to
+ * `src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md` (task 097).
+ */
+export const TODO_ASSIGNED_TO_ENTITY_SET = 'contacts';
+
 // ---------------------------------------------------------------------------
 // To Do Score computation (self-contained — no cross-solution imports)
 // ---------------------------------------------------------------------------
@@ -371,9 +378,10 @@ export interface ITodoDetailProps {
    * Search the picker source (users or contacts) by name for the Assigned To picker.
    * Decoupled from Xrm — host provides the implementation (ADR-012).
    *
-   * Note: `sprk_todo.sprk_assignedto` is a `systemuser` lookup. Hosts should resolve
-   * the picker against `systemuser` (or whichever picker source matches the host's
-   * binding). The IContactOption shape is generic (id + name).
+   * Note: `sprk_todo.sprk_assignedto` is a **contact** lookup (live metadata, task 097).
+   * Hosts MUST resolve the picker against `contact` and return contact ids — the save
+   * binds `sprk_AssignedTo@odata.bind` to `/contacts(id)`; a systemuser id is rejected.
+   * The IContactOption shape is generic (id + name).
    */
   onSearchContacts: (query: string) => Promise<IContactOption[]>;
   /**
@@ -642,7 +650,13 @@ export const TodoDetail: React.FC<ITodoDetailProps> = React.memo(
         updates.sprk_effortscore = effort;
       }
       if (assignedToId !== origRef.current.assignedToId) {
-        updates['sprk_AssignedTo@odata.bind'] = assignedToId ? `/systemusers(${assignedToId})` : null;
+        // Task 097: `sprk_todo.sprk_assignedto` targets CONTACT (live metadata, nav prop
+        // `sprk_AssignedTo`). The former `/systemusers(...)` only worked because Dataverse
+        // resolves a single-target bind by id; a real systemuser id — what this component's
+        // own docs told hosts to supply — failed with "Entity 'Contact' ... Does Not Exist".
+        updates['sprk_AssignedTo@odata.bind'] = assignedToId
+          ? `/${TODO_ASSIGNED_TO_ENTITY_SET}(${assignedToId})`
+          : null;
       }
       return updates;
     }, [description, notes, dueDate, priority, effort, assignedToId]);

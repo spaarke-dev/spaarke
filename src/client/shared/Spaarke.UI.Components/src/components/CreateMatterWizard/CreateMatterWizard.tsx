@@ -53,6 +53,7 @@ import type { AssociationResult } from '../AssociateToStep/types';
 import { resolveCurrentUserAsContactAssignee } from '../../services/userLookup';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 import { cleanGuid } from '../../utils/guid';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Dataverse client URL helper
@@ -67,9 +68,8 @@ import { cleanGuid } from '../../utils/guid';
  */
 function getDataverseClientUrl(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
-    const clientUrl: string | undefined = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    // Shared cross-frame walker (task 081 / C-8).
+    const clientUrl: string | undefined = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (clientUrl) return clientUrl.replace(/\/+$/, '');
   } catch {
     // Cross-origin or missing Xrm — fall through.

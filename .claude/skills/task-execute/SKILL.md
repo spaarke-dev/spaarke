@@ -268,7 +268,8 @@ SIZE GUARD (every start, before reading):
 
 IF resuming work (not fresh start):
   READ projects/{project-name}/current-task.md
-  READ the project CLAUDE.md "Standing directives & gotchas" section (if present)
+  READ the project CLAUDE.md standing-rule sections (if present): "Standing directives & gotchas",
+    or the template's "Binding rules", "Owner directives and standing decisions", "Gotchas"
 
   IF current-task.md exists AND status == "in-progress":
     → This is a continuation
@@ -950,7 +951,8 @@ TRANSITION current-task.md:
 
 1. MOVE OUT anything worth keeping (do NOT leave it in current-task.md):
    - A gotcha or standing directive that outlives this task → project CLAUDE.md
-     "Standing directives & gotchas"
+     standing-directive / gotcha section ("Standing directives & gotchas", or the template's
+     "Owner directives and standing decisions" / "Gotchas")
    - Decisions and rationale → the task's notes file / POML <notes>
    - The narrative → the completion commit message
 

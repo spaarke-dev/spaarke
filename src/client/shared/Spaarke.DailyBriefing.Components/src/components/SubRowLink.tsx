@@ -34,7 +34,7 @@
 
 import * as React from 'react';
 import { makeStyles, tokens, Link, Text } from '@fluentui/react-components';
-import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
 import type { NotificationItem } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -93,16 +93,10 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
     e.preventDefault();
     if (!hasTarget) return;
 
-    // Resolve Xrm from window / parent / top (Spaarke host-context fallback
-    // pattern -- mirrors NarrativeBullet.handleLinkClick). Guard against
-    // missing Xrm in test or standalone environments.
-    const xrm =
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window as any)?.Xrm ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.parent as any)?.Xrm ??
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (window.top as any)?.Xrm;
+    // Resolve Xrm via the shared cross-frame walker (task 081 / C-8). Guard
+    // against missing Xrm in test or standalone environments.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const xrm: any = getXrm('navigation');
 
     if (!xrm?.Navigation?.navigateTo) return;
 

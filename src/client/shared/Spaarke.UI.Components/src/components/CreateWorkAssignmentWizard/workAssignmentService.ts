@@ -29,10 +29,12 @@ import {
   applyResolverFields,
   findNavProp,
   discoverNavProps,
+  toNavPropMap,
   cleanGuid,
 } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // Re-export shared search helpers for use by step components
@@ -56,7 +58,7 @@ export {
 /**
  * Resolve the current Dataverse user ID from the host Xrm global.
  *
- * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * Walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) for an `Xrm.Utility.getGlobalContext()`
  * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
  * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
  *
@@ -64,40 +66,9 @@ export {
  * preserves the "current user" semantics of FR-WIZ-04.
  */
 function _getCurrentUserId(): string {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 /**
@@ -667,11 +638,21 @@ export class WorkAssignmentService {
         entity[`${waNavProp}@odata.bind`] = `/sprk_workassignments(${cleanGuid(workAssignmentId)})`;
       }
 
-      // Assigned To (systemuser)
+      // Assigned To (contact) -- task 097. `sprk_event.sprk_assignedto` targets CONTACT
+      // in the live schema (nav prop `sprk_AssignedTo`). The former
+      // `findNavProp(navProps, 'systemuser', 'assignedto')` matched no assignedto
+      // column, fell back to the FIRST systemuser lookup (`createdby`) and bound the
+      // picked user there -- the assignee was silently dropped on every follow-on
+      // event. Resolved by exact column (sprk_event has five contact lookups whose
+      // names contain "assignedto"), never by substring.
       if (eventState.assignedToId) {
-        const assignedNavProp = findNavProp(navProps, 'systemuser', 'assignedto');
+        const assignedNavProp = toNavPropMap(navProps)['sprk_assignedto'];
         if (assignedNavProp) {
-          entity[`${assignedNavProp}@odata.bind`] = `/systemusers(${cleanGuid(eventState.assignedToId)})`;
+          entity[`${assignedNavProp}@odata.bind`] = `/contacts(${cleanGuid(eventState.assignedToId)})`;
+        } else {
+          console.warn(
+            '[WorkAssignmentService] sprk_event.sprk_assignedto nav-prop not found; follow-on event assignee not set'
+          );
         }
       }
 

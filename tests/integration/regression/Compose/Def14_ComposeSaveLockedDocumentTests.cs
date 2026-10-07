@@ -116,9 +116,9 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // UploadSmallAsUserAsync; this proves the create-on-save path now surfaces the SAME clean 423
         // ProblemDetails the replace path already did — not a 500.
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new DocumentLockedByWordException("spe-item-create-locked"));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -193,9 +193,9 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // generic re-throw, leaking a raw ODataError and surfacing as an opaque 500. This proves the SAME
         // 412-clean-copy the replace route already had is now ALSO wired for create-on-save.
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new EtagPreconditionFailedException("spe-item-create-moved", "\"stale-create-etag\""));
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -266,9 +266,9 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         // of translating to the typed domain exception. This proves the revived/added translation directly.
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
-        var act = () => sut.UploadSmallAsUserAsync(
-            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
-            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+        var act = () => sut.UploadSmallAsync(
+            "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
             "the Kiota ODataError (HTTP 423 / resourceLocked) on a create-on-save upload must translate to the typed lock exception, not leak a raw Microsoft.Graph type");
@@ -286,9 +286,9 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         // already knew how to map to a clean 412.
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
-        var act = () => sut.UploadSmallAsUserAsync(
-            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
-            new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+        var act = () => sut.UploadSmallAsync(
+            "container-1", "draft.docx",
+            new MemoryStream(new byte[] { 1, 2, 3 }), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
             "the Kiota ODataError (HTTP 412) on a create-on-save upload must translate to the typed precondition exception, not leak a raw Microsoft.Graph type");

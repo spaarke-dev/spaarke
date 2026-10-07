@@ -688,6 +688,13 @@ public sealed class DocumentContextService
     /// Downloads and extracts text from a document using SpeFileStore (ADR-007)
     /// and TextExtractor.
     /// </summary>
+    /// <remarks>
+    /// APP-ONLY in every case (unified-access-control-r2 task 171, owner round 69 — broker-only). The document was
+    /// authorized for the caller before this runs (<c>AiAuthorizationFilter</c> on the chat routes); the row's pointer is
+    /// verified here (task 166 r1) because it is followed as the application. The request path used to download OBO,
+    /// which SPE answers only for a caller holding a container role, so a chat over a secure record's document read
+    /// nothing. <paramref name="httpContext"/> no longer chooses the identity.
+    /// </remarks>
     private async Task<string?> ExtractDocumentTextAsync(
         DocumentEntity document,
         HttpContext? httpContext,
@@ -695,34 +702,20 @@ public sealed class DocumentContextService
     {
         var fileName = document.FileName ?? "document";
 
-        Stream? fileStream;
-        if (httpContext != null)
+        // A pointer into a container this document may not use refuses — never downloads.
+        if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
+                document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
         {
-            // OBO authentication (preferred — user-delegated permissions)
-            fileStream = await _speFileStore.DownloadFileAsUserAsync(
-                httpContext,
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                cancellationToken);
+            _logger.LogWarning(
+                "Download of document {DocumentId} refused: its storage pointer could not be verified",
+                document.Id);
+            return null;
         }
-        else
-        {
-            // App-only fallback (background processing scenarios). The row's pointer is verified first (task 166 r1):
-            // a pointer into a container this document may not use refuses — never downloads.
-            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(
-                    document.Id, document.GraphDriveId, document.GraphItemId, cancellationToken))
-            {
-                _logger.LogWarning(
-                    "App-only download of document {DocumentId} refused: its storage pointer could not be verified",
-                    document.Id);
-                return null;
-            }
 
-            fileStream = await _speFileStore.DownloadFileAsync(
-                document.GraphDriveId!,
-                document.GraphItemId!,
-                cancellationToken);
-        }
+        var fileStream = await _speFileStore.DownloadFileAsync(
+            document.GraphDriveId!,
+            document.GraphItemId!,
+            cancellationToken);
 
         if (fileStream == null)
         {

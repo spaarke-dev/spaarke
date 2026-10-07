@@ -127,6 +127,7 @@ import { addMonths, startOfMonth } from '../../utils/dateMath';
 import { DataGrid, type HostFilterCondition } from '../../../../Spaarke.UI.Components/src/components/DataGrid';
 import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../../../Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
+import { getXrm } from '../../../../Spaarke.UI.Components/src/utils/xrmContext';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
@@ -424,18 +425,11 @@ const useStyles = makeStyles({
 // event-detail modal navigation in the outer widget shell.
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getXrm(): typeof Xrm | null {
-  try {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const w: any = window;
-    if (w?.Xrm?.WebApi) return w.Xrm;
-    if (w?.parent?.Xrm?.WebApi) return w.parent.Xrm;
-    if (w?.top?.Xrm?.WebApi) return w.top.Xrm;
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  } catch {
-    /* cross-origin frame access */
-  }
-  return null;
+// Shared cross-frame walker (task 081 / C-8) — this previously inlined its
+// own window/parent/top chain inside ONE try, so a cross-origin parent
+// stopped the walk before `top` was tried. Typed as the @types/xrm surface.
+function getHostXrmFor(capability: 'webApi' | 'navigation'): typeof Xrm | null {
+  return (getXrm(capability) as unknown as typeof Xrm | undefined) ?? null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -552,7 +546,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
     let cancelled = false;
 
     async function fetchEventTypeOptions() {
-      const xrm = getXrm();
+      const xrm = getHostXrmFor('webApi');
       if (!xrm?.WebApi) {
         console.warn('[CalendarWorkspaceWidget] Xrm.WebApi unavailable; Event Type dropdown will be empty.');
         return;
@@ -1054,7 +1048,7 @@ const CalendarWorkspaceLayout: React.FC<ICalendarWorkspaceLayoutProps> = ({ init
 
 export const CalendarWorkspaceWidget: React.FC<CalendarWorkspaceWidgetProps> = ({ initialDateField = '' }) => {
   const handleOpenEvent = React.useCallback((eventId: string, _eventTypeId?: string) => {
-    const xrm = getXrm();
+    const xrm = getHostXrmFor('navigation');
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('[CalendarWidget] Xrm.Navigation.navigateTo unavailable; cannot open event modal.');
       return;

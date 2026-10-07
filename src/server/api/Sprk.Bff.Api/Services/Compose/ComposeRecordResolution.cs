@@ -38,7 +38,8 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </remarks>
 internal sealed class ComposeRecordResolution
 {
-    private readonly ChatSessionManager _sessions;
+    // Null only for the lookup-only instance (ForDocumentLookups) — the session rebind is never reached through it.
+    private readonly ChatSessionManager? _sessions;
     private readonly IGenericEntityService _dataverse;
     private readonly ILogger _logger;
     private readonly ContentDedupDetector? _dedupDetector;
@@ -56,6 +57,14 @@ internal sealed class ComposeRecordResolution
     }
 
     /// <summary>
+    /// A lookup-only instance — <see cref="TryFindDocumentByGraphItemIdAsync"/> and its duplicate self-heal — for
+    /// <c>ComposeDocumentAuthorizationFilter</c> (unified-access-control-r2 task 171), which must find the row of a
+    /// Compose drive item the SAME way the save path does, so the row it authorizes is the row the save writes.
+    /// </summary>
+    internal static ComposeRecordResolution ForDocumentLookups(IGenericEntityService dataverse, ILogger logger)
+        => new(null!, dataverse, logger, dedupDetector: null);
+
+    /// <summary>
     /// FR-07 idempotent rebind of a ChatSession's DocumentId. Handles three cases:
     /// (a) current==new (no-op), (b) session missing (returns null), (c) stored already at
     /// target (no-op), (d) rebind applied via ChatSessionManager's cache-write path.
@@ -70,10 +79,10 @@ internal sealed class ComposeRecordResolution
         // (a) Caller asked for a no-op.
         if (string.Equals(currentDocumentId, newDocumentId, StringComparison.Ordinal))
         {
-            return await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+            return await _sessions!.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
         }
 
-        var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        var session = await _sessions!.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
         if (session is null)
         {
             _logger.LogWarning(
@@ -108,7 +117,7 @@ internal sealed class ComposeRecordResolution
             LastActivity = DateTimeOffset.UtcNow,
         };
 
-        await _sessions.UpdateSessionCacheAsync(rebound, ct).ConfigureAwait(false);
+        await _sessions!.UpdateSessionCacheAsync(rebound, ct).ConfigureAwait(false);
         return rebound;
     }
 

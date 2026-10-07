@@ -49,6 +49,7 @@ import type { ICommunicationAssociation, SendCommunicationOptions } from '../../
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
 import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
+import { getXrm } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -305,9 +306,9 @@ function totalBytes(docs: IDocumentEmailWizardItem[]): number {
 /** Best-effort Xrm client-url lookup (no-op outside Dataverse-hosted contexts). */
 function resolveClientUrlSafe(): string {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (globalThis as any).Xrm;
-    const ctx = xrm?.Utility?.getGlobalContext?.();
+    // Shared cross-frame walker (task 081 / C-8) — was a single-frame
+    // `globalThis.Xrm` read, which missed Xrm when hosted in an iframe.
+    const ctx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
     const url = ctx?.getClientUrl?.();
     return typeof url === 'string' ? url : '';
   } catch {

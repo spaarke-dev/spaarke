@@ -17,7 +17,7 @@
  * (ADR-012) — these callbacks are injected by the host mount, never imported by
  * the engine.
  */
-import { getXrm } from '../../services/xrmGlobal';
+import { getXrm } from '../../utils/xrmContext';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { cleanGuid } from '../../utils/guid';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
@@ -158,7 +158,7 @@ function deriveUploadedFileType(mimeType: string): UploadedFileType {
  */
 export async function resolveCurrentUserEmail(): Promise<string | undefined> {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'utility']);
     const userId: string | undefined = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm?.WebApi || !userId) return undefined;
     const clean = cleanGuid(userId);
@@ -180,7 +180,7 @@ export function createXrmEmailComposeHandlers(options?: {
   const resolveClientUrl = (): string => {
     if (options?.clientUrl) return options.clientUrl;
     try {
-      return getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
+      return getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
     } catch {
       return '';
     }
@@ -192,7 +192,7 @@ export function createXrmEmailComposeHandlers(options?: {
   // Attachments "look up a record": a document pick attaches; any other record
   // type is linked in the body. Runs the OOB picker for the chosen type.
   const onLookupRecord = async (entityType: string): Promise<IPickedRecord | null> => {
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({
       entityTypes: [entityType],
@@ -208,7 +208,7 @@ export function createXrmEmailComposeHandlers(options?: {
   // Advanced recipient lookup: the OOB people picker over contact + systemuser;
   // the picked record's primary email is resolved into a chip. Multi-select.
   const onLookupRecipients = async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'lookupObjects']);
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({
       entityTypes: ['contact', 'systemuser'],
@@ -243,7 +243,7 @@ export function createXrmEmailComposeHandlers(options?: {
   // regarding-able entity types and returns the picked record; the composer
   // shows it in "Related to" and it is written when the email is SENT.
   const onAddRelationship = async (): Promise<IPickedRecord | null> => {
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];
@@ -260,7 +260,7 @@ export function createXrmEmailComposeHandlers(options?: {
   const onUploadLocalAttachment =
     authenticatedFetch && bffBaseUrl
       ? async (file: File): Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }> => {
-          const xrm = getXrm();
+          const xrm = getXrm(['webApi', 'utility']);
           if (!xrm?.WebApi) throw new Error('Dataverse is unavailable — cannot upload the attachment.');
 
           // 🔴 PARENTLESS UPLOAD. Task 076: this flow genuinely has no owning record when the bytes

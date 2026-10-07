@@ -147,6 +147,9 @@ export * from './TagFilter';
 // DocumentRowMenu - 3-dot row-action menu for document grids (FR-SC-02, matter-ui-r1 task 011)
 export * from './DocumentRowMenu';
 
+// EmptyState - Generic centered icon+heading+description empty-state shell (C-11, spaarke-ontology-platform-r1 reuse audit D6)
+export * from './EmptyState';
+
 // DataGrid - Spaarke DataGrid Framework R1 (task 001: tokens; tasks 003-008: component + chips + command bar)
 export * from './DataGrid';
 

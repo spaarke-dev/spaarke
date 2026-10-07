@@ -25,25 +25,20 @@ import {
 
 import type { IWizardSuccessConfig } from "@spaarke/ui-components/components/Wizard";
 import type { OrchestratorResult } from "../services/uploadOrchestrator";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 
 // ---------------------------------------------------------------------------
 // Xrm helper — resolve client URL for record links
 // ---------------------------------------------------------------------------
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 function getClientUrl(): string {
+    // Shared cross-frame walker (task 081 / C-8).
     try {
-        const frames = [window, window.parent, window.top].filter(Boolean) as Window[];
-        for (const frame of frames) {
-            try {
-                const url = (frame as any).Xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
-                if (url) return url;
-            } catch { /* cross-origin */ }
-        }
-    } catch { /* */ }
+        const url = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+        if (url) return url;
+    } catch { /* getGlobalContext() unavailable */ }
     return "";
 }
-/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // ---------------------------------------------------------------------------
 // buildSuccessConfig — constructs the IWizardSuccessConfig

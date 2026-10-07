@@ -14,7 +14,7 @@ import {
   PersonRegular,
 } from "@fluentui/react-icons";
 import { INotificationItem, NotificationCategory } from "../../types";
-import { formatRelativeTime } from "./notificationTypes";
+import { formatRelativeTime } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Styles

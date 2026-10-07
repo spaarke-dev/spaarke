@@ -33,8 +33,13 @@ import {
 
 import type { OrchestratorFileProgress, FileUploadPhase } from "../services/uploadOrchestrator";
 
-/** The two collision resolutions a user is offered. See ConflictBehaviorOption for why only two. */
-export type ConflictResolution = "rename" | "replace";
+/**
+ * The collision resolution a user is offered: keep both (rename). "Save as new version" (replace) was removed by
+ * unified-access-control-r2 task 171 — the BFF refuses an upload that replaces an existing file, because the right to
+ * file content under a record is not a right to overwrite whichever file already holds that name. Updating an existing
+ * document is a version save of that document (Word, the Office add-in, Compose).
+ */
+export type ConflictResolution = "rename";
 
 // ---------------------------------------------------------------------------
 // Props
@@ -289,12 +294,8 @@ function FileUploadProgressRow({
                 </Text>
             )}
 
-            {/* Collision resolution — exactly two options.
-                "Keep both" = server stores this file under a non-colliding name (rename).
-                "Save as new version" = replace; SharePoint retains the prior content as a version,
-                so the existing document is recoverable, not destroyed.
-                There is deliberately no third "replace and discard" option — at the Graph level it
-                is the same call as replace; a user who wants the old file gone deletes it. */}
+            {/* Collision resolution — "Keep both" stores this file under a non-colliding name (rename). There is no
+                replace option (task 171): to update the existing document, the user opens it and saves a version. */}
             {canResolve && (
                 <div className={styles.conflictActions}>
                     <Button
@@ -305,17 +306,9 @@ function FileUploadProgressRow({
                     >
                         Keep both
                     </Button>
-                    <Button
-                        size="small"
-                        appearance="secondary"
-                        disabled={isResolving}
-                        onClick={() => onResolveConflict(progress.fileName, "replace")}
-                    >
-                        Save as new version
-                    </Button>
                     <Text size={100} className={styles.statusLabel}>
-                        Keep both uploads this file under a new name. Save as new version keeps the
-                        existing document and adds this file as its latest version.
+                        Keep both uploads this file under a new name. To update the existing document
+                        instead, open it and save your changes there as a new version.
                     </Text>
                 </div>
             )}

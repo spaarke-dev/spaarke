@@ -62,6 +62,12 @@ public static class DocumentsModule
         services.AddScoped(sp => ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(
             sp, sp.GetRequiredService<Spaarke.Dataverse.DataverseAccessDataSource>()));
 
+        // unified-access-control-r2 task 171 (owner rounds 69 + 70): the just-in-time Office-edit grant on a SECURE
+        // container, used by GET /api/documents/{id}/office and /open-links. UNCONDITIONAL because FileAccessEndpoints maps
+        // unconditionally (bff-extensions.md section F.1); its dependencies (RecordContainerResolver, CallerRecordAccessProbe,
+        // SpeContainerMembershipService, IGenericEntityService) are registered unconditionally too.
+        services.AddScoped<Sprk.Bff.Api.Services.Documents.OfficeEditAccessService>();
+
         // The legacy migration (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"): registered DISABLED — it runs only when
         // scripts/Invoke-DocumentContainerMigration.ps1 triggers it through /api/admin/jobs (SystemAdmin), and writes
         // only while DocumentContainerMigration:WritesEnabled is set.

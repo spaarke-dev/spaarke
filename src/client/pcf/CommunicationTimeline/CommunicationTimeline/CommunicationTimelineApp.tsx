@@ -28,7 +28,7 @@
 import * as React from 'react';
 import { makeStyles, tokens, Spinner, MessageBar, MessageBarBody, Text } from '@fluentui/react-components';
 import { authenticatedFetch } from '@spaarke/auth';
-import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid } from '@spaarke/ui-components';
+import { CommunicationTimeline, type CommunicationTimelineProps, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import { initializeAuth, resolveDataverseUrl } from './authInit';
 import { resolveThreadId } from './hostContext';
@@ -63,21 +63,11 @@ const useStyles = makeStyles({
   },
 });
 
-/** Walk window/parent frames to locate Xrm (PCF runs in an iframe). Mirrors CommunicationMessageActions. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrm(): any {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const w = window as any;
-    return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-  } catch {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (window as any).Xrm;
-  }
-}
-
 function getHostRecordId(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
@@ -88,7 +78,10 @@ function getHostRecordId(): string | undefined {
 }
 
 function getHostEntityName(): string | undefined {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8).
+  // `any` view: typed XrmContext does not declare the members used below.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrm('page') as any;
   try {
     const name = xrm?.Page?.data?.entity?.getEntityName?.();
     if (typeof name === 'string' && name.length > 0) return name;

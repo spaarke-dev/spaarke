@@ -59,10 +59,10 @@ namespace Spaarke.ArchTests;
 /// consecutive green runs on ubuntu-latest, then blocking (<see cref="DataGridGateAdvisory"/>).
 /// <see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/> refuses the named ways that job could stop
 /// running or stop reporting (a text check, each disarming proven by a seeded row; not every conceivable one, see its
-/// summary). Owner round 13 item 12: <c>ci-router.yml</c> is not changed by this project, so its pre-existing
-/// <c>docs_only</c> skip still applies (a PR that edits the grid, the external SPA or this guard together with only
-/// docs-class files skips Tier 1); that skip is <c>ci-cd-unit-test-remediation-r1</c>'s. The pin stays as a fast first
-/// check.
+/// summary). Owner round 13 item 12: <c>ci-router.yml</c> is not changed by this project. Its <c>docs_only</c> skip
+/// used to apply to a PR that edits the grid, the external SPA or this guard together with only docs-class files; since
+/// 2026-10-06 (ontology task 081 round 8, PR #1309) a diff is docs-only only when EVERY changed file is documentation,
+/// so such a PR runs Tier 1. The pin stays as a fast first check.
 /// </para>
 /// <para>
 /// <b>The scan is defence in depth.</b> The rules below stay because each is zero-false-positive on the current
@@ -185,8 +185,9 @@ namespace Spaarke.ArchTests;
 /// (<c>datagrid-external-host-gate</c>; seed J4 re-planted in fix round c2 failed that job's jest step), guarded by
 /// <see cref="SharedDataGrid_ExternalHostJestSuiteRunsAsATier1Gate"/>. Until the flip (owner round 13 item 11,
 /// <see cref="DataGridGateAdvisory"/>) a red run there is a visible failed job, not a failed <c>CI / Router</c>: J4
-/// would be reported, not refused. Two more gaps stay open until then and after: the router's <c>docs_only</c> skip
-/// (owner round 13 item 12, above), and a PR that edits no classified path. Data impact, had J4 shipped: nil, because
+/// would be reported, not refused. One more gap stays open until then and after: a PR that edits no classified path.
+/// (The router's <c>docs_only</c> skip of a code-plus-docs PR, listed here before, was closed 2026-10-06 by ontology
+/// task 081 round 8.) Data impact, had J4 shipped: nil, because
 /// the BFF's external <c>savedqueries</c> / <c>savedquery</c> routes 404 every view no module grid registers (task 157
 /// F1), which today is every view.</para>
 /// <para><b>Closed by the runtime rule, and removed from this list in fix round c1</b> (residuals 3 and 5 through fix
@@ -1832,8 +1833,8 @@ public class ExternalSpaGridViewSelectorGuardTests
     /// <c>|| true</c>; any job-level key outside <see cref="DataGridGateJobKeys"/>; its <c>needs:</c> or job-level
     /// <c>if:</c> changed; an <c>if:</c> on any step except <c>always()</c>, or <c>failure()</c> on the artifact upload;
     /// <c>classify-tier1</c> gaining a job-level <c>if:</c>; or its <c>datagrid_gate</c> output or filter changed. It
-    /// reads nothing in <c>ci-router.yml</c>: owner round 13 item 12 leaves the router (and its pre-existing
-    /// <c>docs_only</c> skip) to <c>ci-cd-unit-test-remediation-r1</c>. Crude by design: line and regex checks over
+    /// reads nothing in <c>ci-router.yml</c>: owner round 13 item 12 leaves the router (and its <c>docs_only</c>
+    /// classification, every-file since ontology task 081 round 8) to <c>ci-cd-unit-test-remediation-r1</c>. Crude by design: line and regex checks over
     /// YAML, not a YAML parse. It refuses the disarmings it names, each proven by a row of
     /// <see cref="DataGridCiGateSeeds"/> or by
     /// <see cref="ScanDataGridCiGate_RefusesAnAdvisoryStateTheConstantDoesNotRecord"/>, not every conceivable one.

@@ -5,7 +5,8 @@
  * Handles event-specific content (urgency accent, priority, To Do toggle,
  * regarding record link, due date) and overflow menu.
  *
- * Accent border color varies by urgency: red=overdue, amber=soon, green=on track.
+ * Accent border color varies by due-date tier (see ./feedDueAccent.ts): red=overdue,
+ * dark orange=0-3 days, yellow=4-7 days, neutral otherwise.
  * Tools: To Do toggle (with pending spinner). Overflow: Email, Teams, Edit, AI Summary.
  */
 
@@ -31,9 +32,10 @@ import {
 } from "@fluentui/react-icons";
 import { IEvent } from "../../types/entities";
 import { PriorityLevel } from "../../types/enums";
-import { formatRelativeTime } from "../../utils/formatRelativeTime";
 import { getTypeIcon, getTypeIconLabel } from "../../utils/typeIconMap";
 import { RecordCardShell, CardIcon, createXrmNavigationService } from "@spaarke/ui-components";
+import { formatDueDate } from "@spaarke/daily-briefing-components/utils";
+import { FEED_DUE_ACCENT, feedDueUrgency } from "./feedDueAccent";
 
 // R3 FR-14 / OS-1 note:
 //   The legacy "Flag as To Do" button on the FeedItemCard wrote
@@ -65,26 +67,6 @@ function derivePriorityLevel(priority: number | undefined): PriorityLevel | null
     default: return null;
   }
 }
-
-type UrgencyTier = "overdue" | "dueSoon" | "onTrack" | "neutral";
-
-function deriveUrgencyTier(dueDate: string | undefined): UrgencyTier {
-  if (!dueDate) return "neutral";
-  const due = new Date(dueDate);
-  if (isNaN(due.getTime())) return "neutral";
-  const diffDays = Math.ceil((due.getTime() - Date.now()) / 86400000);
-  if (diffDays < 0) return "overdue";
-  if (diffDays <= 3) return "dueSoon";
-  if (diffDays <= 10) return "onTrack";
-  return "neutral";
-}
-
-const URGENCY_ACCENT: Record<UrgencyTier, string> = {
-  overdue: tokens.colorPaletteRedBorder2,
-  dueSoon: tokens.colorPaletteDarkOrangeBorder2,
-  onTrack: tokens.colorPaletteGreenBorder2,
-  neutral: tokens.colorNeutralStroke2,
-};
 
 // ---------------------------------------------------------------------------
 // Regarding entity mapping
@@ -190,9 +172,15 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
     const TypeIconComponent = getTypeIcon(event.eventTypeName);
     const typeIconLabel = getTypeIconLabel(event.eventTypeName);
 
-    const dueDateText = event.sprk_duedate ? `Due: ${formatRelativeTime(event.sprk_duedate)}` : null;
-    const isDueOverdue = event.sprk_duedate ? new Date(event.sprk_duedate) < new Date() : false;
-    const urgencyTier = deriveUrgencyTier(event.sprk_duedate);
+    // `sprk_duedate` is a DateOnly calendar day, not an instant: day-granular
+    // label ("Due today" / "Due tomorrow" / "Due in 3d" / "Overdue by 2d" /
+    // "Due Oct 20") from the shared `formatDueDate`, never an elapsed-time
+    // phrase (task 081 / F4 — the elapsed formatter read a due date of today
+    // as "Due: 14 hours ago" in US zones). Tier from the shared
+    // `dueUrgencyForDays` (see ./feedDueAccent.ts).
+    const dueDateText = formatDueDate(event.sprk_duedate);
+    const dueUrgency = feedDueUrgency(event.sprk_duedate);
+    const isDueOverdue = dueUrgency === "overdue";
 
     // ── Handlers ──
 
@@ -276,7 +264,7 @@ export const FeedItemCard: React.FC<IFeedItemCardProps> = React.memo(
             <TypeIconComponent fontSize={20} aria-label={typeIconLabel} />
           </CardIcon>
         }
-        accentColor={URGENCY_ACCENT[urgencyTier]}
+        accentColor={FEED_DUE_ACCENT[dueUrgency]}
         primaryContent={
           <>
             {event.eventTypeName && <TypeBadge typeName={event.eventTypeName} />}

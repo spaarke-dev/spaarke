@@ -342,7 +342,10 @@ public sealed class AccessCacheFaultCachingTests
     [Fact]
     public async Task Membership_AnEntryCachedUnderThePreFixVersion_IsNotServed()
     {
-        MembershipResolverService.CacheVersion.Should().Be(5, "task 132 bumped it 4 → 5 so no pre-fix (possibly fault-derived) entry is served");
+        // At least 5: task 132 bumped it 4 → 5 so no pre-fix (possibly fault-derived) entry is served. Later bumps keep
+        // that guarantee (task 172 / #1011 bumped 5 → 6 because the Owner column's query semantics changed), so this pins
+        // the floor rather than one value; the v4 seed below is still unreachable.
+        MembershipResolverService.CacheVersion.Should().BeGreaterThanOrEqualTo(5, "task 132 bumped it 4 → 5 so no pre-fix (possibly fault-derived) entry is served");
 
         // Learn the production cache id from a real write (the id embeds a private options hash).
         var probe = new MembershipWorld();
