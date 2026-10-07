@@ -45,9 +45,10 @@ import {
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
+  Caption1,
 } from '@fluentui/react-components';
+import { CheckmarkCircleRegular } from '@fluentui/react-icons';
 import { DigestHeader } from './DigestHeader';
-import { EmptyState } from './EmptyState';
 import { TldrSection } from './TldrSection';
 import type { TldrResolvableItem } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
@@ -55,7 +56,14 @@ import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
 import { HighPrioritySection } from './HighPrioritySection';
 import { StatTiles, type StatTile } from './StatTiles';
-import { SendEmailDialog, RichFilePreviewDialog, OOB_MODAL_SIZES, cleanGuid } from '@spaarke/ui-components';
+import {
+  SendEmailDialog,
+  RichFilePreviewDialog,
+  OOB_MODAL_SIZES,
+  cleanGuid,
+  EmptyState,
+  getXrm,
+} from '@spaarke/ui-components';
 import { describeFailedSections } from './failedSections';
 import type { ILookupItem } from '@spaarke/ui-components/types/LookupTypes';
 // #713 (2026-08-03): the canonical SendEmailDialog engine sends via the BFF; this
@@ -103,6 +111,19 @@ const useStyles = makeStyles({
   },
   errorBar: {
     marginBottom: tokens.spacingVerticalL,
+  },
+  emptyStateIcon: {
+    color: tokens.colorPaletteGreenForeground1,
+  },
+  emptyStateTimestamp: {
+    color: tokens.colorNeutralForeground4,
+    textAlign: 'center',
+  },
+  // The pre-081 local EmptyState used a 64px vertical band; the shared
+  // `EmptyState` default is 48px — this is the one spacing difference.
+  emptyStateBand: {
+    paddingTop: '64px',
+    paddingBottom: '64px',
   },
 });
 
@@ -285,34 +306,25 @@ function bulletToNotificationItem(bullet: NarrativeBulletResult, generatedAtUtc?
 export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _params, onBrowsePlaybooks }) => {
   const styles = useStyles();
 
-  // Resolve Xrm via frame-walking with polling for welcome screen timing.
-  // Xrm may not be available immediately when loaded as MDA welcome screen.
+  // Resolve Xrm via the shared cross-frame `getXrm()` walker (task 081 / C-8),
+  // polling for welcome-screen timing: Xrm may not be available immediately
+  // when loaded as the MDA welcome screen. Only the poll is local; each tick
+  // calls `getXrm()` afresh (it never caches). The former inline
+  // `w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm` chain sat inside ONE try, so a
+  // cross-origin parent threw before `top` was ever tried; `getXrm()` guards
+  // each frame separately.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [xrm, setXrm] = React.useState<any>(() => {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const w = window as any;
-      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-    } catch {
-      return null;
-    }
-  });
+  const [xrm, setXrm] = React.useState<any>(() => getXrm(['webApi', 'utility']) ?? null);
 
   // Poll for Xrm if not available on mount (welcome screen / left nav timing)
   React.useEffect(() => {
     if (xrm?.WebApi) return; // Already available
     let cancelled = false;
     const interval = setInterval(() => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        const found = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
-        if (found?.WebApi && !cancelled) {
-          setXrm(found);
-          clearInterval(interval);
-        }
-      } catch {
-        /* cross-origin */
+      const found = getXrm(['webApi', 'utility']);
+      if (found?.WebApi && !cancelled) {
+        setXrm(found);
+        clearInterval(interval);
       }
     }, 500);
     // Stop polling after 30s
@@ -494,15 +506,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             // R7 W12 fix (2026-07-01): call xrm.Navigation.navigateTo as a method
             // (not destructured) — the platform's implementation relies on `this`
             // to access its internal _clientApiExecutor. Destructuring breaks it.
-            if (typeof xrm?.Navigation?.navigateTo !== 'function') return;
+            // Nearest frame that can navigateTo (task 081 round 4) — the held
+            // `xrm` is resolved for WebApi + Utility.
+            const nav = getXrm('navigation')?.Navigation;
+            if (typeof nav?.navigateTo !== 'function') return;
             // `record` OOB size (85%×85%) — record-modal-selection.md
             // invariant (spec FR-11/FR-18, task 090); was ad-hoc 80%×80%.
-            xrm.Navigation.navigateTo(
-              { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
-              { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
-            ).catch(() => {
-              /* user closed dialog */
-            });
+            nav
+              .navigateTo(
+                { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
+                { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+              )
+              .catch(() => {
+                /* user closed dialog */
+              });
           };
           dispatchToast(
             <Toast>
@@ -567,22 +584,26 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       //   `const navigateTo = xrm.Navigation.navigateTo`
       //   `navigateTo(...)`
       // throws `Cannot read properties of undefined ('_clientApiExecutor')`.
-      if (typeof xrm?.Navigation?.navigateTo !== 'function') {
+      // Nearest frame that can navigateTo (task 081 round 4).
+      const nav = getXrm('navigation')?.Navigation;
+      if (typeof nav?.navigateTo !== 'function') {
         dispatchAccessToast();
         return;
       }
       // `record` OOB size (85%×85%) — record-modal-selection.md invariant
       // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
-      xrm.Navigation.navigateTo(
-        {
-          pageType: 'entityrecord',
-          entityName: entityType,
-          entityId: entityId,
-        },
-        { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
-      ).catch(() => {
-        dispatchAccessToast();
-      });
+      nav
+        .navigateTo(
+          {
+            pageType: 'entityrecord',
+            entityName: entityType,
+            entityId: entityId,
+          },
+          { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+        )
+        .catch(() => {
+          dispatchAccessToast();
+        });
     },
     [xrm, dispatchToast]
   );
@@ -685,7 +706,17 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           onBrowsePlaybooks={onBrowsePlaybooks}
         />
         <div className={styles.scrollContent}>
-          <EmptyState />
+          <EmptyState
+            className={styles.emptyStateBand}
+            icon={<CheckmarkCircleRegular className={styles.emptyStateIcon} />}
+            heading="You're all caught up!"
+            description="No unread notifications. New activity across your matters and projects will appear here automatically."
+            footer={
+              <Caption1 className={styles.emptyStateTimestamp}>
+                Last checked at {new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}
+              </Caption1>
+            }
+          />
         </div>
         <Toaster toasterId={toasterId} position="bottom-end" />
       </div>

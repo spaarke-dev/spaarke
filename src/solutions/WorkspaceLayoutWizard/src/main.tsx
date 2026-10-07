@@ -16,35 +16,10 @@ import * as React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/auth";
-import { AppErrorBoundary } from "@spaarke/ui-components";
+import { AppErrorBoundary, getXrm } from "@spaarke/ui-components";
 import type { LayoutTemplateId } from "@spaarke/ui-components";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-declare const Xrm: any;
-
-/**
- * Walk the frame hierarchy to find the Xrm global object.
- * Web resources run inside iframes — Xrm may be on a parent or top window.
- */
-function getXrm(): any | null {
-  // 1. Current window (direct embedding)
-  if (typeof Xrm !== "undefined" && Xrm?.WebApi) return Xrm;
-  // 2. Parent window (iframe in Custom Page)
-  try {
-    const p = (window.parent as any)?.Xrm;
-    if (p?.WebApi) return p;
-  } catch {
-    /* cross-origin */
-  }
-  // 3. Top window (nested iframes)
-  try {
-    const t = (window.top as any)?.Xrm;
-    if (t?.WebApi) return t;
-  } catch {
-    /* cross-origin */
-  }
-  return null;
-}
 
 /** Wizard mode determines the wizard behavior */
 type WizardMode = "create" | "edit" | "saveAs";
@@ -87,8 +62,9 @@ interface DataParams {
 function parseDataParams(): DataParams {
   let dataString = "";
 
-  // Try Xrm context first (Dataverse runtime)
-  const xrm = getXrm();
+  // Try Xrm context first (Dataverse runtime).
+  // Shared cross-frame walker (task 081 / C-8); `any` view because XrmContext.Page lacks `data`.
+  const xrm: any = getXrm('page');
   if (xrm?.Page?.data) {
     try {
       dataString = xrm.Page.data || "";
@@ -221,6 +197,4 @@ if (rootElement) {
   console.error("[WorkspaceLayoutWizard] Root element not found");
 }
 
-// Export getXrm for use by other modules
-export { getXrm };
 export type { WizardMode };

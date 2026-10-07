@@ -5,6 +5,7 @@ export * from './logger';
 export * from './lookupMatching';
 export * from './parseDataParams';
 export * from './quoteBody';
+export * from './relativeTime';
 export * from './safeRegister';
 export * from './sanitizeEmailHtml';
 export * from './themeDetection';

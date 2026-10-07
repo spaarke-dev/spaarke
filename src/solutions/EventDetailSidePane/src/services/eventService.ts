@@ -7,7 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 import { splitFilingPayload } from "@spaarke/ui-components";
 import { refileEventThroughBff } from "./childRecordWrites";
 import {
@@ -38,33 +38,16 @@ interface IXrmWebApi {
 }
 
 /**
- * Get the Xrm.WebApi object from window context
- *
- * In Custom Pages, Xrm is available from window.parent.Xrm (when in iframe)
- * or window.Xrm (when running directly).
+ * Get the Xrm.WebApi object via the shared cross-frame walker (task 081 / C-8).
  */
 function getXrmWebApi(): IXrmWebApi | null {
-  try {
-    // Try window.parent.Xrm first (Custom Page in iframe)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.WebApi) {
-      return parentXrm.WebApi as IXrmWebApi;
-    }
-
-    // Try window.Xrm (direct access)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.WebApi) {
-      return windowXrm.WebApi as IXrmWebApi;
-    }
-
-    console.warn("[EventService] Xrm.WebApi not available");
-    return null;
-  } catch (error) {
-    console.error("[EventService] Error accessing Xrm.WebApi:", error);
-    return null;
+  const webApi = getXrm()?.WebApi;
+  if (webApi) {
+    return webApi as unknown as IXrmWebApi;
   }
+
+  console.warn("[EventService] Xrm.WebApi not available");
+  return null;
 }
 
 /**

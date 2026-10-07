@@ -522,8 +522,10 @@ jobs:
     name: ADR Compliance (NetArchTest)
     runs-on: ubuntu-latest
     if: ${{ inputs.run-adr-compliance != 'false' }}
+    # TIMEOUT 3 -> 5 min (2026-10-07): the arch suite grew to 806 tests in #1312 and now runs
+    # 2m50s-3m35s, so the 3-min kill (conclusion=CANCELLED, not failure) hit ~half of runs. Owner-approved 2026-10-07.
     continue-on-error: true
-    timeout-minutes: 3
+    timeout-minutes: 5
     outputs:
       result: ${{ steps.report.outputs.result }}
     steps:

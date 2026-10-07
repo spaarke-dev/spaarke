@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components/utils/themeStorage";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
+import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { WorkAssignmentWizardDialog } from "@spaarke/ui-components/components/CreateWorkAssignmentWizard";
@@ -60,8 +61,9 @@ function App() {
 
   // Resolve SPE container ID from the user's business unit
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
+    // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    const xrm: any = getXrm(['webApi', 'utility']);
     if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
     const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, "");
     const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");

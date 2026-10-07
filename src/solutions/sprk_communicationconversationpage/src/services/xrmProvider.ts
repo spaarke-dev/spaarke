@@ -1,6 +1,7 @@
 /**
- * Xrm Provider — frame-walk utility for accessing Dataverse APIs from
- * a standalone HTML web resource (Custom Page).
+ * Xrm Provider — Dataverse API access for a standalone HTML web resource
+ * (Custom Page), via the shared cross-frame walker (`getXrm` in
+ * @spaarke/ui-components, task 081 / C-8).
  *
  * Mirrors `src/solutions/LegalWorkspace/src/services/xrmProvider.ts` (per
  * ADR-026: standalone HTML web resources use this frame-walk pattern instead
@@ -16,44 +17,7 @@
  * wiring an inert callback would be dead code (root CLAUDE.md §11).
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { cleanGuid } from '@spaarke/ui-components';
-
-declare const Xrm: any;
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-/**
- * Locate the Xrm global by walking the frame hierarchy.
- * Priority: current window → parent window → top window.
- * Returns null if Xrm is not available (e.g., local dev server).
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getXrm(): any | null {
-  if (typeof Xrm !== 'undefined' && Xrm?.Utility) {
-    return Xrm;
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.Utility) {
-      (window as any).Xrm = parentXrm;
-      return parentXrm;
-    }
-  } catch {
-    /* cross-origin — swallow */
-  }
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const topXrm = (window.top as any)?.Xrm;
-    if (topXrm?.Utility) {
-      (window as any).Xrm = topXrm;
-      return topXrm;
-    }
-  } catch {
-    /* cross-origin — swallow */
-  }
-  return null;
-}
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 /**
  * Get the current user's GUID (no braces).
@@ -62,7 +26,9 @@ export function getXrm(): any | null {
  * own/others bubble alignment is STRICTLY an identity comparison).
  */
 export function getUserId(): string {
-  const xrm = getXrm();
+  // Shared cross-frame walker (task 081 / C-8). `any` view: getUserId() is not on the typed GlobalContext.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('utility');
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';

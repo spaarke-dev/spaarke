@@ -17,6 +17,7 @@
  *   factory has a non-empty catalog to compare against.
  */
 import * as React from 'react';
+import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MicrosoftToDoIcon: React.FC<any> = props => (
@@ -177,8 +178,9 @@ export const createXrmEmailComposeHandlers: (...args: any[]) => any = () => ({})
 export const resolveCurrentUserEmail: (...args: unknown[]) => Promise<string> = async () => '';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const searchUsersAndContacts: (...args: any[]) => Promise<any[]> = async () => [];
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const getXrm: (...args: any[]) => any = () => undefined;
+// `getXrm` is the REAL shared walker (task 081 — see the note further down);
+// bound here so the `_driftGuard` object below can reference it.
+export const getXrm = realGetXrm;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const getXrmForPicker: (...args: any[]) => any = () => undefined;
 export interface RecordTypeCatalogEntry {
@@ -272,6 +274,42 @@ export const OOB_MODAL_SIZES = {
     height: { value: 70, unit: '%' as const },
   },
 };
+
+// ---------------------------------------------------------------------------
+// task 081 (C-8 / C-11 / C-13): DailyBriefing now imports `getXrm`,
+// `formatRelativeTime`, `parseDueDate`, `daysBetweenLocalMidnight` and
+// `EmptyState` from `@spaarke/ui-components`.
+//
+// `getXrm`, `formatRelativeTime` and the `dateLocal` helpers are the REAL implementations, re-exported
+// from the UI.Components TypeScript source (both are dependency-free pure
+// modules), so tests exercise the code under change and mock only at the
+// boundary (the `window.Xrm` object / the clock). Only the presentational
+// `EmptyState` stays a stub (the real one would pull a second Fluent/React
+// copy from the sibling package's node_modules).
+// ---------------------------------------------------------------------------
+
+export { formatRelativeTime } from '../../../Spaarke.UI.Components/src/utils/relativeTime';
+export { parseDueDate, daysBetweenLocalMidnight } from '../../../Spaarke.UI.Components/src/utils/dateLocal';
+
+export interface EmptyStateProps {
+  icon?: React.ReactElement;
+  heading: string;
+  description?: string;
+  footer?: React.ReactNode;
+  ariaLabel?: string;
+  size?: 'compact' | 'default';
+  className?: string;
+  headingClassName?: string;
+  descriptionClassName?: string;
+}
+
+export const EmptyState: React.FC<EmptyStateProps> = ({ heading, description, footer }) => (
+  <div role="status" aria-live="polite">
+    <span>{heading}</span>
+    {description && <span>{description}</span>}
+    {footer}
+  </div>
+);
 
 // ---------------------------------------------------------------------------
 // Types referenced by the LegalWorkspace registry factory under test

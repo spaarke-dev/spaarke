@@ -64,6 +64,8 @@ interface MockNavigation {
 }
 
 interface MockXrm {
+  // The shared getXrm() walker (task 081 / C-8) accepts a frame only when Xrm.WebApi is present.
+  WebApi: Record<string, unknown>;
   Navigation: MockNavigation;
 }
 
@@ -71,7 +73,7 @@ function installXrmMock(): MockNavigation {
   const nav: MockNavigation = {
     navigateTo: jest.fn().mockResolvedValue(undefined),
   };
-  (globalThis as unknown as { Xrm: MockXrm }).Xrm = { Navigation: nav };
+  (globalThis as unknown as { Xrm: MockXrm }).Xrm = { WebApi: {}, Navigation: nav };
   return nav;
 }
 

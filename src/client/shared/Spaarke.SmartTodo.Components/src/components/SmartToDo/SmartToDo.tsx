@@ -35,13 +35,12 @@ import {
   makeStyles,
   shorthands,
   tokens,
-  Text,
   Button,
   Spinner,
   MessageBar,
   MessageBarBody,
 } from '@fluentui/react-components';
-import { KanbanBoard } from '@spaarke/ui-components';
+import { KanbanBoard, EmptyState } from '@spaarke/ui-components';
 import type { DropResult } from '@hello-pangea/dnd';
 import { KanbanCard } from './KanbanCard';
 import { KanbanHeader } from './KanbanHeader';
@@ -159,18 +158,19 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
 
-  // ── Empty state ───────────────────────────────────────────────────────────
-  emptyContainer: {
+  // ── Empty state (pre-081 look on top of the shared compact EmptyState) ──
+  emptyStateContainer: {
     flex: '1 1 0',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalS,
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  emptyStateHeading: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
     color: tokens.colorNeutralForeground3,
-    textAlign: 'center',
+  },
+  emptyStateDescription: {
+    maxWidth: 'none',
   },
 
   // ── Kanban board area ─────────────────────────────────────────────────────
@@ -189,19 +189,23 @@ const useStyles = makeStyles({
 
 // ---------------------------------------------------------------------------
 // Empty state sub-component
+//
+// Hoisted to the shared `EmptyState` in `@spaarke/ui-components` (task 081 /
+// C-11) — this was one of three hand-rolled copies of the same icon+heading+
+// description shape.
 // ---------------------------------------------------------------------------
 
 const TodoEmptyState: React.FC = () => {
   const styles = useStyles();
   return (
-    <div className={styles.emptyContainer} role="status" aria-live="polite">
-      <Text size={300} weight="semibold">
-        All caught up
-      </Text>
-      <Text size={200}>
-        No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here.
-      </Text>
-    </div>
+    <EmptyState
+      size="compact"
+      className={styles.emptyStateContainer}
+      headingClassName={styles.emptyStateHeading}
+      descriptionClassName={styles.emptyStateDescription}
+      heading="All caught up"
+      description="No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here."
+    />
   );
 };
 
