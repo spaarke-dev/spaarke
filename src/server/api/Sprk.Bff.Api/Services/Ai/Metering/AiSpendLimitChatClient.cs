@@ -6,7 +6,9 @@ namespace Sprk.Bff.Api.Services.Ai.Metering;
 /// <summary>
 /// The <see cref="AiSpendLimit"/> seam of the <see cref="IChatClient"/> pipeline (task 254). Registered INSIDE
 /// <c>UseFunctionInvocation</c>, so each model round-trip of a tool-calling turn is checked before it starts and counted
-/// after it ends — the chat agent never reaches <see cref="OpenAiClient"/>, which carries the other seam.
+/// after it ends. The chat loop's own model round-trips do not pass through <see cref="OpenAiClient"/>, which carries the
+/// other seam (in-turn tools that call it are checked there; their refusal is fed back to the loop, whose next round-trip
+/// is then refused here).
 /// </summary>
 public sealed class AiSpendLimitChatClient : DelegatingChatClient
 {

@@ -261,8 +261,9 @@ is wanted, and it caps the stamp's Azure OpenAI use, not provisioning:
 - **Later — add, change or remove**: `scripts/Set-AiSpendLimit.ps1 -SubscriptionId <customer sub> -ResourceGroupName
   rg-spaarke-{customerId}-prod -AppServiceName spaarke-bff-{customerId}-prod -MonthlyLimitUsd 500` (or `-Remove`). It
   writes both slots, changes nothing when the value is already set, supports `-WhatIf`, and runs as the operator's own
-  identity. Changing an app setting restarts the site — do it outside busy hours. A later provisioning run that carries
-  the intake value re-applies it; one that does not leaves the setting alone.
+  identity. Changing an app setting restarts the site — do it outside busy hours. **A later provisioning run that carries
+  the intake value re-applies it** — overriding a change made with the script, or re-adding a removed limit; run
+  upgrades without the value (the setting is then left alone) or with the current one.
 
 **What the limit does** — the stamp's BFF keeps an estimate of the month's OpenAI spend (UTC calendar month) in the
 stamp's Redis, shared by every instance and both slots: input and output tokens at list prices
@@ -272,10 +273,14 @@ ProblemDetails, code `ai_spend_limit_exceeded`, `Retry-After` = seconds to the n
 crosses it mid-turn ends with an in-band error carrying the same code. One limit per stamp — a stamp is one customer,
 whoever signs in. Application Insights `ai.metering.tokens` remains the authoritative usage record.
 
-**Known limits** — the estimate is list-price based, not the invoice: set the limit with headroom. Endpoints that turn
-every error into their own message show that message instead of the 429; background AI jobs fail their AI step while the
-month is over the limit. A call already running when the limit is crossed completes. If Redis cannot be read, calls are
-allowed (logged); if the setting is not a number, it is ignored (logged as an error). Decisions:
+**Known limits** — the estimate is list-price based, not the invoice: set the limit with headroom. Chat messages and text
+refinement get the 429 before they start; other AI endpoints that turn every error into their own message show that
+message instead. **Background AI jobs (document indexing, profiling) refuse while the month is over the limit** and,
+after their retries, are dead-lettered — nothing replays them when the month resets or the limit is raised, so re-run
+indexing / profiling for documents uploaded in that window. A call already running when the limit is crossed completes.
+If Redis cannot be read within 250 ms, calls are allowed (logged); if the setting is not a number, it is ignored (logged
+once as an error). The stamp's Redis evicts least-recently-used keys under memory pressure, which would restart the
+month's figure at 0. The keyless proof's two calls per provisioning run are outside the limit by design. Decisions:
 `projects/customer-provisioning-orchestration-r1/notes/t254-ai-spend-limit-decisions.md`.
 
 **Keyless (owner D13, T244)**: AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB

@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Infrastructure.Cache;
 /// <para>
 /// <b>Adding to this list requires architecture review.</b> The spec caps the total at
 /// 20 distinct logical resources (Assumption §3 / NFR-08); the current allow-list contains
-/// 16 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
+/// 17 entries (the two scheduler keys added 2026-09-14 by unified-access-control-r2 task 103; <see cref="JobStatusSequence"/>
 /// added 2026-10-01 by spaarkeai-word-add-in-r1 task 068 and approved by the owner on review 2026-10-02, its
 /// justification in its own remarks; <see cref="AiSpendMonth"/> added 2026-10-06 by customer-provisioning-orchestration-r1
 /// task 254, justified in its remarks; see

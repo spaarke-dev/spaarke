@@ -62,10 +62,11 @@ public sealed class AiSpendLimitSeamTests
     [Fact]
     public void TheTheoryCoversEveryPublicModelCallOfOpenAiClient()
     {
+        // By return shape, not by `async`: a future public method returning a Task without the async keyword is still
+        // a model call that must check the limit.
         var publicAsync = typeof(OpenAiClient)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Where(m => m.GetCustomAttribute<AsyncStateMachineAttribute>() is not null
-                        || m.GetCustomAttribute<AsyncIteratorStateMachineAttribute>() is not null)
+            .Where(m => IsAsyncShape(m.ReturnType))
             .Select(m => m.Name)
             .Distinct();
 
@@ -119,6 +120,11 @@ public sealed class AiSpendLimitSeamTests
 
         (await _ledger.GetMonthToDateUsdAsync(Now, CancellationToken.None)).Should().Be(12.50m);
     }
+
+    private static bool IsAsyncShape(Type type)
+        => type == typeof(Task) || type == typeof(ValueTask)
+           || (type.IsGenericType && type.GetGenericTypeDefinition() is var g
+               && (g == typeof(Task<>) || g == typeof(ValueTask<>) || g == typeof(IAsyncEnumerable<>)));
 
     private static async Task Drain<T>(IAsyncEnumerable<T> stream)
     {

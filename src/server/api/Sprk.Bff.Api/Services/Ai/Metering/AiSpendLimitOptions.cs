@@ -15,8 +15,10 @@ namespace Sprk.Bff.Api.Services.Ai.Metering;
 /// <para>
 /// Unset is the default and means no limit. Provisioning writes <c>AiSpendLimit__MonthlyLimitUsd</c> only when the
 /// operator supplies one (intake <c>openAiMonthlyLimitUsd</c>); <c>scripts/Set-AiSpendLimit.ps1</c> adds, changes or
-/// removes it later. Read through <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>, so a change takes
-/// effect without a restart.
+/// removes it later. On App Service the settings are environment variables, so a change applies on the restart App Service
+/// performs for any app-setting change (environment variables are not reloaded); <see cref="AiSpendLimit"/> reads them
+/// through <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/> each call, so reloadable sources (local
+/// files) apply at once.
 /// </para>
 /// </remarks>
 public sealed class AiSpendLimitOptions

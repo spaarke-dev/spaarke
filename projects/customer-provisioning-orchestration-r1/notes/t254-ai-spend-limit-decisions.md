@@ -55,3 +55,24 @@ Owner G37 (2026-10-06): "no cap but allow for a per customer spend limit if desi
   AI step (and retry per the job's policy) while over the limit.
 - K2 — the estimate is list-price based, not the invoice; set the limit with headroom.
 - K3 — a call already in flight when the limit is crossed completes; the next call is refused.
+- K4 — the stamp Redis evicts with `AllKeysLRU` (`redis.bicep`): under memory pressure the month's key can be evicted
+  and the figure restarts at 0. Changing the eviction policy affects every key — out of scope; App Insights stays
+  authoritative.
+- K5 — two paths are outside the limit: the keyless proof (one chat + one embedding call per provisioning run,
+  deliberately — a capped stamp must still prove its identity) and Foundry Agent Service runs
+  (`Services/Ai/Foundry/AgentServiceClient`, disabled by default — `AgentService:Enabled` is false on every stamp; add a
+  check in its `GuardEnabled()` before enabling it on a capped stamp).
+- K6 — background AI jobs (indexing, profiling) refuse while over the limit; Service Bus redelivers until the max
+  delivery count, then dead-letters. Nothing replays them when the month resets or the limit is raised — re-run them
+  (guide §3.2b).
+- K7 — a provisioning re-run that carries `openAiMonthlyLimitUsd` re-applies the intake value, overriding a later
+  `Set-AiSpendLimit.ps1` change (or re-adding a removed limit). Run upgrades without the value, or with the current one.
+- Side effect (correct, not a double count): `ai.metering.tokens` `source=executor` now also records streaming and
+  vision completions, which recorded nothing before — executor-token dashboards step up at the first deploy.
+
+## Step 9.5 (2026-10-06)
+
+ADR tensions recorded in `design.md` §17 (T254 bullet): Path A for `provisioning.md`'s "no manual single-setting app
+setting writes in production" (`Set-AiSpendLimit.ps1` writes an operator-owned runtime policy value, not deploy
+configuration — the owner asked for exactly this change path) and for ADR-010's `ValidateOnStart` (D4: a bad value must
+not stop the BFF). Owner approval requested for the 17th `SystemCacheKeys` entry (`AiSpendMonth`).

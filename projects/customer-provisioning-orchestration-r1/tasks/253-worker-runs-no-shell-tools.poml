@@ -61,6 +61,7 @@
     <constraint source="parity">H4b writes exactly the settings the generated script wrote (same names, same KV-reference values, both slots) — a parity test against the manifest.</constraint>
     <constraint source="forcing-function">An ArchTest (or Worker composition test) fails if a registered Worker type starts a process (ProcessStartInfo / Process.Start).</constraint>
     <constraint source="owner">No live call or deployment; the first live proof is T186.</constraint>
+    <constraint source="T254 (2026-10-06)">H4b's ARM write must keep the `required: false` behaviour the generated script has since T254: an optional per_env entry the run does not carry (today `AiSpendLimit__MonthlyLimitUsd`, intake `openAiMonthlyLimitUsd`) is NOT written, and an existing value on the site is left alone (merge, never replace the whole settings set — the operator may have set it with scripts/Set-AiSpendLimit.ps1). Both slots.</constraint>
   </constraints>
 
   <steps mode="directional">

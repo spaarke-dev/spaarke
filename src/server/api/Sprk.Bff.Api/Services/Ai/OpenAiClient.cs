@@ -69,7 +69,8 @@ public class OpenAiClient : IOpenAiClient
         _circuitRegistry = circuitRegistry;
         _aiTelemetry = aiTelemetry;
         // Task 254: the stamp's optional OpenAI spend limit. Task 077 wired its predecessor here and a later merge of
-        // master dropped it silently — OpenAiSpendLimitWiringTests now fails if any public method skips the check.
+        // master dropped it silently — AiSpendLimitSeamTests now fails if any public method skips the check, and
+        // AiSpendLimitContractTests if the DI container stops supplying it.
         _spendLimit = spendLimit;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);

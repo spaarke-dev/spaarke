@@ -835,7 +835,9 @@ ability to have a cap if necessary." Ask only whether the customer should have o
 the customer's agreement calls for a cap. When set, H4b writes `AiSpendLimit__MonthlyLimitUsd` on both slots and the
 stamp's BFF answers model calls with HTTP 429 (Retry-After = next UTC month start) once its list-price estimate of the
 month's OpenAI spend reaches it. It never blocks provisioning. Change or remove it later with
-`scripts/Set-AiSpendLimit.ps1` (guide §3.2b) — not by re-running provisioning.
+`scripts/Set-AiSpendLimit.ps1` (guide §3.2b) — not by re-running provisioning. On an UPGRADE run, leave it out (the
+setting is then left alone) or send the CURRENT value: a re-run that carries it re-applies it, overriding a later script
+change or re-adding a removed limit.
 
 ```powershell
 if (-not $script:SkipInteractiveIntake) {

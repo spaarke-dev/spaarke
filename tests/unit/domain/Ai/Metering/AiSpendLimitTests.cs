@@ -81,7 +81,7 @@ public sealed class AiSpendLimitTests
     }
 
     [Fact]
-    public async Task ARaisedLimit_TakesEffectWithoutARestart()
+    public async Task ARaisedLimit_IsReadOnTheNextCall()
     {
         _options.CurrentValue = new AiSpendLimitOptions { MonthlyLimitUsd = 100m };
         _ledger.Add(150m, MidOctober);

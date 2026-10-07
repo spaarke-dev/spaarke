@@ -28,6 +28,9 @@ namespace Sprk.Bff.Api.Services.Ai.Diagnostics;
 /// <see cref="KeylessProofContract.Outcomes.KeyCredential"/> instead of calling — the key-selection rules mirrored here are
 /// those of <c>AiModule.BuildInnerClient</c>, <c>OpenAiClient</c>, <c>TextExtractorService</c>,
 /// <see cref="SearchClientFactory"/> and <see cref="ContentSafetyAuthHandler"/>.</para>
+/// <para><b>Outside the spend limit, deliberately</b> (task 254): its one chat and one embedding call bypass
+/// <see cref="Metering.AiSpendLimit"/> — they cost a fraction of a cent per provisioning run, and a capped stamp must still
+/// be able to prove its identity.</para>
 /// <para><b>Side effects and cost.</b> Every call is read-only. Chat asks for a one-word reply (no output-token cap:
 /// reasoning-model deployments reject <c>max_tokens</c>, which would fail a healthy stamp) and the embedding input is
 /// four words; Prompt Shield and groundedness are one text record each; Document

@@ -65,8 +65,18 @@
     <step order="4">Verify; Step 9.5; close.</step>
   </steps>
 
+  <justification>
+    Existing: task 077's TenantBudget* (per-tid map, per-process ledger — wiring lost by merge 28c2c1b385) and
+    AgentCostControlMiddleware (per-session turn budget, not stamp spend). Extension rejected: a per-tid key matches no
+    caller on a dedicated stamp (users' tid = the customer's workforce tenant; jobs carry none) and a per-process store
+    resets on restart and multiplies by instance count — replaced, not extended (notes/t254-ai-spend-limit-decisions.md
+    D1–D3). Cost of doing nothing: no cap can be set, and an over-limit call would surface as HTTP 500.
+  </justification>
+
   <acceptance-criteria>
-    <criterion testable="true">Without the intake value nothing TenantBudget-related is written; with it both slots get TenancyMode=Model1Gated and the limit.</criterion>
+    <!-- Superseded wording (2026-10-06, decision D1): one stamp-wide setting AiSpendLimit__MonthlyLimitUsd replaces the
+         per-tenant TenantBudget map; "TenancyMode=Model1Gated" no longer exists. -->
+    <criterion testable="true">Without the intake value nothing spend-limit-related is written; with it both slots get AiSpendLimit__MonthlyLimitUsd.</criterion>
     <criterion testable="true">An AI call over the limit returns 429 ProblemDetails with Retry-After; under the limit, and for unconfigured tenants, behaviour is unchanged.</criterion>
     <criterion testable="true">The documented procedure changes or removes a limit on an existing stamp.</criterion>
   </acceptance-criteria>

@@ -1217,6 +1217,7 @@ public static class ChatEndpoints
         ChatRefineRequest request,
         ChatSessionManager sessionManager,
         IChatClient chatClient,
+        [FromServices] Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimit spendLimit,
         HttpContext httpContext,
         ILogger<ChatHistoryManager> logger)
     {
@@ -1239,6 +1240,10 @@ public static class ChatEndpoints
             await response.WriteAsJsonAsync(new { error = $"Session {sessionId} not found" }, cancellationToken);
             return;
         }
+
+        // Task 254: the stamp's optional monthly OpenAI spend limit — before the stream starts, so an over-limit
+        // refinement is a 429 + Retry-After (global exception handler), not the generic in-band error below.
+        await spendLimit.EnsureUnderLimitAsync(cancellationToken);
 
         // Set SSE headers — X-Accel-Buffering prevents reverse proxy buffering (NFR-01).
         response.ContentType = "text/event-stream";

@@ -19,6 +19,14 @@ public sealed class AiSpendLimit
 {
     private const decimal TokensPerMillion = 1_000_000m;
 
+    /// <summary>
+    /// Longest wait for the month-to-date figure before the call proceeds without it (fail-open). A degraded Redis would
+    /// otherwise hold every model call for the client's 5 s timeout.
+    /// </summary>
+    internal static readonly TimeSpan LedgerReadTimeout = TimeSpan.FromMilliseconds(250);
+
+    private int _unreadableSettingsLogged;
+
     private readonly IOptionsMonitor<AiSpendLimitOptions> _options;
     private readonly IAiSpendLedger _ledger;
     private readonly TimeProvider _timeProvider;
@@ -51,11 +59,19 @@ public sealed class AiSpendLimit
         decimal spent;
         try
         {
-            spent = await _ledger.GetMonthToDateUsdAsync(now, cancellationToken).ConfigureAwait(false);
+            spent = await _ledger.GetMonthToDateUsdAsync(now, cancellationToken).AsTask()
+                .WaitAsync(LedgerReadTimeout, _timeProvider, cancellationToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (TimeoutException)
+        {
+            _logger.LogWarning(
+                "AI spend limit: the month-to-date figure was not read within {TimeoutMs} ms; the call proceeds (fail-open).",
+                LedgerReadTimeout.TotalMilliseconds);
+            return;
         }
         catch (Exception ex)
         {
@@ -116,7 +132,11 @@ public sealed class AiSpendLimit
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogError(ex, "AI spend limit: the AiSpendLimit settings cannot be read; no limit is applied until they are fixed.");
+            // Once per process: the options cache does not keep a failed bind, so this runs on every model call.
+            if (Interlocked.Exchange(ref _unreadableSettingsLogged, 1) == 0)
+            {
+                _logger.LogError(ex, "AI spend limit: the AiSpendLimit settings cannot be read; no limit is applied until they are fixed.");
+            }
             return null;
         }
     }
