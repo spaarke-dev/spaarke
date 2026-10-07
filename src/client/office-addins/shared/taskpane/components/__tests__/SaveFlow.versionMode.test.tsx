@@ -38,7 +38,13 @@ const RESOLVED: DocumentIdentityOutcome = {
   documentId: DOCUMENT_ID,
   documentName: 'Engagement Letter',
   fileName: 'Engagement Letter.docx',
-  relatedRecord: null,
+  // Task 111: a document already filed to a record — an unfiled one now offers the picker + "File to record".
+  relatedRecord: {
+    entityType: 'sprk_matter',
+    id: 'aaaaaaaa-0000-0000-0000-000000000001',
+    name: 'MAT-1',
+    displayName: 'Gamma Merger',
+  },
 };
 
 type FakeResponse = { ok: boolean; status: number; text: () => Promise<string>; json: () => Promise<unknown> };

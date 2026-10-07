@@ -67,8 +67,9 @@ public partial class RouteAuthorizationGuardTests
     {
         // ---- the document / file-byte surface (task 074's original RouteLevelGate set) ----
         new GovernedFile("Api/FileAccessEndpoints.cs", Scope.RouteLevelGate,
-            "/api/documents/{documentId}/* — file bytes and URL minting; all ten routes carry AddDocumentAuthorizationFilter "
-            + "(share-link since task 072; resolve-identity pairs DocumentUrlIdentityFilter with it)."),
+            "/api/documents/{documentId}/* — file bytes, URL minting and document identity; all eleven routes carry "
+            + "AddDocumentAuthorizationFilter (share-link since task 072; resolve-identity pairs DocumentUrlIdentityFilter "
+            + "with it; GET /{documentId}/identity since word-add-in task 112)."),
         new GovernedFile("Api/DataverseDocumentsEndpoints.cs", Scope.RouteLevelGate,
             "/api/v1/documents/* — document rows, a byte download, the pointer attach (POST /{id}/file, task 166 f1) and the "
             + "two container-keyed listings (gated by task 078; GET /api/v1/documents?containerId= since task 166 carries "

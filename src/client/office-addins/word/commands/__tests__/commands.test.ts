@@ -11,6 +11,10 @@
  *   - Every notification says what happened in words; a refusal shows the SERVER's message, never the old fixed
  *     "Failed to save" text.
  *   - Open Spaarke opens the Console URL built from the build settings, through the capability-chosen opener.
+ *   - Task 110 (UAT round 11, item 2): Quick Save opens its dialog in a PROGRESS state before it calls the server, then
+ *     shows the result in place — success with an "Open in Spaarke" link to the document record (from ORG_URL), or
+ *     the error. The dialog's own mechanics (messageChild vs reopen, the link opener, the completed() lifetime) are
+ *     tested in `quickSaveDialog.test.ts`; here the command is tested end to end against a fake dialog.
  *
  * Collaborators with side effects (auth, the API client, the adapter factory, identity resolution and the stamp
  * write) are module-mocked; the PURE request/message builders in `quickSaveHelpers` run for real so the tests pin
@@ -99,6 +103,22 @@ function createMockAdapter(overrides: Partial<Record<keyof IHostAdapter, unknown
   } as unknown as IHostAdapter;
 }
 
+/** A fake Office dialog handle: records its handlers so a test can play the page / the user. */
+interface FakeDialog {
+  close: jest.Mock;
+  handlers: Record<string, (arg: unknown) => void>;
+  addEventHandler: jest.Mock;
+}
+
+function createFakeDialog(): FakeDialog {
+  const handlers: Record<string, (arg: unknown) => void> = {};
+  const close = jest.fn();
+  const addEventHandler = jest.fn((type: string, handler: (arg: unknown) => void) => {
+    handlers[type] = handler;
+  });
+  return { close, handlers, addEventHandler };
+}
+
 function lastNotifyCall(displayDialogAsync: jest.Mock): unknown[] | undefined {
   return displayDialogAsync.mock.calls[displayDialogAsync.mock.calls.length - 1];
 }
@@ -138,7 +158,18 @@ describe('word/commands/index.ts', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let commands: any;
   let displayDialogAsync: jest.Mock;
+  let dialogs: FakeDialog[];
   let showAsTaskpane: jest.Mock;
+
+  /**
+   * Runs Quick Save to its end, then plays the user closing the (latest) dialog — the point at which the command's
+   * `event.completed()` is due (task 110). A run that never opened a dialog has nothing to close.
+   */
+  async function runQuickSave(event: Office.AddinCommands.Event): Promise<void> {
+    await commands.quickSave(event);
+    const latest = dialogs[dialogs.length - 1];
+    latest?.handlers['dialogEventReceived']?.({ error: 12006 });
+  }
 
   beforeEach(() => {
     jest.resetModules();
@@ -159,8 +190,11 @@ describe('word/commands/index.ts', () => {
     });
     mockApiGet.mockResolvedValue(completedJob(CREATED_ID, 'My Document.docx'));
 
+    dialogs = [];
     displayDialogAsync = jest.fn((_url: string, _options: unknown, callback?: (result: unknown) => void) => {
-      callback?.({ status: 'succeeded', value: {} });
+      const dialog = createFakeDialog();
+      dialogs.push(dialog);
+      callback?.({ status: 'succeeded', value: dialog });
     });
     global.Office.context.ui.displayDialogAsync =
       displayDialogAsync as unknown as typeof Office.context.ui.displayDialogAsync;
@@ -187,7 +221,7 @@ describe('word/commands/index.ts', () => {
     it("bootstraps (explicit 'word' host), creates with the pane's file-name rule + allowRename, stamps the created id, names the file, and completes", async () => {
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockAuthInitialize).toHaveBeenCalledTimes(1);
       expect(mockApiConfigure).toHaveBeenCalledTimes(1);
@@ -212,7 +246,7 @@ describe('word/commands/index.ts', () => {
       expect(mockApiGet).toHaveBeenCalledWith('/api/office/jobs/job-1');
       expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, CREATED_ID);
 
-      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('success');
       expect(lastNotifyMessage(displayDialogAsync)).toBe("Saved to Spaarke as 'My Document.docx'.");
       expect(showAsTaskpane).not.toHaveBeenCalled();
       expect(event.completed).toHaveBeenCalledTimes(1);
@@ -223,7 +257,7 @@ describe('word/commands/index.ts', () => {
       mockApiGet.mockResolvedValue(completedJob(CREATED_ID, 'Untitled Document 1.docx'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockApiPost.mock.calls[0]![1].document.fileName).toBe('Untitled Document.docx');
       const message = lastNotifyMessage(displayDialogAsync)!;
@@ -235,7 +269,7 @@ describe('word/commands/index.ts', () => {
     it('a name collision on an unresolved document is never turned into a version save (#1005: a name is not identity)', async () => {
       // Even when the file name matches an existing Spaarke document, an unresolved identity creates.
       (mockAdapter.getSubject as jest.Mock).mockResolvedValue('The Newfound Importance of Knowledge Management');
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
 
       expect(mockApiPost.mock.calls[0]![1].document).not.toHaveProperty('existingDocumentId');
       expect(mockApiPost.mock.calls[0]![1].document.allowRename).toBe(true);
@@ -248,7 +282,7 @@ describe('word/commands/index.ts', () => {
       mockApiGet.mockResolvedValue(completedJob(RESOLVED_ID, 'My Document.docx'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       const body = mockApiPost.mock.calls[0]![1];
       expect(body.document).toMatchObject({ existingDocumentId: RESOLVED_ID, isNewVersion: true });
@@ -259,7 +293,7 @@ describe('word/commands/index.ts', () => {
       );
 
       expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, RESOLVED_ID);
-      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('success');
       expect(lastNotifyMessage(displayDialogAsync)).toBe("Saved a new version of 'My Document.docx'.");
       expect(event.completed).toHaveBeenCalledTimes(1);
     });
@@ -275,7 +309,7 @@ describe('word/commands/index.ts', () => {
       });
       mockApiGet.mockResolvedValue(completedJob(RESOLVED_ID, 'Brief.docx'));
 
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
 
       expect(mockResolveDocumentIdentity).toHaveBeenCalledWith('https://contoso.sharepoint.com/Brief.docx');
       expect(mockApiPost.mock.calls[0]![1].document.existingDocumentId).toBe(RESOLVED_ID);
@@ -287,7 +321,7 @@ describe('word/commands/index.ts', () => {
       mockApiGet.mockRejectedValue(new Error('job read failed'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockWriteIdentityStampAfterSave).toHaveBeenCalledWith(mockAdapter, RESOLVED_ID);
       expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Saved a new version of/);
@@ -305,7 +339,7 @@ describe('word/commands/index.ts', () => {
       mockResolveDocumentIdentity.mockResolvedValue(outcome);
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
       expect(mockWriteIdentityStampAfterSave).not.toHaveBeenCalled();
@@ -318,7 +352,7 @@ describe('word/commands/index.ts', () => {
       (mockAdapter.getDocumentUrl as jest.Mock).mockRejectedValue(new Error('url read failed'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
       expect(lastNotifyMessage(displayDialogAsync)).toMatch(/url read failed/);
@@ -333,7 +367,7 @@ describe('word/commands/index.ts', () => {
       );
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       const message = lastNotifyMessage(displayDialogAsync)!;
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
@@ -345,7 +379,7 @@ describe('word/commands/index.ts', () => {
 
     it('a rate-limited save (429) shows the server reason too', async () => {
       mockApiPost.mockRejectedValue(serverRefusal({ status: 429, title: 'Too Many Requests' }));
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
       expect(lastNotifyMessage(displayDialogAsync)).toBe('Spaarke did not save this document: Too Many Requests (429)');
     });
 
@@ -356,7 +390,7 @@ describe('word/commands/index.ts', () => {
       });
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
@@ -370,7 +404,7 @@ describe('word/commands/index.ts', () => {
       mockApiPost.mockRejectedValue(new TypeError('Failed to fetch'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
       expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Couldn't reach Spaarke.*Failed to fetch/);
@@ -381,7 +415,7 @@ describe('word/commands/index.ts', () => {
       mockAuthInitialize.mockRejectedValue(new Error('auth failed'));
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(mockApiPost).not.toHaveBeenCalled();
       expect(lastNotifyMessage(displayDialogAsync)).toMatch(/^Couldn't connect to Spaarke.*auth failed/);
@@ -390,7 +424,7 @@ describe('word/commands/index.ts', () => {
 
     it("a job that ended Failed after the save was accepted reports the job's reason, not a success", async () => {
       mockApiGet.mockResolvedValue({ status: 'Failed', error: { message: 'Upload finalization failed' } });
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
 
       expect(lastNotifyStatus(displayDialogAsync)).toBe('error');
       expect(lastNotifyMessage(displayDialogAsync)).toMatch(/Upload finalization failed/);
@@ -399,28 +433,143 @@ describe('word/commands/index.ts', () => {
 
     it('a stamp-write failure never turns a successful save into an error (the helper is non-fatal)', async () => {
       mockWriteIdentityStampAfterSave.mockResolvedValue('failed');
-      await commands.quickSave(createMockEvent());
-      expect(lastNotifyStatus(displayDialogAsync)).toBe('info');
+      await runQuickSave(createMockEvent());
+      expect(lastNotifyStatus(displayDialogAsync)).toBe('success');
     });
 
     it('a very long server reason is bounded before it goes into the dialog URL', async () => {
       mockApiPost.mockRejectedValue(serverRefusal({ status: 400, title: 'Bad', detail: 'x'.repeat(5000) }));
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
       const message = lastNotifyMessage(displayDialogAsync)!;
       expect(message.length).toBeLessThanOrEqual(400);
       expect(message.endsWith('…')).toBe(true);
     });
 
-    it('error notifications get a larger window than a success', async () => {
+    it('the dialog is large enough for an error and is never prompted for', async () => {
       mockApiPost.mockRejectedValue(serverRefusal({ status: 403, title: 'Forbidden', detail: 'No.' }));
-      await commands.quickSave(createMockEvent());
-      expect(lastNotifyCall(displayDialogAsync)![1]).toMatchObject({ height: 30, width: 35 });
+      await runQuickSave(createMockEvent());
+      expect(lastNotifyCall(displayDialogAsync)![1]).toMatchObject({ height: 30, width: 35, promptBeforeOpen: false });
     });
 
     it('never opens the task pane on any path', async () => {
       mockApiPost.mockRejectedValue(new Error('network down'));
-      await commands.quickSave(createMockEvent());
+      await runQuickSave(createMockEvent());
       expect(showAsTaskpane).not.toHaveBeenCalled();
+    });
+  });
+
+  // -----------------------------------------------------------------------------------------
+  // Task 110 — the progress dialog and the record link
+  // -----------------------------------------------------------------------------------------
+  describe('quickSave — the dialog shows progress first, then the result with a link to the record (task 110)', () => {
+    const originalEnv = { ORG_URL: process.env.ORG_URL, SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME };
+
+    beforeEach(() => {
+      process.env.ORG_URL = 'https://spaarkedev1.crm.dynamics.com/';
+      process.env.SPAARKE_APP_NAME = 'sprk_MatterManagement';
+    });
+
+    afterEach(() => {
+      process.env.ORG_URL = originalEnv.ORG_URL;
+      process.env.SPAARKE_APP_NAME = originalEnv.SPAARKE_APP_NAME;
+    });
+
+    function paramsOf(call: unknown[] | undefined): URLSearchParams {
+      return new URL(call![0] as string).searchParams;
+    }
+
+    it('opens the dialog in a progress state BEFORE the save request is sent', async () => {
+      await runQuickSave(createMockEvent());
+
+      const first = displayDialogAsync.mock.calls[0]!;
+      expect(paramsOf(first).get('status')).toBe('progress');
+      expect(paramsOf(first).get('message')).toBe('Saving to Spaarke…');
+      expect(displayDialogAsync.mock.invocationCallOrder[0]!).toBeLessThan(mockApiPost.mock.invocationCallOrder[0]!);
+      expect(displayDialogAsync.mock.invocationCallOrder[0]!).toBeLessThan(
+        mockAuthInitialize.mock.invocationCallOrder[0]!
+      );
+    });
+
+    it('success: the dialog carries the saved name and a link to sprk_document/{id} built from ORG_URL (and the app name)', async () => {
+      await runQuickSave(createMockEvent());
+
+      const final = lastNotifyCall(displayDialogAsync);
+      expect(paramsOf(final).get('status')).toBe('success');
+      expect(paramsOf(final).get('message')).toBe("Saved to Spaarke as 'My Document.docx'.");
+      expect(paramsOf(final).get('linkUrl')).toBe(
+        `https://spaarkedev1.crm.dynamics.com/main.aspx?appname=sprk_MatterManagement&etn=sprk_document&id=${CREATED_ID}&pagetype=entityrecord&navbar=off`
+      );
+    });
+
+    it('a version save links to the VERSIONED document record', async () => {
+      (mockAdapter.readDocumentStamp as jest.Mock).mockResolvedValue(RESOLVED_ID);
+      mockApiGet.mockResolvedValue(completedJob(RESOLVED_ID, 'My Document.docx'));
+      await runQuickSave(createMockEvent());
+
+      expect(paramsOf(lastNotifyCall(displayDialogAsync)).get('linkUrl')).toContain(
+        `etn=sprk_document&id=${RESOLVED_ID}`
+      );
+    });
+
+    it('a version save whose job cannot be read still links to the known document', async () => {
+      (mockAdapter.readDocumentStamp as jest.Mock).mockResolvedValue(RESOLVED_ID);
+      mockApiGet.mockRejectedValue(new Error('job read failed'));
+      await runQuickSave(createMockEvent());
+
+      expect(paramsOf(lastNotifyCall(displayDialogAsync)).get('linkUrl')).toContain(`id=${RESOLVED_ID}`);
+    });
+
+    it('NEGATIVE: without ORG_URL there is no link — and the success message is unchanged', async () => {
+      process.env.ORG_URL = '';
+      await runQuickSave(createMockEvent());
+
+      const final = lastNotifyCall(displayDialogAsync);
+      expect(paramsOf(final).get('status')).toBe('success');
+      expect(paramsOf(final).has('linkUrl')).toBe(false);
+      expect(paramsOf(final).get('message')).toBe("Saved to Spaarke as 'My Document.docx'.");
+    });
+
+    it('NEGATIVE: an unreadable job for a CREATE (no document id known) offers no link', async () => {
+      mockApiGet.mockRejectedValue(new Error('job read failed'));
+      await runQuickSave(createMockEvent());
+
+      const final = lastNotifyCall(displayDialogAsync);
+      expect(paramsOf(final).get('status')).toBe('success');
+      expect(paramsOf(final).has('linkUrl')).toBe(false);
+    });
+
+    it('NEGATIVE: an error shows its message with NO link', async () => {
+      mockApiPost.mockRejectedValue(
+        serverRefusal({ status: 403, title: 'Forbidden', detail: 'You do not have write access to this document.' })
+      );
+      await runQuickSave(createMockEvent());
+
+      const final = lastNotifyCall(displayDialogAsync);
+      expect(paramsOf(final).get('status')).toBe('error');
+      expect(paramsOf(final).get('message')).toContain('You do not have write access to this document.');
+      expect(paramsOf(final).has('linkUrl')).toBe(false);
+    });
+
+    it('event.completed waits for the dialog to be closed — the ribbon command stays alive while it is open', async () => {
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+      expect(event.completed).not.toHaveBeenCalled();
+
+      dialogs[dialogs.length - 1]!.handlers['dialogEventReceived']!({ error: 12006 });
+      expect(event.completed).toHaveBeenCalledTimes(1);
+    });
+
+    it('event.completed is called once even if the dialog never opens (host without a dialog)', async () => {
+      global.Office.context.ui.displayDialogAsync = jest.fn((_u: string, _o: unknown, cb?: (r: unknown) => void) => {
+        cb?.({ status: 'failed', value: null });
+      }) as unknown as typeof Office.context.ui.displayDialogAsync;
+      const event = createMockEvent();
+
+      await commands.quickSave(event);
+
+      expect(mockApiPost).toHaveBeenCalledTimes(1);
+      expect(event.completed).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -531,7 +680,7 @@ describe('word/commands/index.ts', () => {
       const event = createMockEvent();
 
       try {
-        await commands.quickSave(event);
+        await runQuickSave(event);
         expect(event.completed).toHaveBeenCalledTimes(1);
       } finally {
         global.Office.context.ui.displayDialogAsync = original;
@@ -544,7 +693,7 @@ describe('word/commands/index.ts', () => {
       }) as unknown as typeof Office.context.ui.displayDialogAsync;
       const event = createMockEvent();
 
-      await commands.quickSave(event);
+      await runQuickSave(event);
 
       expect(event.completed).toHaveBeenCalledTimes(1);
     });

@@ -4,7 +4,11 @@ import { SaveFlow, type SavedDocumentPaneState } from '../SaveFlow';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
-import { writeIdentityStampAfterSave, type DocumentIdentityState } from '../../services/documentIdentityService';
+import {
+  writeIdentityStampAfterSave,
+  type DocumentIdentityState,
+  type ResolvedRelatedRecord,
+} from '../../services/documentIdentityService';
 import { subscribeToDocumentChanges } from '../../services/documentChangeDetectionService';
 import type { ContactOption } from './CreateTodoView';
 
@@ -73,6 +77,8 @@ export interface SaveViewProps {
   documentIdentity?: DocumentIdentityState;
   /** Re-runs identity resolution for the "Check again" / "Try again" actions. */
   onRetryDocumentIdentity?: () => void;
+  /** Task 111: the pane filed the open document to a record — `App` puts it into the identity state. */
+  onDocumentFiled?: (documentId: string, record: ResolvedRelatedRecord) => void;
   /**
    * task 094: the saved-state bundle lifted to `App.tsx`, threaded straight through to `SaveFlow` so a
    * Save-tab remount (switching to To Do/Find and back) does not lose it. Omitted → `SaveFlow` keeps
@@ -122,6 +128,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   resolvedDocumentId,
   documentIdentity,
   onRetryDocumentIdentity,
+  onDocumentFiled,
   savedState,
   onSavedStateChange,
   onSearchContacts,
@@ -391,6 +398,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
         {...(documentIdentity !== undefined ? { documentIdentity } : {})}
         {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
+        {...(onDocumentFiled ? { onDocumentFiled } : {})}
         {...(onSearchContacts ? { onSearchContacts } : {})}
       />
     </div>

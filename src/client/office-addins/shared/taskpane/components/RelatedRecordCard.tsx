@@ -109,10 +109,13 @@ export function RelatedRecordCard({
       <div className={styles.sectionTitle}>
         <Text weight="semibold">Filed to</Text>
       </div>
-      {outcome.kind === 'unassociated' ? (
+      {outcome.kind === 'unassociated' || outcome.kind === 'unknown' ? (
         <Card>
           <Text size={200} className={styles.unassociated}>
-            This document is not filed to a record yet.
+            {/* Task 111: a stamp-only identity does not know the record — never claim "not filed". */}
+            {outcome.kind === 'unknown'
+              ? 'Filing record not available here.'
+              : 'This document is not filed to a record yet.'}
           </Text>
         </Card>
       ) : (

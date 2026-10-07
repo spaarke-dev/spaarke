@@ -39,7 +39,8 @@ import {
   type StageStatus,
   type UseSaveFlowOptions,
 } from '../hooks/useSaveFlow';
-import type { DocumentIdentityState } from '../services/documentIdentityService';
+import type { DocumentIdentityState, ResolvedRelatedRecord } from '../services/documentIdentityService';
+import { fileDocumentToRecord } from '../services/documentFilingService';
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
@@ -50,7 +51,13 @@ import {
 import { useCreateRecordFormData } from '../hooks/useCreateRecordFormData';
 import type { CreateRecordInput } from './CreateRecordForm';
 import type { ContactOption } from './views/CreateTodoView';
-import { openFileUrl, openDesktopUrl, openRecord } from '../services/openRecordLauncher';
+import {
+  openFileUrl,
+  openDesktopUrl,
+  openRecord,
+  buildOpenRecordUrl,
+  configuredSpaarkeAppName,
+} from '../services/openRecordLauncher';
 // Task 099 (ADR-012/ADR-044, amended 2026-10-05): the ONE shared `cleanGuid`, by exact-path alias — not the barrel.
 import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from '../utils/errorMessages';
@@ -272,6 +279,15 @@ const useStyles = makeStyles({
     display: 'block',
     marginTop: tokens.spacingVerticalXXS,
   },
+  // Task 111: the "File to record" action under the picker, and its error line.
+  filingActions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+  },
+  filingError: {
+    color: tokens.colorStatusDangerForeground1,
+  },
   collisionNote: {
     display: 'block',
     marginTop: tokens.spacingVerticalXS,
@@ -297,6 +313,25 @@ const useStyles = makeStyles({
  * version save of a document whose filing it never resolved) — the bar then says nothing about a record.
  */
 type FiledTo = string | null | undefined;
+
+/**
+ * Task 111: what the green confirmation box shows. Built from the document this pane just saved (the post-save
+ * state) OR from a document that was already in Spaarke when the pane opened (the resolved state) — one box, so the
+ * two cannot drift. `filingUnknown` = the pane cannot tell which record the document is filed to (a stamp-only
+ * identity): the box then says so instead of "filed" or "not filed".
+ */
+interface SavedBarModel {
+  documentId: string;
+  title: string;
+  filedTo: FiledTo;
+  filingUnknown?: boolean;
+  /** The wording for `filedTo === null`. */
+  notFiledText: string;
+  /** What Copy Link copies; `null` = nothing to copy. */
+  copyUrl: string | null;
+  /** The resolved variant hides Copy Link when there is nothing to copy; the post-save one shows it disabled. */
+  hideCopyWithoutUrl: boolean;
+}
 
 /** Task 088: taken when a save is SUBMITTED, committed to {@link SavedDocumentState} when it completes. */
 interface PendingSaveSnapshot {
@@ -434,6 +469,12 @@ export interface SaveFlowProps {
    * override; `undefined` means identity does not apply (Outlook) → a plain create save, as before.
    */
   documentIdentity?: DocumentIdentityState;
+  /**
+   * Task 111: called after the pane FILED the open (already-in-Spaarke, known-unfiled) document to a record, so the
+   * host can put that record into its identity state — the card and the confirmation box then show it without a
+   * reload. `documentId` is canonical (ADR-044).
+   */
+  onDocumentFiled?: (documentId: string, record: ResolvedRelatedRecord) => void;
   /** Re-runs identity resolution ("Check again" / "Try again"). Also the task 027 / FR-10
    * return-path re-read for the related-record card, fired on focus/visibility after the pane
    * regains focus following a record opened via the browser-tab escape hatch. */
@@ -568,6 +609,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     resolvedDocumentId,
     documentIdentity,
     onRetryDocumentIdentity,
+    onDocumentFiled,
     canOpenRecord = false,
     canSuggestRelatedRecords = false,
     canProvideDocumentName = false,
@@ -915,6 +957,66 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
 
   // The document "Open Document" opens: the one this pane just saved, else the one identity resolution found.
   const openableDocumentId = savedDocument?.documentId ?? resolvedDocumentId;
+
+  // ── Task 111 (owner UAT round 11 items 3-6): a document ALREADY in Spaarke ────────────────────────
+  // A document that opened as a resolved identity (no save in this pane session) shows the SAME green box as after
+  // a save — in the default version mode only: once the user picks "Save as new document" the pane is composing a
+  // different document and the box would describe the wrong one. The record it names comes from the identity.
+  //
+  // `resolvedRelatedRecord.kind` decides everything about filing, and only a KNOWN-unfiled document is offered the
+  // picker + "File to record": `'unassociated'` is a URL-resolved identity whose record slots the server read and
+  // found empty. `'unknown'` is a stamp-only identity — nothing was read, so it must never be filed (the route sets a
+  // lookup and never clears another slot; a document filed to a slot the pane cannot see would get a second parent).
+  const resolvedIdentity =
+    documentIdentity && typeof documentIdentity === 'object' && documentIdentity.kind === 'resolved'
+      ? documentIdentity
+      : null;
+  const showResolvedBox = savedDocument === null && isVersionMode && resolvedIdentity !== null;
+  const showFilingPicker = showResolvedBox && resolvedRelatedRecord.kind === 'unassociated';
+  const [fileTarget, setFileTarget] = useState<EntitySearchResult | null>(null);
+  const [filing, setFiling] = useState(false);
+  const [filingError, setFilingError] = useState<string | null>(null);
+  // A new identity (retry, or the filing itself landing) starts the picker afresh.
+  useEffect(() => {
+    setFileTarget(null);
+    setFilingError(null);
+  }, [documentIdentity]);
+
+  const handleFileTargetSelect = useCallback(
+    (entity: EntitySearchResult | null) => {
+      if (entity?.canFile === false) return; // same backstop as handleEntitySelect (task 084)
+      setFileTarget(entity);
+      setFilingError(null);
+      if (entity) {
+        announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
+      }
+    },
+    [announce]
+  );
+
+  const handleFileToRecord = useCallback(async () => {
+    if (!resolvedIdentity || !fileTarget || filing) return;
+    setFiling(true);
+    setFilingError(null);
+    const outcome = await fileDocumentToRecord({
+      apiBaseUrl,
+      getAccessToken,
+      documentId: resolvedIdentity.documentId,
+      entityType: fileTarget.entityType,
+      recordId: fileTarget.id,
+      recordName: fileTarget.name,
+      // `displayInfo` is the record's number for a Matter/Project; an Invoice's is not a number.
+      recordNumber: fileTarget.entityType === 'Invoice' ? null : (fileTarget.displayInfo ?? null),
+    });
+    setFiling(false);
+    if (outcome.ok) {
+      announce(`Filed to ${fileTarget.name}.`, 'polite');
+      onDocumentFiled?.(resolvedIdentity.documentId, outcome.record);
+    } else {
+      setFilingError(outcome.message);
+      announce(outcome.message, 'assertive');
+    }
+  }, [resolvedIdentity, fileTarget, filing, apiBaseUrl, getAccessToken, announce, onDocumentFiled]);
 
   // Return path (Spike-2 §d): an unmodified Dataverse form never calls `messageParent`, so every
   // option Spike-2 compared — including this one — falls back to a focus/visibility-triggered
@@ -1425,19 +1527,23 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   );
 
   // Handle copy link. Task 088: unchanged on purpose (owner, 2026-10-03) — it copies what it always copied, the
-  // saved file's link; only View Document moved to the Spaarke record.
-  const handleCopyLink = useCallback(async () => {
-    if (savedDocumentUrl) {
-      try {
-        await navigator.clipboard.writeText(savedDocumentUrl);
-        announce('Link copied', 'polite');
-        flashButton('copy', 'done');
-      } catch {
-        announce('Failed to copy link', 'assertive');
-        flashButton('copy', 'failed');
+  // saved file's link; only View Document moved to the Spaarke record. Task 111: the URL is the bar's own
+  // (`SavedBarModel.copyUrl`) — the session's saved link, or, for a document already in Spaarke, its record link.
+  const handleCopyLink = useCallback(
+    async (url: string | null) => {
+      if (url) {
+        try {
+          await navigator.clipboard.writeText(url);
+          announce('Link copied', 'polite');
+          flashButton('copy', 'done');
+        } catch {
+          announce('Failed to copy link', 'assertive');
+          flashButton('copy', 'failed');
+        }
       }
-    }
-  }, [savedDocumentUrl, announce, flashButton]);
+    },
+    [announce, flashButton]
+  );
 
   // Task 105 (UAT round 7 item 3): View Document / Copy Link confirm the click for ~2 s, then revert.
   const handleViewDocument = useCallback(
@@ -1512,23 +1618,27 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Task 088 (UAT-1/6, owner 2026-10-03 "Keep the form"): the confirmation bar at the top of the SAVED state.
   // Replaces the full-screen success card. Names the record the document is filed to — or says it is filed to
   // none — with View Document (the Spaarke record, in the Spaarke app) and Copy Link (unchanged).
-  const renderSavedBar = (saved: SavedDocumentState) => (
+  const renderSavedBar = (bar: SavedBarModel) => (
     <div ref={savedBarRef} tabIndex={-1} className={styles.savedBarWrap}>
       <MessageBar intent="success" layout="multiline">
         <MessageBarBody>
-          <MessageBarTitle>
-            {saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke'}
-          </MessageBarTitle>
-          {saved.filedTo !== undefined && (
+          <MessageBarTitle>{bar.title}</MessageBarTitle>
+          {bar.filingUnknown ? (
             <Text size={200} className={styles.savedBarDetail}>
-              {saved.filedTo === null ? (
-                'Not filed to a record.'
-              ) : (
-                <>
-                  Filed to <Text weight="semibold">{saved.filedTo}</Text>.
-                </>
-              )}
+              Filing record not available here.
             </Text>
+          ) : (
+            bar.filedTo !== undefined && (
+              <Text size={200} className={styles.savedBarDetail}>
+                {bar.filedTo === null ? (
+                  bar.notFiledText
+                ) : (
+                  <>
+                    Filed to <Text weight="semibold">{bar.filedTo}</Text>.
+                  </>
+                )}
+              </Text>
+            )
           )}
         </MessageBarBody>
         <MessageBarActions>
@@ -1540,7 +1650,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               size="small"
               className={styles.savedBarButton}
               icon={buttonFeedback.view === 'done' ? <CheckmarkRegular /> : <OpenRegular />}
-              onClick={() => handleViewDocument(saved.documentId)}
+              onClick={() => handleViewDocument(bar.documentId)}
             >
               {buttonFeedback.view === 'done'
                 ? 'Opened'
@@ -1549,24 +1659,54 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
                   : 'View Document'}
             </Button>
           )}
-          <Button
-            appearance="outline"
-            size="small"
-            className={styles.savedBarButton}
-            icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
-            onClick={handleCopyLink}
-            disabled={!savedDocumentUrl}
-          >
-            {buttonFeedback.copy === 'done'
-              ? 'Copied'
-              : buttonFeedback.copy === 'failed'
-                ? "Couldn't copy"
-                : 'Copy Link'}
-          </Button>
+          {(bar.copyUrl !== null || !bar.hideCopyWithoutUrl) && (
+            <Button
+              appearance="outline"
+              size="small"
+              className={styles.savedBarButton}
+              icon={buttonFeedback.copy === 'done' ? <CheckmarkRegular /> : <CopyRegular />}
+              onClick={() => void handleCopyLink(bar.copyUrl)}
+              disabled={!bar.copyUrl}
+            >
+              {buttonFeedback.copy === 'done'
+                ? 'Copied'
+                : buttonFeedback.copy === 'failed'
+                  ? "Couldn't copy"
+                  : 'Copy Link'}
+            </Button>
+          )}
         </MessageBarActions>
       </MessageBar>
     </div>
   );
+
+  // The box for a save this pane just made.
+  const savedBarOf = (saved: SavedDocumentState): SavedBarModel => ({
+    documentId: saved.documentId,
+    title: saved.lastSave === 'version' ? 'New version saved to Spaarke' : 'Saved to Spaarke',
+    filedTo: saved.filedTo,
+    notFiledText: 'Not filed to a record.',
+    copyUrl: savedDocumentUrl ?? null,
+    hideCopyWithoutUrl: false,
+  });
+
+  // Task 111: the box for a document that was already in Spaarke when the pane opened. Copy Link copies the session's
+  // saved URL when there is one, else the document's Spaarke record link; with neither, it is not shown.
+  const resolvedBarOf = (identity: { documentId: string }): SavedBarModel => {
+    const orgUrl = process.env.ORG_URL;
+    const recordUrl = orgUrl
+      ? buildOpenRecordUrl(orgUrl, 'sprk_document', cleanGuid(identity.documentId), configuredSpaarkeAppName())
+      : null;
+    return {
+      documentId: identity.documentId,
+      title: 'Saved to Spaarke',
+      filedTo: resolvedRelatedRecord.kind === 'associated' ? relatedRecordLabel(resolvedRelatedRecord) : null,
+      filingUnknown: resolvedRelatedRecord.kind === 'unknown',
+      notFiledText: 'Not filed to a record yet.',
+      copyUrl: savedDocumentUrl ?? recordUrl,
+      hideCopyWithoutUrl: true,
+    };
+  };
 
   // Render duplicate state
   const renderDuplicateState = () => (
@@ -1737,9 +1877,12 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const renderForm = () => {
     // Task 099 (owner item 2): while "+ New" is open, only the pills + the create form show. Only meaningful
     // where the picker is rendered (a new document); version mode never shows it.
-    const hideForCreate = relatedCreating && !isVersionMode;
+    const hideForCreate = relatedCreating && (!isVersionMode || showFilingPicker);
     return (
       <>
+        {/* Task 111: a document already in Spaarke says so with the same green box a save ends on. */}
+        {!hideForCreate && showResolvedBox && resolvedIdentity && renderSavedBar(resolvedBarOf(resolvedIdentity))}
+
         {!hideForCreate &&
           // Task 099 (owner item 5): the Document header IS where the name is edited (or shown locked) — there is
           // no separate "Document Details" card any more.
@@ -1759,12 +1902,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           together for an explicit "a new document" override. The click seam (`onOpenRecord`) is task 027 /
           FR-10 (NFR-10): supplied only when `canOpenRecord` is true — absent it, the card renders as
           plain, non-interactive text (its own fallback, not a host-type branch here). */}
-        {!hideForCreate && (
+        {!hideForCreate && !showFilingPicker && (
           <RelatedRecordCard
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             {...(openRecordAvailable ? { onOpenRecord: handleOpenRelatedRecord } : {})}
           />
         )}
+
+        {/* Task 111 (owner items 4-5): a KNOWN-unfiled document (a URL-resolved identity whose record slots the server
+          read as empty) gets the record picker in place of the empty "Filed to" card, with an explicit "File to
+          record" action. Never offered for a stamp-only identity (record unknown — see showFilingPicker). */}
+        {showFilingPicker && renderFilingSection()}
 
         {/* Related to applies to a NEW document only. A version save (task 024) keeps the existing record's
           name and associations — the server never renames or re-associates on that path (task 023 D-5) — so
@@ -1955,6 +2103,54 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     );
   }
 
+  // Task 111: the filing section — the existing picker (same types, search and "+ New" as a new save) plus the
+  // explicit "File to record" action. Its own selection state (`fileTarget`), never `selectedEntity`: a version save
+  // sends no record, and the two must not share a selection.
+  function renderFilingSection(): React.ReactElement {
+    return (
+      <div className={styles.section}>
+        {!relatedCreating && (
+          <div className={styles.sectionTitle}>
+            <Text weight="semibold">File to a record</Text>
+          </div>
+        )}
+        <RelatedToPicker
+          value={fileTarget}
+          onChange={handleFileTargetSelect}
+          candidates={relatedCandidates}
+          candidatesLoading={candidatesLoading}
+          onSearch={relatedSearch}
+          onCreateRecord={createRelatedRecord}
+          allowedTypes={['Matter', 'Project', 'Invoice']}
+          defaultType="Matter"
+          createForm={createFormData}
+          {...(onSearchContacts ? { onSearchContacts } : {})}
+          onCreatingChange={setRelatedCreating}
+          disabled={filing}
+        />
+        {!relatedCreating && (
+          <>
+            {filingError && (
+              <Text size={200} className={styles.filingError} role="alert">
+                {filingError}
+              </Text>
+            )}
+            <div className={styles.filingActions}>
+              <Button
+                appearance="primary"
+                {...(filing ? { icon: <Spinner size="tiny" /> } : {})}
+                onClick={() => void handleFileToRecord()}
+                disabled={!fileTarget || filing}
+              >
+                {filing ? 'Filing...' : 'File to record'}
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   // Footer actions (task 099, owner round 5 item 6 + decision A).
   // BEFORE a save: wizard pattern — Cancel (left); Open Document then Save (right). Open Document (the
   // `sprk_document` record, in the Spaarke app) shows when there is a document to open — the resolved one — and
@@ -1982,7 +2178,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           Cancel
         </Button>
         <div className={styles.footerEnd}>
-          {openRecordAvailable && openableDocumentId && (
+          {/* Task 111 (owner item 6): the green box above already has View Document — no second button. */}
+          {openRecordAvailable && openableDocumentId && !showResolvedBox && (
             <Button
               appearance="secondary"
               icon={<OpenRegular />}
@@ -2018,7 +2215,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     const lockedName = saved.lastSave === 'version' ? identityName || saved.savedName : saved.savedName;
     return (
       <>
-        {renderSavedBar(saved)}
+        {renderSavedBar(savedBarOf(saved))}
         {renderDocumentHeader(canSaveNewVersion ? 'locked' : 'readonly', lockedName)}
         <div className={styles.section}>
           <DocumentProfileSection
