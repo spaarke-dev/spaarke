@@ -437,8 +437,8 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                     // make the notification playbooks runnable with no per-tenant or per-user
                     // configuration; per-user preference overrides can be layered later.
                     //
-                    // Format: dates as FetchXML-compatible UTC strings ("yyyy-MM-ddTHH:mm:ssZ").
-                    // Integer windows: hour/day windows as plain integer strings.
+                    // Format: dates as "yyyy-MM-dd" calendar dates (task 098, below) — before task 098 they were UTC
+                    // instants ("yyyy-MM-ddTHH:mm:ssZ"). Integer windows: hour/day windows as plain integer strings.
                     //
                     // Task 098: {{todayUtc}} / {{dueSoonWindowUtc}} are compared with Date Only columns
                     // (sprk_event.sprk_duedate / sprk_finalduedate — the "Query Overdue Tasks" node filters

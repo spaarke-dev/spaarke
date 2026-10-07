@@ -127,6 +127,7 @@ public class EventDateOnlyTests
                 Name = "Filing",
                 DueDate = new DateOnly(2026, 10, 20),
                 BaseDate = new DateOnly(2026, 10, 1),
+                OwningTeamId = Guid.NewGuid(), // task 146 (master): never app-owned
             }).Should().Contain("sprk_duedate", "2026-10-20").And.Contain("sprk_basedate", "2026-10-01");
         }
         finally

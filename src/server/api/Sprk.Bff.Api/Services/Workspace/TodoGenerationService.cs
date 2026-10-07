@@ -443,13 +443,14 @@ public sealed class TodoGenerationService : IScheduledJob
             return (0, 0, 1);
         }
 
+        var utcFallbacks = new UtcFallbackTally();
         foreach (var evt in overdueEvents)
         {
             var todoTitle = $"Overdue: {evt.Name}";
             try
             {
                 if (evt.DueDate is not { } due
-                    || !await HoldsForRecipientAsync("Rule 1", evt, recipients, today => due < today, ct))
+                    || !await HoldsForRecipientAsync("Rule 1", evt, recipients, today => due < today, utcFallbacks, ct))
                 {
                     continue; // not overdue yet where its recipient is (D-25)
                 }
@@ -496,6 +497,8 @@ public sealed class TodoGenerationService : IScheduledJob
                 failed++;
             }
         }
+
+        LogUtcFallbacks("Rule 1", utcFallbacks);
 
         if (!_options.EnableEventSourcedGeneration && wouldCreate > 0)
         {
@@ -617,6 +620,7 @@ public sealed class TodoGenerationService : IScheduledJob
             return (0, 0, 1);
         }
 
+        var utcFallbacks = new UtcFallbackTally();
         foreach (var evt in upcomingEvents)
         {
             if (evt.DueDate is not { } due)
@@ -628,7 +632,7 @@ public sealed class TodoGenerationService : IScheduledJob
             try
             {
                 if (!await HoldsForRecipientAsync(
-                        "Rule 3", evt, recipients, today => today <= due && due <= today.AddDays(window), ct))
+                        "Rule 3", evt, recipients, today => today <= due && due <= today.AddDays(window), utcFallbacks, ct))
                 {
                     continue; // outside its recipient's window (D-25)
                 }
@@ -680,6 +684,8 @@ public sealed class TodoGenerationService : IScheduledJob
             }
         }
 
+        LogUtcFallbacks("Rule 3", utcFallbacks);
+
         if (!_options.EnableEventSourcedGeneration && wouldCreate > 0)
         {
             _logger.LogInformation(
@@ -702,10 +708,13 @@ public sealed class TodoGenerationService : IScheduledJob
     /// <remarks>
     /// When the judgement is the same on every today anyone can have at this instant (UTC date ± 1), it is decided
     /// without a lookup — so only events due within a day of a boundary cost the event read and, per distinct person,
-    /// the time-zone read. A failed event read is a UTC judgement with a warning, never a failed rule.
+    /// the time-zone read. A failed event read is a UTC judgement, never a failed rule. Each UTC judgement is logged at
+    /// Debug and counted in <paramref name="utcFallbacks"/>; the rule logs ONE warning with the count
+    /// (<see cref="LogUtcFallbacks"/>), so a nightly run over team-owned, unassigned events is not a warning per event.
     /// </remarks>
     private async Task<bool> HoldsForRecipientAsync(
-        string rule, EventEntity evt, DataverseRecipientDays recipients, Func<DateOnly, bool> holds, CancellationToken ct)
+        string rule, EventEntity evt, DataverseRecipientDays recipients, Func<DateOnly, bool> holds,
+        UtcFallbackTally utcFallbacks, CancellationToken ct)
     {
         var verdicts = recipients.PossibleTodays.Select(holds).Distinct().ToList();
         if (verdicts.Count == 1)
@@ -721,20 +730,47 @@ public sealed class TodoGenerationService : IScheduledJob
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
-            _logger.LogWarning(ex,
-                "todo_today_utc_fallback: TodoGeneration {Rule}: event {EventId}'s assignee and owner could not be read; "
-                + "judged on the UTC date {Today:yyyy-MM-dd}", rule, evt.Id, recipients.UtcToday);
-            return holds(recipients.UtcToday);
+            day = new RecipientDay(recipients.UtcToday, RecipientDaySource.Utc, null, "event-read-failed", ex);
         }
 
         if (day.Source == RecipientDaySource.Utc)
         {
-            _logger.LogWarning(
+            utcFallbacks.Add(evt.Id, day);
+            _logger.LogDebug(day.Error,
                 "todo_today_utc_fallback: TodoGeneration {Rule}: event {EventId} has no assignee or owner with a time zone "
                 + "({Reason}); judged on the UTC date {Today:yyyy-MM-dd}", rule, evt.Id, day.FallbackReason, day.Today);
         }
 
         return holds(day.Today);
+    }
+
+    /// <summary>The events of one rule that were judged on the UTC date, for the rule's one summary warning.</summary>
+    private sealed class UtcFallbackTally
+    {
+        public int Count { get; private set; }
+        public Guid? FirstEventId { get; private set; }
+        public string? FirstReason { get; private set; }
+        public Exception? FirstError { get; private set; }
+
+        public void Add(Guid eventId, RecipientDay day)
+        {
+            Count++;
+            FirstEventId ??= eventId;
+            FirstReason ??= day.FallbackReason;
+            FirstError ??= day.Error;
+        }
+    }
+
+    /// <summary>One warning per rule when any event was judged on the UTC date (D-25: "UTC with a warning").</summary>
+    private void LogUtcFallbacks(string rule, UtcFallbackTally tally)
+    {
+        if (tally.Count == 0)
+            return;
+
+        _logger.LogWarning(tally.FirstError,
+            "todo_today_utc_fallback: TodoGeneration {Rule}: {Count} event(s) near a day boundary had no assignee or owner "
+            + "with a readable time zone and were judged on the UTC date (first: event {EventId}, {Reason}; the rest are "
+            + "logged at Debug)", rule, tally.Count, tally.FirstEventId, tally.FirstReason);
     }
 
     /// <summary>A calendar date as the event query's due-date bound (it formats <c>yyyy-MM-dd</c>).</summary>

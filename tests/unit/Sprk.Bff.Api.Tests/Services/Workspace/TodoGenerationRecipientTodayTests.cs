@@ -55,6 +55,10 @@ public class TodoGenerationRecipientTodayTests
     private readonly Dictionary<Guid, (Guid? Assignee, EntityReference? Owner)> _eventPeople = new();
     private readonly List<EventEntity> _eventRows = new();
 
+    private readonly HashSet<Guid> _contactsOfSeveralUsers = new();
+    private readonly HashSet<Guid> _contactsThatFailToRead = new();
+    private readonly HashSet<Guid> _eventsThatFailToRead = new();
+
     private readonly List<Guid> _zoneReads = new();
     private readonly List<Guid> _contactToUserQueries = new();
 
@@ -158,6 +162,33 @@ public class TodoGenerationRecipientTodayTests
         fallbackWarnings.Should().OnlyContain(e => e.Message.Contains("no-assignee;owner-is-team"));
     }
 
+    [Fact]
+    public async Task AnAssigneeThatIsNoSingleUser_OrCannotBeRead_FallsToTheOwner_AndAnUnreadableEventToUtcWithOneWarning()
+    {
+        var laOwner = Person(PacificCode);
+        var collision = Guid.NewGuid();
+        _contactsOfSeveralUsers.Add(collision);
+        var unreadable = Guid.NewGuid();
+        _contactsThatFailToRead.Add(unreadable);
+
+        AddEvent("Assignee represents several users", NewYorkToday, collision, User(laOwner));
+        AddEvent("Assignee cannot be read", NewYorkToday, unreadable, User(laOwner));
+        AddEvent("Event cannot be read", NewYorkToday, assignee: null, owner: User(laOwner));
+        _eventsThatFailToRead.Add(EventIdOf("Event cannot be read"));
+
+        await CreateService().RunGenerationPassAsync(CancellationToken.None);
+
+        Names("Overdue:").Should().BeEquivalentTo(new[] { "Overdue: Event cannot be read" },
+            "a collision or an unreadable contact gives no zone, so the Los Angeles owner's today (10-06) decides; an event "
+            + "whose people cannot be read at all is judged on the UTC date (10-07)");
+        var rule1Warnings = _logger.Entries
+            .Where(e => e.Level == LogLevel.Warning && e.Message.Contains("todo_today_utc_fallback") && e.Message.Contains("Rule 1"))
+            .ToList();
+        rule1Warnings.Should().ContainSingle("the rule logs one summary warning, not one per event");
+        rule1Warnings[0].Message.Should().Contain("event-read-failed");
+        rule1Warnings[0].Exception.Should().NotBeNull("the read failure is logged with its exception");
+    }
+
     // ── One time-zone read per distinct user per run ────────────────────────────────────────────────────────────
 
     [Fact]
@@ -228,6 +259,10 @@ public class TodoGenerationRecipientTodayTests
                 var value = (Guid)condition.Values[0];
                 if (condition.AttributeName == "sprk_primarycontact")
                     _contactToUserQueries.Add(value);
+                if (_contactsThatFailToRead.Contains(value))
+                    throw new InvalidOperationException("systemuser read failed");
+                if (_contactsOfSeveralUsers.Contains(value))
+                    return new EntityCollection(new List<Entity> { new("systemuser", Guid.NewGuid()), new("systemuser", Guid.NewGuid()) });
                 var user = condition.AttributeName switch
                 {
                     "sprk_primarycontact" => _userByPrimaryContact.TryGetValue(value, out var u) ? u : (Guid?)null,
@@ -254,6 +289,9 @@ public class TodoGenerationRecipientTodayTests
 
     private Entity Retrieve(string entity, Guid id)
     {
+        if (entity == "sprk_event" && _eventsThatFailToRead.Contains(id))
+            throw new InvalidOperationException("sprk_event read failed");
+
         var row = new Entity(entity, id);
         switch (entity)
         {

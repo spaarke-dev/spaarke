@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Api.Events;
 /// personal time zone (<c>usersettings.timezonecode</c>, read by <see cref="DataverseUserTimeZone"/>). The model-driven app
 /// uses that same setting when the user picks a date in a form, so a completion through the API lands on the day the same
 /// user would have entered by hand. The only caller of this route today is the Copilot agent (<c>completeEvent</c>), which
-/// has no reliable notion of the user's local date. Deriving the date on the server also keeps it a server-owned value
-/// (DATAVERSE-WRITE-PATH-ARCHITECTURE WP-1) that a client cannot back-date.</para>
+/// has no reliable notion of the user's local date. This is the API route's own choice, not a record invariant:
+/// <c>sprk_completeddate</c> is client-writable (the ribbon, EventsPage and the complete dialog, where the user picks the
+/// date, write it through <c>Xrm.WebApi</c>), so it is not a WP-1 server-owned value.</para>
 /// <para><b>Fallback: the UTC date</b> (the former behaviour), logged as a warning, when the caller or their zone cannot
 /// be resolved. Completing a task never fails because its date could not be localised.</para>
 /// <para>§11: <i>Existing</i> — <see cref="DataverseUserTimeZone"/> owns the time-zone read; this class adds only the
