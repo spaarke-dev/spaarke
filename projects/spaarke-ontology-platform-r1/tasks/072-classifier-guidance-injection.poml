@@ -4,7 +4,7 @@
     <title>Guidance injection into the classifier prompt</title>
     <phase>7 Inquiry and the classifier</phase>
     <gate>004 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes classifier behavior, which is the conjunction weakest input.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,6 +85,12 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-38 and NFR-09. Issue 1049 is the silent-degradation tracker.</notes>
+
+  <completion>
+    <date>2026-10-07</date>
+    <summary>LookupChoicesResolver reads sprk_classifierguidance for sprk_triagecategory (single entry in a guidance-column map) and places "name - guidance" lines on a side key (guidance:{ref}); the value at the reference key, which becomes the schema enum, stays the bare names. PromptSchemaRenderer renders an "Allowed values" section for both structured and text output (the TRIAGE-EMAIL action is structuredOutput:true, where the prompt previously listed no categories at all). Choices-resolution failures (read threw, empty result, guidance read failed) emit ai_choices_resolution_failures_total on the existing Sprk.Bff.Api.Ai meter (#1049). Deviation: the change also touches PromptSchemaRenderer, IScopeResolverService and ScopeResolverService, not only the resolver; see notes/072-progress.md.</summary>
+    <evidence>6559 passed, 0 failed in Services.Ai + Seam tests; live-schema test (TriageGuidanceLiveSchemaTests) passes against spaarkedev1; publish 36.24 MB vs 36.23 MB parent (+0.01); no vulnerable packages.</evidence>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
