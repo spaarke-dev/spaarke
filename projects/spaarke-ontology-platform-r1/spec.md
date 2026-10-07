@@ -956,6 +956,10 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 | **D-26** | Modals | **Adopt** the canonical approach (`SprkModal` envelope + `WizardShell` engine, launched in-app, ADR-050 amendment = path B) **and migrate today's wizards off `navigateTo`** in this project (~12–17 dev-days, own phase) | ADR-050 amendment (main session, `.claude/`); modal phase tasks |
 | **D-27** | Event due date | The Do lane and Reschedule use **`sprk_duedate` always**; the Daily Briefing changes to match; `sprk_finalduedate` becomes informational | Briefing reader change; evaluator; reschedule route |
 | **D-28** | Event status column | **`statuscode` is authoritative**; `sprk_eventstatus` is deprecated (a task checks remaining readers before removal); Completed stays Active-state | Small cleanup task |
+| **D-30** (O-1, 2026-10-07) | Severity source | A **severity column on `sprk_policy`** reusing the Signal's Info / Warning / Critical; UI labels High / Medium / Low; set per rule by the admin | Task 007 |
+| **D-31** (O-5, 2026-10-07) | Overdue To Do rule | **In R1, for ALL To Dos.** A To Do filed under a matter groups under that matter; a To Do with **no matter** gets a Signal secured by the **To Do owner's business unit** (a second ownership path in the writer) | Tasks 037, 061 |
+| **D-32** (O-19, 2026-10-07) | Off → On | Re-enabling a policy **re-raises** its PolicyRetired subjects that still hold, as new episodes | Task 031/033 |
+| **O-17 (pending)** | Secure matters, and the D-15 skip itself | Owner asked why secured matters are skipped and whether protecting them is hard; **scoping running** (`notes/secure-signals-scoping.md`). If cheap, D-15's skip is replaced by registering Signals/Decision Records as secure children in R1 | 031, 037, 008 |
 | **D-29** | Smaller | To Do composite score → **calendar days**, one shared function (boards re-rank once). Writer gets **AppendTo** on `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_workassignment` (closes F26). Caller-unresolved stays **#1312's single 403**. Tier 2 ADR Compliance timeout → **5 min** (own small PR) | Role edits; To Do scoring task; CI PR |
 
 ---
