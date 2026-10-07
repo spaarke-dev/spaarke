@@ -838,7 +838,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       const pickUser = jest.fn(async (): Promise<IUserPick | null> => EXTERNAL_PICK);
       renderWithTheme(<AccessGrantModal {...makeProps({ pickUser })} />);
       fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
-      expect(await screen.findByText('Internal system user · ralph.schroeder@hotmail.com')).toBeInTheDocument();
+      expect(await screen.findByText('System user · ralph.schroeder@hotmail.com')).toBeInTheDocument();
     });
 
     it('the external-user refusal names the person and says why, instead of "1 failed. Please try again."', async () => {
@@ -886,6 +886,27 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       expect(screen.queryByText(/Please try again/)).not.toBeInTheDocument();
     });
 
+    it.each([
+      ['sdap.access.user_share.subject_no_access', 403, 'This person is on the No Access list for this record, so it was not shared with them.'],
+      ['sdap.access.user_share.no_access_unverifiable', 500, 'Whether this person is on the No Access list could not be checked, so nothing was shared. Try again.'],
+    ])('a %s refusal names the person instead of the generic retry message', async (reasonCode, status, detail) => {
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user') ? jsonResponse({ title: 'Not shared', detail, reasonCode }, false, status) : null
+      );
+      renderWithTheme(
+        <AccessGrantModal
+          {...makeProps({
+            pickUser,
+            authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+          })}
+        />
+      );
+      await pickAndAdd('Uma Userton');
+      expect(await screen.findByText(text => text.includes(`System user Uma Userton: ${detail}`))).toBeInTheDocument();
+      expect(screen.queryByText(/1 failed\. Please try again/)).not.toBeInTheDocument();
+    });
+
     it('while the lookup is open the modal stays visible (dimmed), instead of disappearing', async () => {
       let resolvePick: (v: IUserPick | null) => void = () => {};
       const pickUser = jest.fn(() => new Promise<IUserPick | null>(r => (resolvePick = r)));
@@ -895,10 +916,12 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
 
       const dialog = screen.getByRole('dialog');
       expect(dialog.style.visibility).not.toBe('hidden');
-      expect(dialog.style.opacity).toBe('0.6');
+      expect(dialog.style.filter).toBe('opacity(0.6)');
+      expect(dialog).toHaveAttribute('inert');
 
       resolvePick(null);
-      await waitFor(() => expect(screen.getByRole('dialog').style.opacity).toBe(''));
+      await waitFor(() => expect(screen.getByRole('dialog').style.filter).toBe(''));
+      expect(screen.getByRole('dialog')).not.toHaveAttribute('inert');
     });
   });
 });

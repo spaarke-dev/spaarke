@@ -151,8 +151,14 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     );
     const dialog = screen.getByRole('dialog');
     expect(dialog.style.visibility).not.toBe('hidden');
-    expect(dialog.style.opacity).toBe('0.6');
+    expect(dialog.style.filter).toBe('opacity(0.6)');
     expect(dialog.style.pointerEvents).toBe('none');
+    // Docked left of a right-edge pane: the right margin clears the pane, the surface narrows to fit.
+    expect(dialog.style.marginLeft).toBe('auto');
+    expect(dialog.style.marginRight).toBe('max(440px, 34vw)');
+    expect(dialog.style.maxWidth).toBe('calc(100vw - max(440px, 34vw) - 16px)');
+    // Keyboard cannot reach Save / Cancel / × behind the lookup.
+    expect(dialog).toHaveAttribute('inert');
     expect(within(dialog).getByText('Body')).toBeInTheDocument();
 
     // `rerender` reuses renderWithProviders' FluentProvider wrapper.
@@ -162,7 +168,8 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
       </SprkModal>
     );
     const restored = screen.getByRole('dialog');
-    expect(restored.style.opacity).toBe('');
+    expect(restored.style.filter).toBe('');
     expect(restored.style.pointerEvents).toBe('');
+    expect(restored).not.toHaveAttribute('inert');
   });
 });

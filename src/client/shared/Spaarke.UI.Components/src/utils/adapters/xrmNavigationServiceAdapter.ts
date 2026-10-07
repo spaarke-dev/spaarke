@@ -266,8 +266,10 @@ export function createXrmNavigationService(): INavigationService {
           name: r.name,
           entityType: r.entityType,
         }));
-      } catch {
-        // User cancelled the lookup dialog — return empty array
+      } catch (err) {
+        // Treated as a cancel (empty result). Logged so a real failure — e.g. a `filters` entry the platform rejects —
+        // is visible in the console instead of looking like the user closed the lookup.
+        console.warn('[xrmNavigationService] lookupObjects failed or was cancelled:', err);
         return [];
       }
     },

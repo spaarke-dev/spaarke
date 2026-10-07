@@ -62,8 +62,8 @@ export interface SprkModalProps {
    * When `true`, the modal stays MOUNTED and VISIBLE while a page-level native
    * side pane (the `Xrm.Utility.lookupObjects` advanced-lookup pane, which opens
    * at the right edge of the window) is open: the surface moves left so its
-   * right edge clears the pane, narrows to fit, dims, and ignores pointer input
-   * until the flag is cleared. The modal reads as sitting behind the lookup
+   * right edge clears the pane, narrows to fit, dims, and is `inert` (no pointer
+   * or keyboard input) until the flag is cleared. The modal reads as sitting behind the lookup
    * instead of disappearing (owner test feedback 2026-10-07, Manage Access).
    * Used together with `nonBlocking`. Ignored when `hidden` is `true`. Default `false`.
    */

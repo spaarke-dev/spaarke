@@ -464,20 +464,27 @@ function childrenIncompleteDetail(err: unknown): string | null {
  * person who can open a secure record. Its `detail` says what to do instead. */
 const UNSHARE_LAST_READER_REASON_CODE = 'sdap.access.user_share.last_reader_on_secure_record';
 
-/** Task 114 (owner test feedback 2026-10-07): `/share-user`'s refusals for a user who cannot receive a share. The
- * server's sentence says "this user", so the modal names the person, with their email because several users can share
- * a name. Without this the refusal fell through to the generic "1 failed. Please try again." */
-const USER_SHARE_ELIGIBILITY_REASON_CODES = new Set([
+/** Task 114 (owner test feedback 2026-10-07): `/share-user`'s refusals about the person being shared with — who cannot
+ * receive a share (disabled, not a person, external on a Restricted record, no such user), is on the record's No Access
+ * list, or could not be checked. The server's sentence says "this user"/"this person", so the modal names the person,
+ * with their email because several users can share a name. Without this they fell through to the generic "1 failed.
+ * Please try again." — wrong advice for every refusal here except the two read faults, whose own sentence says to try
+ * again. */
+const USER_SHARE_NAMED_REFUSAL_CODES = new Set([
   'sdap.access.user_share.user_disabled',
   'sdap.access.user_share.user_not_a_person',
   'sdap.access.user_share.user_not_internal',
+  'sdap.access.user_share.user_not_found',
+  'sdap.access.user_share.subject_no_access',
+  'sdap.access.user_share.no_access_unverifiable',
+  'sdap.access.user_share.read_failed',
 ]);
 const USER_NOT_INTERNAL_REASON_CODE = 'sdap.access.user_share.user_not_internal';
 
 /** The named sentence for a `/share-user` eligibility refusal, or `null` for any other failure. */
 function userShareRefusalDetail(err: unknown, user: IUserPick): string | null {
   if (!(err instanceof AccessGrantModalApiError)) return null;
-  if (!err.reasonCode || !USER_SHARE_ELIGIBILITY_REASON_CODES.has(err.reasonCode)) return null;
+  if (!err.reasonCode || !USER_SHARE_NAMED_REFUSAL_CODES.has(err.reasonCode)) return null;
   const who = user.email ? `${user.name} (${user.email})` : user.name;
   if (err.reasonCode === USER_NOT_INTERNAL_REASON_CODE) {
     return `System user ${who} is an external user. Restricted records cannot be shared with external users.`;
@@ -1114,7 +1121,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       items.push({
         id: u.id,
         name: u.name,
-        meta: u.email ? `Internal system user · ${u.email}` : 'Internal system user',
+        // Neutral: a user flagged external can be picked too (allowed on a non-Restricted record, round 78).
+        meta: u.email ? `System user · ${u.email}` : 'System user',
         kind: 'user',
         user: u,
       });
@@ -1355,14 +1363,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         setNotice({ intent: 'success', text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` });
       } catch (err) {
         const deny = classifyAccessFailure(err);
+        // Task 149: the share WAS written; only some related records of the secure record are not updated yet.
+        const pendingDetail = deny ? null : childrenIncompleteDetail(err);
         if (deny) setAccessDenyState(deny);
-        else
+        else if (pendingDetail) {
+          await loadData();
+          setNotice({
+            intent: 'warning',
+            text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}). ${pendingDetail}`,
+          });
+        } else
           setNotice({
             intent: 'error',
             text:
-              err instanceof AccessGrantModalApiError && err.detail
+              (entry.systemUserId ? userShareRefusalDetail(err, { id: entry.systemUserId, name }) : null) ??
+              (err instanceof AccessGrantModalApiError && err.detail
                 ? err.detail
-                : `Failed to grant ${name} access. Please try again.`,
+                : `Failed to grant ${name} access. Please try again.`),
           });
       } finally {
         setSuggestionBusy(null);
