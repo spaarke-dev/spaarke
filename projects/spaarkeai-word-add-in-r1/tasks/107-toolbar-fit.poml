@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 9 (2) — the toolbar fits its width: Expand into "⋮", then icon-only tabs; pane icons for Expand/Collapse</title>
+    <phase>6 UAT round 9 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx`/`.ts` (`TaskPaneToolbar.tsx`, new `useToolbarFit.ts`) and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only layout defect.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT9</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>103, 106</deps>
+    <tags>frontend, office-addins, typescript, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 9 (2026-10-07), item 2. Record: `notes/042-uat-round9-2026-10-07.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>Nothing in the toolbar overlaps at any pane width: when the row is too narrow Expand moves into "⋮" and then the tabs go icon-only; Expand/Collapse use a pane icon.</goal>
+
+  <constraints>
+    <constraint source="owner item 2">No overlap in Word at default width; Expand stays reachable.</constraint>
+    <constraint source="NFR-11 / ADR-021">Icon-only tabs keep their accessible names and tooltips; Fluent v9 only.</constraint>
+    <constraint source="ADR-038">Tests for each fit level and the step back up; suite gated.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wide: labelled tabs and an inline Expand button.</criterion>
+    <criterion testable="true">Narrow: Expand is a "⋮" menu item that works; tabs icon-only with names.</criterion>
+    <criterion testable="true">Widened again: back to labelled tabs and the inline button, without flicker.</criterion>
+    <criterion testable="true">Gates: full jest green; lint 0; typecheck 0 production.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Measure overflow in a hook with hysteresis; render the levels in the toolbar.</step>
+    <step>Pane icons for Expand/Collapse.</step>
+    <step>Tests; gates; notes; status.</step>
+  </steps>
+
+  <justification>
+    <existing>The toolbar (tasks 103/106) and Find's ResizeObserver use.</existing>
+    <extension>Yes — the existing toolbar measures itself; one small hook, used only here.</extension>
+    <cost-of-doing-nothing>Owner UAT round 9: the Expand button covers the last tab in Word at default width.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+    <file role="new">src/client/office-addins/shared/taskpane/hooks/useToolbarFit.ts</file>
+    <file role="new">src/client/office-addins/shared/taskpane/components/__tests__/TaskPaneToolbar.fit.test.tsx</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round9-2026-10-07.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>
