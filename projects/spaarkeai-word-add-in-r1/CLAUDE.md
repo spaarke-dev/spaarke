@@ -359,7 +359,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Do not edit UAC-r2's tests** (standing): `tests/integration/auth/UnifiedAccessControl/*` and `SecureBuRoleDepthAssertion*`. If our change fails one, revert or report it to UAC-r2 (task 098 precedent, 2026-10-05).
 - **Caller-identity primitives** (UAC-r2 task 082): 080 uses `ICallerSystemUserResolver`; coordinate so it does not become a fifth primitive.
 - **NFR-05 dev finding is UAC-r2's** (2026-09-30): the hotmail `#EXT#` guest in the root BU holds Spaarke Basic User Read at a depth reaching the Secure BU; UAC-r2 owns the owner decision.
-- **#1011 is unrepaired but its GitHub issue is CLOSED** (corrected 2026-10-06): it was auto-closed 2026-09-30 when #960 merged — commit `34beafe78`'s "do not close #1011" was read as a closing keyword. UAC-r2 043 routed around the defect; `MembershipFieldDiscoveryService` still binds `systemuser` first, so do not assume it is safe for other Owner-column uses. Reopening the issue is the owner's / UAC-r2's call (asked 2026-10-06).
+- **#1011 is unrepaired but its GitHub issue is CLOSED** (corrected 2026-10-06): it was auto-closed 2026-09-30 when #960 merged — commit `34beafe78`'s "do not close #1011" was read as a closing keyword. UAC-r2 043 routed around the defect; `MembershipFieldDiscoveryService` still binds `systemuser` first, so do not assume it is safe for other Owner-column uses. **Reopened 2026-10-06** (owner go) with an explanatory comment; owned by UAC-r2, who were sent a hand-off message via the owner.
 
 ---
 
