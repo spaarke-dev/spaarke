@@ -151,7 +151,7 @@ describe('SprkModal (base shell — FR-01/03/04/05/07/08)', () => {
     );
     const dialog = screen.getByRole('dialog');
     expect(dialog.style.visibility).not.toBe('hidden');
-    expect(dialog.style.filter).toBe('opacity(0.6)');
+    expect(dialog.style.filter).toBe('brightness(0.75)');
     expect(dialog.style.pointerEvents).toBe('none');
     // Docked left of a right-edge pane: the right margin clears the pane, the surface narrows to fit.
     expect(dialog.style.marginLeft).toBe('auto');

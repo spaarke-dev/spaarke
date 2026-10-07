@@ -40,8 +40,10 @@ const SIDE_PANE_YIELD_STYLE: React.CSSProperties = {
   marginRight: SIDE_PANE_CLEARANCE,
   maxWidth: `calc(100vw - ${SIDE_PANE_CLEARANCE} - 16px)`,
   // `filter`, not `opacity`: newer Fluent animates the surface's opacity with a persisted Web Animation, which
-  // overrides an inline opacity. Pointer input is blocked here; keyboard focus is blocked by `inert` (see below).
-  filter: 'opacity(0.6)',
+  // overrides an inline opacity. Brightness, not opacity: the surface stays solid (owner test 2026-10-07 — a
+  // see-through modal let the form's text show through it). Works in light and dark themes. Pointer input is
+  // blocked here; keyboard focus is blocked by `inert` (see below).
+  filter: 'brightness(0.75)',
   pointerEvents: 'none',
 };
 
