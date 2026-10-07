@@ -110,12 +110,12 @@ For tasks modifying 4+ files: group by module, parallelize where files are indep
 
 ### Gotchas verified during discovery
 
-- **There is no `build:prod` script** in `src/client/office-addins` — `npm run build` *is* the production build. `src/client/office-addins/CLAUDE.md:39` names a script that does not exist.
+- **There is no `build:prod` script** in `src/client/office-addins` — `npm run build` *is* the production build (the module `CLAUDE.md` says so too; corrected 2026-10-06).
 - **There is no concise `ADR-038`** in `.claude/adr/` — point at [`docs/adr/ADR-038-testing-strategy.md`](../../docs/adr/ADR-038-testing-strategy.md).
 - **`ADR-049`** (Compose Shadow Document) governs the other `.docx` write path and was missing from the spec's ADR table. Read it before touching any `.docx` save path.
-- **`deploy-office-addins.yml` does not trigger on this branch** (only `master` and `work/SDAP-outlook-office-add-in`) — use `workflow_dispatch` or add the trigger.
+- **`deploy-office-addins.yml` runs on every push to `master`** (and on `workflow_dispatch`); a branch build needs `workflow_dispatch` (corrected 2026-10-06).
 - **`npm install` needs `--legacy-peer-deps --no-audit --no-fund`** — a bare install fails with ERESOLVE (`@testing-library/react@14` peer-requires React 18; the project is on React 19).
-- **Deploy is CI-only** — never run the workflow as an agent. Push, then `gh run list --workflow=deploy-office-addins.yml`.
+- **The add-in site deploys from CI on every master merge** — confirm with `gh run list --workflow=deploy-office-addins.yml`. An agent-triggered `workflow_dispatch` only with the owner's go (corrected 2026-10-06; the old "never run it as an agent" line predated the owner authorizing it case by case).
 
 ---
 
@@ -274,6 +274,9 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 ### Owner directives
 - **Fix findings here, don't defer them** (2026-09-19 / 2026-09-21): divergence and review findings are addressed in this project. Defer only with a good technical reason OR an ACTIVE hand-off note the other project is told to read — a GitHub issue alone is not a hand-off (2026-09-09).
 - **Live-environment changes need the owner's go** (2026-10-01): Dataverse role/privilege config and data changes. A dry run comes first; owner-run scripts (e.g. backfill `-Apply`) stay the owner's.
+- **Platform rules** (owner, standing): no Dataverse plugins and no form-event `.js` (ADR-002); records are always **team-owned**; `TargetEntity` is never required; access is **BU-assigned, never org-wide**.
+- **Approvals** (owner, standing): every spec amendment needs the owner's sign-off; a dev BFF deploy needs the owner's go (given per deploy); no Dataverse role/security configuration change without the owner's go. The owner prefers the best long-term solution and often delegates the pick — recommend it, then execute it.
+- **CI ownership** (2026-09-09): ci-cd-unit-test-remediation-r1 is CLOSED, so this project owns its own CI changes. React 19 stays; React Testing Library aligns to it.
 - **Dev data is not indicative** (2026-09-10 / 2026-09-25): legacy/existing documents don't matter. Root-BU users and records are a setup artifact. Verify ownership/BU behaviour as **Test User 1** (`testuser1@spaarke.com`, BU `cb15f587…`), the only child-BU account.
 
 ### Git, PRs, CI
@@ -286,6 +289,10 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
   - Agents never edit `TASK-INDEX.md`, `current-task.md`, this file or `ci-gated-suites.txt`.
 - **lint-staged reformats on commit** (`prettier --write`, `dotnet format`) (2026-09-19): the committed bytes are not the tested bytes, so re-run gates on the committed tree.
 - **Handoffs never pin the HEAD SHA** (2026-09-19): it self-invalidates on the commit that writes it. Use `git log -1`; cite only landmark/merge commits.
+- **Never touch other sessions' measurement worktrees**: `C:/tmp/bffsize/{m,b}`, `C:\wt097`, `C:\wt097r` (2026-10-04 / 2026-10-06). Our own short-path worktrees are `C:\code_files\wtNNNx`, removed after use.
+- **Before a commit, check untracked files** — no blind `git add -A` (2026-09-21).
+- **Overlap with another branch: compare by function, not by line numbers** (2026-10-04).
+- **`jq` is not installed** — use `gh … --jq`; `gh --jq` accepts no `--arg` (2026-10-06). In PowerShell, `R` is the `Invoke-History` alias — never name a helper function `R`.
 - **Shell traps** (2026-09-19):
   - `grep -c … || echo 0` yields `0\n0`.
   - A pipeline's exit code is the last command's — use `${PIPESTATUS[0]}`.
@@ -303,7 +310,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **CI pins Node 20**; this desktop runs Node 22 (2026-09-21) — local office-addins gate runs are advisory.
 - **Local add-in build needs the CI env values** from `.github/workflows/deploy-office-addins.yml` (2026-10-05): ADDIN_CLIENT_ID, TENANT_ID, BFF_API_CLIENT_ID, BFF_API_BASE_URL, ORG_URL, SPAARKE_APP_NAME, ADDIN_BASE_URL.
 - **`ADDIN_EMAIL_TAB_ENABLED`** (2026-10-06): the code default is OFF (`webpack.config.js`, only the exact string `"true"` turns it on). The deploy workflow sets it ON; set it back to `"false"` to hide the tab, no code change.
-- **`scripts/check-task-status-drift.ps1` cannot parse this TASK-INDEX** (2026-09-30 / 2026-10-03): status sits in cell 3. Verify POML ⇔ index pairs by hand until fix `233ff9341` (customer-provisioning) is on master.
+- **`scripts/check-task-status-drift.ps1` and this TASK-INDEX** (2026-09-30 / 2026-10-06): status sits in cell 3. Fix `233ff9341` (customer-provisioning) IS on master as of 2026-10-06 — re-run the script once before trusting it; until it passes here, verify POML ⇔ index pairs by hand.
 
 ### Deploy
 - **The add-in site follows master** (2026-10-05/06): every PR merge runs `deploy-office-addins.yml` on master. A branch build still needs `workflow_dispatch`.
@@ -312,7 +319,7 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **`Deploy-BffApi.ps1` checks** (2026-09-18 / 2026-09-21):
   - Run it under `pwsh`, not `powershell` — 5.x lacks `Get-FileHash`, which silently disables the hash check.
   - The Kudu SHA-256 file check is the only proof: `az webapp deploy` can return 200 with Kudu `status=4`. SCM basic auth is disabled, so Kudu needs an AAD token.
-  - Package under 30 MB = incomplete zip.
+  - Package under 30 MB = incomplete zip. Since 2026-10-06 master publishes at about 36 MB (was about 45 MB) — expected, not a defect.
   - Linux cold start is 90–120 s — a `/healthz` timeout after a passing hash check is not a reason to redeploy.
   - Probe an authed route → 401 (404 = incomplete package).
 - **A failed Kudu upload can leave the app STOPPED** after the script's recovery (2026-09-19): check state after every deploy and start it if not `Running`.
@@ -349,7 +356,10 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Attaching a filter: verify both dimensions** (2026-09-30): (1) it resolves the request type — `ExtractTargetEntity` returning null makes `EntityAccessFilter` pass through; (2) some end-user role actually holds the right it enforces.
 - **No-record saves: authorize the destination container through UAC-r2's #1025** (2026-09-30), not a parallel mechanism.
 - **`sprk_communication` create** (`EmailUploadCaptureService.BuildCommunicationEntity`) belongs to the Communication project (2026-09-30): coordinate or hand off, never edit their create path.
-- **#1011 stays OPEN** (2026-09-28): UAC-r2 043 routed around it, not repaired. `MembershipFieldDiscoveryService` still binds `systemuser` first, so do not assume it is safe for other Owner-column uses.
+- **Do not edit UAC-r2's tests** (standing): `tests/integration/auth/UnifiedAccessControl/*` and `SecureBuRoleDepthAssertion*`. If our change fails one, revert or report it to UAC-r2 (task 098 precedent, 2026-10-05).
+- **Caller-identity primitives** (UAC-r2 task 082): 080 uses `ICallerSystemUserResolver`; coordinate so it does not become a fifth primitive.
+- **NFR-05 dev finding is UAC-r2's** (2026-09-30): the hotmail `#EXT#` guest in the root BU holds Spaarke Basic User Read at a depth reaching the Secure BU; UAC-r2 owns the owner decision.
+- **#1011 is unrepaired but its GitHub issue is CLOSED** (corrected 2026-10-06): it was auto-closed 2026-09-30 when #960 merged — commit `34beafe78`'s "do not close #1011" was read as a closing keyword. UAC-r2 043 routed around the defect; `MembershipFieldDiscoveryService` still binds `systemuser` first, so do not assume it is safe for other Owner-column uses. Reopening the issue is the owner's / UAC-r2's call (asked 2026-10-06).
 
 ---
 

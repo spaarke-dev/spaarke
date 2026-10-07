@@ -53,3 +53,29 @@ Verdict: the conversion is sound. Almost every live item reached CLAUDE.md, this
    - Item 2: the 32-privilege drift was removed 2026-10-01 (`082` note §4.1); only the hotmail guest finding remains, with UAC-r2.
    - Item 4: 084's latency is on the UAT list (`defer-issues.md` L43).
    - Item 9: W-5 is confirmed still open (`identity-obj-proxy` mapped in `jest.config.js:70`, missing from `package.json`); lint was fixed by 072.
+
+---
+
+# Resolution (2026-10-06, the project's own session)
+
+**Conversion items 1–14**
+1. Round-4 `code-review` + `adr-check` — **done** before #1292 (two agents; no Critical; fixes listed in `042-uat-round4` §5). Not applicable.
+2. 32 extra privileges — removed 2026-10-01 (`082` §4.1). The hotmail `#EXT#` guest finding — **restored** to CLAUDE.md Coordination (UAC-r2 owns it).
+3. 080 backfill `-Apply` + Test User 1 checks — **restored** as a question to the owner (current-task). 078 TEST zip — **not applicable**: the owner removed TEST + both XML add-ins 2026-10-03; unified 1.1.1 installed.
+4. 084 latency — already in `defer-issues.md` (UAT list). Not applicable.
+5. Secure Project BU geometry — **restored** as an owner question (current-task).
+6. Drift-checker fix `233ff9341` — **IS on master**; CLAUDE.md **corrected**.
+7. Tier 2 30-min cap — documented behaviour (CLAUDE.md: a cancel at the cap is not a failure); CI-owner item, **not applicable** here. Idempotency filter — already in `defer-issues.md`.
+8. ISS-002 shadow-window latch — already in `defer-issues.md`; CI cutover owner's decision. **Not applicable** to this project's live work.
+9. W-5 `identity-obj-proxy` — still open, already in `defer-issues.md`. W-2/W-7/F-6 — lint/`npm ci` fixed by 071/072; nothing live.
+10. "Production runs XML" — **corrected** in `src/client/office-addins/CLAUDE.md` (LIVE = unified package).
+11. ~45 MB publish — **corrected**: master publishes about 36 MB since 2026-10-06 (CLAUDE.md Deploy).
+12. `--no-verify` — no exception applies to this project; the root rule stands. **Not applicable.**
+13. "Deploy is CI-only / never run as an agent" — **corrected** (CLAUDE.md Gotchas + module CLAUDE.md): CI deploys on every master merge; `workflow_dispatch` only with the owner's go. Line ~116 (trigger branches) **corrected**.
+14. Project Status block — superseded by TASK-INDEX (103/105 done); row 097 ✅. Rows 011/077/080 ⚠️ and 057/061/081 ➡️ are final statuses (counted done).
+
+**Audit — missing:** 065 residual (MEDIUM) **restored** (current-task, 065 note header, TASK-INDEX row 065). CI ownership, the fifth-primitive coordination, the commit/overlap/jq gotchas and "BU-assigned, never org-wide" **restored** to CLAUDE.md, with the owner's standing platform rules and approvals (no plugins, team-owned, `TargetEntity` never required, spec sign-off, BFF deploy go, no role changes without go) and "never edit UAC-r2's tests / other sessions' worktrees".
+
+**Audit — wrongly carried:** #1011 line **corrected** (issue auto-closed 2026-09-30; reopening asked of the owner). Share-link lines **corrected** earlier today. Row 097 ✅. CLAUDE.md L113 **corrected**.
+
+**Not this project's:** a generic hygiene brief of 2026-10-06 named INCOMING-141/145 (customer-provisioning delivery), `notes/task-165-admin-surfaces.md` §13.9(b) `-MintClientSecret`, the `[open]/[done]` token rule and the "Secure Projects BU" name, and "309 commits behind". None exists in this project (grep, 2026-10-06); this branch was 1 commit behind master. They appear to belong to unified-access-control-r2.
