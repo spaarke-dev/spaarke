@@ -45,11 +45,18 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
   deep-link) AND in-portal notification** (owner decision 2026-08-12) — parity with first-assignment
   onboarding.
 - G4. Refined, owner-approved **grid columns** across the CIAM data tabs.
-- G5. Full **Teams-embedded parity** for G1–G4.
+- G5. **Teams parity for the WORKFORCE plane** (G1–G4). Scope narrowed 2026-10-07 (see §4.6): the Teams
+  tab serves only Dataverse-licensed users (internal / B2B-guest, workforce plane). **CIAM external
+  contacts are browser-only** — a CIAM account cannot sign into Teams, so there is no Teams parity to
+  deliver for the external-contact plane.
 
 **Non-goals (this release)**
 - Ask Legal assistant (FR-26 preview). E-signature. In-portal record **editing** (partners stay read-only;
   intake creates service requests, it does not edit core records). New identity planes.
+- **External contacts (CIAM) inside the Teams tab** — not possible / not planned (§4.6); contacts use the
+  browser SPA only.
+- **Model 2 (dedicated per-customer tenant) workforce auth** — out of scope for now; R3 targets **Model 1**
+  (customer staff are B2B guests in Spaarke's tenant), see §4.6.
 
 ## 4. In-scope capabilities + reuse map (§11 — extend donors, don't fork)
 
@@ -92,13 +99,21 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
 - **Reuse**: DataGrid framework `sprk_gridconfiguration` config records (data-only; no code).
 - **New**: owner-approved column sets per CIAM tab (needs the column spec from the owner).
 
-### C5 — Teams parity (G5) — verify C1–C4 render + launch correctly in the Teams-embedded host.
+### C5 — Teams parity (G5) — WORKFORCE plane only (narrowed 2026-10-07, §4.6)
+- **Reuse / verify**: C1–C4 render + launch correctly in the Teams-embedded host **for workforce users**.
+- **New (auth-shape change, §4.6)**: the Teams tab adopts the add-ins' sign-in shape — **NAA only** (the
+  Teams-SSO `getAuthToken` fallback is **dropped** for the multi-customer build, because a single manifest
+  can name only one audience). A **dedicated Spaarke Teams client app** (in Spaarke's tenant) becomes the
+  manifest `webApplicationInfo.id` + the NAA client, decoupled from any backend (today `1e40baad` the
+  backend doubles as the client). Workforce authority = **Spaarke's tenant** (Model 1), not `/organizations`.
+- **Not in scope**: external-contact Teams parity (CIAM can't sign into Teams — §4.6).
 
 ## 4.5 Build-environment prerequisite — .NET 10 (BINDING for any BFF build/deploy)
 
 > **As of 2026-08-14, `master` and the dev App Service runtime are .NET 10.** A net8 BFF deploy to the
-> net10 runtime **503s on startup**. This worktree is currently **~164 commits behind master** and has
-> **not** merged the net8→net10 retarget.
+> net10 runtime **503s on startup**. ✅ **This worktree was merged onto net10 master on 2026-10-07**
+> (global.json pins SDK 10.0.100; machine has 10.0.101) — the drift below is resolved; keep the gate as
+> the standing rule for any future divergence.
 
 **Scope of impact:**
 - **C3 only** touches the BFF (`Sprk.Bff.Api`) → C3 is gated on net10-readiness.
@@ -115,6 +130,75 @@ for NDA (deferred). 5A first-assignment CIAM invite email works (R2). 5B Partner
 
 **Do NOT** deploy the BFF from a net8 tree. The spec's C3 task MUST carry this as a hard prerequisite so
 execution does not inadvertently regress dev. (Client work may proceed on the current tree meanwhile.)
+
+## 4.6 Per-customer backend & auth-platform alignment (customer-provisioning-orchestration-r1)
+
+> **CONFIRMED by owner 2026-10-07** via `customer-provisioning-orchestration-r1` (task t240). R3's single-BFF
+> assumption is superseded: under owner D-13 each customer gets its own backend (`sprk-{customerId}-prod-api`,
+> own Entra app + audience + CORS). The external SPA is **shared Spaarke-tenant infra** (one build, one
+> origin) that selects the backend/scope **at runtime** — the auth module already supports this (pluggable
+> authority + `setActiveBffTokenAcquirer` / `setActiveLoginScope`; NAA requests scope dynamically). What
+> changes is **configuration + packaging + the external-contact platform**, not the auth engine.
+> Source: `projects/customer-provisioning-orchestration-r1/notes/t240-plan.md`; R3 reply in
+> [`notes/t240-auth-coordination-response.md`](notes/t240-auth-coordination-response.md).
+
+### Confirmed decisions
+1. **Production origin — `https://external.spaarke.com`** (one shared site `swa-spaarke-external-spa-prod`,
+   `rg-spaarke-shared-prod`). Covers Teams **and** browser; every customer backend lists this **one** origin
+   in CORS (provisioning task 240a). Provisioning creates the SWA + custom domain; owner adds DNS.
+2. **Teams sign-in — NAA only; drop the Teams-SSO fallback.** A **dedicated Spaarke Teams client app** (one,
+   Spaarke tenant) is the manifest `webApplicationInfo.id` + NAA client; provisioning H3 pre-authorizes it on
+   every customer backend. NAA requests the chosen backend's scope dynamically → reaches any customer.
+3. **External contacts are served by the customer's OWN backend** (not a shared one) — forced by D-13: a
+   contact's shared records live in that customer's Dataverse, so only that stamp can serve them.
+4. **External contacts are BROWSER-ONLY.** A CIAM (`spaarkeextid`) local account cannot sign into Teams
+   (the Teams broker only yields a workforce/guest identity); forcing it would need their org admin to
+   install the Spaarke app + a second sign-in, for zero added capability. → **C5 narrowed to workforce.**
+5. **Workforce authority = Spaarke's tenant (Model 1).** R3's current `/organizations` multitenant shape is
+   the **Model 2** path (deferred). Under Model 1, customer staff are **B2B guests in Spaarke's tenant** and
+   stamps validate Spaarke-tenant tokens, so workforce sign-in (Teams **and** browser) authenticates against
+   **Spaarke's tenant** — same as the Office add-in. Implemented via the existing optional `authority`
+   override (`workforceAuthorityConfig({authority})` / `TeamsWorkforceAuthConfig.authority`) → **config, not
+   code**.
+
+### Two populations — do not conflate
+| Population | Identity | Teams? | Backend routing |
+|---|---|---|---|
+| Workforce / internal (incl. **B2B-guest** licensed) | Entra, **Spaarke tenant** (Model 1) | ✅ yes | directory endpoint (group membership) |
+| **CIAM external contact** (outside counsel) | `spaarkeextid` local account | ❌ browser-only | invitation / deep-link scoped (see below) |
+
+### R3-side actions (each a live action — confirm with owner first)
+- **A1.** Produce a **prod Teams appPackage** (own manifest + prod Teams app registration); dev stays `green-dune`.
+- **A2.** Update the manifest origin references + SPA redirect URIs to `external.spaarke.com`; set
+  `webApplicationInfo.id` to the **dedicated Spaarke Teams client app** (owner creates it; send its client id
+  to provisioning). Keep the dev origin in CORS during transition.
+- **A3.** Code: drop the `acquireBffTokenViaTeamsSso` fallback branch (NAA-only); set workforce `authority`
+  to Spaarke's tenant (Model 1). Confirm the **supported Teams-host matrix all speak NAA** before removing
+  the fallback (flag to provisioning if any host lacks it).
+- **A4.** Deploy the production build to `swa-spaarke-external-spa-prod` once the origin is live.
+
+### 240d co-design (external contacts on stamps) — R3 positions
+Provisioning task 240d closes the gap that **no stamp can serve CIAM today** (no `Ciam:*` settings; the CIAM
+Graph provisioner uses a Key Vault cert a keyless stamp lacks). R3 co-designs with provisioning + `unified-access-control-r2`. **This is the hard dependency for R3's external-contact capabilities (C1 messages/detail,
+C2 external submission, C3 in-portal notify) on provisioned customers.** R3's positions:
+- **CIAM audience → one per customer** (per-stamp CIAM app/audience in the shared `spaarkeextid` tenant), not
+  one shared audience — else a contact's token for customer A could be replayed against customer B's BFF.
+- **Routing → invitation / deep-link scoped, NOT the workforce directory endpoint.** CIAM contacts are not
+  members of the `sprk-{customerId}-users` workforce groups the directory resolves, so that mechanism can't
+  enumerate a contact's customers. A contact's customer relationship is established at **invite/grant** time —
+  which is exactly R3's **C3 deep-link** ("you've been granted access to {record}" → one record on one stamp).
+  So C3's deep-link should encode `{customerId, apiBaseUrl}`, and the C3 notification mechanism **converges
+  with** contact→backend routing. Cold-landing (no deep-link) needs a contact→customers map in the shared
+  registry (written at invite time) or an "enter invite / pick organization" prompt.
+- **Provisioner → keyless federated credential** from the stamp's managed identity (not a Key Vault cert).
+  Note this is **cross-tenant workload-identity federation** (stamp MI → CIAM app in `spaarkeextid`) — confirm
+  support before committing.
+
+### Sequencing implication for the spec
+- **C4 (grid columns)** and the **non-auth UI of C1/C2/C5** are independent of the platform work — can proceed.
+- **C1/C2/C3 for workforce users** are largely stamp-agnostic (Model-1 Spaarke-tenant authority aside).
+- **C1/C2/C3 for external contacts** depend on **240d** — they cannot ship to a provisioned customer until
+  stamps serve CIAM. This split is a natural wave boundary for the plan.
 
 ## 5. ADR touchpoints (anticipated)
 - ADR-028 (auth planes — unchanged; reuse), ADR-024 (polymorphic regarding — service requests),

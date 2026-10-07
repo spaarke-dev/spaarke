@@ -91,3 +91,22 @@ CIAM external contacts are **local accounts in `spaarkeextid`**, *not* B2B guest
 1. 🔔 **Production origin hostname** (Q1) — the single Spaarke custom domain.
 2. 🔔 **Teams SSO fallback** (Q2) — drop it for multi-customer, or re-point at the Spaarke Teams client's own API? Any NAA-unavailable hosts to support?
 3. 🔔 **CIAM external-contact plane vs per-customer backends** (Q3) — do customer backends serve external contacts (→ per-customer CIAM config + CORS), or does external-contact access stay on a shared backend?
+
+---
+
+## 5. RESOLUTION — owner decided all three (2026-10-07); R3 confirms alignment
+
+Provisioning relayed the owner's decisions (t240 second message). R3 **agrees with all three** and confirms:
+
+1. **Origin `https://external.spaarke.com`** — agreed. R3 owns: a prod Teams appPackage + prod registration, updating the manifest origin refs + SPA redirects, and deploying to `swa-spaarke-external-spa-prod`. Each is a live action R3 will confirm with the owner first. Keep the dev origin in CORS during transition.
+2. **Drop the Teams-SSO fallback; dedicated Spaarke Teams client app = `webApplicationInfo.id` + NAA client** — agreed. R3 will confirm the supported Teams-host matrix all speak NAA before removing the fallback, and send the Spaarke Teams client id to provisioning once the owner creates the app.
+3. **External contacts served by the customer's own backend** — agreed (D-13 forces it). **Contacts are browser-only** (CIAM can't sign into Teams) — confirmed by both sides.
+
+**New item R3 absorbs: Model 1 workforce authority = Spaarke's tenant.** R3's `/organizations` multitenant shape is the Model 2 (deferred) path. For Model 1 (customer staff = B2B guests in Spaarke's tenant), workforce sign-in (Teams + browser) authenticates against **Spaarke's tenant**, like the add-in. This is the existing optional `authority` override — **config, not code**.
+
+**R3's positions on the three 240d co-design points:**
+- **CIAM audience → one per customer** (per-stamp audience in `spaarkeextid`), not shared — prevents cross-customer token replay.
+- **Routing → invitation / deep-link scoped**, not the workforce directory (CIAM contacts aren't in the `sprk-*-users` groups it resolves). This **converges with R3's C3 deep-link** — the "you've been granted access to {record}" notification already targets one record on one stamp, so it carries `{customerId, apiBaseUrl}`. Cold-landing needs a contact→customers map in the shared registry (written at invite time) or a pick-organization prompt.
+- **Provisioner → keyless federated credential** from the stamp MI — agreed; flag cross-tenant workload-identity federation (stamp MI → `spaarkeextid` app) as the item to validate for support.
+
+All captured authoritatively in [`../design.md` §4.6](../design.md). R3's external-contact capabilities (C1 messages/detail, C2 external submission, C3 in-portal) are **gated on 240d**.
