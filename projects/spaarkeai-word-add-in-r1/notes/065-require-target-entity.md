@@ -7,6 +7,8 @@ container to one per business unit, and the account/contact case is **defined an
 task's headline change — **making `TargetEntity` required — was NOT shipped**, for three independent
 reasons, each verified rather than argued. §6 is the escalation.
 
+> **Residual still open (2026-10-06 hygiene review):** control 3 (the caller's table-level create right on `sprk_document`) is unverified — since task 080 the row is created app-only with a team owner, so nothing checks the caller's create privilege — and control 4 (destination-container authorization) waits on UAC-r2 **#1025 (OPEN)**. The TASK-INDEX row reads closed; this residual is tracked in `current-task.md`.
+
 ---
 
 ## 0. TL;DR for a reviewer
