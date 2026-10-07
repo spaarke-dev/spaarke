@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://spaarke.com/schemas/ontology/existence-rule.schema.json",
   "title": "Existence rule body",
-  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Existence (spec FR-05; design.md section 8.0.1(a) / CM-7). An 'all' array of independent EXISTS / NOT EXISTS clauses over a fixed window, each expressible as a single Dataverse FetchXML link-entity filter (design.md CM-3). Cross-clause variable binding is REFUSED at this schema level, not merely by review: clauses additionalProperties=false forbids a 'bind' property outright, and every filter value is pattern-restricted to reject a leading '$' variable-dereference token (e.g. '$commitment.sprk_receiveddate').",
+  "description": "sprk_policyversion.sprk_rulebody shape for sprk_ruletype = Existence (spec FR-05; design.md section 8.0.1(a) / CM-7). An 'all' array of independent EXISTS / NOT EXISTS clauses over a fixed window, each expressible as a single Dataverse FetchXML link-entity filter (design.md CM-3). Task 024 (D-16, D-40, D-13): 'all' may be empty for a subject-only body scoped by a non-empty 'when'; relative dates include now+Nd; a date field may take one lower plus one upper relative-date bound; 'quietWindowDays' is an optional knob. Cross-clause variable binding is REFUSED at this schema level, not merely by review: clauses additionalProperties=false forbids a 'bind' property outright, and every filter value is pattern-restricted to reject a leading '$' variable-dereference token (e.g. '$commitment.sprk_receiveddate').",
   "type": "object",
   "additionalProperties": false,
   "required": ["type", "subject", "all"],
@@ -16,7 +16,7 @@
       "minLength": 1
     },
     "when": {
-      "description": "Optional scope filter over the subject. Empty object = all subjects. Shares the clause filters' per-value grammar (#/$defs/filterConditions): the same scalar/array/operator shapes, the same leading-'$' refusal and the same numeric evaluation, so a 'when' value cannot carry what a clause value may not.",
+      "description": "Optional scope filter over the subject. Empty object = all subjects, allowed only when 'all' holds at least one clause (a subject-only body needs at least one condition here; task 024). Shares the clause filters' per-value grammar (#/$defs/filterConditions): the same scalar/array/operator shapes, the same leading-'$' refusal and the same numeric evaluation, so a 'when' value cannot carry what a clause value may not.",
       "$ref": "#/$defs/filterConditions"
     },
     "all": {
@@ -39,7 +39,7 @@
     }
   },
   "if": {
-    "description": "A subject-only body (zero clauses)...",
+    "description": "Root-level JSON Schema conditional (not the reserved 'then' PROPERTY above): a subject-only body (zero clauses)...",
     "required": ["all"],
     "properties": { "all": { "maxItems": 0 } }
   },
@@ -134,9 +134,9 @@
       }
     },
     "relativeDate": {
-      "description": "'now', 'now-{N}d' or 'now+{N}d' (N = 1-4 digits), resolved by the compiler against one window anchor (UTC).",
+      "description": "'now', 'now-{N}d' or 'now+{N}d' (N = 1-4 digits), resolved by the compiler against one window anchor (UTC). The lookahead refuses a newline anywhere: this library's '$' also matches before a trailing newline (review F3).",
       "type": "string",
-      "pattern": "^now(?:[-+][0-9]{1,4}d)?$"
+      "pattern": "^(?![\\s\\S]*\\n)now(?:[-+][0-9]{1,4}d)?$"
     },
     "scalar": {
       "description": "A literal string, number or boolean. Strings MUST NOT begin with '$' -- that token is reserved for cross-clause variable dereferencing (e.g. '$commitment.sprk_receiveddate'), which this grammar does not support (design.md section 8.0.1(a)).",

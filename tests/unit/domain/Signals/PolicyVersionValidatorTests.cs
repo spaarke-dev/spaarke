@@ -861,10 +861,12 @@ public class PolicyVersionValidatorTests
 
     [Theory]
     // a clause whose join is not in VerifiedJoins (D-16 adds none)
-    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"exists":"sprk_communication","path":"sprk_regardingevent","filter":{"sprk_direction":1}}]}""")]
+    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"exists":"sprk_communication","path":"sprk_regardingevent","filter":{"sprk_direction":1}}]}""",
+        "*not a verified lookup*")]
     // a notExists over a table the writer reads below org-wide depth (task 030 finding (b))
-    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"notExists":"sprk_document","path":"sprk_regardingevent","filter":{"statecode":0}}]}""")]
-    public void DoLaneSubject_UnverifiedJoinOrNotExistsOverBasicDepthTable_IsRefusedAtSaveAndAtEvaluation(string body)
+    [InlineData("""{"type":"Existence","subject":"sprk_event","when":{"statuscode":659490001},"all":[{"notExists":"sprk_document","path":"sprk_regardingevent","filter":{"statecode":0}}]}""",
+        "*'sprk_document' is not in the verified Global-read allow-list*")]
+    public void DoLaneSubject_UnverifiedJoinOrNotExistsOverBasicDepthTable_IsRefusedAtSaveAndAtEvaluation(string body, string why)
     {
         var scope = Guid.NewGuid();
         PolicyInvalidMetricScope.Value = scope;
@@ -873,7 +875,9 @@ public class PolicyVersionValidatorTests
         var logger = new CapturingLogger<PolicyVersionValidator>();
         var sut = Sut(logger);
 
-        sut.ValidateForSave("Existence", body, null).Reason.Should().Be(OntologyWriterFailureReason.CompileRefused);
+        var saved = sut.ValidateForSave("Existence", body, null);
+        saved.Reason.Should().Be(OntologyWriterFailureReason.CompileRefused);
+        saved.Errors.Should().ContainSingle().Which.Should().Match(why);
 
         sut.TryPrepareForEvaluation(Snapshot("Existence", body), subjectId: null, out var compiled).Should().BeFalse();
         compiled.Should().BeNull();

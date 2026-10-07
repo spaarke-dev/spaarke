@@ -230,13 +230,16 @@ public class RuleBodySchemaValidatorTests
     }
 
     [Fact]
-    public void Validate_WithEmptyAllArray_IsRefused()
+    public void Validate_EmptyAllWithoutWhen_IsRefused()
     {
+        // Task 024: an empty 'all' is legal for a subject-only body, but only with a non-empty 'when'; without one
+        // the body would match every row of the subject.
         const string body = """{ "type": "Existence", "subject": "sprk_matter", "all": [] }""";
 
         var result = _sut.Validate(RuleType.Existence, body);
 
         result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("when", StringComparison.Ordinal));
     }
 
     [Fact]

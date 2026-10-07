@@ -748,21 +748,40 @@ public class PredicateCompilerTests
     }
 
     [Theory]
-    [InlineData("""{">=":"now",">":"now-1d"}""")]                 // two lower bounds
-    [InlineData("""{"<=":"now+3d","<":"now+1d"}""")]              // two upper bounds
-    [InlineData("""{">=":"now","<=":"now+3d","<":"now+5d"}""")]   // a third key
-    [InlineData("""{"=":"now","<=":"now+3d"}""")]                 // '=' is not a bound
-    [InlineData("""{"<>":"now","<=":"now+3d"}""")]                // '<>' is not a bound
-    [InlineData("""{">=":1,"<=":5}""")]                           // not a date: numeric bounds
-    [InlineData("""{">=":"2026-01-01","<=":"2026-12-31"}""")]     // absolute dates are not relative-date bounds
-    [InlineData("""{">=":"now","<=":"now+3"}""")]                 // a malformed relative date
-    public void Compile_RangeOutsideD40_IsRefused_ByTheSchemaAndByTheCompiler(string range)
+    [InlineData("""{">=":"now",">":"now-1d"}""", "*exactly ONE lower bound*")]                          // two lower bounds
+    [InlineData("""{"<=":"now+3d","<":"now+1d"}""", "*exactly ONE lower bound*")]                       // two upper bounds
+    [InlineData("""{">=":"now","<=":"now+3d","<":"now+5d"}""", "*exactly one operator, or one lower*")] // a third key
+    [InlineData("""{"=":"now","<=":"now+3d"}""", "*'=' cannot bound a date range*")]                    // '=' is not a bound
+    [InlineData("""{"<>":"now","<=":"now+3d"}""", "*'<>' cannot bound a date range*")]                 // '<>' is not a bound
+    [InlineData("""{">=":1,"<=":5}""", "*relative-date bounds only*")]                                  // not a date: numeric bounds
+    [InlineData("""{">=":"2026-01-01","<=":"2026-12-31"}""", "*relative-date bounds only*")]            // absolute dates
+    [InlineData("""{">=":"now","<=":"now+3"}""", "*relative-date bounds only*")]                        // a malformed relative date
+    [InlineData("""{">=":"now","<=":"now+3d\n"}""", "*relative-date bounds only*")]                     // trailing newline (review F3)
+    public void Compile_RangeOutsideD40_IsRefused_ByTheSchemaAndByTheCompiler(string range, string compilerMessage)
     {
         var body = SubjectOnly("sprk_event", "{\"sprk_duedate\":" + range + "}");
 
         new RuleBodySchemaValidator().Validate(RuleType.Existence, body).IsValid.Should().BeFalse();
-        // Defence in depth: refused by the compiler alone too (the schema is skipped here).
-        Compiler().Invoking(c => c.CompileSchemaValidated(body, subjectId: null)).Should().Throw<PredicateCompilationException>();
+        // Defence in depth: refused by the compiler alone too (the schema is skipped here), for the stated reason.
+        Compiler().Invoking(c => c.CompileSchemaValidated(body, subjectId: null)).Should().Throw<PredicateCompilationException>()
+            .WithMessage(compilerMessage);
+    }
+
+    [Fact]
+    public void Compile_RangeInANotExistsClause_StaysInsideTheOuterLink()
+    {
+        // D-40 says "a date field"; the grammar is shared, so a range is also legal in a clause filter. In a notExists
+        // it MUST land in the join's ON clause like any window (a root-filter window returns nothing; probe V4).
+        const string body = """
+            {"type":"Existence","subject":"sprk_matter","all":[
+              {"notExists":"sprk_budgetrevision","path":"sprk_matter","filter":{"sprk_revisedon":{">=":"now-30d","<":"now"}}}]}
+            """;
+
+        var entity = XElement.Parse(Compiler().Compile(body).FetchXml).Element("entity")!;
+
+        entity.Element("filter")!.Descendants("condition").Should().NotContain(c => c.Attribute("attribute")!.Value == "sprk_revisedon");
+        entity.Element("link-entity")!.Element("filter")!.Elements("condition").Select(c => c.Attribute("operator")!.Value)
+            .Should().Equal("ge", "lt");
     }
 
     [Theory]
@@ -788,11 +807,16 @@ public class PredicateCompilerTests
 
     // ── D-13 / FR-17a: the quietWindowDays knob ─────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Compile_QuietWindowDays_IsExposedOnThePredicate()
+    [Theory]
+    [InlineData("7", 7)]
+    [InlineData("0", 0)]
+    [InlineData("3650", 3650)]
+    [InlineData("7.0", 7)]   // JSON Schema 'integer' accepts an integral number in any spelling (review F2)
+    [InlineData("1e2", 100)]
+    public void Compile_QuietWindowDays_IsExposedOnThePredicate(string json, int expected)
     {
-        Compiler().Compile(SubjectOnly("sprk_event", """{"statuscode":659490001}""", ",\"quietWindowDays\":7"))
-            .QuietWindowDays.Should().Be(7);
+        Compiler().Compile(SubjectOnly("sprk_event", """{"statuscode":659490001}""", ",\"quietWindowDays\":" + json))
+            .QuietWindowDays.Should().Be(expected);
     }
 
     [Fact]

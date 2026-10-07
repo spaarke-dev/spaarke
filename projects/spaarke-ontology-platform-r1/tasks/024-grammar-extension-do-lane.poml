@@ -4,7 +4,7 @@
     <title>Rule grammar extension for the Do lane: subject-only rules, now+Nd, Do subjects, quiet-window knob</title>
     <phase>2b Rule grammar (D-16)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the rule-body schema, the validator and the predicate compiler that every Signal depends on; a widened grammar that compiles wrongly fires on every row or none.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -110,6 +110,8 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-45, FR-17a, FR-30 (amended); D-13, D-16, D-27. #12 lists every current refusal with line numbers.</notes>
+
+  <completion>COMPLETED 2026-10-07. Escalation trigger 2 fired ("task due within 3 days" needs a two-bound range); owner chose option A = D-40 (one lower plus one upper relative-date bound). Trigger 1 checked, not fired: the writer reads sprk_event / sprk_todo / sprk_workassignment at Global (§9.2 method + RetrievePrincipalAccess + identical row counts as admin and writer). Delivered: subject-only bodies, now+Nd, sprk_workassignment as subject, D-40 ranges, quietWindowDays (0..3650, default 14), CompiledPredicate.QuietWindowDays + DateOnlyWhenFields (live-verified DateOnlyColumns catalog); no VerifiedJoins entry; sprk_servicerequest, Threshold, Switch still refused. Three Do-rule fixtures with hand-written reference FetchXML run on spaarkedev1 (12 / 3 / 19 rows); seam test 10/10 live as the writer. Every new test proven to fail without its fix (19 mutations; M14 equivalent). Publish +1,995 B (212 = 212 files, fresh short-path worktrees, Compress-Archive; fresh master 192 files / 36.19 MB for reference); no vulnerable packages. Independent code-review + adr-check: PASS-WITH-FINDINGS, findings fixed. Input for 031: the compiled query is exact at WindowAnchorUtc, so 031 must widen Date Only bounds before judging per item (D-25). uac-r2 re-read on origin/master dbc58d139 (CoreAncestorResolver @ d254d7166, SecureChildLineage.cs, secure-record-owner-role.json, RecordOwnershipResolver, RecordRouteAccessAuthorizationFilter, CallerRecordAccessProbe, ExternalCallerContext, RouteAuthorizationGuardTests.Ledger.cs, ADR-034): plan not invalidated, no uac-r2 file changed, no core-record derivation added. Pre-existing finding (task 030, not fixed here): arch rule FR-32/§4D I5 fails on OntologyWriterCredentialFactory.cs:78. Detail: notes/024-progress.md.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

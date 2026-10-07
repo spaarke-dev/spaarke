@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// Each returned row carries exactly this one column.</param>
 /// <param name="FetchXml">The single compiled query. Execute it as-is via
 /// <c>IGenericEntityService.RetrieveMultipleAsync(new FetchExpression(FetchXml))</c>.</param>
-/// <param name="WindowAnchorUtc">The instant every relative-date token (<c>now</c>, <c>now-30d</c>) was resolved
+/// <param name="WindowAnchorUtc">The instant every relative-date token (<c>now</c>, <c>now-30d</c>, <c>now+3d</c>) was resolved
 /// against. Recorded so a caller can state, truthfully, which window a Signal was evaluated over (§0.3).</param>
 /// <param name="TemplateEligibleFields">The field names a <c>sprk_messagetemplate</c> <c>{{token}}</c> may
 /// reference — the ONE definition of the §0.3 template vocabulary (task 022 rework round 2, finding F3,
@@ -48,10 +48,14 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// dismissal before the subject may re-raise. <see cref="PredicateCompiler.DefaultQuietWindowDays"/> (14) when the
 /// body omits it. Carried, not applied: re-raise is the evaluator's job (task 031).</param>
 /// <param name="DateOnlyWhenFields">The subject's <c>when</c> fields that are Date Only columns (in
-/// <see cref="PredicateCompiler.DateOnlyColumns"/>), task 024. Every relative date in <see cref="FetchXml"/> is
-/// resolved against the ONE <see cref="WindowAnchorUtc"/>; for these fields a "day" is a calendar date, so the
-/// evaluator (task 031) re-judges each returned item against that item's own "today" (D-25: assignee's time zone,
-/// then owner's, then UTC). The compiler itself applies no time-zone logic.</param>
+/// <see cref="PredicateCompiler.DateOnlyColumns"/>), task 024. <b>The compiled query is EXACT at
+/// <see cref="WindowAnchorUtc"/></b>: every relative date is resolved against that one instant, and the compiler
+/// applies no time-zone logic. For these fields a "day" is a calendar date whose "today" depends on the item (D-25:
+/// assignee's time zone, then owner's, then UTC), so the instant-anchored filter can both include and EXCLUDE an
+/// item near a day boundary. Re-judging the returned rows can only drop false positives, never recover rows the
+/// query left out: the evaluator (task 031) must therefore widen the query for these fields (for example anchor
+/// at a day boundary and widen each Date Only bound by one day) before judging per item. Recorded as a 031 input
+/// in <c>notes/024-progress.md</c>.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
@@ -104,9 +108,9 @@ public sealed class PredicateCompilationException : Exception
 /// resolves against <see cref="TimeProvider"/> at compile time — ONE anchor per compile — to an absolute UTC instant
 /// emitted with a <c>Z</c> suffix (verified on <c>spaarkedev1</c> to be honored as UTC, not the caller's local zone).
 /// The body's operator is kept as written: <c>{"&gt;=": "now-30d"}</c> compiles to <c>operator="ge"</c>. FetchXML's
-/// <c>last-x-days</c> / <c>next-x-days</c> are deliberately NOT used — they truncate to the start of day in the
-/// calling user's time zone and cap the range at "now", which is a different predicate from the one the author
-/// wrote. Any other string shaped like a relative date but outside that grammar (<c>NOW-30d</c>, <c>now-30</c>,
+/// <c>last-x-days</c> / <c>next-x-days</c> are deliberately NOT used — they truncate to day boundaries in the
+/// calling user's time zone (and <c>last-x-days</c> also caps the range at "now"), which is a different predicate
+/// from the one the author wrote. Any other string shaped like a relative date but outside that grammar (<c>NOW-30d</c>, <c>now-30</c>,
 /// <c>now+1h</c>, <c>now+-3d</c>) is refused rather than sent to Dataverse as a literal.</para>
 /// <para><b>Two-bound date range (owner decision D-40, task 024).</b> A field may take
 /// <c>{"&gt;=": "now", "&lt;=": "now+3d"}</c>: exactly one lower bound (<c>&gt;=</c>/<c>&gt;</c>) plus exactly one
@@ -524,13 +528,16 @@ public sealed partial class PredicateCompiler
             return DefaultQuietWindowDays;
         }
 
-        if (knob.ValueKind != JsonValueKind.Number || !knob.TryGetInt32(out var days) || days < 0 || days > MaxQuietWindowDays)
+        // TryGetDecimal, not TryGetInt32 (review F2): JSON Schema 'integer' accepts an integral number written as
+        // 7.0 or 1e2, so the compiler must read those as 7 and 100 rather than refuse them with an untrue message.
+        if (knob.ValueKind != JsonValueKind.Number || !knob.TryGetDecimal(out var value)
+            || value != decimal.Truncate(value) || value < 0 || value > MaxQuietWindowDays)
         {
             throw new PredicateCompilationException(
                 $"quietWindowDays: {knob.GetRawText()} is not a whole number of days between 0 and {MaxQuietWindowDays}.");
         }
 
-        return days;
+        return (int)value;
     }
 
     private static PositiveFieldUse UseOf(Dictionary<string, PositiveFieldUse> uses, string field)

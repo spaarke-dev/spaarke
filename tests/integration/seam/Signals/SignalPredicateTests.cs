@@ -37,9 +37,11 @@ namespace Sprk.Bff.Api.Tests.Seam.Signals;
 /// environment URL; set <see cref="CallerIdEnvVar"/> to the writer principal to evaluate AS it (without it, the run
 /// is as the operator, who is likely not trimmed by read depth). The credential is <see cref="DefaultAzureCredential"/>.
 /// The seed it relies on is recorded in <c>projects/spaarke-ontology-platform-r1/notes/seed-data-state.md</c>.</para>
-/// <para><b>Run status (2026-10-04): written, NOT yet run.</b> The workstation's <c>DefaultAzureCredential</c> could
-/// not obtain a token. The same compiled strings were executed via <c>pac org fetch</c> (reference notes §3b), which
-/// proves the query, not this harness.</para>
+/// <para><b>Run status.</b> 2026-10-04: written, not run (the workstation's <c>DefaultAzureCredential</c> could not
+/// obtain a token; the compiled strings were executed via <c>pac org fetch</c>, reference notes §3b). <b>2026-10-07
+/// (task 024): all 10 tests run live and pass as the writer principal</b>, with
+/// <c>AZURE_TOKEN_CREDENTIALS=AzureCliCredential</c> narrowing the credential chain to the Azure CLI login
+/// (<c>notes/024-progress.md</c>).</para>
 /// </remarks>
 [Trait("status", "repaired")]
 [Trait("Category", "Live")]
