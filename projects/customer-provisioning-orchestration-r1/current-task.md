@@ -2,18 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing directives + gotchas → project `CLAUDE.md` "Standing directives & gotchas". Decisions → notes. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/current-task-archive-2026-10-06.md` (do not load on recovery). Review limits (repo procedure 2026-10-06): F1–F4 fix now / K1–K4 known limit; ≤ 2 fix rounds re-verifying only the fix diff + direct callers/callees; 1 verifier pass per task (2 for auth/security); escalate an F1 still open instead of a round 3.
 
-> **Last Updated**: 2026-10-06 SESSION 41 — T254 Step 9.5 round 2 applied + committed (context-handoff before /compact).
+> **Last Updated**: 2026-10-06 SESSION 41 — T254 closed; next T232.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T254** — optional per-customer OpenAI spend limit (G37): `tasks/254-optional-openai-spend-limit.poml` (FULL, opus/high, BFF hot path). |
-| **Step** | Steps 1–3 ✅; Step 9 criteria met; Step 9.5: code-review + adr-check done, round 1 fixed (`105db5087`), verifier pass done (1 Warning: client refine 429 → fixed), **round 2 applied** (last round allowed — no round 3). Publish +0.01 MB (pre-task/master 36.15 MB / 192 files, branch `105db5087` 36.16 MB / 192); CVE none; design §17 T254 bullet + `.claude/CHANGELOG.md` written. |
-| **Status** | in-progress — verification of round 2, then close. Decisions + K1–K7: `notes/t254-ai-spend-limit-decisions.md`. |
-| **Next Action** | (1) `dotnet build tests/unit/Sprk.Bff.Api.Tests` then FULL `dotnet test tests/unit/Sprk.Bff.Api.Tests` (the round-1 build ran FULL green: BFF 18118/0 (54 skip), ArchTests 836/836 — only round 2's small diff is unverified by a full run) + `dotnet test tests/Spaarke.ArchTests` + ControlPlane suite; jest SprkChat already 210/210 on round 2. (2) If green: POML 254 status completed + notes (copy outcome from decisions note + design §17), TASK-INDEX 254 ✅, plan row, `pwsh scripts/check-task-status-drift.ps1`, commit + push, devops-project-sync, set next task T232. (3) Report owner items below. No live action. |
+| **Task** | **T232** — H11 B2B guests + Spaarke-paid licensing (D2, G10): verify/implement license assignment + guest → Dataverse user sync in the Spaarke-tenant environment. **No POML yet** — create it first from plan §7 row T232 (copy `tasks/228-…poml`), add the TASK-INDEX row. |
+| **Step** | 0 — not started. T254 ✅ (SESSION 41) — see its POML notes. |
+| **Status** | pending. |
+| **Next Action** | Create `tasks/232-…poml` (task-create conventions), then `task-execute` 232. No live action without owner approval. |
 | **Branch** | `work/customer-provisioning-orchestration-r1` — **23 behind / 44 ahead of `origin/master`** (measured 2026-10-06). Merge master before T186 and before any BFF deploy from this branch. |
-| **Order** | T254 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
+| **Order** | T254 ✅ → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141) → **T256** (INCOMING-145) → T186. T242c / T241 when the owner wants them. |
 
 ## Owner items
 

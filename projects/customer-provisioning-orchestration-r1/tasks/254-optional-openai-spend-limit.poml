@@ -4,7 +4,7 @@
     <title>Optional per-customer OpenAI spend limit (G37, owner decision 2026-10-06): no cap by default; an operator can set or change a monthly limit for a customer at intake or later, and a customer over its limit gets a clean 429</title>
     <phase>Model 1 dedicated-stamp remediation — gap G37</phase>
     <gate>after 230b</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Intake + H4b settings + BFF exception mapping (BFF §10) + operator procedure; tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,5 +81,31 @@
     <criterion testable="true">The documented procedure changes or removes a limit on an existing stamp.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 41). Commits f5d193709 (BFF), 46096d320 (intake / H4b / generator / script), 6458bcd5d
+    (docs), 105db5087 (Step 9.5 round 1), aaefd709d (round 2 + design §17), plus this close. Decisions + K1–K7:
+    notes/t254-ai-spend-limit-decisions.md; placement, publish size and ADR tensions: design.md §17 (T254 bullet).
+    - FOUND: task 077's gate was inert — merge 28c2c1b385 dropped its OpenAiClient wiring; the chat loop was never gated;
+      per-tid keying matches no Model 1 caller; the ledger was per process; 3 of 10 OpenAiClient methods recorded usage.
+    - D1 one OPTIONAL limit per STAMP (AiSpendLimit__MonthlyLimitUsd; unset = no limit) — replaces TenantBudget*;
+      D2 Redis ledger (integer micro-USD, {InstanceName}ai-spend:month:{yyyy-MM}, SystemCacheKeys.AiSpendMonth = 17th
+      entry, owner approval requested); D3 both seams (every public OpenAiClient method + AiSpendLimitChatClient inside
+      UseFunctionInvocation; usage now recorded on every completion path); D4 fail-open on the store (250 ms bounded read)
+      and on unbindable settings (logged once); D5 429 ProblemDetails + Retry-After (next UTC month), chat SendMessage +
+      RefineText pre-check before SSE, in-band code mid-turn; client shows the server message (describeTooManyRequests /
+      requestFailedMessage); D6 list-price estimate, rates configurable; D7 intake openAiMonthlyLimitUsd
+      (OpenAiMonthlyLimitRule, POST /api/runs) → H4b required:false entry (generator now supports optional per-env
+      sources) → scripts/Set-AiSpendLimit.ps1 for later add/change/remove (both slots, idempotent, -WhatIf).
+    - Step 9.5: code-review (5 W, 17 S) + adr-check (13 W, 3 V) → round 1 fixed all W and most S; V1 (single-setting
+      script writes vs provisioning.md) + V2 (no ValidateOnStart) = Path A recorded in design §17, owner confirmation
+      requested; V3 eviction = K4. Verifier pass on the fix diff: 1 W (refine 429 rendered raw JSON client-side) +
+      suggestions → round 2 fixed. No round 3.
+    - BFF §10: publish (fresh short-path worktrees, Compress-Archive Optimal, PDBs incl.) pre-task 3eeb76788 36.15 MB / 192
+      files, origin/master fdfd4cec5 36.15 MB / 192, branch 105db5087 36.16 MB / 192 = +0.01 MB; CVE none; ADR-010
+      ceiling 159 → 157.
+    - Tests: BFF full (round 1) 18118/0 (54 skip); ArchTests 836/836; ControlPlane 2224/0 (1 skip); Pester 11/11;
+      jest SprkChat 210/210; round-2 full run: BFF 18120/0 (54 skip), ArchTests 836/836, ControlPlane 2224/0 (1 skip).
+    - Not deployed. Client change ships with the next code-page / PCF build. Live check at T186: streaming usage arrives
+      on the final update (include_usage) — the estimate depends on it.
+  </notes>
 </task>
