@@ -47,7 +47,7 @@ Spec `ci-cd-unit-test-remediation-r1` FR-B01..FR-B07 + design.md §§4–5 + SC-
 
 The portfolio is heavy at the integration boundary, modest at the unit boundary, no UI tests yet. Approximate ratio of the surviving suite: ~70% integration / ~30% unit. This is **shape**, not a hard target.
 
-### 2. Seven KEEP path categories as MUST rules
+### 2. Eight KEEP path categories as MUST rules
 
 Tests under these paths are KEEP-protected. Deletion requires a same-PR replacement covering the same scenario. Enforced at code-review (Step 9.5 of `task-execute`) by path check, NOT by CSV consultation at runtime.
 
@@ -85,7 +85,7 @@ The policy is enforced at three layers:
 
 1. **`task-execute` Step 9.5** (modified by task CICD-060) — runs `code-review` + `adr-check` UNCONDITIONALLY on test-modifying PRs, regardless of default rigor level. The override is binding per spec FR-B07.
 2. **`nightly-health.yml` Tier 3 coverage job** — observation only; surfaces drift in nightly issue.
-3. **Path-check deletion safety** — any deletion under the 7 KEEP paths requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
+3. **Path-check deletion safety** — any deletion under the KEEP paths (eight; §2) requires same-PR replacement (Step 9.5 enforces by path inspection, not CSV).
 
 ### 7. Build-vs-Maintain Criteria (Scaffolding-Test Bans — added 2026-06-26 per spec FR-B08)
 

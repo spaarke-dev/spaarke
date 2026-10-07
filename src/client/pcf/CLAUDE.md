@@ -13,12 +13,13 @@ TypeScript/React PCF controls for the Dataverse model-driven app. Each control i
 **Retired — do not use as patterns or references:**
 - **UniversalDatasetGrid** (deleted). For lists use the DataGrid framework: `<DataGrid configId=… />` from `@spaarke/ui-components` + a `sprk_gridconfiguration` record ([`docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../../../docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)).
 - **AssociationResolver** (SRFR-045, 2026-07) — folded into **RegardingResolver**, the polymorphic set-regarding picker on child forms. It writes the denormalized `sprk_regarding*` fields with subgrid auto-detect (Xrm.WebApi, no BFF) and supplies the parent the Field Mapping Framework inherits from ([`docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md`](../../../docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md)).
+- **EmailProcessingMonitor** (deleted 2026-09-25) — its folder holds only a stray `package-lock.json`.
 
 ## Binding rules
 
 - **ADR-006** — custom UI on a form is a PCF control; no new JS web resources for custom UI.
 - **ADR-022** — React and Fluent come from the platform libraries declared in `ControlManifest.Input.xml` (React **16.14.0**, Fluent 9). Code written for React 18/19 can fail here.
-- **Shared library from a PCF:** import from `@spaarke/ui-components/src/pcf-safe` (the React 16/17-safe barrel), not the main barrel. Type drift between React versions: [`.claude/patterns/ui/fluent-v9-react-version-boundaries.md`](../../../.claude/patterns/ui/fluent-v9-react-version-boundaries.md).
+- **Shared library from a PCF (ADR-012 "PCF Import Pattern"):** import compiled deep paths — `@spaarke/ui-components/dist/components/…`, `dist/utils/…`, or the React 16-safe barrel `dist/pcf-safe`. Never the main barrel (it pulls in components that need `react/jsx-runtime`, absent in React 16) and never a `src/` path (ADR-022: TS2786). A control importing `dist/` needs the `prebuild`/`prebuild:prod` `ensure-dist-fresh` wiring (`/pcf-deploy`). Type drift between React versions: [`.claude/patterns/ui/fluent-v9-react-version-boundaries.md`](../../../.claude/patterns/ui/fluent-v9-react-version-boundaries.md).
 - **ADR-012 / ADR-021** — reuse `@spaarke/ui-components` rather than duplicating; Fluent UI v9 only (`@fluentui/react-components`), never v8 `@fluentui/react`; design tokens only, never hard-coded hex/px, so light and dark themes both resolve.
 - **Section headers and list rows** follow [`docs/standards/UI-DESIGN-STANDARDS.md`](../../../docs/standards/UI-DESIGN-STANDARDS.md): header = `fontSizeBase300` + `fontWeightSemibold` + `colorNeutralForeground1`; row = 20px min-height + `spacingVerticalXS` top/bottom. Reference: `CommunicationAttachments/`.
 
@@ -32,15 +33,15 @@ import { initAuth, authenticatedFetch } from '@spaarke/auth';
 await initAuth({
     clientId: clientAppId,
     // authority omitted — @spaarke/auth resolves the tenant-specific authority (INV-6)
-    redirectUri: resolveClientUrlFromXrm(),
-    bffApiScope: `api://${bffAppId}/SDAP.Access`,
-    bffBaseUrl: bffApiUrl,
+    redirectUri: dataverseUrl,                          // Xrm.Utility.getGlobalContext().getClientUrl()
+    bffApiScope: `api://${bffAppId}/user_impersonation`, // .claude/constraints/auth.md
+    bffBaseUrl: bffApiUrl,                              // await getApiBaseUrl(context.webAPI) — HOST ONLY
     proactiveRefresh: true,
 });
 const response = await authenticatedFetch('/ai/search/...'); // relative path; token, refresh and 401 retry handled
 ```
 
-Canonical: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md) (INV-1..INV-8). Exemplar: `SemanticSearchControl`.
+Copy the real file rather than this sketch: `SemanticSearchControl/SemanticSearchControl/authInit.ts`. **The BFF base URL is host only** — take it from `getApiBaseUrl()` in `shared/utils/environmentVariables.ts` (strips `/api`) and pass relative paths to `authenticatedFetch`; hand-concatenating URLs has caused repeated `/api/api` 404s in production. Canonical: [`.claude/patterns/auth/spaarke-sso-binding.md`](../../../.claude/patterns/auth/spaarke-sso-binding.md) (INV-1..INV-8).
 
 **⛔ Never (ADR-028 violations):**
 - pass `accessToken: string` or `getAccessToken: () => Promise<string>` as a prop or constructor argument (API clients included);
@@ -63,5 +64,5 @@ Every PCF control displays its version in the UI footer, e.g. `v3.2.4 • Built 
 |---|---|
 | Type props and state | Use `any` |
 | Handle loading and error states; show user-friendly messages | Show raw errors to users |
-| Use the logger utility | Leave `console.log` in production code |
+| Use the logger (`createLogger` from `@spaarke/ui-components/dist/pcf-safe`) | Leave `console.log` in production code |
 | Clean up in `destroy()` | Leave event listeners attached |

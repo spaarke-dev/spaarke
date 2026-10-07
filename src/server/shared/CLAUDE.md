@@ -11,13 +11,13 @@ Maintainer notes (stripped before Claude reads this file):
 | Library | What it holds | References |
 |---|---|---|
 | `Spaarke.Dataverse` | Dataverse access: `IDataverseService` plus per-area interfaces (`IDocumentDataverseService`, `IEventDataverseService`, …), `DataverseServiceClientImpl`, `DataverseWebApiClient`, impersonation and access-rights helpers. See its `README.md` | none (base layer) |
-| `Spaarke.Core` | Cross-cutting: `Auth/`, `Cache/`, `Utilities/`, `Entities/`, constants. See its `README.md` | `Spaarke.Dataverse` |
+| `Spaarke.Core` | Cross-cutting: `Auth/`, `Cache/`, `Utilities/`, `Entities/`, `Attributes/`. See its `README.md` | `Spaarke.Dataverse` |
 | `Spaarke.Scheduling` | The scheduled-job host — `IScheduledJob`, `ScheduledJobHost`, leases, retry policy (ADR-036) | `Spaarke.Core` |
-| `Contracts/` | Shared contract types (`SpeContainerBusinessUnitBinding.cs`) | — |
+| `Contracts/` | Shared contract types (`SpeContainerBusinessUnitBinding.cs`). No project of its own: linked by `Compile Include` into `Sprk.Bff.Api.csproj` and `Sprk.Provisioning.ControlPlane.Core.csproj` — do not add a csproj | — |
 
 ## Binding rules
 
-- **Dependency direction:** `Spaarke.Dataverse` ← `Spaarke.Core` ← `Spaarke.Scheduling` ← `Sprk.Bff.Api`. No shared library references the BFF, and no cycles. Enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs`; if a refactor changes the direction, update this table and that test together.
+- **Dependency direction:** `Spaarke.Dataverse` ← `Spaarke.Core` ← `Spaarke.Scheduling` ← `Sprk.Bff.Api`. No shared library references the BFF, and no cycles. The Core / Dataverse / BFF edges are enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs` (Scheduling's position is not); if a refactor changes the direction, update this table and that test together.
 - Changes to `Spaarke.Core` or `Spaarke.Dataverse` follow BFF hygiene — [`.claude/rules/bff-hygiene.md`](../../../.claude/rules/bff-hygiene.md) loads automatically when you edit them (root §10).
 - **ADR-010** — DI minimalism: register concretes; an interface only where it is a real seam. The Dataverse `ServiceClient` is a singleton, never per-request.
 - Keep each library focused; no "utility" kitchen-sink types. Document public APIs with XML comments.

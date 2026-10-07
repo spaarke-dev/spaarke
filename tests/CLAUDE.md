@@ -9,6 +9,8 @@ Maintainer notes (stripped before Claude reads this file):
 -->
 # tests/ — test authoring rules
 
+**Scope:** .NET xUnit tests (ADR-038). `tests/e2e`, `tests/load`, `tests/scripts`, `tests/manual` and `tests/eval` follow their own READMEs; the KEEP-path rules below do not apply to them.
+
 Canonical source: [ADR-038](../docs/adr/ADR-038-testing-strategy.md). MUST/MUST NOT list: [`.claude/constraints/testing.md`](../.claude/constraints/testing.md). Operational standard: [`docs/standards/TEST-ARCHITECTURE.md`](../docs/standards/TEST-ARCHITECTURE.md). Test PRs run at FULL rigor (root `CLAUDE.md` §8).
 
 ## KEEP paths (deletion-protected)
@@ -29,7 +31,7 @@ tests/
 
 Removing a file under any KEEP path requires a same-PR replacement covering the same scenario (enforced at code-review, `task-execute` Step 9.5).
 
-**Where they compile.** The seven `integration/*` and `unit/domain` folders have no project file of their own; they are compiled into `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` (`Compile Include` per folder). `Spaarke.ArchTests` is its own project.
+**Where they compile.** The seven `integration/*` and `unit/domain` folders have no project file of their own; they are compiled into `tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj` (`Compile Include` per folder). The globs already exist: a new file under a KEEP folder needs no csproj change, and a second identical glob breaks the build (NETSDK1022 — it happened once, from two branches each adding it). `Spaarke.ArchTests` is its own project and is **not** in `Spaarke.sln`.
 
 ### Structural fitness functions — `tests/Spaarke.ArchTests/**`
 
@@ -85,7 +87,7 @@ public async Task CreateDocument_WithValidInput_ReturnsCreatedAndPersists()
 }
 ```
 
-`TestWebApplicationFactory` and `GetRepository()` are placeholders. Real fixtures are per-area `WebApplicationFactory<Program>` subclasses (e.g. `ChatEndpointsTestFixture` in `tests/integration/Spe.Integration.Tests/Api/Ai/ChatEndpointsTests.cs`); copy the nearest one.
+`TestWebApplicationFactory` and `GetRepository()` are placeholders. KEEP-path tests compile into `Sprk.Bff.Api.Tests`, so use its fixtures: `CustomWebAppFactory` (`tests/unit/Sprk.Bff.Api.Tests/CustomWebAppFactory.cs`) or the per-area `WebApplicationFactory<Program>` subclasses in that project (e.g. `WorkspaceTestFixture`); copy the nearest one. Fixtures in `tests/integration/Spe.Integration.Tests` are a separate assembly and cannot be referenced from KEEP-path tests.
 
 ## Authoring Template — Unit (DOMAIN LOGIC ONLY)
 
@@ -131,13 +133,13 @@ Before authoring, ask:
 2. **Does it live under a KEEP path?** If not, it is the wrong shape — re-scope, or escalate to an ADR amendment.
 3. **Is the assertion about behaviour the caller would notice, or implementation the caller can't see?** The latter is scaffolding (ADR-038 §7).
 
-A test that passes all three is maintain-class: name it `{Method}_{Scenario}_{ExpectedResult}`, place it in the right KEEP path. A test that fails any of them: fix it now (rescope, rename, restructure) or accept that `/test-diet` will delete it. Binding ≥ 6 months from 2026-06-26 (ADR-038 §7).
+A test that passes all three is maintain-class: name it `{Method}_{Scenario}_{ExpectedResult}`, place it in the right KEEP path. A test that fails any of them: fix it now (rescope, rename, restructure) or accept that `/test-diet` will delete it. Binding ≥ 6 months from 2026-06-26 (ADR-038).
 
 ## Conventions
 
 - **Naming:** `{MethodOrEndpoint}_{Scenario}_{ExpectedResult}` — e.g. `GetDocument_WhenNotFound_ReturnsNotFound`.
 - **Class names:** `{ClassUnderTest}Tests.cs` (domain unit tests), `{Endpoint}ContractTests.cs` (contract), `Issue{N}_{Description}Tests.cs` (regression).
-- **Frameworks:** xUnit, Moq (not NSubstitute), FluentAssertions (prefer it over `Assert.Equal` / `Assert.NotNull`). Versions: the test `.csproj` files and `Directory.Packages.props`.
+- **Frameworks:** xUnit, Moq (not NSubstitute), FluentAssertions (prefer it over `Assert.Equal` / `Assert.NotNull`). Versions: the test `.csproj` files (`Directory.Packages.props` is not authoritative — central package management is off).
 - **Time:** `FakeTimeProvider` (`Microsoft.Extensions.TimeProvider.Testing`). Banned in tests: `Stopwatch`, `DateTime.UtcNow`, `Task.Delay` — they flake on shared CI runners. Pattern: construct the SUT with a `FakeTimeProvider`, then `time.Advance(...)`.
 - **Moq** for module-boundary mocks only, never for `HttpClient` / `HttpMessageHandler`.
 - **Test data builders** for complex objects, next to the test class or under `tests/integration/Shared/` for cross-class reuse.
@@ -150,9 +152,9 @@ Measured, **never a gate** (nightly `nightly-health.yml`). Binding ≥ 6 months 
 ## Running tests
 
 ```bash
-dotnet test                                                      # everything
+dotnet test                                                      # Spaarke.sln — does NOT include Spaarke.ArchTests
+dotnet test tests/Spaarke.ArchTests/                             # fitness functions — always run this too
 dotnet test tests/unit/Sprk.Bff.Api.Tests/                       # all KEEP folders (compiled here)
-dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ChatEndpointsContractTests"
-dotnet test tests/Spaarke.ArchTests/                             # fitness functions
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~ComposeActiveDocumentContractTests"
 dotnet test --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings   # informational only
 ```

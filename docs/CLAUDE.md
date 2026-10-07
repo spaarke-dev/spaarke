@@ -5,7 +5,7 @@ Previous version: .claude/archive/2026-10-07/modules/docs.CLAUDE.md
 -->
 # docs/ — how to use this folder
 
-**Code is the source of truth; docs lag.** When a doc disagrees with `src/`, the code is right and the doc gets fixed (root §2). Read code and `.claude/patterns/` / `.claude/adr/` first; come here for the *why* and for procedures.
+**Code is the source of truth; docs lag.** When a doc disagrees with `src/`, the code is right and the doc gets fixed (root §2). Read code and `.claude/patterns/` (index: `.claude/patterns/INDEX.md`) / `.claude/adr/` first; come here for the *why* and for procedures.
 
 - **Find a doc:** [`docs/INDEX.md`](INDEX.md) — the full catalogue. Load order across layers: root `CLAUDE.md` §14.
 - **Folders:** `architecture/` decisions and rationale · `standards/` cross-cutting coding standards · `guides/` operations (deploy, configure) · `procedures/` development workflow · `data-model/` Dataverse schemas · `adr/` full ADR history (the concise rules are in `.claude/adr/`) · `deployment/`, `assessments/`, `enhancements/`, `notes/`, `product-documentation/`, `screenshots/`.

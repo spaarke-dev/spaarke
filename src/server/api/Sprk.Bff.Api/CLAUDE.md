@@ -24,14 +24,15 @@ The .NET 10 Minimal API that is the single backend for every client surface (SPE
 | SPE operations facade | `Infrastructure/Graph/SpeFileStore.cs` |
 | Graph clients / OBO | `Infrastructure/Graph/GraphClientFactory.cs`; OBO token cache `Services/GraphTokenCache.cs` |
 | Confidential-client credentials | `Infrastructure/Auth/OrderedCredentialClientProvider.cs` (reads `Graph:Credentials:Order`) |
-| Settings inventory (each key with a `_comment` explaining it) | `appsettings.template.json` |
+| Settings inventory (`_comment` entries explain the keys where the reason matters) | `appsettings.template.json` |
 | Startup config validation | `Configuration/` (`IdentityConfigurationValidator.cs`, `GraphOptionsValidator.cs`) |
 | Audit enrichment (`oid`, `appid`, `obo`, `tenantId`, `correlationId`) | `Infrastructure/Logging/AuditEnrichmentMiddleware.cs` |
 | Chat pipeline | `Api/Ai/ChatEndpoints.cs` → `Services/Ai/Chat/ChatSessionManager.cs` → `SprkChatAgentFactory.cs` → `PlaybookChatContextProvider.cs` → `AgentToolCatalogProjector.cs` (closed catalog, ADR-039) → `Services/Ai/RagService.cs` |
 | AI analysis pipeline | `Services/Ai/AnalysisOrchestrationService.cs`; design: `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` |
 | Background jobs | `Services/Jobs/ServiceBusJobProcessor.cs` (queue, ADR-004); scheduled: ADR-036 `IScheduledJob` |
 | Code patterns (endpoint, filter, errors, DI, workers, resilience) | `.claude/patterns/api/` |
-| Local dev secrets | `docs/SPE.BFF.API-SECRETS-SETUP.md` (short answer: `az login` covers everything except OBO) |
+| Inbound API-key schemes; webhook HMAC | `Infrastructure/Authentication/ApiKeyAuthenticationHandler.cs` (one handler, several named schemes); `Api/Filters/WebhookSignatureFilter.cs` |
+| Local dev secrets | `src/server/api/Sprk.Bff.Api/docs/SPE.BFF.API-SECRETS-SETUP.md` (short answer: `az login` covers everything except OBO; any Key Vault step it mentions is governed by root §9) |
 
 ## Binding rules
 
@@ -44,7 +45,7 @@ The .NET 10 Minimal API that is the single backend for every client surface (SPE
 ## Auth — load-bearing facts ([ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md), [`.claude/constraints/auth.md`](../../../../.claude/constraints/auth.md))
 
 - **OBO needs a confidential *credential*, not a secret.** Here it is a managed-identity-issued federated client assertion (ADR-028 A4). Do not re-derive "OBO needs a secret" from any doc; if you find a doc that says so, fix it.
-- The BFF identity is **secret-free**. `OrderedCredentialClientProvider` resolves the credential named in `Graph:Credentials:Order`; `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if `ClientSecret` returns to the order. App-only Graph and Dataverse use the managed identity when `Graph:ManagedIdentity:Enabled=true`; it is a user-assigned identity selected by `Graph:ManagedIdentity:ClientId` (validated at startup in `Configuration/`). Mailbox-scoped Graph (`Mail.*`) also needs an Exchange `ApplicationAccessPolicy`.
+- The BFF identity is **secret-free**. `OrderedCredentialClientProvider` resolves the credential named in `Graph:Credentials:Order`; `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if `ClientSecret` returns to the order. App-only Graph and Dataverse use the managed identity when `Graph:ManagedIdentity:Enabled=true`; it is a user-assigned identity selected by `Graph:ManagedIdentity:ClientId` (validated at startup in `Configuration/`). Mailbox-scoped Graph (`Mail.*`) also needs Exchange *RBAC for Applications* scoping (`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §4.2.1; it replaced the legacy `ApplicationAccessPolicy`, which some older docs still describe).
 - ⚠️ **Never add a `.WithClientSecret(...)` site.** `tests/Spaarke.ArchTests/CredentialGuardTests.cs` fails the build on one and `CredentialCensusTests` asserts the construction-site count. The only sanctioned secret-bearing credentials are ADR-028's listed exceptions — read their current text there.
 - Inbound from trusted external systems uses named API-key schemes (`AuthenticationHandler<>` per scheme, constant-time compare with `CryptographicOperations.FixedTimeEquals`).
 - Clients call with `@spaarke/auth` (`authenticatedFetch`). Never add `accessToken` props or custom auth headers to the client contract.
@@ -56,7 +57,7 @@ Follow [`tests/CLAUDE.md`](../../../../tests/CLAUDE.md): a new endpoint gets a c
 
 ## Package Management
 
-**Microsoft.Graph / Kiota.** The BFF references `Microsoft.Graph` 6.x directly (`Sprk.Bff.Api.csproj`); Kiota is **transitive only**. Every resolved `Microsoft.Kiota.*` assembly must be the same version or the app fails at runtime with binding errors — Graph.Core's own dependency graph guarantees that today. Do not add direct `Microsoft.Kiota.*` `PackageReference`s unless a genuine transitive conflict forces one. If it does:
+**Microsoft.Graph / Kiota.** The BFF references `Microsoft.Graph` 6.x directly (`Sprk.Bff.Api.csproj`); Kiota is **transitive only**. (`Directory.Packages.props` sets `ManagePackageVersionsCentrally=false`, so its older Graph/Kiota entries are inert.) Every resolved `Microsoft.Kiota.*` assembly must be the same version or the app fails at runtime with binding errors — Graph.Core's own dependency graph guarantees that today. Do not add direct `Microsoft.Kiota.*` `PackageReference`s unless a genuine transitive conflict forces one. If it does:
 1. Confirm: `dotnet list package --include-transitive | grep -i kiota` shows more than one Kiota version.
 2. Pin **all** `Microsoft.Kiota.*` references to the same version (never a partial set), with an inline comment naming the conflict.
 3. Re-run the check, then build and test locally before deploying.
