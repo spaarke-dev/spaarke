@@ -1,3 +1,4 @@
+/** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * Kanban-bucket / To-Do-Score parity under a negative-UTC-offset timezone
  * (spaarke-ontology-platform-r1 task 080 / C-10, 2026-10-03).
@@ -19,10 +20,8 @@
  * `Spaarke.AI.Widgets/.../EntityInfoWidget.tz.test.tsx`).
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-// Must be set before the imports below (Date reads TZ at construction time).
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 // `@spaarke/ui-components`'s dist entry (`dist/services/index.js`) unconditionally requires
 // `@spaarke/sdap-client`, which is not built as a dist package in this worktree. Delegate to the
 // SOURCE file directly (bypassing the broken dist) so this suite exercises the real canonical
@@ -39,14 +38,6 @@ import { parseDueDate as canonicalParseDueDate } from '@spaarke/ui-components';
 import { bucketTodoItems } from '../src/hooks/useKanbanColumns';
 import { computeTodoScore, parseDueDate as scoringParseDueDate } from '../src/utils/todoScoring';
 import type { IKanbanCardTodo } from '../src/types/kanban';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 
 /** Build a date-only `YYYY-MM-DD` string N local calendar days from today. */
 function localDateOnlyIso(daysFromToday: number): string {

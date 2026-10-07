@@ -1,3 +1,4 @@
+/** @jest-environment ./jest.newYorkEnvironment.js */
 /**
  * dateLocal — timezone regression guard (spaarke-ontology-platform-r1 task
  * 080 / C-10, 2026-10-03).
@@ -10,19 +11,9 @@
  * `Spaarke.AI.Widgets/.../EntityInfoWidget.tz.test.tsx`.
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-// Must be set before the import below (Date/Intl read TZ at construction time).
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { parseDueDate, daysBetweenLocalMidnight, dueUrgencyForDays } from '../dateLocal';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 
 describe('parseDueDate — negative-UTC-offset regression (C-10)', () => {
   it('confirms the harness timezone is genuinely behind UTC (guard is meaningful)', () => {

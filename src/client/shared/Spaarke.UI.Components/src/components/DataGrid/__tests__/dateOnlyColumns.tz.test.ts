@@ -13,9 +13,8 @@
  * CI runner cannot pass this trivially (same pattern as dateLocal.test.ts).
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { renderCellValue } from '../DataGrid';
 import { resolveConfig } from '../configResolution';
 import type { DataGridConfiguration } from '../../../types/DataGridConfiguration';
@@ -23,11 +22,6 @@ import type { EntityMetadata } from '../../../services/IDataverseClient';
 import { XrmDataverseClient, _resetEntityMetadataCacheForTests } from '../../../services/XrmDataverseClient';
 import { ColumnRendererService } from '../../../services/ColumnRendererService';
 import { DataverseAttributeType } from '../../../types/ColumnRendererTypes';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
-  else process.env.TZ = ORIGINAL_TZ;
-});
 
 const OCT_2 = new Date(2026, 9, 2).toLocaleDateString();
 const OCT_1 = new Date(2026, 9, 1).toLocaleDateString();

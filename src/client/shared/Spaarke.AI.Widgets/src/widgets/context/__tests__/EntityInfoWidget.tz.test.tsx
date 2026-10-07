@@ -1,3 +1,4 @@
+/** @jest-environment ../Spaarke.UI.Components/jest.newYorkEnvironment.js */
 /**
  * EntityInfoWidget — timezone regression guard (F-9, e2e-completion-audit
  * 2026-07-10).
@@ -23,10 +24,8 @@
  * sharing this worker.
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-// Must be set before the imports below (Intl reads TZ at formatter construction).
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen } from '@testing-library/react';
@@ -36,14 +35,6 @@ import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
 import EntityInfoWidget from '../EntityInfoWidget';
 import type { EntityInfoData } from '../EntityInfoWidget';
 import type { ContextWidgetProps } from '../../../types/widget-types';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 
 function renderWidget(data: EntityInfoData): void {
   const bus = new PaneEventBus();

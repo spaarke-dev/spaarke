@@ -1,3 +1,4 @@
+/** @jest-environment ./jest.newYorkEnvironment.js */
 /**
  * formatRelativeTime — bucket boundaries, styles and locale (task 081 /
  * F3, F5, F9, F10, F11 + compact style).
@@ -8,9 +9,9 @@
  * buckets are deterministic across DST.
  */
 
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { formatRelativeTime } from '../relativeTime';
-
-const ORIGINAL_TZ = process.env.TZ;
 
 /** Fixed local "now": Mon 2026-06-15 12:00 America/New_York. */
 const NOW = (): Date => new Date(2026, 5, 15, 12, 0, 0);
@@ -18,16 +19,6 @@ const NOW = (): Date => new Date(2026, 5, 15, 12, 0, 0);
 const secondsFromNow = (s: number): string => new Date(NOW().getTime() + s * 1000).toISOString();
 const daysFromNow = (d: number): string => new Date(2026, 5, 15 + d, 12, 0, 0).toISOString();
 
-beforeAll(() => {
-  process.env.TZ = 'America/New_York';
-});
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) {
-    delete process.env.TZ;
-  } else {
-    process.env.TZ = ORIGINAL_TZ;
-  }
-});
 beforeEach(() => {
   jest.useFakeTimers();
   jest.setSystemTime(NOW());

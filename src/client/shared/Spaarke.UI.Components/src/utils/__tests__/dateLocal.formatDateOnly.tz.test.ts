@@ -11,15 +11,9 @@
  * TZ pinned to America/New_York before any Date use (see dateLocal.test.ts).
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { formatDateOnly, isDateOnlyString, parseDueDate } from '../dateLocal';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
-  else process.env.TZ = ORIGINAL_TZ;
-});
 
 describe('formatDateOnly — the LOCAL calendar day as YYYY-MM-DD', () => {
   it('late evening in New York is still that day (toISOString would give tomorrow)', () => {

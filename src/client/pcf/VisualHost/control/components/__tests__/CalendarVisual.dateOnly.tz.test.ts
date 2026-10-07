@@ -9,15 +9,9 @@
  * America/New_York before any Date use (a UTC runner would pass trivially).
  */
 
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = 'America/New_York';
-
+// America/New_York is set by the @jest-environment above. Assigning process.env.TZ in a jest test file only
+// changes Jest's per-file copy of process.env, so it never reached Node (task 098).
 import { mapRecordToEvent } from '../CalendarVisual';
-
-afterAll(() => {
-  if (ORIGINAL_TZ === undefined) delete process.env.TZ;
-  else process.env.TZ = ORIGINAL_TZ;
-});
 
 describe('CalendarVisual.mapRecordToEvent — Date Only dates (task 098)', () => {
   it('the harness is behind UTC (guard is meaningful)', () => {
