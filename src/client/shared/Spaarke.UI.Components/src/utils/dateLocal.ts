@@ -61,3 +61,37 @@ export function daysBetweenLocalMidnight(a: Date, b: Date): number {
   const msPerDay = 1000 * 60 * 60 * 24;
   return Math.round((startB.getTime() - startA.getTime()) / msPerDay);
 }
+
+/**
+ * Due-date urgency tier (owner decision 2026-10-03, C-17: 3/7/10 calendar days).
+ *
+ *   - `'overdue'` — due before today
+ *   - `'3d'`      — due today through 3 days out (day 3 included)
+ *   - `'7d'`      — 4 to 7 days out
+ *   - `'10d'`     — 8 to 10 days out
+ *   - `'none'`    — 11+ days out, or no due date
+ */
+export type DueUrgency = 'overdue' | '3d' | '7d' | '10d' | 'none';
+
+/**
+ * THE due-date tier function (spaarke-ontology-platform-r1 task 081 / C-17).
+ * Every surface that colours a due date calls this — SmartTodo
+ * (`computeDueLabel`), the LegalWorkspace feed card, and the VisualHost event
+ * due-date card (which passes the tier to `@spaarke/visuals`) — so one item
+ * gets one tier everywhere. Each surface keeps only its own tier → colour map,
+ * all following SmartTodo's badge palette (red / dark orange / yellow / grey).
+ *
+ * @param days CALENDAR days from today to the due date (negative = overdue),
+ *   i.e. `daysBetweenLocalMidnight(new Date(), parseDueDate(value))`. Never an
+ *   elapsed-ms quotient: a date-only value parsed as UTC midnight reads one
+ *   day early in every US zone.
+ * @returns the tier; `null` (no due date) → `'none'`.
+ */
+export function dueUrgencyForDays(days: number | null): DueUrgency {
+  if (days === null || Number.isNaN(days)) return 'none';
+  if (days < 0) return 'overdue';
+  if (days <= 3) return '3d';
+  if (days <= 7) return '7d';
+  if (days <= 10) return '10d';
+  return 'none';
+}

@@ -17,6 +17,7 @@ import { EntityCreationService } from '../../services/EntityCreationService';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import { applyResolverFields, discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -102,7 +103,7 @@ function _resolveLookupHint(entityLogicalName: string): string {
  * Best-effort resolution of the current Dataverse user GUID from the host Xrm global.
  *
  * Matches the established `CreateWorkAssignmentWizard/workAssignmentService._getCurrentUserId`
- * pattern: walks `window`, `window.parent`, `window.top` (cross-origin safe) looking first for
+ * pattern: walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) looking first for
  * `Xrm.Utility.getGlobalContext().userSettings.userId` (Code Page hosted in a Power App iframe),
  * then falling back to `Xrm.Utility.getUserId()` (PCF / direct host).
  *
@@ -112,40 +113,9 @@ function _resolveLookupHint(entityLogicalName: string): string {
  * @returns Current user GUID (braces stripped, lowercased), or `null` if Xrm is unreachable.
  */
 function _tryGetCurrentUserId(): string | null {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const ctx = xrm.Utility.getGlobalContext();
-        const userId = ctx?.userSettings?.userId;
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
-      }
-      if (typeof xrm?.Utility?.getUserId === 'function') {
-        const userId = xrm.Utility.getUserId();
-        if (typeof userId === 'string' && userId.trim() !== '') {
-          return cleanGuid(userId);
-        }
-      }
-    } catch {
-      // Cross-origin frame — skip
-    }
-  }
-  return null;
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? null;
 }
 
 /**

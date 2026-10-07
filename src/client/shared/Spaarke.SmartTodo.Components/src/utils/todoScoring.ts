@@ -2,27 +2,20 @@
  * todoScoring — Shared scoring + due-date helpers used by the hoisted
  * SmartTodo Kanban surface (R4 task 102 / E-1, 2026-06-18).
  *
- * Why this file exists (and why the helpers aren't simply imported from the
- * Code Page's `utils/todoScoreUtils.ts` / `utils/dueLabelUtils.ts`):
+ * Why this file exists: the peer package is host-agnostic by design, so the
+ * composite-score math lives here rather than in a `src/solutions/...` Code
+ * Page (reaching into one would invert the dependency direction). The Code
+ * Page's `utils/todoScoreUtils.ts` and `utils/dueLabelUtils.ts` now re-export
+ * from this package instead of keeping copies.
  *
- *   - The peer package is host-agnostic by design. Reaching into a
- *     `src/solutions/...` source path would invert the dependency direction
- *     and tie the peer package to one specific app's file layout.
- *   - The previously-hoisted `useKanbanColumns` (R4-101) already keeps
- *     LOCAL copies of `computeTodoScore` + `parseDueDate` inside its module
- *     for the same reason. Centralising those copies here lets the hoisted
- *     `KanbanCard` re-use the identical math without further duplication.
- *
- * Bit-for-bit parity with the Code Page implementation is required (no
- * regression for existing users of `SmartToDo.tsx`):
  *   - Weights: priority 0.50, effort (inverted) 0.20, urgency 0.30
- *   - Urgency tiers: overdue=100, ≤3d=80, ≤7d=50, ≤10d=25, else=0
- *   - DueLabel COLOUR tiers: overdue / 3d / 7d / 10d / none (unchanged).
- *     NOTE (smart-todo-r5 UAT 2026-08-17, item #6): the badge LABEL text is now
- *     a real calendar-day countdown ("Overdue" / "Today" / "{n}d"), not the
- *     tier name — so a task due today reads "Today" instead of a misleading
- *     "3d". Colour tiers (`urgency`) are untouched; only `label` changed. The
- *     Code Page's `utils/dueLabelUtils.ts` (List/Dismissed views) mirrors this.
+ *   - Composite-score urgency points: overdue=100, ≤3d=80, ≤7d=50, ≤10d=25, else=0
+ *   - DueLabel COLOUR tiers (`urgency`): from the shared `dueUrgencyForDays`
+ *     (`@spaarke/ui-components` `utils/dateLocal.ts`, task 081 / C-17) — the
+ *     ONE 3/7/10 tier function every due-date surface calls.
+ *     NOTE (smart-todo-r5 UAT 2026-08-17, item #6): the badge LABEL text is a
+ *     real calendar-day countdown ("Overdue" / "Today" / "{n}d"), not the tier
+ *     name — so a task due today reads "Today" instead of a misleading "3d".
  *
  * `parseDueDate`'s local-midnight fix (spaarke-ontology-platform-r1 task 080
  * / C-10, 2026-10-03): this file no longer defines its own copy. Two other
@@ -36,18 +29,17 @@
  * locked in THIS file per `todoScoreMappings.ts`'s own doc comment — only
  * the date-parsing primitive moved.
  *
- * @see src/solutions/SmartTodo/src/utils/todoScoreUtils.ts (original)
- * @see src/solutions/SmartTodo/src/utils/dueLabelUtils.ts (original)
- * @see hooks/useKanbanColumns.ts (now imports the same parseDueDate)
+ * @see hooks/useKanbanColumns.ts (imports the same parseDueDate)
  */
 
-import { parseDueDate } from '@spaarke/ui-components';
+import { parseDueDate, daysBetweenLocalMidnight, dueUrgencyForDays, type DueUrgency } from '@spaarke/ui-components';
 import type { IKanbanTodoLike } from '../types/kanban';
 
 export { parseDueDate };
+export type { DueUrgency };
 
 // ---------------------------------------------------------------------------
-// Weights — locked to match Code Page `todoScoreUtils.ts`
+// Weights — locked (see `todoScoreMappings.ts`)
 // ---------------------------------------------------------------------------
 
 const W_PRIORITY = 0.5;
@@ -55,11 +47,8 @@ const W_EFFORT = 0.2;
 const W_URGENCY = 0.3;
 
 // ---------------------------------------------------------------------------
-// Due-date label types — mirrors Code Page `dueLabelUtils.ts` exactly
+// Due-date label types (`DueUrgency` is re-exported from `@spaarke/ui-components`)
 // ---------------------------------------------------------------------------
-
-/** The urgency tier for a due date. */
-export type DueUrgency = 'overdue' | '3d' | '7d' | '10d' | 'none';
 
 /** Computed due label with a short display string and urgency tier. */
 export interface IDueLabel {
@@ -113,27 +102,20 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
   // for anything in the 0–3-day tier, including today.) Math.round absorbs the
   // ±1h DST skew that makes a "day" 23 or 25 hours. Colour tiers (`urgency`) are
   // UNCHANGED, so badge colours match the prior behaviour exactly.
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const startOfDue = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
-  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24));
+  // (task 081 / U5: the shared `daysBetweenLocalMidnight` replaces this
+  // function's former inline copy of the same local-midnight idiom.)
+  const diffDays = daysBetweenLocalMidnight(new Date(), dueDate);
+  // task 081 / C-17: the tier comes from the ONE shared tier function, so the
+  // feed card and the event due-date card get the same tier for the same day.
+  const urgency = dueUrgencyForDays(diffDays);
 
-  if (diffDays < 0) {
-    return { label: 'Overdue', urgency: 'overdue' };
+  if (urgency === 'none') {
+    return { label: '', urgency };
   }
-  if (diffDays === 0) {
-    return { label: 'Today', urgency: '3d' };
+  if (urgency === 'overdue') {
+    return { label: 'Overdue', urgency };
   }
-  if (diffDays <= 3) {
-    return { label: `${diffDays}d`, urgency: '3d' };
-  }
-  if (diffDays <= 7) {
-    return { label: `${diffDays}d`, urgency: '7d' };
-  }
-  if (diffDays <= 10) {
-    return { label: `${diffDays}d`, urgency: '10d' };
-  }
-  return { label: '', urgency: 'none' };
+  return { label: diffDays === 0 ? 'Today' : `${diffDays}d`, urgency };
 }
 
 // ---------------------------------------------------------------------------

@@ -17,7 +17,7 @@ import type {
     DataverseRecordRef,
 } from "@spaarke/ui-components/services/document-upload";
 import { consoleLogger } from "@spaarke/ui-components/services/document-upload";
-import { cleanGuid } from "@spaarke/ui-components";
+import { cleanGuid, getXrm } from "@spaarke/ui-components";
 
 // ---------------------------------------------------------------------------
 // Xrm.WebApi type shims (minimal subset used by this client)
@@ -83,26 +83,16 @@ class XrmDataverseClient implements IDataverseClient {
 /**
  * Resolve Xrm.WebApi from the frame hierarchy.
  *
- * Walks: window → parent → top to find Xrm.WebApi.
  * This is available because Code Pages are webresources loaded inside
  * a Dataverse dialog iframe.
  */
 function resolveXrmWebApi(): XrmWebApi {
-    const frames: Window[] = [window];
-    try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
-    try { if (window.top && window.top !== window) frames.push(window.top); } catch { /* cross-origin */ }
-
-    for (const frame of frames) {
-        try {
-            /* eslint-disable @typescript-eslint/no-explicit-any */
-            const xrm = (frame as any).Xrm;
-            if (xrm?.WebApi?.createRecord) {
-                return xrm.WebApi as XrmWebApi;
-            }
-            /* eslint-enable @typescript-eslint/no-explicit-any */
-        } catch {
-            // Cross-origin frame — skip
-        }
+    // Shared cross-frame walker (task 081 / C-8) with the createRecord check
+    // applied PER FRAME (as the former local walk did).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const webApi = getXrm((x: any) => typeof x.WebApi?.createRecord === "function")?.WebApi;
+    if (webApi?.createRecord) {
+        return webApi as unknown as XrmWebApi;
     }
 
     throw new Error(

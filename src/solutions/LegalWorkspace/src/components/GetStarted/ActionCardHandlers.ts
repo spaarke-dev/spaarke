@@ -13,6 +13,11 @@
  *   can inject the refetch callback.
  */
 
+// Xrm is resolved via the shared cross-frame `getXrm()` walker (task 081 /
+// C-8): the former `window.Xrm`-only read silently no-op'd when LegalWorkspace
+// runs embedded (SpaarkeAi) and Xrm lives on the parent/top frame.
+import { getXrm } from "@spaarke/ui-components";
+
 // ---------------------------------------------------------------------------
 // Logger
 // ---------------------------------------------------------------------------
@@ -83,7 +88,7 @@ async function openPlaybookIntent(
     const bffParam = bffBaseUrl ? `&bffBaseUrl=${encodeURIComponent(bffBaseUrl)}` : "";
     const data = `intent=${intent}${bffParam}`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (window as any).Xrm?.Navigation?.navigateTo(
+    await (getXrm('navigation') as any)?.Navigation?.navigateTo(
       { pageType: "webresource", webresourceName: "sprk_playbooklibrary", data },
       { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Playbook Library" }
     );

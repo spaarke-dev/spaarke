@@ -20,6 +20,7 @@
 
 import { initAuth, getAuthProvider, authenticatedFetch, AuthError } from '@spaarke/auth';
 import type { SpaarkeAuthProvider } from '@spaarke/auth';
+import { getXrm } from '@spaarke/ui-components';
 
 // Re-export core symbols for consumers
 export { initAuth, getAuthProvider, authenticatedFetch, AuthError };
@@ -69,31 +70,16 @@ export function stopTokenRefresh(): void {
  * @returns The org URL (e.g., "https://orgname.crm.dynamics.com"), or null if Xrm unavailable
  */
 export function getClientUrl(): string | null {
-  /* eslint-disable @typescript-eslint/no-explicit-any */
-  const frames: Window[] = [window];
   try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) frames.push(window.top!);
-  } catch {
-    /* cross-origin */
-  }
-
-  for (const frame of frames) {
-    try {
-      const xrm = (frame as any).Xrm;
-      if (xrm?.Utility?.getGlobalContext) {
-        const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
-        if (clientUrl) return clientUrl;
-      }
-    } catch {
-      /* cross-origin */
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl');
+    if (xrm?.Utility?.getGlobalContext) {
+      const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
+      if (clientUrl) return clientUrl;
     }
+  } catch {
+    /* Xrm unavailable */
   }
-  /* eslint-enable @typescript-eslint/no-explicit-any */
 
   return null;
 }

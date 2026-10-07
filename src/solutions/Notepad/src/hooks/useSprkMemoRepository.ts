@@ -78,6 +78,7 @@ import * as React from 'react';
 import { applyResolverFields } from '@spaarke/ui-components/services/PolymorphicResolverService';
 import type { IPolymorphicWebApi } from '@spaarke/ui-components/services/PolymorphicResolverService';
 import { SUPPORTED_MEMO_PARENTS } from '@spaarke/ui-components/hooks/toolbarLaunchDefaults';
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
 import type { Memo, MemoRaw } from '../types/memo';
 import { discoverMemoNavProps } from './discoverMemoNavProps';
@@ -190,37 +191,14 @@ interface IXrmWebApiLike {
 }
 
 /**
- * Read `Xrm.WebApi` from the current window, walking `parent` / `top` when the
- * page is iframed (Power Apps hosts the Code Page in a nested iframe). Returns
- * `null` when no Xrm is reachable — the hook then reports an error and returns
- * safe defaults so the React tree does not crash.
+ * Read `Xrm.WebApi` via the shared cross-frame walker (task 081 / C-8) — Power
+ * Apps hosts the Code Page in a nested iframe. Returns `null` when no Xrm is
+ * reachable — the hook then reports an error and returns safe defaults so the
+ * React tree does not crash.
  */
 function getXrmWebApi(): IXrmWebApiLike | null {
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin */
-  }
-  try {
-    if (window.top && window.top !== window && window.top !== window.parent) {
-      frames.push(window.top);
-    }
-  } catch {
-    /* cross-origin */
-  }
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = (frame as any).Xrm;
-      if (xrm?.WebApi?.retrieveMultipleRecords) {
-        return xrm.WebApi as IXrmWebApiLike;
-      }
-    } catch {
-      /* cross-origin */
-    }
-  }
-  return null;
+  const webApi = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
+  return webApi?.retrieveMultipleRecords ? (webApi as unknown as IXrmWebApiLike) : null;
 }
 
 // ---------------------------------------------------------------------------

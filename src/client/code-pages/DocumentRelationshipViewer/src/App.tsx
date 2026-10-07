@@ -69,6 +69,7 @@ import {
   type IDocumentEmailWizardItem,
 } from '@spaarke/ui-components/components/DocumentEmailWizard';
 import type { IDataService } from '@spaarke/ui-components/types/serviceInterfaces';
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 
 /** Inline SVG icon: table/grid view (matches Fluent 20px icon style) */
 const TableViewIcon: React.FC = () => (
@@ -412,15 +413,16 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
 
   const handleOpenRecord = useCallback(() => {
     if (!previewDocumentId) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('openForm');
     if (xrm?.Navigation?.openForm) {
       xrm.Navigation.openForm({
         entityName: 'sprk_document',
         entityId: previewDocumentId,
       });
     } else {
-      const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+      // No frame could openForm: the client URL comes from the nearest frame that has it.
+      const clientUrl = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
       window.open(`${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`, '_blank');
     }
   }, [previewDocumentId]);
@@ -441,28 +443,13 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   }, [previewDocumentId, previewDocumentName]);
 
   // IDataService adapter for the email wizard's recipient picker.
-  // Code Pages don't have PCF's context.webAPI, so we frame-walk to the parent
-  // window's Xrm.WebApi (same pattern used by @spaarke/auth's resolveTenantFromXrm).
+  // Code Pages don't have PCF's context.webAPI, so we reach the host's
+  // Xrm.WebApi through the shared cross-frame walker (task 081 / C-8).
   const dataService: IDataService = useMemo(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const resolveXrm = (): any => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const frames: any[] = [window];
-      try {
-        if (window.parent !== window) frames.push(window.parent);
-      } catch {
-        /* cross-origin */
-      }
-      try {
-        if (window.top && window.top !== window) frames.push(window.top);
-      } catch {
-        /* cross-origin */
-      }
-      for (const frame of frames) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (frame as any).Xrm;
-        if (xrm?.WebApi) return xrm.WebApi;
-      }
+      const xrm = getXrm();
+      if (xrm?.WebApi) return xrm.WebApi;
       throw new Error('[DRV] Xrm.WebApi not reachable — cannot run recipient picker queries.');
     };
 
@@ -495,8 +482,8 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
 
   const handleCopyLink = useCallback(() => {
     if (!previewDocumentId) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('clientUrl');
     const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
     const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`;
     void navigator.clipboard.writeText(url);

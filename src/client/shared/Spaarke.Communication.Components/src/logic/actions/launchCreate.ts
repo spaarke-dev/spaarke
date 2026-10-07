@@ -21,6 +21,8 @@
  * ONLY the body of `launchCreate` here — the App call sites do not change.
  */
 
+import { getXrm } from '@spaarke/ui-components';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type XrmNavigateTo = (pageInput: any, navigationOptions: any) => Promise<unknown>;
 
@@ -61,30 +63,17 @@ export interface LaunchCreateOptions {
   onError?: (err: unknown) => void;
 }
 
-/** Walk window/parent/top frames to locate a bound `Xrm.Navigation.navigateTo`. */
+/**
+ * Locate a bound `Xrm.Navigation.navigateTo` via the shared cross-frame
+ * `getXrm()` walker (task 081 / C-8 — this previously hand-rolled its own
+ * window/parent/top frame walk, one of six duplicates converged onto
+ * `xrmContext.ts:306`).
+ */
 function resolveHostNavigateTo(): XrmNavigateTo | null {
-  if (typeof window === 'undefined') return null;
-  const frames: Window[] = [window];
-  try {
-    if (window.parent && window.parent !== window) frames.push(window.parent);
-  } catch {
-    /* cross-origin — skip */
-  }
-  try {
-    if (window.top && window.top !== window) frames.push(window.top);
-  } catch {
-    /* cross-origin — skip */
-  }
-  for (const frame of frames) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const nav = (frame as any).Xrm?.Navigation;
-      if (nav && typeof nav.navigateTo === 'function') {
-        return nav.navigateTo.bind(nav) as XrmNavigateTo;
-      }
-    } catch {
-      /* cross-origin — skip */
-    }
+  const nav = getXrm('navigation')?.Navigation;
+  if (nav && typeof nav.navigateTo === 'function') {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return nav.navigateTo.bind(nav) as any as XrmNavigateTo;
   }
   return null;
 }

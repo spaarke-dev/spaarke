@@ -16,3 +16,9 @@ export * from './components';
 // BOTH the Code Page and SmartTodoWidget; smart-todo-r5 follow-up 2026-08-17).
 export { matchesTodoSearchQuery, buildTodoDueDateSearchBlob } from './utils/todoSearchUtils';
 export type { TodoSearchableFields } from './utils/todoSearchUtils';
+// The canonical due-date tier function (overdue / 3d / 7d / 10d / none — owner
+// decision 2026-10-03, C-17). Exported so other surfaces (e.g. the
+// LegalWorkspace feed card) map THIS tier to their colours instead of keeping
+// a private copy of the boundaries (task 081 / F6).
+export { computeDueLabel } from './utils/todoScoring';
+export type { DueUrgency, IDueLabel } from './utils/todoScoring';
