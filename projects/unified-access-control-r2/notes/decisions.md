@@ -26,7 +26,7 @@ Kept in place rather than moved: dozens of POMLs, notes and PRs link to them by 
 | D1/C9 access model; Created By = FOR, not OPEN | session 27 answers (C9), round 3 (D1) |
 | Grant Access rules (C4; cap; contact-to-own-org; Assigned-To uncapped Collaborate) | session 27 answers (C4), round 2 (Q1, Q2, Q5), round 3 (A1), round 3b (A1), round 11 item 1 (ADR-034 A4) |
 | Restricted vs Secure | round 2 item 3, round 67 |
-| `sprk_isexternal` (blank = internal; Restricted refuses/removes; guest script first) | rounds 67, 76; task 114 V5 |
+| `sprk_isexternal` (blank = internal; Restricted refuses/removes; secure-only allows; guest script first) | rounds 67, 76, 78; task 114 V5 |
 | Accepted business-unit read gap | round 77 |
 | `sprk_issecure` locked; F3; filed-under-secure is secure; no unsecure cascade | round 2 item 2, round 3b (F3), round 6 |
 | A secure record always has a reader (S5), except Restricted wins | round 3 (S5), round 76 |

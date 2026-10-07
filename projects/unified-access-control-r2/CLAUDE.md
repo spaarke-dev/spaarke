@@ -94,7 +94,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - **Restricted** = internal use only: no contact-based access, no system user flagged external (rounds 2, 67). **Secure** = its own named owner team and container; for contacts only named direct grants count.
 - **`sprk_isexternal`** (on `systemuser` only):
   - only a stored true is external; blank is internal, everywhere (round 67);
-  - on a Restricted record a flagged user is refused a share, and existing shares are removed;
+  - on a Restricted record a flagged user is refused a share, and existing shares are removed; a secure-only record may be shared with them, e.g. licensed outside counsel (round 78);
   - **Restricted wins over the last-reader rule:** the removal reports `no-internal-reader` for an admin (round 76);
   - B2B guests are flagged by `scripts/Set-ExternalFlagForB2BGuests.ps1`, run BEFORE the BFF deploy.
 - **Accepted gap (round 77):** a flagged user can still read a NON-secure Restricted record in their own business unit through role depth.

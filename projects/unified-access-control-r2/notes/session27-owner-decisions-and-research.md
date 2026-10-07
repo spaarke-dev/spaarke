@@ -1152,6 +1152,13 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
   - secure Restricted records are fully closed.
 - **Recorded in:** task 114's note and PR as a known limit.
 
+## Round 78 (2026-10-07): BINDING. OWNER decision: secure-only records may be shared with external-flagged system users
+
+- **The question:** the owner's suggested refusal text (test feedback on TrackingFieldTrio 1.0.36) said "Restricted and secure records cannot be shared with external users", but the rule (round 67) bars external-flagged users only on Restricted records.
+- **Decision (owner, verbatim):** "we should allow external systemusers (e.g., outside counsel who have Spaarke licenses should have access)".
+- **So:** `sprk_isexternal` is consulted only on Restricted records, Secure – Restricted included. A secure record that is not Restricted can be shared with an external-flagged, licensed system user. This is the rule as built by task 114, so nothing changes.
+- **Copy:** the refusal reads "... Restricted records cannot be shared with external users." (PR #1369); it does not mention secure.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
