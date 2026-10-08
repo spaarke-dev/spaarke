@@ -85,3 +85,31 @@ No LegalWorkspace deploy is needed: the 106 date filters are already live inside
 2. Quick Summary: overdue count includes zz-121-yesterday and NOT zz-121-today; Activity Feed Overdue filter agrees.
 3. Repeat in dark mode (badges/filters themed).
 4. Delete both rows; confirm `sprk_todos?$filter=startswith(sprk_name,'zz-121-')` returns 0.
+
+### Task 121 - owner decisions D-82 applied (2026-10-08)
+- Scripts: grep of origin/master found no caller of Deploy-LegalWorkspaceCustomPage.ps1 / Package-LegalWorkspace.ps1 (no workflow, skill, README or script); targets gone (PCF source removed in 5557abaa80; Custom Page absent live). DELETED both in PR #1455 (branch fix/legalworkspace-deploy-121, head 748106457d); LEGALWORKSPACE-RETIREMENT.md updated. Not merged.
+- Orphan web resource DELETED from spaarkedev1 (owner-approved): `sprk_corporateworkspace`, id 8b7e8863-020d-f111-8342-7ced8d1dc988, modifiedon 2026-07-07T16:40:38Z, 3,759,131 B decoded, sha256 60f0e524711b7e755f4f45d67c8e0e3767d17d23b02dc389ecc2f29de5d12e35. Backup: scratchpad `sprk_corporateworkspace.backup.html`. DELETE returned 204; GET by id returns 404; name query returns 0 rows. No publish run.
+- Live UI check (step 6) moved to the owner's checklist page; no zz-121- rows were created.
+- Tenant-wide publish in other scripts/skills moved to task 130 (D-83).
+
+### Task 129 - D-63 definitions + VisualHost 1.4.39 (2026-10-08, PARTIAL: awaiting owner approval)
+- Inventory (read-only) and build done; see notes/129-finalduedate-definitions.md. No Dataverse definition edited, no import run, no publish of any kind.
+- Build from a throwaway worktree of origin/master (C:\wt129) because this branch lacks #1413. Invoke-PcfBuildProd.ps1 succeeded; bundle 783,088 B, reports 1.4.39, 0 sprk_finalduedate strings. Zip: C:\wt129\src\client\pcf\VisualHost\Solution\bin\VisualHostSolution_v1.4.39.zip (250,670 B).
+- Browser checklist after approval: zz-129-A (due in 3 days, final due in the past) and zz-129-B (due yesterday, final due in the future), open Task type, on a matter. Due Date Card List shows A with sprk_duedate and not overdue, B overdue; TASKS & EVENTS calendar places each on its sprk_duedate; "All Tasks Open 7 Days" lists A and B by sprk_duedate; Matter Tasks overdue count includes B not A; dark mode themed; delete both and confirm `sprk_events?$filter=startswith(sprk_eventname,'zz-129-')` returns 0.
+
+### Task 122 - external SPA dev deploy (2026-10-08, owner-approved D-84; browser checks pending)
+- Target: Static Web App swa-spaarke-external-spa-dev, https://green-dune-0c4f1221e.7.azurestaticapps.net (dev only; workflow unchanged; Power Pages path not used).
+- Deployed SHA: 885d0c5f92c89bcb44fc01ad678a318ce835001f (origin/master; contains 23c359eaf/056 and 73d3b970e/106). Master unchanged between ship-list review and dispatch.
+- Run: 37823351696, `gh workflow run deploy-external-spa.yml --ref master`, created 2026-10-08T18:19:12Z, finished success 18:30:21Z. Previous run 37741946955 (37d0c944c).
+- Ships: 056 WizardShell in SprkModal (#1386); 106 To Do date-only (#1429); 098 event DateOnly (#1359); uac-r2 067 AccessGrantModal No Access list (#1434); spaarkeai SprkChat playbook opt-in (60ccc1b95, 414cfa9643); test-only timezone fixes.
+- Local build/tests at the SHA before dispatch: vite build OK, SPA vitest 5 files / 43 tests pass.
+- Verification: build emits unhashed names (assets/app.js), so compared content. Live assets/app.js is 1,343,276 B, sha256 begins 9a6ea229a62f17b9f6e0, identical to the local build of the same SHA (same size, same hash prefix; was 7ed8a75bfe2be008 before deploy). index.html references assets/app.js.
+- Not done: live browser checks; #1428 stays open until the owner's checks pass (task 111 regression row 4 to be updated then).
+
+Owner browser checks (dev external SPA, test data prefixed zz-122-):
+1. Start a document upload (DocumentUploadPage wizard): Escape and a backdrop click must NOT close it; the x and Cancel must close it; no resize corner; light and dark both fully themed.
+2. Create a To Do `zz-122-today` due today: it shows today's date and is not overdue. Mark it complete, then reopen it, no error.
+3. Events calendar / dashboard dates fall on the correct day (not shifted by one).
+4. Manage Access dialog shows the No Access list without error.
+5. Sign-in works (a CIAM authority/client/audience error means stop and report).
+6. Delete zz-122- To Dos; confirm none remain.

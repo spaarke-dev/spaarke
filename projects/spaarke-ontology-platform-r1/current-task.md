@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-10-08, checkpoint 3 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
-> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-84). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-86). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -37,7 +37,7 @@
 | **060** ✅ (D-74): 1 Draft row opened (8a6b371f, owner choice), 48 left Draft; 0 platform-created; #1050 closed | — | — |
 | **#1413** (068) **MERGED** 885d0c5f9; 068 ✅ | — | — |
 | **ISS-018** (#1452): NO notification delivered in dev since >=2026-07-11 (3 defects + silent scheduler). Owner D-77..D-80 | **task 120** running (`aae6c79edd0f863de`, Opus, `C:\wts-120`) | PR green → review → owner approves dev BFF deploy → live node updates + D-76/D-79 scope + audit (D-80) → main session amends ADR-034 (.claude) |
-| **No-parking sweep** (D-81) → tasks 121-130. 121: LW changes already live; deleting dead scripts + orphan web resource (D-82). 122: SPA deploy APPROVED (D-84), dispatching. 124/127/128/129 running. 130 (D-83 repo-wide scoped publish) queued after 121 (needs its scoped-solution-import.md). 123, 125 queued; 126 waits for uac-r2 | stops at owner-approval steps | Review PRs → owner approvals → merge; add SPA + LW browser checks to checklist page |
+| **No-parking sweep** (D-81). 121: PR #1455 (scripts deleted), orphan web resource deleted. 122: SPA DEPLOYED 18:30Z (885d0c5f9, run 37823351696); owner checks = card r7. 128: PR #1460. 124, 127 running. 129: D-85/D-86 approved, applying + pack.ps1 guard PR. 130 running (`afa95b62d109541c3`). 123, 125 queued; 126 waits for uac-r2 | review of #1455 + #1460 (`a4c3edbae4a2a8dac`) | Owner merges; checklist results; #1428 closes after r7 |
 | **#1422** (112) refreshed `1f167149e`, review accepted; owner PRE-APPROVED merge when green | background wait-and-merge (b71akxyjd) | Mark 112 ✅ → start 113 (incl. #1420/#1421) |
 | **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** PR #1422 (5 Create wizards in-app; +3.6 KB; issues #1420/#1421) → independent review running (`a747ef8af51f83500`); CI red only from master #1418 → merge master after #1424; **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 | **111** PR #1415 (code); deployed SpaarkeAi/SmartTodo/DRV + PCF 1.1.82 to dev; SPA handed off #1428 | owner running live checks: https://claude.ai/artifact/3FPj4oT83f25v2r8yutkMV | Read results → deploy-log → fix fails → independent review of #1415 → owner merge → 111 ✅ |

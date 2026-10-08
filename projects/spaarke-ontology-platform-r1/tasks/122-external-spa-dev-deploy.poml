@@ -49,7 +49,7 @@ What to check live: issue #1428 body (056: Escape and backdrop no longer close D
     <step order="2">Ship list: `git log --oneline LASTSHA..origin/master -- src/client/external-spa src/client/shared/Spaarke.UI.Components` (plus any other file: dependency in the SPA package.json), grouped by project/PR, each with a one-line user-visible effect.</step>
     <step order="3">Build locally at the same SHA with the workflow's env values (npm install --legacy-peer-deps --no-audit --no-fund; npm run build) and run the SPA test suite; record failures (pre-existing ones are reported, not ignored).</step>
     <step order="4">STOP: report the ship list, SHA and build/test result to the main session for owner approval.</step>
-    <step order="5">After approval: `gh workflow run deploy-external-spa.yml --ref master`; wait for success; confirm the served index.html references the same hashed asset names as the local build of that SHA.</step>
+    <step order="5">After approval: `gh workflow run deploy-external-spa.yml --ref master`; wait for success; confirm the served assets/app.js sha256 and byte size equal the local build of that SHA (names are not hashed).</step>
     <step order="6">Live checks by a human in the browser (if the session has no browser tool, put the checklist in deploy-log.md and ask the owner): the #1428 wizard checks; the #1428-comment To Do checks with zz-122- data; one smoke check per ship-list group. Delete zz-122- rows.</step>
     <step order="7">Record everything in deploy-log.md (target, SHA, run id, ship list, results), update the task 111 regression row 4 there, comment the result on #1428 and close it.</step>
   </steps>
@@ -76,7 +76,7 @@ What to check live: issue #1428 body (056: Escape and backdrop no longer close D
   </ui-tests>
 
   <acceptance-criteria>
-    <criterion testable="true">deploy-log.md records the verified live target, the deployed SHA (an origin/master commit containing 23c359eaf and 73d3b970e), the workflow run id and the ship list, and that the served asset names match the local build of that SHA.</criterion>
+    <criterion testable="true">deploy-log.md records the verified live target, the deployed SHA (an origin/master commit containing 23c359eaf and 73d3b970e), the workflow run id and the ship list, and that the served app.js content hash (sha256) and byte size match the local build of that SHA (the build emits unhashed names, so asset names cannot be compared).</criterion>
     <criterion testable="true">Live: DocumentUploadPage's wizard is not closed by Escape or the backdrop, is closed by x and Cancel, and renders correctly in light and dark; an external To Do created with a due date shows that date, is not overdue on its due day, and completes and reopens without error.</criterion>
     <criterion testable="true">One smoke check per ship-list group is recorded as pass or as a fix/new task; zz-122- rows: 0 remain.</criterion>
     <criterion testable="true">#1428 is closed with a comment naming the deploy and results.</criterion>
