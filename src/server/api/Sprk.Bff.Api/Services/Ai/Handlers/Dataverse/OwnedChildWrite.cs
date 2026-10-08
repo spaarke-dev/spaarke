@@ -522,6 +522,7 @@ internal static class OwnedChildWrite
         if (!metadata.IsSuccess
             || metadata.Body is not { } body
             || !body.TryGetProperty("OwnershipType", out var ownership)
+            || ownership.ValueKind != JsonValueKind.String
             || !string.Equals(ownership.GetString(), "OrganizationOwned", StringComparison.Ordinal)
             || PrivilegeNamed(body, "AppendTo", 8) is not { } appendTo)
         {
