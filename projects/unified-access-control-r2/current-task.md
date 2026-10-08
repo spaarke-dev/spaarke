@@ -1,68 +1,83 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–79) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-07.md`, `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
+> **Format:** CURRENT state only. Rewrite at each checkpoint, never prepend; ≤10 KB. Standing rules: project `CLAUDE.md` (§2 Binding rules, §3 Owner directives, §6 Gotchas). Decisions: `notes/session27-owner-decisions-and-research.md` (rounds 1–81) and `notes/decisions.md`. Live records: `notes/batch5-live-gates-2026-10-07.md`, `notes/batch5-live-gates-2026-10-08.md`. Narrative: checkpoint commit messages.
 
-> **Last Updated**: 2026-10-08 (checkpoint #22, batch 5 in flight).
+> **Last Updated**: 2026-10-08 (checkpoint #23, before /compact; batch 5 in flight).
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 5. Done: 101. On dev, waiting on owner checks: 154, 105 (plus 171/114 from batch 4/5). In review: **113** (PR #1406), **064** (PR #1411). In progress: **#1410 fix** (secure-parent veto). Next: 153, 067 → 099 → 036 (ADR-034 path B approved) → 090. |
-| **Agents running** | `verify113` (pass 1 of 2, auth), `verify064` (pass 1 of 2, auth), `fix1410` (executor, worktree C:\wt1410). Executors `exec113` (C:\wt113) and `exec064` (C:\wt064) are idle and resumable for fix rounds. |
-| **Next Action** | (1) As each verifier reports: send its findings to the executor (SendMessage to exec113 / exec064), re-check the fix diff, run pass 2 (both tasks are auth-tagged), then merge on Router green and deploy the BFF (`scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev` from `C:\wtR2` after `git checkout --detach origin/master`; check clean first). (2) #1410 PR: one verifier pass (auth-adjacent → two), merge, deploy. Sequence it against #1411 (both touch No Access coverage). (3) Then start 153 and 067 (both consume 064's route: contract in `notes/phase4-access-report-contract.md` on #1411). |
+| **Task** | Batch 5. Done: 101. On dev, waiting on owner checks: 154, 105. **113** (PR #1406): both verifier passes clean; doc-only fixes in progress, then merge. **064** (PR #1411): pass-1 fixes in; **verifier pass 2 running**. **#1410 fix** (secure-parent veto): executor running. Next: 153, 067 → 099 → 036 (ADR-034 path B approved; fold in #1414) → 090. |
+| **Agents running (background, notify on completion)** | `exec113`: doc/comment F4s on #1406; reports a commit. `verify064b`: pass 2 on #1411. `fix1410`: executor in `C:\wt1410`; reports a PR. Idle and resumable through SendMessage: `exec064`, `exec154`, `exec105`, `exec101`. |
+| **Next Action** | (1) **113:** on exec113's report, re-check its fix diff, then merge #1406 on Router green and deploy the BFF. (2) **064:** send pass-2 findings to exec064 if any; else merge #1411 and deploy the BFF. #1406 and #1411 both carry the same one-line master compile fix (`EventRoutesLiveTests.cs:407`), so the second merge may need a trivial rebase. (3) **#1410:** run two verifier passes (it is an access veto), merge and deploy. Sequence it against #1411, since both touch No Access coverage. (4) Start **153** and **067**; both consume 064's route (contract in `notes/phase4-access-report-contract.md`, on master after #1411). (5) If the owner confirms, run `task-create` for the **child access-permission task** (round 81 below). |
 
 ## Merge / deploy procedure (current practice)
-- Merge job: wait for `Router` = pass with no failing check, for up to 150 × 20 s; Router reports only after Tier 2 finishes.
-- Required checks: `gh pr merge N --squash`.
-- **Run PowerShell scripts that call `pac` from the PowerShell tool, or rely on `$pacExe`.** Under Git Bash, `~/bin/pac` is a bash shim (fixed in #1407 for the ribbon scripts).
-- The deploy worktree `C:\wtR2` must be clean. `Set-AccessRibbon -Apply` writes the live work-assignment RibbonDiff into it by design; that file was checked in by #1405.
+- **Merge job:** wait for `Router` = pass, with no failing check, for up to 150 × 20 s. Router reports only after Tier 2.
+- **Merge:** `gh pr merge N --squash`.
+- **BFF deploy:** from `C:\wtR2`. Check it is clean, then `git checkout --detach origin/master`, then `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`.
+- **External SPA:** `gh workflow run deploy-external-spa.yml --ref master`.
+- **Under Git Bash, `~/bin/pac` is a bash shim.** Scripts resolve `$pacExe` since #1407; otherwise use `pac.cmd`.
 
 ## Dev state (2026-10-08)
-- **Master deployed to the dev BFF:** includes #1393 (154), #1408 (105), #1395 (101), #1389 (TrackingFieldTrio 1.0.39: dark mode for standard PCFs; the lookup pane layers over the modal).
-- **External SPA:** deployed (run 37741946955).
-- **154 live:**
-  - forms, view, the NO ACCESS subgrids, the site map and the hidden Add Existing are applied;
-  - O2 roles applied: Spaarke Core User lost Read; "Spaarke Access Administrator" was created and assigned to ralph.schroeder@spaarke.com;
-  - **gap:** `AddAppComponents` did not add `sprk_noaccessentry` to the Matter Management app, so the owner may need to add the table in the app designer.
-- **101 live:** both expiry views, verified.
-- **App settings set 2026-10-08 (round 79):**
+- **Master on the dev BFF:** #1393 (154), #1408 (105), #1395 (101), #1389 (TrackingFieldTrio 1.0.39), #1405, #1407.
+- **External SPA:** deployed.
+- **154:**
+  - The forms, view, NO ACCESS subgrids, site map and hidden Add Existing are applied.
+  - O2: Spaarke Core User lost Read on No Access entries. The "Spaarke Access Administrator" role was assigned to ralph.schroeder@spaarke.com.
+  - **Gap:** `AddAppComponents` did not add `sprk_noaccessentry` to the Matter Management app. The owner may need to add the table in the app designer.
+- **101:** both expiry views are live.
+- **App settings (round 79):**
   - `ExternalAccess__Reconciliation__WritesEnabled=true`;
   - `Communication__OwnershipHoldAlertUserIds__0` = ralph.schroeder@spaarke.com.
 
+## Round 81 (2026-10-08), owner direction; record it in the decisions log on confirmation
+- **Children with a parent inherit:** To Do, Event, Communication and Document take the parent's `sprk_accesspermission`. The owner added `sprk_accesspermission` (the global choice) to `sprk_document` LIVE; it is not yet in source.
+- **Children without a parent:** they keep their own value.
+- **Control:** on these child records, but not the TrackingFieldTrio on Communication (email).
+- **Explained to the owner:** a child associated with a Secure or Restricted record is protected through the parent. That covers every `sprk_regarding*` lookup, including "Link another" associations. Ownership goes to the Secure team, shares mirror the parent, and Restricted bars external users.
+- **Proposed plan:**
+  - the server writes the parent's value into the child on create and re-file;
+  - the 2-minute reconcile keeps it in step;
+  - the field is locked with "inherited from X" when the record has a parent, and editable when it has none;
+  - for a parentless record: **record only, no new enforcement**. The owner has not yet confirmed this.
+
 ## Waiting on the owner
 - **Tests:**
-  - TrackingFieldTrio 1.0.39: dark mode, and the lookup on top of Manage Access and the composer;
+  - TrackingFieldTrio 1.0.39: dark mode, and the lookup pane on top of Manage Access and the composer;
   - 154: checklist (a)–(p) in `notes/task-154-no-access-management-forms.md`, plus the left-nav item;
-  - the 171/114 UI checks listed in `notes/batch5-live-gates-2026-10-07.md`.
+  - the 171/114 UI checks.
 - **Decisions:**
-  - (a) No Access record picker: recommended to switch to RegardingResolver "link only" mode plus `sprk_objectrecordname` as a follow-up; the alternatives are to switch first or keep the form-script picker.
-  - (b) 101: keep overdue shares in View 2; Granted By beside Created By.
-  - (c) 105 live gate: OK to seed 250 test documents on dev?
-  - (d) #1396: add the secure-ownership layer for grant rows (topology already protects production).
-  - (e) 064: Reason stays hidden from Write-holders (recommended).
-  - (f) #1350 share-link: retire it or replace it with an in-app link.
-  - (g) hook cap: raise to about 20,000.
-  - (h) 133(e) / 166: close on test proof?
-  - (i) is the Copilot agent in dev?
-  - (j) the owner runs `Remove-TestContainers.ps1` (approved; interactive SharePoint admin).
+  - (a) Round 81: confirm the parentless "record only" rule and the plan.
+  - (b) No Access record picker: recommended follow-up is RegardingResolver in "link only" mode plus `sprk_objectrecordname`.
+  - (c) 101: keep overdue shares in View 2; Granted By beside Created By.
+  - (d) 105: OK to seed 250 test documents on dev for the live gate?
+  - (e) #1396: add the secure-ownership layer for grant rows?
+  - (f) 064: Reason hidden from Write holders (recommended).
+  - (g) #1350 share-link: retire or replace?
+  - (h) Hook cap: raise to ~20,000?
+  - (i) 133(e)/166: close on test proof?
+  - (j) Is the Copilot agent in dev?
+  - (k) The owner runs `Remove-TestContainers.ps1` (approved).
 
-## Issues filed this batch (not this project's code, or not yet scheduled)
-- #1394: grant rows are saved with an empty name.
-- #1396: secure grant rows in the root BU; topology-limited.
-- #1397: no Granted By on user-triggered grants (R-4).
-- #1404: FR-12 guard fails open on a regex timeout (email project).
-- #1409: external to-do gets an empty regarding name on a read fault.
-- #1378: one table's listing failure stalls the secure-child reconcile.
-- #1379: census follow-up for the ontology tables.
-- **Earlier:** #1339, #1340, #1343–#1345, #1350–#1352, #1313 (do NOT mint a secret), and others.
+## Issues filed (not yet scheduled)
+| Issue | What it is |
+|---|---|
+| #1394 | Grant rows have an empty name |
+| #1396 | Secure grant rows sit in the root BU (limited by BU topology) |
+| #1397 | No Granted By on user-triggered grants |
+| #1404 | FR-12 guard fails open on a regex timeout (email project) |
+| #1409 | External to-do gets an empty regarding name on a read fault |
+| #1414 | Timing oracle in 6 other gates; fold into 036 |
+| #1378 | Secure-child reconcile stalls when one table's listing fails |
+| #1379 | Census follow-up for the ontology tables |
+
+Earlier issues are in previous checkpoints. #1313: do NOT mint a secret.
 
 ## Coordination
-- **#1355 (ontology-r1 task 039):** our review is accepted. Their PR, adding `SecureChildLineage` and `secure-record-owner-role.json` entries for `sprk_signal` / `sprk_decisionrecord`, comes to us for review.
-- **Their task 046:** a work-assignment create route on `RecordCreationService`, on a separate thread.
+- **#1355 (ontology-r1):** their task 039 PR will come to us for review. Their task 046 (a work-assignment create route) will come on a separate thread.
 
 ## Worktrees
 - **Active:** C:\wt113, C:\wt064, C:\wt1410.
-- **Merged, removable:** C:\wt154, C:\wt105, C:\wt101, C:\wt114u (used for small PRs).
 - **Deploy:** C:\wtR2.
-- **Older ones:** listed in the previous checkpoint's commit; remove at leisure, deleting `node_modules` junctions with `cmd /c rmdir` first.
+- **Removable:** C:\wt154, C:\wt105, C:\wt101, C:\wt114u. Run `cmd /c rmdir` on node_modules junctions first.
