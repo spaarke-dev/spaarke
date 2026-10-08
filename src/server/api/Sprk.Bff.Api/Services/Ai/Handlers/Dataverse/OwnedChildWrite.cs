@@ -487,7 +487,13 @@ internal static class OwnedChildWrite
         {
             var rights = await RightsOnAsync(user, me, lookup.RelatedEntitySet, lookup.RecordId, ct).ConfigureAwait(false);
 
-            if (!rights.HasFlag(AccessRights.AppendTo))
+            // An ORGANIZATION-OWNED target (the ADR-024 record-type catalog sprk_recordtype_ref, the matter-type and
+            // practice-area reference tables) has no record-level access: RetrievePrincipalAccess refuses the table (live,
+            // spaarkedev1 2026-10-07: 400 0x80040800 "The 'RetrievePrincipalAccess' method does not support entities of type
+            // 'sprk_recordtype_ref'"), so RightsOnAsync reads None and every ADR-024 resolver payload was refused as
+            // "not found". What a run-as-user create checks there is the table's AppendTo PRIVILEGE, and the row must exist.
+            if (!rights.HasFlag(AccessRights.AppendTo)
+                && !await CallerMayAppendToOrganizationOwnedAsync(user, me, lookup, ct).ConfigureAwait(false))
             {
                 return new Outcome
                 {
@@ -498,6 +504,42 @@ internal static class OwnedChildWrite
         }
 
         return Outcome.Allowed;
+    }
+
+    /// <summary>
+    /// AS THE CALLER, for a lookup target RetrievePrincipalAccess cannot answer: <c>true</c> only when the target table is
+    /// ORGANIZATION-OWNED (its own metadata says so), the caller holds that table's AppendTo privilege, and the row exists
+    /// for them (read under their token). Anything else — a user/team-owned table, a privilege not held, a row that is
+    /// missing or unreadable, a question Dataverse does not answer — is <c>false</c> (fail closed; the caller keeps the
+    /// uniform not-found, so a missing row and an unappendable one still look alike).
+    /// </summary>
+    private static async Task<bool> CallerMayAppendToOrganizationOwnedAsync(
+        IDataverseUserClient user, Guid me, DataverseWriteItemMapper.MappedLookup lookup, CancellationToken ct)
+    {
+        var metadata = await user.GetAsync(
+                $"EntityDefinitions(LogicalName='{lookup.RelatedTable}')?$select=LogicalName,OwnershipType,PrimaryIdAttribute,Privileges", ct)
+            .ConfigureAwait(false);
+        if (!metadata.IsSuccess
+            || metadata.Body is not { } body
+            || !body.TryGetProperty("OwnershipType", out var ownership)
+            || !string.Equals(ownership.GetString(), "OrganizationOwned", StringComparison.Ordinal)
+            || PrivilegeNamed(body, "AppendTo", 8) is not { } appendTo)
+        {
+            return false;
+        }
+
+        var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { appendTo }));
+        var held = await user.GetAsync(
+                $"systemusers({me:D})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}", ct)
+            .ConfigureAwait(false);
+        if (!held.IsSuccess || !CallerRecordAccessProbe.ResponseGrantsPrivilege(held.Body?.GetRawText(), appendTo))
+            return false;
+
+        var primaryId = body.TryGetProperty("PrimaryIdAttribute", out var pk) && pk.ValueKind == JsonValueKind.String
+            ? pk.GetString()
+            : $"{lookup.RelatedTable}id";
+        var row = await user.GetAsync($"{lookup.RelatedEntitySet}({lookup.RecordId:D})?$select={primaryId}", ct).ConfigureAwait(false);
+        return row.IsSuccess;
     }
 
     /// <summary>

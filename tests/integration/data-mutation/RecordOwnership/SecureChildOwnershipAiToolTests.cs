@@ -705,8 +705,12 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_recordtype_ref"] = "sprk_recordtype_refs", ["sprk_organization"] = "sprk_organizations",
         };
 
-        /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
-        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref" };
+        /// <summary>
+        /// Tables whose metadata declares organization ownership (everything else is UserOwned) — live, spaarkedev1
+        /// 2026-10-07: the ADR-024 record-type catalog and the matter-type / practice-area reference tables. Dataverse
+        /// refuses RetrievePrincipalAccess on these (400 0x80040800); appending to one costs the table's AppendTo PRIVILEGE.
+        /// </summary>
+        private static readonly HashSet<string> OrganizationOwned = new() { "sprk_mattertype_ref", "sprk_recordtype_ref", "sprk_practicearea_ref" };
 
         /// <summary>table → (lookup column, target table, navigation property).</summary>
         private static readonly Dictionary<string, (string Column, string Target, string Navigation)[]> Lookups = new()
@@ -718,6 +722,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                 ("sprk_assignedto", "contact", "sprk_AssignedTo"),
                 ("ownerid", "systemuser", "ownerid"),
                 ("sprk_createdbyperson", "systemuser", "sprk_CreatedByPerson"), // task 146 c1-r1 schema step
+                // The ADR-024 record-type lookup every resolver payload binds (live navigation property, 2026-10-07).
+                ("sprk_regardingrecordtype", "sprk_recordtype_ref", "sprk_RegardingRecordType"),
             },
             ["sprk_matter"] = new[]
             {
@@ -816,6 +822,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_document", "prvAppendsprk_document", "prvCreatesprk_invoice", "prvAppendsprk_invoice",
             "prvCreatesprk_reportcard", "prvAppendsprk_reportcard", "prvCreatesprk_analysis", "prvAppendsprk_analysis",
             "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
+            // The organization-owned reference tables' AppendTo privileges (what a lookup onto one of their rows costs).
+            "prvAppendTosprk_recordtype_ref", "prvAppendTosprk_mattertype_ref", "prvAppendTosprk_practicearea_ref",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();
@@ -922,7 +930,14 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
 
             if (path.Contains("RetrievePrincipalAccess", StringComparison.Ordinal))
             {
-                var id = Guid.Parse(Target().Match(path).Groups["id"].Value);
+                var match = Target().Match(path);
+                var id = Guid.Parse(match.Groups["id"].Value);
+                if (TableOf(match.Groups["set"].Value) is { } targetTable && OrganizationOwned.Contains(targetTable))
+                {
+                    // Live (spaarkedev1, 2026-10-07): the message refuses the table before looking at the row.
+                    return DataverseUserResponse.Fail(400, DataverseUserClientErrorCodes.BadRequest,
+                        $"0x80040800 The 'RetrievePrincipalAccess' method does not support entities of type '{targetTable}'.");
+                }
                 if (Missing.Contains(id))
                     return DataverseUserResponse.Fail(404, DataverseUserClientErrorCodes.NotFound, "Does not exist.");
                 var rights = NoAppendTo.Contains(id) ? "ReadAccess,WriteAccess" : "ReadAccess,WriteAccess,AppendAccess,AppendToAccess";
@@ -951,10 +966,13 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
                     return Ok(new
                     {
                         LogicalName = table,
+                        OwnershipType = OrganizationOwned.Contains(table) ? "OrganizationOwned" : "UserOwned",
+                        PrimaryIdAttribute = table == "task" ? "activityid" : table + "id",
                         Privileges = new[]
                         {
                             new { Name = $"prvCreate{schema}", PrivilegeType = "Create" },
                             new { Name = $"prvAppend{schema}", PrivilegeType = "Append" },
+                            new { Name = $"prvAppendTo{schema}", PrivilegeType = "AppendTo" },
                         },
                     });
                 }
