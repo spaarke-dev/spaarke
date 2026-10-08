@@ -105,6 +105,10 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-62 | Remove Console User **Create on Decision Record** with task 049 | Binding |
 | D-63 | `sprk_finalduedate` informational **everywhere** (notification playbook node, VisualHost card, CalendarVisual) | Binding (task 068) |
 | D-64 | Recall gate: **synthetic set, owner labels blind**, ~80–100 items, gate = combined fee-OR-scope recall ≥ 80%, one run | Binding (task 074) |
+| D-65 | **One canonical server create path per table**; uac-r2 to pick one of `RecordCreationService` / `OwnedChildWrite` for work assignments and retire the other; 046 follows it, never a third (supersedes D-59's component choice) | Binding (046, awaiting uac-r2) |
+| D-66 | Move the shared Dataverse write core out of `Services/Ai` to `Services/Dataverse` (AI → core only), own PR, uac-r2 review; **no ADR-013 exception** | Binding (task 048) |
+| D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
+| D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 
 ## Superseded or withdrawn
 

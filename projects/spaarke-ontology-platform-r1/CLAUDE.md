@@ -102,6 +102,7 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
 - 2026-10-07 — D-33 secure-child Signals/Decision Records · D-34/D-36/D-37 core-record grouping, extensible · D-38 no skips · D-39 per-item suppression · D-40 two-bound dates · D-41 To Do dates → Date Only (task 106).
 - 2026-10-07 — D-42..D-56 close every open point: rank sev→highpriority→oldest→number · overdue 1 day · WA in both assigner's and assignee's Do lane · reassign/extend Routine · drop RowMenu/OutcomeCard reuse · DR tab in R1 · association-confirmed trigger · recall columns on triage category · Missing + freshness issue · Know rule offers Assign Work · Confirm = confirmation, no chat · templated drafts · WA response columns (task 047) · budget amount as the user · no inquiry due date.
 - 2026-10-07 — D-57 Briefing uses IsOpenWork (no Draft data change) · D-58/D-59 work-assignment response columns + create via uac-r2's RecordCreationService · D-60 drop foreign tables from our solution · **D-61 never stamp unchanged Signals nightly** (uac-r2 100k-row limit) · D-62 users lose Create on Decision Records with 049.
+- 2026-10-07 — D-63 final due date informational everywhere (task 068) · D-64 recall gate on a synthetic set the owner labels blind · **D-65 one canonical server create path per table** (uac-r2 picks for work assignments) · **D-66 no core code in `Services/Ai`** (task 048, not an ADR exception) · D-67/D-68 #1390 and #1391 merge after uac-r2 approves.
 - 2026-10-05 — SmartTodo's palette is the one due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey).
 - 2026-10-07 — Writer credential vs tenant-isolation rule I5 (owner): tenant-pinned `DefaultAzureCredential` locked to the writer's own UAMI — every non-MI source excluded, `AZURE_TOKEN_CREDENTIALS` refused unless MI, both pinned by tests; I5 satisfied (spec §6 ADR-028 row).
 
@@ -112,8 +113,12 @@ Full log with sources and superseded items: [`notes/decisions.md`](notes/decisio
   `CallerRecordAccessProbe`, the route ledger (`RouteAuthorizationGuardTests.Ledger.cs`), ADR-034, ADR-003's
   `ExternalCallerContext`. Before an access-touching task: fetch master, re-read those files and name them in the
   completion record; check uac-r2's open PRs; reuse their mechanisms; their files change only through their review;
-  if their code invalidates the plan, stop and escalate. Open request: **issue #1355** (register Signal/Decision
-  Record as secure children — gates task 039). Their master merges have broken our PRs mid-flight before (#1312).
+  if their code invalidates the plan, stop and escalate. **Channel: issue #1355** (their sessions hold cross-session messages; use the issue). Open with them (2026-10-07):
+  review **PR #1390** (039 lineage + role config) and **PR #1391** (org-owned AppendTo fix in `OwnedChildWrite`); name
+  **one canonical work-assignment create path** (`RecordCreationService` vs `OwnedChildWrite`, D-65 — 046 waits); agree
+  the **move of the write core out of `Services/Ai`** (D-66, task 048). Their binding conditions: register only lookup
+  columns that exist (one-pass reconciliation fails for every table otherwise); lineage + role config in ONE PR; deploy
+  order schema → roles → BFF; never stamp unchanged rows (100k changed-rows/pass limit, D-61). Their master merges have broken our PRs mid-flight before (#1312).
 - **spaarke-prototype** — owns `HANDOFF.md` (UI contract, pinned `ae1cc9f`). We consume; we do not edit.
 - **ci-cd-unit-test-remediation-r1** — owns the CI tier workflows; our Tier 1 guard + router change is a recorded
   path-A exception to its FR-A02.
