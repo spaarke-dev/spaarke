@@ -340,6 +340,11 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     }
                 }
 
+                if (IsReservedOutputVariable(node.OutputVariable))
+                {
+                    errors.Add($"Node '{node.Name}' uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification)");
+                }
+
                 // Check output variable is unique
                 var duplicateOutputs = nodes
                     .Where(n => n.Id != node.Id && n.OutputVariable == node.OutputVariable)
@@ -1078,6 +1083,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
 
                 EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
+                return errorOutput;
+            }
+
+            // ISS-018 (#1452): `item` is reserved for the executor-scoped root CreateNotification binds per item. A node
+            // whose output were named `item` would put `item` into every later Layer 1 context, so Layer 1 would render
+            // CreateNotification's per-item templates early again (blank titles, null regardingId). Refuse the name.
+            if (IsReservedOutputVariable(node.OutputVariable))
+            {
+                var errorMsg = $"Node '{node.Name}' (id={node.Id}) uses the reserved outputVariable '{node.OutputVariable}' (the per-item root of CreateNotification); rename it.";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
+
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed");
 
                 return errorOutput;
             }
@@ -2533,6 +2555,14 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     /// </summary>
     private static readonly IReadOnlyDictionary<ExecutorType, string[]> ExecutorScopedTemplateRoots =
         new Dictionary<ExecutorType, string[]> { [ExecutorType.CreateNotification] = ["item"] };
+
+    /// <summary>
+    /// True when <paramref name="outputVariable"/> is an executor-scoped template root (<c>item</c>) — reserved, because a
+    /// node output with that name would bind the root in every later Layer 1 context (ISS-018).
+    /// </summary>
+    internal static bool IsReservedOutputVariable(string? outputVariable) =>
+        outputVariable is not null
+        && ExecutorScopedTemplateRoots.Values.Any(roots => roots.Contains(outputVariable.Trim(), StringComparer.Ordinal));
 
     private static readonly System.Text.RegularExpressions.Regex MustacheExpression = new(
         @"\{\{(.*?)\}\}",

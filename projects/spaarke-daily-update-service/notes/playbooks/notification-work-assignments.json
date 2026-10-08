@@ -9,7 +9,7 @@
   },
   "playbook": {
     "name": "New Work Assignments",
-    "description": "Notifies users of sprk_workassignment records created or updated in the last 24 hours on their matters, on matters they own, or that they own. Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
+    "description": "Notifies the user of active sprk_workassignment records created or modified in the last 24 hours on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_workassignment entity (NOT OOB task activity).",
     "isPublic": true,
     "sprk_playbooktype": 2,
     "capabilities": ["notify"],

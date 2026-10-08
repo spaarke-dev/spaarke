@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-005",
     "name": "New Events on Matters/Projects",
-    "description": "Notifies users when new sprk_event records (of types Action, Deadline, Meeting, Milestone, Reminder) have been created on their assigned matters or projects since the last check. Uses Spaarke custom sprk_event entity (NOT OOB appointment activity).",
+    "description": "Notifies the user of new sprk_event records of types Action, Deadline, Meeting, Milestone and Reminder created in the last 24 hours by someone else on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_event entity (NOT OOB appointment activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,

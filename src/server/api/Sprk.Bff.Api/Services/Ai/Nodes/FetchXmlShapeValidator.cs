@@ -58,6 +58,10 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes
         private static readonly HashSet<string> GuidListOperators =
             new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "in" };
 
+        // Negated list operators: the empty GUID (fetchInGuids' "select nothing" value) inverts to "select everything".
+        private static readonly HashSet<string> NegatedListOperators =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "not-in", "not-contain-values" };
+
         private static readonly Regex ListHelperExpression = new Regex(
             @"^\s*\{\{\s*" + ListHelperName + @"\s+[A-Za-z_][A-Za-z0-9_.]*\s*\}\}\s*$",
             RegexOptions.CultureInvariant);
@@ -154,6 +158,14 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes
                         ? "exactly " + arity.Min
                         : "at least " + arity.Min;
                     problems.Add(label + ": needs " + expected + " <value> child element(s); found " + values.Count + ".");
+                }
+
+                if (!authoredTemplate && NegatedListOperators.Contains(op)
+                    && values.Any(v => Guid.TryParse(v.Value.Trim(), out var id) && id == Guid.Empty))
+                {
+                    problems.Add(
+                        label + ": contains the empty GUID, the impossible match fetchInGuids writes for an empty or invalid " +
+                        "list; under a negated operator it matches EVERY row (fail-open).");
                 }
 
                 if (values.Any(v => string.IsNullOrWhiteSpace(v.Value)))

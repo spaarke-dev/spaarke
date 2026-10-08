@@ -624,7 +624,7 @@ Existing helpers (`safe`, simple variable interpolation, `{{#each}}`, nested pro
 
 Columns from an aliased `<link-entity alias="m">` appear in the query output keys as `alias.column` (e.g. `m.sprk_mattername`). Reference them with `{{lookup item 'm.sprk_mattername'}}` — not `{{item.m_sprk_mattername}}` (no such key) and not `{{item.m.sprk_mattername}}` (Handlebars reads the dot as a path). (Added 2026-10-08, ISS-018 #1452.)
 
-`item` is the executor-scoped root inside `CreateNotification`'s per-item loop (`itemNotification`). The orchestrator's config render (Layer 1) leaves strings that use `item` unrendered so the executor renders them once per item.
+`item` is the executor-scoped root inside `CreateNotification`'s per-item loop (`itemNotification`). Because of that, **`item` is a reserved `outputVariable`**: a node named `item` fails at run time, in `ValidateAsync` and at deploy lint C (2026-10-08, ISS-018). A Condition comparison's `left` must be authored (a template or a value); only `exists` accepts a rendered null/empty value (→ false), every other operator fails the node when `left` renders null or empty, and lint C refuses an authored literal `"left": null`. The orchestrator's config render (Layer 1) leaves strings that use `item` unrendered so the executor renders them once per item.
 
 ### `default` (NEW in R3)
 

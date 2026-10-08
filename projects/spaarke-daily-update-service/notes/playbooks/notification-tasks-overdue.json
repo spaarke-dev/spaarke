@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-001",
     "name": "Tasks Overdue",
-    "description": "Identifies Task-type sprk_event records (sprk_eventtype_ref = Task) past their due date on the user's matters and creates notifications for each overdue item. Uses Spaarke custom sprk_event entity (NOT OOB task activity).",
+    "description": "Notifies the user of open Task-type sprk_event records (sprk_eventtype_ref = Task) whose sprk_duedate is before their local today, on their matters, on matters they own, or that they own; one notification per overdue task. Uses Spaarke custom sprk_event entity (NOT OOB task activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,

@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-003",
     "name": "New Documents on Your Matters",
-    "description": "Identifies documents added to user's matters since the last check (configurable time window) and creates notifications for each new document.",
+    "description": "Notifies the user of sprk_document records created in the last 24 hours by someone else on their matters, on matters they own, or that they own, one notification per document. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,

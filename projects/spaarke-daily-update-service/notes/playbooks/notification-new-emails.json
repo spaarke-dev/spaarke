@@ -11,7 +11,7 @@
   "playbook": {
     "id": "NP-004",
     "name": "New Emails on Matters",
-    "description": "Notifies users when new emails (sprk_communication records with sprk_communicationtype = Email/100000000) have been received on their assigned matters since the last check. Resolves matter memberships via the LookupUserMembership node (ADR-034 / R3 FR-1C.2 / A1 defect remediation) and filters inbound communications by those matter IDs within the configurable timeWindow parameter. Uses Spaarke custom sprk_communication entity (NOT OOB email activity).",
+    "description": "Notifies the user of new emails (sprk_communication records with sprk_communicationtype = Email/100000000) created in the last 24 hours by someone else on their matters (resolved by the LookupUserMembership node, ADR-034), on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_communication entity (NOT OOB email activity).",
     "sprk_playbooktype": 2,
     "isPublic": true,
     "isSystemPlaybook": true,

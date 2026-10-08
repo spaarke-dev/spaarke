@@ -37,7 +37,16 @@
     Folder for the before/after JSON records.
 
 .PARAMETER Only
-    Restrict to these definition file names (e.g. notification-tasks-overdue.json).
+    Restrict to these playbooks: definition file names (notification-tasks-overdue.json) or playbook names
+    (Tasks Overdue). An unknown value stops the script before anything runs.
+
+.PARAMETER RestoreFrom
+    ROLLBACK: a folder written by an earlier -RecordPath run. For each selected playbook, writes back the recorded
+    <file>.before.json state - every recorded node's sprk_configjson, sprk_executortype, sprk_executionorder,
+    sprk_outputvariable, sprk_isactive and sprk_dependsonjson, and the playbook row's sprk_description and
+    sprk_configjson - then reads every node back and fails on any difference. A node the sync CREATED (absent from
+    the record) is set inactive (sprk_isactive = false), never deleted: deleting rows is an owner decision. Combine
+    with -DryRun to see the plan without writing.
 
 .EXAMPLE
     .\Deploy-NotificationPlaybooks.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -DryRun
@@ -49,7 +58,8 @@ param(
     [string]$DataverseUrl = $env:DATAVERSE_URL,
     [switch]$DryRun,
     [string]$RecordPath,
-    [string[]]$Only
+    [string[]]$Only,
+    [string]$RestoreFrom
 )
 
 $ErrorActionPreference = 'Stop'
@@ -72,7 +82,18 @@ $playbooks = @(
     'notification-matter-activity.json',
     'notification-work-assignments.json'
 )
-if ($Only) { $playbooks = @($playbooks | Where-Object { $_ -in $Only }) }
+if ($Only) {
+    $selected = @()
+    foreach ($entry in $Only) {
+        $match = @($playbooks | Where-Object {
+            $_ -eq $entry -or ((Get-Content -LiteralPath (Join-Path $playbookDir $_) -Raw -Encoding utf8 | ConvertFrom-Json -Depth 64).playbook.name -eq $entry)
+        })
+        if ($match.Count -ne 1) { throw "-Only '$entry' matches no notification playbook (file name or playbook name)." }
+        $selected += $match[0]
+    }
+    $playbooks = @($playbooks | Where-Object { $_ -in $selected })
+}
+if ($RestoreFrom -and -not (Test-Path -LiteralPath $RestoreFrom)) { throw "-RestoreFrom folder not found: $RestoreFrom" }
 if ($RecordPath -and -not (Test-Path -LiteralPath $RecordPath)) { New-Item -ItemType Directory -Path $RecordPath | Out-Null }
 
 function Get-Headers {
@@ -226,11 +247,90 @@ function Sync-Playbook {
     Write-Host "    read-back: all $(@($after.nodes).Count) nodes and the playbook row equal the definition" -ForegroundColor Green
 }
 
+function Restore-Playbook {
+    # ROLLBACK to a recorded before-state (see -RestoreFrom).
+    param([string]$PlaybookId, [string]$File)
+
+    $recordFile = Join-Path $RestoreFrom "$File.before.json"
+    if (-not (Test-Path -LiteralPath $recordFile)) { throw "$File : no record at $recordFile" }
+    $record = Get-Content -LiteralPath $recordFile -Raw -Encoding utf8 | ConvertFrom-Json -Depth 64 -DateKind String
+    if ([string]$record.playbook.id -ne [string]$PlaybookId) { throw "$File : the record is for playbook $($record.playbook.id), the live playbook is $PlaybookId. Nothing written." }
+
+    $live = Get-LiveState -PlaybookId $PlaybookId
+    $liveById = @{}
+    foreach ($n in $live.nodes) { $liveById[[string]$n.id] = $n }
+    $recordIds = @($record.nodes | ForEach-Object { [string]$_.id })
+    $missing = @($recordIds | Where-Object { -not $liveById.ContainsKey($_) })
+    if ($missing.Count -gt 0) { throw "$File : recorded nodes no longer exist: $($missing -join ', '). Nothing written." }
+
+    foreach ($n in $record.nodes) {
+        $current = $liveById[[string]$n.id]
+        $body = @{
+            sprk_configjson     = $n.configjson
+            sprk_executortype   = $n.executortype
+            sprk_executionorder = $n.executionorder
+            sprk_outputvariable = $n.outputvariable
+            sprk_isactive       = [bool]$n.isactive
+            sprk_dependsonjson  = $n.dependsonjson
+        }
+        $changed = @()
+        if ((ConvertTo-CanonicalJson $current.configjson) -ne (ConvertTo-CanonicalJson $n.configjson)) { $changed += 'configjson' }
+        if ($current.executortype -ne $n.executortype) { $changed += "executortype $($current.executortype)->$($n.executortype)" }
+        if ($current.executionorder -ne $n.executionorder) { $changed += "executionorder $($current.executionorder)->$($n.executionorder)" }
+        if ($current.outputvariable -ne $n.outputvariable) { $changed += "outputvariable $($current.outputvariable)->$($n.outputvariable)" }
+        if ([bool]$current.isactive -ne [bool]$n.isactive) { $changed += "isactive $($current.isactive)->$($n.isactive)" }
+        if ([string]$current.dependsonjson -ne [string]$n.dependsonjson) { $changed += 'dependsonjson' }
+        if ($changed.Count -eq 0) {
+            Write-Host "    = node '$($n.name)' already as recorded" -ForegroundColor Gray
+        } else {
+            Write-Host "    < restore node '$($n.name)' ($($changed -join '; '))" -ForegroundColor Yellow
+            if (-not $DryRun) { Invoke-Dv -Method Patch -Path "sprk_playbooknodes($($n.id))" -Body $body | Out-Null }
+        }
+    }
+
+    $created = @($live.nodes | Where-Object { [string]$_.id -notin $recordIds })
+    foreach ($n in $created) {
+        Write-Host "    - deactivate node '$($n.name)' (created after the record; not deleted)" -ForegroundColor Yellow
+        if (-not $DryRun) { Invoke-Dv -Method Patch -Path "sprk_playbooknodes($($n.id))" -Body @{ sprk_isactive = $false } | Out-Null }
+    }
+
+    $playbookChanged = ([string]$live.playbook.description -ne [string]$record.playbook.description) -or
+        ((ConvertTo-CanonicalJson $live.playbook.configjson) -ne (ConvertTo-CanonicalJson $record.playbook.configjson))
+    if ($playbookChanged) {
+        Write-Host '    < restore playbook description/configjson' -ForegroundColor Yellow
+        if (-not $DryRun) {
+            Invoke-Dv -Method Patch -Path "sprk_analysisplaybooks($PlaybookId)" -Body @{
+                sprk_description = $record.playbook.description
+                sprk_configjson  = $record.playbook.configjson
+            } | Out-Null
+        }
+    } else {
+        Write-Host '    = playbook row already as recorded' -ForegroundColor Gray
+    }
+
+    if ($DryRun) { Write-Host '    (dry run: nothing written, read-back skipped)' -ForegroundColor Gray; return }
+
+    $after = Get-LiveState -PlaybookId $PlaybookId
+    $mismatches = @()
+    foreach ($n in $record.nodes) {
+        $a = $after.nodes | Where-Object { [string]$_.id -eq [string]$n.id }
+        if ((ConvertTo-CanonicalJson $a.configjson) -ne (ConvertTo-CanonicalJson $n.configjson)) { $mismatches += "$($n.name): configjson" }
+        if ($a.executortype -ne $n.executortype -or $a.outputvariable -ne $n.outputvariable -or [bool]$a.isactive -ne [bool]$n.isactive -or [string]$a.dependsonjson -ne [string]$n.dependsonjson) { $mismatches += "$($n.name): columns" }
+    }
+    foreach ($n in $created) {
+        if (($after.nodes | Where-Object { [string]$_.id -eq [string]$n.id }).isactive) { $mismatches += "$($n.name): still active" }
+    }
+    if ((ConvertTo-CanonicalJson $after.playbook.configjson) -ne (ConvertTo-CanonicalJson $record.playbook.configjson)) { $mismatches += 'playbook configjson' }
+    if ($mismatches.Count -gt 0) { throw "$File : restore read-back differs from the record: $($mismatches -join ' | ')" }
+    Write-Host "    read-back: all $(@($record.nodes).Count) recorded nodes and the playbook row equal the record" -ForegroundColor Green
+}
+
 Write-Host "`n=== Deploying Notification Playbooks ===" -ForegroundColor Cyan
 Write-Host "  Source:      $playbookDir" -ForegroundColor Gray
 Write-Host "  Environment: $DataverseUrl" -ForegroundColor Gray
 Write-Host "  Count:       $($playbooks.Count)" -ForegroundColor Gray
 if ($DryRun) { Write-Host '  Mode:        DRY RUN' -ForegroundColor Yellow }
+if ($RestoreFrom) { Write-Host "  Restore:     from $RestoreFrom (ROLLBACK)" -ForegroundColor Yellow }
 Write-Host ''
 
 $script:Headers = Get-Headers
@@ -252,7 +352,10 @@ foreach ($file in $playbooks) {
             [uri]::EscapeDataString("sprk_name eq '$name' and sprk_playbooktype eq $NotificationPlaybookType"))).value)
         if ($existing.Count -gt 1) { throw "more than one notification playbook named '$($definition.playbook.name)'" }
 
-        if ($existing.Count -eq 0) {
+        if ($RestoreFrom) {
+            if ($existing.Count -eq 0) { throw 'playbook absent: nothing to restore' }
+            Restore-Playbook -PlaybookId $existing[0].sprk_analysisplaybookid -File $file
+        } elseif ($existing.Count -eq 0) {
             # Deploy-Playbook.ps1 skips (exit 0) when ANY playbook has this name, so a same-named playbook of another
             # type would read as "deployed" while nothing was written.
             $sameName = @((Invoke-Dv -Method Get -Path ("sprk_analysisplaybooks?`$select=sprk_analysisplaybookid,sprk_playbooktype&`$filter=" +

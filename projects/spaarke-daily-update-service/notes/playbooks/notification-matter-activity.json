@@ -9,7 +9,7 @@
   },
   "playbook": {
     "name": "Matter/Project Activity Summary",
-    "description": "Notifies users of recent sprk_event activity on their matters and projects since last check (all event types — Action, Deadline, Meeting, Milestone, Reminder, Notification, Status Change, Approval). Uses Spaarke custom sprk_event entity. Surfaces general activity stream, distinct from the type-specific PB-019 (new-events) playbook.",
+    "description": "Notifies the user of sprk_event records of any event type modified in the last 24 hours on their matters, on matters they own, or that they own. The 24-hour window is fixed (the scheduler passes timeWindowHours=24; it is not \"since the last check\" and the timeWindow parameter is not applied yet). Uses Spaarke custom sprk_event entity. Surfaces general activity stream, distinct from the type-specific new-events playbook.",
     "isPublic": true,
     "sprk_playbooktype": 2,
     "capabilities": ["notify"],

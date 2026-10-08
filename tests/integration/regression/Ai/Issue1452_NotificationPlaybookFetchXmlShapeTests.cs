@@ -284,6 +284,34 @@ public class Issue1452_NotificationPlaybookFetchXmlShapeTests
         ((string)inner["itemNotification"]!["title"]!).Should().Be("Item {{item.name}}");
     }
 
+    [Theory]
+    [InlineData("eq", "null")]
+    [InlineData("ne", "null")]
+    [InlineData("gt", "null")]
+    [InlineData("eq", "\"\"")]
+    [InlineData("lt", "\"  \"")]
+    public async Task TheConditionNode_FailsANullOrBlankLeft_ForEveryOperatorButExists(string op, string left)
+    {
+        // A missing upstream value must not silently pick a branch: only `exists` may see null/blank (-> false).
+        var executor = new ConditionNodeExecutor(Engine, NullLogger<ConditionNodeExecutor>.Instance);
+        var config = $"{{\"condition\":{{\"operator\":\"{op}\",\"left\":{left},\"right\":0}},\"trueBranch\":\"Next\",\"falseBranch\":\"Other\"}}";
+
+        var result = await executor.ExecuteAsync(NodeContext("Check", config, ExecutorType.Condition, new Dictionary<string, NodeOutput>()), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(NodeErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain("left");
+    }
+
+    [Theory]
+    [InlineData("item", true)]
+    [InlineData(" item ", true)]
+    [InlineData("items", false)]
+    [InlineData("Item", false)]
+    [InlineData("myMatters", false)]
+    public void TheOutputVariableItem_IsReserved(string name, bool reserved) =>
+        PlaybookOrchestrationService.IsReservedOutputVariable(name).Should().Be(reserved);
+
     [Fact]
     public async Task TheConditionNode_TreatsALayer1RenderedNullAsAValue_ExistsIsFalse()
     {

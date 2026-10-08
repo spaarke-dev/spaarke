@@ -197,17 +197,29 @@ public sealed class ConditionNodeExecutor : INodeExecutor
             {
                 errors.Add($"{path}: 'left' operand is required for '{op}' operator");
             }
+            else if (op != "exists" && IsNullOrBlank(condition.Left))
+            {
+                // Only `exists` may see a null/empty left (a missing upstream value → false). For a comparison it means the
+                // upstream value is missing: fail the node, as before ISS-018b, rather than silently take a branch.
+                errors.Add($"{path}: 'left' operand rendered null or empty for '{op}' operator — the upstream value is missing");
+            }
         }
 
         return errors;
     }
 
     /// <summary>
-    /// True when a comparison's <c>left</c> operand is absent from the config. Any PRESENT value — a template, a rendered
-    /// number (ISS-018b: Layer 1 renders <c>"left": "{{q.output.count}}"</c> to <c>12</c>), a rendered <c>""</c> or
-    /// <c>null</c> (a missing value, which <c>exists</c> must evaluate to false rather than fail the node) — is valid.
+    /// True when a comparison's <c>left</c> operand is absent from the config. A rendered number is present (ISS-018b:
+    /// Layer 1 renders <c>"left": "{{q.output.count}}"</c> to <c>12</c>); a rendered <c>null</c>/<c>""</c> is present but
+    /// valid only for <c>exists</c> (→ false), see <see cref="IsNullOrBlank"/>. An authored literal <c>"left": null</c> is
+    /// refused at deploy by lint C (scripts/common/Assert-PlaybookFetchXmlShape.ps1).
     /// </summary>
     private static bool IsMissingOperand(JsonElement operand) => operand.ValueKind == JsonValueKind.Undefined;
+
+    /// <summary>True for a JSON <c>null</c> or a blank string — valid only as the left operand of <c>exists</c>.</summary>
+    private static bool IsNullOrBlank(JsonElement operand) =>
+        operand.ValueKind == JsonValueKind.Null
+        || (operand.ValueKind == JsonValueKind.String && string.IsNullOrWhiteSpace(operand.GetString()));
 
     /// <inheritdoc />
     public Task<NodeOutput> ExecuteAsync(

@@ -312,6 +312,29 @@ public class PlaybookOrchestrationServiceTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ANodeWhoseOutputVariableIsItem_Fails_WithoutRunning_ISS018()
+    {
+        // `item` is CreateNotification's per-item root; a node output named `item` would bind it in every later Layer 1
+        // context and bring back the early render of per-item templates (blank titles, null regardingId).
+        var playbookId = Guid.NewGuid();
+        var (node, executor, _) = QueryDataverseNode(playbookId, "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch/>\"}");
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([node with { OutputVariable = "item" }]);
+
+        var failures = new List<string?>();
+        await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.NodeFailed)
+            {
+                failures.Add(evt.Error);
+            }
+        }
+
+        executor.Verify(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()), Times.Never());
+        failures.Should().ContainSingle().Which.Should().Contain("reserved outputVariable 'item'");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ATypedParameterOfTheWrongType_FailsTheQueryNode_WithoutRunningIt()
     {
         var playbookId = Guid.NewGuid();

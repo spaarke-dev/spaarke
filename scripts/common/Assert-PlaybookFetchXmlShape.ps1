@@ -1,7 +1,8 @@
 <#
 .SYNOPSIS
     Deploy lint C (ISS-018, #1452, owner decision D-77): refuse a playbook definition whose FetchXML list conditions
-    Dataverse would mis-read, or whose node config is a Playbook Designer canvas stub.
+    Dataverse would mis-read, whose node config is a Playbook Designer canvas stub, that names a node output `item`
+    (reserved), or whose Condition comparison has no authored `left`.
 
 .DESCRIPTION
     Dot-source this file, then call Assert-PlaybookFetchXmlShape -Definition <parsed definition JSON>.
@@ -74,6 +75,16 @@ function Get-FetchXmlStrings {
     }
 }
 
+function Get-ConditionComparisons {
+    # The comparison leaves of a Condition expression (and/or/not are walked).
+    param($Condition)
+    if ($null -eq $Condition) { return }
+    $op = ([string]$Condition.operator).ToLowerInvariant()
+    if ($op -in @('and', 'or')) { foreach ($c in @($Condition.conditions)) { Get-ConditionComparisons -Condition $c }; return }
+    if ($op -eq 'not') { Get-ConditionComparisons -Condition $Condition.condition; return }
+    $Condition
+}
+
 function Assert-PlaybookFetchXmlShape {
     [CmdletBinding()]
     param(
@@ -93,6 +104,24 @@ function Assert-PlaybookFetchXmlShape {
             $keys = @($config.PSObject.Properties.Name)
             if ($keys -contains '__canvasNodeId' -and @($keys | Where-Object { $_ -notin @('__canvasNodeId', '__actionType') }).Count -eq 0) {
                 $problems.Add("node '$name': its config is a Playbook Designer canvas stub (only __canvasNodeId/__actionType); deploying it would replace a working node with an empty one.")
+            }
+        }
+
+        # `item` is the per-item template root CreateNotification binds; a node output with that name would make the
+        # orchestrator render the per-item templates early (ISS-018). The orchestrator refuses it at run time too.
+        if ([string]$node.outputVariable -ceq 'item') {
+            $problems.Add("node '$name': outputVariable 'item' is reserved (the per-item root of CreateNotification); rename it.")
+        }
+
+        # A Condition comparison's `left` must be authored (a template or a value). An authored literal null/blank is
+        # refused: only a RENDERED null is meaningful (exists -> false).
+        $condition = if ($null -ne $config -and $config -is [System.Management.Automation.PSCustomObject]) { $config.condition } else { $null }
+        if ($null -ne $condition) {
+            foreach ($c in @(Get-ConditionComparisons -Condition $condition)) {
+                $hasLeft = $c.PSObject.Properties.Name -contains 'left'
+                if (-not $hasLeft -or $null -eq $c.left -or ($c.left -is [string] -and [string]::IsNullOrWhiteSpace($c.left))) {
+                    $problems.Add("node '$name': Condition operator '$($c.operator)' has no authored 'left' operand (absent, null or blank).")
+                }
             }
         }
 

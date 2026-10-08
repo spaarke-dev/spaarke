@@ -130,6 +130,28 @@ public class FetchXmlShapeValidatorTests
             .Should().Contain(p => p.Contains("operator=\"not-in\""));
     }
 
+    [Theory]
+    [InlineData("not-in")]
+    [InlineData("not-contain-values")]
+    public void RenderedNegatedList_HoldingTheEmptyGuid_IsRejected_ItWouldMatchEveryRow(string op)
+    {
+        // The executor-side twin of the authored-mode refusal: an empty membership list renders to the impossible match,
+        // which under a negated operator selects EVERY row (fail-open).
+        FetchXmlShapeValidator.Validate(Fetch(
+            $"<condition attribute=\"x\" operator=\"{op}\"><value>00000000-0000-0000-0000-000000000000</value></condition>"))
+            .Should().Contain(p => p.Contains("empty GUID") && p.Contains($"operator=\"{op}\""));
+    }
+
+    [Fact]
+    public void RenderedNotIn_WithRealIds_Passes_AndInWithTheEmptyGuid_Passes()
+    {
+        FetchXmlShapeValidator.Validate(Fetch($"<condition attribute=\"x\" operator=\"not-in\"><value>{A}</value></condition>"))
+            .Should().BeEmpty();
+        FetchXmlShapeValidator.Validate(Fetch(
+            "<condition attribute=\"x\" operator=\"in\"><value>00000000-0000-0000-0000-000000000000</value></condition>"))
+            .Should().BeEmpty("under `in` the empty GUID selects nothing (fail-closed)");
+    }
+
     [Fact]
     public void AuthoredEachBlock_InAList_IsRejected_UseTheHelper()
     {
