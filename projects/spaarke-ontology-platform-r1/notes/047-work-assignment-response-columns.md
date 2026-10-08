@@ -1,10 +1,37 @@
-# Task 047 — response columns on `sprk_workassignment` (D-54): proposal and escalation
+# Task 047 — response columns on `sprk_workassignment` (D-54, D-58)
 
-> **Date**: 2026-10-07 · **Env**: `spaarkedev1` · **Status**: 🔔 **STOPPED at the escalation trigger — no metadata
-> was changed.** The POML requires the work-assignment area owner's agreement on the column set, the choice values and
-> the solution BEFORE any metadata change, and uac-r2's "no lineage change" answer. Neither could be obtained from this
-> session (stream C2 sub-agent; no synchronous channel to either). The proposal below is ready to execute unchanged once
-> both answers are recorded here.
+> **Date**: 2026-10-07 · **Env**: `spaarkedev1` · **Status**: ✅ **DONE (2026-10-07).** First pass stopped at the
+> escalation trigger (sections 1-6 below are that record, unchanged). The owner then answered as **area owner (D-58,
+> spec §9)**: approve §4 as proposed. Columns created and read back: §7.
+
+## 7. Executed after D-58 (2026-10-07)
+
+**Agreement**: the project owner, acting as work-assignment area owner, approved §4 as written on 2026-10-07: the
+column set, the three outcome values, no note column ("notes go in the Decision Record") and home solution
+`SpaarkeCore`. Recorded as **D-58** in `spec.md` §9, relayed by the coordinator session.
+**uac-r2**: the request in §6 was posted on issue #1355,
+<https://github.com/spaarke-dev/spaarke/issues/1355#issuecomment-6049366401>. Per D-58, plain columns do **not** wait on
+the reply. If uac-r2 names a needed change, that is follow-up work.
+
+**Method**: Web API, `POST EntityDefinitions(LogicalName='sprk_workassignment')/Attributes` with explicit PascalCase
+SchemaName and header `MSCRM.SolutionUniqueName: SpaarkeCore`. `DateTimeBehavior` was set on the date column. Then
+`PublishXml` ran for `<entity>sprk_workassignment</entity>` **only**. No MCP `create_table`, no `PublishAllXml`.
+Responses: create ×2 HTTP 204, publish HTTP 204.
+
+**Read back (live)**:
+
+| Column | SchemaName | Type | Detail | MetadataId | Before | After |
+|---|---|---|---|---|---|---|
+| `sprk_respondedon` | `sprk_RespondedOn` | DateTime | Format **DateOnly**, DateTimeBehavior **DateOnly**, RequiredLevel None | `61464111-acc2-f111-a05c-3833c5e9614d` | absent | present |
+| `sprk_responseoutcome` | `sprk_ResponseOutcome` | Picklist, **local** option set `sprk_workassignment_sprk_responseoutcome` | `100000000` Received outside Spaarke · `100000001` Delivered on the matter · `100000002` No longer needed; RequiredLevel None, no default | `67244417-acc2-f111-a05c-3833c5e9614d` | absent | present |
+
+**Solution membership**: neither attribute has a componenttype-2 row of its own. As task 007 found, a table that a
+solution holds with rootcomponentbehavior 0 carries all of its attributes through the entity. So both columns belong to
+`SpaarkeCore` (rcb 0), the header's target, and to the table's other rcb-0 holders. After D-60 that list no longer
+includes `OntologyPlatformSolution`.
+
+**Negative**: no other column or table was changed by this task, and no tool without a publisher parameter was used.
+Later tests that assert these names pair with this read-back (ADR-038).
 
 ## 1. Who is the work-assignment area owner?
 
