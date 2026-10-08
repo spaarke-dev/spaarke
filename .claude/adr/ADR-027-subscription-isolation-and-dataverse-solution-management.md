@@ -71,12 +71,17 @@ cross-*subscription* prohibition is load-bearing here.
   from there. No hand-built or hand-uploaded artifact.
 - Upgrade = re-run H6 (`StageAndUpgrade`; a component removed from the package is deleted in managed environments).
 - Runbook: [`docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md`](../../docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md).
-  *(H6 side built 2026-10-07, task 218b; the scope rule, git source and CI publish are tasks 218c–218e.)*
+  *(H6 side built 2026-10-07, task 218b; scope rule, git source and CI publish 2026-10-08, tasks 218c–218e; Spaarke's
+  own environments 2026-10-08, task 218f.)*
 
 ## Constraints
 
 - **MUST** version-bump solutions before export
 - **MUST** import customer environments through provisioning H6 (the one package, typed per run); never by hand *(amended 2026-10-07 — replaces "MUST use `Deploy-DataverseSolutions.ps1`")*
+- **MUST** import Spaarke's own environments (demo, …) from the same CI-published SpaarkeMaster, with H6's rules —
+  `scripts/solution-authoring/Import-SpaarkeMasterPackage.ps1` via `Deploy-Release.ps1` Phase 3, typed by
+  `config/environments.json` `solutionPackageType` (`none` for the authoring environment). **MUST NOT** import into any
+  environment a solution the dev team creates or manages by hand *(owner 2026-10-08, #1401; task 218f)*
 - **MUST NOT** make direct customizations in production
 - **MUST NOT** commit binary solution ZIPs to git (commit the unpacked source; CI packs the zips)
 - **MUST** deliver SpaarkeMaster **managed** to customer environments unless the run explicitly asks for unmanaged *(added 2026-10-07, D8)*

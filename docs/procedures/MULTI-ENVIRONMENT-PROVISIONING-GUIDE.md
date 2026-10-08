@@ -135,7 +135,7 @@ This script executes a 13-step idempotent chain:
 4. Configure Key Vault access policies
 5. Create the Dataverse environment via Power Platform Admin API (returns the new Dataverse URL)
 6. Wait for Dataverse environment to reach Ready state
-7. Import Spaarke solutions (managed, current version) — uses `Deploy-DataverseSolutions.ps1`
+7. Import SpaarkeMaster (managed, the CI-published version) — uses `solution-authoring/Import-SpaarkeMasterPackage.ps1` (T218f; `Deploy-DataverseSolutions.ps1` retired)
 8. Set environment-variable values (BFF API base URL, Key Vault URI, etc.)
 9. Provision the demo team + business unit
 10. Create the SharePoint Embedded container

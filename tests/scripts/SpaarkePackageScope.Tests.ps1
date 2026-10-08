@@ -306,6 +306,53 @@ Describe 'Get-PackedSolutionInfo (T218d)' {
     }
 }
 
+Describe 'Resolve-PackageImportPlan (T218f — H6 rules for Spaarke environments)' {
+    $inst = { param($v, $m) [PSCustomObject]@{ Version = $v; Managed = $m } }
+
+    It 'installs into an environment without SpaarkeMaster' {
+        $p = Resolve-PackageImportPlan -Installed $null -PackageVersion '1.2.0.0' -Managed $true
+        $p.Action | Should Be 'Install'; $p.StageAndUpgrade | Should Be $false
+    }
+    It 'stages and upgrades an older managed package; updates an older unmanaged one with a plain import' {
+        $m = Resolve-PackageImportPlan -Installed (& $inst '1.1.0.0' $true) -PackageVersion '1.2.0.0' -Managed $true
+        $m.Action | Should Be 'Upgrade'; $m.StageAndUpgrade | Should Be $true
+        $u = Resolve-PackageImportPlan -Installed (& $inst '1.0.0.0' $false) -PackageVersion '1.2.0.0' -Managed $false
+        $u.Action | Should Be 'Update'; $u.StageAndUpgrade | Should Be $false
+    }
+    It 'does nothing when the same version is installed (missing parts count as 0)' {
+        (Resolve-PackageImportPlan -Installed (& $inst '1.2' $false) -PackageVersion '1.2.0.0' -Managed $false).Action | Should Be 'AlreadyCurrent'
+    }
+    It 'refuses a managed/unmanaged switch in either direction' {
+        $a = Resolve-PackageImportPlan -Installed (& $inst '1.0.0.0' $false) -PackageVersion '1.2.0.0' -Managed $true
+        $a.Action | Should Be 'Refuse'; $a.Refusal | Should Be 'package-type-mismatch'
+        (Resolve-PackageImportPlan -Installed (& $inst '1.0.0.0' $true) -PackageVersion '1.2.0.0' -Managed $false).Refusal | Should Be 'package-type-mismatch'
+    }
+    It 'refuses a downgrade' {
+        $d = Resolve-PackageImportPlan -Installed (& $inst '1.10.0.0' $true) -PackageVersion '1.9.0.0' -Managed $true
+        $d.Action | Should Be 'Refuse'; $d.Refusal | Should Be 'downgrade-refused'
+    }
+}
+
+Describe 'Compare-PackageVersion + Get-InstalledPackage (T218f)' {
+    It 'compares numerically, not as text' {
+        Compare-PackageVersion -A '1.10.0.0' -B '1.9.0.0' | Should Be 1
+        Compare-PackageVersion -A '1.2' -B '1.2.0.0' | Should Be 0
+        Compare-PackageVersion -A '1.2.0.0' -B '1.2.0.1' | Should Be -1
+        { Compare-PackageVersion -A '1.x' -B '1.0' } | Should Throw 'Not a version'
+    }
+    It 'reads the installed package by unique name, and returns $null when absent' {
+        $one = New-FakeGet @{ 'solutions' = @{ Filter = "uniquename eq 'SpaarkeMaster'"; Page = (Page @([PSCustomObject]@{ version = '1.0.0.0'; ismanaged = $false })) } }
+        $p = Get-InstalledPackage -Get $one
+        $p.Version | Should Be '1.0.0.0'; $p.Managed | Should Be $false
+        $none = New-FakeGet @{ 'solutions' = @{ Filter = "uniquename eq 'SpaarkeMaster'"; Page = (Page @()) } }
+        Get-InstalledPackage -Get $none | Should Be $null
+    }
+    It 'lets a failed read throw instead of reporting "not installed"' {
+        $broken = { param($endpoint) throw 'HTTP 503' }
+        { Get-InstalledPackage -Get $broken } | Should Throw 'HTTP 503'
+    }
+}
+
 Describe 'Find-EnvironmentVariableValues (T218c value guard)' {
     It 'finds a values file in an unpacked folder and passes a clean one' {
         $dirty = Join-Path $TestDrive 'dirty/environmentvariabledefinitions/sprk_X'

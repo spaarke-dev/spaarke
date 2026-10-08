@@ -653,7 +653,7 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 | 0 | (built-in) | Pre-flight checks: git clean, branch, auth, BFF URL validation |
 | 1 | `Build-AllClientComponents.ps1` | Build all client components in dependency order |
 | 2 | `Deploy-BffApi.ps1` | BFF API deployment (per environment) |
-| 3 | `Deploy-DataverseSolutions.ps1` | Dataverse solution import (per environment) |
+| 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | SpaarkeMaster import — the CI-published package, typed per environment (`solutionPackageType` in `config/environments.json`; `none` skips the authoring environment). T218f retired `Deploy-DataverseSolutions.ps1` |
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
 | 6 | (built-in) | Tag release in git |

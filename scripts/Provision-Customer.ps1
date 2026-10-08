@@ -13,7 +13,8 @@
       4. Populate customer Key Vault with secrets (connection strings, API keys)
       5. Create Dataverse environment via Power Platform Admin API
       6. Wait for Dataverse environment provisioning
-      7. Import managed solutions (Deploy-DataverseSolutions.ps1)
+      7. Import SpaarkeMaster, managed (solution-authoring/Import-SpaarkeMasterPackage.ps1 — the CI-published
+         package; T218f)
       8. Set Dataverse Environment Variables (7 required variables)
       9. Generate environment-config.json
       10. Provision SPE containers
@@ -904,7 +905,7 @@ function Invoke-Step6_WaitForDataverse {
 function Invoke-Step7_ImportSolutions {
     param([PSCustomObject]$State)
 
-    Write-StepHeader 7 "Importing managed solutions to Dataverse"
+    Write-StepHeader 7 "Importing SpaarkeMaster (managed) to Dataverse"
 
     if ($SkipDataverse) {
         Write-Log "Solution import skipped (-SkipDataverse flag)." -Level WARN
@@ -912,9 +913,11 @@ function Invoke-Step7_ImportSolutions {
         return
     }
 
-    $deployScript = Join-Path $ScriptRoot "Deploy-DataverseSolutions.ps1"
+    # T218f: the canonical, CI-published SpaarkeMaster (managed) — the 9-solution Deploy-DataverseSolutions.ps1 retired.
+    # The import uses the operator's own az/pac sign-in; -ClientSecret / -CertificateThumbprint are not used here.
+    $deployScript = Join-Path $ScriptRoot "solution-authoring/Import-SpaarkeMasterPackage.ps1"
     if (-not (Test-Path $deployScript)) {
-        throw "Deploy-DataverseSolutions.ps1 not found at: $deployScript"
+        throw "Import-SpaarkeMasterPackage.ps1 not found at: $deployScript"
     }
 
     $envUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
@@ -925,28 +928,11 @@ function Invoke-Step7_ImportSolutions {
     }
 
     Write-Log "Target environment: $envUrl"
-    Write-Log "Calling Deploy-DataverseSolutions.ps1..."
+    Write-Log "Calling Import-SpaarkeMasterPackage.ps1 (managed)..."
 
-    $deployArgs = @{
-        EnvironmentUrl = $envUrl
-        TenantId       = $TenantId
-        ClientId       = $ClientId
-    }
+    & $deployScript -EnvironmentUrl $envUrl -PackageType managed
 
-    if ($ClientSecret) {
-        $deployArgs.ClientSecret = $ClientSecret
-    }
-    else {
-        $deployArgs.CertificateThumbprint = $CertificateThumbprint
-    }
-
-    & $deployScript @deployArgs
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Solution import failed. See Deploy-DataverseSolutions.ps1 output above."
-    }
-
-    Write-Log "All solutions imported successfully." -Level SUCCESS
+    Write-Log "SpaarkeMaster imported." -Level SUCCESS
     Complete-Step -State $State -StepNumber 7 -StepName "Import solutions"
 }
 

@@ -412,7 +412,64 @@ function New-SpaarkeMasterManifest {
     return ($doc | ConvertTo-Json -Depth 5)
 }
 
+function Compare-PackageVersion {
+    <#
+    .SYNOPSIS -1 / 0 / 1 for a < b / a = b / a > b, part by part with missing parts as 0 (H6's
+              SpaarkePackage.CompareVersions). Throws on a version that is not 1-4 dot-separated numbers.
+    #>
+    param([Parameter(Mandatory)][string]$A, [Parameter(Mandatory)][string]$B)
+    $parse = {
+        param([string]$v)
+        $p = @($v.Trim() -split '\.')
+        if ($p.Count -gt 4 -or @($p | Where-Object { $_ -notmatch '^\d+$' }).Count -gt 0) { throw "Not a version: '$v'." }
+        @(0..3 | ForEach-Object { if ($_ -lt $p.Count) { [long]$p[$_] } else { 0 } })
+    }
+    $x = & $parse $A; $y = & $parse $B
+    foreach ($i in 0..3) { if ($x[$i] -lt $y[$i]) { return -1 }; if ($x[$i] -gt $y[$i]) { return 1 } }
+    return 0
+}
+
+function Get-InstalledPackage {
+    <#
+    .SYNOPSIS The SpaarkeMaster installed in an environment ({Version, Managed}), or $null when absent. A failed read
+              throws — "cannot tell" must never be taken for "not installed" (it would skip the type and downgrade
+              refusals).
+    #>
+    param([Parameter(Mandatory)][scriptblock]$Get, [string]$SolutionUniqueName = 'SpaarkeMaster')
+    $rows = @((& $Get "solutions?`$select=version,ismanaged&`$filter=uniquename eq '$SolutionUniqueName'").value)
+    if ($rows.Count -eq 0) { return $null }
+    [PSCustomObject]@{ Version = [string]$rows[0].version; Managed = [bool]$rows[0].ismanaged }
+}
+
+function Resolve-PackageImportPlan {
+    <#
+    .SYNOPSIS What importing SpaarkeMaster {PackageVersion} as managed/unmanaged into an environment that holds
+              $Installed would do — the same rules as H6 (DataverseWebApiSolutionImporter, ADR-027 §3-§4):
+              never switch the package type, never downgrade, an equal version is already done, an older MANAGED
+              package is upgraded with stage-and-upgrade, an older UNMANAGED one is updated by a plain import.
+    .OUTPUTS  Action = Install | Upgrade | Update | AlreadyCurrent | Refuse; Refusal = package-type-mismatch |
+              downgrade-refused (when Refuse); StageAndUpgrade; Message.
+    #>
+    param($Installed, [Parameter(Mandatory)][string]$PackageVersion, [Parameter(Mandatory)][bool]$Managed)
+    $type = if ($Managed) { 'managed' } else { 'unmanaged' }
+    $plan = { param($action, $refusal, $stage, $message) [PSCustomObject]@{ Action = $action; Refusal = $refusal; StageAndUpgrade = $stage; Message = $message } }
+    if ($null -eq $Installed) { return & $plan 'Install' $null $false "Install SpaarkeMaster $PackageVersion ($type)." }
+    $installedType = if ($Installed.Managed) { 'managed' } else { 'unmanaged' }
+    if ([bool]$Installed.Managed -ne $Managed) {
+        return & $plan 'Refuse' 'package-type-mismatch' $false ("The environment holds SpaarkeMaster $($Installed.Version) as $installedType; " +
+            "this import asks for $type. The package type is never switched (ADR-027 §3) — set the environment's solutionPackageType " +
+            "to $installedType, or convert the environment first (owner-approved, backed up).")
+    }
+    $cmp = Compare-PackageVersion -A $Installed.Version -B $PackageVersion
+    if ($cmp -gt 0) {
+        return & $plan 'Refuse' 'downgrade-refused' $false "The environment holds SpaarkeMaster $($Installed.Version), newer than the published $PackageVersion. Never downgraded."
+    }
+    if ($cmp -eq 0) { return & $plan 'AlreadyCurrent' $null $false "SpaarkeMaster $PackageVersion ($type) is already installed — nothing to import." }
+    if ($Managed) { return & $plan 'Upgrade' $null $true "Upgrade SpaarkeMaster $($Installed.Version) -> $PackageVersion (managed, stage and upgrade)." }
+    return & $plan 'Update' $null $false "Update SpaarkeMaster $($Installed.Version) -> $PackageVersion (unmanaged import over the existing components)."
+}
+
 Export-ModuleMember -Function Get-PackageComponentTypeCode, Read-PackageScope, Get-PackageRuleComponents, `
     Get-SolutionMembershipKeys, Compare-PackageScope, Get-EntityNameMap, Find-EnvironmentVariableValues, Find-LeakyDependencies, `
     Get-NextPackageVersion, `
-    Get-PackedSolutionInfo, New-SpaarkeMasterManifest
+    Get-PackedSolutionInfo, New-SpaarkeMasterManifest, Compare-PackageVersion, Get-InstalledPackage, Resolve-PackageImportPlan

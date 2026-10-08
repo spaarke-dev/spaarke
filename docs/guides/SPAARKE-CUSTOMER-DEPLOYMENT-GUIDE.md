@@ -1419,7 +1419,8 @@ pac admin create `
 pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
     --user "<L2 control-plane UAMI client id>" --role "System Administrator" --application-user
 
-.\scripts\Deploy-DataverseSolutions.ps1 -EnvironmentUrl "<dv-org-url>"
+# SpaarkeMaster (managed — ADR-027 §3): H6 does this in a provisioning run; by hand, the same package and rules:
+.\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl "<dv-org-url>" -PackageType managed
 
 # Phase 5 — SPE (app-only as the owning app — T6 fix)
 # The container type + owning app are ONE-TIME setup: docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
