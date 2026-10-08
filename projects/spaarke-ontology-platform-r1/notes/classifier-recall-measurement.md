@@ -108,6 +108,22 @@ Once the owner answers 1-5 (or confirms the proposals), the remaining work is: c
 `tests/fixtures/ontology-classifier-recall/`, build and review the harness (Step 9.5), state the call count, run,
 compute, write the two rows' three columns, and state pass or fail plainly.
 
+## 4a. D-64 (owner, 2026-10-07): labelling set drafted, awaiting blind owner labels
+
+The owner chose the **synthetic** source. Report the result as *"recall on a synthetic set"*. Quotas: ≥ 25 fee/rate
+positives, ≥ 25 scope/budget positives, ≥ 30 negatives with half hard confusables. **Gate**: combined fee-OR-scope
+recall ≥ 80%, with strict per-category recall reported. **Labeller**: the owner. **One run** (about 2 calls per item); a second run only if
+the first lands near 80%, and only after asking.
+
+| File | Contents |
+|---|---|
+| `notes/074-labelling-set.json` | **92** items `{id, subject, from, body}`, ids `L001`-`L092` assigned **after** a seeded shuffle, **no category, intent or label field** (verified by a key scan). 88 distinct senders; body length 72-935 chars (median 311). Outside-counsel, client, vendor, court-notice, opposing-counsel and bulk mail |
+| `notes/074-drafting-intent.json` | **SEALED.** The drafter's intended mix: 28 fee, 28 scope, 18 hard-confusable negatives, 18 other negatives. 17 items are tagged `borderline` with the reason. Use it only for the composition check after labelling. It is **not ground truth** |
+| `notes/074-category-definitions.md` | The 10 enabled rows and their guidance, read live from spaarkedev1 with the production guidance URL (alphabetical, flattened as the prompt renders them), plus labelling instructions (`AMBIGUOUS` = excluded from the denominator) |
+
+Buffer: 28 per gated category rather than 25, so up to 3 owner labels per category can differ from the intent
+and the quota still holds. **The classifier has NOT been run on any item, and must not run until the labels are back.**
+
 ## 5. Deviations from the POML
 1. **Steps 1-7 not executed**. The escalation trigger is "labelling needs owner judgement" (dispatch rule), not the
    recall < 80% trigger. Nothing was measured, so neither pass nor fail is claimed.
