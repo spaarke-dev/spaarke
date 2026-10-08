@@ -980,6 +980,14 @@ proposed from a single case; (C) comply — keep the guard advisory in legacy SD
 `continue-on-error` and the ruleset (Router only) mean a violation never stops a merge; also "Tier 1 advisory first"
 (the DataGrid gate's pattern) — declined by the owner.
 
+| ADR | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| **ADR-050** | Modals use the named sizes only; no bespoke width/height | Task 056 (PR #1386) moves `WizardShell` into `SprkModal`. Three non-embedded consumers (Console Create Analysis via AI.Widgets, the SemanticSearchControl PCF's Email documents, the external SPA upload) pass raw `maxWidth`/`height` strings, so 056 keeps a transitional `SprkModal.legacySize` and `WizardShell`'s deprecated `maxWidth`/`height` | **A — project-scoped exception (✅ APPROVED by owner 2026-10-07, D-70)** | Mapping those consumers now means rebuilding and redeploying the SemanticSearchControl PCF and AI.Widgets inside 056, which is task 111's job (111 already maps consumers 1, 3, 5 and deploys them). The values nearly match named sizes today (1280px/85vh ≈ `lg`, 60vw/70vh ≈ `wizard`). **Time-boxed:** task 111 deletes `legacySize` and the deprecated props, with a test that they no longer exist; no new consumer may use them meanwhile |
+
+**Alternatives considered for ADR-050**: (B) amend ADR-050 to allow a bespoke size escape hatch — rejected; the rule
+is right. (C) comply inside 056 — rejected because it pulls two PCF/package redeploys into a library refactor and
+delays #1386 for no user benefit, when task 111 deploys the same consumers next.
+
 ---
 
 ## 7. Success criteria
@@ -1119,6 +1127,8 @@ open list. Each changes the requirements and the task plan; FR text is amended w
 | **D-66** (2026-10-07) | AI namespace | The shared Dataverse write core (`OwnedChildWrite` and helpers) moves **out of `Services/Ai/`** to `Services/Dataverse/` (AI → core, never core → AI, per ADR-013's intent) as its **own PR reviewed by uac-r2**; plus an ArchTest pinning the direction. No ADR exception is recorded for 046 | New task 048 |
 | **D-67** (2026-10-07) | 039 live gate | Merge PR #1390 **after uac-r2 approves**, then deploy master to dev and run the rest of the live gate (creates and deletes a `zz-039` Secure matter + its file container) | 039 |
 | **D-68** (2026-10-07) | PR #1391 | Merge **when green and uac-r2 approves** (their code); fix the stale doc comment and file the business-owned-lookup follow-up meanwhile | #1391 |
+| **D-69** (2026-10-07) | Wizard skipped steps | The dashed-ring "skipped" marker is **opt-in** per wizard (one prop); every existing wizard keeps today's tick for a skipped step; the 058 decision wizard opts in. Raised by the #1386 review (F1: the change reached every Create* wizard and looked like an unvisited step) | 056, 058 |
+| **D-70** (2026-10-07) | ADR-050 sizes | **Path A** for 056's transitional size override (`SprkModal.legacySize`, `WizardShell`'s deprecated `maxWidth`/`height`); task 111 removes them when it maps the consumers to named sizes (§6 row) | 056, 111 |
 | **D-29** | Smaller | To Do composite score → **calendar days**, one shared function (boards re-rank once). Writer gets **AppendTo** on `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_workassignment` (closes F26). Caller-unresolved stays **#1312's single 403**. Tier 2 ADR Compliance timeout → **5 min** (own small PR) | Role edits; To Do scoring task; CI PR |
 
 ---

@@ -2,7 +2,7 @@
 
 > **Last Updated**: 2026-10-07 late, checkpoint 2 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
-> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-68). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-70). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
@@ -35,7 +35,7 @@
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) final round | agent `a67ad20f7bead7126` | Main session reads the diff → ask owner to merge → mark 098 ✅ (065 lands with it) → start **106** and **068** (`a17154f00e69eeced`) |
 | **#1384** (060) round 2 DONE `e69e99ab1`, CI green (High Priority now IsOpenWork too) | #1359 merging first | Rebase onto master (header-comment conflict: keep #1359 wording + "open work (IsOpenWork)") → ask owner to merge → 060 ✅ |
-| **056** → **PR #1386** green; deviations D1 dashed ring for skipped steps (owner-visible), D2 `legacySize` Path A (111 removes), D3 no onBeforeClose; filed #1388, #1392 | **independent review running** (`ad2f766533241683a`) | Owner-visible changes + merge question → then 111/112/113/114 |
+| **056** → **PR #1386**: review PASS-WITH-FINDINGS; owner decided D-69 (skipped marker opt-in) + D-70 (ADR-050 Path A, 111 removes); fixes sent to author `af7588b2ed6612c5f` (opt-in prop + stepper tests, PR body, K2 warn, merge master) | author fixing | Independent re-check of the fix diff → owner merge question (list the user-visible changes) → 111/112/113/114 |
 
 ### Agent IDs (SendMessage resumes a finished agent with its context)
 
@@ -44,8 +44,8 @@
 | a67ad20f7bead7126 | 098 author, PR #1359 — final round | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 060 author, PR #1384 (round 2 done, awaits #1359) — next 068 after #1359 | idle |
-| af7588b2ed6612c5f | 056 author, PR #1386 — resume for review fixes | idle |
-| ad2f766533241683a | Reviewer: PR #1386 (056) | running |
+| af7588b2ed6612c5f | 056 author, PR #1386 — doing D-69/D-70 review fixes | running |
+| ad2f766533241683a | Reviewer: PR #1386 (056) — done; resume it for the re-check | idle |
 | a810b83c36e7d8f39 | 039 author — fixes accepted; next: after #1390 merges, merge master into the writer branch + add the pin test | idle |
 | a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 follow-ups done | idle |
 | a1bcb0bae3c363ca9 | 074 author — waits for owner labels | idle |
@@ -67,7 +67,7 @@ unchanged Signals. 073 waits on 037 + 039 + 031 (and a `sprk_regardingmemo` sche
 
 ### Housekeeping for the owner
 
-Delete by hand (sandbox can't delete under `C:\`): `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
+Delete by hand (sandbox can't delete under `C:\`): `C:\wtr1386`, `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
 `C:\wt081r`, `C:\wt081s`, `C:\wt21m`, `C:\wt21h`, `C:\wt21t`, `C:\wtem`. Worktrees removable now: `C:\wt081b`, `C:\wt081c`,
 `C:\wt081m`, `C:\wt081`, `C:\wt092`, `C:\wt094`, `C:\wt095`, `C:\wt096`, `C:\wt097`, `C:\wts-110`, `C:\wts-c`, `C:\wts-d`,
 `C:\wts-d73`, `C:\wts-b` (#1382 merged); later `C:\wt098` (#1359), `C:\wts-b56` (#1386), `C:\wts-e` (#1384), `C:\wts-039`/`C:\wts-039w`, `C:\wts-c2`/`C:\wts-c2fix`, `C:\wts-d74`.
