@@ -41,6 +41,13 @@
   - the 2-minute reconcile keeps it in step;
   - the field is locked with "inherited from X" when the record has a parent, and editable when it has none;
   - for a parentless record: **record only, no new enforcement**. The owner has not yet confirmed this.
+- **Peer report (spaarkeai-word-add-in-r1, 2026-10-08, relayed by the owner):** "To Do created on a restricted document shows Standard". Traced `POST /api/office/todo` → `OfficeService.CreateTodoAsync` (`Services/Office/OfficeService.cs:2067`).
+  - **Ownership is correct:** `_coreAncestors.StampAsync` fails closed, and `ResolveTodoOwnerTeamAsync` → `_ownershipResolver.ResolveOwnerAsync` applies secure-if-any.
+  - **No BFF path writes `sprk_todo.sprk_accesspermission`** (Office, the wizard, `ChildRecordEndpoints.cs`), so it stays at the default Standard.
+  - **Doc drift to fix in the task:** `docs/data-model/sprk_communication.md:12` says a child carries no permission of its own, and `projects/unified-access-control-r2/unified-access-control-cascade.md:37` says the column isn't on `sprk_todo`. Both are now out of date.
+  - **Peer recommendation:** retire or lock the column (the communication model). If it is filled, fill it ONCE in the shared ownership/stamp path (`CoreAncestorResolver` / `RecordOwnershipResolver`), never Office-only.
+  - **Our position:** the owner's round-81 direction overrides "retire". The column shows the parent's value, and a parentless record keeps its own. Implement it in the shared stamp path plus the 2-minute reconcile, as they advise.
+  - **Reply owed to the peer** (through the owner, or `#1094`-style coordination): "The owner expected the COLUMN to show Restricted. The effective access was already right: PAT-176903 is Restricted, not secure, so external users are barred through the root. Round 81: children with a parent show the parent's value, written once in the shared stamp path (no Office-only write), kept in step by the reconcile job. Parentless children keep their own value. A new uac-r2 task will cover it; Office needs no change unless the shared path changes its call."
 
 ## Waiting on the owner
 - **Tests:**
