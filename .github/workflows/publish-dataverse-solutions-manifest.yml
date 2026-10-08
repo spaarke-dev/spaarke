@@ -14,10 +14,12 @@
 # flag, no environment-variable values) and the source (no missing dependency on solution="Active" — F12) → write
 # the manifest with New-SpaarkeMasterManifest (the one producer of its shape; the C# parser and Pester tests share
 # Fixtures/spaarkemaster-manifest.sample.json) → keep everything as a run artifact.
-# Only a manual run with `publish: true` then uploads: both zips under versioned names (a version publishes ONCE —
-# an existing blob refuses the run; bump the version with Assemble-SpaarkeMasterSolution.ps1 -Version and re-export),
-# a versioned manifest, a copy of the current latest manifest as `dataverse-solutions-latest.previous.json` (the
-# rollback pointer), then the new `dataverse-solutions-latest.json`. Nothing is ever deleted.
+# Only a manual run on master with `publish: true` then uploads: both zips under versioned names, a versioned
+# manifest, a copy of the current latest manifest as `dataverse-solutions-latest.previous.json` (the rollback
+# pointer), then the new `dataverse-solutions-latest.json`, read back. A version publishes ONCE: a zip of that version
+# from a DIFFERENT commit refuses the run (bump with Assemble-SpaarkeMasterSolution.ps1 -Version and re-export); a zip
+# from the SAME commit (blob metadata `sourcesha`) is a re-run after a partial failure and is replaced. Nothing is
+# ever deleted.
 #
 # Runbook: docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md. Storage access: the existing OIDC identity
 # (azure/login, no key or SAS) — the same one publish-provisioning-arm-artifacts.yml uses on the same container.
@@ -60,10 +62,19 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUBLISH: ${{ github.event_name == 'workflow_dispatch' && inputs.publish == true }}
+      # The OIDC subject trusts refs/heads/master only; a publish from another branch is refused up front.
+      ON_MASTER: ${{ github.ref == 'refs/heads/master' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Refuse a publish from a branch other than master
+        if: env.PUBLISH == 'true' && env.ON_MASTER != 'true'
+        shell: bash
+        run: |
+          echo "::error::publish=true runs from master only (the OIDC federated subject trusts refs/heads/master). Merge first, or run with publish=false for a dry run."
+          exit 1
 
       - name: Install pac CLI ${{ env.PAC_VERSION }}
         shell: bash
@@ -114,6 +125,14 @@ jobs:
               -BuildId $buildId -SourceSha '${{ github.sha }}' | Set-Content out/manifest.json -Encoding utf8NoBOM
           Get-Content out/manifest.json
 
+          # Producer <-> parser contract: the same sample the C# ParsePackageEntry test reads.
+          $made = Get-Content out/manifest.json -Raw | ConvertFrom-Json
+          $sample = Get-Content src/server/services/Sprk.Provisioning.ControlPlane.Tests/Fixtures/spaarkemaster-manifest.sample.json -Raw | ConvertFrom-Json
+          foreach ($pair in @(@($made, $sample), @($made.solutions.SpaarkeMaster, $sample.solutions.SpaarkeMaster))) {
+              $a = @($pair[0].PSObject.Properties.Name) -join ','; $b = @($pair[1].PSObject.Properties.Name) -join ','
+              if ($a -ne $b) { throw "Manifest keys '$a' differ from the parser sample's '$b' (Fixtures/spaarkemaster-manifest.sample.json)." }
+          }
+
           "version=$version" >> $env:GITHUB_OUTPUT
           "managed_blob=$managedBlob" >> $env:GITHUB_OUTPUT
           "unmanaged_blob=$unmanagedBlob" >> $env:GITHUB_OUTPUT
@@ -148,20 +167,28 @@ jobs:
           if [ -z "${ACCOUNT}" ]; then echo "::error::Repo variable PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is not set."; exit 1; fi
           blob() { az storage blob "$@" --account-name "${ACCOUNT}" --container-name "${CONTAINER}" --auth-mode login; }
 
-          # A version publishes once: an existing zip means this version is already out (bump it, re-export).
-          for b in "${MANAGED_BLOB}" "${UNMANAGED_BLOB}"; do
-            if [ "$(blob exists --name "$b" --query exists -o tsv)" = "true" ]; then
-              echo "::error::${b} already exists — SpaarkeMaster ${VERSION} is published. Bump the version (Assemble-SpaarkeMasterSolution.ps1 -Version), re-export, and run again."
-              exit 1
+          # A version publishes once. A zip of this version from ANOTHER commit refuses the run; one from THIS commit
+          # (metadata sourcesha) is a re-run after a partial failure and is replaced.
+          upload_zip() {  # name file
+            local exists src
+            exists=$(blob exists --name "$1" --query exists -o tsv)
+            if [ "${exists}" = "true" ]; then
+              src=$(blob metadata show --name "$1" --query sourcesha -o tsv)
+              if [ "${src}" != "${GITHUB_SHA}" ]; then
+                echo "::error::$1 already exists from commit ${src:-unknown} — SpaarkeMaster ${VERSION} is published. Bump the version (Assemble-SpaarkeMasterSolution.ps1 -Version), re-export, and run again."
+                exit 1
+              fi
+              echo "$1 exists from this commit (re-run) — replacing it."
             fi
-          done
-
-          blob upload --name "${MANAGED_BLOB}" --file out/SpaarkeMaster_managed.zip --overwrite false
-          blob upload --name "${UNMANAGED_BLOB}" --file out/SpaarkeMaster.zip --overwrite false
-          blob upload --name "dataverse-solutions-${BUILD_ID}.json" --file out/manifest.json --overwrite false
+            blob upload --name "$1" --file "$2" --overwrite true --metadata "sourcesha=${GITHUB_SHA}"
+          }
+          upload_zip "${MANAGED_BLOB}" out/SpaarkeMaster_managed.zip
+          upload_zip "${UNMANAGED_BLOB}" out/SpaarkeMaster.zip
+          blob upload --name "dataverse-solutions-${BUILD_ID}-${GITHUB_RUN_ATTEMPT}.json" --file out/manifest.json --overwrite false
 
           # Rollback pointer: keep the manifest being replaced (the first run keeps the hand-made pre-T218 one).
-          if [ "$(blob exists --name dataverse-solutions-latest.json --query exists -o tsv)" = "true" ]; then
+          latest_exists=$(blob exists --name dataverse-solutions-latest.json --query exists -o tsv)
+          if [ "${latest_exists}" = "true" ]; then
             blob download --name dataverse-solutions-latest.json --file out/previous-latest.json --overwrite true
             blob upload --name dataverse-solutions-latest.previous.json --file out/previous-latest.json --overwrite true
           fi
@@ -185,5 +212,5 @@ jobs:
             echo "### SpaarkeMaster package"
             echo "- Version: \`${{ steps.check.outputs.version }}\` — mode: $([ "${PUBLISH}" = "true" ] && echo '**published**' || echo 'dry run (nothing uploaded)')"
             echo "- Blobs: \`${{ steps.check.outputs.managed_blob }}\`, \`${{ steps.check.outputs.unmanaged_blob }}\`"
-            echo "- Manifest: \`dataverse-solutions-${{ steps.check.outputs.build_id }}.json\` → \`dataverse-solutions-latest.json\` (container \`${CONTAINER}\`)"
+            echo "- Manifest: \`dataverse-solutions-${{ steps.check.outputs.build_id }}-${GITHUB_RUN_ATTEMPT}.json\` → \`dataverse-solutions-latest.json\` (container \`${CONTAINER}\`)"
           } >> "$GITHUB_STEP_SUMMARY"

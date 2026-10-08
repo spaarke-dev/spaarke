@@ -93,11 +93,13 @@ Manifest schema read by H6:
 7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml` — first with `publish: false` (dry run:
    pack + checks + manifest as a run artifact; every pull request touching the package source runs this too), then
    with `publish: true`. It refuses a zip whose name, version or managed flag is wrong, a zip with environment-variable
-   values, and a source with a missing dependency on `solution="Active"` (F12). **A version publishes once**: an
-   existing blob of that version refuses the run — bump with `Assemble-SpaarkeMasterSolution.ps1 -Version` and
-   re-export. It keeps the replaced manifest as `dataverse-solutions-latest.previous.json`, then moves
-   `dataverse-solutions-latest.json` and reads it back. Rollback: copy `latest.previous` over `latest`. Nothing is
-   deleted.
+   values, and a source with a missing dependency on `solution="Active"` (F12). `publish: true` runs from master
+   only. **A version publishes once**: a blob of that version from another commit refuses the run — bump with
+   `Assemble-SpaarkeMasterSolution.ps1 -Version` and re-export; a re-run of the same commit after a partial failure
+   replaces its own blobs. It keeps the replaced manifest as `dataverse-solutions-latest.previous.json`, then moves
+   `dataverse-solutions-latest.json` and reads it back. Rollback: copy `latest.previous` over `latest` — **except
+   right after the first CI publish**, when `previous` is the hand-made 2026-08-21 manifest that H6 refuses (no
+   `SpaarkeMaster` entry); then roll back by re-publishing the earlier version. Nothing is deleted.
 8. **Roll out**: re-run provisioning per customer (§5).
 
 ## 4. First import (provisioning H6)
