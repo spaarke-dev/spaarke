@@ -32,13 +32,13 @@ Kept in place rather than moved: dozens of POMLs, notes and PRs link to them by 
 | A secure record always has a reader (S5), except Restricted wins | round 3 (S5), round 76 |
 | Team ownership; record-first; `sprk_createdbyperson`; G5 pattern | D-11 (2026-09-22), round 5, round 3b (G5), rounds 7, 9 |
 | Access changes in minutes; ≤2 min child mirror | round 3 (R3/R4), round 11 item 2 |
-| Two-root intersection; invoices follow matter; communications inherit | round 11 item 4, round 10 item 11, round 2 Q6 |
+| Two-root intersection; invoices follow matter; communications inherit; children show the parent's access permission | round 11 item 4, round 10 item 11, round 2 Q6, round 81 |
 | No Access on internal users; author-Write enforcement; hidden in SPA | round 2 Q4, round 3b (N2, N5) |
 | Notifications: Created By + Assigned To; no team fan-out | session 27 answers, round 2 item 9 |
 | Broker-only SPE; standing BU writers; JIT Office edit | rounds 69, 70 |
 | Locked item-id copy; share-link refusal; Modified by = BFF | round 72 |
 | Upload binding for app-uploaded files | task 171 hotfix, PR #1353 (2026-10-07) |
-| Reconciliation report-only; R4 | round 7 item 1, round 71 |
+| Reconciliation writes on dev; R4 | round 7 item 1, round 71, round 79 |
 | Every route declares authorization; unused unpublished routes are deleted | round 9 item 3, round 14 item 2, round 10 item 1 |
 | Finding bar | rounds 56, 59, 74; repo-wide in task-execute Step 9.5 |
 
@@ -99,3 +99,7 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
 ### Why CLAUDE.md has a "standing directives" layer (2026-10-06)
 
 `current-task.md` grew from 5 KB to 483 KB because every checkpoint stacked a new block over the old ones. The repo procedure now rewrites it as current state only (context-handoff "State, not history"). Standing items moved to CLAUDE.md. The old journal is at `handoff-history/current-task-archive-2026-10-06.md`, and the conversion review is at `handoff-history/2026-10-06-conversion-review.md`.
+- **"`ExternalAccessReconciliationJob` is report-only until the owner reviews a report"** (round 7).
+  - SUPERSEDED on dev 2026-10-08 by round 79: writes enabled after a 0-change report. Other environments still need the explain-and-confirm step.
+- **"Communications inherit the parent's access permission; a child carries no permission of its own"** (round 2 Q6, as written in `docs/data-model/sprk_communication.md`).
+  - EXTENDED 2026-10-08 by round 81: To Do, Event, Communication and Document show the parent's value in their own column; a parentless child keeps its own value (recorded only).

@@ -115,6 +115,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - a child under two secure roots gets the INTERSECTION of their sharees (round 11);
   - invoices follow their matter (round 10 item 11);
   - communications inherit the parent's access permission (round 2 Q6).
+  - To Do, Event, Communication and Document show their parent's `sprk_accesspermission`, written once in the shared stamp path and kept in step by the reconcile; a parentless child keeps its own value, recorded only, no new enforcement (round 81; owner may revisit).
 - **No Access** applies to internal users on secure records (Q4). It is enforced only when the entry's author has Write (N5), and the record is hidden in Teams/SPA (N2).
 - **Notifications** target Created By and Assigned To; no fan-out to a team (round 2 item 9).
 
@@ -130,7 +131,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - "Modified by" = the BFF app for app-only writes is accepted.
 - **Upload binding:** an app-uploaded file attaches only for the user the BFF recorded as its uploader (171 hotfix, PR #1353).
 
-**Reconciliation:** `ExternalAccessReconciliationJob` is **report-only** until the owner reviews a report (round 7); R4 deactivates grants whose record is gone (round 71). Explain plainly and confirm before setting `ExternalAccess:Reconciliation:WritesEnabled` or `Communication__OwnershipHoldAlertUserIds__0` (2026-10-06).
+**Reconciliation:** `ExternalAccessReconciliationJob` writes on dev since round 79 (2026-10-08, after a 0-change report); it was report-only until then (round 7). R4 deactivates grants whose record is gone (round 71). In any other environment, explain plainly and confirm before setting `ExternalAccess:Reconciliation:WritesEnabled` or `Communication__OwnershipHoldAlertUserIds__0`.
 
 ## 4. Coordination
 

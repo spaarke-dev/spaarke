@@ -1181,6 +1181,19 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Rejected:** refusing with a 409, because the Expiration toolbar would then restore the old level; and shipping 113 as it was.
 - **Applied in:** task 113, PR #1406.
 
+## Round 81 (2026-10-08): BINDING. OWNER decision: child records show their parent's access permission; a parentless child keeps its own
+
+- **Trigger:** UAT. A To Do created through the Word web add-in on a document under Restricted matter PAT-176903 showed `sprk_accesspermission` = Standard. The peer word-add-in-r1 traced it: ownership was correct (`CoreAncestorResolver.StampAsync` fails closed; `RecordOwnershipResolver` applies secure-if-any), but no BFF path writes the child's `sprk_accesspermission` (Office, the wizards, `ChildRecordEndpoints.cs`), so it kept the default. Effective access was already right: Restricted bars external users through the root.
+- **Decision:**
+  - **A child WITH a parent inherits** the parent's `sprk_accesspermission`: To Do, Event, Communication and Document. The owner added `sprk_accesspermission` (the global choice) to `sprk_document` live on 2026-10-08; it must be brought into source.
+  - **A child WITHOUT a parent keeps its own value**, which the user sets.
+  - **Parentless value is recorded only; no new enforcement** (owner, 2026-10-08: "This is fine (BUT in future we might need to revisit)"). A parented child's protection keeps coming from the parent (every `sprk_regarding*` lookup, ownership to the Secure team, mirrored shares, Restricted bars external users).
+  - **Control:** a permission control on these child records, but NOT TrackingFieldTrio on Communication (email).
+- **Implementation shape (adopted from the peer's advice):** write the value ONCE in the shared stamp/ownership path (`CoreAncestorResolver` / `RecordOwnershipResolver`), never an Office-only write; the ≤2-minute reconcile keeps it in step on re-file or a parent change; the field is locked with "inherited from X" while the record has a parent.
+- **Rejected:** the peer's "retire or lock the column" (communication model): the owner wants the value visible.
+- **Doc drift to fix in the task:** `docs/data-model/sprk_communication.md:12` (child carries no permission of its own) and `unified-access-control-cascade.md:37` (column not on `sprk_todo`).
+- **Revisit later (owner):** whether a parentless child's own value should be enforced.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
