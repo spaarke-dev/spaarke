@@ -14,7 +14,15 @@ import * as React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { FluentProvider, webDarkTheme, webLightTheme } from '@fluentui/react-components';
 
-import { AggregateCard, CONSOLE_STATE_BADGES, EvidenceLine, RecordRow, StatusBar, resolveConsoleState } from '..';
+import {
+  AggregateCard,
+  CONSOLE_STATE_BADGES,
+  EvidenceLine,
+  RecordRow,
+  StatusBar,
+  resolveConsoleState,
+  resolveDecisionRecordState,
+} from '..';
 import type { ConsoleState } from '..';
 import { decisionRecords, evidenceRefs } from '../__fixtures__/consoleKitFixtures';
 
@@ -77,6 +85,26 @@ describe('EvidenceLine', () => {
     expect(screen.getByText('0')).toBeInTheDocument();
   });
 
+  it('shows only a stored Observation as Interpretation; an unknown or Missing tier shows Missing', () => {
+    const cases: [string, string][] = [
+      ['Observation', 'Interpretation'],
+      ['Interpretation', 'Interpretation'],
+      ['Missing', 'Missing'],
+      ['Guess', 'Missing'],
+    ];
+    for (const [tier, shown] of cases) {
+      const { unmount } = renderThemed(<EvidenceLine tier={tier as never} text="x" />);
+      expect(screen.getByTestId('evidence-line')).toHaveAttribute('data-tier', shown);
+      unmount();
+    }
+  });
+
+  it('renders a NaN value as Missing, not "NaN"', () => {
+    renderThemed(<EvidenceLine tier="Fact" text={NaN} />);
+    expect(screen.getByTestId('evidence-line')).toHaveAttribute('data-tier', 'Missing');
+    expect(screen.getByTestId('evidence-line')).not.toHaveTextContent('NaN');
+  });
+
   it('shows no confidence percentage', () => {
     const e = evidenceRefs.interpretation;
     // @ts-expect-error confidence is deliberately not part of the contract (#5)
@@ -92,6 +120,15 @@ describe('Console state table', () => {
       expect(CONSOLE_STATE_BADGES[s].label).toBeTruthy();
       expect(['neutral', 'info', 'success', 'warning', 'critical']).toContain(CONSOLE_STATE_BADGES[s].tone);
     }
+  });
+
+  it('derives a Decision Record state from outcome + class, and Routine reads as Done (R-4)', () => {
+    expect(resolveDecisionRecordState('Authorized', 'Judgement')).toBe('Authorized');
+    expect(resolveDecisionRecordState('Denied', 'Judgement')).toBe('Denied');
+    expect(resolveDecisionRecordState('Dismissed', 'Dismissal')).toBe('Dismissed');
+    expect(resolveDecisionRecordState('Authorized', 'Routine')).toBe('Done');
+    expect(resolveDecisionRecordState('Denied', 'Routine')).toBe('Done');
+    expect(resolveDecisionRecordState(null)).toBe('Open');
   });
 
   it('derives closure states from stored columns (R-14) and shows Routine as Done (R-4)', () => {
@@ -110,7 +147,7 @@ describe('StatusBar', () => {
     ['Decided', 'success'],
     ['Done', 'success'],
     ['Dismissed', 'warning'],
-    ['ClearedItself', 'neutral'],
+    ['ClearedItself', 'info'],
     ['Superseded', 'neutral'],
     ['RuleRetired', 'neutral'],
   ] as [ConsoleState, string][])('renders %s with the %s tone', (state, tone) => {
@@ -120,19 +157,27 @@ describe('StatusBar', () => {
     expect(screen.getByText(CONSOLE_STATE_BADGES[state].label)).toBeInTheDocument();
   });
 
+  it('uses the info intent for Dismissed and the badge-matched intent elsewhere', () => {
+    const { unmount } = renderThemed(<StatusBar state="Dismissed" />);
+    expect(screen.getByTestId('status-bar')).toHaveAttribute('data-intent', 'info');
+    unmount();
+    renderThemed(<StatusBar state="Denied" />);
+    expect(screen.getByTestId('status-bar')).toHaveAttribute('data-intent', 'error');
+  });
+
   it('shows record id, class, who and when where present', () => {
     const r = decisionRecords[0];
     renderThemed(
       <StatusBar
         state="Decided"
-        recordId={r.recordId}
+        recordId={r.sprk_decisionnumber}
         recordClass={r.sprk_recordclass}
-        decidedBy={r.decidedBy}
+        decidedBy={r.confirmedByName}
         decidedOn={r.sprk_decidedon}
       />
     );
     const bar = screen.getByTestId('status-bar');
-    expect(bar).toHaveTextContent('DR-0042');
+    expect(bar).toHaveTextContent('DR-00042');
     expect(bar).toHaveTextContent('Judgement');
     expect(bar).toHaveTextContent('by A. Reviewer');
   });
@@ -162,18 +207,18 @@ describe('RecordRow', () => {
     const r = decisionRecords[1];
     renderThemed(
       <RecordRow
-        recordId={r.recordId}
+        recordId={r.sprk_decisionnumber}
         title={r.sprk_name}
-        state={resolveConsoleState(r.resolution, r.sprk_recordclass)}
+        state={resolveDecisionRecordState(r.sprk_decisionoutcome, r.sprk_recordclass)}
         recordClass={r.sprk_recordclass}
-        decidedBy={r.decidedBy}
+        decidedBy={r.confirmedByName}
         decidedOn={r.sprk_decidedon}
       />
     );
     const row = screen.getByTestId('record-row');
     expect(row).toHaveTextContent('Done');
     expect(row).toHaveTextContent(r.sprk_name);
-    expect(row).toHaveTextContent('DR-0043 · Routine · A. Reviewer');
+    expect(row).toHaveTextContent('DR-00043 · Routine · A. Reviewer');
   });
 
   it('calls onOpen with the record id from the Open link', () => {
@@ -227,6 +272,12 @@ describe('AggregateCard', () => {
     unmount();
     renderThemed(<AggregateCard count={null} label="emails" linkLabel="Open" onOpen={() => undefined} />);
     expect(screen.getByTestId('aggregate-count')).toHaveTextContent('Missing');
+  });
+
+  it('renders a NaN count as Missing, not "NaN"', () => {
+    renderThemed(<AggregateCard count={NaN} label="emails" linkLabel="Open" onOpen={() => undefined} />);
+    expect(screen.getByTestId('aggregate-count')).toHaveTextContent('Missing');
+    expect(screen.getByTestId('aggregate-count')).not.toHaveTextContent('NaN');
   });
 });
 

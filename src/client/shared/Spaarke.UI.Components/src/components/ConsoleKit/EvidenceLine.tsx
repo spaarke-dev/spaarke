@@ -55,8 +55,20 @@ const useStyles = makeStyles({
   detail: { color: tokens.colorNeutralForeground3 },
 });
 
+/** Stored tier to displayed tier. Anything not listed (an unknown value, or `Missing`) displays as Missing. */
+const TIER_DISPLAY: Partial<Record<string, 'Fact' | 'Interpretation'>> = {
+  Fact: 'Fact',
+  Interpretation: 'Interpretation',
+  Observation: 'Interpretation',
+};
+
 function isBlank(text: EvidenceLineProps['text']): boolean {
-  return text === null || text === undefined || (typeof text === 'string' && text.trim() === '');
+  return (
+    text === null ||
+    text === undefined ||
+    (typeof text === 'string' && text.trim() === '') ||
+    (typeof text === 'number' && Number.isNaN(text))
+  );
 }
 
 function formatAsOf(asOf: string | null | undefined): string | null {
@@ -68,11 +80,7 @@ function formatAsOf(asOf: string | null | undefined): string | null {
 export const EvidenceLine: React.FC<EvidenceLineProps> = ({ tier, text, subject, source, asOf, clause, className }) => {
   const styles = useStyles();
   const missing = isBlank(text);
-  const shown: 'Fact' | 'Interpretation' | 'Missing' = missing
-    ? 'Missing'
-    : tier === 'Fact'
-      ? 'Fact'
-      : 'Interpretation';
+  const shown: 'Fact' | 'Interpretation' | 'Missing' = missing ? 'Missing' : (TIER_DISPLAY[tier] ?? 'Missing');
   const tierClass =
     shown === 'Fact' ? styles.tierFact : shown === 'Interpretation' ? styles.tierInterpretation : styles.tierMissing;
 

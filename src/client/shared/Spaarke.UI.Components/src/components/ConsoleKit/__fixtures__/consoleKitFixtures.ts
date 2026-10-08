@@ -3,7 +3,7 @@
  * the `sprk_evidencerefs` JSON entries. Not v4's mock types. Test/harness use only.
  */
 
-import type { RecordClass, ResolutionType } from '../consoleStatus';
+import type { DecisionOutcome, RecordClass } from '../consoleStatus';
 
 /** One `sprk_evidencerefs` entry (kind/ref/tier from SignalEvidenceRef; clause/asOf/text/source per FR-48/FR-50). */
 export interface EvidenceRefFixture {
@@ -52,38 +52,41 @@ export const evidenceRefs: Record<string, EvidenceRefFixture> = {
   },
 };
 
+/** A `sprk_decisionrecord` row: it has `sprk_decisionoutcome` and `sprk_recordclass`, NOT `sprk_resolutiontype` (that is on `sprk_signal`). */
 export interface DecisionRecordFixture {
   sprk_name: string;
-  recordId: string;
-  resolution: ResolutionType;
+  /** `sprk_decisionnumber` autonumber, DR-{SEQNUM:00000}. */
+  sprk_decisionnumber: string;
+  sprk_decisionoutcome: DecisionOutcome;
   sprk_recordclass: RecordClass;
-  decidedBy: string;
+  /** Display name of the `sprk_confirmedby` systemuser lookup. */
+  confirmedByName: string;
   sprk_decidedon: string;
 }
 
 export const decisionRecords: DecisionRecordFixture[] = [
   {
     sprk_name: 'Invoice 4411 over budget: approved',
-    recordId: 'DR-0042',
-    resolution: 'Acted',
+    sprk_decisionnumber: 'DR-00042',
+    sprk_decisionoutcome: 'Authorized',
     sprk_recordclass: 'Judgement',
-    decidedBy: 'A. Reviewer',
+    confirmedByName: 'A. Reviewer',
     sprk_decidedon: '2026-10-01T14:30:00Z',
   },
   {
     sprk_name: 'Reschedule own task',
-    recordId: 'DR-0043',
-    resolution: 'Acted',
+    sprk_decisionnumber: 'DR-00043',
+    sprk_decisionoutcome: 'Authorized',
     sprk_recordclass: 'Routine',
-    decidedBy: 'A. Reviewer',
+    confirmedByName: 'A. Reviewer',
     sprk_decidedon: '2026-10-02T08:00:00Z',
   },
   {
     sprk_name: 'Late filing: dismissed',
-    recordId: 'DR-0044',
-    resolution: 'Dismissed',
+    sprk_decisionnumber: 'DR-00044',
+    sprk_decisionoutcome: 'Dismissed',
     sprk_recordclass: 'Dismissal',
-    decidedBy: 'A. Reviewer',
+    confirmedByName: 'A. Reviewer',
     sprk_decidedon: '2026-10-03T10:00:00Z',
   },
 ];

@@ -32,7 +32,7 @@ export const CONSOLE_STATE_BADGES: Readonly<Record<ConsoleState, ConsoleStateBad
   },
   ClearedItself: {
     label: 'Cleared on its own',
-    tone: 'neutral',
+    tone: 'info',
     description: 'No one decided. The condition stopped being true on re-evaluation.',
   },
   Superseded: { label: 'Superseded', tone: 'neutral', description: 'Replaced by a newer item on the same subject.' },
@@ -69,6 +69,31 @@ export function resolveConsoleState(
       return 'Superseded';
     case 'PolicyRetired':
       return 'RuleRetired';
+    default:
+      return 'Open';
+  }
+}
+
+/** Stored `sprk_decisionoutcome` values on `sprk_decisionrecord`. */
+export type DecisionOutcome = 'Authorized' | 'Denied' | 'Dismissed';
+
+/**
+ * Derive the display state of a Decision Record row from its own columns (`sprk_decisionoutcome`,
+ * `sprk_recordclass`). `sprk_resolutiontype` lives on `sprk_signal`, not here, so use this resolver for
+ * `RecordRow`. A Routine record displays as Done whatever its outcome (R-4); the stored outcome is unchanged.
+ */
+export function resolveDecisionRecordState(
+  outcome: DecisionOutcome | null | undefined,
+  recordClass?: RecordClass | null
+): ConsoleState {
+  if (recordClass === 'Routine') return 'Done';
+  switch (outcome) {
+    case 'Authorized':
+      return 'Authorized';
+    case 'Denied':
+      return 'Denied';
+    case 'Dismissed':
+      return 'Dismissed';
     default:
       return 'Open';
   }

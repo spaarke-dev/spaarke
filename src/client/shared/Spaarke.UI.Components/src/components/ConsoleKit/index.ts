@@ -6,5 +6,5 @@ export { RecordRow } from './RecordRow';
 export type { RecordRowProps } from './RecordRow';
 export { AggregateCard } from './AggregateCard';
 export type { AggregateCardProps } from './AggregateCard';
-export { CONSOLE_STATE_BADGES, resolveConsoleState } from './consoleStatus';
-export type { ConsoleState, ConsoleStateBadge, ResolutionType, RecordClass } from './consoleStatus';
+export { CONSOLE_STATE_BADGES, resolveConsoleState, resolveDecisionRecordState } from './consoleStatus';
+export type { ConsoleState, ConsoleStateBadge, ResolutionType, RecordClass, DecisionOutcome } from './consoleStatus';

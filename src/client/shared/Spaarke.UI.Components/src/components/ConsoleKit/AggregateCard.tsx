@@ -54,7 +54,7 @@ const useStyles = makeStyles({
 
 export const AggregateCard: React.FC<AggregateCardProps> = ({ count, label, linkLabel, onOpen, icon, className }) => {
   const styles = useStyles();
-  const missing = count === null || count === undefined;
+  const missing = count === null || count === undefined || Number.isNaN(count);
   return (
     <div className={mergeClasses(styles.root, className)} data-testid="aggregate-card">
       {icon && (

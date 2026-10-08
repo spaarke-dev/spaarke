@@ -36,6 +36,11 @@ const TONE_TO_INTENT: Record<StatusBadgeTone, NonNullable<MessageBarProps['inten
   critical: 'error',
 };
 
+/** Where a state's bar intent differs from its badge tone (HANDOFF section 1.1): a dismissal is information, not a warning. */
+const STATE_INTENT_OVERRIDE: Partial<Record<ConsoleState, NonNullable<MessageBarProps['intent']>>> = {
+  Dismissed: 'info',
+};
+
 const useStyles = makeStyles({
   body: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', columnGap: tokens.spacingHorizontalS },
   meta: { color: tokens.colorNeutralForeground3 },
@@ -50,15 +55,18 @@ export const StatusBar = React.forwardRef<HTMLDivElement, StatusBarProps>(functi
   const when = decidedOn && !Number.isNaN(new Date(decidedOn).getTime()) ? new Date(decidedOn).toLocaleString() : null;
   const parts = [recordId, recordClass, decidedBy ? `by ${decidedBy}` : null, when].filter((p): p is string => !!p);
 
+  const intent = STATE_INTENT_OVERRIDE[state] ?? TONE_TO_INTENT[badge.tone];
+
   return (
     <MessageBar
       ref={ref}
-      intent={TONE_TO_INTENT[badge.tone]}
+      intent={intent}
       icon={null}
       tabIndex={-1}
       className={className}
       data-testid="status-bar"
       data-state={state}
+      data-intent={intent}
     >
       <MessageBarBody className={styles.body}>
         <StatusBadge label={badge.label} tone={badge.tone} ariaLabel={`${badge.label}. ${badge.description}`} />
