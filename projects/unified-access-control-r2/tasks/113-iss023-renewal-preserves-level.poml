@@ -3,7 +3,7 @@
   <metadata>
     <title>ISS-023 (#1002) — a renewal keeps the previous period's access LEVEL (pin what exists, no contract change); folds in ISS-028 (#1008) — the ADR-003 refusal must not have already written the level</title>
     <phase>Register-driven (queued 2026-09-18 by owner directive)</phase>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Grant write path (.cs under Api/ExternalAccess); tags bff-api/auth; modifies tests. Reorders a security check relative to a write. Both the FULL triggers (auth-tagged .cs) and the TEST-MODIFYING override row (CLAUDE.md §8) apply, so code-review + adr-check at Step 9.5 are unconditional.</rigor-reason>
     <model-tier>opus</model-tier>
