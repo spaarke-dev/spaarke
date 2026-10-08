@@ -34,6 +34,7 @@ Kept in place rather than moved: dozens of POMLs, notes and PRs link to them by 
 | Access changes in minutes; ≤2 min child mirror | round 3 (R3/R4), round 11 item 2 |
 | Two-root intersection; invoices follow matter; communications inherit; children show the parent's access permission | round 11 item 4, round 10 item 11, round 2 Q6, round 81 |
 | No Access on internal users; author-Write enforcement; hidden in SPA; parent permissions control a filed child | round 2 Q4, round 3b (N2, N5), round 82 |
+| A child's access follows its parent both ways, locked while it has a parent | round 84 (replaces round 6 item 4) |
 | Notifications: Created By + Assigned To; no team fan-out | session 27 answers, round 2 item 9 |
 | Broker-only SPE; standing BU writers; JIT Office edit | rounds 69, 70 |
 | Locked item-id copy; share-link refusal; Modified by = BFF | round 72 |
@@ -103,3 +104,5 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
   - SUPERSEDED on dev 2026-10-08 by round 79: writes enabled after a 0-change report. Other environments still need the explain-and-confirm step.
 - **"Communications inherit the parent's access permission; a child carries no permission of its own"** (round 2 Q6, as written in `docs/data-model/sprk_communication.md`).
   - EXTENDED 2026-10-08 by round 81: To Do, Event, Communication and Document show the parent's value in their own column; a parentless child keeps its own value (recorded only).
+- **"Parent unsecured → its secured work assignments and projects STAY secure; no unsecure cascade"** (round 6 item 4, 2026-10-02; task 158 constraint).
+  - REPLACED 2026-10-08 by round 84: a child's access always follows its parent, both ways, and is locked while it has a parent.

@@ -1220,6 +1220,26 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **TrackingFieldTrio 1.0.39:** dark mode PASS (owner). Lookup-pane placement accepted as the SprkModal standard; no further check.
 - **Hands-on checks** for 171/114/batch 4 will be done by the owner in the SPA and the apps (owner, 2026-10-08).
 
+## Round 84 (2026-10-08): BINDING. OWNER decision: a child's access always follows its parent, both ways, and is locked while it has a parent
+
+- **The question:** found by the task 067 verifier. The server applied Secure/Limited/Restricted from a record's OWN flags only, so a work assignment filed under a secure matter but not yet flagged secure (inheritance pending, Refused or Failed) kept its org-wide and standing contact grants (#1442).
+- **Owner (verbatim):** "Child access should always follow parent; if parent changes, then child changes. A protection is that if a child has a parent then the access cannot be changed manually (e.g. its locked)."
+- **Follow-ups answered the same day:**
+  - **Un-securing cascades ("Child follows"):** when a parent goes from Secure back to not secure, its filed children become not secure too. This REPLACES round 6 item 4 ("parent unsecured → children stay secure; no unsecure cascade").
+  - **Scope ("all children"):** work assignments and projects filed under a parent take the parent's `sprk_issecure` AND `sprk_accesspermission`. To Do, Event, Communication and Document take `sprk_accesspermission` (round 81 / task 173).
+- **Rule:**
+  - A record WITH a parent: effective Secure and Access Permission are the parent's (the most restrictive across several parents). They change when the parent changes. Users cannot set them on the child: the fields and the Make Secure / Remove Secure / Update Access commands are locked or hidden while a parent exists.
+  - A record WITHOUT a parent keeps and edits its own values (round 81 for the four child types: recorded only).
+  - Enforcement uses the effective (parent-derived) values on every path:
+    - the read-time veto and cancellation;
+    - grant time;
+    - the No Access enforcer;
+    - share mirroring;
+    - the Manage Access display.
+  - Until the stored flag catches up, the server computes the value from the filing chain and fails closed.
+- **Applied in:** PR #1419 (No Access via the parent, round 82); #1442 (cancellation and flags follow the parent); #1425 (contact plane); task 173 (the four child types' Access Permission); a new task for work assignments and projects (flag cascade both ways, lock, effective flags in enforcement); task 067's modal reads the effective value once the server exposes it.
+- **Superseded:** round 6 item 4 (no unsecure cascade) and its task 158 constraint. Also any rule that a filed child's Secure can be removed by an explicit act while it still has a parent (F3 now applies only to parentless records).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.

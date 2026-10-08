@@ -100,9 +100,9 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
 - **Accepted gap (round 77):** a flagged user can still read a NON-secure Restricted record in their own business unit through role depth.
 - **`sprk_issecure`** is field-locked and changed only through the endpoints (round 2):
   - securing needs Write;
-  - unsecuring needs Full Access or being the creator (F3, round 3b);
+  - unsecuring needs Full Access or being the creator (F3, round 3b), and only on a record with no parent (round 84);
   - a work assignment or project filed under a secure parent is itself secure (round 6);
-  - unsecuring a parent leaves its secure children secure.
+  - ~~unsecuring a parent leaves its secure children secure~~ REPLACED by round 84: unsecuring a parent unsecures its filed children.
 - **A secure record always has at least one user who can see it** (S5): inbound mail with an unknown secure parent is held, and unshare and No Access can't remove the last internal reader. Exception: round 76 (Restricted wins).
 - **Ownership is team ownership, never user ownership** (D-11, round 5):
   - record-first, so the parent's BU default team owns it;
@@ -116,6 +116,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - invoices follow their matter (round 10 item 11);
   - communications inherit the parent's access permission (round 2 Q6).
   - To Do, Event, Communication and Document show their parent's `sprk_accesspermission`, written once in the shared stamp path and kept in step by the reconcile; a parentless child keeps its own value, recorded only, no new enforcement (round 81; owner may revisit).
+- **A child's access always follows its parent, both ways, locked while it has a parent** (round 84; replaces round 6 item 4's "no unsecure cascade"): a filed work assignment / project takes the parent's `sprk_issecure` and `sprk_accesspermission`; To Do / Event / Communication / Document take `sprk_accesspermission`; most restrictive across parents; enforcement uses the parent-derived value (computed from the filing chain, fail closed) until the stored flag catches up; a parentless record keeps its own.
 - **No Access** applies to internal users on secure records (Q4); a record filed under a secure parent counts as secure for this, whatever its own flag says ("the parent permissions control", round 82). It is enforced only when the entry's author has Write (N5), and the record is hidden in Teams/SPA (N2).
 - **Notifications** target Created By and Assigned To; no fan-out to a team (round 2 item 9).
 
