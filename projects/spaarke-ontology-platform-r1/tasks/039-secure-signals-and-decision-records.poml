@@ -113,7 +113,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given the lineage map and the owner-role config, when read, then each contains exactly the two new entries described (sprk_signal with the listed lookups plus sprk_project; sprk_decisionrecord with sprk_matter and sprk_project, D-34), each config entry cites a recorded live refusal, and uac-r2's lineage and census suites pass.</criterion>
+    <criterion testable="true">Given the lineage map and the owner-role config, when read, then each contains exactly the two new entries described (sprk_signal with the listed lookups and NO sprk_project, because D-36 removed that column and uac-r2 condition A lists only existing lookups; sprk_decisionrecord with sprk_matter, sprk_project and sprk_workassignment; AMENDED 2026-10-07 per D-36), each config entry cites a recorded live refusal, and uac-r2's lineage and census suites pass.</criterion>
     <criterion testable="true">Given a Signal on a Secure matter, when written, then its owningteam is the Secure Record Owners team, set in the create, and owningbusinessunit was not sent.</criterion>
     <criterion testable="true">Given a Signal on a Standard, Limited or Restricted matter, when written, then ownership is exactly today's FR-14 path and no row is skipped.</criterion>
     <criterion testable="true">Given a resolver refusal, when the writer runs, then nothing is written, a Warning with the stable EventId is logged and ontology.writer.failures increments with the new reason.</criterion>
@@ -124,7 +124,7 @@
     <criterion testable="true">The PR links uac-r2's review; the completion record names the uac-r2 files and the origin/master commit read.</criterion>
     <criterion testable="true">Tests cover the stated contract (secure, not secure, refused); anything beyond needs a one-line justification in task notes. All tests pass; the BFF builds.</criterion>
     <criterion testable="true">Given a Signal whose core record is a Secure project, when written, then it is owned by the Secure Record Owners team and reaches the project's sharees within 2 minutes; the live gate covers one Secure project case as well as the provisioned Secure matter (use a probe child under an existing Secure project, never modifying the project, and delete the probe rows).</criterion>
-    <criterion testable="true">Given the lineage map, when read, then sprk_signal and sprk_decisionrecord each list sprk_project as a lineage lookup.</criterion>
+    <criterion testable="true">AMENDED 2026-10-07 (D-36): Given the lineage map, when read, then sprk_decisionrecord lists sprk_project and sprk_signal lists no lookup that does not exist on the live table (no sprk_project).</criterion>
     <criterion testable="true">Given a Signal and a Decision Record whose core record is a Secure work assignment, when written, then both are owned by the Secure Record Owners team and reach the work assignment's sharees within 2 minutes (live gate on a provisioned probe, cleaned up) (D-36).</criterion>
     <criterion testable="true">Given a Signal or Decision Record whose core record is a service request, when written, then it is on the non-secure path (D-36).</criterion>
     <criterion testable="true">Given the lineage map, when read, then sprk_decisionrecord lists sprk_matter, sprk_project and sprk_workassignment.</criterion>
