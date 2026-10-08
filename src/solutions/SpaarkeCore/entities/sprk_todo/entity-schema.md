@@ -47,8 +47,8 @@
 | sprk_todopinned | Pinned | Boolean | No | Locks column assignment against auto-reassign |
 | sprk_priorityscore | Priority Score | Integer (0-100) | No | Independent from `sprk_event.sprk_priorityscore` |
 | sprk_effortscore | Effort Score | Integer (0-100) | No | Independent from `sprk_event.sprk_effortscore` |
-| sprk_duedate | Due Date | DateTime (DateOnly) | No | - |
-| sprk_completedon | Completed On | DateTime | No | Set on transition to Completed |
+| sprk_duedate | Due Date | DateTime — Format DateOnly, **Behavior DateOnly** (spaarkedev1 since 2026-10-08, task 106) | No | A calendar date: the Web API reads and accepts only `yyyy-MM-dd`. See [`docs/data-model/sprk_todo-date-columns.md`](../../../../../docs/data-model/sprk_todo-date-columns.md). |
+| sprk_completedon | Completed On | DateTime — Format DateAndTime, Behavior UserLocal (an instant; unchanged) | No | Set on transition to Completed |
 
 ### Regarding (Multi-Entity Resolution per ADR-024)
 

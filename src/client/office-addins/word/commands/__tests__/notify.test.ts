@@ -9,7 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-const HTML = fs.readFileSync(path.join(__dirname, '..', 'notify.html'), 'utf8');
+const HTML = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'shared', 'commands', 'notify.html'), 'utf8');
 
 /** The page's markup inside <body>, and its inline script — run exactly as the page ships them. */
 function loadPage(search: string): { close: jest.Mock } {

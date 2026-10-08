@@ -280,7 +280,18 @@ CLAUDE.md §11 applies: every entry must name a concrete behavior or contract th
 - **Business-unit layout** (owner, 2026-10-06): each customer has ONE primary business unit; the secure-record business unit is a SIBLING of the primary one (not a child). Unified-access-control-r2 owns this design — ask them for detail.
 - **Dev data is not indicative** (2026-09-10 / 2026-09-25): legacy/existing documents don't matter. Root-BU users and records are a setup artifact. Verify ownership/BU behaviour as **Test User 1** (`testuser1@spaarke.com`, BU `cb15f587…`), the only child-BU account.
 
+### Multi-customer add-in (Model 1) — owner decisions 2026-10-07/08
+- **One shared add-in for all Model 1 customers**: one production site (`swa-spaarke-office-addins-prod`, **https://addins.spaarke.com**, built by provisioning) and one production add-in app registration (**`1958aec2-0218-495e-8e3c-37133e9b8357`** "Spaarke Office Add-in (Production)", created 2026-10-07); each customer backend has its own app registration (provisioning) that pre-authorizes the add-in client (provisioning H3). `c1258e2d…` is the DEV client only. Notes 113/114.
+- **Customer staff are B2B guests in Spaarke's tenant**; their Outlook/Word run in their HOME tenant, so each customer's IT installs the package there (Integrated apps). The add-in signs in to Spaarke's tenant (`TENANT_ID`) — verified working for a guest in Outlook on the web (2026-10-08).
+- **NOT multi-tenant**: the add-in apps stay single-tenant; the package carries **no `webApplicationInfo`** (task 115 — it made customer-tenant deployment fail with AADSTS700016; the add-in never uses Office SSO). `mergeUnifiedManifest` refuses it. Revisit only for Model 2.
+- **First production deploy waits** for provisioning's directory endpoint (their 240c) + the add-in's runtime customer selection (`{authority, bffApiScope, apiBaseUrl}` into `AuthService.initialize`), its own package ID/name (dev + prod both install in Spaarke's tenant), and a manual prod deploy job. Store (AppSource) publishing is the recommended production distribution, after that.
+- **Server Graph cannot reach a guest's mailbox** (home tenant): email body + attachments are captured IN THE ADD-IN with Office.js (task 116) — never reintroduce a server-only Graph fetch for content.
+- **Office on the web has no `openBrowserWindow`**: anything that opens Spaarke must fall back to `window.open` from the click (task 120).
+- **Diagnostics view** (task 113) is on the dev site via `ADDIN_DIAGNOSTICS_ENABLED: "true"` in `deploy-office-addins.yml` — remove it once provisioning's guest tests are done.
+
 ### Git, PRs, CI
+- **`gh pr merge` is refused until `Router` reports** (2026-10-07): a watcher that merges on "no failures" can fire early; use `gh pr merge N --auto --merge` and watch the PR state + the deploy run for the exact merge SHA.
+- **Long bash commands with several heredocs mis-parse** ("unexpected EOF while looking for matching `'`") — write multi-file text with the Write tool and run a small Python script for edits (2026-10-07/08).
 - **Merge with `gh pr merge N --merge`** (a merge commit, not squash); **never `--delete-branch`** — the branch continues (2026-09-30).
 - **Only `Router` is a required check** (2026-09-21 / 2026-09-30). `Tier 2 (Advisory) / Full Unit Tests` cancelled at its 30-min cap is not a failure; do not make it blocking. Read `gh pr checks N` and require pending == 0 before trusting a verdict.
 - **One build-heavy agent per worktree** (2026-09-21): concurrent agents' commits swallowed each other through the shared `.git/index`. Verify a commit with `git diff <base> HEAD -- <paths>`, never `git show --stat` or a derived count.
