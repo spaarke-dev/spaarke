@@ -166,6 +166,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - BFF app ids `5967251e-171c-46fe-a6c2-ef843c90309d`, `1e40baad-e065-4aea-a8d4-4b7ab273458c`.
   - Its records are test records.
 - **Live actions need the owner's OK.** Gate approvals are recorded per round (e.g. rounds 4, 11, 69/70/72). Agents never write Entra or Key Vault, never change app settings, and print setting NAMES only. Never change SPE container-type registration.
+- **No prod Key Vault for dev work (owner, round 85, 2026-10-08):** agents never read secrets from `sprk-prod-kv` (or any non-dev vault) for dev checks or gates. Use dev credentials and the existing dev automation; if a dev gate needs a credential that only lives in prod, stop and ask.
 - **An app-setting change restarts the BFF:** it's an owner decision, unless it's part of an approved rollout (e.g. 171's `DocumentPointer__ItemIdBoundBackfillComplete`).
 - **Deploy:**
   - **the BFF:** `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, from a FRESH short-path worktree of `origin/master`;

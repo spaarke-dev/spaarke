@@ -3,7 +3,7 @@
   <metadata>
     <title>Validate secure-project provisioning end-to-end against live dev: a real secure project gets its OWN SPE container, owned by the Secure Project team</title>
     <phase>0b Review remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live-environment verification of a security mechanism whose entire local test suite is offline doubles. This is the first and only evidence that provisioning actually works.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1240,6 +1240,16 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Applied in:** PR #1419 (No Access via the parent, round 82); #1442 (cancellation and flags follow the parent); #1425 (contact plane); task 173 (the four child types' Access Permission); a new task for work assignments and projects (flag cascade both ways, lock, effective flags in enforcement); task 067's modal reads the effective value once the server exposes it.
 - **Superseded:** round 6 item 4 (no unsecure cascade) and its task 158 constraint. Also any rule that a filed child's Secure can be removed by an explicit act while it still has a parent (F3 now applies only to parentless records).
 
+## Round 85 (2026-10-08): BINDING. OWNER decisions: evidence stand-ins, Key Vault rule, banner wording ("follow your recommendations")
+
+- **A. Task 047:** the API run that provisioned a secure project (G4, batch4-live-gates-2026-10-06:571) stands in for the Create Project wizard run. 047 closes.
+- **B. Task 143 (v):** an agent-made Web API share stands in for the MDA Share dialog (as for G149-2, round 68).
+- **C. Task 162 (i)/(j):** testuser1 stands in for uac.child.
+- **D. Tasks 146 and 166 (f):** second-internal-user checks are accepted as test-proven (146: `SecureDesignationRemovalTests`; 166 (f): its unit tests).
+- **E. Task 105:** closes on the API result (250 documents, no `truncated`); the SPA notice check is waived (the notice renders only on that flag).
+- **F. Key Vault:** agents never read secrets from the prod Key Vault (`sprk-prod-kv`) for dev checks; a dev gate that needs a prod-only credential stops and asks. Standing rule in the project CLAUDE.md §5. Context: gatesA read app `170c98e1`'s secret from `sprk-prod-kv` (read only, never printed) for Graph container reads.
+- **G. Task 153 wording:** (a) the banners no longer point at "the person icon"; (b) the indicator shows only No Access. The pill already shows Secure, so the SECURE banner points to Manage Access, not to a marker.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
