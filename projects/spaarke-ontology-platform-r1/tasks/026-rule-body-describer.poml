@@ -4,7 +4,7 @@
     <title>Rule-body describer: generate the plain-language condition, read-side</title>
     <phase>2b Rule grammar (D-16)</phase>
     <gate>024 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF code whose output is shown to users as the statement of what a rule tested; a wrong description is a section 0.3 failure.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -86,6 +86,11 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-48, FR-55, FR-57; #11. Off the critical path to 031.</notes>
+
+  <completion date="2026-10-07">
+    <summary>RuleBodyDescriber: gated on PolicyVersionValidator, same strict parse, one line per clause (words, formal form, clause id), lookup GUIDs shown as names by one batched read per reference table, nothing stored. Wired into the 036 response as ruleDescription. 13 domain tests + 2 live seam tests (passed against spaarkedev1). Choice option values print raw (known gap, see record). Publish +0.03 MB total vs fresh master (36.25). Commit 421da7944.</summary>
+    <record>projects/spaarke-ontology-platform-r1/notes/036-026-stream-c-record.md</record>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

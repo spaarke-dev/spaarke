@@ -34,4 +34,19 @@ public static class OntologyWriterEvents
     /// text (all of which may echo admin-authored config content).
     /// </summary>
     public static readonly EventId PolicyVersionInvalid = new(50301, nameof(PolicyVersionInvalid));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per refused decision plan, by <see cref="Actions.DecisionPlanService"/> (task 036):
+    /// a plan that does not resolve against the closed action catalog is refused for that plan, never skipped silently.
+    /// Structured properties: <c>policyVersionId</c> and <c>reason</c>
+    /// (<see cref="Telemetry.DecisionPlanRefusalReason"/>) ONLY.
+    /// </summary>
+    public static readonly EventId DecisionPlanRefused = new(50302, nameof(DecisionPlanRefused));
+
+    /// <summary>
+    /// Logged at Warning, exactly once per rule description that could not be produced after the body validated, by
+    /// <see cref="RuleBodyDescriber"/> (task 026). Structured property: <c>reason</c>
+    /// (<see cref="Telemetry.RuleDescriptionRefusalReason"/>) ONLY; never the body, a name or the exception message.
+    /// </summary>
+    public static readonly EventId RuleDescriptionRefused = new(50303, nameof(RuleDescriptionRefused));
 }

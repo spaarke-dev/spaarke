@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Sprk.Bff.Api.Services.Signals;
+using Sprk.Bff.Api.Services.Signals.Actions;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -53,6 +54,16 @@ public static class SignalsModule
         // Dataverse connections, injected as two DIFFERENT types, so neither can be swapped for the other by
         // accident.
         services.AddSingleton<SignalWriter>();
+
+        // Decision plan read (task 036, FR-49/FR-50): the Signal-level access decision (as the caller, through the
+        // caller-identity client, so scoped) and the plan resolver (the catalog itself is a static table). Both
+        // unconditional -- the route that uses them is mapped unconditionally (bff-extensions.md F.1).
+        services.AddScoped<SignalCoreRecordAccess>();
+        services.AddScoped<DecisionPlanService>();
+
+        // RuleBodyDescriber (task 026, FR-48): the read-side plain-language description of a rule body. Stateless over the
+        // compiler and the shared sysadmin entity service, both singletons.
+        services.AddSingleton<RuleBodyDescriber>();
 
         return services;
     }

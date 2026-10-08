@@ -4,7 +4,7 @@
     <title>Closed BFF action catalog and the decision-plan read endpoint</title>
     <phase>4b Commit and actions</phase>
     <gate>007 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF service and endpoint; the catalog decides what a decision can do and which record class it produces.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,11 @@
   </acceptance-criteria>
 
   <notes>spec.md FR-49, FR-50; D-17, D-18, D-19, D-20, D-27. D-45 (C-3 decided: Routine), D-51, D-54.</notes>
+
+  <completion date="2026-10-07">
+    <summary>Closed 13-action catalog + per-lane dismissal reasons + plan resolver (whole-plan refusal, EventId 50302, metered) + GET /api/v1/signals/{signalId}/decision-plan authorized as the caller via SignalCoreRecordAccess (Signal then core record of any type; no-core owner-only Do lane). Census ledger: count 117->118, one GovernedFile, one HandlerDecision. 49 domain tests; RouteAuthorizationGuard 86/86; publish +0.02 MB vs fresh master (36.22 -> 36.24, 192 files each); no vulnerable packages. Commit 2cff1f051.</summary>
+    <record>projects/spaarke-ontology-platform-r1/notes/036-026-stream-c-record.md</record>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
