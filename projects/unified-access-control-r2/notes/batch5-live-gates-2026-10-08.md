@@ -147,3 +147,46 @@ Clean-up: E was deleted after G3 (204 → 404). The share was revoked (204). GI,
 **Defects found:** none. **Harness note:** the script's RetrievePrincipalAccess pre-check URL was malformed (404). G1c's `narrowed: true` restore at Collaborate shows the Collaborate ceiling directly.
 
 **113 can be marked done.** G1–G5 pass live. G6 is covered offline by design. The POML's ISS-023 half was cut (round 59).
+
+## #1410: the read-time veto honours a secure parent's list (PR #1419, merged `65177354f`), live gates 2026-10-08 21:50–21:56Z
+
+Run against spaarke-bff-dev (healthz 200) and spaarkedev1 with the existing identities only:
+- admin (`az` default);
+- testuser1 (`AZURE_CONFIG_DIR=C:/tmp/az-uac-child`), whose linked contact is `ac6d7b68…`.
+
+Tokens: `api://1e40baad…/.default` for the BFF, and the admin `az` token for Dataverse set-up and read-back. No app-setting, Entra or Key Vault access, and no prod Key Vault read. Script and raw log: session scratchpad `gate1410/gate1410.py`, `run1.out`.
+
+**Why a fresh secure parent, not `31e232ae…`.** A wall naming testuser1 on `31e232ae…` would make the enforcer remove testuser1's share there (262167), and the sync in G3 triggers the enforcer. So a throwaway secure parent was provisioned instead. Two SPE containers were created as a result (below).
+
+**How testuser1 reaches the records on Teams/SPA.** Through a direct ViewOnly contact grant to `ac6d7b68…`, which counts on a secure record. That is the systemuser plane's contact-grant term. testuser1's Dataverse share alone does not put a record in its Teams/SPA set (036 is not live).
+
+**The read.** `GET /api/v1/external/workassignments/{id}/todos` as testuser1. It is gated on the caller's composed work-assignment set, the same set the veto trims. The SPA API has no work-assignment LIST route (`/external/projects` lists projects only), so "disappears from the list" is shown as the composed-scope read going 200 → 403 → 200.
+
+**Timing.** Phase B ran between 21:55:25Z and 21:55:58Z, 25 s after a */5 boundary, so no secure-inheritance, No Access or assigned-access job ran inside it.
+
+**Throwaway records** (all created as admin; names `zz-1410-gate*`):
+- **M** `bb712d42…`: project, provisioned → secure, owner Secure Record Owners, container below.
+- **W1** `05bbcc4e…`: work assignment filed under M (`sprk_regardingproject`), provisioned → secure, container below. Contact grant `5db7a350…`.
+- **W2** `c4be49f6…`: work assignment filed under M, NOT provisioned (`sprk_issecure` false, never secured). Contact grant `c6be49f6…`.
+- **W3** `16be04fb…`: work assignment filed under M, not provisioned, `sprk_assignedattorney1` = `ac6d7b68…`.
+- **E** `5d73b7fb…`: No Access entry, subject systemuser testuser1, object project M (id in lower case).
+- Ledger rows `79565efd…` (W3) and `6da7d2e7…`.
+
+**Clean-up:** all deleted (204) and read back **404** at 21:56:00–07Z: E (deleted inside the gate, before the "lifted" reads), the 2 ledger rows, the 2 grants, W3, W2, W1 and M. A final sweep at 21:56:35Z found:
+- 0 `zz-1410` projects or work assignments;
+- the only No Access entry left is the owner's 154 (o) seed;
+- 0 grants for `ac6d7b68…` and 0 ledger rows created since 21:49Z.
+
+**Containers to add to `Remove-TestContainers.ps1`** (orphaned by deleting the provisioned records, #1445):
+- M: `b!CtWYdqDTo0GSJGqApjHauRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+- W1: `b!HMt6g1HOGEe9Jp1UZUDQrxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+
+| # | Gate | Result | Evidence |
+|---|---|---|---|
+| G1 | A secure parent's wall reaches a secure child | **PASS** | testuser1 read of W1 (secure, its own list empty): before E **200**; with E on M **403** (21:55:40Z); E deleted (204 → 404) **200** again (21:55:54Z). |
+| G2 | A NOT-yet-secure child (owner round 82) | **PASS** | W2 read back `sprk_issecure` **false**, owner unchanged, at 21:55:40Z, 5 s after E was created and minutes before any inheritance run. testuser1: before **200**, walled **403**, lifted **200**. |
+| G3 | Assignee materializer (F2) | **PASS** | `POST /assigned-access/sync` on W3 (`sprk_issecure` false) with E in force → 200, entry `Skipped` / `no-access` for testuser1. The share read showed **no principal** on W3. The sync's own No Access pass: `coveredRecords 4`, `removed []`, complete. After E was lifted, the second sync → 200 `Shared` / `shared`, and W3 shows testuser1 **Read/Write/Append/AppendTo/Share**; ledger `79565efd…` is the same row, now Shared. |
+
+**Defects found:** none.
+
+**#1410 can be closed.** G1–G3 pass live on the merged build. The rule is pinned offline by `SecureParentReadVetoTests`, `SecureParentReadVetoInheritanceTests`, `NoAccessShareEnforcerTests` and `AssignedAccessParentWallTests`. What is left belongs to other issues: #1425 (contact plane) and #1426 (synchronizer, direct parents only).
