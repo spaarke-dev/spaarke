@@ -10,6 +10,11 @@
 > - [PRODUCTION-DEPLOYMENT-GUIDE.md](../guides/PRODUCTION-DEPLOYMENT-GUIDE.md) — First-time platform setup
 > - [INCIDENT-RESPONSE.md](../guides/INCIDENT-RESPONSE.md) — Production troubleshooting
 
+> ⚠️ **Customer environments (2026-10-07)**: customer environments receive SpaarkeMaster **managed by default** through
+> provisioning H6, never by a manual export/import (ADR-027 §3–§4, amended 2026-10-07). The unmanaged export/import in
+> this procedure applies only to Spaarke's own non-customer environments. Package, release, IAM and upgrade:
+> [`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md).
+
 ---
 
 ## Overview
@@ -209,16 +214,12 @@ pac solution list  # Should show SpaarkeMaster v1.0.0.0
 # (PublishXml via scripts/lib/Publish-SolutionComponents.ps1). Never a tenant-wide publish.
 ```
 
-### Build-SpaarkeMaster.ps1
+### Composing SpaarkeMaster (retired: `Build-SpaarkeMaster.ps1`)
 
-The `Build-SpaarkeMaster.ps1` script automates solution composition using independent discovery:
-- Creates/recreates the SpaarkeMaster solution in dev
-- Adds all components programmatically using the identification logic above
-- Verifies component count matches expected (386)
-
-Run this when: new entities/PCFs/web resources are added, or to rebuild the solution from scratch.
-
-See `scripts/Build-SpaarkeMaster.ps1` for implementation.
+`Build-SpaarkeMaster.ps1` was retired on 2026-10-07 (T218c). Its prefix discovery now lives in
+`scripts/solution-authoring/SpaarkePackageScope.psm1` with committed exclusions in `docs/data-model/package-scope.json`;
+`Test-SolutionCompleteness.ps1` reports what is missing and `Assemble-SpaarkeMasterSolution.ps1` adds it. Steps:
+[`SPAARKE-SOLUTION-RELEASE-PROCESS.md`](SPAARKE-SOLUTION-RELEASE-PROCESS.md) §3.
 
 ---
 
@@ -324,8 +325,10 @@ pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 # Export takes the PUBLISHED state. Publish only your own pending component first (PublishXml via
 # scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish.
 
-# Export SpaarkeMaster
-pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+# Export SpaarkeMaster — NOT a raw `pac solution export` (that carries dev env-var VALUES and skips the F12
+# leak guard). Use the runbook's export, which strips values and fails on leaky dependencies:
+./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1     # docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md §3
+# Customer environments never take this zip: they get the CI-packed SpaarkeMaster through H6 (ADR-027 §3-§4).
 ```
 
 ### Verify Export
@@ -338,7 +341,7 @@ Test-Path ./deploy/SpaarkeMaster.zip
 (Get-Item ./deploy/SpaarkeMaster.zip).Length / 1MB
 ```
 
-**GATE**: Export must succeed and produce a valid ZIP. If SpaarkeMaster solution doesn't exist in dev, run `Build-SpaarkeMaster.ps1` first.
+**GATE**: Export must succeed and produce a valid ZIP. If SpaarkeMaster is incomplete, run `Test-SolutionCompleteness.ps1` and `Assemble-SpaarkeMasterSolution.ps1` first (runbook §3).
 
 ---
 
@@ -429,8 +432,10 @@ Before deploying to any target, export SpaarkeMaster from the dev environment:
 # Ensure PAC CLI is connected to dev
 pac auth select --environment "https://spaarkedev1.crm.dynamics.com"
 
-# Export SpaarkeMaster
-pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --overwrite
+# Export SpaarkeMaster — NOT a raw `pac solution export` (that carries dev env-var VALUES and skips the F12
+# leak guard). Use the runbook's export, which strips values and fails on leaky dependencies:
+./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1     # docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md §3
+# Customer environments never take this zip: they get the CI-packed SpaarkeMaster through H6 (ADR-027 §3-§4).
 ```
 
 ### Import to Target
@@ -694,22 +699,17 @@ curl https://api.spaarke.com/healthz
 
 ### Dataverse Solution Rollback
 
-Managed solutions support version rollback:
-
-1. **Power Platform Admin Center** → Environment → Solutions → Solution history
-2. Import the **previous version** of the managed solution ZIP
-
-Or re-import from a previous git commit:
+**SpaarkeMaster is never downgraded** (ADR-027 §3-§4; the same rule in H6 and in
+`Import-SpaarkeMasterPackage.ps1`, which refuses a published version older than the installed one). Roll forward:
+fix the content in dev, `Assemble-SpaarkeMasterSolution.ps1 -Version <higher>`, export, merge, publish with
+`publish-dataverse-solutions-manifest.yml`, then import:
 
 ```powershell
-# Checkout solution ZIPs from previous tag
-git checkout v1.0.0 -- src/solutions/
-
-# Re-import
-.\scripts\Deploy-DataverseSolutions.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-    -TenantId "..." -ClientId "..." -ClientSecret "..."
+.\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 `
+    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged   # demo's solutionPackageType
 ```
+
+*(T218f, 2026-10-08: replaces the re-import of `Deploy-DataverseSolutions.ps1`'s 9-solution list, which retired.)*
 
 ### Web Resource Rollback
 
@@ -738,10 +738,7 @@ az webapp deployment slot swap `
 # 2. Checkout previous release
 git checkout v1.0.0
 
-# 3. Re-import solutions
-.\scripts\Deploy-DataverseSolutions.ps1 `
-    -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-    -TenantId "..." -ClientId "..." -ClientSecret "..."
+# 3. SpaarkeMaster: no downgrade — roll forward (see "Dataverse Solution Rollback" above)
 
 # 4. Re-deploy web resources
 .\scripts\Deploy-AllWebResources.ps1 `
@@ -781,11 +778,9 @@ For critical production issues requiring immediate deployment. This is an **abbr
          -ResourceGroupName "rg-spaarke-platform-prod" `
          -AppServiceName "spaarke-bff-prod" -UseSlotDeploy
 
-   Solution fix:
-     .\scripts\Deploy-DataverseSolutions.ps1 `
-         -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" `
-         -TenantId "..." -ClientId "..." -ClientSecret "..." `
-         -SolutionsToImport @("AffectedSolution")
+   Solution fix (fix in dev → Assemble -Version <higher> → export → merge → CI publish, then):
+     .\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 `
+         -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -PackageType unmanaged
 
    Web resource fix:
      .\scripts\Deploy-CorporateWorkspace.ps1 `  # or whichever script
@@ -882,7 +877,7 @@ See `.claude/skills/deploy-new-release/SKILL.md` for full documentation.
 |-------|--------|---------------|
 | 1 | `Build-AllClientComponents.ps1` | `-WhatIf`, `-SkipSharedLibs`, `-Component` |
 | 2 | `Deploy-BffApi.ps1` | `-Environment`, `-AppServiceName`, `-UseSlotDeploy`, `-SkipBuild` |
-| 3 | `Deploy-DataverseSolutions.ps1` | `-EnvironmentUrl`, `-TenantId`, `-ClientId`, `-ClientSecret` |
+| 3 | `solution-authoring/Import-SpaarkeMasterPackage.ps1` | `-EnvironmentUrl`, `-PackageType` (from `config/environments.json` `solutionPackageType`; operator's own sign-in, no secret) |
 | 4 | `Deploy-AllWebResources.ps1` | `-DataverseUrl`, `-WhatIf`, `-SkipComponent` |
 | 5 | `Validate-DeployedEnvironment.ps1` | `-DataverseUrl`, `-BffApiUrl` |
 | — | `Deploy-Release.ps1` | `-EnvironmentUrl`, `-Version`, `-WhatIf`, `-SkipPhase`, `-SkipBuild` |
@@ -897,7 +892,7 @@ See `.claude/skills/deploy-new-release/SKILL.md` for full documentation.
 | Preview release plan | `.\scripts\Deploy-Release.ps1 -EnvironmentUrl "https://spaarke-demo.crm.dynamics.com" -WhatIf` |
 | Deploy only web resources | `.\scripts\Deploy-AllWebResources.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"` |
 | Deploy only BFF API (prod) | `.\scripts\Deploy-BffApi.ps1 -Environment production -AppServiceName spaarke-bff-prod -UseSlotDeploy` |
-| Deploy only solutions | `.\scripts\Deploy-DataverseSolutions.ps1 -EnvironmentUrl "..." -TenantId "..." -ClientId "..." -ClientSecret "..."` |
+| Deploy only SpaarkeMaster | `.\scripts\solution-authoring\Import-SpaarkeMasterPackage.ps1 -EnvironmentUrl "..." -PackageType <managed\|unmanaged>` |
 | Validate after deploy | `.\scripts\Validate-DeployedEnvironment.ps1 -DataverseUrl "https://spaarke-demo.crm.dynamics.com"` |
 | Rollback BFF API | `az webapp deployment slot swap -g rg-spaarke-platform-prod -n spaarke-bff-prod --slot staging --target-slot production` |
 | Emergency hotfix | See [Emergency Hotfix Procedure](#emergency-hotfix-procedure) |

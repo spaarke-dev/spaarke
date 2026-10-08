@@ -45,6 +45,12 @@ public static class MiddlewarePipelineExtensions
                         $"Failed to exchange user token for Graph API token: {ms.Message}"
                     ),
 
+                    // Task 254: the stamp's optional monthly OpenAI spend limit — 429 + Retry-After (next UTC month).
+                    Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException sl => (
+                        429, Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException.ErrorCode,
+                        "AI Usage Limit Reached", sl.Message
+                    ),
+
                     Microsoft.Graph.Models.ODataErrors.ODataError gs => (
                         (int?)gs.ResponseStatusCode ?? 500, "graph_error", "Graph API Error",
                         gs.Error?.Message ?? gs.Message
@@ -56,12 +62,28 @@ public static class MiddlewarePipelineExtensions
                     )
                 };
 
-                logger.LogError(exception,
-                    "Request failed | Status: {StatusCode} | Code: {Code} | Detail: {Detail} | ExceptionType: {ExceptionType} | Path: {Path} | CorrelationId: {CorrelationId}",
-                    status, code, detail, exception?.GetType().FullName, ctx.Request.Path, traceId);
+                if (exception is Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException)
+                {
+                    // Task 254: an expected refusal (AiSpendLimit already logged the amounts) — a capped stamp must not
+                    // raise one Error with a stack trace per AI request for the rest of the month.
+                    logger.LogWarning(
+                        "Request refused: AI spend limit reached | Status: {StatusCode} | Path: {Path} | CorrelationId: {CorrelationId}",
+                        status, ctx.Request.Path, traceId);
+                }
+                else
+                {
+                    logger.LogError(exception,
+                        "Request failed | Status: {StatusCode} | Code: {Code} | Detail: {Detail} | ExceptionType: {ExceptionType} | Path: {Path} | CorrelationId: {CorrelationId}",
+                        status, code, detail, exception?.GetType().FullName, ctx.Request.Path, traceId);
+                }
 
                 ctx.Response.StatusCode = status;
                 ctx.Response.ContentType = "application/problem+json";
+                if (exception is Sprk.Bff.Api.Services.Ai.Metering.AiSpendLimitExceededException spendLimit)
+                {
+                    ctx.Response.Headers.RetryAfter =
+                        spendLimit.RetryAfterSeconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                }
 
                 var origin = ctx.Request.Headers.Origin.FirstOrDefault();
                 if (!string.IsNullOrEmpty(origin) && !ctx.Response.Headers.ContainsKey("Access-Control-Allow-Origin"))

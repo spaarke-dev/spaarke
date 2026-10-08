@@ -1,10 +1,10 @@
 # Authentication Azure Resources & GUIDs
 
 > **Source**: AUTHENTICATION-ARCHITECTURE.md
-> **Last Updated**: 2026-05-17
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-platform-unification-r2
-> **Status**: Current (R2: Cosmos DB containers added; Content Safety resource added; RBAC updated)
+> **Last Updated**: 2026-10-06
+> **Last Reviewed**: 2026-10-06 (Content Safety section only)
+> **Reviewed By**: customer-provisioning-orchestration-r1 task 246 (Content Safety); earlier ai-platform-unification-r2
+> **Status**: Current (R2: Cosmos DB containers added; RBAC updated. 2026-10-06: Content Safety section corrected — keyless, served by `spaarke-openai-dev` in shared dev)
 > **Applies To**: Debugging, deployment, configuration lookup
 
 ---
@@ -192,7 +192,7 @@ requests
 |----------|-------|
 | **Name** | `spaarke-openai-dev` |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | West US 2 (dev — production deploys to `westus3` per `infrastructure/bicep/parameters/platform-prod.bicepparam`) |
+| **Region** | East US (`spaarke-openai-dev` — Azure reports `eastus`, checked 2026-10-06; customer stamps deploy OpenAI to `openAiLocation`, default `westus3`) |
 | **Endpoint** | `https://spaarke-openai-dev.openai.azure.com/` |
 | **SKU** | S0 (Standard) |
 
@@ -257,22 +257,32 @@ DocumentIntelligence__ReasoningModel=(unset until task 013 provisioning lands; t
 
 ### Azure AI Content Safety (R2)
 
+> **Corrected 2026-10-06 (task 246)**: there is no `spaarke-contentsafety-dev` account and no Content Safety API key. Shared dev serves Content Safety from the multi-service AIServices account `spaarke-openai-dev`, and the BFF authenticates with its managed identity.
+
 | Property | Value |
 |----------|-------|
-| **Name** | `spaarke-contentsafety-dev` |
+| **Name** | `spaarke-openai-dev` (kind `AIServices`; shared with Azure OpenAI) |
 | **Resource Group** | `spe-infrastructure-westus2` |
-| **Region** | West US 2 |
-| **Endpoint** | `https://spaarke-contentsafety-dev.cognitiveservices.azure.com/` |
+| **Region** | East US (as Azure reports it, 2026-10-06) |
+| **Endpoint** | `https://spaarke-openai-dev.cognitiveservices.azure.com/` |
 | **SKU** | S0 (Standard) |
+| **Auth** | Managed identity. The BFF identity needs **Cognitive Services User** on the account ("Cognitive Services OpenAI User" does NOT cover Content Safety dataActions). |
 | **Purpose** | Prompt injection detection (PromptShieldService) and groundedness annotation (GroundednessCheckService) |
 
-**App Service Settings** (bound via `AiSafetyModule`):
+**App Service Settings** (read by `AiSafetyModule` / `ContentSafetyAuthHandler`; shared dev BFF `spaarke-bff-dev`, RG `rg-spaarke-dev`):
 ```
-AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/
-AiSafety__ContentSafety__ApiKey=(from Key Vault or App Settings)
+AiSafety__ContentSafety__Endpoint=https://spaarke-openai-dev.cognitiveservices.azure.com/
+AiSafety__ContentSafety__ManagedIdentity__Enabled=true
+AiSafety__PromptShield__ChatPipelineEnabled=true
 ```
 
-**API used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01`
+`AiSafety__ContentSafety__Endpoint` is **required** outside Development/Testing: the BFF refuses to start without it, and there is no default. `AiSafety__ContentSafety__ApiKey` is read only when set and is for local development; do not set it in a deployed environment.
+
+**Customer stamps**: each stamp has its own `sprk-{customer}-{env}-contentsafety` account (kind `ContentSafety`, custom subdomain, local auth disabled; the stamp's user-assigned managed identity holds Cognitive Services User), deployed by `infrastructure/bicep/customer.bicep` via `modules/content-safety.bicep`. `customer.bicep` sets `AiSafety__ContentSafety__Endpoint`, and provisioning handler H4b re-applies it from H2a's `contentSafetyEndpoint` output. No customer vault holds a Content Safety key.
+
+**APIs used**: `POST {endpoint}/contentsafety/text:shieldPrompt?api-version=2024-09-01` and `POST {endpoint}/contentsafety/text:detectGroundedness?api-version=2024-09-15-preview`
+
+**Verify**: `./scripts/Verify-ContentSafetyResource.ps1` (keyless and read-only; calls both APIs with your own Entra token).
 
 ---
 

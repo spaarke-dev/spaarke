@@ -1,0 +1,7 @@
+/* CommunicationTimeline PCF Control Styles */
+/* Uses Fluent UI v9 tokens — minimal custom CSS per ADR-021 */
+
+.communication-timeline-container {
+    height: 100%;
+    width: 100%;
+}

@@ -827,6 +827,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   isSecureRecord = false,
   fetchSecureOwnerInfo,
   fetchContactOrganizationMemberships,
+  initialSection,
 }) => {
   const styles = useStyles();
 
@@ -893,6 +894,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [noAccessState, setNoAccessState] = React.useState<NoAccessSectionState>({ kind: 'loading' });
   const [contactWalledOrgs, setContactWalledOrgs] = React.useState<Map<string, string>>(new Map());
   const [orgWallCheck, setOrgWallCheck] = React.useState<'notNeeded' | 'done' | 'notChecked'>('notNeeded');
+  // Task 153: the section this open was asked to show (`initialSection`), armed on open and cleared once revealed. A
+  // state, not a ref, so it is set in the same batch as this open's `loading` No Access state and can never act on the
+  // previous open's list.
+  const [sectionToReveal, setSectionToReveal] = React.useState<'noAccess' | null>(null);
+  const noAccessSectionRef = React.useRef<HTMLElement>(null);
 
   // Verifier F4-a: the record the modal shows NOW (an in-flight answer is checked against it), and the number of the
   // latest load (an older load's results are dropped).
@@ -1146,6 +1152,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setNoAccessState({ kind: 'loading' });
       setContactWalledOrgs(new Map());
       setOrgWallCheck('notNeeded');
+      setSectionToReveal(initialSection === 'noAccess' ? 'noAccess' : null);
       void loadData();
     } else {
       // Closed (or no longer permitted): any load still in flight belongs to a session that has ended.
@@ -1154,6 +1161,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     // Only re-run when the modal transitions open (and once per open), not on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, canGrantAccess]);
+
+  // Task 153: once this open's load has finished, bring the requested section into view (and focus it, so keyboard
+  // and screen-reader users land there too). Only once per open; a hidden section (no Write) is simply not revealed.
+  React.useEffect(() => {
+    if (!open || sectionToReveal !== 'noAccess' || loading || noAccessState.kind === 'loading') return;
+    setSectionToReveal(null);
+    const section = noAccessSectionRef.current;
+    if (!section) return;
+    if (typeof section.scrollIntoView === 'function') section.scrollIntoView({ block: 'start' });
+    if (typeof section.focus === 'function') section.focus({ preventScroll: true });
+  }, [open, sectionToReveal, loading, noAccessState.kind]);
 
   /** Posts a JSON body to a relative BFF path via the host `authenticatedFetch`
    * and returns the parsed response body. Throws {@link AccessGrantModalApiError}
@@ -2188,6 +2206,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     064 answers `notShown` (the caller lacks Write, owner O2). */}
                 {noAccessState.kind !== 'hidden' && (
                   <section
+                    ref={noAccessSectionRef}
+                    // Focusable by script only (task 153: the access-status indicator opens the modal here).
+                    tabIndex={-1}
                     className={styles.section}
                     style={{ marginTop: tokens.spacingVerticalXXL }}
                     aria-label="No Access List"

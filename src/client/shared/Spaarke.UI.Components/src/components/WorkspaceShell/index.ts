@@ -100,8 +100,8 @@ export {
 
 // Wizard launchers (hoisted in Round 4 Fix 2 / task 085 — see file header).
 // Shared Xrm.Navigation.navigateTo wrappers for the seven Get Started wizards.
-// Reused by SpaarkeAi's ContextPaneController; LegalWorkspace's WorkspaceGrid
-// continues to use its own local handlers for FR-25 byte-stability.
+// Reused by SpaarkeAi; since task 112 LegalWorkspace's WorkspaceGrid routes its five Create
+// wizard launches through `navigateToWebResourceSurfaceAsync` too (in-app when a host is mounted).
 export {
   launchCreateMatterWizard,
   launchCreateEventWizard,
@@ -114,6 +114,9 @@ export {
   resolveXrmNavigation,
   navigateToWebResourceSurfaceAsync,
   navigateToEntityRecordSurfaceAsync,
+  // Task 112 (ontology-platform-r1): in-app routing seam for the five Create wizards.
+  isInAppWizardName,
+  registerInAppWizardHost,
 } from './wizardLaunchers';
 export type {
   BaseLauncherOptions,
@@ -122,4 +125,7 @@ export type {
   PlaybookIntentLauncherOptions,
   NavigateToOutcome,
   EntityRecordSurfaceParams,
+  InAppWizardName,
+  InAppWizardRequest,
+  InAppWizardOpener,
 } from './wizardLaunchers';

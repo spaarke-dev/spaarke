@@ -119,11 +119,11 @@ public sealed record SystemUserNoAccessSubjects(NoAccessSubjects Subjects, strin
 /// the static <c>ResolveSubjectsAsync</c>:
 /// the <c>sprk_primarycontact</c> link plus every contact bound to U's oid, each read status-first, and those contacts'
 /// wall organizations. This guard calls it; the systemuser-plane read-time veto
-/// (<see cref="AccessibleRecordSetService"/>) calls it for every SECURE candidate — adding the principal's derived contact,
-/// so the contact whose grants were composed is always among the subjects — and removes every secure candidate when it
-/// reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
-/// contact C represent") over the same two links. On a non-secure record the veto checks only the derived contact and its
-/// organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
+/// (<see cref="AccessibleRecordSetService"/>) calls it whenever a candidate is SECURE or sits below a secure parent (GitHub
+/// #1410, owner round 82) — adding the principal's derived contact, so the contact whose grants were composed is always among
+/// the subjects — and removes every such candidate when it reports a fault; the enforcer (<see cref="NoAccessShareEnforcer"/>) asks the REVERSE question ("which systemusers does
+/// contact C represent") over the same two links. On a non-secure record's OWN list the veto checks only the derived contact
+/// and its organizations, because there the wall removes only that contact's grant contribution (owner N3) — a contact the
 /// normalizer could not derive contributed no grant to remove. Task 149's <c>SecureChildShareSynchronizer</c> asks
 /// <see cref="CheckAsync"/> about each of a child's secure ROOTS before any child grant or widening, and drops a user it
 /// refuses (walled or unverifiable).</para>

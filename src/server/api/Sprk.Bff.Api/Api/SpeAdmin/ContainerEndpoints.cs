@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -280,7 +281,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "ListContainers: unexpected error for configId {ConfigId}, TraceId={TraceId}",
@@ -393,7 +394,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "GetContainer: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -586,7 +587,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex, "CreateContainer: unexpected error for configId {ConfigId}, TraceId={TraceId}",
@@ -712,7 +713,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(ex,
                 "PatchContainer: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -900,7 +901,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(ex,
                 "{Operation}: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
@@ -1171,7 +1172,7 @@ public static class ContainerEndpoints
                 traceId: context.TraceIdentifier,
                 title: "Graph API Error");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not SdapProblemException)
         {
             logger.LogError(
                 ex,

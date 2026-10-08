@@ -35,36 +35,83 @@ function decodeJwtExpMs(jwt: string): number {
  *
  * Failed acquisitions (inner returns an empty access token) are never cached.
  *
- * `clearCache()` cascades to the inner strategy (use on logout / 401 retry).
+ * Concurrent cache misses share ONE in-flight inner acquisition (#1453): before,
+ * N components fetching on a cold cache each ran the strategy's silent → popup
+ * chain, so a user could get N sign-in popups (or MSAL `interaction_in_progress`).
+ *
+ * `clearCache()` cascades to the inner strategy (use on logout / dispose).
+ * It also detaches any in-flight acquisition, whose result is then returned to
+ * its own callers but not cached (a logout must not be undone by a late token).
  * `invalidate()` clears only the in-memory entry without touching the inner
- * strategy (use for proactive refresh — the inner may still serve silently).
+ * strategy (use for proactive refresh and the 401 retry — the inner may still
+ * serve silently). It keeps an in-flight acquisition shared: that acquisition started after the
+ * cache was emptied, and detaching it could open a second popup alongside it.
  */
 export class InMemoryCache implements AuthStrategy {
   readonly name: string;
 
   private _cached: TokenResult | null = null;
+  private _inFlight: Promise<TokenResult> | null = null;
+  /** Bumped by clearCache()/logout() so an acquisition started earlier cannot repopulate the cache. */
+  private _generation = 0;
 
   constructor(private readonly _inner: AuthStrategy) {
     this.name = `in-memory-cache(${_inner.name})`;
   }
 
-  async acquire(): Promise<TokenResult> {
+  acquire(): Promise<TokenResult> {
     if (this._cached && this._isFresh(this._cached)) {
-      return this._cached;
+      return Promise.resolve(this._cached);
+    }
+    if (this._inFlight) {
+      return this._inFlight;
     }
 
-    const result = await this._inner.acquire();
-    this._cached = result.accessToken && this._isFresh(result) ? result : null;
-    return result;
+    // Start the inner call on a microtask: if _inner.acquire() throws synchronously,
+    // the helper's `finally` would otherwise run before this assignment and leave a
+    // rejected promise stuck in _inFlight for every later caller.
+    const generation = this._generation;
+    this._inFlight = Promise.resolve().then(() => this._acquireFromInner(generation));
+    return this._inFlight;
+  }
+
+  /**
+   * Resolves once no acquisition is in flight (whatever its outcome). Used when
+   * replacing a provider, so the new MSAL instance does not start an
+   * interactive request while the old one's is still open (`interaction_in_progress`).
+   */
+  whenIdle(): Promise<void> {
+    return this._inFlight
+      ? this._inFlight.then(
+          () => undefined,
+          () => undefined
+        )
+      : Promise.resolve();
+  }
+
+  /**
+   * One inner acquisition. Within a generation at most one runs (acquire() shares
+   * it), so a matching generation means `_inFlight` is still this acquisition.
+   */
+  private async _acquireFromInner(generation: number): Promise<TokenResult> {
+    try {
+      const result = await this._inner.acquire();
+      if (generation === this._generation) {
+        this._cached = result.accessToken && this._isFresh(result) ? result : null;
+      }
+      return result;
+    } finally {
+      if (generation === this._generation) this._inFlight = null;
+    }
   }
 
   clearCache(): void {
-    this._cached = null;
+    this._drop();
     this._inner.clearCache();
   }
 
   async logout(): Promise<void> {
-    this._cached = null;
+    this._drop();
     await this._inner.logout();
   }
 
@@ -76,6 +123,12 @@ export class InMemoryCache implements AuthStrategy {
    */
   invalidate(): void {
     this._cached = null;
+  }
+
+  private _drop(): void {
+    this._cached = null;
+    this._inFlight = null;
+    this._generation++;
   }
 
   /**

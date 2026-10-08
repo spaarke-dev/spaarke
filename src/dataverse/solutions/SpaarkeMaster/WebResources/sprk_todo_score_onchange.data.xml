@@ -1,0 +1,16 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<WebResource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <WebResourceId>{3f7f07ab-b799-f111-b8de-7ced8ddc4a05}</WebResourceId>
+  <Name>sprk_todo_score_onchange</Name>
+  <DisplayName>Smart To Do Score OnChange</DisplayName>
+  <Description>Smart To Do R5 task 011 (FR-02/03): sprk_priority/sprk_effort OnChange -&gt; sprk_priorityscore/sprk_effortscore. OnLoad entry point Spaarke.SmartTodo.ScoreOnChange.onLoad.</Description>
+  <LanguageCode>1033</LanguageCode>
+  <WebResourceType>3</WebResourceType>
+  <IntroducedVersion>1.0</IntroducedVersion>
+  <IsEnabledForMobileClient>0</IsEnabledForMobileClient>
+  <IsAvailableForMobileOffline>0</IsAvailableForMobileOffline>
+  <IsCustomizable>1</IsCustomizable>
+  <CanBeDeleted>1</CanBeDeleted>
+  <IsHidden>0</IsHidden>
+  <FileName>/WebResources/sprk_todo_score_onchange3F7F07AB-B799-F111-B8DE-7CED8DDC4A05</FileName>
+</WebResource>

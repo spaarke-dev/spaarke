@@ -381,6 +381,13 @@ export interface IAccessGrantModalProps {
     contactIds: string[],
     organizationIds: string[]
   ) => Promise<IContactOrganizationMembership[]>;
+  /**
+   * The section to bring into view when the modal opens (task 153): `'noAccess'` scrolls to and focuses the No Access
+   * List once this open's load has finished (the TrackingFieldTrio access-status indicator asks for it when a No
+   * Access restriction applies). Omit for the top (Current Access). Ignored when the section is not shown (the caller
+   * lacks Write, `notShown`).
+   */
+  initialSection?: 'noAccess';
 }
 
 /** BFF's fixed `ExternalAccessLevel` enum values (Infrastructure/ExternalAccess/

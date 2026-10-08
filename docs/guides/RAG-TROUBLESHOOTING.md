@@ -922,40 +922,13 @@ az rest --method PUT \
 
 ---
 
-### CustomerOwned Connection Fails
+### BFF fails at startup with `Analysis__DefaultRagModel=CustomerOwned`
 
-**Symptom**: CustomerOwned deployment returns connection errors.
+**Symptom**: The BFF does not start; options binding for `Analysis` fails on `DefaultRagModel`.
 
-**Check 1: Validation**
+**Cause**: The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
-```csharp
-var validation = await deploymentService.ValidateCustomerOwnedDeploymentAsync(config);
-if (!validation.IsValid)
-{
-    Console.WriteLine($"Validation failed: {validation.ErrorMessage}");
-}
-```
-
-**Check 2: Key Vault Secret**
-
-```bash
-# Verify secret exists
-az keyvault secret show \
-  --vault-name spaarke-spekvcert \
-  --name "customer-api-key-secret"
-```
-
-**Check 3: Customer Endpoint Reachable**
-
-```bash
-# Test customer's AI Search endpoint
-curl -I "https://customer-search.search.windows.net"
-```
-
-**Resolution**:
-1. Verify SearchEndpoint URL is correct
-2. Ensure ApiKeySecretName matches Key Vault secret
-3. Verify customer has whitelisted our IP/service
+**Resolution**: Remove the `Analysis__DefaultRagModel` setting (the default `Shared` reads the stamp's own `AiSearch:KnowledgeIndexName`, which H2b creates) and point `AiSearch:Endpoint` at the stamp's own AI Search service. Do not set `Dedicated`: it reads `{tenantId}-knowledge`, which no provisioning step creates (corrected 2026-10-08, T235).
 
 ---
 

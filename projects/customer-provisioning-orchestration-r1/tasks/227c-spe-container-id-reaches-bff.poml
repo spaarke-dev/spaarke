@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>The customer's SPE container id reaches the BFF as plain H4b settings from H8 (no vault); H13 I4 checks it (plan G18)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G18)</phase>
+    <gate>after 227b</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handler code, manifest/catalog generator contract, DAG edge, contract tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Follows the existing written-by-h3 precedent end to end.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, l2-controlplane, spe, key-vault, model1-dedicated, testing</tags>
+    <deps>227b</deps>
+  </metadata>
+
+  <prompt>Give SPE-DefaultContainerId and SPE-CommunicationArchiveContainerId a real writer (H8), so a fresh stamp is not quarantined by H4 and the BFF gets both container ids.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, canonical secret catalog). Follow the provisioning constraints.</role>
+
+  <goal>
+    The manifest marks both secrets written by H8; H4 and the generated seed script skip them; H8 writes both (the one container
+    it creates) to the customer vault after verifying the container; H9 waits for H8 so the BFF boots with resolvable KV
+    references; the email container setting uses the key the BFF reads (EmailProcessing__DefaultContainerId);
+    RunContextContractTests.PinnedManifestGaps is empty.
+  </goal>
+
+  <justification>
+    <existing>manifest value_source from-bicep-output (nothing produces it — KvSecretValueResolver always fails it → H4 PARTIAL → QuarantineRequired); written-by-h3 precedent (KvSecretValueSource.WrittenByEntraAppReg, H4 filter, generator skip, contract rule (g), GraphAppRegistrationProvisioner SetSecretAsync).</existing>
+    <extension>Generalise the written-by-handler source to H8 (sibling enum value + filter + rule); H8 reuses H3's per-call SecretClient pattern.</extension>
+    <cost-of-doing-nothing>Every fresh stamp is quarantined at H4 (G18); Communication:ArchiveContainerId is unset so CommunicationService throws; Email__DefaultContainerId is a dead key (BFF reads EmailProcessing:DefaultContainerId).</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Fact sheet 2026-10-06: manifest.yaml :291-317 (app settings Email__DefaultContainerId — dead — and Communication__ArchiveContainerId);
+      customer.bicep :780-785 omits both (cites G18); SecretClientKvWriter.cs :231-245; H4KvSecretsPopulationHandler.cs :83, :476-487;
+      DagAdvancer.cs :141-165 (H9←H3,H4b — not H8; H7←H6,H8,H9); H8 creates ONE container → InterStepState.SpeContainerId;
+      RunContextContractTests.cs :504-505 pins both, positive control :576/:584 uses SPE-DefaultContainerId→T227.
+      Adjacent (fix here): H13 I4 probe (SpeContainerTenantDerivationInvariantProbe.cs :218, :570-624) requires
+      SharePointEmbedded__ContainerTypeId to be a KV reference, but H4b writes it as a literal GUID (not a secret) → I4 fails on
+      every stamp. Accept the literal (the GUID is not secret); keep the check that it equals the run's containerTypeId.
+    </background>
+    <relevant-files>
+      <file>scripts/canonical-secret-catalog/manifest.yaml + Invoke-CatalogGenerator.ps1 + generated/*</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecrets/** (FileKvSecretManifest, KvSecretValueResolver, H4 handler)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/H8SpeContainerHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs</file>
+      <file>H13 SpeContainerTenantDerivationInvariantProbe.cs</file>
+      <file>Tests: RunContextContractTests, FileKvSecretManifestTests, H4/H8/H13 handler tests, DAG tests</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <decisions>
+    <decision date="2026-10-06" by="owner (D28)">One container type per model, one container per customer (per Dataverse environment) — both container settings name H8's one container.</decision>
+    <decision date="2026-10-06" by="agent, from evidence (deviation from constraint 'precedent' and steps 1-3)">No Key Vault at all: a container id is not a secret. Both secrets leave the catalog and become per_env_settings (from-h8-output:spe_container_id) that H4b writes, with H4b ← H8 in the DAG — the T242/T245b/T246 plain-setting precedent. This removes the written-by-h8 source, H8's vault write and its overwrite rule, which were needed only because the value was put in the vault. H9 still waits for H8 (H9 ← H4b ← H8).</decision>
+  </decisions>
+
+  <constraints>
+    <constraint source="precedent">Mirror written-by-h3 exactly (manifest value, enum, H4 filter, generator skip, contract rule). No special case inside H4.</constraint>
+    <constraint source="KV">Never delete or overwrite a different existing value silently: if a secret exists with another value, fail Resumable naming it (upgrade safety).</constraint>
+    <constraint source="DAG">Add H9 ← H8; DAG test updated.</constraint>
+    <constraint source="catalog">Regenerate generated/* and run -Verify; re-verify after the pre-commit prettier pass.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Manifest + catalog: written-by-h8 for both; app setting key EmailProcessing__DefaultContainerId; regenerate.</step>
+    <step order="2">Parser/enum/H4 filter/contract rule; remove both PinnedManifestGaps pins; re-seed the positive control with a synthetic name.</step>
+    <step order="3">H8 KV writes (+ tests); DAG H9 ← H8.</step>
+    <step order="4">H13 I4 probe accepts a literal container-type id equal to the run's containerTypeId (+ test).</step>
+    <step order="5">Docs (inventory, plan G18/T227 ✅, CHANGELOG if .claude touched); verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The manifest has neither container-id secret, so H4 cannot attempt or quarantine on them; H4b writes both settings from H8's SpeContainerId (H4b catalog test).</criterion>
+    <criterion testable="true">DAG test: H4b (and so H9) waits for H8.</criterion>
+    <criterion testable="true">RunContextContractTests.PinnedManifestGaps is empty; the positive control still proves the scanner flags an unwired secret.</criterion>
+    <criterion testable="true">I4 probe tests: the run's container type + H8's container in both settings passes; another container fails CATASTROPHIC; missing / blank / other container type fails; run values missing is InfraFault.</criterion>
+    <criterion testable="true">Catalog -Verify OK; ControlPlane.Tests, Worker build, ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-10-06 (FULL).
+    - manifest.yaml: SPE-DefaultContainerId + SPE-CommunicationArchiveContainerId removed from secrets; per_env_settings
+      EmailProcessing__DefaultContainerId (the key the BFF reads — Email__DefaultContainerId was dead) and
+      Communication__ArchiveContainerId from from-h8-output:spe_container_id. Catalog regenerated (-Verify OK); generated
+      kv-secrets module and customer.json recompiled without the two secrets; generator allow-list + PerEnvSourceCatalog.
+    - DAG: H4b ← H8 (H9 transitively). HandlerRunInputs H4b += SpeContainerId. RunContextContractTests: PinnedManifestGaps
+      empty; positive control re-seeded with a synthetic pinned gap.
+    - H13 I4 (SpeContainerTenantDerivationInvariantProbe) rewritten: it required SharePointEmbedded__ContainerTypeId to be a
+      KV reference (H4b writes a literal — every stamp would fail) and never checked the customer's container. Now it
+      compares: container type = the run's; both container settings = H8's container (another id = CATASTROPHIC, D28).
+      InvariantVerificationRequest gained optional ContainerTypeId / SpeContainerId; H13 passes them.
+    - Tests: DagAdvancerTests (H4b waits for H8), H4bBulkAppSettingsHandlerTests (catalog row), probe tests rewritten.
+      ControlPlane.Tests 2124/0/1.
+    - Docs: inventory SPE rows, plan G18, manifest-driven-secret-catalog pattern rule 4, customer.bicep comment.
+    - Legacy scripts Configure-ProductionAppSettings.ps1 / Seed-ProductionKeyVault.ps1 (retired shared production stack):
+      marked LEGACY; the dead Email__DefaultContainerId key fixed to EmailProcessing__DefaultContainerId.
+    - Step 9.5: adr-check 0 violations — W1 spec FR-31 / design §4D I4 wording amended (container id = stamp app settings,
+      verified by H13); W2 resolver bypass (BFF reads EmailProcessing:DefaultContainerId directly; ITenantContainerResolver
+      reads an unwritten StagingContainerId) -> recorded on T227d; W3 legacy scripts marked; W4 unread SPE-ContainerTypeId
+      secret / DEFAULT_CT_ID -> T227e. code-review 0 critical — #1 deployment-guide + design DAG updated; #2 probe header +
+      E2EAcceptanceModule comment rewritten; #3 H8 always creates a new container (re-run after WaitingOnGate / later run
+      would leave an orphan and repoint the BFF) -> T227e; #4 H13 test asserts the invariant request carries both values;
+      #5 H13 input comment; #6 a container setting still a KV reference fails without the CATASTROPHIC label (+ test);
+      #9 CONFIGURATION-MATRIX key; #10 POML renamed (was 227c-h8-writes-container-id-secrets.poml). Not done: #7 colon form
+      for container settings, #8 staging slot not read (recorded in the probe header).
+    - ControlPlane.Tests 2125/0/1, Worker build 0 warnings, ArchTests 363/363, bicep-e2e-dry-run PASS, catalog -Verify OK.
+  </notes>
+</task>

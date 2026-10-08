@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -298,7 +299,7 @@ public class GrantLifecycleCharacterizationTests
             new RevokeAccessRequest(accessRecordId, contactId, ProjectId),
             client.Object,
             new SpeContainerMembershipService(
-                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             OpenRecordPolicy,
             AssignedAccessTestDoubles.InertMaterializer(),
             TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId),
@@ -1482,7 +1483,7 @@ public class GrantLifecycleCharacterizationTests
         => RevokeExternalAccessEndpoint.RevokeAccessAsync(
             new RevokeAccessRequest(accessRecordId, contactId, ProjectId),
             client.Object,
-            new SpeContainerMembershipService(Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+            new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             participations,
             AssignedAccessTestDoubles.InertMaterializer(),
             TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId),

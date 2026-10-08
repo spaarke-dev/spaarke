@@ -1,0 +1,40 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>0</isdefault>
+    <savedqueryid>{ff060ec0-fd0c-f111-8342-7c1e520aa4df}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_invoiceid">
+          <cell name="sprk_invoicenumber" width="132" />
+          <cell name="sprk_name" width="300" />
+          <cell name="sprk_invoicedate" width="112" />
+          <cell name="sprk_totalamount" width="118" />
+          <cell name="createdon" width="125" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_invoice">
+          <attribute name="sprk_invoiceid" />
+          <attribute name="sprk_name" />
+          <attribute name="createdon" />
+          <order attribute="sprk_name" descending="false" />
+          <attribute name="sprk_invoicedate" />
+          <attribute name="sprk_totalamount" />
+          <attribute name="sprk_invoicenumber" />
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="All Invoices subgrid" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

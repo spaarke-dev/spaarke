@@ -1,77 +1,47 @@
 // -----------------------------------------------------------------------------
 // DataverseWebApiSolutionImporter.cs
 //
-// Production <see cref="ISolutionImporter"/> implementation (task 141, Wave
-// G-4, Option D hybrid) — pure HttpClient + Azure.Identity.ClientSecretCredential
-// port of the retired DeployDataverseSolutionsScriptImporter's pwsh shell-out
-// to scripts/Deploy-DataverseSolutions.ps1. Ports the SAME 8-solution
-// dependency-tier import sequence + retry/partial-failure semantics the PS
-// script implements, via Dataverse Web API `ImportSolution` / `StageAndUpgrade`
-// actions + `importjobs` entity polling instead of the pac CLI's solution
-// import command.
+// Production <see cref="ISolutionImporter"/> implementation (task 141; T218b) —
+// pure HttpClient import of the ONE Spaarke package, SpaarkeMaster, via the
+// Dataverse Web API `ImportSolutionAsync` / `StageAndUpgradeAsync` actions,
+// polling `asyncoperations` for completion and `importjobs` for the detail.
 //
-// ORDERING (POML constraint — port verbatim, do not re-derive): the tier
-// grouping + per-tier iteration order below is sourced from the INJECTED
-// <see cref="ISolutionCatalog"/> (CanonicalSolutionCatalog in production),
-// which is already verified byte-for-byte equivalent to the PS script's
-// $SolutionImportOrder by H6SolutionImportHandlerTests's catalog-mirror test.
-// This importer does not re-derive dependency ordering from solution metadata
-// inspection — it trusts the catalog's Tier field exactly as the PS script
-// trusted its own $SolutionImportOrder hashtable.
+// T218b (ADR-027 §3-§4, amended 2026-10-07): the run's package type picks the
+// managed (default) or unmanaged blob; the importer reads the installed
+// SpaarkeMaster FIRST and refuses — nothing imported — a managed↔unmanaged
+// switch and a downgrade; an equal version is skipped; an older managed package
+// is upgraded with StageAndUpgradeAsync, an older unmanaged one updated with
+// ImportSolutionAsync. A failed read of the installed solution is a failure,
+// never "assume a fresh install".
 //
-// ARTIFACT PACKAGING (DS-1b §1 H6 row — "solution ZIPs must become versioned
-// publish/content artifacts, not files assumed present on a local shell's
-// filesystem"): the 9 solution ZIPs are resolved from the SAME
-// `provisioning-artifacts` blob container task 116 (BFF zip)/117 (ARM JSON)/
-// 132 (H9 artifact) already publish to, via a small solution-specific
-// manifest (`dataverse-solutions-latest.json` by default — see
-// SolutionImportOptions.SolutionArtifactManifestBlobName for the exact shape
-// + the live-ceremony gap this manifest currently has no CI producer for).
-// This importer never reads a local filesystem path for a solution ZIP.
+// ARTIFACT PACKAGING (DS-1b §1 H6 row): the package zips are resolved from the
+// `provisioning-artifacts` blob container through its manifest
+// (`dataverse-solutions-latest.json`:
+// {"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}},
+// published by publish-dataverse-solutions-manifest.yml — T218d). This importer
+// never reads a local filesystem path for a solution ZIP.
 //
 // GROUND-TRUTHED WEB API SHAPES (Wave G-1..G-4 discipline — verify, don't
 // guess; WebFetch against learn.microsoft.com 2026-08-20):
-//   - ImportSolution / StageAndUpgrade actions share the SAME core parameter
-//     set: OverwriteUnmanagedCustomizations (bool, required),
-//     PublishWorkflows (bool, required), CustomizationFile (base64 binary,
-//     required), ImportJobId (GUID, required — CLIENT-GENERATED, not
-//     server-returned), SkipProductUpdateDependencies (bool, optional).
-//     ImportSolution additionally exposes HoldingSolution (bool) +
-//     StageAndUpgrade (bool) parameters; StageAndUpgrade (the action) can be
-//     invoked directly with CustomizationFile populated for a single-call
-//     stage+upgrade (no separate StageSolution round-trip is required).
-//   - This importer maps the PS script's own $useStageAndUpgrade branch
-//     (Import-ManagedSolution: existing solution + Auto/Upgrade mode ->
-//     `--stage-and-upgrade`; else plain import) onto: existing solution ->
-//     call the `StageAndUpgrade` action; absent solution -> call the
-//     `ImportSolution` action (HoldingSolution=false). This literally
-//     satisfies the POML's "ImportSolution + StageAndUpgrade" framing as TWO
-//     distinct action calls on the two distinct PS branches, rather than
-//     ImportSolution's own StageAndUpgrade=true parameter (functionally
-//     equivalent, but the two-action mapping is a more faithful 1:1 port of
-//     Import-ManagedSolution's own if/else).
-//   - ASYNC-OPERATION POLLING CONTRACT — DEVIATION FROM THE DISPATCH CONTEXT'S
-//     "poll /asyncoperations({id}) until statecode 0/3" framing, DOCUMENTED
-//     per Wave G-2..G-4 discipline (see task 140's BapRestEnvironmentCreator
-//     header for the precedent of documenting a ground-truthed deviation
-//     rather than silently complying with a wrong assumption): this importer
-//     polls `/api/data/v9.2/importjobs({ImportJobId})` using the SAME
-//     client-generated ImportJobId GUID passed in the action request body,
-//     NOT `/asyncoperations({AsyncOperationId})`. Rationale: ImportJobId is
-//     deterministic and known BEFORE the POST is even sent (we generate it),
-//     so polling importjobs requires no Location-header parsing or
-//     AsyncOperationId discovery from the POST response — Microsoft's own
-//     SDK-level CheckImportStatus sample (learn.microsoft.com
-//     /power-platform/alm/solution-async) polls asyncoperation.statecode==3
-//     PLUS separately reads importjobs by the SAME ImportJobKey for the
-//     detailed result; this importer folds both into a single importjobs
-//     poll by treating `completedon` (non-null) as the terminal signal —
-//     importjobs.completedon is populated exactly when statecode reaches 3
-//     (Completed), so this is a documented simplification, not a different
-//     terminal-state definition. statecode 0 (Ready) referenced in the
-//     dispatch context is Dataverse's PRE-RUN state, not a terminal one —
-//     the dispatch context's framing conflated the two; this header
-//     documents the correction for future auditors.
+//   - ImportSolutionAsync / StageAndUpgradeAsync (T218b review, verified against
+//     learn.microsoft.com 2026-10-07) take OverwriteUnmanagedCustomizations,
+//     PublishWorkflows, CustomizationFile, ImportJobId (CLIENT-GENERATED) and
+//     SkipProductUpdateDependencies; ImportSolutionAsync also HoldingSolution.
+//     Both return { AsyncOperationId, ImportJobKey } at once. The synchronous
+//     ImportSolution / StageAndUpgrade actions used before held the HTTP request
+//     for the whole import and outlived the client timeout on a package this size.
+//   - Absent, or an older UNMANAGED package → ImportSolutionAsync (an unmanaged
+//     package has no holding-solution mechanism; its update overwrites the
+//     components). Older MANAGED package → StageAndUpgradeAsync.
+//   - COMPLETION: the importer polls `asyncoperations({AsyncOperationId})` until
+//     statecode 3 (Completed); statuscode 30 = Succeeded, 31 = Failed, 32 =
+//     Canceled (Microsoft's documented asynchronous-import pattern,
+//     /power-platform/alm/solution-async). It then reads
+//     `importjobs({ImportJobId}).data` for the result detail. Throttling (429),
+//     5xx, an expired token (401 — a fresh token is requested for every poll),
+//     a not-yet-visible row (404) and transport errors are retried until
+//     ImportTimeout; only a completed operation that failed counts as a failure
+//     Dataverse REPORTED (and only that, for a managed upgrade, is PartialImport).
 //   - importjobs.data is an XML text field (Format=Text, MaxLength
 //     1,073,741,823) containing solution-import result nodes. Exact schema
 //     is not published in a single canonical Microsoft Learn reference page;
@@ -95,7 +65,7 @@
 // pattern H7's DataverseWebApiEnvVarValuesWriter uses). Token audience is the
 // target Dataverse env's origin + `/.default` (Dataverse Web API convention,
 // parity with DataverseWebApiHealthProbe / DataverseWebApiEnvVarValuesWriter).
-// Blob-artifact resolution (fetching the 9 solution ZIPs from Spaarke's OWN
+// Blob-artifact resolution (fetching the package ZIP from Spaarke's OWN
 // provisioning-artifacts storage account) uses a SEPARATE, unrelated
 // credential — the shared L2 UAMI TokenCredential singleton (ADR-028
 // MI-outbound), injected via the pre-constructed BlobContainerClient (parity
@@ -137,11 +107,9 @@ using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
-/// <see cref="ISolutionImporter"/> implementation that imports the 8
-/// authoritative Spaarke managed solutions via Dataverse Web API
-/// <c>ImportSolution</c>/<c>StageAndUpgrade</c> actions + <c>importjobs</c>
-/// polling, resolving each solution ZIP from a versioned blob-artifact
-/// manifest (never a local filesystem path).
+/// <see cref="ISolutionImporter"/> implementation that imports the SpaarkeMaster package (managed or unmanaged, per
+/// run) via Dataverse Web API <c>ImportSolutionAsync</c>/<c>StageAndUpgradeAsync</c> + <c>asyncoperations</c> polling,
+/// resolving the ZIP from the versioned blob-artifact manifest (never a local filesystem path).
 /// </summary>
 public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 {
@@ -157,12 +125,23 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     /// </summary>
     public const string HttpClientName = "H6.DataverseWebApiSolutionImporter";
 
+    /// <summary><c>asyncoperation.statecode</c> Completed.</summary>
+    private const int AsyncOperationCompleted = 3;
+
+    /// <summary><c>asyncoperation.statuscode</c> Succeeded (31 = Failed, 32 = Canceled).</summary>
+    private const int AsyncOperationSucceeded = 30;
+
+    /// <summary>Manifest property naming the managed package blob (T218b).</summary>
+    internal const string ManagedBlobProperty = "managedBlobName";
+
+    /// <summary>Manifest property naming the unmanaged package blob (T218b).</summary>
+    internal const string UnmanagedBlobProperty = "unmanagedBlobName";
+
     private const string ODataVersion = "4.0";
     private const int DiagnosticTailBudget = 800;
 
     private readonly HttpClient _httpClient;
     private readonly BlobContainerClient _artifactsContainer;
-    private readonly ISolutionCatalog _catalog;
     private readonly SolutionImportOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
@@ -182,14 +161,12 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     public DataverseWebApiSolutionImporter(
         HttpClient httpClient,
         BlobContainerClient artifactsContainer,
-        ISolutionCatalog catalog,
         IOptions<SolutionImportOptions> options,
         WorkerDataverseCredentialFactory credentialFactory,
         ILogger<DataverseWebApiSolutionImporter> logger)
         : this(
             httpClient,
             artifactsContainer,
-            catalog,
             options,
             logger,
             TimeProvider.System,
@@ -215,7 +192,6 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     internal DataverseWebApiSolutionImporter(
         HttpClient httpClient,
         BlobContainerClient artifactsContainer,
-        ISolutionCatalog catalog,
         IOptions<SolutionImportOptions> options,
         ILogger<DataverseWebApiSolutionImporter> logger,
         TimeProvider timeProvider,
@@ -223,14 +199,12 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     {
         ArgumentNullException.ThrowIfNull(httpClient);
         ArgumentNullException.ThrowIfNull(artifactsContainer);
-        ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(credentialFactory);
         _httpClient = httpClient;
         _artifactsContainer = artifactsContainer;
-        _catalog = catalog;
         _options = options.Value;
         _logger = logger;
         _timeProvider = timeProvider;
@@ -257,32 +231,45 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 $"Target Dataverse URL '{request.TargetDataverseUrl}' is not a valid absolute URI.");
         }
 
-        // (0) Resolve the artifact manifest ONCE up front — a manifest that
-        // cannot be read/parsed is a hard MissingSolutionZips failure (parity
-        // with the PS script's "no ZIPs found -> exit 1" hard stop).
-        Dictionary<string, SolutionArtifactManifestEntry> manifest;
+        var packageType = PackageTypeName(request.Managed);
+
+        // (0) The published package entry, read ONCE up front. No manifest, no SpaarkeMaster entry, or no blob for the
+        // requested type is a hard MissingSolutionZips failure — H6 never falls back to the other type or a local path.
+        PackageManifestEntry entry;
         try
         {
-            manifest = await LoadArtifactManifestAsync(cancellationToken).ConfigureAwait(false);
+            entry = await LoadPackageEntryAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (RequestFailedException ex) when (ex.Status == 404)
         {
             return new SolutionImportOutcome.Failure(
                 SolutionImportFailureKind.MissingSolutionZips,
                 $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' not found in the " +
-                "'provisioning-artifacts' blob container. H6 refuses to fall back to a local filesystem path — " +
-                "the 9 solution ZIPs must be published as versioned blob artifacts (DS-1b §1 H6 invariant).");
+                "'provisioning-artifacts' blob container. Publish the package (publish-dataverse-solutions-manifest.yml) " +
+                "and resume — H6 never reads a local path.");
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
             return new SolutionImportOutcome.Failure(
                 SolutionImportFailureKind.MissingSolutionZips,
-                $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' could not be parsed: " +
+                $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' could not be used: " +
                 $"{ex.GetType().Name}: {ex.Message}.");
+        }
+
+        var blobName = request.Managed ? entry.ManagedBlobName : entry.UnmanagedBlobName;
+        if (string.IsNullOrWhiteSpace(blobName))
+        {
+            return new SolutionImportOutcome.Failure(
+                SolutionImportFailureKind.MissingSolutionZips,
+                $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' has no {packageType} blob for " +
+                $"'{SpaarkePackage.SolutionUniqueName}' ({(request.Managed ? ManagedBlobProperty : UnmanagedBlobProperty)}). " +
+                "H6 never falls back to the other package type (ADR-027 §3).");
         }
 
         var scope = $"{new Uri(envUri, "/")}".TrimEnd('/') + "/.default";
 
+        var tokenContext = new TokenRequestContext(new[] { scope });
+        TokenCredential credential;
         AccessToken token;
         try
         {
@@ -290,10 +277,9 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
             // fake in tests) can itself throw on an exhausted chain — classify
             // as AuthFailure (→ §4C Resumable at the handler), same boundary
             // as a failed token acquisition.
-            var credential = _credentialFactory(
+            credential = _credentialFactory(
                 request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
-            token = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
-                .ConfigureAwait(false);
+            token = await credential.GetTokenAsync(tokenContext, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -308,199 +294,233 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 
         var deadline = _timeProvider.GetUtcNow() + _options.ImportTimeout;
         var bearerToken = token.Token;
+        // The poll can outlive one token (up to ImportTimeout); each poll asks the credential again (it caches).
+        async Task<string> FreshTokenAsync(CancellationToken ct)
+            => (await credential.GetTokenAsync(tokenContext, ct).ConfigureAwait(false)).Token;
 
-        // (1) Existing-solutions snapshot (mirrors PS Get-ExistingSolutions —
-        // catch-and-proceed-with-empty-dict on failure, same as the script).
-        var existing = await GetExistingSolutionsAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false);
-
-        var anyImportedThisRun = false;
-
-        foreach (var tier in _catalog.Solutions.GroupBy(s => s.Tier).OrderBy(g => g.Key))
+        // (1) What the environment holds now. A failed read is a failure, not "fresh install": guessing would bypass
+        // the type-switch and downgrade refusals below.
+        var installed = await GetInstalledPackageAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false);
+        if (installed is InstalledPackage.Unknown unknown)
         {
-            foreach (var solution in tier)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (!manifest.TryGetValue(solution.SolutionUniqueName, out var artifactEntry))
-                {
-                    return new SolutionImportOutcome.Failure(
-                        SolutionImportFailureKind.MissingSolutionZips,
-                        $"Solution artifact manifest does not contain an entry for '{solution.SolutionUniqueName}'.");
-                }
-
-                byte[] zipBytes;
-                try
-                {
-                    var blob = _artifactsContainer.GetBlobClient(artifactEntry.BlobName);
-                    var download = await blob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
-                    zipBytes = download.Value.Content.ToArray();
-                }
-                catch (RequestFailedException ex) when (ex.Status == 404)
-                {
-                    return new SolutionImportOutcome.Failure(
-                        SolutionImportFailureKind.MissingSolutionZips,
-                        $"Artifact blob '{artifactEntry.BlobName}' for solution '{solution.SolutionUniqueName}' " +
-                        "not found (HTTP 404).");
-                }
-
-                var expectedVersion = artifactEntry.Version ?? TryReadSolutionVersionFromZip(zipBytes);
-                var isUpgrade = existing.TryGetValue(solution.SolutionUniqueName, out var installedVersion);
-
-                // "Already at version" skip — acceptance criterion b parity.
-                if (isUpgrade && expectedVersion is not null
-                    && string.Equals(installedVersion, expectedVersion, StringComparison.Ordinal))
-                {
-                    _logger.LogInformation(
-                        "H6 solution {Solution} already at v{Version} — skipping import call.",
-                        solution.SolutionUniqueName, expectedVersion);
-                    continue;
-                }
-
-                var importJobId = Guid.NewGuid();
-                var invokeResult = await InvokeImportActionAsync(
-                    envUri, bearerToken, solution, zipBytes, isUpgrade, importJobId, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (invokeResult is ActionInvokeResult.Failed invokeFailed)
-                {
-                    var kind = anyImportedThisRun ? SolutionImportFailureKind.PartialImport : invokeFailed.Kind;
-                    return new SolutionImportOutcome.Failure(kind, invokeFailed.Diagnostic);
-                }
-
-                var pollResult = await PollImportJobAsync(
-                    envUri, bearerToken, importJobId, solution.SolutionUniqueName, deadline, cancellationToken)
-                    .ConfigureAwait(false);
-
-                if (pollResult is ImportJobPollResult.Failed pollFailed)
-                {
-                    // Timeout is never promoted to PartialImport — a timeout
-                    // means "no confirmed failure, resume safely" per
-                    // SolutionImportRejectionCodes.ImportTimeout's own doc
-                    // comment; only genuine reported failures get promoted.
-                    var kind = pollFailed.Kind != SolutionImportFailureKind.Timeout && anyImportedThisRun
-                        ? SolutionImportFailureKind.PartialImport
-                        : pollFailed.Kind;
-                    return new SolutionImportOutcome.Failure(kind, pollFailed.Diagnostic);
-                }
-
-                anyImportedThisRun = true;
-            }
-
-            // Per-tier version-verification gate (mirrors PS Test-TierImport)
-            // — refresh the existing-solutions snapshot + confirm every
-            // solution in the just-completed tier is now present before
-            // proceeding to the next tier.
-            var refreshed = await GetExistingSolutionsAsync(envUri, bearerToken, cancellationToken).ConfigureAwait(false);
-            foreach (var solution in tier)
-            {
-                if (!refreshed.ContainsKey(solution.SolutionUniqueName))
-                {
-                    return new SolutionImportOutcome.Failure(
-                        SolutionImportFailureKind.PartialImport,
-                        $"Tier {tier.Key} solution '{solution.SolutionUniqueName}' not found in the post-import " +
-                        "solutions list — import reported complete but the per-tier verification gate disagrees. " +
-                        "Aborting BEFORE attempting subsequent tiers (Package Deployer dependency-order guarantee).");
-                }
-            }
-            existing = refreshed;
+            return new SolutionImportOutcome.Failure(unknown.Kind, unknown.Diagnostic);
         }
 
-        return new SolutionImportOutcome.Success();
+        // (2) The package itself.
+        byte[] zipBytes;
+        try
+        {
+            var blob = _artifactsContainer.GetBlobClient(blobName);
+            var download = await blob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
+            zipBytes = download.Value.Content.ToArray();
+        }
+        catch (RequestFailedException ex) when (ex.Status == 404)
+        {
+            return new SolutionImportOutcome.Failure(
+                SolutionImportFailureKind.MissingSolutionZips,
+                $"Artifact blob '{blobName}' ({packageType} {SpaarkePackage.SolutionUniqueName}) not found (HTTP 404).");
+        }
+
+        var packageVersion = entry.Version ?? TryReadSolutionVersionFromZip(zipBytes);
+        if (string.IsNullOrWhiteSpace(packageVersion) || SpaarkePackage.CompareVersions(packageVersion, packageVersion) is null)
+        {
+            return new SolutionImportOutcome.Failure(
+                SolutionImportFailureKind.MissingSolutionZips,
+                $"The package version is unknown or not a version ('{packageVersion}'): the manifest entry's 'version' or " +
+                $"'{blobName}''s solution.xml must be major.minor[.build[.revision]]. H6 cannot rule out a downgrade without it.");
+        }
+
+        // (3) Type-switch and downgrade refusals; an equal version is already done.
+        var stageAndUpgrade = false;
+        if (installed is InstalledPackage.Present present)
+        {
+            if (present.IsManaged != request.Managed)
+            {
+                return new SolutionImportOutcome.Failure(
+                    SolutionImportFailureKind.PackageTypeMismatch,
+                    $"The environment holds {SpaarkePackage.SolutionUniqueName} {present.Version} as " +
+                    $"{PackageTypeName(present.IsManaged)}; the run asks for {packageType}. H6 never switches an " +
+                    "environment's package type (ADR-027 §3, amended 2026-10-07): re-run with solutionPackageType = " +
+                    $"{PackageTypeName(present.IsManaged)}, or convert the environment first (owner-approved, backed up).");
+            }
+
+            var comparison = SpaarkePackage.CompareVersions(present.Version, packageVersion);
+            if (comparison is null)
+            {
+                return new SolutionImportOutcome.Failure(
+                    SolutionImportFailureKind.UnknownInvocationFailure,
+                    $"Cannot compare the installed {SpaarkePackage.SolutionUniqueName} version '{present.Version}' with " +
+                    $"the package version '{packageVersion}'.");
+            }
+            if (comparison > 0)
+            {
+                return new SolutionImportOutcome.Failure(
+                    SolutionImportFailureKind.DowngradeRefused,
+                    $"The environment holds {SpaarkePackage.SolutionUniqueName} {present.Version}, newer than the " +
+                    $"published package {packageVersion}. H6 never downgrades — publish the right package and resume.");
+            }
+            if (comparison == 0)
+            {
+                _logger.LogInformation(
+                    "H6 {Solution} already at v{Version} ({PackageType}) — skipping import.",
+                    SpaarkePackage.SolutionUniqueName, packageVersion, packageType);
+                return new SolutionImportOutcome.Success(packageVersion);
+            }
+            // A managed upgrade stages a holding solution and applies it (StageAndUpgrade). An unmanaged package has
+            // no holding-solution mechanism: its update is a plain import that overwrites the components.
+            stageAndUpgrade = request.Managed;
+        }
+
+        // (4) ImportSolutionAsync (absent, or an older unmanaged package) or StageAndUpgradeAsync (older managed
+        //     package). The *Async actions return at once with an async operation; the synchronous actions would hold
+        //     the HTTP request for the whole import and outlive the client timeout on a package this size.
+        var importJobId = Guid.NewGuid();
+        var invokeResult = await InvokeImportActionAsync(
+            envUri, bearerToken, zipBytes, stageAndUpgrade, importJobId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (invokeResult is ActionInvokeResult.Failed invokeFailed)
+        {
+            // The POST was refused — nothing started, so never a partial state.
+            return new SolutionImportOutcome.Failure(invokeFailed.Kind, invokeFailed.Diagnostic);
+        }
+
+        var started = (ActionInvokeResult.Started)invokeResult;
+        var pollResult = await PollImportAsync(
+            envUri, FreshTokenAsync, started.AsyncOperationId, importJobId, deadline, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (pollResult is ImportPollResult.Failed pollFailed)
+        {
+            // Only a failure Dataverse REPORTED for a started StageAndUpgrade may leave the holding solution behind →
+            // PartialImport (QuarantineRequired). A timeout or an unreadable status is never promoted: no confirmed
+            // failure, resume is safe.
+            var kind = stageAndUpgrade && pollFailed.ReportedByDataverse
+                ? SolutionImportFailureKind.PartialImport
+                : pollFailed.Kind;
+            return new SolutionImportOutcome.Failure(kind, pollFailed.Diagnostic);
+        }
+
+        return new SolutionImportOutcome.Success(packageVersion);
     }
 
-    private async Task<Dictionary<string, SolutionArtifactManifestEntry>> LoadArtifactManifestAsync(
-        CancellationToken cancellationToken)
+    private async Task<PackageManifestEntry> LoadPackageEntryAsync(CancellationToken cancellationToken)
     {
         var manifestBlob = _artifactsContainer.GetBlobClient(_options.SolutionArtifactManifestBlobName);
         var response = await manifestBlob.DownloadContentAsync(cancellationToken).ConfigureAwait(false);
-        var json = response.Value.Content.ToString();
+        return ParsePackageEntry(response.Value.Content.ToString(), _options.SolutionArtifactManifestBlobName);
+    }
 
+    /// <summary>
+    /// Reads the SpaarkeMaster entry of the artifact manifest:
+    /// <c>{"solutions":{"SpaarkeMaster":{"version","managedBlobName","unmanagedBlobName"}}}</c> (T218b; written by
+    /// publish-dataverse-solutions-manifest.yml). Throws <see cref="InvalidOperationException"/> when the entry is
+    /// missing. Exposed <c>internal</c> for direct unit testing.
+    /// </summary>
+    internal static PackageManifestEntry ParsePackageEntry(string json, string manifestName)
+    {
         using var doc = JsonDocument.Parse(json);
         if (!doc.RootElement.TryGetProperty("solutions", out var solutionsElement)
             || solutionsElement.ValueKind != JsonValueKind.Object)
         {
+            throw new InvalidOperationException($"Manifest '{manifestName}' is missing a 'solutions' object.");
+        }
+        if (!solutionsElement.TryGetProperty(SpaarkePackage.SolutionUniqueName, out var package)
+            || package.ValueKind != JsonValueKind.Object)
+        {
             throw new InvalidOperationException(
-                $"Manifest '{_options.SolutionArtifactManifestBlobName}' is missing a 'solutions' object.");
+                $"Manifest '{manifestName}' has no '{SpaarkePackage.SolutionUniqueName}' entry — the published artifact " +
+                "predates the one-package format (T218).");
         }
 
-        var result = new Dictionary<string, SolutionArtifactManifestEntry>(StringComparer.Ordinal);
-        foreach (var property in solutionsElement.EnumerateObject())
-        {
-            if (property.Value.TryGetProperty("blobName", out var blobNameEl)
-                && blobNameEl.ValueKind == JsonValueKind.String
-                && !string.IsNullOrWhiteSpace(blobNameEl.GetString()))
-            {
-                var version = property.Value.TryGetProperty("version", out var versionEl)
-                    && versionEl.ValueKind == JsonValueKind.String
-                        ? versionEl.GetString()
-                        : null;
-                result[property.Name] = new SolutionArtifactManifestEntry(blobNameEl.GetString()!, version);
-            }
-        }
-        return result;
+        return new PackageManifestEntry(
+            Version: ReadString(package, "version"),
+            ManagedBlobName: ReadString(package, ManagedBlobProperty),
+            UnmanagedBlobName: ReadString(package, UnmanagedBlobProperty));
+
+        static string? ReadString(JsonElement element, string name)
+            => element.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String
+               && !string.IsNullOrWhiteSpace(value.GetString())
+                ? value.GetString()!.Trim()
+                : null;
     }
 
-    private async Task<Dictionary<string, string>> GetExistingSolutionsAsync(
+    private async Task<InstalledPackage> GetInstalledPackageAsync(
         Uri envUri, string bearerToken, CancellationToken cancellationToken)
     {
-        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var uri = new Uri(envUri, "/api/data/v9.2/solutions?$select=uniquename,version");
+        var uri = new Uri(envUri,
+            $"/api/data/v9.2/solutions?$select=uniquename,version,ismanaged&$filter=uniquename eq '{SpaarkePackage.SolutionUniqueName}'");
         try
         {
             using var request = BuildRequest(HttpMethod.Get, uri, bearerToken);
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
-                _logger.LogWarning(
-                    "H6 existing-solutions query returned {StatusCode} — proceeding with fresh-import assumption.",
-                    (int)response.StatusCode);
-                return result;
+                return new InstalledPackage.Unknown(
+                    ClassifyHttpFailure(response.StatusCode, bodyText),
+                    $"Reading the installed {SpaarkePackage.SolutionUniqueName} returned {(int)response.StatusCode}: " +
+                    $"{Truncate(bodyText, DiagnosticTailBudget)}. Nothing was imported.");
             }
-            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            using var doc = JsonDocument.Parse(bodyText);
-            if (doc.RootElement.TryGetProperty("value", out var array) && array.ValueKind == JsonValueKind.Array)
+            return ParseInstalledPackage(bodyText);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException
+                                   || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            return new InstalledPackage.Unknown(
+                SolutionImportFailureKind.UnknownInvocationFailure,
+                $"Reading the installed {SpaarkePackage.SolutionUniqueName} failed: {ex.GetType().Name}: {ex.Message}. " +
+                "Nothing was imported.");
+        }
+    }
+
+    /// <summary>
+    /// Parses the filtered <c>solutions</c> response into what the environment holds. Exposed <c>internal</c> for
+    /// direct unit testing.
+    /// </summary>
+    internal static InstalledPackage ParseInstalledPackage(string bodyText)
+    {
+        using var doc = JsonDocument.Parse(bodyText);
+        if (doc.RootElement.TryGetProperty("value", out var array) && array.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var element in array.EnumerateArray())
             {
-                foreach (var element in array.EnumerateArray())
+                if (element.TryGetProperty("uniquename", out var un) && un.ValueKind == JsonValueKind.String
+                    && string.Equals(un.GetString(), SpaarkePackage.SolutionUniqueName, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (element.TryGetProperty("uniquename", out var un) && un.ValueKind == JsonValueKind.String
-                        && element.TryGetProperty("version", out var ver) && ver.ValueKind == JsonValueKind.String)
-                    {
-                        result[un.GetString()!] = ver.GetString()!;
-                    }
+                    var version = element.TryGetProperty("version", out var ver) && ver.ValueKind == JsonValueKind.String
+                        ? ver.GetString()!
+                        : string.Empty;
+                    var isManaged = element.TryGetProperty("ismanaged", out var managed)
+                                    && managed.ValueKind == JsonValueKind.True;
+                    return new InstalledPackage.Present(version, isManaged);
                 }
             }
         }
-        catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
-        {
-            // Parity with the PS script's Get-ExistingSolutions catch-and-proceed.
-            _logger.LogWarning(ex, "H6 existing-solutions query failed — proceeding with fresh-import assumption.");
-        }
-        return result;
+        return new InstalledPackage.Absent();
     }
 
     private async Task<ActionInvokeResult> InvokeImportActionAsync(
         Uri envUri,
         string bearerToken,
-        CanonicalSolutionEntry solution,
         byte[] zipBytes,
-        bool isUpgrade,
+        bool stageAndUpgrade,
         Guid importJobId,
         CancellationToken cancellationToken)
     {
-        // Maps the PS script's Import-ManagedSolution branch exactly:
-        // existing solution -> StageAndUpgrade action; absent -> ImportSolution.
-        var actionName = isUpgrade ? "StageAndUpgrade" : "ImportSolution";
+        var actionName = stageAndUpgrade ? "StageAndUpgradeAsync" : "ImportSolutionAsync";
         var actionUri = new Uri(envUri, $"/api/data/v9.2/{actionName}");
+        var solutionName = SpaarkePackage.SolutionUniqueName;
 
         var body = new Dictionary<string, object?>
         {
-            ["OverwriteUnmanagedCustomizations"] = true, // PS --force-overwrite
-            ["PublishWorkflows"] = true,                 // activates the solution workflows (not a publish)
+            ["OverwriteUnmanagedCustomizations"] = true,
+            ["PublishWorkflows"] = true,
             ["CustomizationFile"] = Convert.ToBase64String(zipBytes),
             ["ImportJobId"] = importJobId,
             ["SkipProductUpdateDependencies"] = false,
         };
-        if (!isUpgrade)
+        if (!stageAndUpgrade)
         {
             body["HoldingSolution"] = false;
         }
@@ -517,41 +537,70 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
         {
             return new ActionInvokeResult.Failed(
                 SolutionImportFailureKind.Timeout,
-                $"{actionName} POST for '{solution.SolutionUniqueName}' timed out after {_options.DataverseWebApiRequestTimeout}.");
+                $"{actionName} POST for '{solutionName}' timed out after {_options.DataverseWebApiRequestTimeout}.");
         }
         catch (HttpRequestException ex)
         {
             return new ActionInvokeResult.Failed(
                 SolutionImportFailureKind.UnknownInvocationFailure,
-                $"{actionName} POST for '{solution.SolutionUniqueName}' infrastructure error: {ex.Message}");
+                $"{actionName} POST for '{solutionName}' infrastructure error: {ex.Message}");
         }
 
         using (response)
         {
-            if (response.IsSuccessStatusCode || response.StatusCode == HttpStatusCode.Accepted)
+            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
             {
-                return new ActionInvokeResult.Started();
+                return new ActionInvokeResult.Failed(
+                    ClassifyHttpFailure(response.StatusCode, bodyText),
+                    $"{actionName} POST for '{solutionName}' failed: {(int)response.StatusCode} " +
+                    $"{response.ReasonPhrase}. Body: {Truncate(bodyText, DiagnosticTailBudget)}");
             }
 
-            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var kind = ClassifyHttpFailure(response.StatusCode, bodyText);
-            return new ActionInvokeResult.Failed(
-                kind,
-                $"{actionName} POST for '{solution.SolutionUniqueName}' failed: {(int)response.StatusCode} " +
-                $"{response.ReasonPhrase}. Body: {Truncate(bodyText, DiagnosticTailBudget)}");
+            var asyncOperationId = TryReadAsyncOperationId(bodyText);
+            return asyncOperationId is { } id
+                ? new ActionInvokeResult.Started(id)
+                : new ActionInvokeResult.Failed(
+                    SolutionImportFailureKind.UnknownInvocationFailure,
+                    $"{actionName} for '{solutionName}' returned no AsyncOperationId: {Truncate(bodyText, DiagnosticTailBudget)}");
         }
     }
 
-    private async Task<ImportJobPollResult> PollImportJobAsync(
+    /// <summary>Reads <c>AsyncOperationId</c> from an *Async action response. Exposed <c>internal</c> for unit testing.</summary>
+    internal static Guid? TryReadAsyncOperationId(string bodyText)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(bodyText);
+            return doc.RootElement.TryGetProperty("AsyncOperationId", out var idEl)
+                   && idEl.ValueKind == JsonValueKind.String
+                   && Guid.TryParse(idEl.GetString(), out var id)
+                ? id
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Polls the async operation until it completes (statecode 3), then reads the import job for the result detail —
+    /// Microsoft's documented pattern for asynchronous solution import. Throttling (429), server errors (5xx), an
+    /// expired token (401), a not-yet-visible row (404) and transport errors are retried until
+    /// <paramref name="deadline"/>; only a completed operation that failed is <see cref="ImportPollResult.Failed.ReportedByDataverse"/>.
+    /// </summary>
+    private async Task<ImportPollResult> PollImportAsync(
         Uri envUri,
-        string bearerToken,
+        Func<CancellationToken, Task<string>> freshToken,
+        Guid asyncOperationId,
         Guid importJobId,
-        string solutionUniqueName,
         DateTimeOffset deadline,
         CancellationToken cancellationToken)
     {
-        var pollUri = new Uri(envUri,
-            $"/api/data/v9.2/importjobs({importJobId:D})?$select=importjobid,progress,completedon,data,solutionname");
+        var solutionName = SpaarkePackage.SolutionUniqueName;
+        var operationUri = new Uri(envUri,
+            $"/api/data/v9.2/asyncoperations({asyncOperationId:D})?$select=statecode,statuscode,message");
 
         while (true)
         {
@@ -559,7 +608,8 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
 
             try
             {
-                using var request = BuildRequest(HttpMethod.Get, pollUri, bearerToken);
+                var bearerToken = await freshToken(cancellationToken).ConfigureAwait(false);
+                using var request = BuildRequest(HttpMethod.Get, operationUri, bearerToken);
                 using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
                 var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
@@ -567,59 +617,68 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 {
                     using var doc = JsonDocument.Parse(bodyText);
                     var root = doc.RootElement;
-                    var hasCompletedOn = root.TryGetProperty("completedon", out var completedEl)
-                        && completedEl.ValueKind != JsonValueKind.Null;
-
-                    if (hasCompletedOn)
+                    var stateCode = ReadInt(root, "statecode");
+                    if (stateCode == AsyncOperationCompleted)
                     {
-                        var data = root.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.String
-                            ? dataEl.GetString()
+                        var statusCode = ReadInt(root, "statuscode");
+                        var message = root.TryGetProperty("message", out var m) && m.ValueKind == JsonValueKind.String
+                            ? m.GetString()
                             : null;
-                        var (success, diagnostic) = EvaluateImportJobData(data);
-                        if (success)
+                        var data = await TryReadImportJobDataAsync(envUri, bearerToken, importJobId, cancellationToken)
+                            .ConfigureAwait(false);
+                        var (jobOk, jobDiagnostic) = EvaluateImportJobData(data);
+
+                        if (statusCode == AsyncOperationSucceeded && jobOk)
                         {
-                            if (!string.IsNullOrEmpty(diagnostic))
+                            if (!string.IsNullOrEmpty(jobDiagnostic))
                             {
-                                _logger.LogInformation(
-                                    "H6 importjob for {Solution} completed: {Diagnostic}",
-                                    solutionUniqueName, diagnostic);
+                                _logger.LogInformation("H6 import of {Solution} completed: {Diagnostic}", solutionName, jobDiagnostic);
                             }
-                            return new ImportJobPollResult.Succeeded();
+                            return new ImportPollResult.Succeeded();
                         }
-                        return new ImportJobPollResult.Failed(
+
+                        return new ImportPollResult.Failed(
                             SolutionImportFailureKind.UnknownInvocationFailure,
-                            $"ImportJob for '{solutionUniqueName}' completed but reported failure: {diagnostic}");
+                            $"Import of '{solutionName}' completed with asyncoperation statuscode {statusCode}" +
+                            (string.IsNullOrWhiteSpace(message) ? string.Empty : $" ({Truncate(message, DiagnosticTailBudget)})") +
+                            $"; import job: {(data is null ? "no import job detail available" : jobDiagnostic)}",
+                            ReportedByDataverse: true);
                     }
-                    // Else still in progress — fall through to the delay below.
+                    // Not completed yet — wait below.
                 }
-                else if (response.StatusCode != HttpStatusCode.NotFound)
+                else if (!IsTransientPollStatus(response.StatusCode))
                 {
-                    // NotFound is tolerated (Dataverse may not have created
-                    // the importjobs row yet at the very start) — any OTHER
-                    // non-success status is a genuine classified failure.
-                    var kind = ClassifyHttpFailure(response.StatusCode, bodyText);
-                    return new ImportJobPollResult.Failed(
-                        kind,
-                        $"ImportJob poll for '{solutionUniqueName}' returned {(int)response.StatusCode}: " +
-                        $"{Truncate(bodyText, DiagnosticTailBudget)}");
+                    return new ImportPollResult.Failed(
+                        ClassifyHttpFailure(response.StatusCode, bodyText),
+                        $"Async-operation poll for '{solutionName}' returned {(int)response.StatusCode}: " +
+                        $"{Truncate(bodyText, DiagnosticTailBudget)}",
+                        ReportedByDataverse: false);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "H6 async-operation poll for {Solution} returned {StatusCode} — retrying.",
+                        solutionName, (int)response.StatusCode);
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException)
+            catch (Exception ex) when (ex is HttpRequestException or JsonException or TaskCanceledException
+                                       or Azure.Identity.AuthenticationFailedException)
             {
-                _logger.LogWarning(ex, "H6 importjob poll error for solution={Solution} — retrying.", solutionUniqueName);
+                _logger.LogWarning(ex, "H6 async-operation poll error for {Solution} — retrying.", solutionName);
             }
 
             var now = _timeProvider.GetUtcNow();
             if (now >= deadline)
             {
-                return new ImportJobPollResult.Failed(
+                return new ImportPollResult.Failed(
                     SolutionImportFailureKind.Timeout,
-                    $"ImportJob polling for '{solutionUniqueName}' did not complete within the configured " +
-                    $"ImportTimeout window (deadline {deadline:O}).");
+                    $"Import of '{solutionName}' did not complete within the configured ImportTimeout window " +
+                    $"(deadline {deadline:O}); async operation {asyncOperationId:D}.",
+                    ReportedByDataverse: false);
             }
 
             var remaining = deadline - now;
@@ -630,6 +689,44 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
             }
         }
     }
+
+    /// <summary>Import-job result XML (best effort — the async operation is the completion signal).</summary>
+    private async Task<string?> TryReadImportJobDataAsync(
+        Uri envUri, string bearerToken, Guid importJobId, CancellationToken cancellationToken)
+    {
+        var uri = new Uri(envUri, $"/api/data/v9.2/importjobs({importJobId:D})?$select=data");
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Get, uri, bearerToken);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+            var bodyText = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(bodyText);
+            return doc.RootElement.TryGetProperty("data", out var dataEl) && dataEl.ValueKind == JsonValueKind.String
+                ? dataEl.GetString()
+                : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException
+                                   || (ex is TaskCanceledException && !cancellationToken.IsCancellationRequested))
+        {
+            _logger.LogWarning(ex, "H6 import-job detail read failed for {ImportJobId}.", importJobId);
+            return null;
+        }
+    }
+
+    /// <summary>Poll statuses that are retried until the deadline. Exposed <c>internal</c> for unit testing.</summary>
+    internal static bool IsTransientPollStatus(HttpStatusCode statusCode)
+        => statusCode is HttpStatusCode.NotFound or HttpStatusCode.Unauthorized or HttpStatusCode.RequestTimeout
+           || (int)statusCode == 429
+           || (int)statusCode >= 500;
+
+    private static int? ReadInt(JsonElement root, string name)
+        => root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.Number && el.TryGetInt32(out var v)
+            ? v
+            : null;
 
     /// <summary>
     /// Parses <c>importjobs.data</c> (an XML text field — see file header for
@@ -753,19 +850,33 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     private static string Truncate(string s, int max)
         => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
 
-    private sealed record SolutionArtifactManifestEntry(string BlobName, string? Version);
+    private static string PackageTypeName(bool managed) => managed ? "managed" : "unmanaged";
+
+    /// <summary>The SpaarkeMaster entry of the artifact manifest (T218b). Any field may be absent.</summary>
+    internal sealed record PackageManifestEntry(string? Version, string? ManagedBlobName, string? UnmanagedBlobName);
+
+    /// <summary>What the target environment holds before the import.</summary>
+    internal abstract record InstalledPackage
+    {
+        private InstalledPackage() { }
+        public sealed record Absent : InstalledPackage;
+        public sealed record Present(string Version, bool IsManaged) : InstalledPackage;
+        public sealed record Unknown(SolutionImportFailureKind Kind, string Diagnostic) : InstalledPackage;
+    }
 
     private abstract record ActionInvokeResult
     {
         private ActionInvokeResult() { }
-        public sealed record Started : ActionInvokeResult;
+        public sealed record Started(Guid AsyncOperationId) : ActionInvokeResult;
         public sealed record Failed(SolutionImportFailureKind Kind, string Diagnostic) : ActionInvokeResult;
     }
 
-    private abstract record ImportJobPollResult
+    private abstract record ImportPollResult
     {
-        private ImportJobPollResult() { }
-        public sealed record Succeeded : ImportJobPollResult;
-        public sealed record Failed(SolutionImportFailureKind Kind, string Diagnostic) : ImportJobPollResult;
+        private ImportPollResult() { }
+        public sealed record Succeeded : ImportPollResult;
+
+        /// <param name="ReportedByDataverse">The async operation completed and reported the failure (not a timeout or an unreadable status).</param>
+        public sealed record Failed(SolutionImportFailureKind Kind, string Diagnostic, bool ReportedByDataverse) : ImportPollResult;
     }
 }

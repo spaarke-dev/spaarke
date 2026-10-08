@@ -208,8 +208,8 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-027: no longer an exception (amended 2026-09-28 — one subscription per customer
-//     in both models). Model 2 deploys customer.bicep; Model 1 fails closed at H2a until
-//     tasks 225b + 228 (task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
+//     in both models). Both models deploy customer.bicep into the customer's own subscription (Model 1 since
+//     task 228; task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
 //   - ADR-028 UAMI outbound: ArmDeploymentRunner / ArmKeyVaultRefProbe /
 //     ArmWhatIfDriftDetector all use DefaultAzureCredential pinned to the L2
 //     UAMI (via the shared TokenCredential singleton) — no account keys, no
@@ -279,23 +279,6 @@ builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmResourceNameAvailabilityProbe>>();
     return new ArmResourceNameAvailabilityProbe(armClient, logger);
 });
-// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): OpenAI
-// deployment-set auto-recompose seam. Invoked only when
-// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose. LIVE
-// production impl (2026-08-27 follow-on to scaffold commit 74197c02e) —
-// reads Azure.ResourceManager.CognitiveServices regional usage via the
-// shared UAMI-pinned TokenCredential singleton, drops zero-TPM pinned
-// models, and returns a preserved-set + operator-visible note. Factory
-// lambda parity with the sibling ARM collaborator registrations above
-// (HANDLER-05 name-availability, upgrade-drift-detector) — one per-
-// registration probe-local ArmClient, no shared ArmClient DI singleton.
-builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer>(sp =>
-{
-    var credential = sp.GetRequiredService<TokenCredential>();
-    var armClient = new Azure.ResourceManager.ArmClient(credential);
-    var logger = sp.GetRequiredService<ILogger<ArmOpenAiDeploymentSetRecomposer>>();
-    return new ArmOpenAiDeploymentSetRecomposer(armClient, logger);
-});
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
@@ -339,7 +322,7 @@ builder.Services.AddScoped<H2bAiSearchIndexHandler>();
 // Task 046 / task 130: H3 Entra app-registration handler + two collaborator
 // seams. Task 130 (Wave G-3, xhigh, Option D hybrid) REPLACED the shell-out
 // scaffold (RegisterEntraAppRegScriptProvisioner + NullAdminConsentVerifier —
-// both RETIRED, kept on disk unregistered per their retirement banners) with
+// the script provisioner since deleted; NullAdminConsentVerifier kept unregistered) with
 // pure Microsoft.Graph 6.5.0 SDK ports: GraphAppRegistrationProvisioner
 // (Applications/ServicePrincipals/FederatedIdentityCredentials/AddPassword —
 // Model 2 ensure/create + FIC trusting the shared BFF UAMI per auth-v4 §3.1)
@@ -395,39 +378,20 @@ builder.Services.AddSingleton<IEntraAppRegProvisioner>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var options = sp.GetRequiredService<IOptions<EntraAppRegOptions>>();
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<GraphAppRegistrationProvisioner>>();
-    return new GraphAppRegistrationProvisioner(credential, options, logger);
+    return new GraphAppRegistrationProvisioner(credential, options, identity, logger);
 });
 builder.Services.AddSingleton<IAdminConsentVerifier, GraphAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
 
-// Task 048 / task 140: H5 Dataverse env creation handler + 2 collaborator
-// seams (IDataverseEnvCreator creates + polls via the BAP admin REST API —
-// see BapRestEnvironmentCreator.cs file header for the ground-truthed
-// endpoint/audience port of Provision-Customer.ps1 STEP 5/6, replacing the
-// retired `pac admin create-environment` shell-out (PacAdminDataverseEnvCreator
-// — kept on disk unregistered per Wave G-2/G-3 retirement convention);
-// IDataverseHealthProbe polls Web API `WhoAmI` via DefaultAzureCredential
-// until Reachable — implements the Pending→Verified gate for the long-
-// running Dataverse env-creation flow).
-builder.Services.Configure<DataverseEnvCreationOptions>(
-    builder.Configuration.GetSection(nameof(DataverseEnvCreationOptions)));
-// Typed HttpClient (BapRestEnvironmentCreator's public ctor takes HttpClient
-// directly, matching BapRestEnvironmentRateProbe's established pattern —
-// parity with the other raw-HttpClient BAP-REST collaborator in Handlers/**).
-builder.Services.AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>();
-// NAMED HttpClient (task 103 fix): DataverseWebApiHealthProbe takes
-// IHttpClientFactory + calls _httpClientFactory.CreateClient(HttpClientName)
-// itself — it is NOT a typed client (no HttpClient-accepting constructor).
-// The previous AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe>()
-// typed-client registration could never construct this type (ActivatorUtilities
-// requires an HttpClient ctor param for typed clients), so IDataverseHealthProbe
-// — and therefore H5DataverseEnvCreationHandler — was NOT resolvable via DI.
-// HandlerRegistrationCompletenessTests (task 103) surfaced this pre-existing
-// defect the first time anything actually built the real container down to H5.
+// H5 (T228): adopts the Dataverse environment the operator created — no creation seam. The WhoAmI probe uses a NAMED
+// HttpClient (task 103: its ctor takes IHttpClientFactory, which a typed AddHttpClient<I, T>() registration cannot satisfy).
+builder.Services.Configure<DataverseEnvAdoptionOptions>(
+    builder.Configuration.GetSection(nameof(DataverseEnvAdoptionOptions)));
 builder.Services.AddHttpClient(DataverseWebApiHealthProbe.HttpClientName);
 builder.Services.AddScoped<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
-builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
+builder.Services.AddScoped<H5DataverseEnvAdoptionHandler>();
 
 // Task 047 / task 125: H4 KV secrets-population handler + FOUR collaborator
 // seams. Task 125 (Wave G-2, Option D hybrid) replaced the three shell-out
@@ -618,45 +582,31 @@ builder.Services.AddScoped<H12aAiSeedChainHandler>();
 // cross-dependency; both handlers can fire post-H7.
 builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
 
-// Task 049 / task 141 (Wave G-4, Option D hybrid): H6 solution-import handler
-// + 3 collaborator seams. Task 141 replaced the two shell-out collaborators
-// (DeployDataverseSolutionsScriptImporter / PacCliSolutionVerifier — both
-// RETIRED, kept on disk unregistered per the Wave G-2/G-3/G-4 retirement
-// convention) with pure HttpClient ports: ISolutionImporter =
-// DataverseWebApiSolutionImporter (Dataverse Web API ImportSolution /
-// StageAndUpgrade actions + importjobs polling, resolving the 8 solution
-// ZIPs from a versioned blob-artifact manifest in the SAME
-// `provisioning-artifacts` container task 116/117/132 use — never a local
-// filesystem path); ISolutionVerifier = DataverseWebApiSolutionVerifier (a
-// trivial GET /api/data/v9.2/solutions?$select=uniquename,version,solutionid).
-// ISolutionCatalog = CanonicalSolutionCatalog is UNCHANGED (C#-side mirror of
-// Deploy-DataverseSolutions.ps1's $SolutionImportOrder per task 008 R5
-// binding) — it is now the RUNTIME ordering authority the new importer reads
-// directly (the PS script itself is no longer invoked; see
-// DataverseWebApiSolutionImporter.cs file header for the ordering-fidelity
-// rationale).
+// Task 049 / task 141 / T218b: H6 solution-import handler + 2 collaborator seams.
+// ISolutionImporter = DataverseWebApiSolutionImporter imports the ONE Spaarke
+// package, SpaarkeMaster (managed by default, unmanaged on explicit
+// instruction — ADR-027 §3 amended 2026-10-07), through the Dataverse Web API
+// (ImportSolutionAsync / StageAndUpgradeAsync + asyncoperations polling), resolving the ZIP
+// from the versioned blob-artifact manifest in the `provisioning-artifacts`
+// container (never a local path); it refuses a package-type switch and a
+// downgrade. ISolutionVerifier = DataverseWebApiSolutionVerifier (one GET of
+// the SpaarkeMaster row: present + ismanaged as requested + the imported version;
+// an unreadable environment is Unavailable → Resumable).
 //
-// ArmClient/BlobContainerClient pattern: the artifacts container is
-// constructed via a factory lambda reusing the shared UAMI-pinned
-// TokenCredential singleton (ADR-028 MI-outbound) — parity with H9's
-// ArtifactManifestVerifier/BlobArtifactDownloader registration comment above
-// (self-contained against sibling handler ports). This credential is
-// DISTINCT from the per-customer ClientSecretCredential the importer/verifier
-// construct internally to authenticate INTO the customer's Dataverse env
-// (task 142's H7 credential precedent — BFF app-reg secret from H4-populated
-// KV, NOT a new S2S secret) — two intentionally separate trust boundaries.
-//
-// LIVE-CEREMONY GAP (documented, not a defect of this task — see
-// SolutionImportOptions.SolutionArtifactManifestBlobName doc comment): no CI
-// workflow publishes the solution-artifact manifest yet as of task 141. This
-// handler is fully buildable/unit-testable today; a live E2E run additionally
-// requires the provisioning-artifacts storage account (live-ceremony backlog
-// item #4) AND a new CI publish step for the 8 solution ZIPs + manifest.
+// BlobContainerClient pattern: the artifacts container is constructed via a
+// factory lambda reusing the shared UAMI-pinned TokenCredential singleton
+// (ADR-028 MI-outbound) — parity with H9's ArtifactManifestVerifier /
+// BlobArtifactDownloader registration. This credential is DISTINCT from the
+// credential the importer/verifier select (FR-39 chain) to authenticate INTO
+// the customer's Dataverse env — two intentionally separate trust boundaries.
+// The manifest + zips are published by publish-dataverse-solutions-manifest.yml (T218d).
 builder.Services.Configure<SolutionImportOptions>(
     builder.Configuration.GetSection(nameof(SolutionImportOptions)));
 builder.Services.PostConfigure<SolutionImportOptions>(o => o.Validate());
-builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
-builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName);
+// T218b review: the per-request timeout is the option, not HttpClient's silent 100 s default.
+builder.Services.AddHttpClient(DataverseWebApiSolutionImporter.HttpClientName)
+    .ConfigureHttpClient((sp, client) =>
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 // A44.5 (task 205i): FR-39 ordered credential factory for the L2 Worker's
 // OWN Dataverse auth as the shared BFF app-reg — consumed by H7's writer +
 // H6's importer/verifier. Mirrors master's DataverseServiceClientImpl
@@ -673,17 +623,16 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
     var artifactsContainer = new Azure.Storage.Blobs.BlobContainerClient(
         new Uri(options.Value.ProvisioningArtifactsContainerUri), credential);
     var httpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient(DataverseWebApiSolutionImporter.HttpClientName);
-    var catalog = sp.GetRequiredService<ISolutionCatalog>();
     var workerCredentialFactory = sp.GetRequiredService<WorkerDataverseCredentialFactory>();
     var logger = sp.GetRequiredService<ILogger<DataverseWebApiSolutionImporter>>();
-    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, catalog, options, workerCredentialFactory, logger);
+    return new DataverseWebApiSolutionImporter(httpClient, artifactsContainer, options, workerCredentialFactory, logger);
 });
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the
-// plain typed-client registration (parity with H5's
-// AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>()) applies
-// directly, no manual factory lambda / named client required.
-builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>();
+// plain typed-client registration applies directly, no manual factory lambda / named client required.
+builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>()
+    .ConfigureHttpClient((sp, client) =>
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
 // required-applications installer + org-settings applier + their canonical
 // manifests. Wave 2 ships scaffolds (log + return Success); the incremental
@@ -704,7 +653,7 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // client (BFF app-reg client-credentials via Azure.Identity.ClientSecretCredential),
 // the SAME identity + pattern H6 uses — the MI-Dataverse App User (H10) has
 // not yet been created at H7's point in the DAG (H10 runs AFTER H7 per
-// design.md §4.1: "H5 → H6 (solutions) → H7 → H10 (app-user) → H11").
+// design.md §4.1 order "H5 → H6 → H7 → H10 → H11"; since T228 H10 runs right after H3 + H5, before H6 (DagAdvancer).
 //
 // NAMED HttpClient (task 103 fix, applied 2026-08-19 per g1-task-103 report):
 // DataverseWebApiEnvVarValuesWriter takes IHttpClientFactory (not HttpClient)
@@ -757,7 +706,8 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 //   - ISpeContainerProvisioner -> GraphContainerProvisioner: POST
 //     /storage/fileStorage/containers (CREATE) + POST /storage/fileStorage/
 //     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0, app-only
-//     as the container type's owning app.
+//     as the container type's owning app; first it ensures the customer BFF
+//     identities' grants on the container-type registration (task 227b).
 //     Container CREATION is app-only-capable per topology doc §6 (unlike
 //     container-TYPE creation per §R5 which requires delegated).
 //   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET
@@ -835,11 +785,18 @@ builder.Services.AddScoped<H10DataverseAppUserGraphParityHandler>();
 // consent-verification gate — independent GET /users/{id}?$select=
 // externalUserState re-query per invited guest, parity with H3's
 // IAdminConsentVerifier gate shape).
-builder.Services.Configure<H11UserProvisioningOptions>(
-    builder.Configuration.GetSection(nameof(H11UserProvisioningOptions)));
+// T232: validated at start — a blank role name would otherwise be found only by the first Model 1 run, after H0–H10.
+builder.Services.AddOptions<H11UserProvisioningOptions>()
+    .Bind(builder.Configuration.GetSection(nameof(H11UserProvisioningOptions)))
+    .Validate(o => o.GuestSecurityRoleNames.TrueForAll(n => !string.IsNullOrWhiteSpace(n)),
+        "H11UserProvisioningOptions:GuestSecurityRoleNames holds a blank role name.")
+    .ValidateOnStart();
 builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>();
 builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>();
 builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>();
+// Task 232 (D2, G10): the environment security group (Graph) and the guest's Dataverse user + role(s) (Web API).
+builder.Services.AddHttpClient<IEnvironmentSecurityGroupClient, GraphRestEnvironmentSecurityGroupClient>();
+builder.Services.AddHttpClient<IDataverseGuestUserWriter, DataverseWebApiGuestUserWriter>();
 builder.Services.AddScoped<H11UserProvisioningHandler>();
 
 // Task 072 (Batch 3F): H12c runtime references handler + ONE collaborator
@@ -854,7 +811,7 @@ builder.Services.AddScoped<H11UserProvisioningHandler>();
 builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 
 // Task 073 (Batch 3F): H14 post-deploy integration wiring handler (parent) +
-// its 3 DAG-parallel sub-handlers (H14a Exchange ApplicationAccessPolicy —
+// its 3 DAG-parallel sub-handlers (H14a Exchange RBAC for Applications —
 // T4 silent-fail trap owner; H14b Graph webhook subscriptions; H14c Dataverse
 // service-endpoint webhook) + FOUR collaborator seams. Registered via a
 // single AddH14IntegrationWiringHandler() extension method
@@ -942,7 +899,7 @@ builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
 
-// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams,
+// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + FIVE collaborator seams,
 // ALL NOW REAL as of Wave G-7 (task 185, 2026-08-20) — see
 // E2EAcceptanceModule.AddH13E2EAcceptanceGateHandler for the authoritative
 // registration (this comment summarizes; that module is the source of truth):
@@ -952,19 +909,18 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 // (Phase F rerun task 186 closes); IE2ETrapVerifier = CompositeTrapVerifier
 // dispatching per-TrapKind to the 7 registered real ITrapProbe implementations
 // (T1–T7, tasks 171/177/178/180/172/175/238); IE2EInvariantVerifier =
-// CompositeInvariantVerifier dispatching to the 5 registered real
-// IInvariantProbe implementations (I1–I5, tasks 170/173/174/176/179);
-// INamingConformanceChecker = NamingConformanceChecker — pure-C# port of r3
-// task 063's scripts/naming-conformance-check.ps1 (task 182, 2026-08-20);
+// CompositeInvariantVerifier dispatching to the 4 registered real
+// IInvariantProbe implementations (I2–I5, tasks 173/174/204c/179);
 // ICostEnvelopeChecker = ArmCostEnvelopeChecker (task 183, Wave G-7 SDK port,
 // 2026-08-20) uses Azure.ResourceManager.CostManagement.UsageQueryAsync per
 // subscription + compares against §15 #14 envelopes;
 // IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater (task 184)
 // performs the real Web API PATCH via IDataverseEnvironmentRegistryClient —
 // THE acceptance-target sprk_setupstatus = Ready transition (spec.md FR-18 /
-// SC #5). PlaceholderTrapVerifier and PlaceholderInvariantVerifier (the
-// Wave-C4 stubs the composite verifiers replaced) remain on disk UNREGISTERED
-// for reference only per the project retirement convention. The retired
+// SC #5). Task 230a deleted the naming-conformance checker and the runtime I1
+// probe (both read Spaarke repo files absent from this publish — naming runs
+// once in CI, I1 is the I1 ArchTest) and the unregistered Wave-C4
+// PlaceholderTrapVerifier / PlaceholderInvariantVerifier stubs. The retired
 // shell-out predecessors (ValidateDeployedEnvironmentScriptRunner,
 // NamingConformanceScriptRunner, AzCliCostEnvelopeChecker, and the Wave-C4
 // logged-no-op registry updater) were deleted in the Wave G-8 cleanup sweep

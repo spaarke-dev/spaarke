@@ -1,194 +1,168 @@
-# Spaarke Solution Release Process
+# Spaarke Solution Package — Release, IAM and Upgrade Runbook
 
-> **Purpose**: The repeatable ISV publisher-based discipline for identifying, packaging,
-> and releasing the Spaarke Dataverse content — for both initial customer provisioning
-> AND for subsequent release updates.
+> **Purpose**: how Spaarke's Dataverse content is defined, released, imported into a customer environment and upgraded.
+> One document for the whole lifecycle; other docs link here instead of restating it.
 >
-> **Established**: 2026-08-20 during customer-provisioning-orchestration-r1 Wave H-3
-> pre-check, after the 5-Fable-reviewer audit surfaced that the current CanonicalSolutionCatalog
-> expected 8 solutions but only 2 had scaffolding. Microsoft's Power Platform ALM guidance
-> (Pattern #1 Single Solution) recommends one managed solution for small-medium ISVs.
+> **Binding rule**: [ADR-027 §3–§4](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md)
+> (amended 2026-10-07): one solution, `SpaarkeMaster`, **managed by default** in customer environments, **unmanaged only
+> on explicit instruction**. Design and evidence: `projects/customer-provisioning-orchestration-r1/notes/t218-plan.md`.
+>
+> **Build status** (2026-10-07). H6 (first import, upgrade, refusals) is built — task 218b. Steps marked *(218c)*,
+> *(218d)* or *(218e)* describe behaviour customer-provisioning-orchestration-r1 is still building; the current state is
+> noted beside each.
 
 ---
 
-## What this replaces
+## 1. The package
 
-Before: aspirational 8-solution catalog with mostly-missing scaffolding. Each new customer
-required manual solution assembly + no drift detection + tribal knowledge of what belongs
-where.
+**One solution, `SpaarkeMaster`, publisher `Spaarke` (prefix `sprk`).** It holds everything a customer environment
+needs; one solution keeps every dependency inside one import, one version and one upgrade (Microsoft ALM
+"single solution" pattern).
 
-After: **one packaged managed solution (`SpaarkeMaster`)** produced by three scripts that
-enforce publisher-based identification, OOB customization capture, and drift detection.
+**Scope is a rule, not a list.** The package is:
 
----
+- every unmanaged `sprk`-prefixed component in the **authoring environment** (`spaarkedev1`): tables, columns, global
+  option sets, relationships, forms, views, web resources (**including every code page**), PCF controls, security roles,
+  model-driven apps and site maps, environment-variable **definitions**;
+- plus the `sprk_` columns on OOB tables listed in [`docs/data-model/oob-customizations.yaml`](../data-model/oob-customizations.yaml);
+- **minus** the entries in [`docs/data-model/package-scope.json`](../data-model/package-scope.json), each with a reason and a date.
+  The rule lives in `scripts/solution-authoring/SpaarkePackageScope.psm1` (tests: `tests/scripts/SpaarkePackageScope.Tests.ps1`).
 
-## The one solution: SpaarkeMaster
+Why a rule: the old scope collected only components already inside a Spaarke solution, but most deploy scripts
+create components in the Default solution. The first rule run against spaarkedev1 (2026-10-07) found **44 in-scope
+components missing from SpaarkeMaster** — 11 PCF controls (incl. RecordHeader), the AI Setup app and site map,
+`sprk_assignedaccess`, the access scripts, the Console User and Ontology roles, 17 OOB-table columns.
 
-Single managed solution containing everything a Spaarke customer environment needs:
+**Never in the package**
 
-- All `sprk_*` custom entities (per the current audit: 122 in SpaarkeMaster baseline)
-- All custom attributes on those entities (69 baseline)
-- All web resources (196 baseline + delta from SpaarkeFeatures)
-- All PCF custom controls (7 baseline; excludable per release via `-ExcludedPCFs`)
-- All environment variable **declarations** (21 baseline — values set per-customer at
-  provisioning time by H7)
-- All environment variable **default values** (6 baseline)
-- All global option sets (29 baseline)
-- All entity relationships (24 baseline)
-- All security roles (7 baseline)
-- All saved queries / system views (7 baseline)
-- All system forms (8 baseline)
-- Site map(s) (2 baseline)
-- Model-Driven App(s) — need to be added (currently in `SpaarkeCorporateCounselApp`)
-- OOB entity customizations for account, contact, systemuser, businessunit (21 sprk_
-  columns total; see [docs/data-model/oob-customizations.yaml](../data-model/oob-customizations.yaml))
-- Canvas Apps (5 in SpaarkeCore 1.1.0.0)
+| Item | Why |
+|---|---|
+| Environment-variable **values** | Per customer; H7 writes them. A dev value (dev BFF URL, dev container) in a customer environment is a cross-environment leak. |
+| Plugins | ADR-002: no plugins; invariants live in the BFF write path. Reintroducing one needs the ADR-002 reopen criteria (CLAUDE.md §6.5). |
+| Test / scratch solutions | `Test$`, `Temp`, `SCRATCH`, `MasterTest`, `TestSpaarke` names. |
+| Microsoft tooling installed in dev | `CreatorKit*`, `DataverseAccelerator*`. |
+| Content under another publisher | Only publisher `Spaarke` ships. |
 
-Explicitly EXCLUDED:
-- `Spaarke.Plugins` assembly — REMOVED from spaarkedev1 on 2026-08-20 during Wave H-3
-  audit (unregistered `DocumentEventPlugin` + Delete/Create SDK message steps + assembly).
-  Spaarke ships no plugins (ADR-002, updated 2026-09-25); reintroducing one requires the ADR-002
-  reopen criteria via CLAUDE.md §6.5, not a manifest addition.
-- Test / scratch / temp solutions (`SpaarkeMasterTest*`, `PowerAppsToolsTemp_sprk`,
-  `TemplatePCFImport`, `SPRKMAINDEV1250801`).
-- Microsoft-authored tooling installed to spaarkedev1 (`CreatorKit*`, `DataverseAccelerator*`).
+**Not Dataverse content** (shipped elsewhere): the Office add-in and Teams packages (shared clients, one per platform),
+the M365 Copilot agent (task 257), BFF code (H9).
 
----
+## 2. Where it lives
 
-## The three scripts
+| Stage | Location |
+|---|---|
+| Authoring | `spaarkedev1`, SpaarkeMaster **unmanaged** |
+| Source of record | `src/dataverse/solutions/SpaarkeMaster/` — unpacked, both types (`pac solution unpack --packagetype Both`), committed per release (first: 1.2.0.0, 2026-10-08, T218e) |
+| Built artifacts | `publish-dataverse-solutions-manifest.yml` packs managed + unmanaged from git with pac (pinned to the version that unpacked the source) and keeps them as a run artifact |
+| Provisioning store | `sprkcpartifacts{env}` / container `provisioning-artifacts`: `dataverse-solution-SpaarkeMaster-{version}-managed.zip` / `-unmanaged.zip`, `dataverse-solutions-{buildId}.json`, `dataverse-solutions-latest.json` (what H6 reads) and `dataverse-solutions-latest.previous.json` (the rollback pointer). Until the first CI publish, the store holds the hand-made 2026-08-21 files, which H6 refuses (no `SpaarkeMaster` entry). |
 
-Location: `scripts/solution-authoring/`
+Manifest schema read by H6:
 
-### 1. `Get-SpaarkeComponents.ps1` (read-only)
+```json
+{ "solutions": { "SpaarkeMaster": {
+    "version": "1.2.0.0",
+    "managedBlobName": "dataverse-solution-SpaarkeMaster-1.2.0.0-managed.zip",
+    "unmanagedBlobName": "dataverse-solution-SpaarkeMaster-1.2.0.0-unmanaged.zip" } } }
+```
 
-Queries the target Dataverse environment (default `spaarkedev1`) for every solution
-owned by the `Spaarke` publisher, enumerates every component inside those solutions,
-and emits a deterministic JSON inventory to `docs/data-model/spaarke-components-inventory.json`.
+## 3. Release (authoring environment → customers)
 
-**When to run**:
-- Whenever a Spaarke publisher-owned solution changes in the dev environment
-- Before every release (freshens the baseline snapshot)
-- During drift-detection CI (called by `Test-SolutionCompleteness.ps1`)
+1. **Dev is release-ready**: the content is finished and tested in `spaarkedev1`.
+2. **Drift report** (read-only): `./scripts/solution-authoring/Test-SolutionCompleteness.ps1`. It fails when a component
+   matches the rule but is not in SpaarkeMaster, an in-scope table is packaged as a shell (without its columns), an
+   excluded component is packaged, something is packaged outside the rule (e.g. Microsoft tables, env-var values), a
+   scope entry matches nothing, an OOB column is unlisted, or the committed inventory drifted.
+3. **Classify each finding**: add to the package, or add to `package-scope.json` with a reason and date. A new `sprk_` column on
+   an OOB table also goes into `oob-customizations.yaml`.
+4. **Assemble** (writes to dev — the release owner runs it): `Assemble-SpaarkeMasterSolution.ps1 -WhatIf`, review, then
+   without `-WhatIf`. It adds what the rule finds missing and re-adds tables packaged as shells, each custom table WITH
+   all its subcomponents; it never pulls in dependencies (`AddRequiredComponents = false` — with `true`, the 2026-08-23
+   rebuild dragged five Microsoft tables into SpaarkeMaster); OOB tables go in metadata-only. It bumps the version only
+   when every add succeeded. Anything packaged outside the rule, and any excluded component still packaged, is
+   reported; `-RemoveUnexplained` (owner-approved) takes it out of the solution — nothing is deleted from dev, but a
+   component dropped from the package is deleted from an environment on its next managed upgrade (ADR-027 §4). Bump
+   the version with `-VersionBumpKind` (semver: Major = breaking schema change; Minor = new table/feature; Build =
+   additive content; Revision = a fix for one customer stamp) or set it with `-Version`, which must be higher than the
+   current one (H6 refuses a downgrade; 1.2.0.0 on 2026-10-08 sits above the 1.1.0.0 shipped on 2026-08-21).
+5. **Export to source**: `./scripts/solution-authoring/Export-SpaarkeMasterSource.ps1` exports managed + unmanaged,
+   unpacks into `src/dataverse/solutions/SpaarkeMaster/`, strips environment-variable values, and **fails if
+   `Other/Solution.xml` lists a missing dependency on `solution="Active"`** — the F12 leak: a Spaarke component the
+   package references but does not contain, so the managed import fails in a fresh environment. `-WhatIf` prints the
+   commands; every export names `--environment` (default spaarkedev1).
+6. **PR**: the diff of the unpacked source is the release review. The release note lists **removed components**
+   (they are deleted from managed customer environments on upgrade — §5).
+7. **Publish** (after merge): run `publish-dataverse-solutions-manifest.yml` — first with `publish: false` (dry run:
+   pack + checks + manifest as a run artifact; every pull request touching the package source runs this too), then
+   with `publish: true`. It refuses a zip whose name, version or managed flag is wrong, a zip with environment-variable
+   values, and a source with a missing dependency on `solution="Active"` (F12). `publish: true` runs from master
+   only. **A version publishes once**: a blob of that version from another commit refuses the run — bump with
+   `Assemble-SpaarkeMasterSolution.ps1 -Version` and re-export; a re-run of the same commit after a partial failure
+   replaces its own blobs. It keeps the replaced manifest as `dataverse-solutions-latest.previous.json`, then moves
+   `dataverse-solutions-latest.json` and reads it back. Rollback: copy `latest.previous` over `latest` — **except
+   right after the first CI publish**, when `previous` is the hand-made 2026-08-21 manifest that H6 refuses (no
+   `SpaarkeMaster` entry); then roll back by re-publishing the earlier version. Nothing is deleted.
+8. **Roll out**: re-run provisioning per customer (§5).
 
-**Publisher anchor**: `WHERE publisherid = '6aeef721-ba73-f011-b4cb-6045bdd6a665'`
-catches every Spaarke-owned component deterministically. Test/scratch solutions
-matching the exclude pattern `Test$|Temp|SCRATCH|MasterTest|TestSpaarke` are filtered out.
+## 4. First import (provisioning H6)
 
-**Output**: `docs/data-model/spaarke-components-inventory.json` — checked into git as the
-release-scope-of-record.
+- **Order in the run**: H5 (environment adopted) → H3 + H10 (the importing identity is an application user) → **H6
+  imports SpaarkeMaster** → H7 (environment-variable values) and H11 (users get the package's roles). The BFF deploy
+  (H9) waits for H6.
+- **Type**: intake `solutionPackageType` = `managed` (default) or `unmanaged` (explicit instruction only); stored on the
+  run and the registry row (`sprk_solutionversion` = `SpaarkeMaster {version} ({managed|unmanaged})`, written by H13).
+- **Pre-import steps**: required Power Platform apps and org settings (e.g. `maxuploadfilesize`) are applied before the
+  import (task 253 moves them off `pac`).
+- **Verification**: SpaarkeMaster present **and** `ismanaged` equals the requested type.
 
-### 2. `Assemble-SpaarkeMasterSolution.ps1` (read + write)
+## 5. Upgrade
 
-Reads the inventory + `oob-customizations.yaml`, computes deltas against the current
-state of the `SpaarkeMaster` solution in the dev environment, adds any missing components
-via `AddSolutionComponent` Web API action, bumps the solution version, and exports as a
-managed ZIP.
+Re-run H6 for the customer (normally as part of an upgrade run of the whole pipeline).
 
-**Idempotent**: safe to re-run. Existing components are skipped.
+| Situation | H6 behaviour |
+|---|---|
+| Installed version = package version | Skip (success, nothing imported) |
+| Installed version lower | `StageAndUpgrade`. In a **managed** environment, a component removed from the package is **deleted** together with its data — check the release note's removal list before rolling out. |
+| Installed version higher | **Refused** (Resumable, `downgrade-refused`, nothing imported) — no downgrade |
+| Installed type ≠ requested type | **Refused** (Resumable, `package-type-mismatch`, nothing imported) — an environment is never switched silently between managed and unmanaged. Converting unmanaged → managed is an owner-approved operation: back up, remove overlapping unmanaged components, import managed. |
+| Environment-variable values | Persist: they are never in the package, so an upgrade cannot overwrite them; H7 re-applies the run's values. |
 
-**Flags**:
-- `-WhatIf` — dry run; reports what WOULD be added without touching Dataverse
-- `-ExcludedPCFs @('name1','name2')` — exclude specific PCFs (deferred to follow-on;
-  currently logged as a warning)
-- `-VersionBumpKind Build|Revision|Minor|Major` — segment to bump (default Build)
-- `-SkipExport` — augment only, do not export
-- `-OutputZipPath <path>` — where to write the managed ZIP (default `./out/SpaarkeMaster.zip`)
+The BFF and the package release from the same master; because H9 waits for H6, a new BFF never starts against an older
+schema. No separate BFF/package version gate exists — the ordering and the downgrade refusal cover that risk.
 
-**Output**: managed solution ZIP at `-OutputZipPath` — ready to hand off to the customer-provisioning
-H6 pipeline (upload to provisioning-artifacts storage; H6 imports it into each customer's env).
+## 6. Identity and permissions (IAM)
 
-### 3. `Test-SolutionCompleteness.ps1` (read-only, CI-friendly)
+| Who | Needs | Granted by |
+|---|---|---|
+| H6 importing identity (the stamp's BFF app registration, signing in secret-free through its federated credential) | System Administrator in the customer environment | H10 (application user + role), before H6 |
+| L2 Worker identity (H5, H8) | System Administrator application user | Operator, prerequisite PRQ-C-09 |
+| Customer users (B2B guests) | The package's Spaarke user role(s) | H11 (`H11UserProvisioningOptions:GuestSecurityRoleNames` must name a role the package ships *(218e)*) |
+| Release owner | System Customizer or higher in `spaarkedev1`; repo write for the PR | Spaarke |
+| CI publish | Storage Blob Data Contributor on the provisioning-artifacts container, through OIDC | Platform Bicep |
 
-Drift detection: runs `Get-SpaarkeComponents.ps1` fresh against dev, compares to the committed
-`spaarke-components-inventory.json`, exits 1 if drift is found.
+**Roles ship in the package** — those of the ROOT business unit (the rule takes no other: Dataverse refuses a role
+authored in a child unit, "root component Role is missing"). "Spaarke Office Add In User" ships since 1.2.0.0 *(218e)*.
+"Secure Record Owner" is deliberately contained in the Secure Record business unit (SECURE-PROJECT-ENVIRONMENT-SETUP.md
+§5.2), so provisioning creates it per environment with that unit and its team (H7b, T256) — never the package.
 
-**When to run**: CI on every PR (fails the build if a dev change hasn't been captured in
-the release manifest).
+## 7. Governance
 
-**Two drift classes**:
-- **NEW in dev, not in committed** — new content added in spaarkedev1 that must be added to
-  the release manifest before release
-- **MISSING from dev, in committed** — content that was in the last release but is gone from
-  dev now (may indicate accidental deletion; investigate before proceeding)
-
----
-
-## Standard release workflow
-
-For each Spaarke release (initial customer OR update to existing customers):
-
-1. **Ensure dev is release-ready**: all in-flight Spaarke customizations are complete + tested in spaarkedev1
-2. **Refresh inventory**:
-   ```powershell
-   ./scripts/solution-authoring/Get-SpaarkeComponents.ps1
-   ```
-3. **Review the diff** (against last committed inventory in git):
-   ```powershell
-   git diff docs/data-model/spaarke-components-inventory.json
-   ```
-4. **Update OOB manifest** if any new sprk_ columns were added to OOB entities:
-   Edit [docs/data-model/oob-customizations.yaml](../data-model/oob-customizations.yaml)
-5. **Commit the inventory + OOB manifest** (this locks the release scope)
-6. **Dry-run the assembly**:
-   ```powershell
-   ./scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1 -WhatIf
-   ```
-7. **Apply the assembly** (adds any missing components to SpaarkeMaster + bumps version + exports ZIP):
-   ```powershell
-   ./scripts/solution-authoring/Assemble-SpaarkeMasterSolution.ps1
-   ```
-8. **Verify drift-free** (must return exit 0):
-   ```powershell
-   ./scripts/solution-authoring/Test-SolutionCompleteness.ps1
-   ```
-9. **Hand off ZIP** to customer-provisioning: upload `./out/SpaarkeMaster.zip` to the
-   provisioning-artifacts blob storage (per Wave H-3 backlog); update
-   `dataverse-solutions-latest.json` manifest via the CI workflow
-   `publish-dataverse-solutions-manifest.yml`. H6 picks it up automatically.
-
----
-
-## Governance rules
-
-1. **Publisher `Spaarke` is the only publisher for Spaarke content.** No component
-   authored under any other publisher prefix ships to customers.
-2. **Test/scratch solutions never ship.** The exclude pattern in
-   `Get-SpaarkeComponents.ps1` is authoritative. Test solutions must follow the
-   naming convention (contain `Test` at end, `Temp`, `SCRATCH`, `MasterTest`).
-3. **No custom plugins ship.** *(updated 2026-09-25 — ADR-002: no plugins; invariants server-side)*
-   Spaarke ships no Dataverse plugins; record invariants live in the BFF server-side write
-   path (ADR-002 WP-1…WP-8). Reintroducing a plugin requires meeting the ADR-002 reopen
-   criteria through the CLAUDE.md §6.5 ADR amendment path — not a manifest addition.
-4. **OOB customizations MUST be documented** in `oob-customizations.yaml` in the same
-   PR that adds the sprk_ column. Test-SolutionCompleteness catches drift.
-5. **Version bumps are semver**: Major on breaking schema changes; Minor on new entity or
-   feature additions; Build on additive content (attributes, web resources, PCFs).
-   Revision reserved for patches to a specific customer stamp.
-
----
-
-## Governance sequencing
-
-- **Repo-wide tool** (this document + the three scripts) is NOT owned by any single project.
-  It's shared infrastructure used by every project that ships Dataverse content.
-- **Ownership**: the Spaarke platform / ALM team (nominal — refine when project structure evolves).
-- **Change discipline**: PRs modifying `SPAARKE-SOLUTION-RELEASE-PROCESS.md` or the three scripts
-  should be reviewed by 2+ team members; changes to `oob-customizations.yaml` follow
-  normal PR review (drift check gates it in CI).
-
----
+1. Publisher `Spaarke` is the only publisher for Spaarke content.
+2. Test/scratch solutions never ship (exclusion pattern in `Get-SpaarkeComponents.ps1`).
+3. No plugins ship (ADR-002).
+4. OOB-table columns are listed in `oob-customizations.yaml` in the same PR that adds them.
+5. Every exclusion carries a reason; nothing is excluded silently in code.
+6. Customer environments are never customized in place; every change goes dev → git → CI → H6.
 
 ## History
 
 | Date | Event |
 |---|---|
-| 2026-08-20 | Established. Baseline audit: 217 authored components in SpaarkeMaster; 21 OOB columns across 4 entities; `Spaarke.Plugins` orphan removed from spaarkedev1. |
-
----
+| 2026-08-20 | Established: one managed SpaarkeMaster; three authoring scripts; 217 components; `Spaarke.Plugins` removed from spaarkedev1. |
+| 2026-08-21 | SpaarkeMaster v1.1.0.0 exported (412 root components; 7 PCFs excluded by the owner) and hand-uploaded to the provisioning store. |
+| 2026-10-07 | ADR-027 amended (managed by default, unmanaged on explicit instruction). Scope rule replaces solution membership; git becomes the source of record; CI publishes; this document becomes the release/IAM/upgrade runbook (customer-provisioning-orchestration-r1 T218). |
+| 2026-10-08 | SpaarkeMaster 1.2.0.0 complete in dev and committed as source (T218e); the CI pack-and-publish workflow replaces the hand-uploaded zip and manifest (T218d). |
 
 ## Related
 
-- [ADR-039: Grounded execution + closed catalogs](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) — publisher discipline principle
-- [Microsoft Learn: Organize your solutions in Power Platform](https://learn.microsoft.com/en-us/power-platform/alm/organize-solutions)
-- [Microsoft Learn: ALM basics with Microsoft Power Platform](https://learn.microsoft.com/en-us/power-platform/alm/basics-alm)
-- [customer-provisioning-orchestration-r1](../../projects/customer-provisioning-orchestration-r1/) — the L2 control-plane that consumes SpaarkeMaster.zip via H6
+- [ADR-027](../../.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md) — the binding rule
+- [Customer deployment guide](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) — H6 in the provisioning run
+- [Microsoft Learn: Organize your solutions](https://learn.microsoft.com/en-us/power-platform/alm/organize-solutions) · [ALM basics](https://learn.microsoft.com/en-us/power-platform/alm/basics-alm)
