@@ -3,15 +3,16 @@
 //
 // Production <see cref="ISolutionImporter"/> implementation (task 141; T218b) —
 // pure HttpClient import of the ONE Spaarke package, SpaarkeMaster, via the
-// Dataverse Web API `ImportSolution` / `StageAndUpgrade` actions + `importjobs`
-// polling.
+// Dataverse Web API `ImportSolutionAsync` / `StageAndUpgradeAsync` actions,
+// polling `asyncoperations` for completion and `importjobs` for the detail.
 //
 // T218b (ADR-027 §3-§4, amended 2026-10-07): the run's package type picks the
 // managed (default) or unmanaged blob; the importer reads the installed
 // SpaarkeMaster FIRST and refuses — nothing imported — a managed↔unmanaged
-// switch and a downgrade; an equal version is skipped; an older version is
-// upgraded with StageAndUpgrade. A failed read of the installed solution is a
-// failure, never "assume a fresh install".
+// switch and a downgrade; an equal version is skipped; an older managed package
+// is upgraded with StageAndUpgradeAsync, an older unmanaged one updated with
+// ImportSolutionAsync. A failed read of the installed solution is a failure,
+// never "assume a fresh install".
 //
 // ARTIFACT PACKAGING (DS-1b §1 H6 row): the package zips are resolved from the
 // `provisioning-artifacts` blob container through its manifest
@@ -107,7 +108,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
 /// <see cref="ISolutionImporter"/> implementation that imports the SpaarkeMaster package (managed or unmanaged, per
-/// run) via Dataverse Web API <c>ImportSolution</c>/<c>StageAndUpgrade</c> actions + <c>importjobs</c> polling,
+/// run) via Dataverse Web API <c>ImportSolutionAsync</c>/<c>StageAndUpgradeAsync</c> + <c>asyncoperations</c> polling,
 /// resolving the ZIP from the versioned blob-artifact manifest (never a local filesystem path).
 /// </summary>
 public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
@@ -321,12 +322,12 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
         }
 
         var packageVersion = entry.Version ?? TryReadSolutionVersionFromZip(zipBytes);
-        if (string.IsNullOrWhiteSpace(packageVersion))
+        if (string.IsNullOrWhiteSpace(packageVersion) || SpaarkePackage.CompareVersions(packageVersion, packageVersion) is null)
         {
             return new SolutionImportOutcome.Failure(
                 SolutionImportFailureKind.MissingSolutionZips,
-                $"The package version is unknown: the manifest entry has no 'version' and '{blobName}' has no readable " +
-                "solution.xml version. H6 cannot rule out a downgrade without it.");
+                $"The package version is unknown or not a version ('{packageVersion}'): the manifest entry's 'version' or " +
+                $"'{blobName}''s solution.xml must be major.minor[.build[.revision]]. H6 cannot rule out a downgrade without it.");
         }
 
         // (3) Type-switch and downgrade refusals; an equal version is already done.
@@ -640,7 +641,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                             SolutionImportFailureKind.UnknownInvocationFailure,
                             $"Import of '{solutionName}' completed with asyncoperation statuscode {statusCode}" +
                             (string.IsNullOrWhiteSpace(message) ? string.Empty : $" ({Truncate(message, DiagnosticTailBudget)})") +
-                            $"; import job: {jobDiagnostic}",
+                            $"; import job: {(data is null ? "no import job detail available" : jobDiagnostic)}",
                             ReportedByDataverse: true);
                     }
                     // Not completed yet — wait below.

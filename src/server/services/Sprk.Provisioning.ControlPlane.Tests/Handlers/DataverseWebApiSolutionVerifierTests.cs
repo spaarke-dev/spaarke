@@ -129,9 +129,9 @@ public sealed class DataverseWebApiSolutionVerifierTests
 
         var outcome = await verifier.VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
 
-        var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
-        missing.MissingUniqueNames.Should().Equal("SpaarkeMaster");
-        missing.Diagnostic.Should().Contain("Token acquisition failed");
+        outcome.Should().BeOfType<SolutionVerificationOutcome.Unavailable>(
+                "nothing was learned about the environment — Resumable, not a quarantine")
+            .Which.Diagnostic.Should().Contain("Token acquisition failed");
         handler.Requests.Should().BeEmpty();
     }
 
@@ -148,6 +148,29 @@ public sealed class DataverseWebApiSolutionVerifierTests
         var missing = outcome.Should().BeOfType<SolutionVerificationOutcome.Missing>().Subject;
         missing.MissingUniqueNames.Should().Equal("SpaarkeMaster");
         missing.Diagnostic.Should().Contain("403");
+    }
+
+    [Theory]
+    [InlineData(429)]
+    [InlineData(503)]
+    [InlineData(408)]
+    public async Task VerifyAsync_TransientStatus_ReturnsUnavailable(int status)
+    {
+        var handler = new FakeHandler(_ => new HttpResponseMessage((HttpStatusCode)status));
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.Unavailable>();
+    }
+
+    [Fact]
+    public async Task VerifyAsync_RequestTimeout_ReturnsUnavailable()
+    {
+        var handler = new FakeHandler(_ => throw new TaskCanceledException("HttpClient.Timeout elapsed"));
+
+        var outcome = await BuildVerifier(handler).VerifyAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionVerificationOutcome.Unavailable>();
     }
 
     // ---------- T5 malformed JSON ----------

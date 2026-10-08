@@ -349,6 +349,99 @@ public sealed class DataverseWebApiSolutionImporterTests
             .Which.Diagnostic.Should().Contain("AsyncOperationId");
     }
 
+    [Fact]
+    public async Task ImportAsync_PollRequestTimesOutOnce_IsRetried_ThenSucceeds()
+    {
+        var polls = 0;
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => ++polls == 1
+                ? throw new TaskCanceledException("HttpClient.Timeout elapsed")   // per-request timeout, caller token live
+                : JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Success>();
+        polls.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ImportAsync_CallerCancelsDuringPoll_Propagates()
+    {
+        using var cts = new CancellationTokenSource();
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ =>
+            {
+                cts.Cancel();
+                throw new TaskCanceledException("cancelled by the caller");
+            },
+        };
+
+        var act = async () => await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task ImportAsync_OperationSucceededButJobReportsFailure_IsFailure()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncSucceeded)),
+            OnImportJobGet = _ => JsonResponse(HttpStatusCode.OK, ImportJobDataJson(FailureDataXml("component failed"))),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("component failed");
+    }
+
+    [Fact]
+    public async Task ImportAsync_FailedOperationWithoutJobDetail_SaysSo_NotSuccess()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+            OnImportPost = _ => JsonResponse(HttpStatusCode.OK, StartedJson()),
+            OnAsyncOperationPoll = _ => JsonResponse(HttpStatusCode.OK, AsyncOpJson(AsyncCompleted, AsyncFailed)),
+            OnImportJobGet = _ => new HttpResponseMessage(HttpStatusCode.NotFound),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("1.2.0.0")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        var diagnostic = outcome.Should().BeOfType<SolutionImportOutcome.Failure>().Subject.Diagnostic;
+        diagnostic.Should().Contain("no import job detail available").And.NotContain("treated as success");
+    }
+
+    [Fact]
+    public async Task ImportAsync_ManifestVersionNotAVersion_RefusesBeforeImport()
+    {
+        var dv = new FakeDataverseHandler
+        {
+            OnSolutionsGet = _ => JsonResponse(HttpStatusCode.OK, InstalledJson()),
+        };
+
+        var outcome = await BuildImporter(dv, new FakeBlobs(ManifestJson("latest")))
+            .ImportAsync(BuildRequest(managed: true), CancellationToken.None);
+
+        outcome.Should().BeOfType<SolutionImportOutcome.Failure>()
+            .Which.FailureKind.Should().Be(SolutionImportFailureKind.MissingSolutionZips);
+        dv.Requests.Should().NotContain(r => r.Method == HttpMethod.Post);
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.NotFound, true)]
     [InlineData(HttpStatusCode.Unauthorized, true)]

@@ -122,6 +122,12 @@ public static class SolutionImportRejectionCodes
     public const string VerificationFailed = "verification-failed";
 
     /// <summary>
+    /// T218b review — the post-import check could not read the environment (token, timeout, transport, 408/429/5xx).
+    /// Resumable: a re-run skips the equal-version import and verifies again.
+    /// </summary>
+    public const string VerificationUnavailable = "verification-unavailable";
+
+    /// <summary>
     /// T218b — the environment already holds SpaarkeMaster of the OTHER type (managed vs unmanaged) than the run asks
     /// for. Nothing is imported: a silent switch is refused (ADR-027 §3, amended 2026-10-07). Resumable — the operator
     /// re-runs with the environment's type, or an owner-approved conversion is done first.

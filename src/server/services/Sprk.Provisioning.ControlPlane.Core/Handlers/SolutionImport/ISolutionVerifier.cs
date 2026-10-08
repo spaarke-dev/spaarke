@@ -64,7 +64,7 @@ public sealed record SolutionVerificationRequest(
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionVerifier.VerifyAsync"/>.
-/// Exhaustive: <see cref="AllPresent"/> | <see cref="Missing"/>.
+/// Exhaustive: <see cref="AllPresent"/> | <see cref="Missing"/> | <see cref="Unavailable"/>.
 /// </summary>
 public abstract record SolutionVerificationOutcome
 {
@@ -80,4 +80,11 @@ public abstract record SolutionVerificationOutcome
     public sealed record Missing(
         ImmutableArray<string> MissingUniqueNames,
         string Diagnostic) : SolutionVerificationOutcome;
+
+    /// <summary>
+    /// T218b review: the environment could not be read (token failure, timeout, transport error, 408/429/5xx) — the
+    /// verifier learned nothing. Resumable: a re-run skips the equal-version import and verifies again. Distinct from
+    /// <see cref="Missing"/>, which is a confirmed disagreement and quarantines the run.
+    /// </summary>
+    public sealed record Unavailable(string Diagnostic) : SolutionVerificationOutcome;
 }

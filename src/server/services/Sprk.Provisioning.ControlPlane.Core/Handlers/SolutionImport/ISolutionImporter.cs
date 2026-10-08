@@ -4,8 +4,8 @@
 // L2 abstraction over the import of the Spaarke Dataverse package into a
 // customer environment (handler H6). Production implementation:
 // <see cref="DataverseWebApiSolutionImporter"/> (Dataverse Web API
-// ImportSolution / StageAndUpgrade + importjobs polling). Unit tests inject
-// stubs.
+// ImportSolutionAsync / StageAndUpgradeAsync + asyncoperations polling). Unit
+// tests inject stubs.
 //
 // T218b (ADR-027 §3-§4, amended 2026-10-07): the package is ONE solution,
 // <see cref="SpaarkePackage.SolutionUniqueName"/>, managed by default and

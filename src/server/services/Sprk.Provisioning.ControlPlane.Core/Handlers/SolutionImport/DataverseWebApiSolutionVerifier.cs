@@ -3,8 +3,10 @@
 //
 // Production <see cref="ISolutionVerifier"/> implementation (task 141; T218b) —
 // one stateless GET of the SpaarkeMaster solution row
-// (`uniquename, version, solutionid, ismanaged`): present AND ismanaged equal
-// to the run's package type, or Missing. No polling, no retry loop.
+// (`uniquename, version, solutionid, ismanaged`): present, ismanaged equal to
+// the run's package type AND the version equal to the imported package's, or
+// Missing. An unreadable environment (token, timeout, transport, 408/429/5xx)
+// is Unavailable (Resumable), never Missing. No polling, no retry loop.
 //
 // CREDENTIAL: acquires its OWN bearer token through the FR-39 ordered chain
 // (WorkerDataverseCredentialFactory — MI-FIC first) as the same BFF app-reg
@@ -12,6 +14,7 @@
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using Azure.Core;
@@ -124,7 +127,7 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
             // failure is still surfaced distinctly via the inner exception's
             // own message ("No credential could be selected …").
             _logger.LogWarning(ex, "H6 verifier credential selection / token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
-            return AllMissing(request, $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+            return new SolutionVerificationOutcome.Unavailable($"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
         }
 
         var requestUri = new Uri(envUri,
@@ -142,11 +145,11 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
         }
         catch (TaskCanceledException tcex) when (!cancellationToken.IsCancellationRequested)
         {
-            return AllMissing(request, $"Solutions GET timed out after {_options.DataverseWebApiRequestTimeout}: {tcex.Message}");
+            return new SolutionVerificationOutcome.Unavailable($"Solutions GET timed out: {tcex.Message}");
         }
         catch (HttpRequestException hrex)
         {
-            return AllMissing(request, $"Solutions GET infrastructure error: {hrex.Message}");
+            return new SolutionVerificationOutcome.Unavailable($"Solutions GET infrastructure error: {hrex.Message}");
         }
 
         using (response)
@@ -155,10 +158,14 @@ public sealed class DataverseWebApiSolutionVerifier : ISolutionVerifier
 
             if (!response.IsSuccessStatusCode)
             {
-                return AllMissing(
-                    request,
+                var diagnostic =
                     $"Solutions GET returned {(int)response.StatusCode} {response.StatusCode} against " +
-                    $"'{request.TargetDataverseUrl}'. Body: {Truncate(bodyText, DiagnosticTailBudget)}");
+                    $"'{request.TargetDataverseUrl}'. Body: {Truncate(bodyText, DiagnosticTailBudget)}";
+                // 408 / 429 / 5xx: nothing was learned — Resumable. Anything else (401/403/400) is a real refusal.
+                return response.StatusCode == HttpStatusCode.RequestTimeout || (int)response.StatusCode == 429
+                       || (int)response.StatusCode >= 500
+                    ? new SolutionVerificationOutcome.Unavailable(diagnostic)
+                    : AllMissing(request, diagnostic);
             }
 
             return ParseSolutionsResponse(bodyText, request.Managed, request.ExpectedVersion);

@@ -30,7 +30,7 @@ public sealed class SolutionImportOptions
     public string PacCliExecutable { get; set; } = "pac";
 
     /// <summary>
-    /// Maximum wall-clock time for one package import (import job polling). Defaults to 60 minutes. If exceeded, the
+    /// Maximum wall-clock time for one package import (async-operation polling). Defaults to 60 minutes. If exceeded, the
     /// importer returns Timeout which the handler maps to
     /// <see cref="SolutionImportRejectionCodes.ImportTimeout"/> (Resumable — a re-run re-reads the installed version).
     /// </summary>
@@ -105,7 +105,7 @@ public sealed class SolutionImportOptions
     /// <summary>
     /// Interval between <c>asyncoperations({AsyncOperationId})</c> poll GETs while
     /// waiting for the package import to reach a terminal state
-    /// (<c>completedon</c> non-null). Defaults to 15 seconds — solution
+    /// (<c>statecode</c> 3 — Completed). Defaults to 15 seconds — solution
     /// imports run minutes, not seconds, so a 15 s cadence keeps API call
     /// volume low across the fleet's longest-running handler (DS-2b §1.2)
     /// without meaningfully delaying terminal-state detection.

@@ -393,6 +393,22 @@ public sealed class H6SolutionImportHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    [Fact]
+    public async Task VerifierUnavailable_FailsResumable_NotQuarantined()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-15b");
+        var verifier = new FakeSolutionVerifier(new SolutionVerificationOutcome.Unavailable("Solutions GET returned 503"));
+        var handler = BuildHandler(repo, FakeSolutionImporter.Success(), verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.VerificationUnavailable);
+        repo.LastWrittenRun!.Status.Should().NotBe(RunStatus.Quarantined);
+    }
+
     // ---------- T16 importer infrastructure exception ----------
 
     [Fact]

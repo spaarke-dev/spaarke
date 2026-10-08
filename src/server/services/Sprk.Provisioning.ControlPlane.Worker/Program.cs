@@ -586,11 +586,12 @@ builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
 // ISolutionImporter = DataverseWebApiSolutionImporter imports the ONE Spaarke
 // package, SpaarkeMaster (managed by default, unmanaged on explicit
 // instruction — ADR-027 §3 amended 2026-10-07), through the Dataverse Web API
-// (ImportSolution / StageAndUpgrade + importjobs polling), resolving the ZIP
+// (ImportSolutionAsync / StageAndUpgradeAsync + asyncoperations polling), resolving the ZIP
 // from the versioned blob-artifact manifest in the `provisioning-artifacts`
 // container (never a local path); it refuses a package-type switch and a
 // downgrade. ISolutionVerifier = DataverseWebApiSolutionVerifier (one GET of
-// the SpaarkeMaster row: present + ismanaged as requested).
+// the SpaarkeMaster row: present + ismanaged as requested + the imported version;
+// an unreadable environment is Unavailable → Resumable).
 //
 // BlobContainerClient pattern: the artifacts container is constructed via a
 // factory lambda reusing the shared UAMI-pinned TokenCredential singleton
@@ -629,7 +630,9 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the
 // plain typed-client registration applies directly, no manual factory lambda / named client required.
-builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>();
+builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>()
+    .ConfigureHttpClient((sp, client) =>
+        client.Timeout = sp.GetRequiredService<IOptions<SolutionImportOptions>>().Value.DataverseWebApiRequestTimeout);
 // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
 // required-applications installer + org-settings applier + their canonical
 // manifests. Wave 2 ships scaffolds (log + return Success); the incremental

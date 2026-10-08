@@ -9,8 +9,9 @@
 //   unmanaged only when the run's solutionPackageType says so (ADR-027 §3-§4,
 //   amended 2026-10-07, owner D8). The importer refuses — nothing imported —
 //   a managed↔unmanaged switch and a downgrade; an equal version is skipped;
-//   an older version is upgraded with StageAndUpgrade. The verifier then
-//   proves SpaarkeMaster is present with the requested type.
+//   an older managed package is upgraded with StageAndUpgradeAsync, an older
+//   unmanaged one updated with ImportSolutionAsync. The verifier then proves
+//   SpaarkeMaster is present with the requested type and the imported version.
 //
 // SPEC / DESIGN references:
 //   - docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md — the package, its
@@ -49,7 +50,8 @@
 //   │ Import timeout                              │ Resumable (ImportTimeout) │
 //   │ Failed StageAndUpgrade (holding solution)   │ QuarantineRequired        │
 //   │ Unknown invocation failure (no partial)     │ Resumable                 │
-//   │ Verifier: absent or wrong type              │ QuarantineRequired        │
+//   │ Verifier: absent, wrong type or version     │ QuarantineRequired        │
+//   │ Verifier: environment unreadable            │ Resumable                 │
 //   │ Importer infrastructure exception           │ Resumable                 │
 //   │ Concurrent Cosmos writer conflict           │ Resumable                 │
 //   │ Run row deleted mid-flight                  │ Resumable                 │
@@ -440,12 +442,19 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 SolutionImportRejectionCodes.VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        if (verifyOutcome is SolutionVerificationOutcome.Unavailable unavailable)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, SolutionImportRejectionCodes.VerificationUnavailable,
+                $"Post-import verification could not read the environment: {unavailable.Diagnostic}. Resume re-checks " +
+                "(the import is skipped when the version is already installed).", cancellationToken).ConfigureAwait(false);
+        }
+
         if (verifyOutcome is SolutionVerificationOutcome.Missing missing)
         {
             var diagnostic =
                 $"Post-import verification FAILED: the importer reported Success but the environment does not hold " +
-                $"{string.Join(", ", missing.MissingUniqueNames)} as {packageType}. Verifier detail: {missing.Diagnostic}. " +
-                "The operator reconciles the environment's solutions before resume.";
+                $"{string.Join(", ", missing.MissingUniqueNames)} as the imported {packageType} package. Verifier detail: " +
+                $"{missing.Diagnostic}. The operator reconciles the environment's solutions before resume.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SolutionImportRejectionCodes.VerificationFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
