@@ -44,15 +44,24 @@ export function computeEventDueDays(dueDate: Date, now: Date = new Date()): IEve
  * The card's due date: `sprk_duedate` ONLY (D-27 / D-63, 2026-10-07). `sprk_finalduedate` is informational and never
  * decides what the card shows or counts down to — a rescheduled task shows its new `sprk_duedate`, and a task whose
  * old final due date has passed is not shown as overdue by it. (Before D-63 this fell back to `sprk_finalduedate`
- * once `sprk_duedate` had passed.) With no `sprk_duedate` the card falls back to `now`.
+ * once `sprk_duedate` had passed.) Returns null when there is no `sprk_duedate`: the card never invents a date.
  */
-export function selectDueDate(duedate: string | null | undefined, now: Date = new Date()): Date {
-  return parseDueDate(duedate) || now;
+export function selectDueDate(duedate: string | null | undefined): Date | null {
+  return parseDueDate(duedate);
 }
 
-/** Map a Dataverse event record to `EventDueDateCard` props. */
-export function mapEventToCardProps(record: Record<string, unknown>, now: Date = new Date()): IEventDueDateCardProps {
-  const dueDate = selectDueDate(record.sprk_duedate as string | undefined, now);
+/**
+ * Map a Dataverse event record to `EventDueDateCard` props, or `null` when the event has no `sprk_duedate` — it is
+ * left out of the due-date countdown (a record with only the informational `sprk_finalduedate`, which the view can
+ * still return, must not show today's date with a "Today" badge). `DueDateCard` already renders `null` as its
+ * no-record state; `DueDateCardList` drops the entry.
+ */
+export function mapEventToCardProps(
+  record: Record<string, unknown>,
+  now: Date = new Date()
+): IEventDueDateCardProps | null {
+  const dueDate = selectDueDate(record.sprk_duedate as string | undefined);
+  if (!dueDate) return null;
   const { daysUntilDue, isOverdue, urgency } = computeEventDueDays(dueDate, now);
 
   // Event type from FetchXML link-entity alias or formatted value
