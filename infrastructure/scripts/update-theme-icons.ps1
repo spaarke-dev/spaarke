@@ -88,10 +88,11 @@ foreach ($iconName in $iconFiles.Keys) {
 Write-Host ""
 Write-Host "Publishing customizations..."
 
-# Publish all customizations
-$publishUrl = "$baseUrl/PublishAllXml"
+# Task 130 (D-83): publish only the theme web resources updated above (PublishXml), never a tenant-wide publish.
+$publishXml = "<importexportxml><webresources>" + (($response.value | ForEach-Object { "<webresource>{$($_.webresourceid)}</webresource>" }) -join '') + "</webresources></importexportxml>"
+$publishUrl = "$baseUrl/PublishXml"
 try {
-    Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post
+    Invoke-RestMethod -Uri $publishUrl -Headers $headers -Method Post -Body (@{ ParameterXml = $publishXml } | ConvertTo-Json)
     Write-Host "Published successfully"
 }
 catch {

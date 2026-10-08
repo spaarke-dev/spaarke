@@ -1,0 +1,30 @@
+# Fails a PR that reintroduces a tenant-wide Dataverse publish or breaks the shared scoped-publish module.
+# Task 130, owner decision D-83. The banned patterns are listed in the Pester test.
+name: Scoped publish lint
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/**'
+      - 'tests/scripts/**'
+      - 'docs/**'
+      - 'infrastructure/**'
+      - 'src/**'
+      - '.github/**'
+
+permissions:
+  contents: read
+
+jobs:
+  scoped-publish-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Pester (scoped-publish module and tenant-wide-publish lint)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5
+          $r = Invoke-Pester -Path tests/scripts/Publish-SolutionComponents.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Scoped-publish tests failed ($($r.FailedCount) failed, $($r.PassedCount) passed)." }

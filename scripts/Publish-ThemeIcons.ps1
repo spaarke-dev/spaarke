@@ -80,19 +80,7 @@ try {
     exit 1
 }
 
-Write-Host ""
-Write-Host "====================================="
-Write-Host "Now publishing all ribbon customizations..."
-Write-Host "====================================="
-
-# Also publish ribbon customizations
-$publishAllUrl = "$apiUrl/PublishAllXml"
-try {
-    Invoke-RestMethod -Uri $publishAllUrl -Headers $headers -Method Post | Out-Null
-    Write-Host "All customizations published!" -ForegroundColor Green
-} catch {
-    Write-Host "Error publishing all: $_" -ForegroundColor Red
-}
+# Task 130 (D-83): only the web resources above are published. The theme menu ribbon needs no publish of its own here.
 
 Write-Host ""
 Write-Host "Done! Please hard-refresh the browser (Ctrl+F5) to see the icons."

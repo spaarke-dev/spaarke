@@ -536,9 +536,7 @@ pac solution export \
   --name Spaarke_AI
 
 # Modify and reimport
-pac solution import \
-  --path Spaarke_AI_updated.zip \
-  --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath Spaarke_AI_updated.zip -SolutionUniqueName Spaarke_AI
 ```
 
 ---
@@ -1202,7 +1200,7 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 
 **Resolution**:
 1. Republish Custom Page in Power Apps maker
-2. Run `pac solution publish-all`
+2. Publish the affected components only (`PublishXml`, scripts/lib/Publish-SolutionComponents.ps1); never a tenant-wide publish
 3. Hard refresh browser (Ctrl+Shift+R)
 4. Check version in control footer
 

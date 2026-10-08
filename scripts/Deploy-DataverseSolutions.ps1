@@ -355,7 +355,9 @@ function Import-ManagedSolution {
         the holding solution is retired (spec FR-09 acceptance).
 
         In fresh-install mode, invokes plain `pac solution import` with
-        --publish-changes + --force-overwrite.
+        --force-overwrite. These are MANAGED solutions: nothing is published here
+        (task 130, D-83: never a tenant-wide publish; scoped procedure in
+        scripts/lib/Publish-SolutionComponents.ps1).
     #>
     param(
         [string]$ZipPath,
@@ -389,7 +391,6 @@ function Import-ManagedSolution {
     $importArgs = @(
         "solution", "import",
         "--path", $ZipPath,
-        "--publish-changes",
         "--force-overwrite",
         "--environment", $Environment
     )

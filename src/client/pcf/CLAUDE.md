@@ -392,13 +392,13 @@ cp out/controls/control/bundle.js \
 
 # 4. Pack and import
 pac solution pack --zipfile Solution_vX.Y.Z.zip --folder {Solution}_extracted
-pac solution import --path Solution_vX.Y.Z.zip --force-overwrite --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath Solution_vX.Y.Z.zip -SolutionUniqueName <name>
 
 # 5. CUSTOM PAGE REPUBLISH (if PCF is in Custom Page)
 # CRITICAL: Open Custom Page in Power Apps Maker (make.powerapps.com)
 #           → Apps → Open Custom Page → Edit
 #           → File → Save → File → Publish
-# Then run: pac solution publish-all
+# Then publish only the affected components (scripts/Import-SolutionScoped.ps1 / PublishXml); never a tenant-wide publish
 
 # 6. CLEAR BROWSER CACHE
 # Users MUST hard refresh (Ctrl+Shift+R) the Spaarke application

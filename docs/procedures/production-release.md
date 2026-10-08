@@ -440,7 +440,7 @@ pac solution export --name SpaarkeMaster --path ./deploy/SpaarkeMaster.zip --ove
 pac auth select --environment "https://spaarke-demo.crm.dynamics.com"
 
 # Import SpaarkeMaster
-pac solution import --path ./deploy/SpaarkeMaster.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath ./deploy/SpaarkeMaster.zip -SolutionUniqueName <name>
 
 # Or via Deploy-Release.ps1 which handles this automatically
 .\scripts\Deploy-Release.ps1 `

@@ -582,6 +582,14 @@ Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes
 
 ## Release & Deployment Orchestration
 
+### `Import-SolutionScoped.ps1` and `lib/Publish-SolutionComponents.ps1`
+**Purpose:** The ONE way to import a Dataverse solution (task 130, owner decision D-83). Imports without publishing, then POSTs a single `PublishXml` for exactly the solution's components (entities, web resources, option sets, site maps, dashboards, app modules; a PCF control through its `cc_` bundle web resources) and reads web resources and app modules back. `-PlanOnly` is read-only. Replaces every tenant-wide publish (`PublishAllXml`, `pac solution publish`, `--publish-changes`); `tests/scripts/Publish-SolutionComponents.Tests.ps1` and the `scoped-publish-lint` workflow fail if one comes back. Entity publishes are entity-wide (all pending views and forms of that entity); the module warns with `Get-EntityPublishCollateral`.
+**Usage:** 🟢 Active - every Dataverse solution import
+**Lifecycle:** ✅ Maintained
+**Dependencies:** PowerShell 7, pac CLI, `az login`
+**Owner:** spaarke-ontology-platform-r1 (task 130)
+**Last Used:** October 2026 (read-only plan against spaarkedev1)
+
 ### `Package-OfficeAddinUnified.ps1`
 **Purpose:** Zips the combined Outlook + Word Spaarke add-in — ONE Microsoft 365 unified-manifest app (schema 1.30) — into the two packages the admin center accepts: `spaarke-addin-<ver>.zip` (production; hides the live XML add-ins on clients that can run it) and `spaarke-addin-<ver>-TEST.zip` (own id, "(TEST)" name, hides nothing). Reads the parts webpack's `SpaarkeUnifiedPackagePlugin` emits into `src/client/office-addins/dist/spaarke/`; writes OUTSIDE `dist/` so the public site does not serve them. **Fails (exit 1)** if the build output is missing or the icons are not 192×192 (color) / 32×32 (outline).
 **Usage:** 🟢 Active - every add-in release (run by `deploy-office-addins.yml`, which uploads the zips as the artifact `spaarke-addin-unified-package`)

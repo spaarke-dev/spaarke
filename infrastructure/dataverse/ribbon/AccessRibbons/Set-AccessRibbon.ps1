@@ -124,6 +124,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '..' '..' '..' '..' 'scripts' 'lib' 'Publish-SolutionComponents.ps1')
 
 if ($Apply -and $Verify) { throw 'Use -Apply OR -Verify (-Apply runs -Verify itself).' }
 if (($Apply -or $Verify) -and -not $EnvironmentUrl) { throw '-EnvironmentUrl is required for -Apply and -Verify.' }
@@ -523,8 +524,9 @@ foreach ($e in $entities) {
 $packed = Join-Path $WorkDir "$SolutionName.merged.zip"
 & $pacExe solution pack --zipfile $packed --folder $unpacked --packagetype Unmanaged
 if ($LASTEXITCODE -ne 0) { throw "pac solution pack failed ($LASTEXITCODE)." }
-& $pacExe solution import --environment $EnvironmentUrl --path $packed --publish-changes
-if ($LASTEXITCODE -ne 0) { throw "pac solution import failed ($LASTEXITCODE)." }
+# Task 130 (D-83): import without a tenant-wide publish, then publish only this ribbon solution's components.
+Invoke-ScopedSolutionImport -EnvironmentUrl $EnvironmentUrl -ZipPath $packed -SolutionUniqueName $SolutionName -PacExe $pacExe -ImportArgs @() `
+    -Context (Get-DataverseApiContext -EnvironmentUrl $EnvironmentUrl) | Out-Null
 
 # The effective ribbon (RetrieveEntityRibbon) lags the publish by up to a minute or more, so a verify run straight after
 # the import can fail on rules that are in fact applied (see the header). Retry with a bounded backoff; only the last

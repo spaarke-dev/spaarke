@@ -495,7 +495,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
         var body = new Dictionary<string, object?>
         {
             ["OverwriteUnmanagedCustomizations"] = true, // PS --force-overwrite
-            ["PublishWorkflows"] = true,                 // PS --publish-changes
+            ["PublishWorkflows"] = true,                 // activates the solution workflows (not a publish)
             ["CustomizationFile"] = Convert.ToBase64String(zipBytes),
             ["ImportJobId"] = importJobId,
             ["SkipProductUpdateDependencies"] = false,

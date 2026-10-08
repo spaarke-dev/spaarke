@@ -369,7 +369,7 @@ pac solution list | Select-String "DocumentRibbons"
 
 ```powershell
 # Re-publish all customizations
-pac solution publish
+# Publish only what you changed: PublishXml via scripts/lib/Publish-SolutionComponents.ps1 (never a tenant-wide publish)
 ```
 
 **Check 3: User Security Role**

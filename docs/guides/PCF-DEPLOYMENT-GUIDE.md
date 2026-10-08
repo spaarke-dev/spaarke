@@ -317,7 +317,7 @@ This creates: `bin/{SolutionName}_v{X.Y.Z}.zip`
 mv /path/to/Directory.Packages.props{,.disabled}
 
 # Import
-pac solution import --path bin/{SolutionName}_vX.Y.Z.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath bin/{SolutionName}_vX.Y.Z.zip -SolutionUniqueName <name>
 
 # Restore CPM
 mv /path/to/Directory.Packages.props{.disabled,}
@@ -351,7 +351,7 @@ pac solution list | grep -i "{SolutionName}"
    - Open the target app in the app designer
    - Add the Custom Page to the sitemap navigation
    - Save and Publish the app
-5. Run `pac solution publish-all`
+5. Publish only the affected components (`scripts/Import-SolutionScoped.ps1` / `PublishXml`); never a tenant-wide publish
 6. Hard refresh browser (`Ctrl+Shift+R`)
 7. Verify the workspace loads correctly
 

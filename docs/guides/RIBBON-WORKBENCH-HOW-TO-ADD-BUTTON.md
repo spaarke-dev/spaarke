@@ -236,7 +236,7 @@ Compress-Archive -Path temp/{SolutionName}_extracted/* -DestinationPath temp/{So
 ### Step 4: Import
 
 ```powershell
-pac solution import --path temp/{SolutionName}_modified.zip --publish-changes
+pwsh scripts/Import-SolutionScoped.ps1 -EnvironmentUrl <url> -ZipPath temp/{SolutionName}_modified.zip -SolutionUniqueName <name>
 ```
 
 ---
