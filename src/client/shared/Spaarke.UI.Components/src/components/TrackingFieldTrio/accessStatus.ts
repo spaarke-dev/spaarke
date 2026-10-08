@@ -59,11 +59,13 @@ export function parseAccessStatusResponse(body: unknown, recordId: string): ITra
 }
 
 /**
- * Whether the indicator shows the Secure signal at all. OWNER CHANGE POINT (b), pending: the access-permission pill
- * already reads "Secure" in red; set this one line to `false` and the indicator shows only No Access (and draws nothing
- * for a record that is only secure). An unknown Secure signal still shows "Access status unavailable" either way.
+ * Whether the indicator shows the Secure signal at all. OWNER CHANGE POINT (b): `false` since owner round 85
+ * (2026-10-08) — the access-permission pill already reads "Secure" in red, so the indicator shows only No Access and
+ * draws nothing for a record that is only secure. An unknown Secure signal still shows "Access status unavailable".
+ * Flipping it back to `true` restores "Secure" / "Secure · No Access"; the banner's SECURE text must then be
+ * re-checked (sprk_accessstatus_banner.js ManageAccessFrom* constants).
  */
-export const INDICATOR_SHOWS_SECURE = true;
+export const INDICATOR_SHOWS_SECURE = false;
 
 /** A request that has not answered by then is "unavailable" (a hung call must not leave the indicator absent). */
 export const ACCESS_STATUS_TIMEOUT_MS = 20000;

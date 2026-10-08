@@ -133,8 +133,9 @@ export interface ITrackingFieldTrioProps {
 
   /** The record's access status (task 153, owner round 83 item 11) — the two signals of task 064's per-record read,
    * parsed by the host with `parseAccessStatusResponse` (fail closed: anything it cannot trust is `unknown`). When
-   * supplied, the header row shows an indicator: Secure and/or No Access in red; "Access status unavailable" in a
-   * neutral colour when either signal is `unknown`; nothing when both are `doesNotApply`. It is clickable ONLY when
+   * supplied, the header row shows an indicator: No Access in red (Secure only when `INDICATOR_SHOWS_SECURE` is true;
+   * owner round 85 set it false, the pill already says Secure); "Access status unavailable" in a neutral colour when
+   * either signal is `unknown`; nothing when no shown signal applies (a secure-only record included). It is clickable ONLY when
    * {@link onOpenGrantModal} is supplied AND {@link canGrantAccess} is `true` (the person icon's own gate); a click
    * opens Manage Access at the No Access List (No Access, or both) or at the top (Secure only). Otherwise it has no
    * click handler and its tooltip says the caller cannot manage access here. When OMITTED (the default, and while the

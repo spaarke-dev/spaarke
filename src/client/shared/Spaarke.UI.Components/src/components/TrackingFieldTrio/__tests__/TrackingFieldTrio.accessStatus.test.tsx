@@ -177,6 +177,7 @@ describe('readAccessStatus — a hung request (hardening)', () => {
 });
 
 describe('resolveAccessIndicator (task 153)', () => {
+  // The Secure path, through the explicit parameter (owner round 85 switched the default off: change point b).
   it.each([
     [status('doesNotApply', 'doesNotApply'), { kind: 'none' }],
     [status('applies', 'doesNotApply'), { kind: 'restricted', secure: true, noAccess: false }],
@@ -188,22 +189,26 @@ describe('resolveAccessIndicator (task 153)', () => {
     [status('unknown', 'doesNotApply'), { kind: 'unavailable' }],
     [status('doesNotApply', 'unknown'), { kind: 'unavailable' }],
     [ACCESS_STATUS_UNAVAILABLE, { kind: 'unavailable' }],
-  ])('%j → %j', (input, expected) => {
-    expect(resolveAccessIndicator(input as ITrackingAccessStatus)).toEqual(expected);
+  ])('with the Secure signal shown: %j → %j', (input, expected) => {
+    expect(resolveAccessIndicator(input as ITrackingAccessStatus, true)).toEqual(expected);
   });
 
-  // Owner change point (b), pending: the indicator may show only No Access (the pill already says Secure).
+  // The default (owner round 85, change point b): only No Access; a secure-only record draws nothing (the pill says
+  // Secure). An unknown Secure signal is still "unavailable".
   it.each([
     [status('applies', 'doesNotApply'), { kind: 'none' }],
     [status('applies', 'applies'), { kind: 'restricted', secure: false, noAccess: true }],
     [status('doesNotApply', 'applies'), { kind: 'restricted', secure: false, noAccess: true }],
     [status('unknown', 'doesNotApply'), { kind: 'unavailable' }],
-  ])('with the Secure signal switched off: %j → %j', (input, expected) => {
+    [status('doesNotApply', 'doesNotApply'), { kind: 'none' }],
+    [status('applies', 'unknown'), { kind: 'unavailable' }],
+  ])('by default (Secure not shown): %j → %j', (input, expected) => {
+    expect(resolveAccessIndicator(input as ITrackingAccessStatus)).toEqual(expected);
     expect(resolveAccessIndicator(input as ITrackingAccessStatus, false)).toEqual(expected);
   });
 
-  it('shows the Secure signal today (change point b not flipped)', () => {
-    expect(INDICATOR_SHOWS_SECURE).toBe(true);
+  it('does not show the Secure signal (owner round 85, change point b flipped)', () => {
+    expect(INDICATOR_SHOWS_SECURE).toBe(false);
   });
 });
 
@@ -222,12 +227,20 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
   });
 
   it.each([
-    [status('applies', 'doesNotApply'), 'Secure'],
     [status('doesNotApply', 'applies'), 'No Access'],
-    [status('applies', 'applies'), 'Secure · No Access'],
+    // Owner round 85: the indicator shows only No Access; "Secure" is the pill's job.
+    [status('applies', 'applies'), 'No Access'],
   ])('shows %j as "%s"', (s, label) => {
     renderTrio(makeProps({ accessStatus: s }));
     expect(indicator()).toHaveTextContent(label);
+    expect(indicator()).not.toHaveTextContent('Secure');
+  });
+
+  it('draws nothing for a secure-only record (the red pill already says Secure)', () => {
+    renderTrio(
+      makeProps({ onOpenGrantModal: jest.fn(), canGrantAccess: true, accessStatus: status('applies', 'doesNotApply') })
+    );
+    expect(indicator()).toBeNull();
   });
 
   it('shows "Access status unavailable" (neutral) when a signal is unknown — present, never absent', () => {
@@ -237,7 +250,7 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
   });
 
   it('renders the indicator in the header row even with no title and no governance icons', () => {
-    renderTrio(makeProps({ accessStatus: status('applies', 'doesNotApply') }));
+    renderTrio(makeProps({ accessStatus: status('doesNotApply', 'applies') }));
     expect(indicator()).not.toBeNull();
   });
 
@@ -252,21 +265,21 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
       expect(onOpenGrantModal).toHaveBeenCalledWith('noAccess');
     });
 
-    it('Secure AND No Access targets the No Access List', () => {
+    it('Secure AND No Access shows "No Access" and targets the No Access List', () => {
       const onOpenGrantModal = jest.fn();
       renderTrio(makeProps({ onOpenGrantModal, canGrantAccess: true, accessStatus: status('applies', 'applies') }));
-      fireEvent.click(screen.getByRole('button', { name: 'Secure · No Access' }));
+      fireEvent.click(screen.getByRole('button', { name: 'No Access' }));
       expect(onOpenGrantModal).toHaveBeenCalledWith('noAccess');
     });
 
-    it('Secure only opens Manage Access at the top (no section)', () => {
+    it('Secure only offers no click at all (nothing is drawn; Manage Access stays on the person icon)', () => {
       const onOpenGrantModal = jest.fn();
       renderTrio(
         makeProps({ onOpenGrantModal, canGrantAccess: true, accessStatus: status('applies', 'doesNotApply') })
       );
-      fireEvent.click(screen.getByRole('button', { name: 'Secure' }));
-      expect(onOpenGrantModal).toHaveBeenCalledTimes(1);
-      expect(onOpenGrantModal.mock.calls[0]).toEqual([]);
+      expect(screen.queryByRole('button', { name: /Secure/ })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Grant access' })).toBeInTheDocument();
+      expect(onOpenGrantModal).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -277,7 +290,8 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
       renderTrio(makeProps({ onOpenGrantModal, ...gate, accessStatus: status('applies', 'applies') }));
       const el = indicator() as HTMLElement;
       expect(el.tagName).toBe('SPAN');
-      expect(screen.queryByRole('button', { name: 'Secure · No Access' })).not.toBeInTheDocument();
+      expect(el).toHaveTextContent('No Access');
+      expect(screen.queryByRole('button', { name: 'No Access' })).not.toBeInTheDocument();
       fireEvent.click(el);
       expect(onOpenGrantModal).not.toHaveBeenCalled();
     });
@@ -341,7 +355,7 @@ describe('TrackingFieldTrio — access-status indicator (task 153)', () => {
   it('renders every state under webDarkTheme with zero console errors or warnings (ADR-021)', () => {
     const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
-    for (const s of [status('applies', 'applies'), ACCESS_STATUS_UNAVAILABLE, status('applies', 'doesNotApply')]) {
+    for (const s of [status('applies', 'applies'), ACCESS_STATUS_UNAVAILABLE, status('doesNotApply', 'applies')]) {
       const view = renderTrio(
         makeProps({ onOpenGrantModal: jest.fn(), canGrantAccess: true, accessStatus: s }),
         webDarkTheme

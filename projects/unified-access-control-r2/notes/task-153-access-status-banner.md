@@ -53,11 +53,13 @@ Live, read-only (spaarkedev1, 2026-10-08):
    is re-evaluated the form first shows that record's last rendered state again (in place, no gap); a record never
    rendered yet, or no record, clears the three ids first. `render()` sets the ids it shows and clears the others.
    Create form: no call.
-2. **TrackingFieldTrio indicator** (shared core): one opt-in prop `accessStatus` (the two signals). Red "Secure" /
-   "No Access" / "Secure · No Access"; neutral "Access status unavailable" on any unknown; nothing when both
-   `doesNotApply`; nothing when the prop is omitted (email reading pane unchanged). Clickable only with
-   `onOpenGrantModal` AND `canGrantAccess === true`: No Access (or both) → `onOpenGrantModal('noAccess')`; Secure only →
-   `onOpenGrantModal()`. Otherwise a focusable span with no handler and a "You cannot manage access on this record."
+2. **TrackingFieldTrio indicator** (shared core): one opt-in prop `accessStatus` (the two signals). Since owner round 85
+   it shows only red "No Access" (`INDICATOR_SHOWS_SECURE = false`: the red pill already says Secure, so a secure-only
+   record draws nothing); neutral "Access status unavailable" on any unknown; nothing when No Access does not apply;
+   nothing when the prop is omitted (email reading pane unchanged). Clickable only with `onOpenGrantModal` AND
+   `canGrantAccess === true`: → `onOpenGrantModal('noAccess')`. (With the flag `true` it would also show "Secure" /
+   "Secure · No Access", a Secure-only click opening `onOpenGrantModal()`; that path is tested through the explicit
+   parameter of `resolveAccessIndicator`.) Otherwise a focusable span with no handler and a "You cannot manage access on this record."
    tooltip. The person icon now calls `onOpenGrantModal()` explicitly (the click event is never passed as a section).
 3. **Section plumbing** (067 did not build it; round 59 cut it): `onOpenGrantModal` gains an optional `section` argument
    (no second callback), and `AccessGrantModal` gains `initialSection?: 'noAccess'`, which scrolls to and focuses the No
@@ -97,15 +99,15 @@ No endpoint, column, package or DI registration.
 | Suite | Tests |
 |---|---|
 | `src/__tests__/accessStatusBanner.test.ts` (the real script in jsdom) | 38 (28 + 6 in pass 1 + 4 net in pass 2) |
-| `TrackingFieldTrio/__tests__/TrackingFieldTrio.accessStatus.test.tsx` | 51 (43 + 8 in verifier pass 1) |
+| `TrackingFieldTrio/__tests__/TrackingFieldTrio.accessStatus.test.tsx` | 53 (43 + 8 in pass 1 + 2 in round 85) |
 | `AccessGrantModal/__tests__/AccessGrantModal.initialSection.test.tsx` | 4 |
 | Existing TrackingFieldTrio + AccessGrantModal suites | unchanged, green |
 
 Full `@spaarke/ui-components` jest: 4179 passed, 1 failed (`buildDynamicWorkspaceConfig.test.ts`, pre-existing, #1345).
 Seeded mutations of the banner (unknown rendered as nothing; no supersession drop; no record-left drop; null Response
 as "clear"; unknown state as doesNotApply; one global sequence for every form) each fail at least one test.
-PCF `scripts/Invoke-PcfBuildProd.ps1` succeeded; `bundle.js` 1,024,348 bytes after verifier pass 1 (1,023,627 at
-first pass; 1,017,260 at 1.0.40, +7.1 KB);
+PCF `scripts/Invoke-PcfBuildProd.ps1` succeeded; `bundle.js` 1,024,345 bytes after owner round 85 (1,024,348 after
+verifier pass 1; 1,023,627 at first pass; 1,017,260 at 1.0.40, +7.1 KB);
 `pcf-scripts lint` clean. Every new test asserts rendered output or the request sent, not a mock echo.
 
 ## Known limits
@@ -139,11 +141,7 @@ Pass 1 found nothing for security, leakage or fail-open. Fixed:
   `readAccessStatus` (`ACCESS_STATUS_TIMEOUT_MS`, 20 s) bound the whole call (token acquisition included) and abort the
   request; a timeout is "unavailable". Tests for both.
 
-**Owner change points (pending, not flipped):**
-- (a) banner text pointing at the new indicator: `Spaarke.AccessStatus.ManageAccessFrom` (one line in
-  `sprk_accessstatus_banner.js`; both closed-copy strings use it).
-- (b) indicator shows only No Access: `INDICATOR_SHOWS_SECURE` (one line in `TrackingFieldTrio/accessStatus.ts`; tests
-  for the `false` behaviour already pass through `resolveAccessIndicator(status, false)`).
+**Owner change points:** both flipped in owner round 85 (below).
 
 ## Verifier pass 2 fixes (2026-10-08)
 
@@ -171,6 +169,26 @@ Pass 2 (full) confirmed the pass-1 fixes and the timeout. Fixed:
 - **They are coupled.** If (b) flips, the indicator draws nothing for a Secure-only record, so (a)'s SECURE wording must
   not send the reader to a marker that is no longer drawn (keep "the person icon", or say "the person icon, or the red
   No Access marker when there is one").
+
+## Owner round 85 (2026-10-08): both change points accepted
+
+- **(b)** `INDICATOR_SHOWS_SECURE = false` (`TrackingFieldTrio/accessStatus.ts`): the indicator shows only No Access; a
+  secure-only record draws nothing (the red pill says Secure). The 9 tests re-pinned to the new default (secure-only
+  draws nothing and offers no click; both → "No Access" opening at the No Access List; the dark-theme and header
+  renders use a No Access record), plus 2 added (secure-only draws nothing; the flag's value). The Secure path stays
+  covered through `resolveAccessIndicator(status, true)`.
+- **(a)** `ManageAccessFrom` split into two one-line constants, because the two banners now point at different places:
+  `Spaarke.AccessStatus.ManageAccessFromSecure` and `Spaarke.AccessStatus.ManageAccessFromNoAccess`. Neither banner
+  says "(the person icon in the tracking panel)" any more as the only pointer. The final text:
+  - **SECURE** (ERROR, `sprk_access_secure`): "SECURE RECORD — only people given access explicitly can see this record.
+    People who can manage access see and change who has access in Manage Access, opened from the person icon in the
+    tracking panel."
+  - **NO ACCESS** (ERROR, `sprk_access_noaccess`): "NO ACCESS RESTRICTION — named people or organizations are blocked
+    from this record. People who can manage access see the list from the red "No Access" marker in the tracking panel,
+    which opens Manage Access at the No Access List."
+  - The unavailable notice is unchanged. The 3 banner text tests re-pinned (the `TEXT` constant).
+- Coupling kept: the SECURE text points at the person icon, not at a marker that is no longer drawn. Flipping (b) back
+  needs the SECURE text re-checked (noted at both constants).
 
 ## Filed (out of scope)
 

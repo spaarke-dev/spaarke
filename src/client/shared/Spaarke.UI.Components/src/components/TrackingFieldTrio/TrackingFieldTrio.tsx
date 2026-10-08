@@ -54,9 +54,11 @@
  * item 11 "BOTH": the form's red text banner plus this clickable indicator):
  *   - opt-in via `accessStatus` (the two signals of task 064's per-record read);
  *     omitted → nothing drawn, so existing consumers are unchanged;
- *   - Secure and/or No Access in red; "Access status unavailable" neutral when
- *     either signal is unknown; nothing when both do not apply. No count, name or
- *     reason is ever shown, and nothing ever says "not secure" / "not restricted";
+ *   - No Access in red ("Secure" too only when INDICATOR_SHOWS_SECURE is true;
+ *     owner round 85 set it false: the pill already says Secure); "Access status
+ *     unavailable" neutral when either signal is unknown; nothing when no shown
+ *     signal applies. No count, name or reason is ever shown, and nothing ever
+ *     says "not secure" / "not restricted";
  *   - clickable only with `onOpenGrantModal` AND `canGrantAccess === true` (the
  *     person icon's own fail-closed gate): No Access → Manage Access at its No
  *     Access List (`onOpenGrantModal('noAccess')`), Secure only → the top. Else a

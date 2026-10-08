@@ -22,11 +22,12 @@ const RECORD_ID = '1b4e28ba-2fa1-11d2-883f-0016d3cca427';
 const OTHER_ID = '2c5f39cb-3fb2-22e3-994f-1127e4ddb538';
 const BASE = 'https://bff.example.test';
 
+// The closed copy as revised by owner round 85 (change points a + b).
 const TEXT = {
   secure:
-    'SECURE RECORD — only people given access explicitly can see this record. People who can manage access see and change who has access in Manage Access (the person icon in the tracking panel).',
+    'SECURE RECORD — only people given access explicitly can see this record. People who can manage access see and change who has access in Manage Access, opened from the person icon in the tracking panel.',
   noAccess:
-    'NO ACCESS RESTRICTION — named people or organizations are blocked from this record. People who can manage access see the list in Manage Access › No Access (the person icon in the tracking panel).',
+    'NO ACCESS RESTRICTION — named people or organizations are blocked from this record. People who can manage access see the list from the red "No Access" marker in the tracking panel, which opens Manage Access at the No Access List.',
   unavailable:
     'Access status unavailable — whether this record is secure or under a No Access restriction could not be checked. Do not assume it is unrestricted; reload the form to try again.',
 };

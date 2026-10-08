@@ -72,17 +72,21 @@ Spaarke.AccessStatus.Ids = {
 };
 
 /**
- * Where the banner tells managers Manage Access is opened from. OWNER CHANGE POINT (a), pending: to point at the new
- * indicator instead, set this one line to e.g. "the red Secure / No Access marker in the tracking panel".
+ * Where each banner tells managers to go. OWNER CHANGE POINTS (a), one line each; owner round 85 (2026-10-08):
+ * - NO ACCESS points at the red "No Access" marker the tracking panel draws (it opens Manage Access at the No Access
+ *   List);
+ * - SECURE points at Manage Access through the person icon, because the marker shows only No Access (change point b,
+ *   TrackingFieldTrio/accessStatus.ts INDICATOR_SHOWS_SECURE = false): nothing is drawn for a secure-only record.
  */
-Spaarke.AccessStatus.ManageAccessFrom = "the person icon in the tracking panel";
+Spaarke.AccessStatus.ManageAccessFromSecure = "Manage Access, opened from the person icon in the tracking panel";
+Spaarke.AccessStatus.ManageAccessFromNoAccess = "the red \"No Access\" marker in the tracking panel, which opens Manage Access at the No Access List";
 
-/** The closed copy (task 153 POML "banner copy"; implement the owner's revision verbatim, compose no other strings). */
+/** The closed copy (task 153 POML "banner copy", as revised by owner round 85; compose no other strings). */
 Spaarke.AccessStatus.Text = {
     secure: "SECURE RECORD — only people given access explicitly can see this record. People who can manage access " +
-        "see and change who has access in Manage Access (" + Spaarke.AccessStatus.ManageAccessFrom + ").",
+        "see and change who has access in " + Spaarke.AccessStatus.ManageAccessFromSecure + ".",
     noAccess: "NO ACCESS RESTRICTION — named people or organizations are blocked from this record. People who can " +
-        "manage access see the list in Manage Access › No Access (" + Spaarke.AccessStatus.ManageAccessFrom + ").",
+        "manage access see the list from " + Spaarke.AccessStatus.ManageAccessFromNoAccess + ".",
     unavailable: "Access status unavailable — whether this record is secure or under a No Access restriction could " +
         "not be checked. Do not assume it is unrestricted; reload the form to try again."
 };
