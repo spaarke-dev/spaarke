@@ -2,14 +2,14 @@
 
 > **Last Updated**: 2026-10-08, checkpoint 3 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
-> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-70). Sub-agents never edit this file.
+> Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-71). Sub-agents never edit this file.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
 | **Task** | No main-session task — orchestrating parallel streams (owner choice). Counts, critical path, stream table: top of `tasks/TASK-INDEX.md` (96 tasks). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098). 46/97 tasks done. ArchTests 818/818. Working tree clean. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master: #1380 (110), #1382 (057), #1359 (098), #1386 (056). 47/97 tasks done. ArchTests 818/818. Working tree clean. |
 | **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
@@ -35,7 +35,7 @@
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) **MERGED** 11dc9b0da (owner approval 2026-10-08); 098 ✅, 065 landed with it | — | 106 running (`a4aa08d7260331359`, worktree `C:\wts-106`; also fixes #1402); 068 queued behind the #1384 rebase (`a17154f00e69eeced`) |
 | **#1384** (060) round 2 done; IsOpenWork | author rebasing onto master (with D-43) — `a17154f00e69eeced` | Independent re-check → ask owner to merge → 060 ✅; author then starts **068** in `C:\wts-068` |
-| **056** → **PR #1386** fixes done `54e8f637f` (D-69 opt-in `showSkippedSteps`, D-70 cited, K2 warn), CI green | re-check by `ad2f766533241683a` running | Owner merge question (list the 6 user-visible changes) → 056 ✅ → 111/112/113/114 |
+| **056** → **#1386 MERGED** 23c359eaf (owner 2026-10-08); 056 ✅ | — | **112** running (`aa80f91b9ac7b3b76`, `C:\wts-112`, code only); **111** running (`a9b2dd472c21a670c`, `C:\wts-111`, dev deploy approved D-71; removes legacySize); then 113 → 114 |
 
 ### Agent IDs (SendMessage resumes a finished agent with its context)
 
@@ -45,8 +45,10 @@
 | a4aa08d7260331359 | 106 author (To Do dates Date Only, `C:\wts-106`) | running |
 | a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
 | a17154f00e69eeced | 060 author: rebasing #1384, then task 068 | running |
-| af7588b2ed6612c5f | 056 author, PR #1386 — fixes done `54e8f637f` | idle |
-| ad2f766533241683a | Reviewer: PR #1386 (056) — re-checking the fix round | running |
+| af7588b2ed6612c5f | 056 author (#1386 merged) | idle |
+| aa80f91b9ac7b3b76 | 112 author (Create wizards in-app) | running |
+| a9b2dd472c21a670c | 111 author (consumer sizes + dev deploy + regression) | running |
+| ad2f766533241683a | Reviewer: PR #1386 (056) — done | idle |
 | a810b83c36e7d8f39 | 039 author — fixes accepted; next: after #1390 merges, merge master into the writer branch + add the pin test | idle |
 | a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 follow-ups done | idle |
 | a1bcb0bae3c363ca9 | 074 author — waits for owner labels | idle |
@@ -68,7 +70,7 @@ unchanged Signals. 073 waits on 037 + 039 + 031 (and a `sprk_regardingmemo` sche
 
 ### Housekeeping for the owner
 
-Delete by hand (sandbox can't delete under `C:\`): `C:\wtr1386`, `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
+Delete by hand (sandbox can't delete under `C:\`): `C:\wtr1386`, `C:\wts-b56` (#1386 merged), `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
 `C:\wt081r`, `C:\wt081s`, `C:\wt21m`, `C:\wt21h`, `C:\wt21t`, `C:\wtem`. Worktrees removable now: `C:\wt081b`, `C:\wt081c`,
 `C:\wt081m`, `C:\wt081`, `C:\wt092`, `C:\wt094`, `C:\wt095`, `C:\wt096`, `C:\wt097`, `C:\wts-110`, `C:\wts-c`, `C:\wts-d`,
-`C:\wts-d73`, `C:\wts-b` (#1382 merged); `C:\wt098` (#1359 merged); later `C:\wts-b56` (#1386), `C:\wts-e` (#1384), `C:\wts-039`/`C:\wts-039w`, `C:\wts-c2`/`C:\wts-c2fix`, `C:\wts-d74`.
+`C:\wts-d73`, `C:\wts-b` (#1382 merged); `C:\wt098` (#1359 merged); later `C:\wts-e` (#1384), `C:\wts-039`/`C:\wts-039w`, `C:\wts-c2`/`C:\wts-c2fix`, `C:\wts-d74`.

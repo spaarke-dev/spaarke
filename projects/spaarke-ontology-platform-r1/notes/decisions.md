@@ -110,6 +110,7 @@ Sources: **design** = [`design.md`](../design.md) §8 (D-1..D-12, §8.0c) and §
 | D-67 | Merge #1390 after uac-r2 approves → deploy master to dev → finish 039 live gate | Binding |
 | D-68 | Merge #1391 (uac-r2 org-owned AppendTo fix) when green + uac-r2 approves | Binding |
 | D-69 | WizardShell's skipped-step marker (dashed ring) is **opt-in** per wizard; existing wizards keep the tick for a skipped step; the 058 decision wizard opts in (from the #1386 review F1) | Binding (056, 058) |
+| D-71 | Task 111 may deploy to **spaarkedev1** (SpaarkeAi, SmartTodo, DocumentRelationshipViewer, external SPA code pages + SemanticSearchControl PCF) and run the modal regression live; code in its own PR, owner merges (approved 2026-10-08) | Binding (111) |
 | D-70 | **ADR-050 Path A** for 056's transitional `SprkModal.legacySize` and `WizardShell` `maxWidth`/`height`; **removed in task 111** with a test that they are gone (from the #1386 review F2) | Binding (056, 111) |
 
 ## Superseded or withdrawn
