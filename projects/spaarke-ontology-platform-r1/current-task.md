@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-07 late (main session, context-handoff before /compact). State only — history is in git,
+> **Last Updated**: 2026-10-07 late, checkpoint 2 (main session, `/context-handoff` before /compact). State only — history is in git,
 > task `<completion>` blocks and `notes/handoff-history/`. Standing rules + coordination: [`CLAUDE.md`](CLAUDE.md).
 > Decisions: [`notes/decisions.md`](notes/decisions.md) + spec §9 (D-1..D-68). Sub-agents never edit this file.
 
@@ -9,7 +9,8 @@
 | Field | Value |
 |---|---|
 | **Task** | No main-session task — orchestrating parallel streams (owner choice). Counts, critical path, stream table: top of `tasks/TASK-INDEX.md` (96 tasks). |
-| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. ArchTests 818/818. |
+| **Branch** | `docs/ontology-platform-design` (draft #1111), pushed, in sync. Merged in today: stream C (036, 026), stream D (072), 074 notes. Merged to master today: #1380 (110), #1382 (057). 44/96 tasks done. ArchTests 818/818. Working tree clean. |
+| **Critical context** | Five parallel streams; every rework round gets an independent review before merge; PRs to master merge only with owner approval; anything touching record access waits on uac-r2 via issue #1355 (their sessions hold cross-session messages). |
 | **Next Action** | (1) **Launch the three queued actions below.** (2) Then act on agent notifications per the tables. Ask the owner only for merges to master, deploys and genuine decisions. |
 
 ### Queued actions (not yet started — do these first after compaction)
@@ -33,7 +34,6 @@
 |---|---|---|
 | uac-r2 on **#1355** (comment 6050669298) | Review #1390 + #1391; name the canonical work-assignment create path (D-65); OK the write-core move (D-66) | 039 live gate; merge #1391; 046 follows their path (one-file swap) + their route name; start 048 |
 | **#1359** (098) final round | agent `a67ad20f7bead7126` | Main session reads the diff → ask owner to merge → mark 098 ✅ (065 lands with it) → start **106** and **068** (`a17154f00e69eeced`) |
-| ~~#1382 (057)~~ | **MERGED** `418914d69` (owner-approved) | 057 ✅ |
 | **#1384** (060) round 2 DONE `e69e99ab1`, CI green (High Priority now IsOpenWork too) | #1359 merging first | Rebase onto master (header-comment conflict: keep #1359 wording + "open work (IsOpenWork)") → ask owner to merge → 060 ✅ |
 | **056** → **PR #1386** green; deviations D1 dashed ring for skipped steps (owner-visible), D2 `legacySize` Path A (111 removes), D3 no onBeforeClose; filed #1388, #1392 | **independent review running** (`ad2f766533241683a`) | Owner-visible changes + merge question → then 111/112/113/114 |
 
@@ -42,9 +42,10 @@
 | ID | Role | State |
 |---|---|---|
 | a67ad20f7bead7126 | 098 author, PR #1359 — final round | running |
-| a18a719c189250af3 | 057 author, PR #1382 — round 2 | running |
-| a17154f00e69eeced | 060 author, PR #1384 — round 2; next 068 after #1359 | running |
-| af7588b2ed6612c5f | 056 WizardShell on SprkModal (own PR) | running |
+| a18a719c189250af3 | 057 author (PR #1382 merged) | idle |
+| a17154f00e69eeced | 060 author, PR #1384 (round 2 done, awaits #1359) — next 068 after #1359 | idle |
+| af7588b2ed6612c5f | 056 author, PR #1386 — resume for review fixes | idle |
+| ad2f766533241683a | Reviewer: PR #1386 (056) | running |
 | a810b83c36e7d8f39 | 039 author (PR #1390 + `stream/039-signal-writer`) | idle |
 | a87c76386416d9b61 | Stream C2 author: 047 ✅, 069 ✅, 046 built (unmerged), PR #1391 | idle |
 | a1bcb0bae3c363ca9 | 074 author — waits for owner labels | idle |
@@ -67,4 +68,4 @@ unchanged Signals. 073 waits on 037 + 039 + 031 (and a `sprk_regardingmemo` sche
 Delete by hand (sandbox can't delete under `C:\`): `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`,
 `C:\wt081r`, `C:\wt081s`, `C:\wt21m`, `C:\wt21h`, `C:\wt21t`, `C:\wtem`. Worktrees removable now: `C:\wt081b`, `C:\wt081c`,
 `C:\wt081m`, `C:\wt081`, `C:\wt092`, `C:\wt094`, `C:\wt095`, `C:\wt096`, `C:\wt097`, `C:\wts-110`, `C:\wts-c`, `C:\wts-d`,
-`C:\wts-d73`; later `C:\wt098` (#1359), `C:\wts-b` (#1382), `C:\wts-e` (#1384), `C:\wts-039`/`C:\wts-039w`, `C:\wts-c2`/`C:\wts-c2fix`, `C:\wts-d74`.
+`C:\wts-d73`, `C:\wts-b` (#1382 merged); later `C:\wt098` (#1359), `C:\wts-b56` (#1386), `C:\wts-e` (#1384), `C:\wts-039`/`C:\wts-039w`, `C:\wts-c2`/`C:\wts-c2fix`, `C:\wts-d74`.
