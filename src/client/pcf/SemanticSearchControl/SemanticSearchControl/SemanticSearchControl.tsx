@@ -56,6 +56,11 @@ import {
 import { useSemanticSearch, useFilters, useFilterOptions, useDocumentListPrefs } from './hooks';
 import { SemanticSearchApiService, NavigationService, DataverseMetadataService } from './services';
 import { resolveSearchIndexNameAsync } from './services/SearchIndexResolver';
+import {
+  bulkDownloadFailureForStatus,
+  bulkDownloadFailureForThrown,
+  type BulkDownloadFailureToast,
+} from './services/bulkDownloadFailure';
 import type { TagFilterOption } from '@spaarke/ui-components/dist/types/TagFilter';
 import { authenticatedFetch } from '@spaarke/auth';
 import { initializeAuth } from './authInit';
@@ -1259,6 +1264,22 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       action_name: 'download',
       selection_count: ids.length,
     });
+    const showBulkDownloadFailure = (failure: BulkDownloadFailureToast): void => {
+      showToast(
+        failure.title,
+        failure.body,
+        'error',
+        TOAST_DEFAULT_MS,
+        failure.retry
+          ? {
+              label: 'Retry',
+              onClick: () => {
+                void handleBulkDownload();
+              },
+            }
+          : undefined
+      );
+    };
     try {
       const response = await authenticatedFetch(`${apiBaseUrl}/api/documents/bulk-download`, {
         method: 'POST',
@@ -1266,23 +1287,8 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         body: JSON.stringify({ documentIds: ids }),
       });
 
-      if (response.status === 413) {
-        showToast('Too many documents', 'Maximum 500 documents per bulk download.', 'error');
-        return;
-      }
-
       if (!response.ok) {
-        // Surface BFF ProblemDetails 4xx (404 "no accessible documents", 403, 401).
-        const detail =
-          response.status === 404
-            ? 'No accessible documents in the current selection.'
-            : `Download failed (${response.status}).`;
-        showToast('Download failed', detail, 'error', TOAST_DEFAULT_MS, {
-          label: 'Retry',
-          onClick: () => {
-            void handleBulkDownload();
-          },
-        });
+        showBulkDownloadFailure(bulkDownloadFailureForStatus(response.status));
         return;
       }
 
@@ -1308,6 +1314,13 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         'success'
       );
     } catch (err) {
+      // authenticatedFetch THROWS for a non-OK response — the 413 / 404 / other-status copy above is
+      // reached from here in production.
+      const failure = bulkDownloadFailureForThrown(err);
+      if (failure) {
+        showBulkDownloadFailure(failure);
+        return;
+      }
       // Network or other unrecoverable error — show a retry toast.
       const message = err instanceof Error ? err.message : 'Unknown error';
       showToast('Download failed', message, 'error', TOAST_DEFAULT_MS, {
