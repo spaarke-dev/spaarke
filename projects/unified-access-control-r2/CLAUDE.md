@@ -116,7 +116,7 @@ The full log is in `notes/session27-owner-decisions-and-research.md` (numbered r
   - invoices follow their matter (round 10 item 11);
   - communications inherit the parent's access permission (round 2 Q6).
   - To Do, Event, Communication and Document show their parent's `sprk_accesspermission`, written once in the shared stamp path and kept in step by the reconcile; a parentless child keeps its own value, recorded only, no new enforcement (round 81; owner may revisit).
-- **No Access** applies to internal users on secure records (Q4). It is enforced only when the entry's author has Write (N5), and the record is hidden in Teams/SPA (N2).
+- **No Access** applies to internal users on secure records (Q4); a record filed under a secure parent counts as secure for this, whatever its own flag says ("the parent permissions control", round 82). It is enforced only when the entry's author has Write (N5), and the record is hidden in Teams/SPA (N2).
 - **Notifications** target Created By and Assigned To; no fan-out to a team (round 2 item 9).
 
 **Documents (SPE):**

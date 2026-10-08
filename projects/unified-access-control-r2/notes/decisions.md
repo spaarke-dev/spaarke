@@ -33,7 +33,7 @@ Kept in place rather than moved: dozens of POMLs, notes and PRs link to them by 
 | Team ownership; record-first; `sprk_createdbyperson`; G5 pattern | D-11 (2026-09-22), round 5, round 3b (G5), rounds 7, 9 |
 | Access changes in minutes; ≤2 min child mirror | round 3 (R3/R4), round 11 item 2 |
 | Two-root intersection; invoices follow matter; communications inherit; children show the parent's access permission | round 11 item 4, round 10 item 11, round 2 Q6, round 81 |
-| No Access on internal users; author-Write enforcement; hidden in SPA | round 2 Q4, round 3b (N2, N5) |
+| No Access on internal users; author-Write enforcement; hidden in SPA; parent permissions control a filed child | round 2 Q4, round 3b (N2, N5), round 82 |
 | Notifications: Created By + Assigned To; no team fan-out | session 27 answers, round 2 item 9 |
 | Broker-only SPE; standing BU writers; JIT Office edit | rounds 69, 70 |
 | Locked item-id copy; share-link refusal; Modified by = BFF | round 72 |

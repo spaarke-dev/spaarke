@@ -1194,6 +1194,16 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Doc drift to fix in the task:** `docs/data-model/sprk_communication.md:12` (child carries no permission of its own) and `unified-access-control-cascade.md:37` (column not on `sprk_todo`).
 - **Revisit later (owner):** whether a parentless child's own value should be enforced.
 
+## Round 82 (2026-10-08): BINDING. OWNER decision: the parent's permissions control a filed child, whatever the child's own secure flag says
+
+- **The case:** a work assignment or project filed under a secure matter or project, not yet flagged `sprk_issecure` (inheritance pending, Refused or Failed). The #1410 fix (PR #1419) walked secure ancestors only for children flagged secure, so a person walled off the parent could still see such a child in Teams/SPA. Inheritance can end Refused or Failed, so the gap could be permanent.
+- **Decision (owner):** "It should be that the parent permissions control." A secure parent's No Access entries (and its access) govern a filed child regardless of the child's own flag.
+- **Applied in:**
+  - PR #1419 (#1410): the read-time veto walks every work assignment or project that has a secure ancestor, not only those flagged secure. The verifier gives the fix shape and cost; `fix1410` implements it.
+  - PR #1411 (task 064): the per-record report counts an entry reached through a secure parent as in force even when the filed record's flag is false, and even when the same entry is also on the direct path (pass-2 F3).
+- **Already consistent:** the share-time guard (`SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync`) checks parents for such a record.
+- **Relationship to Q4:** Q4 ("No Access applies to internal users on SECURE records") is read with "secure" meaning the record or any filing ancestor.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
