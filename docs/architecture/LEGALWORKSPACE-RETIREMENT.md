@@ -112,14 +112,14 @@ There is no code-level constraint to remove from the codebase. The R3 code paths
 
 ## 6. Disambiguation: `sprk_corporateworkspace` vs `sprk_LegalOperationsWorkspace`
 
-Two LegalWorkspace-adjacent Dataverse assets exist in the repo; only ONE is retired here.
+Two LegalWorkspace-adjacent Dataverse assets existed (historical); both are now gone. The web resource was retired here (R4 task 041) and deleted from dev (task 121); the Custom Page deploy path was deleted by task 121.
 
 | Asset | What it is | Status |
 |---|---|---|
 | **`sprk_corporateworkspace`** (web resource) | HTML build of `src/solutions/LegalWorkspace/dist/corporateworkspace.html`. Vite + React 19 + Fluent v9. Deployed by `Deploy-CorporateWorkspace.ps1`. | **Retired** by this doc + R4 task 041 |
 | **`sprk_LegalOperationsWorkspace`** (Custom Page) | Former Power Apps Custom Page hosting the PCF control `sprk_Spaarke.Controls.LegalWorkspace`. | **Gone.** PCF source removed from the repo (5557abaa80); the Custom Page does not exist in spaarkedev1 (verified 2026-10-08); `Deploy-LegalWorkspaceCustomPage.ps1` and `Package-LegalWorkspace.ps1` were deleted (task 121, D-82). The unused `SpaarkeLegalWorkspace` solution (stale PCF) remains in dev. |
 
-There is no longer a LegalWorkspace Custom Page deploy path; LegalWorkspace code ships only inside the Console (`sprk_spaarkeai`) bundle.
+There is no longer a LegalWorkspace Custom Page deploy path; LegalWorkspace code is deployed only as part of the Console (`sprk_spaarkeai`) bundle, via `scripts/Deploy-SpaarkeAi.ps1`.
 
 ## 7. Deploy-script changes (R4 task 041 implementation)
 
