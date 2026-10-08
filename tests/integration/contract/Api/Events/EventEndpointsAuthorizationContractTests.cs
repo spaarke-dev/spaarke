@@ -292,7 +292,7 @@ public class EventEndpointsAuthorizationContractTests
         var eventId = Guid.NewGuid();
         host.Probe.Grant(EventsSet, eventId, AccessRights.Read | AccessRights.Write);
         host.SetupEvent(eventId, EventStatusCode.Open);
-        host.Events.Setup(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()))
+        host.Events.Setup(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
         host.Events.Setup(e => e.CreateEventLogAsync(eventId, logAction, It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Guid.NewGuid());
@@ -300,7 +300,7 @@ public class EventEndpointsAuthorizationContractTests
         var response = await host.SendAsync(IdRequest(route, eventId));
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        host.Events.Verify(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Once);
+        host.Events.Verify(e => e.UpdateEventStatusAsync(eventId, newStatus, It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -320,7 +320,7 @@ public class EventEndpointsAuthorizationContractTests
         forWriter.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         forStranger.StatusCode.Should().Be(HttpStatusCode.NotFound, "the transition check must not disclose the state of an event the caller cannot see");
         host.Events.Verify(e => e.GetEventAsync(unreadable, It.IsAny<CancellationToken>()), Times.Never);
-        host.Events.Verify(e => e.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()), Times.Never);
+        host.Events.Verify(e => e.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateOnly?>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     // =========================================================================================

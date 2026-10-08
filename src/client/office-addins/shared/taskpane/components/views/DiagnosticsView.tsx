@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Spinner, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { Button, Spinner, Text, Textarea, makeStyles, tokens } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, CopyRegular, DismissRegular } from '@fluentui/react-icons';
 import type { SignInDiagnostics } from '@shared/services';
 import { describeTokenClaims, diagnosticsAsText, type DiagnosticRow } from '../../services/tokenDiagnostics';
+import { copyText } from '../../utils/copyText';
 
 /**
  * DiagnosticsView — task 113 (customer-provisioning-orchestration-r1 request R1, 2026-10-07). A DEV-ONLY panel for
@@ -100,13 +101,18 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
     [claims, hostDescription, signIn]
   );
 
+  // Task 116: Outlook on the web can block the Clipboard API; when every copy route fails, the rows are shown as one
+  // text block to select and copy by hand.
+  const [manualCopyText, setManualCopyText] = useState<string | null>(null);
   const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(diagnosticsAsText(rows));
+    const text = diagnosticsAsText(rows);
+    if (await copyText(text)) {
+      setManualCopyText(null);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } else {
       setCopied(false);
+      setManualCopyText(text);
     }
   }, [rows]);
 
@@ -128,6 +134,15 @@ export const DiagnosticsView: React.FC<DiagnosticsViewProps> = ({
             </div>
           ))}
         </div>
+      )}
+      {manualCopyText && (
+        <Textarea
+          readOnly
+          value={manualCopyText}
+          rows={8}
+          aria-label="Diagnostics text — select and copy"
+          onFocus={event => event.target.select()}
+        />
       )}
       <div className={styles.actions}>
         <Button icon={<CopyRegular />} onClick={() => void copy()} disabled={claims === null}>

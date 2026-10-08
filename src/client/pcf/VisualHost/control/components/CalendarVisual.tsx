@@ -16,6 +16,8 @@ import type { IChartDefinition, DrillInteraction } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { logger } from '../utils/logger';
 import { CalendarVisual as CalendarVisualView, type ICalendarEvent, type ICalendarEventRecord } from '@spaarke/visuals';
+// React-free source module (same path #1309 / task 081 uses for VisualHost's due-date cards).
+import { parseDueDate } from '../../../../shared/Spaarke.UI.Components/src/utils/dateLocal';
 
 // Re-export the presentational event type so existing importers
 // (ChartRenderer) keep their `from './CalendarVisual'` path.
@@ -50,7 +52,7 @@ export interface ICalendarVisualProps {
  * `<alias>.sprk_eventtypecolor` key so the FetchXML's link-entity alias
  * (e.g. `evtype`, `eventtype`) doesn't have to be standardized.
  */
-function mapRecordToEvent(
+export function mapRecordToEvent(
   record: Record<string, unknown>,
   entityName: string,
   dateField: string | undefined
@@ -70,8 +72,10 @@ function mapRecordToEvent(
     }
   }
   if (!dateStr) return null;
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return null;
+  // Task 098: due / final due are calendar dates ("YYYY-MM-DD", Date Only) — bucket on THAT day, not on UTC midnight
+  // (the previous day west of UTC). A configured datetime field still parses as an instant.
+  const date = parseDueDate(dateStr);
+  if (!date) return null;
 
   // Find alias-keyed event-type attrs without hard-coding the link-entity alias.
   let typeName: string | undefined;

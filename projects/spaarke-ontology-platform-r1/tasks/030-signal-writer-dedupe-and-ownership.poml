@@ -191,7 +191,7 @@
       0x80040220 access-denied — 0x80040299 was mislabelled in the first rework). R10 (seam) — cleanup now
       sweeps by sprk_policycode, not just tracked ids; the seam fails fast if SIGNALS_LIVE_CALLER_ID is unset;
       the BU assertion now reads the matter's BU independently rather than comparing the writer's own value to
-      itself. R12 — added invariant I-12 (renumbered I-14, then I-15, on 2026-10-07 after master merges) to DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5. R13 — checked;
+      itself. R12 — added invariant I-12 (renumbered I-14, I-15, then I-16 on 2026-10-07/08 after master merges) to DATAVERSE-WRITE-PATH-ARCHITECTURE.md §5. R13 — checked;
       sprk_regardingrecordnumber and sprk_privilegeflagged are NOT set by this writer, documented as a gap with
       citations (neither spec.md/design.md nor the canonical TodoRegardingBuilder reference assigns their
       population to this task). R14 — the previously-unused _logger field is now used in Dispose(). R6 (the

@@ -429,9 +429,13 @@ export const App: React.FC<AppProps> = ({
   }, []);
 
   // "Check again" / "Try again" in the Save tab (task 024).
+  // Task 116: gated like the automatic run above. Outlook has no open document (`canGetDocumentUrl` false), so a
+  // "Try again" there must not call `getDocumentUrl()` — it threw CAPABILITY_NOT_SUPPORTED and Find showed
+  // "Document identity resolution failed" (B2B guest UAT, 2026-10-08).
   const retryDocumentIdentity = useCallback(() => {
+    if (!hostAdapter.getCapabilities().canGetDocumentUrl) return;
     void resolveOpenDocumentIdentity();
-  }, [resolveOpenDocumentIdentity]);
+  }, [hostAdapter, resolveOpenDocumentIdentity]);
 
   const handleCreateTodo = useCallback(
     async (input: CreateTodoInput): Promise<CreateTodoResult> => {
