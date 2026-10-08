@@ -240,8 +240,10 @@ public static class GrantExternalAccessEndpoint
     /// so both write an identical, audited grant.
     /// </summary>
     /// <returns>
-    /// The id of the single surviving active row, and a <c>Warning</c> that is non-null when the grant
-    /// was written but does NOT currently confer access (task 023 / ADR-003 — see the expired-row branch).
+    /// The id of the single surviving active row, and a <c>Warning</c> that is non-null when the key does NOT
+    /// confer access after this request (task 023 / ADR-003 — see the expired-row branch). With no expiry in
+    /// the request nothing was written (task 113); only a request that supplied a date the row will not confer
+    /// on (the Assigned-To restore) was written as asked.
     /// </returns>
     /// <remarks>
     /// <para><b>Idempotent since task 010</b> (spec FR-09, finding A-11). This method previously CREATEd
@@ -388,6 +390,80 @@ public static class GrantExternalAccessEndpoint
             var expiryChanged = expiryToWrite.HasValue && expiryToWrite != survivor.ExpiresDate;
             var levelChanged = survivor.AccessLevel != requestedLevel;
 
+            // ── ADR-003: do not report success over a grant that confers nothing ─────────────
+            //
+            // The match filter selects on statecode only, so an EXPIRED row is still "active" to this
+            // query. Re-granting over one without supplying a new expiry therefore returned 200 and a
+            // record id while task 007's read filter kept excluding the row — the caller is told access
+            // was restored, and the grantee still has none. If the request carries a new expiry, that date
+            // is what the row will carry, and (being today or later — the routes 400 a past one) this does
+            // not fire.
+            //
+            // ── Task 106 (ISS-008 / #973): this judges the WHOLE KEY, not one row ───────────
+            //
+            // The survivor is elected by effective expiry, so if IT does not confer access then NO active
+            // row on the key does — which is the question the caller is really asking, because the read
+            // path unions every active unexpired row on the key. Before task 106 the elected row was
+            // simply the lowest id, so an expired lowest-id row produced this 409 — "still confers no
+            // access" — while a live duplicate meant the grantee did have access. The 409 was false.
+            //
+            // NOTE `expiryToWrite` and `effectiveExpiry` are distinct on purpose: the former is nullable
+            // because null means "write NOTHING" (task 097 — a re-grant from a surface with no date field
+            // must not move a date someone set), the latter is what the row will CARRY. (Review finding F2
+            // of task 106: merging them would be behaviour-preserving — the `!=` guard on `expiryChanged`
+            // sees to that — so they are kept apart for what the nullable type EXPRESSES, not for safety.)
+            //
+            // ── Task 113 (ISS-028 / #1008): decided BEFORE the write ────────────────────────
+            //
+            // Every input (the request's expiry, the survivor's, today, and for a contact issuer the
+            // already-resolved `expiryToWrite`) exists before the update below, and none of it is produced
+            // by that update, so the answer is computed here. When the request supplied NO expiry, the
+            // update could not change it (the survivor's date is kept), so the row would still confer
+            // nothing whatever else it wrote: the request is refused here and writes NOTHING. Before task
+            // 113 the check ran after the update, so a re-grant at a different level over an expired key
+            // wrote the new level (and, over a contact-issued row, took it over) and THEN answered 409
+            // "Grant did not take effect" — a false statement about a row it had just changed.
+            //
+            // What this ordering does NOT carry: a request that SUPPLIES a date the row will not confer
+            // on. The routes reject a past date (400) and the contact-issuer mode always writes today or
+            // later, so only the in-process Assigned-To rule sends one — deliberately, to put a raised
+            // grant back to the operator's own lapsed level and date, which ENDS the access the rule had
+            // extended (AssignedAccessMaterializer, PriorLevelRestoredLapsed). That write is the caller's
+            // intent, so it still happens, and the same warning follows it below. Refusing it here instead
+            // would leave the rule's Collaborate level live on a row the ledger records as ended.
+            //
+            // Conferral itself is ExternalParticipationService.ConfersAccessOn — the in-memory mirror of
+            // the read filter's own predicate.
+            // Task 140: a contact issuer's request may carry a date the row does NOT take (never shortened), so what the row
+            // carries is the written date, else its own.
+            var effectiveExpiry = contactIssuer is null
+                ? ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today)
+                : expiryToWrite ?? survivor.ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(today);
+            var confersAccess = ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today);
+
+            GrantUpsertOutcome ConfersNoAccess()
+            {
+                logger.LogWarning(
+                    "[EXT-GRANT] Grant {Key} elected record {AccessRecordId} whose expiry {Expiry} has " +
+                    "PASSED — no active row on the key confers access — and the request supplied no new " +
+                    "expiry. Refusing to report success over a grant that confers no access.",
+                    key, survivor.Id, effectiveExpiry);
+
+                return new GrantUpsertOutcome(
+                    survivor.Id,
+                    $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
+                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.")
+                {
+                    GrantedLevel = check.GrantedLevel,
+                    Narrowed = check.Narrowed,
+                    GrantedExpiry = effectiveExpiry,
+                    ExpiryNarrowed = expiryNarrowed,
+                };
+            }
+
+            if (!confersAccess && request.ExpiryDate is null)
+                return ConfersNoAccess();
+
             if (levelChanged || expiryChanged)
             {
                 var update = new Dictionary<string, object?>();
@@ -450,60 +526,11 @@ public static class GrantExternalAccessEndpoint
                     "no-op (idempotent).", key, requestedLevel, survivor.ExpiresDate);
             }
 
-            // ── ADR-003: do not report success over a grant that confers nothing ─────────────
-            //
-            // The match filter selects on statecode only, so an EXPIRED row is still "active" to this
-            // query. Re-granting over one without supplying a new expiry therefore returned 200 and a
-            // record id while task 007's read filter kept excluding the row — the caller is told access
-            // was restored, and the grantee still has none. If the request DID carry a new expiry, the
-            // write above has already resolved it and this does not fire.
-            //
-            // ── Task 106 (ISS-008 / #973): this judges the WHOLE KEY, not one row ───────────
-            //
-            // The survivor is elected by effective expiry, so if IT does not confer access then NO active
-            // row on the key does — which is the question the caller is really asking, because the read
-            // path unions every active unexpired row on the key. Before task 106 the elected row was
-            // simply the lowest id, so an expired lowest-id row produced this 409 — "still confers no
-            // access" — while a live duplicate meant the grantee did have access. The 409 was false.
-            //
-            // NOTE `expiryToWrite` and `effectiveExpiry` are distinct on purpose: the former is nullable
-            // because null means "write NOTHING" (task 097 — a re-grant from a surface with no date field
-            // must not move a date someone set), the latter is what the row will CARRY.
-            //
-            // ⚠️ An earlier version of this comment claimed merging them "would start rewriting dates that
-            // already match". Review finding F2: that is FALSE, and traced in all three branches — the
-            // `!=` guard on `expiryChanged` already makes a merged form behaviour-preserving. The reason
-            // to keep them apart is that the nullable type EXPRESSES the write/don't-write intent, not
-            // that merging is unsafe. Left corrected rather than deleted: a comment asserting a
-            // non-hazard teaches the next reader to discount its neighbours, several of which (the
-            // ADR-003 ordering below, the task-097 intent above) are load-bearing and true.
-            //
-            // Conferral itself is ExternalParticipationService.ConfersAccessOn — the in-memory mirror of
-            // the read filter's own predicate.
-            // Task 140: a contact issuer's request may carry a date the row does NOT take (never shortened), so what the row
-            // carries is the written date, else its own.
-            var effectiveExpiry = contactIssuer is null
-                ? ExternalGrantLifecycle.EffectiveExpiry(request.ExpiryDate, survivor.ExpiresDate, today)
-                : expiryToWrite ?? survivor.ExpiresDate ?? ExternalGrantLifecycle.DefaultExpiry(today);
-            if (!ExternalParticipationService.ConfersAccessOn(effectiveExpiry, today))
-            {
-                logger.LogWarning(
-                    "[EXT-GRANT] Grant {Key} elected record {AccessRecordId} whose expiry {Expiry} has " +
-                    "PASSED — no active row on the key confers access — and the request supplied no new " +
-                    "expiry. Refusing to report success over a grant that confers no access.",
-                    key, survivor.Id, effectiveExpiry);
-
-                return new GrantUpsertOutcome(
-                    survivor.Id,
-                    $"The existing grant expired on {effectiveExpiry:yyyy-MM-dd} and this request supplied no new "
-                    + "expiry date, so it still confers no access. Re-send with an expiryDate to restore it.")
-                {
-                    GrantedLevel = check.GrantedLevel,
-                    Narrowed = check.Narrowed,
-                    GrantedExpiry = effectiveExpiry,
-                    ExpiryNarrowed = expiryNarrowed,
-                };
-            }
+            // The explicit-date case the check above leaves to the write (see "What this ordering does NOT carry"):
+            // the date the caller supplied is now on the row, and it confers nothing. Returned before the collapse
+            // and the cache invalidation, as it always was — the Assigned-To caller invalidates on this outcome.
+            if (!confersAccess)
+                return ConfersNoAccess();
 
             await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, conditional: contactIssuer is not null, logger, ct);
             await InvalidateGranteeCacheAsync(key, participations);
@@ -747,8 +774,8 @@ public static class GrantExternalAccessEndpoint
     }
 
     /// <summary>
-    /// Result of the grant upsert: the surviving row id, plus a warning when the grant was written but
-    /// does not currently confer access.
+    /// Result of the grant upsert: the surviving row id, plus a warning when the grant does not currently
+    /// confer access (with no expiry in the request, nothing was written — task 113).
     /// </summary>
     /// <remarks>
     /// Added by task 023 (finding H1 / ADR-003). The method previously returned a bare <c>Guid</c>, so the

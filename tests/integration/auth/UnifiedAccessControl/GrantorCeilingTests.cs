@@ -239,6 +239,34 @@ public class GrantorCeilingTests
         existing.AccessLevel.Should().Be(ViewOnly);
     }
 
+    /// <summary>
+    /// Task 113 (ISS-028 / #1008): <c>/grant</c> over an EXPIRED grant with no new expiry and a different level answers
+    /// 409 "Grant did not take effect" — and that is now true: nothing was written. Before task 113 the level was written
+    /// first and the 409 returned over the changed row. Pins the whole 409 (status, title, detail, reasonCode, traceId,
+    /// accessRecordId), which no handler-level test pinned before, so the reorder is shown not to have moved it.
+    /// </summary>
+    [Fact]
+    public async Task Grant_OverAnExpiredGrantAtADifferentLevelWithNoNewExpiry_Is409_AndWritesNothing()
+    {
+        var existing = _dataverse.Seed(ContactId, null, ViewOnly);
+        existing.ExpiresDate = Today.AddDays(-1);
+
+        var result = await Grant(ContactGrant(ExternalAccessLevel.FullAccess), FullAccessCaller);
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(409);
+        problem.ProblemDetails.Title.Should().Be("Grant did not take effect");
+        problem.ProblemDetails.Detail.Should().Be(
+            "The existing grant expired on 2026-10-01 and this request supplied no new expiry date, so it still confers " +
+            "no access. Re-send with an expiryDate to restore it.");
+        problem.ProblemDetails.Extensions.Should().Contain("reasonCode", "sdap.grant.expired_not_restored");
+        problem.ProblemDetails.Extensions.Should().Contain("traceId", "trace-139");
+        problem.ProblemDetails.Extensions.Should().Contain("accessRecordId", existing.Id);
+        _dataverse.Updates.Should().BeEmpty("the request did not take effect, so it changed nothing");
+        _dataverse.Creates.Should().BeEmpty();
+        existing.AccessLevel.Should().Be(ViewOnly, "the refused request must not have written the level");
+    }
+
     /// <summary>A narrowed request that does NOT lower anything (the grantee holds less) is written — the upgrade case.</summary>
     [Fact]
     public async Task Grant_NarrowedAboveAnExistingLowerGrant_RaisesIt()

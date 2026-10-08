@@ -874,6 +874,72 @@ public class GrantLifecycleCharacterizationTests
         table.ActiveRows.Should().ContainSingle().Which.ExpiresDate.Should().Be(renewed);
     }
 
+    /// <summary>
+    /// Task 113 (ISS-028 / #1008): a request the ADR-003 check REFUSES writes nothing — in particular not the level.
+    /// </summary>
+    /// <remarks>
+    /// <para>The refusal fires on an expired key when the request carries no new expiry. Before task 113 the core wrote the
+    /// requested level onto the expired survivor FIRST and only then refused, so the 409 "Grant did not take effect" was
+    /// returned over a row whose level had just changed. <see cref="Upsert_OverAnExpiredRowWithNoNewExpiry_DoesNotReportSuccess"/>
+    /// could not see it: it requests the level the row already holds, so no level write was due. These cases request a
+    /// DIFFERENT level, in both directions.</para>
+    /// <para>The contact-issued case is the second field the same refused write carried: an internal re-grant over a
+    /// contact-issued row also took the row over (cleared the contact issuer). Refused, it must leave the issuer too.</para>
+    /// </remarks>
+    [Theory]
+    [InlineData(ExternalAccessLevel.ViewOnly, ExternalAccessLevel.FullAccess, false)]
+    [InlineData(ExternalAccessLevel.FullAccess, ExternalAccessLevel.ViewOnly, false)]
+    [InlineData(ExternalAccessLevel.ViewOnly, ExternalAccessLevel.Collaborate, true)]
+    public async Task Upsert_OverAnExpiredRowWithNoNewExpiry_AtADifferentLevel_IsRefusedAndWritesNothing(
+        ExternalAccessLevel stored, ExternalAccessLevel requested, bool contactIssued)
+    {
+        var table = new FakeGrantTable();
+        var expired = Today.AddDays(-1);
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)stored, expiresDate: expired);
+        if (contactIssued)
+            seeded.GrantedByContactId = OtherContactId;
+        var client = table.BuildMock();
+
+        var outcome = await Grant(client, Request(requested, expiryDate: null));
+
+        outcome.Refusal.Should().BeNull("this is the ADR-003 conferral outcome, not a policy refusal");
+        outcome.AccessRecordId.Should().Be(seeded.Id, "the caller needs the id to retry against it");
+        outcome.Warning.Should().Be(
+            "The existing grant expired on 2026-09-09 and this request supplied no new expiry date, so it still "
+            + "confers no access. Re-send with an expiryDate to restore it.",
+            "the refusal itself is unchanged by task 113 — only the write moved");
+        seeded.AccessLevel.Should().Be((int)stored, "a refused request must not have changed the level");
+        seeded.ExpiresDate.Should().Be(expired);
+        seeded.GrantedByContactId.Should().Be(contactIssued ? OtherContactId : null, "nor taken the row over");
+        table.LevelUpdateCount.Should().Be(0);
+        client.Verify(
+            c => c.UpdateAsync(GrantEntitySet, It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "a request that is refused issues no update at all");
+        table.CreateCount.Should().Be(0);
+        table.ActiveRows.Should().ContainSingle();
+    }
+
+    /// <summary>
+    /// Task 113 — the NEGATIVE twin: with a new expiry the same request is a real restoration, so the check does not fire
+    /// and the requested level IS written. Without this, a fix that refused every expired row would also pass the above.
+    /// </summary>
+    [Fact]
+    public async Task Upsert_OverAnExpiredRowWithANewExpiry_AtADifferentLevel_WritesTheLevelAndSucceeds()
+    {
+        var table = new FakeGrantTable();
+        var seeded = table.Seed(ContactId, null, ProjectId, (int)ExternalAccessLevel.FullAccess, expiresDate: Today.AddDays(-1));
+        var client = table.BuildMock();
+
+        var outcome = await Grant(client, Request(ExternalAccessLevel.ViewOnly, expiryDate: Today.AddDays(30)));
+
+        outcome.Warning.Should().BeNull();
+        outcome.Refusal.Should().BeNull();
+        seeded.AccessLevel.Should().Be((int)ExternalAccessLevel.ViewOnly, "an explicit level change applies as requested");
+        seeded.ExpiresDate.Should().Be(Today.AddDays(30));
+        table.LevelUpdateCount.Should().Be(1);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // FR-33 — TASK 097. Every grant is bounded: an ABSENT expiry is defaulted server-side.
     //
