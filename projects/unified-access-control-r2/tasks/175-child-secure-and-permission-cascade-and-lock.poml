@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="175" project="unified-access-control-r2">
+  <metadata>
+    <title>Stored Secure and Access Permission follow the parent both ways for filed work assignments and projects, and are locked while a parent exists: un-securing cascades, permission changes cascade, the secure/unsecure commands and the field are unavailable on a child (owner round 84, replaces round 6 item 4)</title>
+    <phase>Session 27 — UAC defect remediation (owner round 84, 2026-10-08)</phase>
+    <gate>startable after task 174 merges (enforcement already follows the parent, so a lagging stored flag is never a hole)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the secure/unsecure write paths, the inheritance job, container moves on unsecure, ribbon/forms, and tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive and high blast radius: it reverses an owner rule (round 6 item 4), changes task 158's inheritance and the unsecure endpoint, and moves documents between containers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SecureRootInheritance/SecureRootInheritanceJob, UnsecureProjectEndpoint and the AccessRibbons; live ribbon/form writes must not interleave with task 173's form script.</parallel-reason>
+    <deps>174</deps>
+    <tags>bff-api, auth, security, dataverse, ribbon, forms, job, testing, deploy</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner round 84 (notes/session27-owner-decisions-and-research.md): "Child access should always follow parent; if parent changes, then child changes. A protection is that if a child has a parent then the access cannot be changed manually (e.g. its locked)." Follow-ups: un-securing cascades ("Child follows"); applies to work assignments and projects ("all children").</origin>
+  </metadata>
+
+  <prompt>Make the STORED sprk_issecure and sprk_accesspermission of every filed work assignment and project equal its parents' effective values (task 174's rule), in both directions and on every change. Lock them while the record has a parent: in the UI (field and commands) and on the server (the secure/unsecure endpoints refuse a child with a parent).</prompt>
+
+  <role>SPAARKE platform developer: .NET 10 BFF secure transitions (inheritance job, unsecure endpoint, SPE container moves), Dataverse ribbon and form XML, PowerShell operator scripts.</role>
+
+  <goal>(1) DOWNWARD CASCADE ON EVERY CHANGE.
+- When a parent becomes Secure, its filed work assignments and projects become Secure. The existing inheritance does this (SecureIfFiledUnderSecureAsync / SecureRootInheritanceJob); keep it.
+- When a parent becomes NOT secure, its filed children whose only secure source was that parent become not secure through the same server path as /unsecure-project: ownership back to the business unit and documents back to the business-unit container. This is new; it replaces round 6 item 4.
+- When a parent's sprk_accesspermission changes, the children's value is updated to the effective value.
+- A child with another secure or more restrictive ancestor keeps the most restrictive value.
+(2) RE-FILE. Moving a child under a different parent, or removing its parent, recomputes its stored values. A child left with no parent keeps its last values and becomes editable.
+(3) THE CASCADE RUNS through the existing scheduled jobs (SecureRootInheritanceJob, plus the secure-child reconcile where it fits). No new timer. It converges within the existing cycle. Idempotent; writes only where a value differs; resumable after a fault.
+(4) LOCK.
+- POST secure / make-secure, /unsecure-project, and any route that sets sprk_accesspermission on a work assignment or project refuse a record that has a parent, with a named 409 code (e.g. access_follows_parent) naming the parent.
+- The Access ribbon hides Make Secure / Remove Secure on such records.
+- The forms show sprk_accesspermission read-only with an "inherited from {parent}" notification (same mechanism as task 173's script).
+- Parentless records are unchanged: F3 still applies to them.
+(5) SAFETY.
+- An un-secure cascade never leaves a child secure-flagged with its documents moved out, or the reverse: the same ordering and rollback guarantees as /unsecure-project (task 158).
+- S5 (a secure record keeps a reader) and round 76 (Restricted wins) still hold.
+- Every step fails closed: if a step cannot complete, the child stays at the MORE restrictive state and is reported.</goal>
+
+  <context>
+    <background>Task 174 makes enforcement follow the parent whatever the stored flags say. This task makes the stored flags and the UI agree, so users see the truth and cannot set a child's access by hand. Task 173 does the same for the Access Permission of To Do, Event, Communication and Document.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs, SecureRootInheritanceJob.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/UnsecureProjectEndpoint.cs (container move, ownership, rollback) and the make-secure route (find it: ProvisionProjectEndpoint / secure endpoints)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureChildReconciliationJob.cs</file>
+      <file>infrastructure/dataverse/ribbon/AccessRibbons/ (Set-AccessRibbon.ps1, access-group.template.xml; enable rules)</file>
+      <file>projects/unified-access-control-r2/tasks/158-secure-inherit-filed-work-assignment-project.poml and its notes (constraints this task supersedes)</file>
+      <file>Task 173's form-lock script (reuse it for the work assignment and project forms if 173 has merged; otherwise coordinate)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="round 84">Supersedes round 6 item 4 and task 158's "no unsecure cascade" constraint. Record that in the notes; change no other task-158 behaviour.</constraint>
+    <constraint source="ADR-036 / ADR-052">Use the existing scheduled jobs; no new BackgroundService or timer.</constraint>
+    <constraint source="CLAUDE.md §17">No plugin. One server-side owner per invariant: the cascade lives in one service called from the job and the transition endpoints.</constraint>
+    <constraint source="project">No app-setting, Entra or Key Vault changes. Container moves only through the existing broker paths (task 171). Live ribbon/form -Apply runs are main-session gates.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read rounds 6, 82-84 and task 158's notes. Inventory every path that sets sprk_issecure or sprk_accesspermission on a work assignment or project.</step>
+    <step order="2">Implement the cascade service (secure, unsecure and permission; recomputed on re-file) and call it from the jobs and the transition endpoints.</step>
+    <step order="3">Endpoint refusals (409 access_follows_parent).</step>
+    <step order="4">Ribbon enable rules and the form lock; scripts with dry run / -Apply / -Verify.</step>
+    <step order="5">Tests, full suites, publish delta, PR. Update TASK-INDEX and the POML status; run the drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an un-secure cascade would move documents for a child that holds external grants or JIT writers in a way /unsecure-project itself refuses, STOP and report the case.</trigger>
+    <trigger>If a child has two parents with conflicting secure states and the stored-value rule is ambiguous beyond "most restrictive", STOP.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">The files in relevant-files</output>
+    <output type="test">Tests beside the SecureRootInheritance, UnsecureProjectEndpoint and reconcile tests</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-175-child-access-cascade.md; docs/architecture/uac-access-control.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Unsecuring matter M (by an allowed user) leaves, within one job cycle, every work assignment and project filed only under M not secure, owned by the BU, with its documents in the BU container; a child also under another secure parent stays secure.</criterion>
+    <criterion testable="true">Changing M from Standard to Restricted (and back) updates its filed children's sprk_accesspermission within one cycle; rows already correct are not written.</criterion>
+    <criterion testable="true">Re-filing a child from secure M to non-secure N makes it not secure (cascade path); removing its parent keeps its values and makes them editable.</criterion>
+    <criterion testable="true">POST make-secure, POST /unsecure-project and any Access Permission write on a child with a parent return 409 access_follows_parent naming the parent; on a parentless record they behave as before (F3 unchanged).</criterion>
+    <criterion testable="true">On the forms, Make Secure / Remove Secure are hidden and Access Permission is read-only with the "inherited from" notification on a child with a parent; -Verify passes.</criterion>
+    <criterion testable="true">A fault mid-cascade leaves each affected child at the more restrictive state, reports it, and the next run completes it; no child is left flagged secure with its documents moved out, or the reverse.</criterion>
+    <criterion testable="true">Test scope: the cases above, plus one seeding proof for the fail-closed ordering of the un-secure cascade. Anything beyond that needs a one-line justification. Full suites pass; publish delta recorded.</criterion>
+    <criterion testable="true">LIVE GATE (dev): secure a throwaway matter with a filed work assignment, unsecure the matter, and confirm the work assignment follows (flag, owner, container) and that the commands are hidden on it; clean up.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Locked on a filed work assignment">
+      <steps>
+        <step>Open a work assignment filed under a secure matter</step>
+        <step>Verify Make Secure / Remove Secure are not offered and Access Permission is read-only with the parent named</step>
+      </steps>
+      <expected>Locked and labelled; dark mode adapts; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files; follow task-execute; record the inventory, the superseded 158 constraint and the decisions in the notes.</protocol>
+  </execution>
+</task>

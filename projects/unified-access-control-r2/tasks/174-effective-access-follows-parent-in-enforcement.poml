@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="174" project="unified-access-control-r2">
+  <metadata>
+    <title>Enforcement uses the parent-derived access: a filed work assignment or project is treated with its parents' Secure and Access Permission (most restrictive), and the contact plane honours a secure parent's No Access list (owner rounds 82 and 84; closes #1442 and #1425)</title>
+    <phase>Session 27 — UAC defect remediation (owner round 84, 2026-10-08)</phase>
+    <gate>startable after PR #1419 (#1410) merges: it reuses that PR's batched ancestry walk (SecureRootInheritance.ReadSecureParentsOfManyAsync) and edits the same AccessibleRecordSetService regions</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes access decisions on the external read path and at grant time (auth/security), modifies tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-sensitive, cross-cutting: read veto, cancellation flags, grant-time checks and their callers; must not widen access anywhere.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AccessibleRecordSetService.cs and ExternalParticipationService.cs (after #1419; task 036 also edits AccessibleRecordSetService — merge order 174 then 036, or rebase).</parallel-reason>
+    <deps>none (gate: #1419 merged)</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <origin>#1442 (task 067 verifier pass 1) and #1425 (#1419 verifier pass 1, P2). Owner round 84 (notes/session27-owner-decisions-and-research.md): "Child access should always follow parent; if parent changes, then child changes."</origin>
+  </metadata>
+
+  <prompt>Make every external-access decision use the EFFECTIVE flags of a work assignment or project: the most restrictive of its own sprk_issecure / sprk_accesspermission and those of every record it is filed under (up the filing chain), so a not-yet-flagged child of a secure or Restricted parent is never more open than its parent. In the same change, make the contact plane (read-time contact veto and grant-time grantee check) honour a secure parent's No Access entries.</prompt>
+
+  <role>SPAARKE platform developer: .NET 10 BFF external-access plane (AccessibleRecordSetService, ExternalParticipationService, GrantExternalAccessEndpoint, AssignedAccessMaterializer), Dataverse SDK queries, xUnit.</role>
+
+  <goal>(1) EFFECTIVE FLAGS. For a sprk_workassignment or sprk_project, the effective Secure flag is true if the record or ANY filing ancestor is secure. The effective Access Permission is the most restrictive (Restricted over Limited over Standard; null = Standard) across the record and its ancestors. sprk_matter is a top-level record and is unchanged. Computed through the batched walk from #1419 (no N+1). An unreadable chain fails closed: the record counts as Secure and Restricted for cancellation, and as walled for the veto.
+(2) READ PATH. AccessibleRecordSetService cancellation (Restricted removes contact-sourced access; Secure or Limited admits only named direct grants) and ExternalCallerContext use the effective flags (#1442).
+(3) CONTACT PLANE (#1425).
+- ResolveDenyVetoAsync (contact subjects, read time) consults the No Access entries of every secure ancestor, carrying each ancestor's referenced organizations, as the share guard does.
+- CheckGranteeNoAccessAsync (grant time; callers GrantExternalAccessEndpoint ~719 and AssignedAccessMaterializer ~1012) does the same with the single-record walk.
+- Fail closed on unreadable ancestry.
+(4) GRANT TIME. Every grant path that reads the root flags (Restricted refusals for contacts and for external-flagged users, Limited/Secure direct-only rules) reads the effective flags.
+(5) DISPLAY CONTRACT. The flags the Manage Access modal receives for a record reflect the effective values, through the existing host read or a field on an existing response; no new endpoint. Task 067's modal then marks cancellation from them. If no existing response can carry them without a new endpoint, STOP (escalation).
+(6) Matter compositions and parentless records behave exactly as before: no extra reads, same results.</goal>
+
+  <context>
+    <background>Round 82 made a secure parent's No Access list bind a filed child (PR #1419, internal-user plane and enforcer). Round 84 generalises this: a child's access always follows its parent. Task 175 makes the STORED flags follow, as a cascade both ways plus a UI lock. This task makes ENFORCEMENT right in the meantime, and whenever a stored flag lags (pending, Refused or Failed inheritance, or a cascade in flight).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (cancellation ~405; ResolveDenyVetoAsync ~922-1025 / 2237; CheckGranteeNoAccessAsync ~1510-1569)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (GetRootRecordFlagsAsync, FlagsFrom ~1015-1022)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs (IsDirectOnly ~193)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Access/SecureRootInheritance.cs (ReadSecureParentsAsync / ReadSecureParentsOfManyAsync, from #1419)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs, InviteAndGrantExternalUserEndpoint.cs, Services/ExternalAccess/AssignedAccessMaterializer.cs (grant-time callers)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SecureShareNoAccessGuard.cs (reference: how parents are asked)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="round 84 / ADR-003">Never widen access. Every new read failure removes access or refuses the grant; a parentless record's result must not change.</constraint>
+    <constraint source="#1419">Reuse the ONE ancestry walk; no second filing reader. Batched, chunked reads only.</constraint>
+    <constraint source="CLAUDE.md §10/§11">No new endpoint. Any new type needs a justification in the notes; record the publish-size delta.</constraint>
+    <constraint source="project">No app-setting, Entra or Key Vault changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/unified-access-control-r2/notes/issue-1410-secure-parent-veto.md (on master after #1419)</file>
+      <file>projects/unified-access-control-r2/notes/phase4-access-report-contract.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read rounds 61, 76-84. List every place that reads root flags or decides contact denial (grep FlagsFrom, GetRootRecordFlagsAsync, IsDirectOnly, IsRestricted, CheckGranteeNoAccessAsync, ResolveDenyVetoAsync) and record the inventory in the notes.</step>
+    <step order="2">Implement effective flags over the batched walk, with fail-closed handling, and route every call site from step 1 through them.</step>
+    <step order="3">Contact plane: read veto and grantee check over secure ancestors.</step>
+    <step order="4">Display contract (goal 5).</step>
+    <step order="5">Tests, full suites, publish delta, PR. Update TASK-INDEX and the POML status; run the drift check.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If carrying the effective flags to the Manage Access modal needs a new endpoint, STOP and propose the smallest extension of an existing response.</trigger>
+    <trigger>If a call site reads root flags for a NON-access purpose (display text, analytics) where the parent-derived value would be wrong, STOP and list it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">The files in relevant-files</output>
+    <output type="test">Tests beside SecureParentReadVetoTests, GrantorCeilingTests and the AccessibleRecordSet tests</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-174-effective-access-follows-parent.md; docs/architecture/uac-access-control.md (round 84 rule)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A work assignment with IsSecure false and Standard, filed under a SECURE matter, admits only named direct contact grants to an external caller; its org-wide and standing grants confer nothing.</criterion>
+    <criterion testable="true">The same child under a RESTRICTED matter confers no contact-sourced access; a grant to a contact or an external-flagged user on it is refused with the existing Restricted refusal.</criterion>
+    <criterion testable="true">A child through a non-secure project to a secure matter is treated as Secure; a child under a non-secure Standard matter is unchanged.</criterion>
+    <criterion testable="true">A contact (or an organization, through membership) walled on secure matter M is denied a work assignment filed under M at read time, and the grant is refused at grant time; a contact walled only on an unrelated record is not affected.</criterion>
+    <criterion testable="true">An unreadable filing chain, ancestor flag, ancestor organization set or deny-list chunk removes the record (read) or refuses the grant; unrelated records in the same composition are unaffected where the existing posture allows.</criterion>
+    <criterion testable="true">Matter compositions and parentless records make no extra reads (cost pin) and return identical results.</criterion>
+    <criterion testable="true">The Manage Access modal receives effective flags for a filed child, through an existing response.</criterion>
+    <criterion testable="true">Test scope: the cases above plus one seeding proof for the read-path cancellation and one for the grant-time contact check. Anything beyond that needs a one-line justification in the notes. Full unit, integration and ArchTests suites pass; publish delta recorded.</criterion>
+    <criterion testable="true">LIVE GATE (dev): a CIAM contact holding an org-wide grant on a non-flagged work assignment filed under a secure matter cannot see it in the SPA (record the pre-deploy behaviour first, then the post-deploy result, in the batch notes).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files; follow task-execute; record the call-site inventory and decisions in the notes.</protocol>
+  </execution>
+</task>
