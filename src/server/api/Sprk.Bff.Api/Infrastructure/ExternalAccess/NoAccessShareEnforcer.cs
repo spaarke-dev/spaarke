@@ -249,8 +249,12 @@ public sealed class NoAccessShareEnforcer
         var subjectKind = NoAccessListReader.SubjectKindOf(row);
         var isOrgObject = row._sprk_objectorganization_value.HasValue
                           && !row._sprk_objectrecordtype_value.HasValue && string.IsNullOrEmpty(row.sprk_objectrecordid);
+        // Task 154: the record id must be in the form the read-time veto matches (NoAccessListReader.TryParseObjectRecordId).
+        // A braced or otherwise non-canonical id is malformed here too. Before, it was enforced (shares removed) while the
+        // veto never matched it, so the entry looked enforced and walled nothing on Teams/SPA.
         var isRecordObject = !row._sprk_objectorganization_value.HasValue
-                             && row._sprk_objectrecordtype_value.HasValue && !string.IsNullOrEmpty(row.sprk_objectrecordid);
+                             && row._sprk_objectrecordtype_value.HasValue
+                             && NoAccessListReader.TryParseObjectRecordId(row.sprk_objectrecordid, out _);
         if (subjectKind is null || (!isOrgObject && !isRecordObject))
         {
             _logger.LogWarning(
@@ -423,7 +427,7 @@ public sealed class NoAccessShareEnforcer
             return records;
         }
 
-        if (!Guid.TryParse(row.sprk_objectrecordid, out var recordId) || recordId == Guid.Empty)
+        if (!NoAccessListReader.TryParseObjectRecordId(row.sprk_objectrecordid, out var recordId))
         {
             run.Fail(null, null, null, "object-record-unparseable",
                 "The entry's object record id is not a record id, so nothing was enforced.");
