@@ -3,7 +3,7 @@
   <metadata>
     <title>Docs + governance match the dedicated Model 1 stamp: ADR-028 amendment (keyless customer stamps, D13), project spec/design/CLAUDE.md, deployment guide, inventory, topology and packaging docs, root CLAUDE.md pointers, /provision-environment skill (G12, INCOMING §7 DoD)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T235 (G12; INCOMING-D12-D13 §7)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation and governance; touches an ADR, root CLAUDE.md and a skill (main session). Code comments only, no behaviour change.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -67,5 +67,14 @@
     <criterion testable="true">No behaviour change: ControlPlane and ArchTests suites pass unchanged.</criterion>
   </acceptance-criteria>
 
-  <notes/>
+  <notes>
+    <note date="2026-10-08">COMPLETED (SESSION 44). Commits 087d677ed (ADR-028 Amendment A6 + .claude), 642c6de0a (docs + C# comments, helper), 74d2b5e97 (spec/design, helper), 7505ea0d8 (RAG guidance, comments, tenancy column description, G12/DoD closed, ISS-006), 5dc95dcf0 (review fixes).
+    - A6 (path B, owner D13): keyless customer stamps — local auth off on every stamp data-plane resource, documented exclusions (App Insights ingestion, ACS), stamp vault contents, H13 keyless proof; dev/demo key-if-configured window (named: dev Document Intelligence key). Concise-only (no full docs/adr copy exists). Project ADR-028 tension closed.
+    - Root CLAUDE.md deliberately NOT changed (deviation from the POML's step 5): its provisioning/auth pointer rows were already right, and the keyless rule lives where provisioning agents read it (constraints/provisioning.md, cross-linked with A6). Avoids a conflict with PR #1370.
+    - FOUND + FIXED: five guides (BYOK, RAG-TROUBLESHOOTING, AI-DEPLOYMENT, RAG-ARCHITECTURE, auth-AI-azure-resources) told operators to set Analysis:DefaultRagModel=Dedicated; in code that reads {tenantId}-knowledge, which nothing creates (Shared = the stamp's own AiSearch:KnowledgeIndexName). Corrected; the dead mode filed as #1432 (ISS-006, BFF). Two of the wrong texts came from this project (T230b).
+    - Live (dev, under the 218e SpaarkeMaster OK): sprk_tenancymodel column description set to the schema script's D-12 text; options unchanged; SpaarkeMaster source re-exported (the re-export also carries a newer Console bundle another project had deployed to dev — intended: the export mirrors dev).
+    - Answers recorded: Power BI per-customer F-SKU later (no shared pool), Copilot agent per customer, Redis superseded by D12. Plan G12 + INCOMING §7 docs item closed.
+    QUALITY GATES: one full review pass — F1 (three more guides with the Dedicated advice) and four F2 fixed; ArchTests 841/841, ControlPlane 2347/0 (1 skip), BFF build 0/0 (BFF change is comments only; no publish-size effect).
+    KNOWN LIMITS: the sprk_tenancymodel local option-set description still carries pre-D-12 text — an attribute PUT does not update a local option set's description and the Web API has no direct update for it (labels are correct; cosmetic metadata).</note>
+  </notes>
 </task>

@@ -2,18 +2,18 @@
 
 > **Format**: CURRENT state only, REWRITTEN at each checkpoint (≤ 10 KB) — never prepend. Standing rules → project `CLAUDE.md` §2 "Binding rules", §3 "Owner directives", §6 "Gotchas" (one dated line each). Decisions + superseded rules → `notes/decisions.md`. Session narrative → checkpoint commit messages. History: git + `notes/handoff-history/` (do not load on recovery). Review limits: task-execute Step 9.5.
 
-> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅ (SpaarkeMaster 1.2.0.0 complete in dev, exported to git `65eb1cb2b`); control plane deployed; T235 POML filed — next.
+> **Last Updated**: 2026-10-08 SESSION 44 — 218e ✅, T235 ✅ (ADR-028 A6 keyless stamps; docs sweep; RAG guidance corrected, #1432). Next 218d.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T235** — docs + governance match the dedicated Model 1 stamp (POML `tasks/235-docs-governance-dedicated-model1.poml`, filed 2026-10-08). T218: 218a/b/c/e ✅ (218e `082d839ef`/`65eb1cb2b`); 218d, 218f open. |
-| **Step** | T235 not started: begin step 1 (inventory the shared-Model-1 statements — ~30 files, 2026-10-08 grep). |
+| **Task** | **218d** — CI packs + publishes SpaarkeMaster from git (POML `tasks/218d-ci-packs-and-publishes-spaarkemaster.poml`). T218: 218a/b/c/e ✅; 218d, 218f open. T235 ✅ (`087d677ed`…`5dc95dcf0`). |
+| **Step** | 218d not started: step 1 (rewrite `publish-dataverse-solutions-manifest.yml`: pac pack managed + unmanaged from `src/dataverse/solutions/SpaarkeMaster`, value guard, versioned upload, manifest), step 2 dry run on the branch. |
 | **Status** | not-started. |
-| **Next Action** | `task-execute` T235 (owner: continue with it). Then 218d (CI pack + publish SpaarkeMaster from git; the first publish to `sprkcpartifactsdev` needs the owner's OK), 218f. |
+| **Next Action** | `task-execute` 218d. Its FIRST REAL PUBLISH to `sprkcpartifactsdev` (overwrites `dataverse-solutions-latest.json`) needs the owner's OK — ask with the dry-run result. Then 218f. |
 | **Branch** | `work/customer-provisioning-orchestration-r1`, pushed, clean. **9+ behind master**: merge master before T186, before any BFF deploy from this branch, and before PR #1365 merges; after the merge grep the BFF for `.ForApp(` and run `SpeAppOnlyContainerGuardTests`. |
-| **Order** | T235 → 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b now also CREATES the Secure Record Owner role — see its POML note) → T240b (owner's live re-test with package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
+| **Order** | 218d → 218f → T250 → 213.7/207/208/209 → **T253** (G38) → **T255** (INCOMING-141; also H3's `acct` claim) → **T256** (waits on #1364; H7b also CREATES the Secure Record Owner role) → T240b (owner's live re-test with add-in package 1.1.2) → **T240c (approved 2026-10-08)** → T240d → T257 → T186. word-add-in-r1's first production deploy to addins.spaarke.com waits for T240c (their task 114). |
 
 ### T218 facts for 218d/218f
 - Dev SpaarkeMaster **1.2.0.0** (2026-10-08): no drift; source in `src/dataverse/solutions/SpaarkeMaster` (managed + unmanaged unpack). Re-export after any dev change with `Export-SpaarkeMasterSource.ps1` (output folder ≤ 140 chars). Roles come from the ROOT business unit only; Secure Record Owner is created per environment by H7b (T256).
@@ -46,7 +46,7 @@ Done 2026-10-08 (owner OK): `spaarketestpartner.onmicrosoft.com` Azure link reso
 
 - Prod client sites (Standard SWAs, `rg-spaarke-shared-prod`, subscription `cd95fcec-6b89-49ea-8339-c2b579b12587`): `swa-spaarke-office-addins-prod` → `https://addins.spaarke.com`; `swa-spaarke-external-spa-prod` → `https://external.spaarke.com`. Both Ready, managed certs, empty.
 - Dev BFF `spaarke-bff-dev` runs branch build `0911515d7`; future dev BFF deploys only from master ≥ `c8b93b294`. T227d not on dev yet (OwnedContainerIds is set). Dev BFF MI holds application `full` on the Model 1 container type (owner option A).
-- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → T218f).
+- Filed: #1376 (ISS-003), #1377 (ISS-004), #1401 (ISS-005 → T218f), #1432 (ISS-006, RAG `Dedicated` mode reads an index nothing creates — BFF).
 
 ## Open items (no task yet)
 
