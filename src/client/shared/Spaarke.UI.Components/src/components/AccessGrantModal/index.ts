@@ -28,5 +28,8 @@ export type {
   ExternalGrantRootType,
   IAccessLevelOption,
   AccessPermissionState,
+  // Task 067: the No Access List entry (064's contract) and the host's organization-membership answer.
+  IRecordNoAccessEntry,
+  IContactOrganizationMembership,
 } from './types';
 export { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
