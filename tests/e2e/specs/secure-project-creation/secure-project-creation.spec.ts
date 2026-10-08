@@ -64,7 +64,7 @@ const BFF_API_BASE = process.env.BFF_API_URL || 'https://spaarke-bff-dev.azurewe
 const DATAVERSE_API_URL = process.env.DATAVERSE_API_URL || 'https://spaarkedev1.api.crm.dynamics.com/api/data/v9.2';
 
 /** The Dataverse resource (origin) that tokens are requested for. The Web API path is not part of the resource. */
-const DATAVERSE_RESOURCE = new URL(DATAVERSE_API_URL).origin;
+const DATAVERSE_RESOURCE = DataverseAPI.resourceOrigin(DATAVERSE_API_URL);
 
 /** Dataverse entity set names */
 const ENTITY_SETS = {
