@@ -24,6 +24,11 @@ export interface IAccessPermissionOption {
   color?: string;
 }
 
+import type { ITrackingAccessStatus } from './accessStatus';
+
+/** The section of Manage Access a click asks the host to show (task 153). Omitted = the top (Current Access). */
+export type GrantModalSection = 'noAccess';
+
 export interface ITrackingFieldTrioProps {
   monitor: boolean;
   highPriority: boolean;
@@ -98,8 +103,12 @@ export interface ITrackingFieldTrioProps {
 
   /** Invoked when the person icon is clicked, to open the access-grant
    * modal (task 041). When omitted, the person icon is NOT rendered — this
-   * keeps the toolbar opt-in per consumer. */
-  onOpenGrantModal?: () => void;
+   * keeps the toolbar opt-in per consumer.
+   *
+   * `section` (task 153): the access-status indicator asks for `'noAccess'` when a No Access restriction applies, so
+   * the host opens Manage Access at its No Access List; the person icon and a Secure-only indicator pass nothing (the
+   * top, Current Access). The same callback serves both: there is no second open callback. */
+  onOpenGrantModal?: (section?: GrantModalSection) => void;
   /** Invoked when the email icon is clicked, to open the email-members
    * action (task 042, via the canonical EmailComposer/SendEmailDialog per
    * ADR-045 — this component MUST NOT implement ad hoc send logic). When
@@ -121,4 +130,15 @@ export interface ITrackingFieldTrioProps {
    * click handler attached — never merely dimmed with a live handler, so
    * there is no dead click. */
   canGrantAccess?: boolean;
+
+  /** The record's access status (task 153, owner round 83 item 11) — the two signals of task 064's per-record read,
+   * parsed by the host with `parseAccessStatusResponse` (fail closed: anything it cannot trust is `unknown`). When
+   * supplied, the header row shows an indicator: Secure and/or No Access in red; "Access status unavailable" in a
+   * neutral colour when either signal is `unknown`; nothing when both are `doesNotApply`. It is clickable ONLY when
+   * {@link onOpenGrantModal} is supplied AND {@link canGrantAccess} is `true` (the person icon's own gate); a click
+   * opens Manage Access at the No Access List (No Access, or both) or at the top (Secure only). Otherwise it has no
+   * click handler and its tooltip says the caller cannot manage access here. When OMITTED (the default, and while the
+   * host's request is in flight) no indicator is drawn, so existing consumers such as the email reading pane are
+   * unchanged. */
+  accessStatus?: ITrackingAccessStatus;
 }
