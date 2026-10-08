@@ -466,10 +466,11 @@ public sealed class EventRoutesLiveTests
                     // then fail loudly.
                     var found = await dv.GetFromJsonAsync<JsonElement>(
                         $"sprk_events?$select=sprk_eventid&$filter=sprk_eventname eq '{name}'");
-                    createdEvents.AddRange(found.GetProperty("value").EnumerateArray().Select(e => e.GetProperty("sprk_eventid").GetGuid()));
+                    var foundIds = found.GetProperty("value").EnumerateArray().Select(e => e.GetProperty("sprk_eventid").GetGuid()).ToList();
+                    createdEvents.AddRange(foundIds);
                     throw new InvalidOperationException(
                         $"POST sprk_events '{name}' returned {(int)r.StatusCode} without an OData-EntityId header; "
-                        + $"{createdEvents.Count} row(s) found by name are registered for cleanup.");
+                        + $"{foundIds.Count} row(s) found by name are registered for cleanup.");
                 }
 
                 var id = Guid.Parse(entityIds.Single().Split('(', ')')[1]);
@@ -571,16 +572,30 @@ public sealed class EventRoutesLiveTests
 
     private static async Task<Guid> CreateAnalysisAsync(HttpClient dv, Guid matterId, List<Guid> created)
     {
+        const string name = "zz-097-test analysis (H2 re-parent target)";
         var r = await dv.PostAsJsonAsync("sprk_analysises", new Dictionary<string, object>
         {
-            ["sprk_name"] = "zz-097-test analysis (H2 re-parent target)",
+            ["sprk_name"] = name,
             ["sprk_analysis_number"] = "ZZ-097-AN-001",
             ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matterId})",
         });
-        if (r.Headers.TryGetValues("OData-EntityId", out var values))
-            created.Add(Guid.Parse(values.First().Split('(', ')')[1]));
         r.EnsureSuccessStatusCode();
-        return created[^1];
+        if (!r.Headers.TryGetValues("OData-EntityId", out var values))
+        {
+            // #1402 (ISS-011): a created row we cannot name would leak (and created[^1] would be an EVENT id): find it by
+            // its zz name for cleanup, then fail loudly — the Briefing leg's pattern.
+            var found = await dv.GetFromJsonAsync<JsonElement>(
+                $"sprk_analysises?$select=sprk_analysisid&$filter=sprk_name eq '{name}'");
+            var foundIds = found.GetProperty("value").EnumerateArray().Select(e => e.GetProperty("sprk_analysisid").GetGuid()).ToList();
+            created.AddRange(foundIds);
+            throw new InvalidOperationException(
+                $"POST sprk_analysises '{name}' returned {(int)r.StatusCode} without an OData-EntityId header; "
+                + $"{foundIds.Count} row(s) found by name are registered for cleanup.");
+        }
+
+        var id = Guid.Parse(values.First().Split('(', ')')[1]);
+        created.Add(id);
+        return id;
     }
 
     private static async Task<string> RetrievePrincipalAccessAsync(HttpClient dv, Guid user, string set, Guid id)
