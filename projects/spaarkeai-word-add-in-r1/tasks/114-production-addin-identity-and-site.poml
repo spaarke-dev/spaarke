@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Production add-in identity + site (prep): own app registration, guides corrected; deploy waits for provisioning's directory (240c)</title>
+    <phase>6 — cross-project request (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Docs + one owner-approved app registration; no code.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Identity configuration.</model-tier-reason>
+    <effort>high</effort>
+    <deps>113</deps>
+    <tags>docs, auth, office-addins</tags>
+  </metadata>
+  <prompt>customer-provisioning-orchestration-r1, third message (2026-10-07). Owner decisions: production gets its own app registration; prepare now, first production deploy with 240c. Record: `notes/114-production-addin-identity-and-site.md`.</prompt>
+  <goal>Production identity and documentation ready; nothing deployed to addins.spaarke.com yet.</goal>
+  <acceptance-criteria>
+    <criterion testable="true">App `1958aec2-0218-495e-8e3c-37133e9b8357` exists (single tenant, addins.spaarke.com SPA redirects, Graph basics consented, no API permission).</criterion>
+    <criterion testable="true">Both guides name the real site and the production app.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>Dev add-in app c1258e2d.</existing>
+    <extension>No — owner chose a separate production identity so dev testing cannot affect production.</extension>
+    <cost-of-doing-nothing>No production identity for addins.spaarke.com; docs named a site that never existed.</cost-of-doing-nothing>
+  </justification>
+</task>

@@ -89,7 +89,8 @@ describe('mergeUnifiedManifest — the REAL source manifests produce one valid p
   it('separates the package id from the Entra client id — and refuses to conflate them again', () => {
     const merged = buildFromSources();
     expect(merged.id).toBe(APP_ID);
-    expect(merged.webApplicationInfo.id).toBe(CLIENT_ID);
+    // Task 115: the package carries no webApplicationInfo (customer-tenant deployment failed on it, AADSTS700016).
+    expect(merged.webApplicationInfo).toBeUndefined();
 
     expect(() => buildFromSources({ appId: CLIENT_ID })).toThrow(/its OWN GUID/);
     expect(() => buildFromSources({ appId: OUTLOOK_XML_ID })).toThrow(/its OWN GUID/);
