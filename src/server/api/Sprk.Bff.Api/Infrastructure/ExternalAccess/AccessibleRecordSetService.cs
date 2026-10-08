@@ -32,6 +32,7 @@ using Spaarke.Dataverse;               // AccessRights — the rights type (root
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Identity;
+using SecureRootInheritance = Sprk.Bff.Api.Services.Access.SecureRootInheritance; // #1410: the ONE parent walk
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -1062,9 +1063,20 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// membership (every candidate), an unreadable link (every secure candidate), an unreadable record, a fail-closed
     /// reader answer, a denial with no provable subject kind, or a throw. Never "not walled".</item>
     /// </list>
+    /// <para><b>A secure parent's list reaches the records filed below it</b> (GitHub #1410, round 61 item 1): a secure work
+    /// assignment or project is also removed when an entry matches ANY secure matter or project it is filed under, at any
+    /// depth — the ancestors the ONE parent walk (<see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the
+    /// write-time guard's and the enforcer's) finds, each asked as a candidate carrying its own referenced organizations,
+    /// in the same deny-list query. A filing that cannot be read (record, pair type, parent flag, an EMPTY parent flag, a
+    /// chain past <see cref="SecureRootInheritance.MaxFilingDepth"/>) or an ancestor whose organizations cannot be read
+    /// removes the candidate (fail closed). A non-secure candidate is not walked (Q4 scope).</para>
     /// <para>Cost (NFR-02): a composition with no secure candidate makes exactly the reads it made before task 143 r1. One
     /// with a secure candidate adds the link reads (one systemuser read, plus one oid read when the user has an oid) and,
-    /// when it ALSO has non-secure candidates and a contact subject, a second deny-list query for the non-secure batch.</para>
+    /// when it ALSO has non-secure candidates and a contact subject, a second deny-list query for the non-secure batch.
+    /// #1410: when the secure candidates are work assignments or projects, the parent walk adds, per level of filing, one
+    /// row read and one parent-flag read per table per <see cref="SecureRootInheritance.IdsPerQuery"/> rows (plus a
+    /// pair-type read per distinct type, cached), and one referenced-organization read per ancestor table — never a read
+    /// per candidate.</para>
     /// </remarks>
     private async Task<SystemUserDenyVeto> ResolveSystemUserDenyVetoAsync(
         string entityType,
@@ -1144,16 +1156,28 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
                 }
                 else
                 {
-                    var secureResult = await _noAccessList
-                        .GetDeniedRecordsAsync(subjects.Subjects, secureBatch, ct).ConfigureAwait(false);
+                    // GitHub #1410 (round 61 item 1): a secure record's list includes the list of every secure matter or
+                    // project it is filed under, at any depth — the ONE parent walk, batched across the candidates. A
+                    // candidate whose filing (or an ancestor's referenced organizations) could not be read is removed.
+                    var ancestry = await ReadSecureAncestryAsync(entityType, secureBatch, ct).ConfigureAwait(false);
+                    removeWhole.UnionWith(ancestry.Unverifiable);
+                    var asked = secureBatch.Where(c => !ancestry.Unverifiable.Contains(c.RecordId)).ToList();
+                    var askedIds = asked.Select(c => c.RecordId).ToHashSet();
+                    var query = asked.Concat(ancestry.Ancestors.Where(a => !askedIds.Contains(a.RecordId))).ToList();
+
+                    var secureResult = asked.Count == 0
+                        ? NoAccessListResult.Empty
+                        : await _noAccessList.GetDeniedRecordsAsync(subjects.Subjects, query, ct).ConfigureAwait(false);
                     if (secureResult is null || secureResult.FailedClosed)
                     {
                         // A null answer is not a "nothing denied" answer; the reader never returns one. Treated as a fault.
-                        removeWhole.UnionWith(secureBatch.Select(c => c.RecordId));
+                        removeWhole.UnionWith(asked.Select(c => c.RecordId));
                     }
                     else
                     {
-                        removeWhole.UnionWith(secureResult.DeniedRecordIds.Intersect(secureBatch.Select(c => c.RecordId)));
+                        removeWhole.UnionWith(askedIds.Where(id =>
+                            secureResult.DeniedRecordIds.Contains(id)
+                            || (ancestry.AncestorsOf.TryGetValue(id, out var above) && above.Any(secureResult.DeniedRecordIds.Contains))));
                     }
                 }
             }
@@ -1209,6 +1233,109 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     }
 
     /// <summary>
+    /// GitHub #1410: what the secure candidates are filed under, for the systemuser-plane veto — the secure matters and
+    /// projects above each one at any depth (round 61 item 1), each as a deny-list candidate carrying its OWN referenced
+    /// organizations (the write-time guard asks a secure parent's list exactly so), and which candidates could not be
+    /// decided.
+    /// </summary>
+    /// <param name="Unverifiable">Candidates whose filing, or an ancestor's referenced organizations, could not be read:
+    /// removed whole (fail closed, as a candidate whose own organizations are unreadable is).</param>
+    /// <param name="Ancestors">One deny-list candidate per distinct secure ancestor.</param>
+    /// <param name="AncestorsOf">Candidate id → the ids of its secure ancestors (only candidates that have any).</param>
+    private readonly record struct SecureAncestry(
+        IReadOnlySet<Guid> Unverifiable,
+        IReadOnlyList<NoAccessCandidateRecord> Ancestors,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> AncestorsOf)
+    {
+        internal static SecureAncestry None { get; } =
+            new(EmptyDeniedSet, Array.Empty<NoAccessCandidateRecord>(), new Dictionary<Guid, IReadOnlyList<Guid>>());
+    }
+
+    /// <summary>
+    /// GitHub #1410: the secure ancestry of <paramref name="secureCandidates"/> through the ONE parent walk
+    /// (<see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/> — the climb the write-time guard and the enforcer
+    /// use, batched across the candidates), bounded by <see cref="SecureRootInheritance.MaxFilingDepth"/> as theirs is. A
+    /// table that files under nothing (a matter, or any non-root table) reads nothing and has no ancestry. Never decides on
+    /// part of a filing: an unreadable record, filing or parent flag, an EMPTY parent flag, or a chain past the bound makes
+    /// the candidate unverifiable; a read that throws reaches the veto's own catch, which removes every candidate.
+    /// </summary>
+    private async Task<SecureAncestry> ReadSecureAncestryAsync(
+        string entityType, IReadOnlyCollection<NoAccessCandidateRecord> secureCandidates, CancellationToken ct)
+    {
+        if (secureCandidates.Count == 0 || !SecureRootInheritance.Inherits(entityType))
+        {
+            return SecureAncestry.None;
+        }
+
+        var answers = await SecureRootInheritance
+            .ReadSecureParentsOfManyAsync(_dataverse, _logger, entityType, secureCandidates.Select(c => c.RecordId).ToList(), ct,
+                maxDepth: SecureRootInheritance.MaxFilingDepth)
+            .ConfigureAwait(false);
+
+        var unverifiable = new HashSet<Guid>();
+        var ancestorsOf = new Dictionary<Guid, IReadOnlyList<Guid>>();
+        var ancestorTables = new Dictionary<Guid, string>();
+        foreach (var candidate in secureCandidates)
+        {
+            var answer = answers[candidate.RecordId];
+            if (!answer.IsKnown)
+            {
+                _logger.LogError(
+                    "[WF-AUTHZ] Systemuser deny veto on {EntityType} {RecordId}: what it is filed under could not be read " +
+                    "({Reason}), so the No Access lists of the secure records above it are unknown. Failing CLOSED — removed.",
+                    entityType, candidate.RecordId, answer.Unverifiable);
+                unverifiable.Add(candidate.RecordId);
+                continue;
+            }
+
+            if (answer.SecureParents.Count == 0)
+            {
+                continue;
+            }
+
+            ancestorsOf[candidate.RecordId] = answer.SecureParents.Select(p => p.Id).Distinct().ToList();
+            foreach (var parent in answer.SecureParents)
+            {
+                ancestorTables.TryAdd(parent.Id, parent.Table);
+            }
+        }
+
+        // Each ancestor's own referenced organizations: one batched read per table (matters, projects).
+        var ancestors = new List<NoAccessCandidateRecord>();
+        var unreadable = new HashSet<Guid>();
+        foreach (var table in ancestorTables.GroupBy(a => a.Value, StringComparer.OrdinalIgnoreCase))
+        {
+            var ids = table.Select(a => a.Key).ToList();
+            var referenced = await _participations
+                .GetReferencedOrganizationIdsAsync(table.Key, ids, ct).ConfigureAwait(false);
+            foreach (var id in ids)
+            {
+                if (referenced.TryGetValue(id, out var refs) && refs.Unreadable)
+                {
+                    unreadable.Add(id);
+                    continue;
+                }
+
+                ancestors.Add(new NoAccessCandidateRecord(table.Key, id,
+                    referenced.TryGetValue(id, out var resolved) ? resolved.OrganizationIds : Array.Empty<Guid>()));
+            }
+        }
+
+        foreach (var (candidateId, above) in ancestorsOf)
+        {
+            if (above.Any(unreadable.Contains))
+            {
+                _logger.LogError(
+                    "[WF-AUTHZ] Systemuser deny veto on {EntityType} {RecordId}: the organizations a secure record above it " +
+                    "references could not be read. Failing CLOSED — removed.", entityType, candidateId);
+                unverifiable.Add(candidateId);
+            }
+        }
+
+        return new SecureAncestry(unverifiable, ancestors, ancestorsOf);
+    }
+
+    /// <summary>
     /// Rows requested per membership round trip (unified-access-control-r2 task 015 / FR-14).
     /// <para>
     /// DELIBERATELY DECOUPLED from <see cref="MembershipResolveOptions.MaxLimit"/>, the
@@ -1242,6 +1369,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     private readonly INoAccessListReader _noAccessList;
     private readonly IContactIdentityStore _identityStore;
     private readonly ISystemUserIdentityResolver _systemUsers;
+    private readonly IGenericEntityService _dataverse;
     private readonly ILogger<AccessibleRecordSetService> _logger;
 
     /// <param name="membership">ADR-034 membership.</param>
@@ -1253,6 +1381,9 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
     /// reading as "no contact".</param>
     /// <param name="systemUsers">The authoritative <c>sprk_isexternal</c> read (task 114 verifier K1): a systemuser flagged
     /// external keeps no membership-term access to a Restricted record on this plane.</param>
+    /// <param name="dataverse">GitHub #1410: the app-only reads of what a secure work assignment or project is filed under,
+    /// for the systemuser-plane veto — through <see cref="SecureRootInheritance.ReadSecureParentsOfManyAsync"/>, the ONE
+    /// parent walk the write-time guard and the enforcer use (registered unconditionally, GraphModule).</param>
     /// <param name="logger">Logger.</param>
     public AccessibleRecordSetService(
         IMembershipResolverService membership,
@@ -1261,6 +1392,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         INoAccessListReader noAccessList,
         IContactIdentityStore identityStore,
         ISystemUserIdentityResolver systemUsers,
+        IGenericEntityService dataverse,
         ILogger<AccessibleRecordSetService> logger)
     {
         ArgumentNullException.ThrowIfNull(membership);
@@ -1269,6 +1401,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         ArgumentNullException.ThrowIfNull(noAccessList);
         ArgumentNullException.ThrowIfNull(identityStore);
         ArgumentNullException.ThrowIfNull(systemUsers);
+        ArgumentNullException.ThrowIfNull(dataverse);
         ArgumentNullException.ThrowIfNull(logger);
         _membership = membership;
         _participations = participations;
@@ -1276,6 +1409,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         _noAccessList = noAccessList;
         _identityStore = identityStore;
         _systemUsers = systemUsers;
+        _dataverse = dataverse;
         _logger = logger;
     }
 

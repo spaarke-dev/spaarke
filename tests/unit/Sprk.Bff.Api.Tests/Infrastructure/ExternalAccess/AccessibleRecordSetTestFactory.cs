@@ -80,6 +80,21 @@ internal static class AccessibleRecordSetTestFactory
     }
 
     /// <summary>
+    /// An <see cref="IGenericEntityService"/> for the systemuser-plane veto's parent walk (GitHub #1410) in which no work
+    /// assignment or project is filed under anything: every query answers no rows, so a secure candidate has no secure
+    /// ancestor and its veto is exactly its own list — the honest default for tests authored before the veto walked
+    /// secure parents. Any other call fails (strict). Tests of the walk itself use a world that holds the filings.
+    /// </summary>
+    public static IGenericEntityService NoFilingEntities()
+    {
+        var entities = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        return entities.Object;
+    }
+
+    /// <summary>
     /// An <see cref="INoAccessListReader"/> that never denies anything (task 039) — the honest default
     /// for every test authored BEFORE the deny-list veto existed. Centralized here (rather than one Moq
     /// setup per test file) so the three call sites that directly construct
