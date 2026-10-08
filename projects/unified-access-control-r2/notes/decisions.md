@@ -104,5 +104,6 @@ CLAUDE.md fact 1 used to read "on the MDA, Dataverse enforces natively and we wr
   - SUPERSEDED on dev 2026-10-08 by round 79: writes enabled after a 0-change report. Other environments still need the explain-and-confirm step.
 - **"Communications inherit the parent's access permission; a child carries no permission of its own"** (round 2 Q6, as written in `docs/data-model/sprk_communication.md`).
   - EXTENDED 2026-10-08 by round 81: To Do, Event, Communication and Document show the parent's value in their own column; a parentless child keeps its own value (recorded only).
+  - Task 173 (PR #1458): the column is a DISPLAY copy (most restrictive across the parents), written by the BFF and locked on the form while a parent exists. Q6's ACCESS rule stands: no access decision reads a child's copy. `scripts/Retire-CommunicationAccessPermission.ps1` is deleted (running it would destroy the column).
 - **"Parent unsecured → its secured work assignments and projects STAY secure; no unsecure cascade"** (round 6 item 4, 2026-10-02; task 158 constraint).
   - REPLACED 2026-10-08 by round 84: a child's access always follows its parent, both ways, and is locked while it has a parent.
