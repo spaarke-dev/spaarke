@@ -96,6 +96,7 @@ jest.mock('@spaarke/ai-widgets', () => {
         clearChatSession: () => setSessionId(null),
         playbookId: undefined,
         setPlaybookId: jest.fn(),
+        clearPlaybookId: jest.fn(),
         entityContext: null,
         contextMapping: null,
         isLoadingContextMapping: false,

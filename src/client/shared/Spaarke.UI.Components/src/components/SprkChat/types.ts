@@ -1001,6 +1001,14 @@ export interface ISprkChatProps {
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */
   playbooks?: IPlaybookOption[];
+  /**
+   * Opt in to playbook DISCOVERY: fetch `GET /api/ai/chat/playbooks` and merge the caller's
+   * playbooks into the "Playbook:" selector + the empty-transcript playbook chips.
+   * Default **false** — the SpaarkeAi Assistant selects capabilities from the ADR-039 closed
+   * catalog, not by user playbook pick, and the endpoint returns every playbook the user owns
+   * (uncurated). Explicitly passed `playbooks` still render regardless of this flag.
+   */
+  enablePlaybookDiscovery?: boolean;
   /** Predefined prompt suggestions shown before conversation starts */
   predefinedPrompts?: IPredefinedPrompt[];
   /** Content element ref for highlight-refine feature (detects text selection) */
