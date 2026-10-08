@@ -274,8 +274,18 @@ const useStyles = makeStyles({
   },
   // Task 099: the confirmation takes programmatic focus after a save (tabIndex -1); no focus ring box needed.
   savedBarWrap: { outlineStyle: 'none' },
-  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump).
-  savedBarButton: { minWidth: '8.5rem' },
+  // UAT round 12: Fluent's multiline actions (and a single-line bar reflows to multiline when narrow) are
+  // right-aligned and never wrap, so in a narrow pane View Document spilled off the box's left edge. Wrap from the
+  // left instead. Used by every SaveFlow bar with more than one action.
+  wrappingActions: {
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    rowGap: tokens.spacingVerticalS,
+    minWidth: 0,
+  },
+  // Task 105: stable width while the label swaps to "Copied" / "Opened" (no layout jump) — a fixed flex basis, so
+  // the width never follows the label; a row narrower than two bases wraps rather than overflowing.
+  savedBarButton: { flex: '1 1 8.5rem', minWidth: 0, maxWidth: '100%' },
   savedBarDetail: {
     display: 'block',
     marginTop: tokens.spacingVerticalXXS,
@@ -1666,7 +1676,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             )
           )}
         </MessageBarBody>
-        <MessageBarActions>
+        <MessageBarActions className={styles.wrappingActions}>
           {/* NFR-10: rendered only when the host can open a browser tab AND ORG_URL is set — never rendered
             disabled (AC4). */}
           {openRecordAvailable && (
@@ -1788,7 +1798,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </Text>
         )}
       </MessageBarBody>
-      <MessageBarActions>
+      <MessageBarActions className={styles.wrappingActions}>
         {error?.recoverable && (
           <Button appearance="outline" size="small" onClick={retry}>
             Retry
@@ -1858,7 +1868,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
             </Text>
           )}
         </MessageBarBody>
-        <MessageBarActions>
+        <MessageBarActions className={styles.wrappingActions}>
           <Button appearance="primary" size="small" onClick={handleKeepBoth}>
             Keep both
           </Button>
