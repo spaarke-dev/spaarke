@@ -79,6 +79,21 @@ function createHostAdapterError(code: HostAdapterErrorCode, message: string, inn
 }
 
 /**
+ * `Office.MailboxEnums.AttachmentType` → {@link AttachmentInfo.attachmentType}. Compared as lower-case strings, not
+ * against the enum object, so an unknown or absent value maps to `undefined` instead of throwing (task 116a).
+ */
+function toAttachmentType(value: unknown): AttachmentInfo['attachmentType'] {
+  const v = typeof value === 'string' ? value.toLowerCase() : '';
+  return v === 'file' || v === 'item' || v === 'cloud' ? v : undefined;
+}
+
+/** `Office.MailboxEnums.AttachmentContentFormat` → {@link AttachmentInfo.contentFormat}; same rule (task 116a). */
+function toContentFormat(value: unknown): AttachmentInfo['contentFormat'] {
+  const v = typeof value === 'string' ? value.toLowerCase() : '';
+  return v === 'base64' || v === 'eml' || v === 'icalendar' || v === 'url' ? v : undefined;
+}
+
+/**
  * OutlookAdapter implements IHostAdapter for Outlook emails.
  *
  * Handles both read mode (viewing emails) and compose mode (creating emails).
@@ -362,16 +377,18 @@ export class OutlookAdapter implements IHostAdapter {
       return [];
     }
 
-    return attachments.map(
-      (attachment): AttachmentInfo => ({
+    return attachments.map((attachment): AttachmentInfo => {
+      const attachmentType = toAttachmentType(attachment.attachmentType);
+      return {
         id: attachment.id,
         name: attachment.name,
         contentType: attachment.contentType,
         size: attachment.size,
         isInline: attachment.isInline,
+        ...(attachmentType ? { attachmentType } : {}),
         // Content is not populated here - use getAttachmentContent() to retrieve
-      })
-    );
+      };
+    });
   }
 
   /**
@@ -408,14 +425,18 @@ export class OutlookAdapter implements IHostAdapter {
       item.getAttachmentContentAsync(attachmentId, result => {
         if (result.status === Office.AsyncResultStatus.Succeeded) {
           const content = result.value;
+          const attachmentType = toAttachmentType(attachmentMeta.attachmentType);
+          const contentFormat = toContentFormat(content.format);
           resolve({
             id: attachmentMeta.id,
             name: attachmentMeta.name,
             contentType: attachmentMeta.contentType,
             size: attachmentMeta.size,
             isInline: attachmentMeta.isInline,
-            // content.content is base64-encoded for file attachments
-            // content.format indicates the format (Base64, Url, etc.)
+            ...(attachmentType ? { attachmentType } : {}),
+            // content.content is base64 for a file attachment, but TEXT for an attached item (eml/icalendar)
+            // and a LINK for a cloud attachment — the format says which (task 116a).
+            ...(contentFormat ? { contentFormat } : {}),
             content: content.content,
           });
         } else {

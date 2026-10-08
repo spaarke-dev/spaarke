@@ -100,15 +100,18 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConfiguration _configuration;
     private readonly ILogger<PlaybookSchedulerJob> _logger;
+    private readonly TimeProvider _clock;
 
     public PlaybookSchedulerJob(
         IServiceScopeFactory scopeFactory,
         IConfiguration configuration,
-        ILogger<PlaybookSchedulerJob> logger)
+        ILogger<PlaybookSchedulerJob> logger,
+        TimeProvider? clock = null)
     {
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clock = clock ?? TimeProvider.System; // optional so direct constructions need not supply one
     }
 
     /// <inheritdoc />
@@ -434,11 +437,25 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                     // make the notification playbooks runnable with no per-tenant or per-user
                     // configuration; per-user preference overrides can be layered later.
                     //
-                    // Format: dates as FetchXML-compatible UTC strings ("yyyy-MM-ddTHH:mm:ssZ").
-                    // Integer windows: hour/day windows as plain integer strings.
-                    var nowUtc = DateTimeOffset.UtcNow;
-                    var todayUtcStr = nowUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
-                    var dueSoonWindowUtcStr = nowUtc.AddDays(3).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    // Format: dates as "yyyy-MM-dd" calendar dates (task 098, below) — before task 098 they were UTC
+                    // instants ("yyyy-MM-ddTHH:mm:ssZ"). Integer windows: hour/day windows as plain integer strings.
+                    //
+                    // Task 098: {{todayUtc}} / {{dueSoonWindowUtc}} are compared with Date Only columns
+                    // (sprk_event.sprk_duedate / sprk_finalduedate — the "Query Overdue Tasks" node filters
+                    // `lt {{todayUtc}}`). The run is FOR this user (the notification recipient), so "today" is
+                    // THIS USER's local calendar date (Dataverse time zone), "yyyy-MM-dd"; the UTC day called a task
+                    // due today overdue from 20:00 Eastern. The parameter names are kept because live playbook node
+                    // configs reference them. UTC date fallback, with a warning, when the zone cannot be read.
+                    var (userToday, todayFallback) = await Spaarke.Dataverse.DataverseUserTimeZone
+                        .TodayForUserAsync(entityService, userId, _clock.GetUtcNow(), userCt).ConfigureAwait(false);
+                    if (todayFallback is not null)
+                    {
+                        _logger.LogWarning(
+                            "Playbook {PlaybookId} user {UserId}: time zone unreadable; \"today\" is the UTC date ({Reason})",
+                            playbookId, userId, todayFallback);
+                    }
+                    var todayUtcStr = Spaarke.Dataverse.DataverseDateOnly.Format(userToday);
+                    var dueSoonWindowUtcStr = Spaarke.Dataverse.DataverseDateOnly.Format(userToday.AddDays(3));
 
                     var request = new PlaybookRunRequest
                     {

@@ -14,6 +14,16 @@ public sealed class ExternalCollectionResponse<T>
 {
     [JsonPropertyName("value")]
     public IReadOnlyList<T> Value { get; init; } = [];
+
+    /// <summary>
+    /// <c>true</c> when <see cref="Value"/> is known to be INCOMPLETE: the read stopped at its row cap with more rows
+    /// remaining, or a later page failed after earlier pages were read (unified-access-control-r2 task 105, NFR-03 —
+    /// a cap is never silent). Omitted from the JSON when <c>false</c>, so a complete list is byte-for-byte what it was
+    /// before the field existed; clients read a missing field as <c>false</c>.
+    /// </summary>
+    [JsonPropertyName("truncated")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool Truncated { get; init; }
 }
 
 // ---------------------------------------------------------------------------
@@ -313,6 +323,8 @@ public sealed class ExternalEventDto
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The event due date (<c>sprk_event.sprk_duedate</c>) as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse
+    /// Date Only). Parse it as a local calendar date (<c>parseDueDate</c>), never <c>new Date(value)</c>.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
@@ -341,6 +353,8 @@ public sealed class CreateExternalEventRequest
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
+    /// <summary>The due date as a calendar date, <c>yyyy-MM-dd</c> (task 098: Dataverse Date Only refuses a timestamp). A
+    /// timestamp <c>yyyy-MM-ddT…</c> from an earlier client build is read as its leading ten characters; anything else is 400.</summary>
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 

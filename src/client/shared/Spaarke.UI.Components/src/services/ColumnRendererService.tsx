@@ -7,6 +7,7 @@ import { Badge, Link, tokens, Text } from '@fluentui/react-components';
 import { CheckmarkCircle20Regular, DismissCircle20Regular } from '@fluentui/react-icons';
 import { IDatasetColumn, IDatasetRecord } from '../types/DatasetTypes';
 import { ColumnRenderer, DataverseAttributeType } from '../types/ColumnRendererTypes';
+import { isDateOnlyString, parseDueDate } from '../utils/dateLocal';
 
 /**
  * Column renderer registry
@@ -196,8 +197,10 @@ export class ColumnRendererService {
   private static renderDateOnly(value: unknown): React.ReactElement | string {
     if (!value) return '';
 
-    const date = new Date(value as string | number | Date);
-    if (isNaN(date.getTime())) return String(value);
+    // Task 098: a bare "YYYY-MM-DD" (a Date Only BEHAVIOUR column) is that calendar day — new Date() would read it as
+    // UTC midnight, the previous day west of UTC. Instants and Date objects keep their local-day rendering.
+    const date = isDateOnlyString(value) ? parseDueDate(value) : new Date(value as string | number | Date);
+    if (!date || isNaN(date.getTime())) return String(value);
 
     const formatted = date.toLocaleDateString(undefined, {
       year: 'numeric',

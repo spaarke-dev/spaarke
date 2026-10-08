@@ -53,6 +53,8 @@ import {
 // The package's BFF convention (briefingService, DailyBriefingApp): @spaarke/auth's authenticatedFetch with relative
 // /api paths.
 import { authenticatedFetch } from '@spaarke/auth';
+// Deep import of the pure dateLocal module (task 098): tests map this one subpath to the real source.
+import { parseDueDate } from '@spaarke/ui-components/utils/dateLocal';
 import type { IWebApi, NotificationItem, NotificationPriority } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -103,8 +105,10 @@ const DEFAULT_DUE_HOUR_LOCAL = 17;
 
 export function computeDueDate(item: NotificationItem, now: Date = new Date()): string {
   if (item.dueDate) {
-    const parsed = new Date(item.dueDate);
-    if (!isNaN(parsed.getTime())) {
+    // Task 098: a bare "YYYY-MM-DD" (an event's Date Only due date) is that LOCAL day; new Date() read it as UTC
+    // midnight, so the To Do landed on the previous day in every US zone. Timestamps are kept verbatim.
+    const parsed = parseDueDate(item.dueDate);
+    if (parsed) {
       return parsed.toISOString();
     }
   }

@@ -35,7 +35,20 @@ export interface AttachmentInfo {
   size: number;
   /** Whether the attachment is inline (embedded in body) */
   isInline: boolean;
-  /** Base64-encoded content (populated when retrieved) */
+  /**
+   * What kind of attachment Outlook says this is (`Office.MailboxEnums.AttachmentType`): a `file`, an attached
+   * Outlook `item` (a forwarded email or a meeting — its `name` has no extension), or a `cloud` link to a file kept
+   * elsewhere (OneDrive/SharePoint), which has no file content in the email at all. Absent when the host did not say.
+   * Task 116a: the email save reads attachment content in the add-in and must treat these three differently.
+   */
+  attachmentType?: 'file' | 'item' | 'cloud';
+  /**
+   * The form {@link content} came back in (`Office.MailboxEnums.AttachmentContentFormat`), set only by
+   * `getAttachmentContent()`: `base64` (file attachments), `eml` / `icalendar` (an attached item, as TEXT — not
+   * base64), or `url` (a cloud attachment: the content is a link, not the file).
+   */
+  contentFormat?: 'base64' | 'eml' | 'icalendar' | 'url';
+  /** The content (populated when retrieved) — base64 unless {@link contentFormat} says otherwise */
   content?: string;
 }
 

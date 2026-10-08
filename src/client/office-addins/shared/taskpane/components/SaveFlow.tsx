@@ -65,6 +65,7 @@ import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch'
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 // Task 020 (FR-06) default-name rule; task 089 moved it to utils so the ribbon's Quick Save names files the same way.
 import { stripDocumentExtension } from '../utils/documentFileName';
+import { copyText } from '../utils/copyText';
 
 /** True inside the browser test harness (taskpane-test.html sets the flag). */
 function isBrowserTestMode(): boolean {
@@ -1529,15 +1530,19 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Handle copy link. Task 088: unchanged on purpose (owner, 2026-10-03) — it copies what it always copied, the
   // saved file's link; only View Document moved to the Spaarke record. Task 111: the URL is the bar's own
   // (`SavedBarModel.copyUrl`) — the session's saved link, or, for a document already in Spaarke, its record link.
+  // Task 116: Outlook on the web can block the Clipboard API by permissions policy (B2B guest UAT, 2026-10-08) —
+  // `copyText` falls back to a selection copy, and when that fails too the link is shown to copy by hand.
+  const [manualCopyUrl, setManualCopyUrl] = useState<string | null>(null);
   const handleCopyLink = useCallback(
     async (url: string | null) => {
       if (url) {
-        try {
-          await navigator.clipboard.writeText(url);
+        if (await copyText(url)) {
+          setManualCopyUrl(null);
           announce('Link copied', 'polite');
           flashButton('copy', 'done');
-        } catch {
-          announce('Failed to copy link', 'assertive');
+        } else {
+          setManualCopyUrl(url);
+          announce("Couldn't copy here. The link is shown below to copy by hand.", 'assertive');
           flashButton('copy', 'failed');
         }
       }
@@ -1677,6 +1682,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           )}
         </MessageBarActions>
       </MessageBar>
+      {manualCopyUrl && (
+        <Input
+          readOnly
+          value={manualCopyUrl}
+          aria-label="Document link — select and copy"
+          onFocus={event => event.target.select()}
+        />
+      )}
     </div>
   );
 
