@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- DRAFT for the main session to number (D-60). Move to tasks/NNN-solution-hygiene-foreign-tables.poml and set id. -->
+<task id="NNN" project="spaarke-ontology-platform-r1">
+  <metadata>
+    <title>Solution hygiene: remove the 11 foreign tables from OntologyPlatformSolution (D-60)</title>
+    <phase>0 Foundations (schema)</phase>
+    <gate>owner-approved D-60</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Dataverse solution-membership change only; no code; reversible (AddSolutionComponent); nothing deleted.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical, fully specified metadata operation with a dry run.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Dataverse solution components only; touches no repository file another task edits.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse,solution,alm</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Drop the solution references to the 11 other-domain tables that OntologyPlatformSolution holds whole, keep this project's five tables and its own columns on foreign tables, and record before and after component lists.</prompt>
+  <role>SPAARKE platform developer. ALM hygiene on an unmanaged solution; never touch the tables themselves.</role>
+  <goal>OntologyPlatformSolution in spaarkedev1 contains only this project's five tables, any foreign column this project added (as attribute components), and nothing else it did not already intend; the foreign tables are unchanged and still in their home solutions.</goal>
+
+  <context>
+    <background>Found by stream C2 during task 047: OntologyPlatformSolution held sprk_budget, sprk_communication, sprk_document, sprk_event, sprk_invoice, sprk_matter, sprk_project, sprk_recordtype_ref, sprk_servicerequest, sprk_todo and sprk_workassignment with rootcomponentbehavior 0, added when this project's lookups were created under the solution header. An export would ship and overwrite those tables' customizations. Owner decision D-60 (spec section 9).</background>
+    <relevant-files>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/d60-solution-hygiene.md</file>
+      <file role="output">projects/spaarke-ontology-platform-r1/notes/defer-issues.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (D-60): remove ONLY the 11 named tables' solution references; keep sprk_signal, sprk_decisionrecord, sprk_policy, sprk_policyversion, sprk_budgetrevision; keep systemuser (rcb 1) as is.</constraint>
+    <constraint source="owner">Scope: a column this project added to a foreign table stays in the solution as a separate attribute component.</constraint>
+    <constraint source="project">Scope: Web API RemoveSolutionComponent / AddSolutionComponent (or pac solution) only; never delete or alter a table; never PublishAllXml; spaarkedev1 only.</constraint>
+    <constraint source="owner">Scope: list every component before and after; file a GitHub issue through /project-defer-issue-tracking.</constraint>
+  </constraints>
+
+  <steps mode="prescriptive">
+    <step order="1">List every component of the solution (entities, attributes, forms, views, relationships) with names.</step>
+    <step order="2">Inventory this project's own columns on foreign tables from the schema notes.</step>
+    <step order="3">Dry run, then RemoveSolutionComponent for each of the 11 tables; AddSolutionComponent for each kept column.</step>
+    <step order="4">List again; verify each foreign table still exists and is still in its home solutions.</step>
+    <step order="5">Record in notes/d60-solution-hygiene.md; file the issue (defer-issues.md + GitHub).</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a live listing, then no foreign table is in the solution with rcb 0, and the five ontology tables are present with rcb 0.</criterion>
+    <criterion testable="true">sprk_servicerequest.sprk_direction, sprk_disposition and sprk_responseduedate are attribute components of the solution.</criterion>
+    <criterion testable="true">Negative: every one of the 11 tables still exists and is still in its home solutions; nothing was published tenant-wide.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>The solution already exists; this removes references, it adds no component.</existing>
+    <extension>Not applicable: a cleanup of membership.</extension>
+    <cost-of-doing-nothing>An export of OntologyPlatformSolution overwrites the target's customizations of 10 core tables.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>D-60. Issue ISS-008 / GitHub #1385 (closed, completed).</notes>
+
+  <completion>COMPLETED 2026-10-08 00:09 UTC by stream C2. Before: 17 components, all type 1 (5 ontology tables rcb 0, 11 foreign tables rcb 0, systemuser rcb 1); no separate attribute, form, view or relationship rows. RemoveSolutionComponent x11 (HTTP 200; the reference id must be the entity MetadataId, not the solutioncomponent row id - the row id fails 0x8004f021). The project's own sprk_servicerequest columns from task 001 (sprk_direction, sprk_disposition, sprk_responseduedate) re-added as attribute components (HTTP 200); the platform holds sprk_servicerequest as an rcb 2 shell for them. After: 10 components. All 11 tables still exist and are still in their home solutions; no publish needed or run. Evidence: notes/d60-solution-hygiene.md. Issue: defer-issues.md ISS-008, GitHub #1385.</completion>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
